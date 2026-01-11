@@ -1,0 +1,297 @@
+/* Editor.js Styling for Katt */
+
+.block-editor {
+  min-height: 300px;
+}
+
+/* Editor.js base styles */
+.ce-block__content,
+.ce-toolbar__content {
+  max-width: 100%;
+}
+
+.codex-editor__redactor {
+  padding-bottom: 200px !important;
+}
+
+/* Block styling */
+.ce-block {
+  padding: 0.5rem 0;
+}
+
+.ce-paragraph {
+  line-height: 1.75;
+  color: var(--color-text-primary);
+}
+
+/* Headers */
+.ce-header {
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+h1.ce-header {
+  font-size: 2rem;
+  margin-top: 1.5rem;
+  margin-bottom: 1rem;
+}
+
+h2.ce-header {
+  font-size: 1.5rem;
+  margin-top: 1.25rem;
+  margin-bottom: 0.75rem;
+}
+
+h3.ce-header {
+  font-size: 1.25rem;
+  margin-top: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+h4.ce-header {
+  font-size: 1.1rem;
+  margin-top: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+/* Lists */
+.cdx-list {
+  color: var(--color-text-primary);
+  padding-left: 1.5rem;
+}
+
+.cdx-list__item {
+  padding: 0.25rem 0;
+  line-height: 1.75;
+}
+
+/* Checklist */
+.cdx-checklist__item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.25rem 0;
+}
+
+.cdx-checklist__item-checkbox {
+  width: 1.25rem;
+  height: 1.25rem;
+  border: 2px solid var(--color-border);
+  border-radius: 4px;
+  cursor: pointer;
+  flex-shrink: 0;
+  margin-top: 0.25rem;
+}
+
+.cdx-checklist__item--checked .cdx-checklist__item-checkbox {
+  background-color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.cdx-checklist__item--checked .cdx-checklist__item-text {
+  text-decoration: line-through;
+  color: var(--color-text-muted);
+}
+
+/* Code block */
+.ce-code__textarea {
+  background-color: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  color: var(--color-text-primary);
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 0.875rem;
+  padding: 1rem;
+  min-height: 100px;
+}
+
+/* Quote */
+.cdx-quote {
+  border-left: 3px solid var(--color-accent);
+  padding-left: 1rem;
+  margin: 1rem 0;
+}
+
+.cdx-quote__text {
+  color: var(--color-text-secondary);
+  font-style: italic;
+  min-height: auto;
+}
+
+.cdx-quote__caption {
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
+  margin-top: 0.5rem;
+}
+
+/* Inline code */
+.cdx-marker,
+.inline-code {
+  background-color: var(--color-bg-tertiary);
+  border-radius: 3px;
+  padding: 0.125rem 0.375rem;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 0.875em;
+}
+
+/* Marker (highlight) */
+.cdx-marker {
+  background-color: rgba(122, 162, 247, 0.3);
+}
+
+/* Delimiter */
+.ce-delimiter {
+  text-align: center;
+  padding: 1rem 0;
+}
+
+.ce-delimiter::before {
+  content: "•••";
+  color: var(--color-text-muted);
+  font-size: 1.5rem;
+  letter-spacing: 0.5rem;
+}
+
+/* Toolbar */
+.ce-toolbar__plus,
+.ce-toolbar__settings-btn {
+  color: var(--color-text-muted);
+  background-color: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+}
+
+.ce-toolbar__plus:hover,
+.ce-toolbar__settings-btn:hover {
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
+/* Inline toolbar */
+.ce-inline-toolbar {
+  background-color: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.ce-inline-tool {
+  color: var(--color-text-secondary);
+}
+
+.ce-inline-tool:hover {
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
+.ce-inline-tool--active {
+  color: var(--color-accent);
+}
+
+/* Settings popup */
+.ce-settings {
+  background-color: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+}
+
+.ce-settings__button {
+  color: var(--color-text-secondary);
+}
+
+.ce-settings__button:hover {
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
+/* Placeholder */
+.ce-paragraph[data-placeholder]:empty::before {
+  color: var(--color-text-muted);
+}
+
+/* Conversion toolbar */
+.ce-conversion-toolbar {
+  background-color: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+}
+
+.ce-conversion-tool {
+  color: var(--color-text-secondary);
+}
+
+.ce-conversion-tool:hover {
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
+.ce-conversion-tool--focused {
+  background-color: var(--color-bg-tertiary);
+}
+
+/* Popover (block tunes menu) */
+.ce-popover {
+  background-color: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+.ce-popover-item {
+  color: var(--color-text-secondary);
+}
+
+.ce-popover-item:hover {
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
+.ce-popover-item--focused {
+  background-color: var(--color-bg-tertiary);
+}
+
+.ce-popover-item__icon {
+  color: var(--color-text-muted);
+}
+
+.ce-popover-item:hover .ce-popover-item__icon {
+  color: var(--color-text-secondary);
+}
+
+/* Search input in popover */
+.cdx-search-field {
+  background-color: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+}
+
+.cdx-search-field__input {
+  color: var(--color-text-primary);
+}
+
+.cdx-search-field__input::placeholder {
+  color: var(--color-text-muted);
+}
+
+/* Wiki Links */
+wiki-link,
+.wiki-link {
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+wiki-link:hover,
+.wiki-link:hover {
+  color: var(--color-accent-hover);
+  text-decoration-style: solid;
+}
+
+/* Broken wiki links (page doesn't exist) */
+wiki-link.broken,
+.wiki-link.broken {
+  color: var(--color-text-muted);
+  text-decoration-color: rgba(255, 100, 100, 0.5);
+}
