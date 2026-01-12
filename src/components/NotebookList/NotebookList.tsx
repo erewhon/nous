@@ -14,29 +14,55 @@ export function NotebookList({
 
   if (notebooks.length === 0) {
     return (
-      <div className="flex h-32 items-center justify-center text-sm text-[--color-text-muted]">
-        No notebooks yet
+      <div
+        className="flex h-32 flex-col items-center justify-center gap-2 rounded-xl border border-dashed p-4 text-center"
+        style={{ borderColor: "var(--color-border)" }}
+      >
+        <div className="text-2xl opacity-50">📓</div>
+        <span className="text-sm" style={{ color: "var(--color-text-muted)" }}>
+          No notebooks yet
+        </span>
+        <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>
+          Create one to get started
+        </span>
       </div>
     );
   }
 
   return (
     <ul className="space-y-1">
-      {notebooks.map((notebook) => (
-        <li key={notebook.id}>
-          <button
-            onClick={() => selectNotebook(notebook.id)}
-            className={`flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm transition-colors ${
-              selectedNotebookId === notebook.id
-                ? "bg-[--color-accent] text-white"
-                : "text-[--color-text-secondary] hover:bg-[--color-bg-tertiary]"
-            }`}
-          >
-            <NotebookIcon type={notebook.type} />
-            <span className="truncate">{notebook.name}</span>
-          </button>
-        </li>
-      ))}
+      {notebooks.map((notebook) => {
+        const isSelected = selectedNotebookId === notebook.id;
+        return (
+          <li key={notebook.id}>
+            <button
+              onClick={() => selectNotebook(notebook.id)}
+              className="flex w-full items-center gap-3 rounded-lg text-left transition-all p-3"
+              style={{
+                backgroundColor: isSelected ? "var(--color-bg-tertiary)" : "transparent",
+                color: isSelected ? "var(--color-text-primary)" : "var(--color-text-secondary)",
+                borderLeft: `3px solid ${isSelected ? "var(--color-accent)" : "transparent"}`,
+              }}
+            >
+              <div
+                className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg"
+                style={{
+                  backgroundColor: isSelected ? "var(--color-accent)" : "var(--color-bg-tertiary)",
+                  color: isSelected ? "white" : "var(--color-text-muted)",
+                }}
+              >
+                <NotebookIcon type={notebook.type} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <span className="block truncate font-medium">{notebook.name}</span>
+                <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>
+                  {notebook.type === "zettelkasten" ? "Zettelkasten" : "Notebook"}
+                </span>
+              </div>
+            </button>
+          </li>
+        );
+      })}
     </ul>
   );
 }

@@ -3,12 +3,16 @@ import EditorJS, { type OutputData, type ToolConstructable } from "@editorjs/edi
 import Header from "@editorjs/header";
 import List from "@editorjs/list";
 import Checklist from "@editorjs/checklist";
-import Code from "@editorjs/code";
 import Quote from "@editorjs/quote";
 import Marker from "@editorjs/marker";
 import InlineCode from "@editorjs/inline-code";
 import Delimiter from "@editorjs/delimiter";
+import Table from "@editorjs/table";
+import Image from "@editorjs/image";
 import { WikiLinkTool } from "./WikiLinkTool";
+import { CodeBlockTool } from "./CodeBlockTool";
+import { CalloutTool } from "./CalloutTool";
+import { createImageUploader } from "./imageUploader";
 
 interface UseEditorOptions {
   holderId: string;
@@ -18,6 +22,7 @@ interface UseEditorOptions {
   onLinkClick?: (pageTitle: string) => void;
   readOnly?: boolean;
   placeholder?: string;
+  notebookId?: string;
 }
 
 export function useEditor({
@@ -28,6 +33,7 @@ export function useEditor({
   onLinkClick,
   readOnly = false,
   placeholder = "Start writing or press '/' for commands...",
+  notebookId,
 }: UseEditorOptions) {
   const editorRef = useRef<EditorJS | null>(null);
   const isReady = useRef(false);
@@ -63,7 +69,12 @@ export function useEditor({
           class: Checklist as unknown as ToolConstructable,
           inlineToolbar: true,
         },
-        code: Code as unknown as ToolConstructable,
+        code: {
+          class: CodeBlockTool as unknown as ToolConstructable,
+          config: {
+            placeholder: "Enter code here...",
+          },
+        },
         quote: {
           class: Quote as unknown as ToolConstructable,
           inlineToolbar: true,
@@ -71,6 +82,34 @@ export function useEditor({
         marker: Marker,
         inlineCode: InlineCode,
         delimiter: Delimiter as unknown as ToolConstructable,
+        table: {
+          class: Table as unknown as ToolConstructable,
+          inlineToolbar: true,
+          config: {
+            rows: 2,
+            cols: 3,
+            withHeadings: true,
+          },
+        },
+        callout: {
+          class: CalloutTool as unknown as ToolConstructable,
+          inlineToolbar: true,
+          config: {
+            titlePlaceholder: "Callout title (optional)",
+            contentPlaceholder: "Type callout content...",
+          },
+        },
+        ...(notebookId
+          ? {
+              image: {
+                class: Image as unknown as ToolConstructable,
+                config: {
+                  uploader: createImageUploader({ notebookId }),
+                  captionPlaceholder: "Image caption",
+                },
+              },
+            }
+          : {}),
         wikiLink: {
           class: WikiLinkTool,
           config: {

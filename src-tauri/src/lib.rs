@@ -1,6 +1,7 @@
 use std::sync::Mutex;
 
 mod commands;
+mod markdown;
 mod python_bridge;
 mod search;
 mod storage;
@@ -42,6 +43,7 @@ pub fn run() {
     tauri::Builder::default()
         .manage(state)
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -74,6 +76,13 @@ pub fn run() {
             commands::ai_chat_with_context,
             commands::ai_summarize_page,
             commands::ai_suggest_tags,
+            // Markdown commands
+            commands::export_page_markdown,
+            commands::import_markdown,
+            commands::export_page_to_file,
+            commands::import_markdown_file,
+            // Asset commands
+            commands::get_notebook_assets_path,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

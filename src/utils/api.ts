@@ -170,3 +170,35 @@ export async function aiSuggestTags(
     model: options?.model,
   });
 }
+
+// ===== Markdown Import/Export API =====
+
+export async function exportPageToMarkdown(
+  notebookId: string,
+  pageId: string
+): Promise<string> {
+  return invoke<string>("export_page_markdown", { notebookId, pageId });
+}
+
+export async function importMarkdown(
+  notebookId: string,
+  markdown: string,
+  filename: string
+): Promise<Page> {
+  return invoke<Page>("import_markdown", { notebookId, markdown, filename });
+}
+
+export async function exportPageToFile(
+  notebookId: string,
+  pageId: string,
+  path: string
+): Promise<void> {
+  return invoke("export_page_to_file", { notebookId, pageId, path });
+}
+
+export async function importMarkdownFile(
+  notebookId: string,
+  path: string
+): Promise<Page> {
+  return invoke<Page>("import_markdown_file", { notebookId, path });
+}

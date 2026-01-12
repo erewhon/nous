@@ -63,6 +63,10 @@ impl FileStorage {
         self.notebook_dir(notebook_id).join("pages")
     }
 
+    pub fn notebook_assets_dir(&self, notebook_id: Uuid) -> PathBuf {
+        self.notebook_dir(notebook_id).join("assets")
+    }
+
     pub fn list_notebooks(&self) -> Result<Vec<Notebook>> {
         let notebooks_path = self.base_path.join("notebooks");
 
@@ -198,6 +202,20 @@ impl FileStorage {
         let page = Page::new(notebook_id, title);
 
         let page_path = self.page_path(notebook_id, page.id);
+        let content = serde_json::to_string_pretty(&page)?;
+        fs::write(&page_path, content)?;
+
+        Ok(page)
+    }
+
+    /// Create a page from an existing Page struct (used for import)
+    pub fn create_page_from(&self, page: Page) -> Result<Page> {
+        // Verify notebook exists
+        if !self.notebook_dir(page.notebook_id).exists() {
+            return Err(StorageError::NotebookNotFound(page.notebook_id));
+        }
+
+        let page_path = self.page_path(page.notebook_id, page.id);
         let content = serde_json::to_string_pretty(&page)?;
         fs::write(&page_path, content)?;
 

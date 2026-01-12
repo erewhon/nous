@@ -1,42 +1,84 @@
 @import "tailwindcss";
 
+/* CSS Custom Properties - needed for arbitrary value syntax like bg-[--color-name] */
 :root {
-  --color-bg-primary: #1a1b26;
-  --color-bg-secondary: #24283b;
-  --color-bg-tertiary: #414868;
-  --color-text-primary: #c0caf5;
-  --color-text-secondary: #a9b1d6;
-  --color-text-muted: #565f89;
-  --color-accent: #7aa2f7;
-  --color-accent-hover: #89b4fa;
-  --color-border: #414868;
+  /* Background colors */
+  --color-bg-primary: #1e1e2e;
+  --color-bg-secondary: #181825;
+  --color-bg-tertiary: #313244;
+  --color-bg-elevated: #45475a;
+  --color-bg-sidebar: #11111b;
+  --color-bg-panel: #1e1e2e;
+
+  /* Text colors */
+  --color-text-primary: #cdd6f4;
+  --color-text-secondary: #a6adc8;
+  --color-text-muted: #6c7086;
+
+  /* Accent colors - purple/indigo theme */
+  --color-accent: #8b5cf6;
+  --color-accent-hover: #a78bfa;
+  --color-accent-secondary: #7c3aed;
+  --color-accent-tertiary: #6d28d9;
+
+  /* Semantic colors */
+  --color-success: #a6e3a1;
+  --color-warning: #f9e2af;
+  --color-error: #f38ba8;
+  --color-info: #89b4fa;
+
+  /* Border colors */
+  --color-border: #313244;
+  --color-border-muted: #1e1e2e;
+
+  /* Selection/highlight */
+  --color-selection: rgba(139, 92, 246, 0.3);
 }
 
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
-
+/* Base styles - DON'T reset padding/margin as it overrides Tailwind */
 html,
 body,
 #root {
   height: 100%;
   font-family:
-    Inter,
     -apple-system,
     BlinkMacSystemFont,
     "Segoe UI",
-    Roboto,
-    Oxygen,
-    Ubuntu,
-    Cantarell,
-    "Fira Sans",
-    "Droid Sans",
-    "Helvetica Neue",
+    "Noto Sans",
+    Helvetica,
+    Arial,
     sans-serif;
   background-color: var(--color-bg-primary);
   color: var(--color-text-primary);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Remove default focus outlines and add custom ones */
+*:focus {
+  outline: none;
+}
+
+*:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Remove blue outline from Editor.js */
+.ce-block:focus,
+.ce-block--focused,
+.cdx-block:focus,
+[contenteditable]:focus {
+  outline: none !important;
+  box-shadow: none !important;
+  border-color: transparent !important;
+}
+
+.ce-toolbar__content,
+.ce-block__content {
+  max-width: none;
 }
 
 /* Scrollbar styling */
@@ -46,7 +88,7 @@ body,
 }
 
 ::-webkit-scrollbar-track {
-  background: var(--color-bg-secondary);
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
@@ -55,5 +97,37 @@ body,
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--color-text-muted);
+  background: var(--color-bg-elevated);
+}
+
+/* Selection styling */
+::selection {
+  background: var(--color-selection);
+}
+
+/* Button base styles */
+button {
+  cursor: pointer;
+  border: none;
+  background: none;
+}
+
+/* Input base styles */
+input, textarea, select {
+  font-family: inherit;
+  font-size: inherit;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+}
+
+/* Custom focus styles for form elements */
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  border-color: var(--color-accent) !important;
+  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.2) !important;
 }

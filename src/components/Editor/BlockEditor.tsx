@@ -9,6 +9,7 @@ interface BlockEditorProps {
   onLinkClick?: (pageTitle: string) => void;
   readOnly?: boolean;
   className?: string;
+  notebookId?: string;
 }
 
 export function BlockEditor({
@@ -18,6 +19,7 @@ export function BlockEditor({
   onLinkClick,
   readOnly = false,
   className = "",
+  notebookId,
 }: BlockEditorProps) {
   const editorId = useId().replace(/:/g, "-");
   const holderId = `editor-${editorId}`;
@@ -46,6 +48,7 @@ export function BlockEditor({
     onChange: handleChange,
     onLinkClick,
     readOnly,
+    notebookId,
   });
 
   // Cleanup timeout on unmount

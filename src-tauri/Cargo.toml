@@ -22,11 +22,16 @@ log = "0.4"
 tauri = { version = "2.9.5", features = ["devtools"] }
 tauri-plugin-log = "2"
 tauri-plugin-fs = "2"
+tauri-plugin-dialog = "2"
 uuid = { version = "1.0", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 thiserror = "1.0"
 dirs = "5.0"
 tantivy = "0.22"
+
+# Markdown parsing and generation
+pulldown-cmark = "0.10"
+regex = "1.10"
 
 # PyO3 for Python integration
 pyo3 = { version = "0.27", features = ["auto-initialize"] }

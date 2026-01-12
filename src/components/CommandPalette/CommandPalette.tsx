@@ -8,7 +8,8 @@ import {
 } from "react";
 import { useNotebookStore } from "../../stores/notebookStore";
 import { usePageStore } from "../../stores/pageStore";
-import { searchPages } from "../../utils/api";
+import { searchPages, exportPageToFile, importMarkdownFile } from "../../utils/api";
+import { save, open } from "@tauri-apps/plugin-dialog";
 import type { SearchResult } from "../../types/page";
 
 interface Command {
@@ -123,6 +124,52 @@ export function CommandPalette({
       keywords: ["graph", "network", "links", "connections", "visualize"],
     });
 
+    cmds.push({
+      id: "action-export-markdown",
+      title: "Export Page to Markdown",
+      subtitle: "Save current page as .md file",
+      icon: <IconExport />,
+      category: "action",
+      action: async () => {
+        const selectedPageId = usePageStore.getState().selectedPageId;
+        if (selectedNotebookId && selectedPageId) {
+          const selectedPage = pages.find((p) => p.id === selectedPageId);
+          const suggestedName = selectedPage?.title?.replace(/[/\\?%*:|"<>]/g, "-") || "page";
+          const path = await save({
+            defaultPath: `${suggestedName}.md`,
+            filters: [{ name: "Markdown", extensions: ["md"] }],
+          });
+          if (path) {
+            await exportPageToFile(selectedNotebookId, selectedPageId, path);
+          }
+        }
+        onClose();
+      },
+      keywords: ["export", "markdown", "md", "save", "file"],
+    });
+
+    cmds.push({
+      id: "action-import-markdown",
+      title: "Import Markdown File",
+      subtitle: "Create page from .md file",
+      icon: <IconImport />,
+      category: "action",
+      action: async () => {
+        if (selectedNotebookId) {
+          const selected = await open({
+            multiple: false,
+            filters: [{ name: "Markdown", extensions: ["md", "markdown"] }],
+          });
+          if (selected) {
+            const newPage = await importMarkdownFile(selectedNotebookId, selected);
+            selectPage(newPage.id);
+          }
+        }
+        onClose();
+      },
+      keywords: ["import", "markdown", "md", "load", "file"],
+    });
+
     // Only show local pages/notebooks if no search query (to avoid duplication)
     if (!query.trim()) {
       // Pages in current notebook
@@ -184,7 +231,7 @@ export function CommandPalette({
       id: `search-${result.pageId}`,
       title: result.title || "Untitled",
       subtitle: notebookMap.get(result.notebookId) || "Unknown notebook",
-      icon: <IconSearch className="text-[--color-accent]" />,
+      icon: <IconSearch style={{ color: "var(--color-accent)" }} />,
       category: "search" as const,
       score: result.score,
       action: () => {
@@ -314,11 +361,18 @@ export function CommandPalette({
 
       {/* Palette */}
       <div
-        className="relative w-full max-w-xl overflow-hidden rounded-xl border border-[--color-border] bg-[--color-bg-secondary] shadow-2xl"
+        className="relative w-full max-w-xl overflow-hidden rounded-xl border shadow-2xl"
+        style={{
+          backgroundColor: "var(--color-bg-primary)",
+          borderColor: "var(--color-border)",
+        }}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Search input */}
-        <div className="flex items-center gap-3 border-b border-[--color-border] px-4 py-3">
+        <div
+          className="flex items-center gap-3 border-b px-5 py-4"
+          style={{ borderColor: "var(--color-border)" }}
+        >
           <IconSearchBox />
           <input
             ref={inputRef}
@@ -327,12 +381,24 @@ export function CommandPalette({
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Search pages, notebooks, or actions..."
-            className="flex-1 bg-transparent text-[--color-text-primary] placeholder-[--color-text-muted] outline-none"
+            className="flex-1 bg-transparent outline-none"
+            style={{
+              color: "var(--color-text-primary)",
+            }}
           />
           {isSearching && (
-            <div className="h-4 w-4 animate-spin rounded-full border-2 border-[--color-accent] border-t-transparent" />
+            <div
+              className="h-4 w-4 animate-spin rounded-full border-2 border-t-transparent"
+              style={{ borderColor: "var(--color-accent)" }}
+            />
           )}
-          <kbd className="rounded bg-[--color-bg-tertiary] px-1.5 py-0.5 text-xs text-[--color-text-muted]">
+          <kbd
+            className="rounded text-xs px-1.5 py-0.5"
+            style={{
+              backgroundColor: "var(--color-bg-tertiary)",
+              color: "var(--color-text-muted)",
+            }}
+          >
             ESC
           </kbd>
         </div>
@@ -343,36 +409,41 @@ export function CommandPalette({
           className="max-h-[50vh] overflow-y-auto p-2"
         >
           {allCommands.length === 0 ? (
-            <div className="py-8 text-center text-[--color-text-muted]">
+            <div
+              className="text-center py-8"
+              style={{ color: "var(--color-text-muted)" }}
+            >
               {isSearching ? "Searching..." : "No results found"}
             </div>
           ) : (
             groupedCommands.map((group) => (
               <Fragment key={group.category}>
-                <div className="px-2 py-1.5 text-xs font-medium uppercase tracking-wide text-[--color-text-muted]">
+                <div
+                  className="text-xs font-medium uppercase tracking-wide px-2 py-1.5"
+                  style={{ color: "var(--color-text-muted)" }}
+                >
                   {group.category}
                 </div>
                 {group.commands.map((cmd) => {
                   flatIndex++;
                   const currentIndex = flatIndex;
+                  const isSelected = selectedIndex === currentIndex;
                   return (
                     <button
                       key={cmd.id}
                       data-index={currentIndex}
                       onClick={() => cmd.action()}
                       onMouseEnter={() => setSelectedIndex(currentIndex)}
-                      className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors ${
-                        selectedIndex === currentIndex
-                          ? "bg-[--color-accent] text-white"
-                          : "text-[--color-text-secondary] hover:bg-[--color-bg-tertiary]"
-                      }`}
+                      className="flex w-full items-center gap-3 rounded-lg text-left transition-colors px-3 py-2.5"
+                      style={{
+                        backgroundColor: isSelected ? "var(--color-accent)" : "transparent",
+                        color: isSelected ? "white" : "var(--color-text-secondary)",
+                      }}
                     >
                       <span
-                        className={
-                          selectedIndex === currentIndex
-                            ? "text-white/80"
-                            : "text-[--color-text-muted]"
-                        }
+                        style={{
+                          color: isSelected ? "rgba(255,255,255,0.8)" : "var(--color-text-muted)",
+                        }}
                       >
                         {cmd.icon}
                       </span>
@@ -380,11 +451,10 @@ export function CommandPalette({
                         <div className="truncate font-medium">{cmd.title}</div>
                         {cmd.subtitle && (
                           <div
-                            className={`truncate text-xs ${
-                              selectedIndex === currentIndex
-                                ? "text-white/70"
-                                : "text-[--color-text-muted]"
-                            }`}
+                            className="truncate text-xs"
+                            style={{
+                              color: isSelected ? "rgba(255,255,255,0.7)" : "var(--color-text-muted)",
+                            }}
                           >
                             {cmd.subtitle}
                           </div>
@@ -392,11 +462,10 @@ export function CommandPalette({
                       </div>
                       {cmd.score !== undefined && (
                         <span
-                          className={`text-xs ${
-                            selectedIndex === currentIndex
-                              ? "text-white/50"
-                              : "text-[--color-text-muted]"
-                          }`}
+                          className="text-xs"
+                          style={{
+                            color: isSelected ? "rgba(255,255,255,0.5)" : "var(--color-text-muted)",
+                          }}
                         >
                           {cmd.score.toFixed(1)}
                         </span>
@@ -410,19 +479,34 @@ export function CommandPalette({
         </div>
 
         {/* Footer */}
-        <div className="flex items-center justify-between border-t border-[--color-border] px-4 py-2 text-xs text-[--color-text-muted]">
+        <div
+          className="flex items-center justify-between border-t text-xs px-5 py-3"
+          style={{
+            borderColor: "var(--color-border)",
+            color: "var(--color-text-muted)",
+          }}
+        >
           <div className="flex items-center gap-4">
             <span className="flex items-center gap-1">
-              <kbd className="rounded bg-[--color-bg-tertiary] px-1 py-0.5">
+              <kbd
+                className="rounded px-1 py-0.5"
+                style={{ backgroundColor: "var(--color-bg-tertiary)" }}
+              >
                 ↑
               </kbd>
-              <kbd className="rounded bg-[--color-bg-tertiary] px-1 py-0.5">
+              <kbd
+                className="rounded px-1 py-0.5"
+                style={{ backgroundColor: "var(--color-bg-tertiary)" }}
+              >
                 ↓
               </kbd>
               <span>Navigate</span>
             </span>
             <span className="flex items-center gap-1">
-              <kbd className="rounded bg-[--color-bg-tertiary] px-1 py-0.5">
+              <kbd
+                className="rounded px-1 py-0.5"
+                style={{ backgroundColor: "var(--color-bg-tertiary)" }}
+              >
                 ↵
               </kbd>
               <span>Select</span>
@@ -448,7 +532,7 @@ function IconSearchBox() {
       strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
-      className="text-[--color-text-muted]"
+      style={{ color: "var(--color-text-muted)" }}
     >
       <circle cx="11" cy="11" r="8" />
       <line x1="21" y1="21" x2="16.65" y2="16.65" />
@@ -456,7 +540,7 @@ function IconSearchBox() {
   );
 }
 
-function IconSearch({ className }: { className?: string }) {
+function IconSearch({ style }: { style?: React.CSSProperties }) {
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -468,7 +552,7 @@ function IconSearch({ className }: { className?: string }) {
       strokeWidth="2"
       strokeLinecap="round"
       strokeLinejoin="round"
-      className={className}
+      style={style}
     >
       <circle cx="11" cy="11" r="8" />
       <line x1="21" y1="21" x2="16.65" y2="16.65" />
@@ -569,6 +653,46 @@ function IconNotebook() {
       <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" />
       <path d="M8 7h6" />
       <path d="M8 11h8" />
+    </svg>
+  );
+}
+
+function IconExport() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="17 8 12 3 7 8" />
+      <line x1="12" y1="3" x2="12" y2="15" />
+    </svg>
+  );
+}
+
+function IconImport() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="7 10 12 15 17 10" />
+      <line x1="12" y1="15" x2="12" y2="3" />
     </svg>
   );
 }
