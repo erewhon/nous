@@ -12,15 +12,25 @@ import "./editor-styles.css";
 
 export function EditorArea() {
   const { selectedNotebookId, notebooks } = useNotebookStore();
-  const { pages, selectedPageId, selectPage, updatePageContent } =
+  const { pages, selectedPageId, selectPage, updatePageContent, loadPages } =
     usePageStore();
   const { updatePageLinks, buildLinksFromPages } = useLinkStore();
   const [isSaving, setIsSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
 
   const selectedNotebook = notebooks.find((n) => n.id === selectedNotebookId);
-  const notebookPages = pages.filter(
-    (p) => p.notebookId === selectedNotebookId
+
+  // Load pages when notebook selection changes
+  useEffect(() => {
+    if (selectedNotebookId) {
+      loadPages(selectedNotebookId);
+    }
+  }, [selectedNotebookId, loadPages]);
+
+  // Memoize filtered pages to prevent infinite re-renders
+  const notebookPages = useMemo(
+    () => pages.filter((p) => p.notebookId === selectedNotebookId),
+    [pages, selectedNotebookId]
   );
   const selectedPage = pages.find((p) => p.id === selectedPageId);
 

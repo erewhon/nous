@@ -5,6 +5,7 @@ interface KeyboardShortcuts {
   onNewPage?: () => void;
   onNewNotebook?: () => void;
   onGraph?: () => void;
+  onAI?: () => void;
 }
 
 export function useKeyboardShortcuts({
@@ -12,6 +13,7 @@ export function useKeyboardShortcuts({
   onNewPage,
   onNewNotebook,
   onGraph,
+  onAI,
 }: KeyboardShortcuts) {
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
@@ -44,8 +46,15 @@ export function useKeyboardShortcuts({
         onGraph?.();
         return;
       }
+
+      // AI Chat: Cmd+Shift+A / Ctrl+Shift+A
+      if (isMod && e.shiftKey && (e.key === "a" || e.key === "A")) {
+        e.preventDefault();
+        onAI?.();
+        return;
+      }
     },
-    [onCommandPalette, onNewPage, onNewNotebook, onGraph]
+    [onCommandPalette, onNewPage, onNewNotebook, onGraph, onAI]
   );
 
   useEffect(() => {

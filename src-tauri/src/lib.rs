@@ -1,15 +1,18 @@
 use std::sync::Mutex;
 
 mod commands;
+mod python_bridge;
 mod search;
 mod storage;
 
+use python_bridge::PythonAI;
 use search::SearchIndex;
 use storage::FileStorage;
 
 pub struct AppState {
     pub storage: Mutex<FileStorage>,
     pub search_index: Mutex<SearchIndex>,
+    pub python_ai: Mutex<PythonAI>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -23,9 +26,17 @@ pub fn run() {
     let search_dir = data_dir.join("search_index");
     let search_index = SearchIndex::new(search_dir).expect("Failed to initialize search index");
 
+    // Initialize Python AI bridge
+    // The katt-py package should be in the project root
+    let katt_py_path = std::env::current_dir()
+        .map(|p| p.join("../katt-py"))
+        .unwrap_or_else(|_| std::path::PathBuf::from("katt-py"));
+    let python_ai = PythonAI::new(katt_py_path);
+
     let state = AppState {
         storage: Mutex::new(storage),
         search_index: Mutex::new(search_index),
+        python_ai: Mutex::new(python_ai),
     };
 
     tauri::Builder::default()
@@ -58,6 +69,11 @@ pub fn run() {
             commands::search_pages,
             commands::fuzzy_search_pages,
             commands::rebuild_search_index,
+            // AI commands
+            commands::ai_chat,
+            commands::ai_chat_with_context,
+            commands::ai_summarize_page,
+            commands::ai_suggest_tags,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

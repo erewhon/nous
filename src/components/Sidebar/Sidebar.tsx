@@ -86,6 +86,36 @@ export function Sidebar() {
             {notebooks.length} notebook{notebooks.length !== 1 ? "s" : ""}
           </span>
           <div className="flex items-center gap-2">
+            <span title="Open AI Chat (⌘⇧A)">
+              <button
+                onClick={() => {
+                  window.dispatchEvent(
+                    new KeyboardEvent("keydown", {
+                      key: "A",
+                      metaKey: true,
+                      shiftKey: true,
+                      bubbles: true,
+                    })
+                  );
+                }}
+                className="rounded p-1 transition-colors hover:bg-[--color-bg-tertiary] hover:text-[--color-text-primary]"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z" />
+                  <path d="M19 13l1 3 3 1-3 1-1 3-1-3-3-1 3-1 1-3z" />
+                </svg>
+              </button>
+            </span>
             <span title="Open Graph (⌘G)">
               <button
                 onClick={() => {

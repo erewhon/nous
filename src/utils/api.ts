@@ -84,3 +84,89 @@ export async function fuzzySearchPages(
 export async function rebuildSearchIndex(): Promise<void> {
   return invoke("rebuild_search_index");
 }
+
+// ===== AI API =====
+
+import type { ChatMessage, ChatResponse, PageContext } from "../types/ai";
+
+export async function aiChat(
+  messages: ChatMessage[],
+  options?: {
+    providerType?: string;
+    apiKey?: string;
+    model?: string;
+    temperature?: number;
+    maxTokens?: number;
+  }
+): Promise<ChatResponse> {
+  return invoke<ChatResponse>("ai_chat", {
+    messages,
+    providerType: options?.providerType,
+    apiKey: options?.apiKey,
+    model: options?.model,
+    temperature: options?.temperature,
+    maxTokens: options?.maxTokens,
+  });
+}
+
+export async function aiChatWithContext(
+  userMessage: string,
+  options?: {
+    pageContext?: PageContext;
+    conversationHistory?: ChatMessage[];
+    providerType?: string;
+    apiKey?: string;
+    model?: string;
+    temperature?: number;
+    maxTokens?: number;
+  }
+): Promise<ChatResponse> {
+  return invoke<ChatResponse>("ai_chat_with_context", {
+    userMessage,
+    pageContext: options?.pageContext,
+    conversationHistory: options?.conversationHistory,
+    providerType: options?.providerType,
+    apiKey: options?.apiKey,
+    model: options?.model,
+    temperature: options?.temperature,
+    maxTokens: options?.maxTokens,
+  });
+}
+
+export async function aiSummarizePage(
+  content: string,
+  options?: {
+    title?: string;
+    maxLength?: number;
+    providerType?: string;
+    apiKey?: string;
+    model?: string;
+  }
+): Promise<string> {
+  return invoke<string>("ai_summarize_page", {
+    content,
+    title: options?.title,
+    maxLength: options?.maxLength,
+    providerType: options?.providerType,
+    apiKey: options?.apiKey,
+    model: options?.model,
+  });
+}
+
+export async function aiSuggestTags(
+  content: string,
+  options?: {
+    existingTags?: string[];
+    providerType?: string;
+    apiKey?: string;
+    model?: string;
+  }
+): Promise<string[]> {
+  return invoke<string[]>("ai_suggest_tags", {
+    content,
+    existingTags: options?.existingTags,
+    providerType: options?.providerType,
+    apiKey: options?.apiKey,
+    model: options?.model,
+  });
+}

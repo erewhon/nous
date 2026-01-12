@@ -36,6 +36,11 @@ export const useLinkStore = create<LinkStore>((set, get) => ({
   backlinks: new Map(),
 
   updatePageLinks: (page) => {
+    // Skip pages without content or blocks
+    if (!page.content?.blocks) {
+      return;
+    }
+
     const links = WikiLinkTool.extractLinks(
       page.content.blocks.map((b) => ({
         type: b.type,
@@ -100,6 +105,12 @@ export const useLinkStore = create<LinkStore>((set, get) => ({
     const backlinks = new Map<string, LinkInfo[]>();
 
     for (const page of pages) {
+      // Skip pages without content or blocks
+      if (!page.content?.blocks) {
+        outgoingLinks.set(page.id, []);
+        continue;
+      }
+
       const links = WikiLinkTool.extractLinks(
         page.content.blocks.map((b) => ({
           type: b.type,

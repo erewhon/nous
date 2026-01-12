@@ -2,6 +2,7 @@ import { useState, useCallback } from "react";
 import { Layout } from "./components/Layout/Layout";
 import { CommandPalette } from "./components/CommandPalette/CommandPalette";
 import { GraphView } from "./components/Graph/GraphView";
+import { AIChatPanel } from "./components/AI";
 import { useAppInit } from "./hooks/useAppInit";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useNotebookStore } from "./stores/notebookStore";
@@ -12,6 +13,7 @@ function App() {
 
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [showGraph, setShowGraph] = useState(false);
+  const [showAI, setShowAI] = useState(false);
 
   const { selectedNotebookId, createNotebook } = useNotebookStore();
   const { createPage, selectPage } = usePageStore();
@@ -40,6 +42,7 @@ function App() {
     onNewPage: handleNewPage,
     onNewNotebook: handleNewNotebook,
     onGraph: () => setShowGraph(true),
+    onAI: () => setShowAI((prev) => !prev),
   });
 
   return (
@@ -60,6 +63,9 @@ function App() {
           onNodeClick={handleGraphNodeClick}
         />
       )}
+
+      {/* AI Chat Panel */}
+      <AIChatPanel isOpen={showAI} onClose={() => setShowAI(false)} />
     </>
   );
 }

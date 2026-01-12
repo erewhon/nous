@@ -110,6 +110,7 @@ pub struct Zettel {
 }
 
 impl Zettel {
+    #[allow(dead_code)]
     pub fn new(notebook_id: Uuid, title: String) -> Self {
         let now = Utc::now();
         let zettel_id = now.format("%Y%m%d%H%M%S").to_string();
