@@ -2,7 +2,16 @@
 
 from katt_ai.chat import chat, chat_with_context
 from katt_ai.providers import get_provider, list_providers
-from katt_ai.models import ChatMessage, ChatResponse, ProviderConfig
+from katt_ai.models import (
+    ChatMessage,
+    ChatResponse,
+    ProviderConfig,
+    SearchResult,
+    SearchResponse,
+    ScrapedContent,
+    ResearchSummary,
+)
+from katt_ai.web_research import web_search, scrape_url, summarize_research
 
 __all__ = [
     "chat",
@@ -12,4 +21,12 @@ __all__ = [
     "ChatMessage",
     "ChatResponse",
     "ProviderConfig",
+    # Web research
+    "web_search",
+    "scrape_url",
+    "summarize_research",
+    "SearchResult",
+    "SearchResponse",
+    "ScrapedContent",
+    "ResearchSummary",
 ]

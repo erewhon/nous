@@ -1,6 +1,8 @@
 import { useEffect, useId, useCallback, useRef } from "react";
 import type { OutputData } from "@editorjs/editorjs";
 import { useEditor } from "./useEditor";
+import { WikiLinkAutocomplete } from "./WikiLinkAutocomplete";
+import { WikiLinkTool } from "./WikiLinkTool";
 
 interface BlockEditorProps {
   initialData?: OutputData;
@@ -10,6 +12,7 @@ interface BlockEditorProps {
   readOnly?: boolean;
   className?: string;
   notebookId?: string;
+  pages?: Array<{ id: string; title: string }>;
 }
 
 export function BlockEditor({
@@ -20,10 +23,12 @@ export function BlockEditor({
   readOnly = false,
   className = "",
   notebookId,
+  pages = [],
 }: BlockEditorProps) {
   const editorId = useId().replace(/:/g, "-");
   const holderId = `editor-${editorId}`;
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   // Debounced save
   const handleChange = useCallback(
@@ -76,10 +81,59 @@ export function BlockEditor({
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [save, onSave]);
 
+  // Mark broken links when pages change or content renders
+  useEffect(() => {
+    if (!containerRef.current || pages.length === 0) return;
+
+    // Use MutationObserver to mark broken links after editor renders
+    const markLinks = () => {
+      if (containerRef.current) {
+        const pageTitles = pages.map((p) => p.title);
+        WikiLinkTool.markBrokenLinks(containerRef.current, pageTitles);
+      }
+    };
+
+    // Initial mark
+    const timeoutId = setTimeout(markLinks, 100);
+
+    // Mark on mutations (new content added)
+    const observer = new MutationObserver(markLinks);
+    observer.observe(containerRef.current, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+    });
+
+    return () => {
+      clearTimeout(timeoutId);
+      observer.disconnect();
+    };
+  }, [pages]);
+
+  // Handle autocomplete link insertion (trigger save)
+  const handleInsertLink = useCallback(() => {
+    // Trigger a save after link insertion
+    setTimeout(async () => {
+      const data = await save();
+      if (data) {
+        onChange?.(data);
+      }
+    }, 50);
+  }, [save, onChange]);
+
   return (
-    <div
-      id={holderId}
-      className={`block-editor prose prose-invert max-w-none ${className}`}
-    />
+    <div ref={containerRef} className="relative">
+      <div
+        id={holderId}
+        className={`block-editor prose prose-invert max-w-none ${className}`}
+      />
+      {!readOnly && pages.length > 0 && (
+        <WikiLinkAutocomplete
+          containerRef={containerRef}
+          pages={pages}
+          onInsertLink={handleInsertLink}
+        />
+      )}
+    </div>
   );
 }

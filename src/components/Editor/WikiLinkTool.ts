@@ -1,7 +1,7 @@
 import type { InlineTool, API } from "@editorjs/editorjs";
 
 interface WikiLinkToolConfig {
-  onLinkClick?: (pageId: string) => void;
+  onLinkClick?: (pageTitle: string) => void;
   searchPages?: (query: string) => Promise<Array<{ id: string; title: string }>>;
 }
 
@@ -78,10 +78,12 @@ export class WikiLinkTool implements InlineTool {
     // Display format: [[title]]
     wikiLink.textContent = `[[${text}]]`;
 
-    wikiLink.addEventListener("click", () => {
-      const pageId = wikiLink.getAttribute("data-page-id");
-      if (pageId && this.config.onLinkClick) {
-        this.config.onLinkClick(pageId);
+    wikiLink.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const pageTitle = wikiLink.getAttribute("data-page-title");
+      if (pageTitle && this.config.onLinkClick) {
+        this.config.onLinkClick(pageTitle);
       }
     });
 
@@ -152,5 +154,22 @@ export class WikiLinkTool implements InlineTool {
     }
 
     return [...new Set(links)]; // Remove duplicates
+  }
+
+  /**
+   * Mark wiki links as broken if their target page doesn't exist
+   */
+  static markBrokenLinks(
+    container: HTMLElement,
+    existingPageTitles: string[]
+  ): void {
+    const links = container.querySelectorAll("wiki-link");
+    const titlesLower = existingPageTitles.map((t) => t.toLowerCase());
+
+    links.forEach((link) => {
+      const title = link.getAttribute("data-page-title");
+      const exists = title && titlesLower.includes(title.toLowerCase());
+      link.classList.toggle("broken", !exists);
+    });
   }
 }

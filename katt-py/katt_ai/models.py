@@ -76,3 +76,52 @@ class PageContext(BaseModel):
     content: str  # Plain text extracted from Editor.js blocks
     tags: list[str] = Field(default_factory=list)
     notebook_name: str | None = None
+
+
+# ===== Web Research Models =====
+
+
+class SearchResult(BaseModel):
+    """A single search result from Tavily."""
+
+    title: str
+    url: str
+    content: str  # Snippet from search
+    score: float
+    published_date: str | None = None
+
+
+class SearchResponse(BaseModel):
+    """Response from Tavily search API."""
+
+    query: str
+    results: list[SearchResult]
+    answer: str | None = None
+    follow_up_questions: list[str] = Field(default_factory=list)
+
+
+class ScrapedContent(BaseModel):
+    """Content scraped from a URL."""
+
+    url: str
+    title: str
+    content: str
+    author: str | None = None
+    published_date: str | None = None
+    word_count: int
+
+
+class SourceRef(BaseModel):
+    """Reference to a source in research summary."""
+
+    title: str
+    url: str
+
+
+class ResearchSummary(BaseModel):
+    """AI-generated summary of research results."""
+
+    summary: str
+    key_points: list[str] = Field(default_factory=list)
+    sources: list[SourceRef] = Field(default_factory=list)
+    suggested_tags: list[str] = Field(default_factory=list)

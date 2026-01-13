@@ -27,6 +27,7 @@ interface PageActions {
     content: EditorData
   ) => Promise<void>;
   deletePage: (notebookId: string, pageId: string) => Promise<void>;
+  duplicatePage: (notebookId: string, pageId: string) => Promise<void>;
 
   // Selection
   selectPage: (id: string | null) => void;
@@ -118,6 +119,38 @@ export const usePageStore = create<PageStore>((set) => ({
     } catch (err) {
       set({
         error: err instanceof Error ? err.message : "Failed to delete page",
+      });
+    }
+  },
+
+  duplicatePage: async (notebookId, pageId) => {
+    set({ error: null });
+    try {
+      const state = usePageStore.getState();
+      const sourcePage = state.pages.find((p) => p.id === pageId);
+      if (!sourcePage) {
+        throw new Error("Page not found");
+      }
+
+      // Create new page with "(Copy)" suffix
+      const newTitle = `${sourcePage.title} (Copy)`;
+      const newPage = await api.createPage(notebookId, newTitle);
+
+      // If source has content, copy it to the new page
+      if (sourcePage.content) {
+        await api.updatePage(notebookId, newPage.id, {
+          content: sourcePage.content,
+        });
+        newPage.content = sourcePage.content;
+      }
+
+      set((state) => ({
+        pages: [newPage, ...state.pages],
+        selectedPageId: newPage.id,
+      }));
+    } catch (err) {
+      set({
+        error: err instanceof Error ? err.message : "Failed to duplicate page",
       });
     }
   },

@@ -12,7 +12,7 @@ import "./editor-styles.css";
 
 export function EditorArea() {
   const { selectedNotebookId, notebooks } = useNotebookStore();
-  const { pages, selectedPageId, selectPage, updatePageContent, loadPages } =
+  const { pages, selectedPageId, selectPage, updatePageContent, loadPages, createPage } =
     usePageStore();
   const { updatePageLinks, buildLinksFromPages } = useLinkStore();
   const [isSaving, setIsSaving] = useState(false);
@@ -94,17 +94,27 @@ export function EditorArea() {
     ]
   );
 
-  // Handle wiki link clicks - navigate to page by title
+  // Handle wiki link clicks - navigate to page by title, or create if doesn't exist
   const handleLinkClick = useCallback(
-    (pageTitle: string) => {
-      const targetPage = notebookPages.find(
+    async (pageTitle: string) => {
+      let targetPage = notebookPages.find(
         (p) => p.title.toLowerCase() === pageTitle.toLowerCase()
       );
+
       if (targetPage) {
         selectPage(targetPage.id);
+        return;
+      }
+
+      // Page doesn't exist - create it
+      if (selectedNotebookId) {
+        await createPage(selectedNotebookId, pageTitle);
+        // After creation, the new page should be selected automatically by createPage
+        // and pages will be updated, so we need to find and select it
+        // The createPage action sets selectedPageId to the new page
       }
     },
-    [notebookPages, selectPage]
+    [notebookPages, selectPage, selectedNotebookId, createPage]
   );
 
   if (!selectedNotebook) {
@@ -195,6 +205,7 @@ export function EditorArea() {
                   onSave={handleSave}
                   onLinkClick={handleLinkClick}
                   notebookId={selectedNotebook.id}
+                  pages={notebookPages.map((p) => ({ id: p.id, title: p.title }))}
                   className="min-h-[calc(100vh-300px)]"
                 />
 

@@ -202,3 +202,51 @@ export async function importMarkdownFile(
 ): Promise<Page> {
   return invoke<Page>("import_markdown_file", { notebookId, path });
 }
+
+// ===== Web Research API =====
+
+import type {
+  SearchResponse,
+  ScrapedContent,
+  ResearchSummary,
+} from "../types/webResearch";
+
+export async function webSearch(
+  query: string,
+  apiKey: string,
+  options?: {
+    maxResults?: number;
+    searchDepth?: "basic" | "advanced";
+    includeAnswer?: boolean;
+  }
+): Promise<SearchResponse> {
+  return invoke<SearchResponse>("web_search", {
+    query,
+    apiKey,
+    maxResults: options?.maxResults,
+    searchDepth: options?.searchDepth,
+    includeAnswer: options?.includeAnswer,
+  });
+}
+
+export async function scrapeUrl(url: string): Promise<ScrapedContent> {
+  return invoke<ScrapedContent>("scrape_url", { url });
+}
+
+export async function summarizeResearch(
+  contents: ScrapedContent[],
+  query: string,
+  options?: {
+    providerType?: string;
+    apiKey?: string;
+    model?: string;
+  }
+): Promise<ResearchSummary> {
+  return invoke<ResearchSummary>("summarize_research", {
+    contents,
+    query,
+    providerType: options?.providerType,
+    apiKey: options?.apiKey,
+    model: options?.model,
+  });
+}

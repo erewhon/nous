@@ -601,3 +601,73 @@ wiki-link.broken,
   content: attr(data-placeholder);
   color: var(--color-text-muted);
 }
+
+/* Wiki Link Autocomplete */
+.wiki-link-autocomplete {
+  background-color: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  min-width: 240px;
+  max-width: 320px;
+  overflow: hidden;
+}
+
+.wiki-link-autocomplete__header {
+  padding: 0.5rem 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-muted);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.wiki-link-autocomplete__list {
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.wiki-link-autocomplete__item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+  transition: background-color 0.1s ease;
+}
+
+.wiki-link-autocomplete__item:hover,
+.wiki-link-autocomplete__item--selected {
+  background-color: var(--color-bg-tertiary);
+}
+
+.wiki-link-autocomplete__icon {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+}
+
+.wiki-link-autocomplete__title {
+  color: var(--color-text-primary);
+  font-size: 0.875rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wiki-link-autocomplete__footer {
+  padding: 0.375rem 0.75rem;
+  font-size: 0.7rem;
+  color: var(--color-text-muted);
+  border-top: 1px solid var(--color-border);
+  display: flex;
+  gap: 0.75rem;
+}
+
+.wiki-link-autocomplete__footer kbd {
+  background-color: var(--color-bg-tertiary);
+  padding: 0.125rem 0.25rem;
+  border-radius: 3px;
+  font-family: inherit;
+  font-size: 0.65rem;
+}

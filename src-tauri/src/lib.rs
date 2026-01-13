@@ -83,6 +83,10 @@ pub fn run() {
             commands::import_markdown_file,
             // Asset commands
             commands::get_notebook_assets_path,
+            // Web research commands
+            commands::web_search,
+            commands::scrape_url,
+            commands::summarize_research,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -144,9 +144,9 @@ export function Sidebar() {
                   })
                 );
               }}
-              className="flex h-7 w-7 items-center justify-center rounded-md transition-colors"
+              className="flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
               style={{ color: "var(--color-text-muted)" }}
-              title="AI Chat"
+              title="AI Chat (⌘⇧A)"
             >
               <svg
                 xmlns="http://www.w3.org/2000/svg"
@@ -166,15 +166,46 @@ export function Sidebar() {
               onClick={() => {
                 window.dispatchEvent(
                   new KeyboardEvent("keydown", {
+                    key: "W",
+                    metaKey: true,
+                    shiftKey: true,
+                    bubbles: true,
+                  })
+                );
+              }}
+              className="flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
+              style={{ color: "var(--color-text-muted)" }}
+              title="Web Research (⌘⇧W)"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <circle cx="12" cy="12" r="10" />
+                <line x1="2" y1="12" x2="22" y2="12" />
+                <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+              </svg>
+            </button>
+            <button
+              onClick={() => {
+                window.dispatchEvent(
+                  new KeyboardEvent("keydown", {
                     key: "g",
                     metaKey: true,
                     bubbles: true,
                   })
                 );
               }}
-              className="flex h-7 w-7 items-center justify-center rounded-md transition-colors"
+              className="flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
               style={{ color: "var(--color-text-muted)" }}
-              title="Graph View"
+              title="Graph View (⌘G)"
             >
               <svg
                 xmlns="http://www.w3.org/2000/svg"
@@ -192,6 +223,35 @@ export function Sidebar() {
                 <circle cx="5" cy="19" r="2" />
                 <line x1="14.5" y1="9.5" x2="17.5" y2="6.5" />
                 <line x1="9.5" y1="14.5" x2="6.5" y2="17.5" />
+              </svg>
+            </button>
+            <button
+              onClick={() => {
+                window.dispatchEvent(
+                  new KeyboardEvent("keydown", {
+                    key: ",",
+                    metaKey: true,
+                    bubbles: true,
+                  })
+                );
+              }}
+              className="flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
+              style={{ color: "var(--color-text-muted)" }}
+              title="Settings (⌘,)"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+                <circle cx="12" cy="12" r="3" />
               </svg>
             </button>
           </div>

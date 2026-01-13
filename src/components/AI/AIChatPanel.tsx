@@ -4,17 +4,16 @@ import { useAIStore } from "../../stores/aiStore";
 import { usePageStore } from "../../stores/pageStore";
 import { useNotebookStore } from "../../stores/notebookStore";
 import { aiChatWithContext } from "../../utils/api";
-import { AISettingsPanel } from "./AISettingsPanel";
 import type { ChatMessage, PageContext } from "../../types/ai";
 
 interface AIChatPanelProps {
   isOpen: boolean;
   onClose: () => void;
+  onOpenSettings?: () => void;
 }
 
-export function AIChatPanel({ isOpen, onClose }: AIChatPanelProps) {
+export function AIChatPanel({ isOpen, onClose, onOpenSettings }: AIChatPanelProps) {
   const [input, setInput] = useState("");
-  const [showSettings, setShowSettings] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -164,8 +163,8 @@ export function AIChatPanel({ isOpen, onClose }: AIChatPanelProps) {
         </div>
         <div className="flex items-center gap-1">
           <button
-            onClick={() => setShowSettings(true)}
-            className="flex h-8 w-8 items-center justify-center rounded-lg transition-all"
+            onClick={onOpenSettings}
+            className="flex h-8 w-8 items-center justify-center rounded-lg transition-all hover:bg-[--color-bg-tertiary]"
             style={{ color: "var(--color-text-muted)" }}
             title="Settings"
           >
@@ -192,8 +191,8 @@ export function AIChatPanel({ isOpen, onClose }: AIChatPanelProps) {
       {/* Settings hint if no API key */}
       {!settings.apiKey && settings.providerType !== "ollama" && (
         <button
-          onClick={() => setShowSettings(true)}
-          className="flex w-full items-center gap-2 border-b px-5 py-3 text-left text-sm transition-all"
+          onClick={onOpenSettings}
+          className="flex w-full items-center gap-2 border-b px-5 py-3 text-left text-sm transition-all hover:bg-[--color-bg-tertiary]"
           style={{
             borderColor: "var(--color-border)",
             backgroundColor: "rgba(249, 226, 175, 0.1)",
@@ -208,12 +207,6 @@ export function AIChatPanel({ isOpen, onClose }: AIChatPanelProps) {
           <span>Configure your {settings.providerType} API key to get started</span>
         </button>
       )}
-
-      {/* Settings Panel */}
-      <AISettingsPanel
-        isOpen={showSettings}
-        onClose={() => setShowSettings(false)}
-      />
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-5">

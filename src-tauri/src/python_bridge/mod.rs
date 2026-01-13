@@ -76,6 +76,58 @@ impl Default for AIConfig {
     }
 }
 
+// ===== Web Research Types =====
+
+/// Search result from Tavily
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchResult {
+    pub title: String,
+    pub url: String,
+    pub content: String,
+    pub score: f64,
+    pub published_date: Option<String>,
+}
+
+/// Search response from Tavily
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchResponse {
+    pub query: String,
+    pub results: Vec<SearchResult>,
+    pub answer: Option<String>,
+    pub follow_up_questions: Vec<String>,
+}
+
+/// Scraped content from URL
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScrapedContent {
+    pub url: String,
+    pub title: String,
+    pub content: String,
+    pub author: Option<String>,
+    pub published_date: Option<String>,
+    pub word_count: i64,
+}
+
+/// Source reference in research summary
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SourceRef {
+    pub title: String,
+    pub url: String,
+}
+
+/// Research summary from AI
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResearchSummary {
+    pub summary: String,
+    pub key_points: Vec<String>,
+    pub sources: Vec<SourceRef>,
+    pub suggested_tags: Vec<String>,
+}
+
 /// Python AI bridge for calling Python functions
 pub struct PythonAI {
     katt_py_path: PathBuf,
@@ -342,6 +394,163 @@ impl PythonAI {
             let tags: Vec<String> = result.extract()?;
 
             Ok(tags)
+        })
+    }
+
+    // ===== Web Research Methods =====
+
+    /// Search the web using Tavily API
+    pub fn web_search(
+        &self,
+        query: String,
+        api_key: String,
+        max_results: i64,
+        search_depth: String,
+        include_answer: bool,
+    ) -> Result<SearchResponse> {
+        Python::attach(|py| {
+            self.setup_python_path(py)?;
+
+            let web_module = py.import("katt_ai.web_research")?;
+            let search_fn = web_module.getattr("web_search_sync")?;
+
+            let kwargs = PyDict::new(py);
+            kwargs.set_item("query", query)?;
+            kwargs.set_item("api_key", api_key)?;
+            kwargs.set_item("max_results", max_results)?;
+            kwargs.set_item("search_depth", search_depth)?;
+            kwargs.set_item("include_answer", include_answer)?;
+
+            let result = search_fn.call((), Some(&kwargs))?;
+            let result_dict: HashMap<String, Py<PyAny>> = result.extract()?;
+
+            // Extract results list
+            let results_list = result_dict
+                .get("results")
+                .map(|v| {
+                    v.extract::<Vec<HashMap<String, Py<PyAny>>>>(py)
+                        .unwrap_or_default()
+                })
+                .unwrap_or_default();
+
+            let results: Vec<SearchResult> = results_list
+                .into_iter()
+                .map(|r| SearchResult {
+                    title: r.get("title").and_then(|v| v.extract::<String>(py).ok()).unwrap_or_default(),
+                    url: r.get("url").and_then(|v| v.extract::<String>(py).ok()).unwrap_or_default(),
+                    content: r.get("content").and_then(|v| v.extract::<String>(py).ok()).unwrap_or_default(),
+                    score: r.get("score").and_then(|v| v.extract::<f64>(py).ok()).unwrap_or(0.0),
+                    published_date: r.get("published_date").and_then(|v| v.extract::<String>(py).ok()),
+                })
+                .collect();
+
+            let follow_up: Vec<String> = result_dict
+                .get("follow_up_questions")
+                .and_then(|v| v.extract::<Vec<String>>(py).ok())
+                .unwrap_or_default();
+
+            Ok(SearchResponse {
+                query: result_dict.get("query").and_then(|v| v.extract::<String>(py).ok()).unwrap_or_default(),
+                results,
+                answer: result_dict.get("answer").and_then(|v| v.extract::<String>(py).ok()),
+                follow_up_questions: follow_up,
+            })
+        })
+    }
+
+    /// Scrape content from a URL
+    pub fn scrape_url(&self, url: String) -> Result<ScrapedContent> {
+        Python::attach(|py| {
+            self.setup_python_path(py)?;
+
+            let web_module = py.import("katt_ai.web_research")?;
+            let scrape_fn = web_module.getattr("scrape_url_sync")?;
+
+            let kwargs = PyDict::new(py);
+            kwargs.set_item("url", url)?;
+
+            let result = scrape_fn.call((), Some(&kwargs))?;
+            let result_dict: HashMap<String, Py<PyAny>> = result.extract()?;
+
+            Ok(ScrapedContent {
+                url: result_dict.get("url").and_then(|v| v.extract::<String>(py).ok()).unwrap_or_default(),
+                title: result_dict.get("title").and_then(|v| v.extract::<String>(py).ok()).unwrap_or_default(),
+                content: result_dict.get("content").and_then(|v| v.extract::<String>(py).ok()).unwrap_or_default(),
+                author: result_dict.get("author").and_then(|v| v.extract::<String>(py).ok()),
+                published_date: result_dict.get("published_date").and_then(|v| v.extract::<String>(py).ok()),
+                word_count: result_dict.get("word_count").and_then(|v| v.extract::<i64>(py).ok()).unwrap_or(0),
+            })
+        })
+    }
+
+    /// Summarize research results using AI
+    pub fn summarize_research(
+        &self,
+        contents: Vec<ScrapedContent>,
+        query: String,
+        config: AIConfig,
+    ) -> Result<ResearchSummary> {
+        Python::attach(|py| {
+            self.setup_python_path(py)?;
+
+            let web_module = py.import("katt_ai.web_research")?;
+            let summarize_fn = web_module.getattr("summarize_research_sync")?;
+
+            // Convert contents to Python list of dicts
+            let py_contents = PyList::empty(py);
+            for c in contents {
+                let dict = PyDict::new(py);
+                dict.set_item("url", c.url)?;
+                dict.set_item("title", c.title)?;
+                dict.set_item("content", c.content)?;
+                if let Some(author) = c.author {
+                    dict.set_item("author", author)?;
+                }
+                if let Some(date) = c.published_date {
+                    dict.set_item("published_date", date)?;
+                }
+                dict.set_item("word_count", c.word_count)?;
+                py_contents.append(dict)?;
+            }
+
+            let kwargs = PyDict::new(py);
+            kwargs.set_item("contents", py_contents)?;
+            kwargs.set_item("query", query)?;
+            kwargs.set_item("provider_type", config.provider_type)?;
+
+            if let Some(api_key) = config.api_key {
+                kwargs.set_item("api_key", api_key)?;
+            }
+            if let Some(model) = config.model {
+                kwargs.set_item("model", model)?;
+            }
+
+            let result = summarize_fn.call((), Some(&kwargs))?;
+            let result_dict: HashMap<String, Py<PyAny>> = result.extract()?;
+
+            // Extract sources
+            let sources_list = result_dict
+                .get("sources")
+                .map(|v| {
+                    v.extract::<Vec<HashMap<String, Py<PyAny>>>>(py)
+                        .unwrap_or_default()
+                })
+                .unwrap_or_default();
+
+            let sources: Vec<SourceRef> = sources_list
+                .into_iter()
+                .map(|s| SourceRef {
+                    title: s.get("title").and_then(|v| v.extract::<String>(py).ok()).unwrap_or_default(),
+                    url: s.get("url").and_then(|v| v.extract::<String>(py).ok()).unwrap_or_default(),
+                })
+                .collect();
+
+            Ok(ResearchSummary {
+                summary: result_dict.get("summary").and_then(|v| v.extract::<String>(py).ok()).unwrap_or_default(),
+                key_points: result_dict.get("key_points").and_then(|v| v.extract::<Vec<String>>(py).ok()).unwrap_or_default(),
+                sources,
+                suggested_tags: result_dict.get("suggested_tags").and_then(|v| v.extract::<Vec<String>>(py).ok()).unwrap_or_default(),
+            })
         })
     }
 }

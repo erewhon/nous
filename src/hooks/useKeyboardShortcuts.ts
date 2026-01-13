@@ -6,6 +6,11 @@ interface KeyboardShortcuts {
   onNewNotebook?: () => void;
   onGraph?: () => void;
   onAI?: () => void;
+  onWebResearch?: () => void;
+  onSettings?: () => void;
+  onExportPage?: () => void;
+  onDuplicatePage?: () => void;
+  onDeletePage?: () => void;
 }
 
 export function useKeyboardShortcuts({
@@ -14,6 +19,11 @@ export function useKeyboardShortcuts({
   onNewNotebook,
   onGraph,
   onAI,
+  onWebResearch,
+  onSettings,
+  onExportPage,
+  onDuplicatePage,
+  onDeletePage,
 }: KeyboardShortcuts) {
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
@@ -53,8 +63,43 @@ export function useKeyboardShortcuts({
         onAI?.();
         return;
       }
+
+      // Web Research: Cmd+Shift+W / Ctrl+Shift+W
+      if (isMod && e.shiftKey && (e.key === "w" || e.key === "W")) {
+        e.preventDefault();
+        onWebResearch?.();
+        return;
+      }
+
+      // Settings: Cmd+, / Ctrl+,
+      if (isMod && e.key === ",") {
+        e.preventDefault();
+        onSettings?.();
+        return;
+      }
+
+      // Export Page: Cmd+E / Ctrl+E
+      if (isMod && e.key === "e" && !e.shiftKey) {
+        e.preventDefault();
+        onExportPage?.();
+        return;
+      }
+
+      // Duplicate Page: Cmd+D / Ctrl+D
+      if (isMod && e.key === "d" && !e.shiftKey) {
+        e.preventDefault();
+        onDuplicatePage?.();
+        return;
+      }
+
+      // Delete Page: Cmd+Backspace / Ctrl+Backspace
+      if (isMod && e.key === "Backspace" && !e.shiftKey) {
+        e.preventDefault();
+        onDeletePage?.();
+        return;
+      }
     },
-    [onCommandPalette, onNewPage, onNewNotebook, onGraph, onAI]
+    [onCommandPalette, onNewPage, onNewNotebook, onGraph, onAI, onWebResearch, onSettings, onExportPage, onDuplicatePage, onDeletePage]
   );
 
   useEffect(() => {
