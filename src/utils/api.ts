@@ -321,3 +321,44 @@ export async function summarizeResearch(
     model: options?.model,
   });
 }
+
+// ===== Backup API =====
+
+export interface BackupInfo {
+  path: string;
+  version: string;
+  createdAt: string;
+  notebookId: string;
+  notebookName: string;
+  pageCount: number;
+  assetCount: number;
+}
+
+export async function exportNotebookZip(
+  notebookId: string,
+  outputPath: string
+): Promise<BackupInfo> {
+  return invoke<BackupInfo>("export_notebook_zip", { notebookId, outputPath });
+}
+
+export async function importNotebookZip(zipPath: string): Promise<Notebook> {
+  return invoke<Notebook>("import_notebook_zip", { zipPath });
+}
+
+export async function getBackupMetadata(zipPath: string): Promise<BackupInfo> {
+  return invoke<BackupInfo>("get_backup_metadata", { zipPath });
+}
+
+export async function createNotebookBackup(
+  notebookId: string
+): Promise<BackupInfo> {
+  return invoke<BackupInfo>("create_notebook_backup", { notebookId });
+}
+
+export async function listBackups(): Promise<BackupInfo[]> {
+  return invoke<BackupInfo[]>("list_backups");
+}
+
+export async function deleteBackup(backupPath: string): Promise<void> {
+  return invoke("delete_backup", { backupPath });
+}

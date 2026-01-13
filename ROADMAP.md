@@ -73,9 +73,9 @@ Already implemented with Tantivy, may need refinement:
 - [x] Custom user templates (save current page as template)
 
 ### 7. Backup & Restore
-- [ ] Export entire notebook as ZIP
-- [ ] Import notebook from ZIP
-- [ ] Auto-backup schedule
+- [x] Export entire notebook as ZIP
+- [x] Import notebook from ZIP
+- [x] Auto-backup with local storage (manual trigger + auto cleanup)
 - [ ] Backup to cloud storage (optional)
 
 ---

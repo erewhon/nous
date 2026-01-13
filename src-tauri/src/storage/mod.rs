@@ -1,3 +1,4 @@
+pub mod backup;
 mod file_storage;
 mod models;
 

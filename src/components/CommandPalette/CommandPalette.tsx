@@ -31,6 +31,7 @@ interface CommandPaletteProps {
   onClose: () => void;
   onOpenGraph: () => void;
   onNewPage?: () => void;
+  onOpenBackup?: () => void;
 }
 
 export function CommandPalette({
@@ -38,6 +39,7 @@ export function CommandPalette({
   onClose,
   onOpenGraph,
   onNewPage,
+  onOpenBackup,
 }: CommandPaletteProps) {
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -190,6 +192,21 @@ export function CommandPalette({
       keywords: ["import", "markdown", "md", "load", "file"],
     });
 
+    cmds.push({
+      id: "action-backup",
+      title: "Backup & Restore",
+      subtitle: "Export or import notebook backups",
+      icon: <IconArchive />,
+      category: "action",
+      action: () => {
+        onClose();
+        if (onOpenBackup) {
+          onOpenBackup();
+        }
+      },
+      keywords: ["backup", "restore", "export", "import", "zip", "archive"],
+    });
+
     // Only show local pages/notebooks if no search query (to avoid duplication)
     if (!query.trim()) {
       // Pages in current notebook
@@ -240,6 +257,7 @@ export function CommandPalette({
     onClose,
     onOpenGraph,
     onNewPage,
+    onOpenBackup,
     query,
   ]);
 
@@ -836,6 +854,26 @@ function IconHistory() {
       <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
       <path d="M3 3v5h5" />
       <path d="M12 7v5l4 2" />
+    </svg>
+  );
+}
+
+function IconArchive() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <polyline points="21 8 21 21 3 21 3 8" />
+      <rect x="1" y="3" width="22" height="5" />
+      <line x1="10" y1="12" x2="14" y2="12" />
     </svg>
   );
 }

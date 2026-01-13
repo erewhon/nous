@@ -94,6 +94,13 @@ pub fn run() {
             commands::rename_tag,
             commands::merge_tags,
             commands::delete_tag,
+            // Backup commands
+            commands::export_notebook_zip,
+            commands::import_notebook_zip,
+            commands::get_backup_metadata,
+            commands::create_notebook_backup,
+            commands::list_backups,
+            commands::delete_backup,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -33,6 +33,10 @@ tantivy = "0.22"
 pulldown-cmark = "0.10"
 regex = "1.10"
 
+# ZIP backup support
+zip = "4.0"
+walkdir = "2.5"
+
 # PyO3 for Python integration
 pyo3 = { version = "0.27", features = ["auto-initialize"] }
 tokio = { version = "1", features = ["full"] }

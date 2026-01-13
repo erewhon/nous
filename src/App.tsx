@@ -8,6 +8,7 @@ import { SettingsDialog } from "./components/Settings";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { TemplateDialog } from "./components/TemplateDialog";
 import { TagManager } from "./components/Tags";
+import { BackupDialog } from "./components/Backup";
 import { useAppInit } from "./hooks/useAppInit";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useNotebookStore } from "./stores/notebookStore";
@@ -27,6 +28,7 @@ function App() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showTemplateDialog, setShowTemplateDialog] = useState(false);
   const [showTagManager, setShowTagManager] = useState(false);
+  const [showBackup, setShowBackup] = useState(false);
 
   const { selectedNotebookId, createNotebook } = useNotebookStore();
   const { pages, selectedPageId, selectPage, deletePage, duplicatePage } = usePageStore();
@@ -115,6 +117,7 @@ function App() {
         onClose={() => setShowCommandPalette(false)}
         onOpenGraph={() => setShowGraph(true)}
         onNewPage={handleNewPage}
+        onOpenBackup={() => setShowBackup(true)}
       />
 
       {/* Graph View */}
@@ -170,6 +173,12 @@ function App() {
         isOpen={showTagManager}
         onClose={() => setShowTagManager(false)}
         notebookId={selectedNotebookId}
+      />
+
+      {/* Backup Dialog */}
+      <BackupDialog
+        isOpen={showBackup}
+        onClose={() => setShowBackup(false)}
       />
     </>
   );

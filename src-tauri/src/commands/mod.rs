@@ -1,5 +1,6 @@
 mod ai;
 mod assets;
+mod backup;
 mod markdown;
 mod notebook;
 mod page;
@@ -9,6 +10,7 @@ mod web_research;
 
 pub use ai::*;
 pub use assets::*;
+pub use backup::*;
 pub use markdown::*;
 pub use notebook::*;
 pub use page::*;

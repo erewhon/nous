@@ -14,6 +14,9 @@ pub enum StorageError {
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
 
+    #[error("ZIP error: {0}")]
+    Zip(#[from] zip::result::ZipError),
+
     #[error("Notebook not found: {0}")]
     NotebookNotFound(Uuid),
 
