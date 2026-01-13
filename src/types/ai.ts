@@ -69,6 +69,7 @@ export const ChatResponseWithActionsSchema = z.object({
   tokensUsed: z.number().nullable().optional(),
   finishReason: z.string().nullable().optional(),
   actions: z.array(AIActionSchema),
+  thinking: z.string().nullable().optional(),
 });
 
 export type ChatResponseWithActions = z.infer<typeof ChatResponseWithActionsSchema>;

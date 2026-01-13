@@ -25,9 +25,19 @@ interface CreatedItem {
   notebookName?: string;
 }
 
+// Extended message with optional thinking
+interface DisplayMessage {
+  role: "user" | "assistant" | "system";
+  content: string;
+  thinking?: string;
+}
+
 export function AIChatPanel({ isOpen, onClose, onOpenSettings }: AIChatPanelProps) {
   const [input, setInput] = useState("");
   const [createdItems, setCreatedItems] = useState<CreatedItem[]>([]);
+  const [statusText, setStatusText] = useState<string>("");
+  const [displayMessages, setDisplayMessages] = useState<DisplayMessage[]>([]);
+  const [expandedThinking, setExpandedThinking] = useState<Set<number>>(new Set());
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -36,14 +46,32 @@ export function AIChatPanel({ isOpen, onClose, onOpenSettings }: AIChatPanelProp
   const { selectedPageId, pages, loadPages } = usePageStore();
   const { notebooks, selectedNotebookId, loadNotebooks } = useNotebookStore();
 
+  // Sync display messages with conversation messages
+  useEffect(() => {
+    // Only add messages from store that don't have thinking (they'll be added via handleSubmit)
+    const storeMessages = conversation.messages.map(m => ({
+      role: m.role,
+      content: m.content,
+      thinking: undefined,
+    }));
+    // Preserve thinking from display messages
+    setDisplayMessages(prev => {
+      if (storeMessages.length === 0) return [];
+      return storeMessages.map((msg, i) => ({
+        ...msg,
+        thinking: prev[i]?.thinking,
+      }));
+    });
+  }, [conversation.messages]);
+
   // Get current page context
   const currentPage = pages.find((p) => p.id === selectedPageId);
   const currentNotebook = notebooks.find((n) => n.id === selectedNotebookId);
 
-  // Scroll to bottom when messages change
+  // Scroll to bottom when messages change or loading state changes
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [conversation.messages]);
+  }, [displayMessages, conversation.isLoading]);
 
   // Focus input when panel opens
   useEffect(() => {
@@ -160,6 +188,19 @@ export function AIChatPanel({ isOpen, onClose, onOpenSettings }: AIChatPanelProp
     return created;
   }, [selectedNotebookId, currentNotebook, notebooks, loadNotebooks, loadPages]);
 
+  // Toggle thinking expansion
+  const toggleThinking = (index: number) => {
+    setExpandedThinking(prev => {
+      const next = new Set(prev);
+      if (next.has(index)) {
+        next.delete(index);
+      } else {
+        next.add(index);
+      }
+      return next;
+    });
+  };
+
   const handleSubmit = async () => {
     if (!input.trim() || conversation.isLoading) return;
 
@@ -168,9 +209,12 @@ export function AIChatPanel({ isOpen, onClose, onOpenSettings }: AIChatPanelProp
       content: input.trim(),
     };
 
+    // Add user message immediately and scroll
     addMessage(userMessage);
+    setDisplayMessages(prev => [...prev, { role: "user", content: userMessage.content }]);
     setInput("");
     setLoading(true);
+    setStatusText("Thinking...");
     setCreatedItems([]); // Clear previous created items
 
     try {
@@ -192,6 +236,7 @@ export function AIChatPanel({ isOpen, onClose, onOpenSettings }: AIChatPanelProp
         name: n.name,
       }));
 
+      setStatusText("Waiting for AI response...");
       const response = await aiChatWithTools(userMessage.content, {
         pageContext,
         conversationHistory: conversation.messages.slice(-10), // Last 10 messages
@@ -206,6 +251,7 @@ export function AIChatPanel({ isOpen, onClose, onOpenSettings }: AIChatPanelProp
 
       // Execute any actions returned by the AI
       if (response.actions && response.actions.length > 0) {
+        setStatusText("Creating notebooks and pages...");
         const created = await executeActions(response.actions);
         setCreatedItems(created);
       }
@@ -216,14 +262,24 @@ export function AIChatPanel({ isOpen, onClose, onOpenSettings }: AIChatPanelProp
       };
 
       addMessage(assistantMessage);
+
+      // Add to display messages with thinking
+      setDisplayMessages(prev => [...prev, {
+        role: "assistant",
+        content: response.content,
+        thinking: response.thinking || undefined,
+      }]);
     } catch (error) {
       console.error("AI chat error:", error);
+      const errorMessage = `Error: ${error instanceof Error ? error.message : "Failed to get response"}`;
       addMessage({
         role: "assistant",
-        content: `Error: ${error instanceof Error ? error.message : "Failed to get response"}`,
+        content: errorMessage,
       });
+      setDisplayMessages(prev => [...prev, { role: "assistant", content: errorMessage }]);
     } finally {
       setLoading(false);
+      setStatusText("");
     }
   };
 
@@ -329,7 +385,7 @@ export function AIChatPanel({ isOpen, onClose, onOpenSettings }: AIChatPanelProp
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-5">
-        {conversation.messages.length === 0 ? (
+        {displayMessages.length === 0 && !conversation.isLoading ? (
           <div className="flex h-full flex-col items-center justify-center text-center">
             <div
               className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl"
@@ -363,68 +419,106 @@ export function AIChatPanel({ isOpen, onClose, onOpenSettings }: AIChatPanelProp
           </div>
         ) : (
           <div className="space-y-5">
-            {conversation.messages.map((msg, i) => (
+            {displayMessages.map((msg, i) => (
               <div
                 key={i}
                 className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
               >
-                <div
-                  className="max-w-[85%] rounded-2xl"
-                  style={
-                    msg.role === "user"
-                      ? {
-                          background: "linear-gradient(to bottom right, var(--color-accent), var(--color-accent-secondary))",
-                          color: "white",
-                          padding: "12px 16px",
-                          boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.1)",
-                        }
-                      : {
-                          backgroundColor: "var(--color-bg-secondary)",
-                          color: "var(--color-text-primary)",
-                          padding: "16px",
-                          border: "1px solid var(--color-border)",
-                        }
-                  }
-                >
-                  {msg.role === "user" ? (
-                    <p className="whitespace-pre-wrap text-sm leading-relaxed">{msg.content}</p>
-                  ) : (
-                    <div
-                      className="prose prose-sm prose-invert max-w-none"
-                      style={{ color: "var(--color-text-primary)" }}
-                    >
-                      <ReactMarkdown
-                        components={{
-                          p: ({ children }) => <p className="mb-3 last:mb-0 leading-relaxed">{children}</p>,
-                          ul: ({ children }) => <ul className="mb-3 ml-4 list-disc last:mb-0 space-y-1">{children}</ul>,
-                          ol: ({ children }) => <ol className="mb-3 ml-4 list-decimal last:mb-0 space-y-1">{children}</ol>,
-                          li: ({ children }) => <li className="leading-relaxed">{children}</li>,
-                          strong: ({ children }) => <strong style={{ fontWeight: 600, color: "var(--color-accent)" }}>{children}</strong>,
-                          code: ({ children }) => (
-                            <code
-                              className="rounded-md px-1.5 py-0.5 text-xs font-mono"
-                              style={{ backgroundColor: "var(--color-bg-tertiary)" }}
-                            >
-                              {children}
-                            </code>
-                          ),
-                          pre: ({ children }) => (
-                            <pre
-                              className="my-3 overflow-x-auto rounded-xl p-4 text-xs"
-                              style={{ backgroundColor: "var(--color-bg-tertiary)" }}
-                            >
-                              {children}
-                            </pre>
-                          ),
-                          h1: ({ children }) => <h1 className="mb-3 text-base font-bold" style={{ color: "var(--color-text-primary)" }}>{children}</h1>,
-                          h2: ({ children }) => <h2 className="mb-2 text-sm font-bold" style={{ color: "var(--color-text-primary)" }}>{children}</h2>,
-                          h3: ({ children }) => <h3 className="mb-2 text-sm font-semibold" style={{ color: "var(--color-text-primary)" }}>{children}</h3>,
+                <div className="max-w-[85%]">
+                  {/* Thinking section (collapsible) */}
+                  {msg.thinking && (
+                    <div className="mb-2">
+                      <button
+                        onClick={() => toggleThinking(i)}
+                        className="flex items-center gap-2 text-xs rounded-lg px-3 py-1.5 transition-all"
+                        style={{
+                          backgroundColor: "rgba(139, 92, 246, 0.1)",
+                          color: "var(--color-accent)",
                         }}
                       >
-                        {msg.content}
-                      </ReactMarkdown>
+                        <IconBrain style={{ width: 12, height: 12 }} />
+                        <span>Thinking</span>
+                        <IconChevron
+                          style={{
+                            width: 12,
+                            height: 12,
+                            transform: expandedThinking.has(i) ? "rotate(180deg)" : "rotate(0deg)",
+                            transition: "transform 0.2s",
+                          }}
+                        />
+                      </button>
+                      {expandedThinking.has(i) && (
+                        <div
+                          className="mt-2 rounded-xl p-3 text-xs overflow-auto max-h-64"
+                          style={{
+                            backgroundColor: "rgba(139, 92, 246, 0.05)",
+                            border: "1px solid rgba(139, 92, 246, 0.2)",
+                            color: "var(--color-text-secondary)",
+                          }}
+                        >
+                          <pre className="whitespace-pre-wrap font-mono">{msg.thinking}</pre>
+                        </div>
+                      )}
                     </div>
                   )}
+                  <div
+                    className="rounded-2xl"
+                    style={
+                      msg.role === "user"
+                        ? {
+                            background: "linear-gradient(to bottom right, var(--color-accent), var(--color-accent-secondary))",
+                            color: "white",
+                            padding: "12px 16px",
+                            boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.1)",
+                          }
+                        : {
+                            backgroundColor: "var(--color-bg-secondary)",
+                            color: "var(--color-text-primary)",
+                            padding: "16px",
+                            border: "1px solid var(--color-border)",
+                          }
+                    }
+                  >
+                    {msg.role === "user" ? (
+                      <p className="whitespace-pre-wrap text-sm leading-relaxed">{msg.content}</p>
+                    ) : (
+                      <div
+                        className="prose prose-sm prose-invert max-w-none"
+                        style={{ color: "var(--color-text-primary)" }}
+                      >
+                        <ReactMarkdown
+                          components={{
+                            p: ({ children }) => <p className="mb-3 last:mb-0 leading-relaxed">{children}</p>,
+                            ul: ({ children }) => <ul className="mb-3 ml-4 list-disc last:mb-0 space-y-1">{children}</ul>,
+                            ol: ({ children }) => <ol className="mb-3 ml-4 list-decimal last:mb-0 space-y-1">{children}</ol>,
+                            li: ({ children }) => <li className="leading-relaxed">{children}</li>,
+                            strong: ({ children }) => <strong style={{ fontWeight: 600, color: "var(--color-accent)" }}>{children}</strong>,
+                            code: ({ children }) => (
+                              <code
+                                className="rounded-md px-1.5 py-0.5 text-xs font-mono"
+                                style={{ backgroundColor: "var(--color-bg-tertiary)" }}
+                              >
+                                {children}
+                              </code>
+                            ),
+                            pre: ({ children }) => (
+                              <pre
+                                className="my-3 overflow-x-auto rounded-xl p-4 text-xs"
+                                style={{ backgroundColor: "var(--color-bg-tertiary)" }}
+                              >
+                                {children}
+                              </pre>
+                            ),
+                            h1: ({ children }) => <h1 className="mb-3 text-base font-bold" style={{ color: "var(--color-text-primary)" }}>{children}</h1>,
+                            h2: ({ children }) => <h2 className="mb-2 text-sm font-bold" style={{ color: "var(--color-text-primary)" }}>{children}</h2>,
+                            h3: ({ children }) => <h3 className="mb-2 text-sm font-semibold" style={{ color: "var(--color-text-primary)" }}>{children}</h3>,
+                          }}
+                        >
+                          {msg.content}
+                        </ReactMarkdown>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             ))}
@@ -437,19 +531,29 @@ export function AIChatPanel({ isOpen, onClose, onOpenSettings }: AIChatPanelProp
                     borderColor: "var(--color-border)",
                   }}
                 >
-                  <div className="flex items-center gap-2">
-                    <div
-                      className="h-2.5 w-2.5 animate-bounce rounded-full"
-                      style={{ backgroundColor: "var(--color-accent)" }}
-                    />
-                    <div
-                      className="h-2.5 w-2.5 animate-bounce rounded-full"
-                      style={{ backgroundColor: "var(--color-accent-secondary)", animationDelay: "0.1s" }}
-                    />
-                    <div
-                      className="h-2.5 w-2.5 animate-bounce rounded-full"
-                      style={{ backgroundColor: "var(--color-accent-tertiary)", animationDelay: "0.2s" }}
-                    />
+                  <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-1.5">
+                      <div
+                        className="h-2 w-2 animate-bounce rounded-full"
+                        style={{ backgroundColor: "var(--color-accent)" }}
+                      />
+                      <div
+                        className="h-2 w-2 animate-bounce rounded-full"
+                        style={{ backgroundColor: "var(--color-accent-secondary)", animationDelay: "0.1s" }}
+                      />
+                      <div
+                        className="h-2 w-2 animate-bounce rounded-full"
+                        style={{ backgroundColor: "var(--color-accent-tertiary)", animationDelay: "0.2s" }}
+                      />
+                    </div>
+                    {statusText && (
+                      <span
+                        className="text-sm"
+                        style={{ color: "var(--color-text-muted)" }}
+                      >
+                        {statusText}
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -708,6 +812,45 @@ function IconFile({ style }: { style?: React.CSSProperties }) {
     >
       <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
       <polyline points="14,2 14,8 20,8" />
+    </svg>
+  );
+}
+
+function IconBrain({ style }: { style?: React.CSSProperties }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={style}
+    >
+      <path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z" />
+      <path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z" />
+    </svg>
+  );
+}
+
+function IconChevron({ style }: { style?: React.CSSProperties }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={style}
+    >
+      <path d="m6 9 6 6 6-6" />
     </svg>
   );
 }

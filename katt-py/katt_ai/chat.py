@@ -265,6 +265,7 @@ async def chat_with_tools(
     # Handle based on provider
     actions: list[dict[str, Any]] = []
     response_content = ""
+    thinking_content = ""
     response_model = config.model
     tokens_used = None
 
@@ -437,10 +438,13 @@ async def chat_with_tools(
 
             tokens_used += response.usage.input_tokens + response.usage.output_tokens
 
-        # Extract final text response
+        # Extract final text response and thinking
+        thinking_content = ""
         for block in response.content:
             if hasattr(block, "text"):
                 response_content += block.text
+            elif block.type == "thinking":
+                thinking_content = block.thinking
 
     else:
         # Ollama doesn't support native tool use, fall back to regular chat
@@ -467,6 +471,7 @@ async def chat_with_tools(
         "tokens_used": tokens_used,
         "finish_reason": "stop",
         "actions": actions,
+        "thinking": thinking_content,
     }
 
 

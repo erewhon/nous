@@ -173,6 +173,7 @@ pub struct ChatResponseWithActions {
     pub tokens_used: Option<i64>,
     pub finish_reason: Option<String>,
     pub actions: Vec<AIAction>,
+    pub thinking: Option<String>,
 }
 
 /// Python AI bridge for calling Python functions
@@ -512,6 +513,10 @@ impl PythonAI {
                     .get("finish_reason")
                     .and_then(|v| v.extract::<String>(py).ok()),
                 actions,
+                thinking: result_dict
+                    .get("thinking")
+                    .and_then(|v| v.extract::<String>(py).ok())
+                    .filter(|s| !s.is_empty()),
             })
         })
     }
