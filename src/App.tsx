@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Layout } from "./components/Layout/Layout";
 import { CommandPalette } from "./components/CommandPalette/CommandPalette";
 import { GraphView } from "./components/Graph/GraphView";
@@ -13,11 +13,18 @@ import { useAppInit } from "./hooks/useAppInit";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useNotebookStore } from "./stores/notebookStore";
 import { usePageStore } from "./stores/pageStore";
+import { useThemeStore } from "./stores/themeStore";
 import { exportPageToFile } from "./utils/api";
 import { save } from "@tauri-apps/plugin-dialog";
 
 function App() {
   useAppInit();
+
+  // Apply theme on mount
+  const applyTheme = useThemeStore((state) => state.applyTheme);
+  useEffect(() => {
+    applyTheme();
+  }, [applyTheme]);
 
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [showGraph, setShowGraph] = useState(false);

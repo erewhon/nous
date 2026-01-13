@@ -101,10 +101,11 @@ Already implemented with Tantivy, may need refinement:
 - [ ] Optional biometric unlock
 
 ### 12. Theme Customization
-- [ ] Light/dark mode toggle
-- [ ] Custom color schemes
-- [ ] Font selection
-- [ ] Editor width settings
+- [x] Light/dark mode toggle (with system preference support)
+- [x] Custom color schemes (Catppuccin, Default, Nord, Dracula)
+- [x] Font selection (System, Inter, JetBrains Mono, Fira Code)
+- [x] Editor width settings (Narrow, Medium, Wide, Full)
+- [x] Font size and line height customization
 
 ### 13. Mobile & Sync
 - [ ] Cloud sync between devices

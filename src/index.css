@@ -1,6 +1,7 @@
 @import "tailwindcss";
 
 /* CSS Custom Properties - needed for arbitrary value syntax like bg-[--color-name] */
+/* Default values are Catppuccin Mocha (dark) - overridden by themeStore.applyTheme() */
 :root {
   /* Background colors */
   --color-bg-primary: #1e1e2e;
@@ -33,6 +34,14 @@
 
   /* Selection/highlight */
   --color-selection: rgba(139, 92, 246, 0.3);
+
+  /* Typography - set by themeStore */
+  --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-size-base: 16px;
+  --line-height-base: 1.6;
+
+  /* Editor layout */
+  --editor-max-width: 768px;
 }
 
 /* Base styles - DON'T reset padding/margin as it overrides Tailwind */
@@ -40,20 +49,14 @@ html,
 body,
 #root {
   height: 100%;
-  font-family:
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    "Noto Sans",
-    Helvetica,
-    Arial,
-    sans-serif;
+  font-family: var(--font-family);
   background-color: var(--color-bg-primary);
   color: var(--color-text-primary);
   font-size: 14px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 /* Remove default focus outlines and add custom ones */

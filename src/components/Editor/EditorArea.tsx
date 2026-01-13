@@ -199,7 +199,10 @@ export function EditorArea() {
               lastSaved={lastSaved}
             />
             <div className="flex-1 overflow-y-auto px-16 py-10">
-              <div className="mx-auto max-w-3xl">
+              <div
+                className="mx-auto"
+                style={{ maxWidth: "var(--editor-max-width)" }}
+              >
                 <BlockEditor
                   key={selectedPage.id}
                   initialData={editorData}
