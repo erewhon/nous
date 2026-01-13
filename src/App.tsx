@@ -9,11 +9,13 @@ import { ConfirmDialog } from "./components/ConfirmDialog";
 import { TemplateDialog } from "./components/TemplateDialog";
 import { TagManager } from "./components/Tags";
 import { BackupDialog } from "./components/Backup";
+import { ActionLibrary, ActionEditor } from "./components/Actions";
 import { useAppInit } from "./hooks/useAppInit";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useNotebookStore } from "./stores/notebookStore";
 import { usePageStore } from "./stores/pageStore";
 import { useThemeStore } from "./stores/themeStore";
+import { useActionStore } from "./stores/actionStore";
 import { exportPageToFile } from "./utils/api";
 import { save } from "@tauri-apps/plugin-dialog";
 
@@ -38,6 +40,14 @@ function App() {
   const [showBackup, setShowBackup] = useState(false);
 
   const { selectedNotebookId, createNotebook } = useNotebookStore();
+  const {
+    showActionLibrary,
+    showActionEditor,
+    editingActionId,
+    openActionLibrary,
+    closeActionLibrary,
+    closeActionEditor,
+  } = useActionStore();
   const { pages, selectedPageId, selectPage, deletePage, duplicatePage } = usePageStore();
 
   // Get the selected page
@@ -112,6 +122,7 @@ function App() {
     onDuplicatePage: handleDuplicatePage,
     onDeletePage: handleDeletePage,
     onTagManager: () => setShowTagManager((prev) => !prev),
+    onActions: openActionLibrary,
   });
 
   return (
@@ -186,6 +197,20 @@ function App() {
       <BackupDialog
         isOpen={showBackup}
         onClose={() => setShowBackup(false)}
+      />
+
+      {/* Action Library */}
+      <ActionLibrary
+        isOpen={showActionLibrary}
+        onClose={closeActionLibrary}
+        currentNotebookId={selectedNotebookId ?? undefined}
+      />
+
+      {/* Action Editor */}
+      <ActionEditor
+        isOpen={showActionEditor}
+        onClose={closeActionEditor}
+        editingActionId={editingActionId}
       />
     </>
   );

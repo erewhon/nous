@@ -17,6 +17,24 @@ export const EditorDataSchema = z.object({
 
 export type EditorData = z.infer<typeof EditorDataSchema>;
 
+// Folder type enum
+export const FolderTypeSchema = z.enum(["standard", "archive"]);
+export type FolderType = z.infer<typeof FolderTypeSchema>;
+
+// Folder schema
+export const FolderSchema = z.object({
+  id: z.string().uuid(),
+  notebookId: z.string().uuid(),
+  name: z.string(),
+  parentId: z.string().uuid().nullable().optional(),
+  folderType: FolderTypeSchema.default("standard"),
+  position: z.number().default(0),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+
+export type Folder = z.infer<typeof FolderSchema>;
+
 // Page schema
 export const PageSchema = z.object({
   id: z.string().uuid(),
@@ -24,11 +42,28 @@ export const PageSchema = z.object({
   title: z.string(),
   content: EditorDataSchema,
   tags: z.array(z.string()),
+  folderId: z.string().uuid().nullable().optional(),
+  isArchived: z.boolean().default(false),
+  position: z.number().default(0),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });
 
 export type Page = z.infer<typeof PageSchema>;
+
+// Tree node for folder hierarchy
+export interface FolderTreeNode {
+  folder: Folder;
+  children: FolderTreeNode[];
+  pages: Page[];
+  isExpanded: boolean;
+}
+
+// Root level items (pages without folders)
+export interface PageTreeRoot {
+  folders: FolderTreeNode[];
+  pages: Page[]; // Pages at root level (no folder)
+}
 
 // Zettel extends Page with additional metadata
 export const ZettelSchema = PageSchema.extend({

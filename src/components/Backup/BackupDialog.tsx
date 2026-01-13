@@ -7,7 +7,10 @@ import {
   createNotebookBackup,
   deleteBackup,
   getBackupMetadata,
+  previewNotionExport,
+  importNotionExport,
   type BackupInfo,
+  type NotionImportPreview,
 } from "../../utils/api";
 import { useNotebookStore } from "../../stores/notebookStore";
 import type { Notebook } from "../../types/notebook";
@@ -18,11 +21,16 @@ interface BackupDialogProps {
 }
 
 export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
-  const [activeTab, setActiveTab] = useState<"export" | "import" | "backups">("export");
+  const [activeTab, setActiveTab] = useState<"export" | "import" | "notion" | "backups">("export");
   const [backups, setBackups] = useState<BackupInfo[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+
+  // Notion import state
+  const [notionPreview, setNotionPreview] = useState<NotionImportPreview | null>(null);
+  const [notionZipPath, setNotionZipPath] = useState<string | null>(null);
+  const [notionNotebookName, setNotionNotebookName] = useState("");
 
   const { notebooks, loadNotebooks } = useNotebookStore();
 
@@ -166,6 +174,66 @@ export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
     }
   };
 
+  // Notion Import handlers
+  const handleNotionSelectFile = async () => {
+    try {
+      setError(null);
+      setSuccess(null);
+      setNotionPreview(null);
+      setNotionZipPath(null);
+
+      const path = await open({
+        multiple: false,
+        filters: [{ name: "Notion Export", extensions: ["zip"] }],
+      });
+
+      if (!path) return;
+
+      setIsLoading(true);
+      const preview = await previewNotionExport(path);
+      setNotionPreview(preview);
+      setNotionZipPath(path);
+      setNotionNotebookName(preview.suggestedName);
+    } catch (err) {
+      setError(`Failed to read Notion export: ${err}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleNotionImport = async () => {
+    if (!notionZipPath) return;
+
+    try {
+      setError(null);
+      setSuccess(null);
+      setIsLoading(true);
+
+      const notebook = await importNotionExport(
+        notionZipPath,
+        notionNotebookName || undefined
+      );
+      await loadNotebooks();
+      setSuccess(`Imported "${notebook.name}" from Notion successfully`);
+
+      // Reset state
+      setNotionPreview(null);
+      setNotionZipPath(null);
+      setNotionNotebookName("");
+    } catch (err) {
+      setError(`Notion import failed: ${err}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleNotionCancel = () => {
+    setNotionPreview(null);
+    setNotionZipPath(null);
+    setNotionNotebookName("");
+    setError(null);
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -206,6 +274,7 @@ export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
             {[
               { id: "export" as const, label: "Export", icon: <IconUpload /> },
               { id: "import" as const, label: "Import", icon: <IconDownload /> },
+              { id: "notion" as const, label: "Notion", icon: <IconNotion /> },
               { id: "backups" as const, label: "Auto-Backups", icon: <IconArchive /> },
             ].map((tab) => (
               <button
@@ -243,6 +312,7 @@ export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
             >
               {activeTab === "export" && "Export Notebook"}
               {activeTab === "import" && "Import Notebook"}
+              {activeTab === "notion" && "Import from Notion"}
               {activeTab === "backups" && "Auto-Backups"}
             </h3>
             <button
@@ -294,6 +364,17 @@ export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
             )}
             {activeTab === "import" && (
               <ImportTab isLoading={isLoading} onImport={handleImport} />
+            )}
+            {activeTab === "notion" && (
+              <NotionImportTab
+                isLoading={isLoading}
+                preview={notionPreview}
+                notebookName={notionNotebookName}
+                onSelectFile={handleNotionSelectFile}
+                onImport={handleNotionImport}
+                onCancel={handleNotionCancel}
+                onNameChange={setNotionNotebookName}
+              />
             )}
             {activeTab === "backups" && (
               <BackupsTab
@@ -548,6 +629,253 @@ function BackupsTab({
   );
 }
 
+// Notion Import Tab
+function NotionImportTab({
+  isLoading,
+  preview,
+  notebookName,
+  onSelectFile,
+  onImport,
+  onCancel,
+  onNameChange,
+}: {
+  isLoading: boolean;
+  preview: NotionImportPreview | null;
+  notebookName: string;
+  onSelectFile: () => void;
+  onImport: () => void;
+  onCancel: () => void;
+  onNameChange: (name: string) => void;
+}) {
+  if (!preview) {
+    return (
+      <div className="space-y-6">
+        <p
+          className="text-sm"
+          style={{ color: "var(--color-text-muted)" }}
+        >
+          Import pages from a Notion export. Export your Notion workspace as Markdown &amp; CSV,
+          then select the ZIP file below.
+        </p>
+
+        <div
+          className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed p-12"
+          style={{ borderColor: "var(--color-border)" }}
+        >
+          <div
+            className="mb-4 rounded-full p-4"
+            style={{ backgroundColor: "var(--color-bg-tertiary)" }}
+          >
+            <IconNotion size={32} />
+          </div>
+          <h4
+            className="mb-2 text-lg font-medium"
+            style={{ color: "var(--color-text-primary)" }}
+          >
+            Import from Notion
+          </h4>
+          <p
+            className="mb-6 text-center text-sm"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            Select a Notion export ZIP file
+          </p>
+          <button
+            onClick={onSelectFile}
+            disabled={isLoading}
+            className="rounded-lg px-6 py-2.5 text-sm font-medium transition-colors"
+            style={{
+              backgroundColor: "var(--color-accent)",
+              color: "white",
+              opacity: isLoading ? 0.5 : 1,
+            }}
+          >
+            {isLoading ? "Loading..." : "Choose File"}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <p
+        className="text-sm"
+        style={{ color: "var(--color-text-muted)" }}
+      >
+        Review the import preview and confirm.
+      </p>
+
+      {/* Preview Stats */}
+      <div
+        className="grid grid-cols-2 gap-4 rounded-lg border p-4"
+        style={{
+          borderColor: "var(--color-border)",
+          backgroundColor: "var(--color-bg-secondary)",
+        }}
+      >
+        <div>
+          <div
+            className="text-2xl font-bold"
+            style={{ color: "var(--color-accent)" }}
+          >
+            {preview.pageCount}
+          </div>
+          <div
+            className="text-sm"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            Pages
+          </div>
+        </div>
+        <div>
+          <div
+            className="text-2xl font-bold"
+            style={{ color: "var(--color-accent)" }}
+          >
+            {preview.assetCount}
+          </div>
+          <div
+            className="text-sm"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            Images
+          </div>
+        </div>
+        {preview.databaseCount > 0 && (
+          <>
+            <div>
+              <div
+                className="text-2xl font-bold"
+                style={{ color: "var(--color-accent)" }}
+              >
+                {preview.databaseCount}
+              </div>
+              <div
+                className="text-sm"
+                style={{ color: "var(--color-text-muted)" }}
+              >
+                Databases
+              </div>
+            </div>
+            <div>
+              <div
+                className="text-2xl font-bold"
+                style={{ color: "var(--color-accent)" }}
+              >
+                {preview.databaseRowCount}
+              </div>
+              <div
+                className="text-sm"
+                style={{ color: "var(--color-text-muted)" }}
+              >
+                Database rows
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Page Preview */}
+      {preview.pages.length > 0 && (
+        <div>
+          <h4
+            className="mb-2 text-sm font-medium"
+            style={{ color: "var(--color-text-primary)" }}
+          >
+            Sample Pages
+          </h4>
+          <div
+            className="max-h-32 space-y-1 overflow-y-auto rounded-lg border p-2"
+            style={{
+              borderColor: "var(--color-border)",
+              backgroundColor: "var(--color-bg-secondary)",
+            }}
+          >
+            {preview.pages.map((page, i) => (
+              <div
+                key={i}
+                className="flex items-center gap-2 text-sm"
+                style={{ color: "var(--color-text-secondary)" }}
+              >
+                <span>{page.isDatabaseRow ? "📊" : page.hasImages ? "🖼️" : "📄"}</span>
+                <span className="truncate">{page.title}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Warnings */}
+      {preview.warnings.length > 0 && (
+        <div
+          className="rounded-lg p-3 text-sm"
+          style={{
+            backgroundColor: "rgba(234, 179, 8, 0.1)",
+            color: "var(--color-warning)",
+          }}
+        >
+          <strong>Warnings:</strong>
+          <ul className="mt-1 list-disc pl-4">
+            {preview.warnings.map((w, i) => (
+              <li key={i}>{w}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Notebook Name */}
+      <div>
+        <label
+          className="mb-2 block text-sm font-medium"
+          style={{ color: "var(--color-text-primary)" }}
+        >
+          Notebook Name
+        </label>
+        <input
+          type="text"
+          value={notebookName}
+          onChange={(e) => onNameChange(e.target.value)}
+          className="w-full rounded-lg border px-4 py-2 text-sm"
+          style={{
+            borderColor: "var(--color-border)",
+            backgroundColor: "var(--color-bg-secondary)",
+            color: "var(--color-text-primary)",
+          }}
+          placeholder="Enter notebook name"
+        />
+      </div>
+
+      {/* Actions */}
+      <div className="flex justify-end gap-3">
+        <button
+          onClick={onCancel}
+          disabled={isLoading}
+          className="rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+          style={{
+            backgroundColor: "var(--color-bg-tertiary)",
+            color: "var(--color-text-secondary)",
+          }}
+        >
+          Cancel
+        </button>
+        <button
+          onClick={onImport}
+          disabled={isLoading}
+          className="rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+          style={{
+            backgroundColor: "var(--color-accent)",
+            color: "white",
+            opacity: isLoading ? 0.5 : 1,
+          }}
+        >
+          {isLoading ? "Importing..." : "Import Notebook"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // Icons
 function IconUpload() {
   return (
@@ -642,6 +970,27 @@ function IconTrash() {
     >
       <polyline points="3 6 5 6 21 6" />
       <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+    </svg>
+  );
+}
+
+function IconNotion({ size = 16 }: { size?: number }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M4 4h10l6 6v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" />
+      <path d="M14 4v6h6" />
+      <path d="M8 12h4" />
+      <path d="M8 16h6" />
     </svg>
   );
 }

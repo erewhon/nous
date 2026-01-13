@@ -1,5 +1,7 @@
 export { EditorArea } from "./EditorArea";
 export { PageList } from "./PageList";
+export { FolderTree } from "./FolderTree";
+export { FolderTreeItem } from "./FolderTreeItem";
 export { BlockEditor } from "./BlockEditor";
 export { PageHeader } from "./PageHeader";
 export { BacklinksPanel } from "./BacklinksPanel";

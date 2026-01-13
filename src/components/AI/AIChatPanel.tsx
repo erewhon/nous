@@ -21,7 +21,7 @@ interface AIChatPanelProps {
 
 // Track created items to show in UI
 interface CreatedItem {
-  type: "notebook" | "page";
+  type: "notebook" | "page" | "action" | "info";
   name: string;
   notebookName?: string;
 }
@@ -125,6 +125,33 @@ export function AIChatPanel({ isOpen, onClose, onOpenSettings }: AIChatPanelProp
           notebooksSnapshot.push(newNotebook);
           needsNotebookRefresh = true;
           created.push({ type: "notebook", name: args.name });
+        } else if (action.tool === "run_action") {
+          const args = action.arguments as unknown as { action_name: string; variables?: Record<string, string> };
+          try {
+            const { runActionByName } = await import("../../utils/api");
+            const result = await runActionByName(args.action_name, {
+              variables: args.variables,
+              currentNotebookId: selectedNotebookId || undefined,
+            });
+            created.push({
+              type: "action",
+              name: args.action_name,
+              notebookName: `${result.stepsCompleted} steps completed`,
+            });
+            // Reload pages if the action might have created some
+            if (selectedNotebookId) {
+              await loadPages(selectedNotebookId);
+            }
+          } catch (error) {
+            console.error(`Failed to run action ${args.action_name}:`, error);
+          }
+        } else if (action.tool === "list_actions") {
+          // list_actions is informational - just acknowledge it
+          // The AI will format the response based on the tool result
+          created.push({
+            type: "info",
+            name: "Listed available actions",
+          });
         } else if (action.tool === "create_page") {
           const args = action.arguments as unknown as CreatePageArgs;
 

@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { Notebook, NotebookType } from "../types/notebook";
-import type { Page, EditorData, SearchResult } from "../types/page";
+import type { Page, EditorData, SearchResult, Folder } from "../types/page";
 
 // ===== Notebook API =====
 
@@ -32,8 +32,11 @@ export async function deleteNotebook(notebookId: string): Promise<void> {
 
 // ===== Page API =====
 
-export async function listPages(notebookId: string): Promise<Page[]> {
-  return invoke<Page[]>("list_pages", { notebookId });
+export async function listPages(
+  notebookId: string,
+  includeArchived?: boolean
+): Promise<Page[]> {
+  return invoke<Page[]>("list_pages", { notebookId, includeArchived });
 }
 
 export async function getPage(
@@ -45,9 +48,10 @@ export async function getPage(
 
 export async function createPage(
   notebookId: string,
-  title: string
+  title: string,
+  folderId?: string
 ): Promise<Page> {
-  return invoke<Page>("create_page", { notebookId, title });
+  return invoke<Page>("create_page", { notebookId, title, folderId });
 }
 
 export async function updatePage(
@@ -63,6 +67,101 @@ export async function deletePage(
   pageId: string
 ): Promise<void> {
   return invoke("delete_page", { notebookId, pageId });
+}
+
+// ===== Folder API =====
+
+export async function listFolders(notebookId: string): Promise<Folder[]> {
+  return invoke<Folder[]>("list_folders", { notebookId });
+}
+
+export async function getFolder(
+  notebookId: string,
+  folderId: string
+): Promise<Folder> {
+  return invoke<Folder>("get_folder", { notebookId, folderId });
+}
+
+export async function createFolder(
+  notebookId: string,
+  name: string,
+  parentId?: string
+): Promise<Folder> {
+  return invoke<Folder>("create_folder", { notebookId, name, parentId });
+}
+
+export async function updateFolder(
+  notebookId: string,
+  folderId: string,
+  updates: { name?: string; parentId?: string | null }
+): Promise<Folder> {
+  return invoke<Folder>("update_folder", {
+    notebookId,
+    folderId,
+    name: updates.name,
+    parentId: updates.parentId !== undefined ? updates.parentId : undefined,
+  });
+}
+
+export async function deleteFolder(
+  notebookId: string,
+  folderId: string,
+  movePagesTo?: string
+): Promise<void> {
+  return invoke("delete_folder", { notebookId, folderId, movePagesTo });
+}
+
+export async function movePageToFolder(
+  notebookId: string,
+  pageId: string,
+  folderId?: string,
+  position?: number
+): Promise<Page> {
+  return invoke<Page>("move_page_to_folder", {
+    notebookId,
+    pageId,
+    folderId,
+    position,
+  });
+}
+
+export async function archivePage(
+  notebookId: string,
+  pageId: string
+): Promise<Page> {
+  return invoke<Page>("archive_page", { notebookId, pageId });
+}
+
+export async function unarchivePage(
+  notebookId: string,
+  pageId: string,
+  targetFolderId?: string
+): Promise<Page> {
+  return invoke<Page>("unarchive_page", {
+    notebookId,
+    pageId,
+    targetFolderId,
+  });
+}
+
+export async function reorderFolders(
+  notebookId: string,
+  parentId: string | null,
+  folderIds: string[]
+): Promise<void> {
+  return invoke("reorder_folders", { notebookId, parentId, folderIds });
+}
+
+export async function reorderPages(
+  notebookId: string,
+  folderId: string | null,
+  pageIds: string[]
+): Promise<void> {
+  return invoke("reorder_pages", { notebookId, folderId, pageIds });
+}
+
+export async function ensureArchiveFolder(notebookId: string): Promise<Folder> {
+  return invoke<Folder>("ensure_archive_folder", { notebookId });
 }
 
 // ===== Search API =====
@@ -423,4 +522,135 @@ export async function listBackups(): Promise<BackupInfo[]> {
 
 export async function deleteBackup(backupPath: string): Promise<void> {
   return invoke("delete_backup", { backupPath });
+}
+
+// ===== Notion Import API =====
+
+export interface NotionPagePreview {
+  title: string;
+  path: string;
+  hasImages: boolean;
+  isDatabaseRow: boolean;
+}
+
+export interface NotionImportPreview {
+  pageCount: number;
+  assetCount: number;
+  databaseCount: number;
+  databaseRowCount: number;
+  nestedDepth: number;
+  pages: NotionPagePreview[];
+  suggestedName: string;
+  warnings: string[];
+}
+
+export async function previewNotionExport(
+  zipPath: string
+): Promise<NotionImportPreview> {
+  return invoke<NotionImportPreview>("preview_notion_export", { zipPath });
+}
+
+export async function importNotionExport(
+  zipPath: string,
+  notebookName?: string
+): Promise<Notebook> {
+  return invoke<Notebook>("import_notion_export", { zipPath, notebookName });
+}
+
+// ===== Actions API =====
+
+import type {
+  Action,
+  ActionCategory,
+  ActionExecutionResult,
+  ActionUpdate,
+  ScheduledActionInfo,
+} from "../types/action";
+
+export async function listActions(): Promise<Action[]> {
+  return invoke<Action[]>("list_actions");
+}
+
+export async function getAction(actionId: string): Promise<Action> {
+  return invoke<Action>("get_action", { actionId });
+}
+
+export async function createAction(
+  name: string,
+  description: string,
+  options?: {
+    category?: ActionCategory;
+    triggers?: Action["triggers"];
+    steps?: Action["steps"];
+  }
+): Promise<Action> {
+  return invoke<Action>("create_action", {
+    name,
+    description,
+    category: options?.category,
+    triggers: options?.triggers,
+    steps: options?.steps,
+  });
+}
+
+export async function updateAction(
+  actionId: string,
+  updates: ActionUpdate
+): Promise<Action> {
+  return invoke<Action>("update_action", { actionId, updates });
+}
+
+export async function deleteAction(actionId: string): Promise<void> {
+  return invoke("delete_action", { actionId });
+}
+
+export async function runAction(
+  actionId: string,
+  options?: {
+    variables?: Record<string, string>;
+    currentNotebookId?: string;
+  }
+): Promise<ActionExecutionResult> {
+  return invoke<ActionExecutionResult>("run_action", {
+    actionId,
+    variables: options?.variables,
+    currentNotebookId: options?.currentNotebookId,
+  });
+}
+
+export async function runActionByName(
+  actionName: string,
+  options?: {
+    variables?: Record<string, string>;
+    currentNotebookId?: string;
+  }
+): Promise<ActionExecutionResult> {
+  return invoke<ActionExecutionResult>("run_action_by_name", {
+    actionName,
+    variables: options?.variables,
+    currentNotebookId: options?.currentNotebookId,
+  });
+}
+
+export async function findActionsByKeywords(
+  input: string
+): Promise<Action[]> {
+  return invoke<Action[]>("find_actions_by_keywords", { input });
+}
+
+export async function getActionsByCategory(
+  category: ActionCategory
+): Promise<Action[]> {
+  return invoke<Action[]>("get_actions_by_category", { category });
+}
+
+export async function getScheduledActions(): Promise<ScheduledActionInfo[]> {
+  return invoke<ScheduledActionInfo[]>("get_scheduled_actions");
+}
+
+export async function setActionEnabled(
+  actionId: string,
+  enabled: boolean
+): Promise<Action> {
+  return invoke<Action>("set_action_enabled", { actionId, enabled });
 }

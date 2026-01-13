@@ -1,10 +1,12 @@
-import { useState, useRef, useEffect } from "react";
-import type { Page } from "../../types/page";
+import { useState, useRef, useEffect, useCallback } from "react";
+import type { Page, EditorData } from "../../types/page";
 import { usePageStore } from "../../stores/pageStore";
+import { useTemplateStore } from "../../stores/templateStore";
 import { exportPageToFile, importMarkdownFile } from "../../utils/api";
 import { save, open } from "@tauri-apps/plugin-dialog";
 import { TagEditor } from "../Tags";
 import { SaveAsTemplateDialog } from "../TemplateDialog";
+import { useFolderStore } from "../../stores/folderStore";
 
 interface PageHeaderProps {
   page: Page;
@@ -19,7 +21,12 @@ export function PageHeader({ page, isSaving, lastSaved }: PageHeaderProps) {
   const [showSaveAsTemplate, setShowSaveAsTemplate] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  const { updatePage, selectPage } = usePageStore();
+  const { updatePage, selectPage, archivePage, unarchivePage, createPage, updatePageContent } = usePageStore();
+  const { loadFolders } = useFolderStore();
+  const { getTemplateForPage } = useTemplateStore();
+
+  // Check if this page is a template source
+  const pageTemplate = getTemplateForPage(page.id);
 
   // Update local title when page changes
   useEffect(() => {
@@ -94,6 +101,54 @@ export function PageHeader({ page, isSaving, lastSaved }: PageHeaderProps) {
     setShowSaveAsTemplate(true);
   };
 
+  const handleArchive = async () => {
+    setIsMenuOpen(false);
+    await archivePage(page.notebookId, page.id);
+    // Reload folders to ensure archive folder is shown
+    await loadFolders(page.notebookId);
+  };
+
+  const handleUnarchive = async () => {
+    setIsMenuOpen(false);
+    await unarchivePage(page.notebookId, page.id);
+  };
+
+  // Handle using this page as a template to create a new page
+  const handleUseTemplate = useCallback(async () => {
+    if (!pageTemplate) return;
+
+    // Generate title based on template name
+    let newTitle = pageTemplate.name;
+    if (pageTemplate.id === "daily-journal" || pageTemplate.name.toLowerCase().includes("journal")) {
+      newTitle = new Date().toLocaleDateString("en-US", {
+        weekday: "long",
+        year: "numeric",
+        month: "long",
+        day: "numeric",
+      });
+    } else if (pageTemplate.name.toLowerCase().includes("meeting")) {
+      newTitle = `Meeting Notes - ${new Date().toLocaleDateString()}`;
+    }
+
+    // Create the page
+    const newPage = await createPage(page.notebookId, newTitle);
+    if (!newPage) return;
+
+    // If template has content, apply it
+    if (pageTemplate.content.blocks.length > 0) {
+      const contentWithNewIds: EditorData = {
+        time: Date.now(),
+        version: pageTemplate.content.version,
+        blocks: pageTemplate.content.blocks.map((block) => ({
+          ...block,
+          id: crypto.randomUUID(),
+          data: { ...block.data },
+        })),
+      };
+      await updatePageContent(page.notebookId, newPage.id, contentWithNewIds);
+    }
+  }, [pageTemplate, page.notebookId, createPage, updatePageContent]);
+
   const formatTime = (date: Date) => {
     return date.toLocaleTimeString(undefined, {
       hour: "2-digit",
@@ -121,15 +176,68 @@ export function PageHeader({ page, isSaving, lastSaved }: PageHeaderProps) {
               placeholder="Page title"
             />
           ) : (
-            <h1
-              onClick={() => setIsEditing(true)}
-              className="cursor-text text-2xl font-bold"
-              style={{ color: "var(--color-text-primary)" }}
-            >
-              {page.title || "Untitled"}
-            </h1>
+            <div className="flex items-center gap-3">
+              <h1
+                onClick={() => setIsEditing(true)}
+                className="cursor-text text-2xl font-bold"
+                style={{ color: "var(--color-text-primary)" }}
+              >
+                {page.title || "Untitled"}
+              </h1>
+              {pageTemplate && (
+                <span
+                  className="rounded-full px-2.5 py-0.5 text-xs font-medium"
+                  style={{
+                    backgroundColor: "rgba(139, 92, 246, 0.15)",
+                    color: "var(--color-accent)",
+                  }}
+                  title={`Template: ${pageTemplate.name}`}
+                >
+                  Template
+                </span>
+              )}
+              {page.isArchived && (
+                <span
+                  className="rounded-full px-2.5 py-0.5 text-xs font-medium"
+                  style={{
+                    backgroundColor: "rgba(255, 193, 7, 0.15)",
+                    color: "rgb(255, 193, 7)",
+                  }}
+                >
+                  Archived
+                </span>
+              )}
+            </div>
           )}
         </div>
+
+      {/* Use Template button - only shown for template source pages */}
+      {pageTemplate && (
+        <button
+          onClick={handleUseTemplate}
+          className="ml-4 flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors hover:opacity-90"
+          style={{
+            backgroundColor: "var(--color-accent)",
+            color: "white",
+          }}
+          title={`Create new page from "${pageTemplate.name}" template`}
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+          Use Template
+        </button>
+      )}
 
       {/* Menu button */}
       <div ref={menuRef} className="relative ml-4">
@@ -235,6 +343,56 @@ export function PageHeader({ page, isSaving, lastSaved }: PageHeaderProps) {
               </svg>
               Save as Template
             </button>
+            <div
+              className="my-1 border-t"
+              style={{ borderColor: "var(--color-border)" }}
+            />
+            {page.isArchived ? (
+              <button
+                onClick={handleUnarchive}
+                className="flex w-full items-center gap-3 px-4 py-2 text-left text-sm transition-colors hover:opacity-80"
+                style={{ color: "var(--color-accent)" }}
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+                  <polyline points="9 22 9 12 15 12 15 22" />
+                </svg>
+                Unarchive Page
+              </button>
+            ) : (
+              <button
+                onClick={handleArchive}
+                className="flex w-full items-center gap-3 px-4 py-2 text-left text-sm transition-colors hover:opacity-80"
+                style={{ color: "var(--color-text-muted)" }}
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <rect x="2" y="4" width="20" height="5" rx="1" />
+                  <path d="M4 9v9a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9" />
+                  <path d="M10 13h4" />
+                </svg>
+                Archive Page
+              </button>
+            )}
           </div>
         )}
       </div>

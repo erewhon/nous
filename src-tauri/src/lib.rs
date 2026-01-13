@@ -1,19 +1,27 @@
 use std::sync::{Arc, Mutex};
 
+use tauri::Manager;
+
+mod actions;
 mod commands;
 mod markdown;
+mod notion;
 mod python_bridge;
 mod search;
 mod storage;
 
+use actions::{ActionExecutor, ActionScheduler, ActionStorage};
 use python_bridge::PythonAI;
 use search::SearchIndex;
 use storage::FileStorage;
 
 pub struct AppState {
-    pub storage: Mutex<FileStorage>,
+    pub storage: Arc<Mutex<FileStorage>>,
     pub search_index: Mutex<SearchIndex>,
     pub python_ai: Arc<Mutex<PythonAI>>,
+    pub action_storage: Arc<Mutex<ActionStorage>>,
+    pub action_executor: Arc<Mutex<ActionExecutor>>,
+    pub action_scheduler: Mutex<ActionScheduler>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -34,10 +42,34 @@ pub fn run() {
         .unwrap_or_else(|_| std::path::PathBuf::from("katt-py"));
     let python_ai = PythonAI::new(katt_py_path);
 
+    // Initialize action storage
+    let action_storage = ActionStorage::new(data_dir.clone())
+        .expect("Failed to initialize action storage");
+
+    // Wrap storage in Arc<Mutex<>> for sharing with executor
+    let storage_arc = Arc::new(Mutex::new(storage));
+    let action_storage_arc = Arc::new(Mutex::new(action_storage));
+
+    // Initialize action executor (needs references to storage and action_storage)
+    let action_executor = ActionExecutor::new(
+        Arc::clone(&storage_arc),
+        Arc::clone(&action_storage_arc),
+    );
+    let action_executor_arc = Arc::new(Mutex::new(action_executor));
+
+    // Initialize action scheduler
+    let action_scheduler = ActionScheduler::new(
+        Arc::clone(&action_storage_arc),
+        Arc::clone(&action_executor_arc),
+    );
+
     let state = AppState {
-        storage: Mutex::new(storage),
+        storage: storage_arc,
         search_index: Mutex::new(search_index),
         python_ai: Arc::new(Mutex::new(python_ai)),
+        action_storage: action_storage_arc,
+        action_executor: action_executor_arc,
+        action_scheduler: Mutex::new(action_scheduler),
     };
 
     tauri::Builder::default()
@@ -52,6 +84,14 @@ pub fn run() {
                         .build(),
                 )?;
             }
+
+            // Start the action scheduler
+            let state: tauri::State<AppState> = app.handle().state();
+            if let Ok(mut scheduler) = state.action_scheduler.lock() {
+                scheduler.start();
+                log::info!("Action scheduler started");
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -103,6 +143,33 @@ pub fn run() {
             commands::create_notebook_backup,
             commands::list_backups,
             commands::delete_backup,
+            // Notion import commands
+            commands::preview_notion_export,
+            commands::import_notion_export,
+            // Folder commands
+            commands::list_folders,
+            commands::get_folder,
+            commands::create_folder,
+            commands::update_folder,
+            commands::delete_folder,
+            commands::move_page_to_folder,
+            commands::archive_page,
+            commands::unarchive_page,
+            commands::reorder_folders,
+            commands::reorder_pages,
+            commands::ensure_archive_folder,
+            // Action commands
+            commands::list_actions,
+            commands::get_action,
+            commands::create_action,
+            commands::update_action,
+            commands::delete_action,
+            commands::run_action,
+            commands::run_action_by_name,
+            commands::find_actions_by_keywords,
+            commands::get_actions_by_category,
+            commands::get_scheduled_actions,
+            commands::set_action_enabled,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

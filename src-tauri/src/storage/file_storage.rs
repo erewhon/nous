@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use thiserror::Error;
 use uuid::Uuid;
 
-use super::models::{Notebook, NotebookType, Page};
+use super::models::{Folder, FolderType, Notebook, NotebookType, Page};
 
 #[derive(Error, Debug)]
 pub enum StorageError {
@@ -23,8 +23,17 @@ pub enum StorageError {
     #[error("Page not found: {0}")]
     PageNotFound(Uuid),
 
+    #[error("Folder not found: {0}")]
+    FolderNotFound(Uuid),
+
     #[error("Data directory not found")]
     DataDirNotFound,
+
+    #[error("Not found: {0}")]
+    NotFound(String),
+
+    #[error("Invalid operation: {0}")]
+    InvalidOperation(String),
 }
 
 pub type Result<T> = std::result::Result<T, StorageError>;
@@ -54,6 +63,18 @@ impl FileStorage {
 
     // ===== Notebook Operations =====
 
+    /// Get the notebooks directory path
+    pub fn notebooks_dir(&self) -> &PathBuf {
+        // Return the notebooks directory path
+        // This is used by notion import to create notebooks directly
+        &self.base_path
+    }
+
+    /// Get the notebooks base directory
+    pub fn notebooks_base_dir(&self) -> PathBuf {
+        self.base_path.join("notebooks")
+    }
+
     fn notebook_dir(&self, notebook_id: Uuid) -> PathBuf {
         self.base_path.join("notebooks").join(notebook_id.to_string())
     }
@@ -68,6 +89,10 @@ impl FileStorage {
 
     pub fn notebook_assets_dir(&self, notebook_id: Uuid) -> PathBuf {
         self.notebook_dir(notebook_id).join("assets")
+    }
+
+    fn folders_path(&self, notebook_id: Uuid) -> PathBuf {
+        self.notebook_dir(notebook_id).join("folders.json")
     }
 
     pub fn list_notebooks(&self) -> Result<Vec<Notebook>> {
@@ -394,5 +419,291 @@ impl FileStorage {
         }
 
         Ok(count)
+    }
+
+    // ===== Folder Operations =====
+
+    /// List all folders in a notebook
+    pub fn list_folders(&self, notebook_id: Uuid) -> Result<Vec<Folder>> {
+        let folders_path = self.folders_path(notebook_id);
+
+        // If folders.json doesn't exist, return empty vec (migration case)
+        if !folders_path.exists() {
+            return Ok(Vec::new());
+        }
+
+        let content = fs::read_to_string(&folders_path)?;
+        let folders: Vec<Folder> = serde_json::from_str(&content)?;
+
+        Ok(folders)
+    }
+
+    /// Get a specific folder by ID
+    pub fn get_folder(&self, notebook_id: Uuid, folder_id: Uuid) -> Result<Folder> {
+        let folders = self.list_folders(notebook_id)?;
+
+        folders
+            .into_iter()
+            .find(|f| f.id == folder_id)
+            .ok_or(StorageError::FolderNotFound(folder_id))
+    }
+
+    /// Save all folders for a notebook
+    fn save_folders(&self, notebook_id: Uuid, folders: &[Folder]) -> Result<()> {
+        let folders_path = self.folders_path(notebook_id);
+        let content = serde_json::to_string_pretty(folders)?;
+        fs::write(&folders_path, content)?;
+        Ok(())
+    }
+
+    /// Create a new folder in a notebook
+    pub fn create_folder(
+        &self,
+        notebook_id: Uuid,
+        name: String,
+        parent_id: Option<Uuid>,
+    ) -> Result<Folder> {
+        // Verify notebook exists
+        if !self.notebook_dir(notebook_id).exists() {
+            return Err(StorageError::NotebookNotFound(notebook_id));
+        }
+
+        let mut folders = self.list_folders(notebook_id)?;
+
+        // Calculate position (last in parent)
+        let max_position = folders
+            .iter()
+            .filter(|f| f.parent_id == parent_id && f.folder_type == FolderType::Standard)
+            .map(|f| f.position)
+            .max()
+            .unwrap_or(-1);
+
+        let mut folder = Folder::new(notebook_id, name, parent_id);
+        folder.position = max_position + 1;
+
+        folders.push(folder.clone());
+        self.save_folders(notebook_id, &folders)?;
+
+        Ok(folder)
+    }
+
+    /// Update an existing folder
+    pub fn update_folder(&self, folder: &Folder) -> Result<()> {
+        let mut folders = self.list_folders(folder.notebook_id)?;
+
+        let idx = folders
+            .iter()
+            .position(|f| f.id == folder.id)
+            .ok_or(StorageError::FolderNotFound(folder.id))?;
+
+        folders[idx] = folder.clone();
+        self.save_folders(folder.notebook_id, &folders)?;
+
+        Ok(())
+    }
+
+    /// Delete a folder and optionally move its pages
+    pub fn delete_folder(
+        &self,
+        notebook_id: Uuid,
+        folder_id: Uuid,
+        move_pages_to: Option<Uuid>,
+    ) -> Result<()> {
+        let mut folders = self.list_folders(notebook_id)?;
+
+        // Find and remove the folder
+        let idx = folders
+            .iter()
+            .position(|f| f.id == folder_id)
+            .ok_or(StorageError::FolderNotFound(folder_id))?;
+
+        let folder = &folders[idx];
+
+        // Don't allow deleting the archive folder
+        if folder.folder_type == FolderType::Archive {
+            return Err(StorageError::Io(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Cannot delete the Archive folder",
+            )));
+        }
+
+        folders.remove(idx);
+
+        // Move any child folders to the parent or root
+        let parent_id = folders
+            .iter()
+            .find(|f| f.id == folder_id)
+            .and_then(|f| f.parent_id);
+
+        for f in folders.iter_mut() {
+            if f.parent_id == Some(folder_id) {
+                f.parent_id = parent_id;
+                f.updated_at = chrono::Utc::now();
+            }
+        }
+
+        self.save_folders(notebook_id, &folders)?;
+
+        // Move pages to target folder or root
+        let pages = self.list_pages(notebook_id)?;
+        for mut page in pages {
+            if page.folder_id == Some(folder_id) {
+                page.folder_id = move_pages_to;
+                page.updated_at = chrono::Utc::now();
+                self.update_page(&page)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Get or create the Archive folder for a notebook
+    pub fn ensure_archive_folder(&self, notebook_id: Uuid) -> Result<Folder> {
+        let folders = self.list_folders(notebook_id)?;
+
+        // Check if archive folder already exists
+        if let Some(archive) = folders.into_iter().find(|f| f.folder_type == FolderType::Archive) {
+            return Ok(archive);
+        }
+
+        // Create archive folder
+        let archive = Folder::new_archive(notebook_id);
+        let mut folders = self.list_folders(notebook_id)?;
+        folders.push(archive.clone());
+        self.save_folders(notebook_id, &folders)?;
+
+        Ok(archive)
+    }
+
+    /// Move a page to a folder
+    pub fn move_page_to_folder(
+        &self,
+        notebook_id: Uuid,
+        page_id: Uuid,
+        folder_id: Option<Uuid>,
+        position: Option<i32>,
+    ) -> Result<Page> {
+        let mut page = self.get_page(notebook_id, page_id)?;
+
+        // If moving to a specific folder, verify it exists
+        if let Some(fid) = folder_id {
+            let _ = self.get_folder(notebook_id, fid)?;
+        }
+
+        page.folder_id = folder_id;
+
+        // Calculate position if not specified
+        if let Some(pos) = position {
+            page.position = pos;
+        } else {
+            // Put at end of folder
+            let pages = self.list_pages(notebook_id)?;
+            let max_position = pages
+                .iter()
+                .filter(|p| p.folder_id == folder_id)
+                .map(|p| p.position)
+                .max()
+                .unwrap_or(-1);
+            page.position = max_position + 1;
+        }
+
+        page.updated_at = chrono::Utc::now();
+        self.update_page(&page)?;
+
+        Ok(page)
+    }
+
+    /// Archive a page (move to archive folder)
+    pub fn archive_page(&self, notebook_id: Uuid, page_id: Uuid) -> Result<Page> {
+        let archive = self.ensure_archive_folder(notebook_id)?;
+        let mut page = self.get_page(notebook_id, page_id)?;
+
+        page.is_archived = true;
+        page.folder_id = Some(archive.id);
+        page.updated_at = chrono::Utc::now();
+
+        self.update_page(&page)?;
+        Ok(page)
+    }
+
+    /// Unarchive a page (move out of archive folder)
+    pub fn unarchive_page(
+        &self,
+        notebook_id: Uuid,
+        page_id: Uuid,
+        target_folder_id: Option<Uuid>,
+    ) -> Result<Page> {
+        let mut page = self.get_page(notebook_id, page_id)?;
+
+        page.is_archived = false;
+        page.folder_id = target_folder_id;
+
+        // Calculate position in target folder
+        let pages = self.list_pages(notebook_id)?;
+        let max_position = pages
+            .iter()
+            .filter(|p| p.folder_id == target_folder_id && !p.is_archived)
+            .map(|p| p.position)
+            .max()
+            .unwrap_or(-1);
+        page.position = max_position + 1;
+
+        page.updated_at = chrono::Utc::now();
+        self.update_page(&page)?;
+
+        Ok(page)
+    }
+
+    /// Reorder pages within a folder
+    pub fn reorder_pages(
+        &self,
+        notebook_id: Uuid,
+        folder_id: Option<Uuid>,
+        page_ids: &[Uuid],
+    ) -> Result<()> {
+        for (position, page_id) in page_ids.iter().enumerate() {
+            let mut page = self.get_page(notebook_id, *page_id)?;
+            if page.folder_id == folder_id {
+                page.position = position as i32;
+                page.updated_at = chrono::Utc::now();
+                self.update_page(&page)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Reorder folders within a parent
+    pub fn reorder_folders(
+        &self,
+        notebook_id: Uuid,
+        parent_id: Option<Uuid>,
+        folder_ids: &[Uuid],
+    ) -> Result<()> {
+        let mut folders = self.list_folders(notebook_id)?;
+        let now = chrono::Utc::now();
+
+        for (position, folder_id) in folder_ids.iter().enumerate() {
+            if let Some(folder) = folders.iter_mut().find(|f| f.id == *folder_id) {
+                if folder.parent_id == parent_id && folder.folder_type == FolderType::Standard {
+                    folder.position = position as i32;
+                    folder.updated_at = now;
+                }
+            }
+        }
+
+        self.save_folders(notebook_id, &folders)?;
+        Ok(())
+    }
+
+    /// Initialize folders.json for a notebook (migration)
+    pub fn init_folders(&self, notebook_id: Uuid) -> Result<()> {
+        let folders_path = self.folders_path(notebook_id);
+
+        if !folders_path.exists() {
+            // Create empty folders array
+            self.save_folders(notebook_id, &[])?;
+        }
+
+        Ok(())
     }
 }

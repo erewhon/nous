@@ -9,6 +9,7 @@ export interface PageTemplate {
   icon: string;
   content: EditorData;
   isBuiltIn: boolean;
+  sourcePageId?: string; // ID of the page this template was created from
 }
 
 interface TemplateState {
@@ -23,6 +24,7 @@ interface TemplateActions {
   deleteTemplate: (id: string) => void;
   openTemplateDialog: (notebookId: string) => void;
   closeTemplateDialog: () => void;
+  getTemplateForPage: (pageId: string) => PageTemplate | undefined;
 }
 
 type TemplateStore = TemplateState & TemplateActions;
@@ -335,11 +337,436 @@ const builtInTemplates: PageTemplate[] = [
       ],
     },
   },
+  // Agile Results Templates
+  {
+    id: "agile-results-daily",
+    name: "Daily Outcomes",
+    description: "Agile Results template for three daily outcomes",
+    icon: "target",
+    isBuiltIn: true,
+    content: {
+      time: Date.now(),
+      version: "2.28.2",
+      blocks: [
+        {
+          id: "daily-header",
+          type: "header",
+          data: { text: "Daily Outcomes", level: 1 },
+        },
+        {
+          id: "daily-intro",
+          type: "paragraph",
+          data: { text: "Focus on <b>three key outcomes</b> that will make today a success." },
+        },
+        {
+          id: "outcomes-header",
+          type: "header",
+          data: { text: "Three Outcomes for Today", level: 2 },
+        },
+        {
+          id: "outcomes-list",
+          type: "checklist",
+          data: {
+            items: [
+              { text: "Outcome 1: ", checked: false },
+              { text: "Outcome 2: ", checked: false },
+              { text: "Outcome 3: ", checked: false },
+            ],
+          },
+        },
+        {
+          id: "energy-header",
+          type: "header",
+          data: { text: "Energy Management", level: 2 },
+        },
+        {
+          id: "energy-content",
+          type: "paragraph",
+          data: { text: "<b>Morning (high energy):</b> \n<b>Afternoon (focus time):</b> \n<b>Evening (wind down):</b> " },
+        },
+        {
+          id: "wins-header",
+          type: "header",
+          data: { text: "Daily Wins", level: 2 },
+        },
+        {
+          id: "wins-list",
+          type: "list",
+          data: { style: "unordered", items: [""] },
+        },
+        {
+          id: "lessons-header",
+          type: "header",
+          data: { text: "Lessons Learned", level: 2 },
+        },
+        {
+          id: "lessons-content",
+          type: "paragraph",
+          data: { text: "" },
+        },
+      ],
+    },
+  },
+  {
+    id: "agile-results-weekly",
+    name: "Weekly Outcomes",
+    description: "Agile Results template for weekly planning",
+    icon: "calendar",
+    isBuiltIn: true,
+    content: {
+      time: Date.now(),
+      version: "2.28.2",
+      blocks: [
+        {
+          id: "weekly-header",
+          type: "header",
+          data: { text: "Weekly Outcomes", level: 1 },
+        },
+        {
+          id: "weekly-intro",
+          type: "paragraph",
+          data: { text: "Set <b>three key outcomes</b> for the week that align with your monthly and yearly goals." },
+        },
+        {
+          id: "week-outcomes-header",
+          type: "header",
+          data: { text: "Three Outcomes for This Week", level: 2 },
+        },
+        {
+          id: "week-outcomes-list",
+          type: "checklist",
+          data: {
+            items: [
+              { text: "Outcome 1: ", checked: false },
+              { text: "Outcome 2: ", checked: false },
+              { text: "Outcome 3: ", checked: false },
+            ],
+          },
+        },
+        {
+          id: "mon-header",
+          type: "header",
+          data: { text: "Monday", level: 3 },
+        },
+        {
+          id: "mon-content",
+          type: "checklist",
+          data: { items: [{ text: "", checked: false }] },
+        },
+        {
+          id: "tue-header",
+          type: "header",
+          data: { text: "Tuesday", level: 3 },
+        },
+        {
+          id: "tue-content",
+          type: "checklist",
+          data: { items: [{ text: "", checked: false }] },
+        },
+        {
+          id: "wed-header",
+          type: "header",
+          data: { text: "Wednesday", level: 3 },
+        },
+        {
+          id: "wed-content",
+          type: "checklist",
+          data: { items: [{ text: "", checked: false }] },
+        },
+        {
+          id: "thu-header",
+          type: "header",
+          data: { text: "Thursday", level: 3 },
+        },
+        {
+          id: "thu-content",
+          type: "checklist",
+          data: { items: [{ text: "", checked: false }] },
+        },
+        {
+          id: "fri-header",
+          type: "header",
+          data: { text: "Friday", level: 3 },
+        },
+        {
+          id: "fri-content",
+          type: "checklist",
+          data: { items: [{ text: "", checked: false }] },
+        },
+        {
+          id: "reflection-header",
+          type: "header",
+          data: { text: "Weekly Reflection", level: 2 },
+        },
+        {
+          id: "reflection-content",
+          type: "paragraph",
+          data: { text: "<b>What went well:</b> \n<b>What to improve:</b> \n<b>Key learnings:</b> " },
+        },
+      ],
+    },
+  },
+  {
+    id: "agile-results-monthly",
+    name: "Monthly Outcomes",
+    description: "Agile Results template for monthly planning",
+    icon: "calendar",
+    isBuiltIn: true,
+    content: {
+      time: Date.now(),
+      version: "2.28.2",
+      blocks: [
+        {
+          id: "monthly-header",
+          type: "header",
+          data: { text: "Monthly Outcomes", level: 1 },
+        },
+        {
+          id: "monthly-intro",
+          type: "paragraph",
+          data: { text: "Set <b>three key outcomes</b> for this month that support your yearly goals." },
+        },
+        {
+          id: "month-outcomes-header",
+          type: "header",
+          data: { text: "Three Outcomes for This Month", level: 2 },
+        },
+        {
+          id: "month-outcomes-list",
+          type: "checklist",
+          data: {
+            items: [
+              { text: "Outcome 1: ", checked: false },
+              { text: "Outcome 2: ", checked: false },
+              { text: "Outcome 3: ", checked: false },
+            ],
+          },
+        },
+        {
+          id: "week1-header",
+          type: "header",
+          data: { text: "Week 1 Focus", level: 3 },
+        },
+        {
+          id: "week1-content",
+          type: "paragraph",
+          data: { text: "" },
+        },
+        {
+          id: "week2-header",
+          type: "header",
+          data: { text: "Week 2 Focus", level: 3 },
+        },
+        {
+          id: "week2-content",
+          type: "paragraph",
+          data: { text: "" },
+        },
+        {
+          id: "week3-header",
+          type: "header",
+          data: { text: "Week 3 Focus", level: 3 },
+        },
+        {
+          id: "week3-content",
+          type: "paragraph",
+          data: { text: "" },
+        },
+        {
+          id: "week4-header",
+          type: "header",
+          data: { text: "Week 4 Focus", level: 3 },
+        },
+        {
+          id: "week4-content",
+          type: "paragraph",
+          data: { text: "" },
+        },
+        {
+          id: "month-reflection-header",
+          type: "header",
+          data: { text: "Monthly Review", level: 2 },
+        },
+        {
+          id: "month-wins",
+          type: "paragraph",
+          data: { text: "<b>Wins:</b> " },
+        },
+        {
+          id: "month-lessons",
+          type: "paragraph",
+          data: { text: "<b>Lessons:</b> " },
+        },
+        {
+          id: "month-next",
+          type: "paragraph",
+          data: { text: "<b>Next month focus:</b> " },
+        },
+      ],
+    },
+  },
+  {
+    id: "daily-reflection",
+    name: "Daily Reflection",
+    description: "End of day review and reflection",
+    icon: "sun",
+    isBuiltIn: true,
+    content: {
+      time: Date.now(),
+      version: "2.28.2",
+      blocks: [
+        {
+          id: "reflection-header",
+          type: "header",
+          data: { text: "Daily Reflection", level: 1 },
+        },
+        {
+          id: "wins-header",
+          type: "header",
+          data: { text: "Three Wins Today", level: 2 },
+        },
+        {
+          id: "wins-list",
+          type: "list",
+          data: { style: "ordered", items: ["", "", ""] },
+        },
+        {
+          id: "learned-header",
+          type: "header",
+          data: { text: "What I Learned", level: 2 },
+        },
+        {
+          id: "learned-content",
+          type: "paragraph",
+          data: { text: "" },
+        },
+        {
+          id: "improve-header",
+          type: "header",
+          data: { text: "What Could Have Gone Better", level: 2 },
+        },
+        {
+          id: "improve-content",
+          type: "paragraph",
+          data: { text: "" },
+        },
+        {
+          id: "tomorrow-header",
+          type: "header",
+          data: { text: "Focus for Tomorrow", level: 2 },
+        },
+        {
+          id: "tomorrow-content",
+          type: "paragraph",
+          data: { text: "" },
+        },
+        {
+          id: "gratitude-header",
+          type: "header",
+          data: { text: "Gratitude", level: 2 },
+        },
+        {
+          id: "gratitude-content",
+          type: "paragraph",
+          data: { text: "What am I grateful for today?" },
+        },
+      ],
+    },
+  },
+  {
+    id: "weekly-review",
+    name: "Weekly Review",
+    description: "Friday Review template for weekly retrospective",
+    icon: "calendar",
+    isBuiltIn: true,
+    content: {
+      time: Date.now(),
+      version: "2.28.2",
+      blocks: [
+        {
+          id: "review-header",
+          type: "header",
+          data: { text: "Friday Review", level: 1 },
+        },
+        {
+          id: "review-intro",
+          type: "paragraph",
+          data: { text: "Take time to reflect on the week and prepare for the next." },
+        },
+        {
+          id: "accomplished-header",
+          type: "header",
+          data: { text: "What I Accomplished", level: 2 },
+        },
+        {
+          id: "accomplished-list",
+          type: "list",
+          data: { style: "unordered", items: ["", "", ""] },
+        },
+        {
+          id: "wins-header",
+          type: "header",
+          data: { text: "Wins of the Week", level: 2 },
+        },
+        {
+          id: "wins-list",
+          type: "list",
+          data: { style: "ordered", items: ["", "", ""] },
+        },
+        {
+          id: "challenges-header",
+          type: "header",
+          data: { text: "Challenges & Obstacles", level: 2 },
+        },
+        {
+          id: "challenges-content",
+          type: "paragraph",
+          data: { text: "" },
+        },
+        {
+          id: "lessons-header",
+          type: "header",
+          data: { text: "Lessons Learned", level: 2 },
+        },
+        {
+          id: "lessons-content",
+          type: "paragraph",
+          data: { text: "" },
+        },
+        {
+          id: "next-week-header",
+          type: "header",
+          data: { text: "Focus for Next Week", level: 2 },
+        },
+        {
+          id: "next-week-list",
+          type: "checklist",
+          data: {
+            items: [
+              { text: "", checked: false },
+              { text: "", checked: false },
+              { text: "", checked: false },
+            ],
+          },
+        },
+        {
+          id: "gratitude-header",
+          type: "header",
+          data: { text: "Gratitude", level: 2 },
+        },
+        {
+          id: "gratitude-content",
+          type: "paragraph",
+          data: { text: "What am I grateful for this week?" },
+        },
+      ],
+    },
+  },
 ];
 
 export const useTemplateStore = create<TemplateStore>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       templates: builtInTemplates,
       showTemplateDialog: false,
       pendingNotebookId: null,
@@ -375,6 +802,10 @@ export const useTemplateStore = create<TemplateStore>()(
 
       closeTemplateDialog: () => {
         set({ showTemplateDialog: false, pendingNotebookId: null });
+      },
+
+      getTemplateForPage: (pageId) => {
+        return get().templates.find((t) => t.sourcePageId === pageId);
       },
     }),
     {

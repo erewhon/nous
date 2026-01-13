@@ -2,8 +2,9 @@ import { useMemo, useCallback, useState, useEffect } from "react";
 import type { OutputData } from "@editorjs/editorjs";
 import { useNotebookStore } from "../../stores/notebookStore";
 import { usePageStore } from "../../stores/pageStore";
+import { useFolderStore } from "../../stores/folderStore";
 import { useLinkStore } from "../../stores/linkStore";
-import { PageList } from "./PageList";
+import { FolderTree } from "./FolderTree";
 import { BlockEditor } from "./BlockEditor";
 import { PageHeader } from "./PageHeader";
 import { BacklinksPanel } from "./BacklinksPanel";
@@ -15,18 +16,20 @@ export function EditorArea() {
   const { selectedNotebookId, notebooks } = useNotebookStore();
   const { pages, selectedPageId, selectPage, updatePageContent, loadPages, createPage } =
     usePageStore();
+  const { folders, loadFolders, showArchived } = useFolderStore();
   const { updatePageLinks, buildLinksFromPages } = useLinkStore();
   const [isSaving, setIsSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
 
   const selectedNotebook = notebooks.find((n) => n.id === selectedNotebookId);
 
-  // Load pages when notebook selection changes
+  // Load pages and folders when notebook selection changes
   useEffect(() => {
     if (selectedNotebookId) {
-      loadPages(selectedNotebookId);
+      loadPages(selectedNotebookId, showArchived);
+      loadFolders(selectedNotebookId);
     }
-  }, [selectedNotebookId, loadPages]);
+  }, [selectedNotebookId, loadPages, loadFolders, showArchived]);
 
   // Memoize filtered pages to prevent infinite re-renders
   const notebookPages = useMemo(
@@ -170,7 +173,7 @@ export function EditorArea() {
 
   return (
     <div className="flex h-full">
-      {/* Page list panel */}
+      {/* Page list panel with folder tree */}
       <div
         className="w-64 flex-shrink-0 border-r"
         style={{
@@ -178,11 +181,12 @@ export function EditorArea() {
           borderColor: "var(--color-border)",
         }}
       >
-        <PageList
+        <FolderTree
+          notebookId={selectedNotebook.id}
           pages={notebookPages}
+          folders={folders}
           selectedPageId={selectedPageId}
           onSelectPage={selectPage}
-          notebookId={selectedNotebook.id}
         />
       </div>
 

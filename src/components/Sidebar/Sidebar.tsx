@@ -1,8 +1,10 @@
 import { useNotebookStore } from "../../stores/notebookStore";
+import { useActionStore } from "../../stores/actionStore";
 import { NotebookList } from "../NotebookList/NotebookList";
 
 export function Sidebar() {
   const { notebooks, selectedNotebookId, createNotebook } = useNotebookStore();
+  const openActionLibrary = useActionStore((state) => state.openActionLibrary);
 
   return (
     <aside
@@ -223,6 +225,26 @@ export function Sidebar() {
                 <circle cx="5" cy="19" r="2" />
                 <line x1="14.5" y1="9.5" x2="17.5" y2="6.5" />
                 <line x1="9.5" y1="14.5" x2="6.5" y2="17.5" />
+              </svg>
+            </button>
+            <button
+              onClick={openActionLibrary}
+              className="flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
+              style={{ color: "var(--color-text-muted)" }}
+              title="Actions (⌘⇧X)"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
               </svg>
             </button>
             <button

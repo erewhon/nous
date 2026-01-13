@@ -78,6 +78,7 @@ Already implemented with Tantivy, may need refinement:
 - [x] Blank page template
 - [x] Template selection on new page (Cmd+N)
 - [x] Custom user templates (save current page as template)
+- [x] "Use Template" button on template pages to create new page from template
 
 ### 7. Backup & Restore
 - [x] Export entire notebook as ZIP
@@ -85,46 +86,65 @@ Already implemented with Tantivy, may need refinement:
 - [x] Auto-backup with local storage (manual trigger + auto cleanup)
 - [ ] Backup to cloud storage (optional)
 
+### 8. Folders & Organization
+- [x] Folders within notebooks for organizing pages
+- [x] Drag-and-drop pages into folders
+- [x] Folder tree view in sidebar
+- [x] Archive folder for each notebook
+- [x] Archive/unarchive pages (moves to/from Archive folder)
+- [x] Filter to show/hide archived pages
+
 ---
 
 ## Future
 
-### 9. Spaced Repetition
+### 9. Custom Actions & Automations
+- [ ] Define custom actions with triggers and steps
+- [ ] Invoke actions via AI chat (e.g., "create my daily goals")
+- [ ] Agile Results workflow support:
+  - [ ] Daily outcomes template with auto-date
+  - [ ] Weekly outcomes with day breakdown
+  - [ ] Monthly/yearly goal templates
+  - [ ] Carry forward incomplete items
+- [ ] Scheduled automations (daily/weekly triggers)
+- [ ] Action library with pre-built workflows
+
+### 10. Spaced Repetition
 - [ ] Mark content as "flashcard"
 - [ ] Review queue with spaced intervals
 - [ ] Progress tracking
 - [ ] Integration with page content
 
-### 10. PDF Import & Annotation
+### 11. PDF Import & Annotation
 - [ ] Import PDF files
 - [ ] PDF viewer in app
 - [ ] Highlight and annotate
 - [ ] Extract highlights to page
 
-### 11. Notebook Encryption
+### 12. Notebook Encryption
 - [ ] Password-protected notebooks
 - [ ] Encrypt notebook data at rest
 - [ ] Secure unlock flow
 - [ ] Optional biometric unlock
 
-### 12. Theme Customization
+### 13. Theme Customization
 - [x] Light/dark mode toggle (with system preference support)
 - [x] Custom color schemes (Catppuccin, Default, Nord, Dracula)
 - [x] Font selection (System, Inter, JetBrains Mono, Fira Code)
 - [x] Editor width settings (Narrow, Medium, Wide, Full)
 - [x] Font size and line height customization
 
-### 13. Mobile & Sync
+### 14. Mobile & Sync
 - [ ] Cloud sync between devices
 - [ ] Conflict resolution
 - [ ] Mobile companion app (or PWA)
 - [ ] Offline support
 
-### 14. Import from Other Apps
+### 15. Import from Other Apps
 - [ ] OneNote notebook import
 - [ ] Scrivener project import
 - [ ] Evernote export import (.enex)
-- [ ] Notion export import
+- [x] Notion export import (ZIP with markdown & CSV databases)
 - [ ] Obsidian vault import
 - [ ] Apple Notes import
 

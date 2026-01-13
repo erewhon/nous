@@ -357,6 +357,9 @@ mod tests {
                 ],
             },
             tags: vec!["test".to_string()],
+            folder_id: None,
+            is_archived: false,
+            position: 0,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };

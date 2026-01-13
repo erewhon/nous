@@ -12,6 +12,7 @@ interface KeyboardShortcuts {
   onDuplicatePage?: () => void;
   onDeletePage?: () => void;
   onTagManager?: () => void;
+  onActions?: () => void;
 }
 
 export function useKeyboardShortcuts({
@@ -26,6 +27,7 @@ export function useKeyboardShortcuts({
   onDuplicatePage,
   onDeletePage,
   onTagManager,
+  onActions,
 }: KeyboardShortcuts) {
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
@@ -107,8 +109,15 @@ export function useKeyboardShortcuts({
         onTagManager?.();
         return;
       }
+
+      // Actions Library: Cmd+Shift+X / Ctrl+Shift+X
+      if (isMod && e.shiftKey && (e.key === "x" || e.key === "X")) {
+        e.preventDefault();
+        onActions?.();
+        return;
+      }
     },
-    [onCommandPalette, onNewPage, onNewNotebook, onGraph, onAI, onWebResearch, onSettings, onExportPage, onDuplicatePage, onDeletePage, onTagManager]
+    [onCommandPalette, onNewPage, onNewNotebook, onGraph, onAI, onWebResearch, onSettings, onExportPage, onDuplicatePage, onDeletePage, onTagManager, onActions]
   );
 
   useEffect(() => {

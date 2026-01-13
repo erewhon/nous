@@ -1,0 +1,313 @@
+//! Built-in Actions
+//!
+//! Pre-configured actions for Agile Results methodology and common workflows.
+
+use uuid::Uuid;
+
+use crate::actions::models::{
+    Action, ActionCategory, ActionStep, ActionTrigger, ActionVariable, NotebookTarget, Schedule,
+    VariableType,
+};
+
+/// Create all built-in actions
+pub fn get_builtin_actions() -> Vec<Action> {
+    vec![
+        create_daily_outcomes_action(),
+        create_weekly_outcomes_action(),
+        create_monthly_review_action(),
+        create_daily_reflection_action(),
+        create_weekly_review_action(),
+    ]
+}
+
+/// Daily Outcomes action - creates a page for setting daily goals
+fn create_daily_outcomes_action() -> Action {
+    let id = Uuid::parse_str("00000000-0000-0000-0001-000000000001").unwrap();
+
+    Action {
+        id,
+        name: "Daily Outcomes".to_string(),
+        description: "Create a new page for today's three key outcomes using Agile Results methodology".to_string(),
+        icon: Some("target".to_string()),
+        category: ActionCategory::AgileResults,
+        triggers: vec![
+            ActionTrigger::Manual,
+            ActionTrigger::AiChat {
+                keywords: vec![
+                    "daily goals".to_string(),
+                    "daily outcomes".to_string(),
+                    "three outcomes".to_string(),
+                    "today's goals".to_string(),
+                    "start my day".to_string(),
+                ],
+            },
+            ActionTrigger::Scheduled {
+                schedule: Schedule::Daily {
+                    time: "08:00".to_string(),
+                    skip_weekends: false,
+                },
+            },
+        ],
+        steps: vec![ActionStep::CreatePageFromTemplate {
+            template_id: "agile-results-daily".to_string(),
+            notebook_target: NotebookTarget::Current,
+            title_template: "{{dayOfWeek}}, {{date}} - Daily Outcomes".to_string(),
+            folder_name: None,
+            tags: vec!["daily-outcomes".to_string(), "agile-results".to_string()],
+        }],
+        enabled: true,
+        is_built_in: true,
+        variables: vec![
+            ActionVariable {
+                name: "date".to_string(),
+                description: "Today's date".to_string(),
+                default_value: None,
+                variable_type: VariableType::CurrentDateFormatted {
+                    format: "%B %d, %Y".to_string(),
+                },
+            },
+            ActionVariable {
+                name: "dayOfWeek".to_string(),
+                description: "Day of the week".to_string(),
+                default_value: None,
+                variable_type: VariableType::DayOfWeek,
+            },
+        ],
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+        last_run: None,
+        next_run: None,
+    }
+}
+
+/// Weekly Outcomes action - creates a page for the week's goals
+fn create_weekly_outcomes_action() -> Action {
+    let id = Uuid::parse_str("00000000-0000-0000-0001-000000000002").unwrap();
+
+    Action {
+        id,
+        name: "Weekly Outcomes".to_string(),
+        description: "Create a page outlining the three key outcomes for this week".to_string(),
+        icon: Some("calendar".to_string()),
+        category: ActionCategory::AgileResults,
+        triggers: vec![
+            ActionTrigger::Manual,
+            ActionTrigger::AiChat {
+                keywords: vec![
+                    "weekly goals".to_string(),
+                    "weekly outcomes".to_string(),
+                    "week planning".to_string(),
+                    "this week".to_string(),
+                ],
+            },
+            ActionTrigger::Scheduled {
+                schedule: Schedule::Weekly {
+                    days: vec!["monday".to_string()],
+                    time: "08:00".to_string(),
+                },
+            },
+        ],
+        steps: vec![ActionStep::CreatePageFromTemplate {
+            template_id: "agile-results-weekly".to_string(),
+            notebook_target: NotebookTarget::Current,
+            title_template: "Week {{weekNumber}} - Weekly Outcomes".to_string(),
+            folder_name: None,
+            tags: vec!["weekly-outcomes".to_string(), "agile-results".to_string()],
+        }],
+        enabled: true,
+        is_built_in: true,
+        variables: vec![ActionVariable {
+            name: "weekNumber".to_string(),
+            description: "ISO week number".to_string(),
+            default_value: None,
+            variable_type: VariableType::WeekNumber,
+        }],
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+        last_run: None,
+        next_run: None,
+    }
+}
+
+/// Monthly Review action - creates a monthly goals and review page
+fn create_monthly_review_action() -> Action {
+    let id = Uuid::parse_str("00000000-0000-0000-0001-000000000003").unwrap();
+
+    Action {
+        id,
+        name: "Monthly Outcomes".to_string(),
+        description: "Create a page for the month's key outcomes and priorities".to_string(),
+        icon: Some("calendar".to_string()),
+        category: ActionCategory::AgileResults,
+        triggers: vec![
+            ActionTrigger::Manual,
+            ActionTrigger::AiChat {
+                keywords: vec![
+                    "monthly goals".to_string(),
+                    "monthly outcomes".to_string(),
+                    "month planning".to_string(),
+                    "this month".to_string(),
+                ],
+            },
+            ActionTrigger::Scheduled {
+                schedule: Schedule::Monthly {
+                    day_of_month: 1,
+                    time: "08:00".to_string(),
+                },
+            },
+        ],
+        steps: vec![ActionStep::CreatePageFromTemplate {
+            template_id: "agile-results-monthly".to_string(),
+            notebook_target: NotebookTarget::Current,
+            title_template: "{{monthName}} {{year}} - Monthly Outcomes".to_string(),
+            folder_name: None,
+            tags: vec!["monthly-outcomes".to_string(), "agile-results".to_string()],
+        }],
+        enabled: true,
+        is_built_in: true,
+        variables: vec![
+            ActionVariable {
+                name: "monthName".to_string(),
+                description: "Current month name".to_string(),
+                default_value: None,
+                variable_type: VariableType::MonthName,
+            },
+            ActionVariable {
+                name: "year".to_string(),
+                description: "Current year".to_string(),
+                default_value: None,
+                variable_type: VariableType::Year,
+            },
+        ],
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+        last_run: None,
+        next_run: None,
+    }
+}
+
+/// Daily Reflection action - creates an end-of-day reflection page
+fn create_daily_reflection_action() -> Action {
+    let id = Uuid::parse_str("00000000-0000-0000-0001-000000000004").unwrap();
+
+    Action {
+        id,
+        name: "Daily Reflection".to_string(),
+        description: "Create a reflection page for end-of-day review of wins and learnings".to_string(),
+        icon: Some("sun".to_string()),
+        category: ActionCategory::DailyRoutines,
+        triggers: vec![
+            ActionTrigger::Manual,
+            ActionTrigger::AiChat {
+                keywords: vec![
+                    "daily reflection".to_string(),
+                    "end of day".to_string(),
+                    "review my day".to_string(),
+                    "what went well".to_string(),
+                ],
+            },
+            ActionTrigger::Scheduled {
+                schedule: Schedule::Daily {
+                    time: "17:00".to_string(),
+                    skip_weekends: true,
+                },
+            },
+        ],
+        steps: vec![ActionStep::CreatePageFromTemplate {
+            template_id: "daily-reflection".to_string(),
+            notebook_target: NotebookTarget::Current,
+            title_template: "{{date}} - Daily Reflection".to_string(),
+            folder_name: None,
+            tags: vec!["daily-reflection".to_string(), "review".to_string()],
+        }],
+        enabled: true,
+        is_built_in: true,
+        variables: vec![ActionVariable {
+            name: "date".to_string(),
+            description: "Today's date".to_string(),
+            default_value: None,
+            variable_type: VariableType::CurrentDateFormatted {
+                format: "%B %d, %Y".to_string(),
+            },
+        }],
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+        last_run: None,
+        next_run: None,
+    }
+}
+
+/// Weekly Review action - creates a Friday retrospective page
+fn create_weekly_review_action() -> Action {
+    let id = Uuid::parse_str("00000000-0000-0000-0001-000000000005").unwrap();
+
+    Action {
+        id,
+        name: "Weekly Review".to_string(),
+        description: "Create a Friday Review page for weekly retrospective".to_string(),
+        icon: Some("calendar".to_string()),
+        category: ActionCategory::WeeklyReviews,
+        triggers: vec![
+            ActionTrigger::Manual,
+            ActionTrigger::AiChat {
+                keywords: vec![
+                    "weekly review".to_string(),
+                    "friday review".to_string(),
+                    "week retrospective".to_string(),
+                    "review the week".to_string(),
+                ],
+            },
+            ActionTrigger::Scheduled {
+                schedule: Schedule::Weekly {
+                    days: vec!["friday".to_string()],
+                    time: "16:00".to_string(),
+                },
+            },
+        ],
+        steps: vec![ActionStep::CreatePageFromTemplate {
+            template_id: "weekly-review".to_string(),
+            notebook_target: NotebookTarget::Current,
+            title_template: "Week {{weekNumber}} - Friday Review".to_string(),
+            folder_name: None,
+            tags: vec!["weekly-review".to_string(), "agile-results".to_string()],
+        }],
+        enabled: true,
+        is_built_in: true,
+        variables: vec![ActionVariable {
+            name: "weekNumber".to_string(),
+            description: "ISO week number".to_string(),
+            default_value: None,
+            variable_type: VariableType::WeekNumber,
+        }],
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+        last_run: None,
+        next_run: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_builtin_actions_created() {
+        let actions = get_builtin_actions();
+        assert_eq!(actions.len(), 5);
+    }
+
+    #[test]
+    fn test_daily_outcomes_has_ai_trigger() {
+        let action = create_daily_outcomes_action();
+        let has_ai_trigger = action.triggers.iter().any(|t| matches!(t, ActionTrigger::AiChat { .. }));
+        assert!(has_ai_trigger);
+    }
+
+    #[test]
+    fn test_all_builtin_actions_marked_builtin() {
+        let actions = get_builtin_actions();
+        for action in actions {
+            assert!(action.is_built_in, "Action {} should be marked as built-in", action.name);
+        }
+    }
+}

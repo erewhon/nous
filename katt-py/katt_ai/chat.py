@@ -47,7 +47,7 @@ def _emit_chunks_with_delay(callback: Any, event_type: str, text: str) -> None:
         time.sleep(0.02)  # 20ms delay between chunks for visible streaming
 
 
-# Tool definitions for notebook/page creation
+# Tool definitions for notebook/page creation and actions
 NOTEBOOK_TOOLS = [
     {
         "type": "function",
@@ -112,6 +112,46 @@ NOTEBOOK_TOOLS = [
                     }
                 },
                 "required": ["notebook_name", "title", "content_blocks"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_action",
+            "description": "Run a custom action by name. Actions are automations that can create pages, notebooks, manage tags, and more. Use this when the user asks to run an action like 'daily goals', 'weekly review', or any other custom workflow they have set up.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action_name": {
+                        "type": "string",
+                        "description": "Name of the action to run. This can be a partial match - the system will find the best matching action."
+                    },
+                    "variables": {
+                        "type": "object",
+                        "description": "Optional variables to pass to the action. Keys are variable names, values are strings.",
+                        "additionalProperties": {"type": "string"}
+                    }
+                },
+                "required": ["action_name"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_actions",
+            "description": "List available custom actions. Use this when the user asks what actions are available, or when you need to know what workflows are set up.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "category": {
+                        "type": "string",
+                        "enum": ["agileResults", "dailyRoutines", "weeklyReviews", "organization", "custom", "all"],
+                        "description": "Filter by action category. Use 'all' to see all actions."
+                    }
+                },
+                "required": []
             }
         }
     }
@@ -271,8 +311,9 @@ async def chat_with_tools(
     # Build system prompt
     system_parts = [
         "You are a helpful AI assistant integrated into a personal notebook application called Katt.",
-        "You have the ability to create notebooks and pages for the user.",
-        "When the user asks you to create content, organize notes, or set up a system (like Agile Results, GTD, etc.), use the available tools to create the appropriate notebooks and pages.",
+        "You have the ability to create notebooks, pages, and run custom actions for the user.",
+        "When the user asks to create content, organize notes, or set up a system (like Agile Results, GTD, etc.), use the available tools.",
+        "When the user mentions running their 'daily goals', 'weekly review', or any workflow, use the run_action tool.",
         "Create well-structured content with appropriate headings, lists, and organization.",
     ]
 
@@ -364,6 +405,10 @@ async def chat_with_tools(
                     result = f"Created notebook: {func_args.get('name')}"
                 elif func_name == "create_page":
                     result = f"Created page: {func_args.get('title')} in {func_args.get('notebook_name')}"
+                elif func_name == "run_action":
+                    result = f"Running action: {func_args.get('action_name')}"
+                elif func_name == "list_actions":
+                    result = "Listing actions"
                 else:
                     result = "Action completed"
 
@@ -448,6 +493,10 @@ async def chat_with_tools(
                         result = f"Created notebook: {func_args.get('name')}"
                     elif func_name == "create_page":
                         result = f"Created page: {func_args.get('title')} in {func_args.get('notebook_name')}"
+                    elif func_name == "run_action":
+                        result = f"Running action: {func_args.get('action_name')}"
+                    elif func_name == "list_actions":
+                        result = "Listing actions"
                     else:
                         result = "Action completed"
 
@@ -774,8 +823,9 @@ async def chat_with_tools_stream(
     # Build system prompt (same as non-streaming version)
     system_parts = [
         "You are a helpful AI assistant integrated into a personal notebook application called Katt.",
-        "You have the ability to create notebooks and pages for the user.",
-        "When the user asks you to create content, organize notes, or set up a system (like Agile Results, GTD, etc.), use the available tools to create the appropriate notebooks and pages.",
+        "You have the ability to create notebooks, pages, and run custom actions for the user.",
+        "When the user asks to create content, organize notes, or set up a system (like Agile Results, GTD, etc.), use the available tools.",
+        "When the user mentions running their 'daily goals', 'weekly review', or any workflow, use the run_action tool.",
         "Create well-structured content with appropriate headings, lists, and organization.",
     ]
 
@@ -864,6 +914,10 @@ async def chat_with_tools_stream(
                     result = f"Created notebook: {func_args.get('name')}"
                 elif func_name == "create_page":
                     result = f"Created page: {func_args.get('title')} in {func_args.get('notebook_name')}"
+                elif func_name == "run_action":
+                    result = f"Running action: {func_args.get('action_name')}"
+                elif func_name == "list_actions":
+                    result = "Listing actions"
                 else:
                     result = "Action completed"
 
@@ -948,6 +1002,10 @@ async def chat_with_tools_stream(
                         result = f"Created notebook: {func_args.get('name')}"
                     elif func_name == "create_page":
                         result = f"Created page: {func_args.get('title')} in {func_args.get('notebook_name')}"
+                    elif func_name == "run_action":
+                        result = f"Running action: {func_args.get('action_name')}"
+                    elif func_name == "list_actions":
+                        result = "Listing actions"
                     else:
                         result = "Action completed"
 

@@ -11,11 +11,15 @@ interface PageState {
 
 interface PageActions {
   // Data loading
-  loadPages: (notebookId: string) => Promise<void>;
+  loadPages: (notebookId: string, includeArchived?: boolean) => Promise<void>;
   clearPages: () => void;
 
   // Page CRUD
-  createPage: (notebookId: string, title: string) => Promise<void>;
+  createPage: (
+    notebookId: string,
+    title: string,
+    folderId?: string
+  ) => Promise<Page | null>;
   updatePage: (
     notebookId: string,
     pageId: string,
@@ -28,6 +32,25 @@ interface PageActions {
   ) => Promise<void>;
   deletePage: (notebookId: string, pageId: string) => Promise<void>;
   duplicatePage: (notebookId: string, pageId: string) => Promise<void>;
+
+  // Folder operations
+  movePageToFolder: (
+    notebookId: string,
+    pageId: string,
+    folderId?: string,
+    position?: number
+  ) => Promise<void>;
+  archivePage: (notebookId: string, pageId: string) => Promise<void>;
+  unarchivePage: (
+    notebookId: string,
+    pageId: string,
+    targetFolderId?: string
+  ) => Promise<void>;
+  reorderPages: (
+    notebookId: string,
+    folderId: string | null,
+    pageIds: string[]
+  ) => Promise<void>;
 
   // Selection
   selectPage: (id: string | null) => void;
@@ -46,10 +69,10 @@ export const usePageStore = create<PageStore>((set) => ({
   error: null,
 
   // Actions
-  loadPages: async (notebookId) => {
+  loadPages: async (notebookId, includeArchived) => {
     set({ isLoading: true, error: null });
     try {
-      const pages = await api.listPages(notebookId);
+      const pages = await api.listPages(notebookId, includeArchived);
       set({ pages, isLoading: false });
     } catch (err) {
       set({
@@ -63,18 +86,20 @@ export const usePageStore = create<PageStore>((set) => ({
     set({ pages: [], selectedPageId: null });
   },
 
-  createPage: async (notebookId, title) => {
+  createPage: async (notebookId, title, folderId) => {
     set({ error: null });
     try {
-      const page = await api.createPage(notebookId, title);
+      const page = await api.createPage(notebookId, title, folderId);
       set((state) => ({
         pages: [page, ...state.pages],
         selectedPageId: page.id,
       }));
+      return page;
     } catch (err) {
       set({
         error: err instanceof Error ? err.message : "Failed to create page",
       });
+      return null;
     }
   },
 
@@ -151,6 +176,80 @@ export const usePageStore = create<PageStore>((set) => ({
     } catch (err) {
       set({
         error: err instanceof Error ? err.message : "Failed to duplicate page",
+      });
+    }
+  },
+
+  // Folder operations
+  movePageToFolder: async (notebookId, pageId, folderId, position) => {
+    set({ error: null });
+    try {
+      const page = await api.movePageToFolder(
+        notebookId,
+        pageId,
+        folderId,
+        position
+      );
+      set((state) => ({
+        pages: state.pages.map((p) => (p.id === pageId ? page : p)),
+      }));
+    } catch (err) {
+      set({
+        error:
+          err instanceof Error ? err.message : "Failed to move page to folder",
+      });
+    }
+  },
+
+  archivePage: async (notebookId, pageId) => {
+    set({ error: null });
+    try {
+      const page = await api.archivePage(notebookId, pageId);
+      set((state) => ({
+        pages: state.pages.map((p) => (p.id === pageId ? page : p)),
+        // Deselect if archived
+        selectedPageId:
+          state.selectedPageId === pageId ? null : state.selectedPageId,
+      }));
+    } catch (err) {
+      set({
+        error: err instanceof Error ? err.message : "Failed to archive page",
+      });
+    }
+  },
+
+  unarchivePage: async (notebookId, pageId, targetFolderId) => {
+    set({ error: null });
+    try {
+      const page = await api.unarchivePage(notebookId, pageId, targetFolderId);
+      set((state) => ({
+        pages: state.pages.map((p) => (p.id === pageId ? page : p)),
+      }));
+    } catch (err) {
+      set({
+        error: err instanceof Error ? err.message : "Failed to unarchive page",
+      });
+    }
+  },
+
+  reorderPages: async (notebookId, folderId, pageIds) => {
+    set({ error: null });
+    try {
+      await api.reorderPages(notebookId, folderId, pageIds);
+      // Update local state with new positions
+      set((state) => {
+        const updatedPages = state.pages.map((p) => {
+          const idx = pageIds.indexOf(p.id);
+          if (idx !== -1 && (p.folderId ?? null) === folderId) {
+            return { ...p, position: idx };
+          }
+          return p;
+        });
+        return { pages: updatedPages };
+      });
+    } catch (err) {
+      set({
+        error: err instanceof Error ? err.message : "Failed to reorder pages",
       });
     }
   },

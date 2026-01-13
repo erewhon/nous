@@ -9,12 +9,23 @@ use super::notebook::CommandError;
 type CommandResult<T> = Result<T, CommandError>;
 
 #[tauri::command]
-pub fn list_pages(state: State<AppState>, notebook_id: String) -> CommandResult<Vec<Page>> {
+pub fn list_pages(
+    state: State<AppState>,
+    notebook_id: String,
+    include_archived: Option<bool>,
+) -> CommandResult<Vec<Page>> {
     let storage = state.storage.lock().unwrap();
     let id = Uuid::parse_str(&notebook_id).map_err(|e| CommandError {
         message: format!("Invalid notebook ID: {}", e),
     })?;
-    storage.list_pages(id).map_err(Into::into)
+    let mut pages = storage.list_pages(id)?;
+
+    // Filter archived pages unless explicitly requested
+    if !include_archived.unwrap_or(false) {
+        pages.retain(|p| !p.is_archived);
+    }
+
+    Ok(pages)
 }
 
 #[tauri::command]
@@ -38,12 +49,26 @@ pub fn create_page(
     state: State<AppState>,
     notebook_id: String,
     title: String,
+    folder_id: Option<String>,
 ) -> CommandResult<Page> {
     let storage = state.storage.lock().unwrap();
-    let id = Uuid::parse_str(&notebook_id).map_err(|e| CommandError {
+    let nb_id = Uuid::parse_str(&notebook_id).map_err(|e| CommandError {
         message: format!("Invalid notebook ID: {}", e),
     })?;
-    let page = storage.create_page(id, title)?;
+    let fld_id = folder_id
+        .map(|id| {
+            Uuid::parse_str(&id).map_err(|e| CommandError {
+                message: format!("Invalid folder ID: {}", e),
+            })
+        })
+        .transpose()?;
+
+    let mut page = storage.create_page(nb_id, title)?;
+
+    // If folder_id specified, move page to that folder
+    if fld_id.is_some() {
+        page = storage.move_page_to_folder(nb_id, page.id, fld_id, None)?;
+    }
 
     // Index the new page
     if let Ok(mut search_index) = state.search_index.lock() {

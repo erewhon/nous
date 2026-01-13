@@ -84,6 +84,7 @@ export function SaveAsTemplateDialog({
       name: trimmedName,
       description: description.trim() || `Custom template based on "${page.title}"`,
       icon,
+      sourcePageId: page.id, // Link template back to source page
       content: {
         time: Date.now(),
         version: page.content.version,
