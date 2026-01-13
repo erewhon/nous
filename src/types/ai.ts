@@ -96,3 +96,39 @@ export const CreatePageArgsSchema = z.object({
 });
 
 export type CreatePageArgs = z.infer<typeof CreatePageArgsSchema>;
+
+// Stream event types
+export type StreamChunkEvent = {
+  type: "chunk";
+  content: string;
+};
+
+export type StreamThinkingEvent = {
+  type: "thinking";
+  content: string;
+};
+
+export type StreamActionEvent = {
+  type: "action";
+  tool: string;
+  arguments: Record<string, unknown>;
+  toolCallId: string;
+};
+
+export type StreamDoneEvent = {
+  type: "done";
+  model: string;
+  tokensUsed: number;
+};
+
+export type StreamErrorEvent = {
+  type: "error";
+  message: string;
+};
+
+export type StreamEvent =
+  | StreamChunkEvent
+  | StreamThinkingEvent
+  | StreamActionEvent
+  | StreamDoneEvent
+  | StreamErrorEvent;

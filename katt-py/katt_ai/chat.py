@@ -2,7 +2,8 @@
 
 import asyncio
 import json
-from typing import Any
+import re
+from typing import Any, Generator
 
 from katt_ai.models import (
     ChatMessage,
@@ -12,6 +13,38 @@ from katt_ai.models import (
     ProviderType,
 )
 from katt_ai.providers import get_provider
+
+
+def _split_into_chunks(text: str, chunk_size: int = 20) -> Generator[str, None, None]:
+    """Split text into chunks for simulated streaming.
+
+    Splits by words to maintain readability, yielding approximately
+    chunk_size characters at a time. Smaller chunks create a more
+    visible streaming effect.
+    """
+    if not text:
+        return
+
+    words = text.split()
+    current_chunk = ""
+
+    for word in words:
+        if len(current_chunk) + len(word) + 1 > chunk_size and current_chunk:
+            yield current_chunk + " "
+            current_chunk = word
+        else:
+            current_chunk = current_chunk + " " + word if current_chunk else word
+
+    if current_chunk:
+        yield current_chunk
+
+
+def _emit_chunks_with_delay(callback: Any, event_type: str, text: str) -> None:
+    """Emit text chunks with a small delay for streaming effect."""
+    import time
+    for chunk in _split_into_chunks(text):
+        callback({"type": event_type, "content": chunk})
+        time.sleep(0.02)  # 20ms delay between chunks for visible streaming
 
 
 # Tool definitions for notebook/page creation
@@ -691,6 +724,320 @@ def chat_with_tools_sync(
     return asyncio.run(
         chat_with_tools(
             user_message,
+            page_context,
+            conversation_history,
+            available_notebooks,
+            current_notebook_id,
+            provider_type,
+            api_key,
+            model,
+            temperature,
+            max_tokens,
+        )
+    )
+
+
+async def chat_with_tools_stream(
+    user_message: str,
+    callback: Any,  # Callable that receives event dicts
+    page_context: dict[str, Any] | None = None,
+    conversation_history: list[dict[str, str]] | None = None,
+    available_notebooks: list[dict[str, str]] | None = None,
+    current_notebook_id: str | None = None,
+    provider_type: str = "openai",
+    api_key: str | None = None,
+    model: str | None = None,
+    temperature: float = 0.7,
+    max_tokens: int = 4096,
+) -> dict[str, Any]:
+    """Chat with AI using tools, streaming the response via callback.
+
+    The callback receives events of different types:
+    - {"type": "chunk", "content": "..."} - Text chunk
+    - {"type": "thinking", "content": "..."} - Thinking content (Anthropic)
+    - {"type": "action", "tool": "...", "arguments": {...}, "tool_call_id": "..."} - Tool action
+    - {"type": "done", "model": "...", "tokens_used": N} - Completion
+
+    Returns the final complete response dict.
+    """
+    from openai import AsyncOpenAI
+    from anthropic import AsyncAnthropic
+
+    config = ProviderConfig(
+        provider_type=ProviderType(provider_type),
+        api_key=api_key,
+        model=model or "",
+        temperature=temperature,
+        max_tokens=max_tokens,
+    )
+
+    # Build system prompt (same as non-streaming version)
+    system_parts = [
+        "You are a helpful AI assistant integrated into a personal notebook application called Katt.",
+        "You have the ability to create notebooks and pages for the user.",
+        "When the user asks you to create content, organize notes, or set up a system (like Agile Results, GTD, etc.), use the available tools to create the appropriate notebooks and pages.",
+        "Create well-structured content with appropriate headings, lists, and organization.",
+    ]
+
+    if available_notebooks:
+        notebook_names = [n.get("name", "") for n in available_notebooks]
+        system_parts.append(f"\nExisting notebooks: {', '.join(notebook_names)}")
+
+    if current_notebook_id and available_notebooks:
+        current_nb = next((n for n in available_notebooks if n.get("id") == current_notebook_id), None)
+        if current_nb:
+            system_parts.append(f"Currently selected notebook: {current_nb.get('name')}")
+
+    if page_context:
+        ctx = PageContext(**page_context)
+        system_parts.append(f"\nCurrent page: {ctx.title}")
+        if ctx.tags:
+            system_parts.append(f"Tags: {', '.join(ctx.tags)}")
+        if ctx.content:
+            system_parts.append(f"\nPage content:\n{ctx.content}")
+
+    system_message = "\n".join(system_parts)
+
+    actions: list[dict[str, Any]] = []
+    response_content = ""
+    thinking_content = ""
+    response_model = config.model
+    tokens_used = 0
+
+    if provider_type == "openai":
+        client = AsyncOpenAI(api_key=api_key)
+
+        oai_messages: list[dict[str, Any]] = [{"role": "system", "content": system_message}]
+        if conversation_history:
+            oai_messages.extend(conversation_history)
+        oai_messages.append({"role": "user", "content": user_message})
+
+        # First, handle tool calls (non-streaming since we need complete tool data)
+        response = await client.chat.completions.create(
+            model=config.model,
+            messages=oai_messages,
+            tools=NOTEBOOK_TOOLS,
+            tool_choice="auto",
+            temperature=config.temperature,
+            max_tokens=config.max_tokens,
+        )
+
+        response_model = response.model
+        if response.usage:
+            tokens_used = response.usage.total_tokens
+
+        choice = response.choices[0]
+
+        # Process tool calls if any
+        while choice.finish_reason == "tool_calls" and choice.message.tool_calls:
+            oai_messages.append({
+                "role": "assistant",
+                "content": choice.message.content,
+                "tool_calls": [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.function.name,
+                            "arguments": tc.function.arguments
+                        }
+                    }
+                    for tc in choice.message.tool_calls
+                ]
+            })
+
+            for tool_call in choice.message.tool_calls:
+                func_name = tool_call.function.name
+                func_args = json.loads(tool_call.function.arguments)
+
+                action = {
+                    "tool": func_name,
+                    "arguments": func_args,
+                    "tool_call_id": tool_call.id,
+                }
+                actions.append(action)
+
+                # Emit action event
+                callback({"type": "action", **action})
+
+                if func_name == "create_notebook":
+                    result = f"Created notebook: {func_args.get('name')}"
+                elif func_name == "create_page":
+                    result = f"Created page: {func_args.get('title')} in {func_args.get('notebook_name')}"
+                else:
+                    result = "Action completed"
+
+                oai_messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "content": result
+                })
+
+            # Continue with streaming for the final response
+            response = await client.chat.completions.create(
+                model=config.model,
+                messages=oai_messages,
+                tools=NOTEBOOK_TOOLS,
+                tool_choice="auto",
+                temperature=config.temperature,
+                max_tokens=config.max_tokens,
+            )
+
+            if response.usage:
+                tokens_used += response.usage.total_tokens
+
+            choice = response.choices[0]
+
+        # If no more tool calls, emit the response
+        if choice.finish_reason != "tool_calls":
+            # If we have content from the non-streaming response, emit it
+            if choice.message.content:
+                response_content = choice.message.content
+                # Emit in chunks with delay for visible streaming effect
+                _emit_chunks_with_delay(callback, "chunk", response_content)
+
+    elif provider_type == "anthropic":
+        client = AsyncAnthropic(api_key=api_key)
+
+        anthropic_tools = [
+            {
+                "name": t["function"]["name"],
+                "description": t["function"]["description"],
+                "input_schema": t["function"]["parameters"]
+            }
+            for t in NOTEBOOK_TOOLS
+        ]
+
+        ant_messages: list[dict[str, Any]] = []
+        if conversation_history:
+            ant_messages.extend(conversation_history)
+        ant_messages.append({"role": "user", "content": user_message})
+
+        # First, handle tool calls (non-streaming)
+        response = await client.messages.create(
+            model=config.model,
+            system=system_message,
+            messages=ant_messages,
+            tools=anthropic_tools,
+            max_tokens=config.max_tokens,
+        )
+
+        response_model = response.model
+        tokens_used = response.usage.input_tokens + response.usage.output_tokens
+
+        # Process tool use
+        while response.stop_reason == "tool_use":
+            assistant_content = response.content
+            ant_messages.append({"role": "assistant", "content": assistant_content})
+
+            tool_results = []
+            for block in response.content:
+                if block.type == "tool_use":
+                    func_name = block.name
+                    func_args = block.input
+
+                    action = {
+                        "tool": func_name,
+                        "arguments": func_args,
+                        "tool_call_id": block.id,
+                    }
+                    actions.append(action)
+                    callback({"type": "action", **action})
+
+                    if func_name == "create_notebook":
+                        result = f"Created notebook: {func_args.get('name')}"
+                    elif func_name == "create_page":
+                        result = f"Created page: {func_args.get('title')} in {func_args.get('notebook_name')}"
+                    else:
+                        result = "Action completed"
+
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": result
+                    })
+
+            ant_messages.append({"role": "user", "content": tool_results})
+
+            response = await client.messages.create(
+                model=config.model,
+                system=system_message,
+                messages=ant_messages,
+                tools=anthropic_tools,
+                max_tokens=config.max_tokens,
+            )
+
+            tokens_used += response.usage.input_tokens + response.usage.output_tokens
+
+        # Emit the final response from the existing response object
+        if response.stop_reason != "tool_use":
+            # Extract content from response blocks
+            for block in response.content:
+                if hasattr(block, "text"):
+                    response_content += block.text
+                elif block.type == "thinking" and hasattr(block, "thinking"):
+                    thinking_content += block.thinking
+
+            # Emit content in chunks with delay for visible streaming effect
+            if thinking_content:
+                _emit_chunks_with_delay(callback, "thinking", thinking_content)
+            if response_content:
+                _emit_chunks_with_delay(callback, "chunk", response_content)
+
+    else:
+        # Ollama - fall back to non-streaming
+        result = await chat_with_context(
+            user_message,
+            page_context,
+            conversation_history,
+            provider_type,
+            api_key,
+            model,
+            temperature,
+            max_tokens,
+        )
+        response_content = result.get("content", "")
+        response_model = result.get("model", "")
+        tokens_used = result.get("tokens_used", 0) or 0
+        # Emit in chunks with delay for streaming effect
+        _emit_chunks_with_delay(callback, "chunk", response_content)
+
+    # Emit done event
+    callback({
+        "type": "done",
+        "model": response_model,
+        "tokens_used": tokens_used,
+    })
+
+    return {
+        "content": response_content,
+        "model": response_model,
+        "provider": provider_type,
+        "tokens_used": tokens_used,
+        "finish_reason": "stop",
+        "actions": actions,
+        "thinking": thinking_content,
+    }
+
+
+def chat_with_tools_stream_sync(
+    user_message: str,
+    callback: Any,
+    page_context: dict[str, Any] | None = None,
+    conversation_history: list[dict[str, str]] | None = None,
+    available_notebooks: list[dict[str, str]] | None = None,
+    current_notebook_id: str | None = None,
+    provider_type: str = "openai",
+    api_key: str | None = None,
+    model: str | None = None,
+    temperature: float = 0.7,
+    max_tokens: int = 4096,
+) -> dict[str, Any]:
+    """Synchronous wrapper for streaming chat with callback."""
+    return asyncio.run(
+        chat_with_tools_stream(
+            user_message,
+            callback,
             page_context,
             conversation_history,
             available_notebooks,

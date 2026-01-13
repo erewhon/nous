@@ -241,6 +241,34 @@ export async function aiChatWithTools(
   });
 }
 
+export async function aiChatStream(
+  userMessage: string,
+  options?: {
+    pageContext?: PageContext;
+    conversationHistory?: ChatMessage[];
+    availableNotebooks?: NotebookInfo[];
+    currentNotebookId?: string;
+    providerType?: string;
+    apiKey?: string;
+    model?: string;
+    temperature?: number;
+    maxTokens?: number;
+  }
+): Promise<void> {
+  return invoke("ai_chat_stream", {
+    userMessage,
+    pageContext: options?.pageContext,
+    conversationHistory: options?.conversationHistory,
+    availableNotebooks: options?.availableNotebooks,
+    currentNotebookId: options?.currentNotebookId,
+    providerType: options?.providerType,
+    apiKey: options?.apiKey,
+    model: options?.model,
+    temperature: options?.temperature,
+    maxTokens: options?.maxTokens,
+  });
+}
+
 // ===== Tag Management API =====
 
 export interface TagInfo {

@@ -5,6 +5,7 @@ use pyo3::types::{PyDict, PyList};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::mpsc;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -174,6 +175,31 @@ pub struct ChatResponseWithActions {
     pub finish_reason: Option<String>,
     pub actions: Vec<AIAction>,
     pub thinking: Option<String>,
+}
+
+/// Streaming event from AI chat
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum StreamEvent {
+    #[serde(rename = "chunk")]
+    Chunk { content: String },
+    #[serde(rename = "thinking")]
+    Thinking { content: String },
+    #[serde(rename = "action")]
+    Action {
+        tool: String,
+        arguments: serde_json::Value,
+        #[serde(rename = "toolCallId")]
+        tool_call_id: String,
+    },
+    #[serde(rename = "done")]
+    Done {
+        model: String,
+        #[serde(rename = "tokensUsed")]
+        tokens_used: i64,
+    },
+    #[serde(rename = "error")]
+    Error { message: String },
 }
 
 /// Python AI bridge for calling Python functions
@@ -519,6 +545,202 @@ impl PythonAI {
                     .filter(|s| !s.is_empty()),
             })
         })
+    }
+
+    /// Chat with tools with streaming support
+    /// Returns a channel receiver that yields StreamEvent items
+    pub fn chat_with_tools_stream(
+        &self,
+        user_message: String,
+        page_context: Option<PageContext>,
+        conversation_history: Option<Vec<ChatMessage>>,
+        available_notebooks: Option<Vec<NotebookInfo>>,
+        current_notebook_id: Option<String>,
+        config: AIConfig,
+    ) -> Result<mpsc::Receiver<StreamEvent>> {
+        let (tx, rx) = mpsc::channel();
+        let katt_py_path = self.katt_py_path.clone();
+
+        // Spawn a thread to run the Python code
+        std::thread::spawn(move || {
+            let result = Python::attach(|py| -> Result<()> {
+                // Setup Python path
+                let sys = py.import("sys")?;
+                let path = sys.getattr("path")?;
+                let path_list: Bound<'_, PyList> = path.downcast_into().map_err(|e| {
+                    PythonError::TypeConversion(format!("Failed to convert sys.path to list: {}", e))
+                })?;
+
+                let katt_py_str = katt_py_path.to_string_lossy().to_string();
+                let already_added = path_list.iter().any(|p| {
+                    p.extract::<String>().ok() == Some(katt_py_str.clone())
+                });
+
+                if !already_added {
+                    path_list.insert(0, katt_py_str.clone())?;
+                }
+
+                // Add venv site-packages
+                let version_info = sys.getattr("version_info")?;
+                let major: i32 = version_info.getattr("major")?.extract()?;
+                let minor: i32 = version_info.getattr("minor")?.extract()?;
+                let site_packages = format!(
+                    "{}/.venv/lib/python{}.{}/site-packages",
+                    katt_py_str, major, minor
+                );
+
+                let site_already_added = path_list.iter().any(|p| {
+                    p.extract::<String>().ok() == Some(site_packages.clone())
+                });
+
+                if !site_already_added {
+                    path_list.insert(0, site_packages)?;
+                }
+
+                let chat_module = py.import("katt_ai.chat")?;
+                let chat_fn = chat_module.getattr("chat_with_tools_stream_sync")?;
+
+                // Create a Python callback that sends to our channel
+                let tx_clone = tx.clone();
+                let callback = pyo3::types::PyCFunction::new_closure(
+                    py,
+                    None,
+                    None,
+                    move |args: &Bound<'_, pyo3::types::PyTuple>, _kwargs: Option<&Bound<'_, PyDict>>| -> PyResult<()> {
+                        if args.len() > 0 {
+                            let event_dict: HashMap<String, Py<PyAny>> = args.get_item(0)?.extract()?;
+
+                            Python::with_gil(|py| {
+                                let event_type = event_dict.get("type")
+                                    .and_then(|v| v.extract::<String>(py).ok())
+                                    .unwrap_or_default();
+
+                                let event = match event_type.as_str() {
+                                    "chunk" => {
+                                        let content = event_dict.get("content")
+                                            .and_then(|v| v.extract::<String>(py).ok())
+                                            .unwrap_or_default();
+                                        StreamEvent::Chunk { content }
+                                    }
+                                    "thinking" => {
+                                        let content = event_dict.get("content")
+                                            .and_then(|v| v.extract::<String>(py).ok())
+                                            .unwrap_or_default();
+                                        StreamEvent::Thinking { content }
+                                    }
+                                    "action" => {
+                                        let tool = event_dict.get("tool")
+                                            .and_then(|v| v.extract::<String>(py).ok())
+                                            .unwrap_or_default();
+                                        let tool_call_id = event_dict.get("tool_call_id")
+                                            .and_then(|v| v.extract::<String>(py).ok())
+                                            .unwrap_or_default();
+                                        let arguments = event_dict.get("arguments")
+                                            .map(|v| {
+                                                let json_module = py.import("json").ok();
+                                                if let Some(json_mod) = json_module {
+                                                    if let Ok(dumps) = json_mod.getattr("dumps") {
+                                                        if let Ok(json_str) = dumps.call1((v,)) {
+                                                            if let Ok(s) = json_str.extract::<String>() {
+                                                                return serde_json::from_str(&s).unwrap_or(serde_json::Value::Null);
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                                serde_json::Value::Null
+                                            })
+                                            .unwrap_or(serde_json::Value::Null);
+                                        StreamEvent::Action { tool, arguments, tool_call_id }
+                                    }
+                                    "done" => {
+                                        let model = event_dict.get("model")
+                                            .and_then(|v| v.extract::<String>(py).ok())
+                                            .unwrap_or_default();
+                                        let tokens_used = event_dict.get("tokens_used")
+                                            .and_then(|v| v.extract::<i64>(py).ok())
+                                            .unwrap_or(0);
+                                        StreamEvent::Done { model, tokens_used }
+                                    }
+                                    _ => return,
+                                };
+
+                                let _ = tx_clone.send(event);
+                            });
+                        }
+                        Ok(())
+                    },
+                )?;
+
+                let kwargs = PyDict::new(py);
+                kwargs.set_item("user_message", user_message)?;
+                kwargs.set_item("callback", callback)?;
+                kwargs.set_item("provider_type", config.provider_type)?;
+
+                if let Some(api_key) = config.api_key {
+                    kwargs.set_item("api_key", api_key)?;
+                }
+                if let Some(model) = config.model {
+                    kwargs.set_item("model", model)?;
+                }
+                if let Some(temp) = config.temperature {
+                    kwargs.set_item("temperature", temp)?;
+                }
+                if let Some(max_tokens) = config.max_tokens {
+                    kwargs.set_item("max_tokens", max_tokens)?;
+                }
+
+                if let Some(ctx) = page_context {
+                    let ctx_dict = PyDict::new(py);
+                    ctx_dict.set_item("page_id", ctx.page_id)?;
+                    ctx_dict.set_item("title", ctx.title)?;
+                    ctx_dict.set_item("content", ctx.content)?;
+                    ctx_dict.set_item("tags", ctx.tags)?;
+                    if let Some(notebook_name) = ctx.notebook_name {
+                        ctx_dict.set_item("notebook_name", notebook_name)?;
+                    }
+                    kwargs.set_item("page_context", ctx_dict)?;
+                }
+
+                if let Some(history) = conversation_history {
+                    let py_history = PyList::empty(py);
+                    for msg in history {
+                        let dict = PyDict::new(py);
+                        dict.set_item("role", msg.role)?;
+                        dict.set_item("content", msg.content)?;
+                        py_history.append(dict)?;
+                    }
+                    kwargs.set_item("conversation_history", py_history)?;
+                }
+
+                if let Some(notebooks) = available_notebooks {
+                    let py_notebooks = PyList::empty(py);
+                    for nb in notebooks {
+                        let dict = PyDict::new(py);
+                        dict.set_item("id", nb.id)?;
+                        dict.set_item("name", nb.name)?;
+                        py_notebooks.append(dict)?;
+                    }
+                    kwargs.set_item("available_notebooks", py_notebooks)?;
+                }
+
+                if let Some(notebook_id) = current_notebook_id {
+                    kwargs.set_item("current_notebook_id", notebook_id)?;
+                }
+
+                // Call the streaming function - this will block until complete
+                // but will call our callback for each chunk
+                chat_fn.call((), Some(&kwargs))?;
+
+                Ok(())
+            });
+
+            // If there was an error, send it through the channel
+            if let Err(e) = result {
+                let _ = tx.send(StreamEvent::Error { message: e.to_string() });
+            }
+        });
+
+        Ok(rx)
     }
 
     /// Summarize page content

@@ -27,7 +27,7 @@ const PROVIDERS: { value: ProviderType; label: string; description: string }[] =
   {
     value: "anthropic",
     label: "Anthropic",
-    description: "Claude Sonnet, Claude Opus, Claude Haiku",
+    description: "Claude Sonnet 4, Claude Opus 4.5, Claude Haiku",
   },
   {
     value: "ollama",
@@ -38,7 +38,12 @@ const PROVIDERS: { value: ProviderType; label: string; description: string }[] =
 
 const DEFAULT_MODELS: Record<ProviderType, string[]> = {
   openai: ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"],
-  anthropic: ["claude-sonnet-4-20250514", "claude-opus-4-20250514", "claude-3-5-haiku-20241022"],
+  anthropic: [
+    "claude-sonnet-4-20250514",
+    "claude-opus-4-5-20251101",
+    "claude-opus-4-20250514",
+    "claude-3-5-haiku-20241022",
+  ],
   ollama: ["llama3.2", "llama3.1", "mistral", "codellama", "phi3"],
 };
 

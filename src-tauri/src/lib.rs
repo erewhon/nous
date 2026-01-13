@@ -1,4 +1,4 @@
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 mod commands;
 mod markdown;
@@ -13,7 +13,7 @@ use storage::FileStorage;
 pub struct AppState {
     pub storage: Mutex<FileStorage>,
     pub search_index: Mutex<SearchIndex>,
-    pub python_ai: Mutex<PythonAI>,
+    pub python_ai: Arc<Mutex<PythonAI>>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -37,7 +37,7 @@ pub fn run() {
     let state = AppState {
         storage: Mutex::new(storage),
         search_index: Mutex::new(search_index),
-        python_ai: Mutex::new(python_ai),
+        python_ai: Arc::new(Mutex::new(python_ai)),
     };
 
     tauri::Builder::default()
@@ -78,6 +78,7 @@ pub fn run() {
             commands::ai_suggest_tags,
             commands::ai_suggest_related_pages,
             commands::ai_chat_with_tools,
+            commands::ai_chat_stream,
             // Markdown commands
             commands::export_page_markdown,
             commands::import_markdown,

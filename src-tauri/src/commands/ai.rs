@@ -1,10 +1,10 @@
 //! AI-related Tauri commands.
 
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 
 use crate::python_bridge::{
     AIConfig, ChatMessage, ChatResponse, ChatResponseWithActions,
-    NotebookInfo, PageContext, PageInfo, RelatedPageSuggestion,
+    NotebookInfo, PageContext, PageInfo, RelatedPageSuggestion, StreamEvent,
 };
 use crate::AppState;
 
@@ -163,8 +163,8 @@ pub fn ai_suggest_related_pages(
 
 /// Chat with AI using tools for notebook/page creation
 #[tauri::command]
-pub fn ai_chat_with_tools(
-    state: State<AppState>,
+pub async fn ai_chat_with_tools(
+    state: State<'_, AppState>,
     user_message: String,
     page_context: Option<PageContext>,
     conversation_history: Option<Vec<ChatMessage>>,
@@ -176,9 +176,7 @@ pub fn ai_chat_with_tools(
     temperature: Option<f64>,
     max_tokens: Option<i64>,
 ) -> Result<ChatResponseWithActions, CommandError> {
-    let python_ai = state.python_ai.lock().map_err(|e| CommandError {
-        message: format!("Failed to acquire Python AI lock: {}", e),
-    })?;
+    let python_ai = state.python_ai.clone();
 
     let config = AIConfig {
         provider_type: provider_type.unwrap_or_else(|| "openai".to_string()),
@@ -188,16 +186,98 @@ pub fn ai_chat_with_tools(
         max_tokens,
     };
 
-    python_ai
-        .chat_with_tools(
-            user_message,
-            page_context,
-            conversation_history,
-            available_notebooks,
-            current_notebook_id,
-            config,
-        )
-        .map_err(|e| CommandError {
-            message: format!("AI chat with tools error: {}", e),
-        })
+    // Run the blocking Python call on a separate thread
+    tauri::async_runtime::spawn_blocking(move || {
+        let python_ai = python_ai.lock().map_err(|e| CommandError {
+            message: format!("Failed to acquire Python AI lock: {}", e),
+        })?;
+
+        python_ai
+            .chat_with_tools(
+                user_message,
+                page_context,
+                conversation_history,
+                available_notebooks,
+                current_notebook_id,
+                config,
+            )
+            .map_err(|e| CommandError {
+                message: format!("AI chat with tools error: {}", e),
+            })
+    })
+    .await
+    .map_err(|e| CommandError {
+        message: format!("Task join error: {}", e),
+    })?
+}
+
+/// Chat with AI using tools, streaming the response via events
+/// Emits "ai-stream" events with StreamEvent payloads
+#[tauri::command]
+pub async fn ai_chat_stream(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    user_message: String,
+    page_context: Option<PageContext>,
+    conversation_history: Option<Vec<ChatMessage>>,
+    available_notebooks: Option<Vec<NotebookInfo>>,
+    current_notebook_id: Option<String>,
+    provider_type: Option<String>,
+    api_key: Option<String>,
+    model: Option<String>,
+    temperature: Option<f64>,
+    max_tokens: Option<i64>,
+) -> Result<(), CommandError> {
+    let python_ai = state.python_ai.clone();
+
+    let config = AIConfig {
+        provider_type: provider_type.unwrap_or_else(|| "openai".to_string()),
+        api_key,
+        model,
+        temperature,
+        max_tokens,
+    };
+
+    // Get the event receiver from the Python bridge
+    let rx = {
+        let python_ai = python_ai.lock().map_err(|e| CommandError {
+            message: format!("Failed to acquire Python AI lock: {}", e),
+        })?;
+
+        python_ai
+            .chat_with_tools_stream(
+                user_message,
+                page_context,
+                conversation_history,
+                available_notebooks,
+                current_notebook_id,
+                config,
+            )
+            .map_err(|e| CommandError {
+                message: format!("AI streaming error: {}", e),
+            })?
+    };
+
+    // Read from channel and emit events in a blocking task
+    // This ensures events are emitted as they arrive
+    tauri::async_runtime::spawn_blocking(move || {
+        while let Ok(event) = rx.recv() {
+            let is_done = matches!(event, StreamEvent::Done { .. });
+            let is_error = matches!(event, StreamEvent::Error { .. });
+
+            // Emit the event to the frontend
+            let _ = app.emit("ai-stream", &event);
+
+            // Stop if we're done or got an error
+            if is_done || is_error {
+                break;
+            }
+        }
+    })
+    .await
+    .map_err(|e| CommandError {
+        message: format!("Stream task error: {}", e),
+    })?;
+
+    Ok(())
 }

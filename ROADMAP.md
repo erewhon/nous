@@ -21,6 +21,13 @@
   - Floating panel UI with result selection
   - Unified Settings dialog for all configuration
 
+- [x] **AI Chat Enhancements**
+  - Streaming responses (word-by-word display)
+  - AI can create notebooks and pages via tool use
+  - Thinking/reasoning display (collapsible, for Claude models)
+  - Response stats (elapsed time, tokens, tok/s, model name)
+  - Support for OpenAI, Anthropic, and Ollama providers
+
 ---
 
 ## Short-term (Next up)
@@ -34,11 +41,11 @@ Already implemented with Tantivy, may need refinement:
 
 ### 2. Wiki-link Support
 - [x] Parse `[[page-name]]` links in editor content
-- [x] Click-to-navigate between pages
 - [x] Backlinks panel (pages that link to current page)
-- [x] Link autocomplete when typing `[[`
-- [x] Broken link detection (visual styling)
-- [x] Create page from broken link click
+- [ ] Fix click-to-navigate (handler bug)
+- [ ] Link autocomplete when typing `[[`
+- [ ] Broken link detection (visual styling)
+- [ ] Create page from broken link click
 
 ### 3. Keyboard Shortcuts
 - [x] `Cmd+N` - New page
@@ -112,6 +119,14 @@ Already implemented with Tantivy, may need refinement:
 - [ ] Conflict resolution
 - [ ] Mobile companion app (or PWA)
 - [ ] Offline support
+
+### 14. Import from Other Apps
+- [ ] OneNote notebook import
+- [ ] Scrivener project import
+- [ ] Evernote export import (.enex)
+- [ ] Notion export import
+- [ ] Obsidian vault import
+- [ ] Apple Notes import
 
 ---
 

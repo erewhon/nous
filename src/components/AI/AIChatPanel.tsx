@@ -1,15 +1,16 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useAIStore } from "../../stores/aiStore";
 import { usePageStore } from "../../stores/pageStore";
 import { useNotebookStore } from "../../stores/notebookStore";
 import {
-  aiChatWithTools,
+  aiChatStream,
   createNotebook as apiCreateNotebook,
   createPage as apiCreatePage,
   updatePage as apiUpdatePage,
 } from "../../utils/api";
-import type { ChatMessage, PageContext, AIAction, CreateNotebookArgs, CreatePageArgs } from "../../types/ai";
+import type { ChatMessage, PageContext, AIAction, CreateNotebookArgs, CreatePageArgs, StreamEvent } from "../../types/ai";
 import type { EditorData } from "../../types/page";
 
 interface AIChatPanelProps {
@@ -46,26 +47,31 @@ export function AIChatPanel({ isOpen, onClose, onOpenSettings }: AIChatPanelProp
   const [expandedThinking, setExpandedThinking] = useState<Set<number>>(new Set());
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const isStreamingRef = useRef(false); // Track if we're currently streaming
 
   const { settings, conversation, addMessage, setLoading, clearConversation } =
     useAIStore();
   const { selectedPageId, pages, loadPages } = usePageStore();
   const { notebooks, selectedNotebookId, loadNotebooks } = useNotebookStore();
 
-  // Sync display messages with conversation messages
+  // Sync display messages with conversation messages (but not during streaming)
   useEffect(() => {
-    // Only add messages from store that don't have thinking (they'll be added via handleSubmit)
+    // Skip sync during streaming to avoid resetting our temporary assistant message
+    if (isStreamingRef.current) {
+      return;
+    }
+    // Only add messages from store that don't have thinking/stats (they'll be added via handleSubmit)
     const storeMessages = conversation.messages.map(m => ({
       role: m.role,
       content: m.content,
-      thinking: undefined,
     }));
-    // Preserve thinking from display messages
+    // Preserve thinking and stats from display messages
     setDisplayMessages(prev => {
       if (storeMessages.length === 0) return [];
       return storeMessages.map((msg, i) => ({
         ...msg,
         thinking: prev[i]?.thinking,
+        stats: prev[i]?.stats,
       }));
     });
   }, [conversation.messages]);
@@ -210,6 +216,9 @@ export function AIChatPanel({ isOpen, onClose, onOpenSettings }: AIChatPanelProp
   const handleSubmit = async () => {
     if (!input.trim() || conversation.isLoading) return;
 
+    // Mark that we're streaming to prevent useEffect from resetting displayMessages
+    isStreamingRef.current = true;
+
     const userMessage: ChatMessage = {
       role: "user",
       content: input.trim(),
@@ -220,15 +229,94 @@ export function AIChatPanel({ isOpen, onClose, onOpenSettings }: AIChatPanelProp
     setDisplayMessages(prev => [...prev, { role: "user", content: userMessage.content }]);
     setInput("");
     setLoading(true);
-    setStatusText("Sending request...");
+    setStatusText("Connecting...");
     setCreatedItems([]); // Clear previous created items
-
-    // Yield to event loop to allow UI to update before blocking call
-    await new Promise(resolve => setTimeout(resolve, 0));
 
     const startTime = Date.now();
 
+    // Track accumulated content and actions for this response
+    let accumulatedContent = "";
+    let accumulatedThinking = "";
+    let pendingActions: AIAction[] = [];
+    let responseModel = "";
+    let tokensUsed = 0;
+    let unlisten: UnlistenFn | null = null;
+
+    // Add an empty assistant message that we'll update as chunks arrive
+    const assistantMsgIndex = displayMessages.length + 1; // +1 because we just added user message
+    setDisplayMessages(prev => [...prev, { role: "assistant", content: "" }]);
+
     try {
+      // Set up event listener for streaming events
+      unlisten = await listen<StreamEvent>("ai-stream", (event) => {
+        const data = event.payload;
+        console.log("[AI Stream] Received event:", data.type, data);
+
+        switch (data.type) {
+          case "chunk":
+            accumulatedContent += data.content;
+            setStatusText("Receiving response...");
+            // Update the assistant message with accumulated content
+            setDisplayMessages(prev => {
+              const newMessages = [...prev];
+              if (newMessages[assistantMsgIndex]) {
+                newMessages[assistantMsgIndex] = {
+                  ...newMessages[assistantMsgIndex],
+                  content: accumulatedContent,
+                };
+              }
+              return newMessages;
+            });
+            break;
+
+          case "thinking":
+            accumulatedThinking += data.content;
+            setStatusText("Thinking...");
+            // Update thinking content
+            setDisplayMessages(prev => {
+              const newMessages = [...prev];
+              if (newMessages[assistantMsgIndex]) {
+                newMessages[assistantMsgIndex] = {
+                  ...newMessages[assistantMsgIndex],
+                  thinking: accumulatedThinking,
+                };
+              }
+              return newMessages;
+            });
+            break;
+
+          case "action":
+            setStatusText("Executing actions...");
+            pendingActions.push({
+              tool: data.tool,
+              arguments: data.arguments,
+              toolCallId: data.toolCallId,
+            });
+            break;
+
+          case "done":
+            console.log("[AI Stream] Done event - model:", data.model, "tokens:", data.tokensUsed);
+            responseModel = data.model;
+            tokensUsed = data.tokensUsed;
+            break;
+
+          case "error":
+            console.error("Stream error:", data.message);
+            setDisplayMessages(prev => {
+              const newMessages = [...prev];
+              if (newMessages[assistantMsgIndex]) {
+                newMessages[assistantMsgIndex] = {
+                  ...newMessages[assistantMsgIndex],
+                  content: `Error: ${data.message}`,
+                };
+              }
+              return newMessages;
+            });
+            break;
+        }
+      });
+      console.log("[AI Stream] Event listener set up");
+
       // Build page context if a page is selected
       let pageContext: PageContext | undefined;
       if (currentPage) {
@@ -247,13 +335,10 @@ export function AIChatPanel({ isOpen, onClose, onOpenSettings }: AIChatPanelProp
         name: n.name,
       }));
 
-      setStatusText("Waiting for AI response...");
-      // Yield again to show status update
-      await new Promise(resolve => setTimeout(resolve, 0));
-
-      const response = await aiChatWithTools(userMessage.content, {
+      // Start the streaming request - command now waits for completion
+      await aiChatStream(userMessage.content, {
         pageContext,
-        conversationHistory: conversation.messages.slice(-10), // Last 10 messages
+        conversationHistory: conversation.messages.slice(-10),
         availableNotebooks,
         currentNotebookId: selectedNotebookId || undefined,
         providerType: settings.providerType,
@@ -264,40 +349,51 @@ export function AIChatPanel({ isOpen, onClose, onOpenSettings }: AIChatPanelProp
       });
 
       const elapsedMs = Date.now() - startTime;
+      console.log("[AI Stream] Command completed. elapsedMs:", elapsedMs);
+      console.log("[AI Stream] Final values - model:", responseModel, "tokens:", tokensUsed, "content length:", accumulatedContent.length);
 
-      // Execute any actions returned by the AI
-      if (response.actions && response.actions.length > 0) {
+      // Execute any pending actions
+      if (pendingActions.length > 0) {
         setStatusText("Creating notebooks and pages...");
-        await new Promise(resolve => setTimeout(resolve, 0));
-        const created = await executeActions(response.actions);
+        const created = await executeActions(pendingActions);
         setCreatedItems(created);
       }
 
-      const assistantMessage: ChatMessage = {
-        role: "assistant",
-        content: response.content,
-      };
+      // Add final message to conversation store
+      if (accumulatedContent) {
+        addMessage({
+          role: "assistant",
+          content: accumulatedContent,
+        });
+      }
 
-      addMessage(assistantMessage);
-
-      // Calculate stats
-      const tokensUsed = response.tokensUsed || undefined;
+      // Update final stats
       const tokensPerSecond = tokensUsed && elapsedMs > 0
         ? Math.round((tokensUsed / elapsedMs) * 1000)
         : undefined;
 
-      // Add to display messages with thinking and stats
-      setDisplayMessages(prev => [...prev, {
-        role: "assistant",
-        content: response.content,
-        thinking: response.thinking || undefined,
-        stats: {
-          elapsedMs,
-          tokensUsed,
-          tokensPerSecond,
-          model: response.model,
-        },
-      }]);
+      console.log("[AI Stream] Setting stats - elapsedMs:", elapsedMs, "tokensUsed:", tokensUsed, "tokensPerSecond:", tokensPerSecond, "model:", responseModel);
+
+      setDisplayMessages(prev => {
+        const newMessages = [...prev];
+        console.log("[AI Stream] Updating message at index:", assistantMsgIndex, "total messages:", newMessages.length);
+        if (newMessages[assistantMsgIndex]) {
+          newMessages[assistantMsgIndex] = {
+            ...newMessages[assistantMsgIndex],
+            content: accumulatedContent,
+            thinking: accumulatedThinking || undefined,
+            stats: {
+              elapsedMs,
+              tokensUsed: tokensUsed || undefined,
+              tokensPerSecond,
+              model: responseModel || undefined,
+            },
+          };
+        } else {
+          console.log("[AI Stream] ERROR: No message at index", assistantMsgIndex);
+        }
+        return newMessages;
+      });
     } catch (error) {
       console.error("AI chat error:", error);
       const elapsedMs = Date.now() - startTime;
@@ -306,14 +402,25 @@ export function AIChatPanel({ isOpen, onClose, onOpenSettings }: AIChatPanelProp
         role: "assistant",
         content: errorMessage,
       });
-      setDisplayMessages(prev => [...prev, {
-        role: "assistant",
-        content: errorMessage,
-        stats: { elapsedMs },
-      }]);
+      setDisplayMessages(prev => {
+        const newMessages = [...prev];
+        if (newMessages[assistantMsgIndex]) {
+          newMessages[assistantMsgIndex] = {
+            ...newMessages[assistantMsgIndex],
+            content: errorMessage,
+            stats: { elapsedMs },
+          };
+        }
+        return newMessages;
+      });
     } finally {
+      // Clean up the event listener
+      if (unlisten) {
+        unlisten();
+      }
       setLoading(false);
       setStatusText("");
+      isStreamingRef.current = false; // Allow useEffect to sync again
     }
   };
 
