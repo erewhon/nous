@@ -42,10 +42,10 @@ Already implemented with Tantivy, may need refinement:
 ### 2. Wiki-link Support
 - [x] Parse `[[page-name]]` links in editor content
 - [x] Backlinks panel (pages that link to current page)
-- [ ] Fix click-to-navigate (handler bug)
-- [ ] Link autocomplete when typing `[[`
-- [ ] Broken link detection (visual styling)
-- [ ] Create page from broken link click
+- [x] Click-to-navigate (delegated event handler)
+- [x] Link autocomplete when typing `[[`
+- [x] Broken link detection (visual styling)
+- [x] Create page from broken link click
 
 ### 3. Keyboard Shortcuts
 - [x] `Cmd+N` - New page

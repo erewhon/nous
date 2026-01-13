@@ -110,6 +110,32 @@ export function BlockEditor({
     };
   }, [pages]);
 
+  // Handle wiki-link clicks via event delegation
+  // This ensures links loaded from saved content also work
+  useEffect(() => {
+    if (!containerRef.current || !onLinkClick) return;
+
+    const handleWikiLinkClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      const wikiLink = target.closest("wiki-link");
+
+      if (wikiLink) {
+        e.preventDefault();
+        e.stopPropagation();
+        const pageTitle = wikiLink.getAttribute("data-page-title");
+        if (pageTitle) {
+          onLinkClick(pageTitle);
+        }
+      }
+    };
+
+    containerRef.current.addEventListener("click", handleWikiLinkClick);
+
+    return () => {
+      containerRef.current?.removeEventListener("click", handleWikiLinkClick);
+    };
+  }, [onLinkClick]);
+
   // Handle autocomplete link insertion (trigger save)
   const handleInsertLink = useCallback(() => {
     // Trigger a save after link insertion
