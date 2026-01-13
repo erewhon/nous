@@ -25,11 +25,17 @@ interface CreatedItem {
   notebookName?: string;
 }
 
-// Extended message with optional thinking
+// Extended message with optional thinking and stats
 interface DisplayMessage {
   role: "user" | "assistant" | "system";
   content: string;
   thinking?: string;
+  stats?: {
+    elapsedMs: number;
+    tokensUsed?: number;
+    tokensPerSecond?: number;
+    model?: string;
+  };
 }
 
 export function AIChatPanel({ isOpen, onClose, onOpenSettings }: AIChatPanelProps) {
@@ -209,13 +215,18 @@ export function AIChatPanel({ isOpen, onClose, onOpenSettings }: AIChatPanelProp
       content: input.trim(),
     };
 
-    // Add user message immediately and scroll
+    // Add user message immediately
     addMessage(userMessage);
     setDisplayMessages(prev => [...prev, { role: "user", content: userMessage.content }]);
     setInput("");
     setLoading(true);
-    setStatusText("Thinking...");
+    setStatusText("Sending request...");
     setCreatedItems([]); // Clear previous created items
+
+    // Yield to event loop to allow UI to update before blocking call
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    const startTime = Date.now();
 
     try {
       // Build page context if a page is selected
@@ -237,6 +248,9 @@ export function AIChatPanel({ isOpen, onClose, onOpenSettings }: AIChatPanelProp
       }));
 
       setStatusText("Waiting for AI response...");
+      // Yield again to show status update
+      await new Promise(resolve => setTimeout(resolve, 0));
+
       const response = await aiChatWithTools(userMessage.content, {
         pageContext,
         conversationHistory: conversation.messages.slice(-10), // Last 10 messages
@@ -249,9 +263,12 @@ export function AIChatPanel({ isOpen, onClose, onOpenSettings }: AIChatPanelProp
         maxTokens: settings.maxTokens,
       });
 
+      const elapsedMs = Date.now() - startTime;
+
       // Execute any actions returned by the AI
       if (response.actions && response.actions.length > 0) {
         setStatusText("Creating notebooks and pages...");
+        await new Promise(resolve => setTimeout(resolve, 0));
         const created = await executeActions(response.actions);
         setCreatedItems(created);
       }
@@ -263,20 +280,37 @@ export function AIChatPanel({ isOpen, onClose, onOpenSettings }: AIChatPanelProp
 
       addMessage(assistantMessage);
 
-      // Add to display messages with thinking
+      // Calculate stats
+      const tokensUsed = response.tokensUsed || undefined;
+      const tokensPerSecond = tokensUsed && elapsedMs > 0
+        ? Math.round((tokensUsed / elapsedMs) * 1000)
+        : undefined;
+
+      // Add to display messages with thinking and stats
       setDisplayMessages(prev => [...prev, {
         role: "assistant",
         content: response.content,
         thinking: response.thinking || undefined,
+        stats: {
+          elapsedMs,
+          tokensUsed,
+          tokensPerSecond,
+          model: response.model,
+        },
       }]);
     } catch (error) {
       console.error("AI chat error:", error);
+      const elapsedMs = Date.now() - startTime;
       const errorMessage = `Error: ${error instanceof Error ? error.message : "Failed to get response"}`;
       addMessage({
         role: "assistant",
         content: errorMessage,
       });
-      setDisplayMessages(prev => [...prev, { role: "assistant", content: errorMessage }]);
+      setDisplayMessages(prev => [...prev, {
+        role: "assistant",
+        content: errorMessage,
+        stats: { elapsedMs },
+      }]);
     } finally {
       setLoading(false);
       setStatusText("");
@@ -519,6 +553,38 @@ export function AIChatPanel({ isOpen, onClose, onOpenSettings }: AIChatPanelProp
                       </div>
                     )}
                   </div>
+                  {/* Stats for assistant messages */}
+                  {msg.role === "assistant" && msg.stats && (
+                    <div
+                      className="mt-2 flex flex-wrap items-center gap-2 text-xs"
+                      style={{ color: "var(--color-text-muted)" }}
+                    >
+                      <span className="flex items-center gap-1">
+                        <IconClock style={{ width: 10, height: 10 }} />
+                        {(msg.stats.elapsedMs / 1000).toFixed(1)}s
+                      </span>
+                      {msg.stats.tokensUsed && (
+                        <span className="flex items-center gap-1">
+                          <IconHash style={{ width: 10, height: 10 }} />
+                          {msg.stats.tokensUsed} tokens
+                        </span>
+                      )}
+                      {msg.stats.tokensPerSecond && (
+                        <span className="flex items-center gap-1">
+                          <IconZap style={{ width: 10, height: 10 }} />
+                          {msg.stats.tokensPerSecond} tok/s
+                        </span>
+                      )}
+                      {msg.stats.model && (
+                        <span
+                          className="rounded-full px-2 py-0.5"
+                          style={{ backgroundColor: "var(--color-bg-tertiary)" }}
+                        >
+                          {msg.stats.model}
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             ))}
@@ -851,6 +917,67 @@ function IconChevron({ style }: { style?: React.CSSProperties }) {
       style={style}
     >
       <path d="m6 9 6 6 6-6" />
+    </svg>
+  );
+}
+
+function IconClock({ style }: { style?: React.CSSProperties }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={style}
+    >
+      <circle cx="12" cy="12" r="10" />
+      <polyline points="12 6 12 12 16 14" />
+    </svg>
+  );
+}
+
+function IconHash({ style }: { style?: React.CSSProperties }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={style}
+    >
+      <line x1="4" x2="20" y1="9" y2="9" />
+      <line x1="4" x2="20" y1="15" y2="15" />
+      <line x1="10" x2="8" y1="3" y2="21" />
+      <line x1="16" x2="14" y1="3" y2="21" />
+    </svg>
+  );
+}
+
+function IconZap({ style }: { style?: React.CSSProperties }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={style}
+    >
+      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
     </svg>
   );
 }
