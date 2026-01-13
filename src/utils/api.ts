@@ -171,6 +171,77 @@ export async function aiSuggestTags(
   });
 }
 
+export interface PageInfo {
+  id: string;
+  title: string;
+  summary?: string;
+}
+
+export interface RelatedPageSuggestion {
+  id: string;
+  title: string;
+  reason: string;
+}
+
+export async function aiSuggestRelatedPages(
+  content: string,
+  title: string,
+  availablePages: PageInfo[],
+  options?: {
+    existingLinks?: string[];
+    maxSuggestions?: number;
+    providerType?: string;
+    apiKey?: string;
+    model?: string;
+  }
+): Promise<RelatedPageSuggestion[]> {
+  return invoke<RelatedPageSuggestion[]>("ai_suggest_related_pages", {
+    content,
+    title,
+    availablePages,
+    existingLinks: options?.existingLinks,
+    maxSuggestions: options?.maxSuggestions,
+    providerType: options?.providerType,
+    apiKey: options?.apiKey,
+    model: options?.model,
+  });
+}
+
+// ===== Tag Management API =====
+
+export interface TagInfo {
+  name: string;
+  count: number;
+}
+
+export async function getAllTags(): Promise<TagInfo[]> {
+  return invoke<TagInfo[]>("get_all_tags");
+}
+
+export async function getNotebookTags(notebookId: string): Promise<TagInfo[]> {
+  return invoke<TagInfo[]>("get_notebook_tags", { notebookId });
+}
+
+export async function renameTag(
+  notebookId: string,
+  oldTag: string,
+  newTag: string
+): Promise<number> {
+  return invoke<number>("rename_tag", { notebookId, oldTag, newTag });
+}
+
+export async function mergeTags(
+  notebookId: string,
+  tagsToMerge: string[],
+  targetTag: string
+): Promise<number> {
+  return invoke<number>("merge_tags", { notebookId, tagsToMerge, targetTag });
+}
+
+export async function deleteTag(notebookId: string, tag: string): Promise<number> {
+  return invoke<number>("delete_tag", { notebookId, tag });
+}
+
 // ===== Markdown Import/Export API =====
 
 export async function exportPageToMarkdown(

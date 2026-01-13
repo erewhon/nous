@@ -6,6 +6,8 @@ import { AIChatPanel } from "./components/AI";
 import { WebResearchPanel } from "./components/WebResearch";
 import { SettingsDialog } from "./components/Settings";
 import { ConfirmDialog } from "./components/ConfirmDialog";
+import { TemplateDialog } from "./components/TemplateDialog";
+import { TagManager } from "./components/Tags";
 import { useAppInit } from "./hooks/useAppInit";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useNotebookStore } from "./stores/notebookStore";
@@ -23,18 +25,20 @@ function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [settingsTab, setSettingsTab] = useState<"ai" | "web-research">("ai");
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showTemplateDialog, setShowTemplateDialog] = useState(false);
+  const [showTagManager, setShowTagManager] = useState(false);
 
   const { selectedNotebookId, createNotebook } = useNotebookStore();
-  const { pages, selectedPageId, createPage, selectPage, deletePage, duplicatePage } = usePageStore();
+  const { pages, selectedPageId, selectPage, deletePage, duplicatePage } = usePageStore();
 
   // Get the selected page
   const selectedPage = pages.find((p) => p.id === selectedPageId);
 
   const handleNewPage = useCallback(() => {
     if (selectedNotebookId) {
-      createPage(selectedNotebookId, "Untitled");
+      setShowTemplateDialog(true);
     }
-  }, [selectedNotebookId, createPage]);
+  }, [selectedNotebookId]);
 
   const handleNewNotebook = useCallback(() => {
     createNotebook("New Notebook");
@@ -98,6 +102,7 @@ function App() {
     onExportPage: handleExportPage,
     onDuplicatePage: handleDuplicatePage,
     onDeletePage: handleDeletePage,
+    onTagManager: () => setShowTagManager((prev) => !prev),
   });
 
   return (
@@ -109,6 +114,7 @@ function App() {
         isOpen={showCommandPalette}
         onClose={() => setShowCommandPalette(false)}
         onOpenGraph={() => setShowGraph(true)}
+        onNewPage={handleNewPage}
       />
 
       {/* Graph View */}
@@ -150,6 +156,20 @@ function App() {
         variant="danger"
         onConfirm={handleConfirmDelete}
         onCancel={() => setShowDeleteConfirm(false)}
+      />
+
+      {/* Template Selection Dialog */}
+      <TemplateDialog
+        isOpen={showTemplateDialog}
+        onClose={() => setShowTemplateDialog(false)}
+        notebookId={selectedNotebookId}
+      />
+
+      {/* Tag Manager Dialog */}
+      <TagManager
+        isOpen={showTagManager}
+        onClose={() => setShowTagManager(false)}
+        notebookId={selectedNotebookId}
       />
     </>
   );

@@ -245,4 +245,151 @@ impl FileStorage {
         fs::remove_file(&page_path)?;
         Ok(())
     }
+
+    // ===== Tag Operations =====
+
+    /// Get all unique tags across all notebooks with their counts
+    pub fn get_all_tags(&self) -> Result<Vec<(String, usize)>> {
+        let mut tag_counts: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
+
+        let notebooks = self.list_notebooks()?;
+
+        for notebook in notebooks {
+            let pages = self.list_pages(notebook.id)?;
+            for page in pages {
+                for tag in page.tags {
+                    let normalized = tag.to_lowercase().trim().to_string();
+                    if !normalized.is_empty() {
+                        *tag_counts.entry(normalized).or_insert(0) += 1;
+                    }
+                }
+            }
+        }
+
+        let mut tags: Vec<(String, usize)> = tag_counts.into_iter().collect();
+        tags.sort_by(|a, b| b.1.cmp(&a.1)); // Sort by count descending
+        Ok(tags)
+    }
+
+    /// Get tags for a specific notebook
+    pub fn get_notebook_tags(&self, notebook_id: Uuid) -> Result<Vec<(String, usize)>> {
+        let mut tag_counts: std::collections::HashMap<String, usize> =
+            std::collections::HashMap::new();
+
+        let pages = self.list_pages(notebook_id)?;
+        for page in pages {
+            for tag in page.tags {
+                let normalized = tag.to_lowercase().trim().to_string();
+                if !normalized.is_empty() {
+                    *tag_counts.entry(normalized).or_insert(0) += 1;
+                }
+            }
+        }
+
+        let mut tags: Vec<(String, usize)> = tag_counts.into_iter().collect();
+        tags.sort_by(|a, b| b.1.cmp(&a.1));
+        Ok(tags)
+    }
+
+    /// Rename a tag across all pages in a notebook
+    pub fn rename_tag(&self, notebook_id: Uuid, old_tag: &str, new_tag: &str) -> Result<usize> {
+        let old_normalized = old_tag.to_lowercase().trim().to_string();
+        let new_tag_clean = new_tag.trim().to_string();
+        let mut count = 0;
+
+        let pages = self.list_pages(notebook_id)?;
+        for mut page in pages {
+            let mut modified = false;
+
+            page.tags = page
+                .tags
+                .into_iter()
+                .map(|t| {
+                    if t.to_lowercase().trim() == old_normalized {
+                        modified = true;
+                        new_tag_clean.clone()
+                    } else {
+                        t
+                    }
+                })
+                .collect();
+
+            if modified {
+                page.updated_at = chrono::Utc::now();
+                self.update_page(&page)?;
+                count += 1;
+            }
+        }
+
+        Ok(count)
+    }
+
+    /// Merge multiple tags into one across all pages in a notebook
+    pub fn merge_tags(
+        &self,
+        notebook_id: Uuid,
+        tags_to_merge: &[String],
+        target_tag: &str,
+    ) -> Result<usize> {
+        let normalized_sources: Vec<String> = tags_to_merge
+            .iter()
+            .map(|t| t.to_lowercase().trim().to_string())
+            .collect();
+        let target_clean = target_tag.trim().to_string();
+        let mut count = 0;
+
+        let pages = self.list_pages(notebook_id)?;
+        for mut page in pages {
+            let mut modified = false;
+            let mut has_target = false;
+            let mut new_tags: Vec<String> = Vec::new();
+
+            for tag in &page.tags {
+                let normalized = tag.to_lowercase().trim().to_string();
+                if normalized_sources.contains(&normalized) {
+                    if !has_target {
+                        new_tags.push(target_clean.clone());
+                        has_target = true;
+                    }
+                    modified = true;
+                } else if normalized == target_clean.to_lowercase() {
+                    has_target = true;
+                    new_tags.push(tag.clone());
+                } else {
+                    new_tags.push(tag.clone());
+                }
+            }
+
+            if modified {
+                page.tags = new_tags;
+                page.updated_at = chrono::Utc::now();
+                self.update_page(&page)?;
+                count += 1;
+            }
+        }
+
+        Ok(count)
+    }
+
+    /// Delete a tag from all pages in a notebook
+    pub fn delete_tag(&self, notebook_id: Uuid, tag: &str) -> Result<usize> {
+        let normalized = tag.to_lowercase().trim().to_string();
+        let mut count = 0;
+
+        let pages = self.list_pages(notebook_id)?;
+        for mut page in pages {
+            let original_len = page.tags.len();
+            page.tags
+                .retain(|t| t.to_lowercase().trim() != normalized);
+
+            if page.tags.len() != original_len {
+                page.updated_at = chrono::Utc::now();
+                self.update_page(&page)?;
+                count += 1;
+            }
+        }
+
+        Ok(count)
+    }
 }

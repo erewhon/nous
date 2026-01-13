@@ -8,16 +8,19 @@ import {
 } from "react";
 import { useNotebookStore } from "../../stores/notebookStore";
 import { usePageStore } from "../../stores/pageStore";
+import { useSearchStore } from "../../stores/searchStore";
 import { searchPages, exportPageToFile, importMarkdownFile } from "../../utils/api";
 import { save, open } from "@tauri-apps/plugin-dialog";
+import { highlightText } from "../../utils/highlightText";
 import type { SearchResult } from "../../types/page";
 
 interface Command {
   id: string;
   title: string;
   subtitle?: string;
+  snippet?: string;
   icon: React.ReactNode;
-  category: "page" | "action" | "notebook" | "search";
+  category: "page" | "action" | "notebook" | "search" | "recent";
   action: () => void;
   keywords?: string[];
   score?: number;
@@ -27,12 +30,14 @@ interface CommandPaletteProps {
   isOpen: boolean;
   onClose: () => void;
   onOpenGraph: () => void;
+  onNewPage?: () => void;
 }
 
 export function CommandPalette({
   isOpen,
   onClose,
   onOpenGraph,
+  onNewPage,
 }: CommandPaletteProps) {
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -45,6 +50,8 @@ export function CommandPalette({
   const { notebooks, selectedNotebookId, selectNotebook, createNotebook } =
     useNotebookStore();
   const { pages, selectPage, createPage } = usePageStore();
+  const { recentSearches, searchScope, addRecentSearch, setSearchScope, clearRecentSearches } =
+    useSearchStore();
 
   // Debounced search
   useEffect(() => {
@@ -61,8 +68,15 @@ export function CommandPalette({
     setIsSearching(true);
     searchTimeoutRef.current = setTimeout(async () => {
       try {
-        const results = await searchPages(query, 20);
-        setSearchResults(results);
+        const results = await searchPages(query, 50);
+        // Filter by notebook scope if set to "current"
+        const filtered =
+          searchScope === "current" && selectedNotebookId
+            ? results.filter((r) => r.notebookId === selectedNotebookId)
+            : results;
+        setSearchResults(filtered.slice(0, 20));
+        // Save to recent searches
+        addRecentSearch(query);
       } catch (error) {
         console.error("Search error:", error);
         setSearchResults([]);
@@ -76,7 +90,7 @@ export function CommandPalette({
         clearTimeout(searchTimeoutRef.current);
       }
     };
-  }, [query]);
+  }, [query, searchScope, selectedNotebookId, addRecentSearch]);
 
   // Build commands list
   const commands = useMemo<Command[]>(() => {
@@ -91,8 +105,14 @@ export function CommandPalette({
       category: "action",
       action: () => {
         if (selectedNotebookId) {
-          createPage(selectedNotebookId, "Untitled");
           onClose();
+          // Use onNewPage callback if provided (opens template dialog)
+          // Otherwise fall back to direct creation
+          if (onNewPage) {
+            onNewPage();
+          } else {
+            createPage(selectedNotebookId, "Untitled");
+          }
         }
       },
       keywords: ["create", "add", "page"],
@@ -219,6 +239,7 @@ export function CommandPalette({
     createNotebook,
     onClose,
     onOpenGraph,
+    onNewPage,
     query,
   ]);
 
@@ -231,6 +252,7 @@ export function CommandPalette({
       id: `search-${result.pageId}`,
       title: result.title || "Untitled",
       subtitle: notebookMap.get(result.notebookId) || "Unknown notebook",
+      snippet: result.snippet,
       icon: <IconSearch style={{ color: "var(--color-accent)" }} />,
       category: "search" as const,
       score: result.score,
@@ -244,6 +266,22 @@ export function CommandPalette({
       },
     }));
   }, [searchResults, notebooks, selectedNotebookId, selectNotebook, selectPage, onClose]);
+
+  // Recent searches as commands
+  const recentCommands = useMemo<Command[]>(() => {
+    if (query.trim()) return []; // Don't show recent when actively searching
+
+    return recentSearches.slice(0, 5).map((search, index) => ({
+      id: `recent-${index}`,
+      title: search,
+      subtitle: "Recent search",
+      icon: <IconHistory />,
+      category: "recent" as const,
+      action: () => {
+        setQuery(search);
+      },
+    }));
+  }, [recentSearches, query]);
 
   // Filter commands based on query
   const filteredCommands = useMemo(() => {
@@ -262,20 +300,25 @@ export function CommandPalette({
     });
   }, [commands, query]);
 
-  // Combine filtered commands with search results
+  // Combine filtered commands with search results and recent searches
   const allCommands = useMemo(() => {
-    return [...filteredCommands, ...searchCommands];
-  }, [filteredCommands, searchCommands]);
+    return [...recentCommands, ...filteredCommands, ...searchCommands];
+  }, [recentCommands, filteredCommands, searchCommands]);
 
   // Group filtered commands by category
   const groupedCommands = useMemo(() => {
     const groups: { category: string; commands: Command[] }[] = [];
 
+    const recentMatches = allCommands.filter((c) => c.category === "recent");
     const searchMatches = allCommands.filter((c) => c.category === "search");
     const actions = allCommands.filter((c) => c.category === "action");
     const pageResults = allCommands.filter((c) => c.category === "page");
     const notebookResults = allCommands.filter((c) => c.category === "notebook");
 
+    // Show recent searches when there's no query
+    if (recentMatches.length > 0) {
+      groups.push({ category: "Recent Searches", commands: recentMatches });
+    }
     // Show search results first when there's a query
     if (searchMatches.length > 0) {
       groups.push({ category: "Search Results", commands: searchMatches });
@@ -403,6 +446,54 @@ export function CommandPalette({
           </kbd>
         </div>
 
+        {/* Scope filter */}
+        <div
+          className="flex items-center gap-2 border-b px-5 py-2"
+          style={{ borderColor: "var(--color-border)" }}
+        >
+          <span
+            className="text-xs"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            Search in:
+          </span>
+          <button
+            onClick={() => setSearchScope("all")}
+            className="rounded-full text-xs px-3 py-1 transition-colors"
+            style={{
+              backgroundColor:
+                searchScope === "all"
+                  ? "var(--color-accent)"
+                  : "var(--color-bg-tertiary)",
+              color: searchScope === "all" ? "white" : "var(--color-text-secondary)",
+            }}
+          >
+            All notebooks
+          </button>
+          <button
+            onClick={() => setSearchScope("current")}
+            className="rounded-full text-xs px-3 py-1 transition-colors"
+            style={{
+              backgroundColor:
+                searchScope === "current"
+                  ? "var(--color-accent)"
+                  : "var(--color-bg-tertiary)",
+              color: searchScope === "current" ? "white" : "var(--color-text-secondary)",
+            }}
+          >
+            Current notebook
+          </button>
+          {recentSearches.length > 0 && !query.trim() && (
+            <button
+              onClick={clearRecentSearches}
+              className="ml-auto text-xs transition-colors hover:opacity-80"
+              style={{ color: "var(--color-text-muted)" }}
+            >
+              Clear history
+            </button>
+          )}
+        </div>
+
         {/* Results */}
         <div
           ref={listRef}
@@ -428,6 +519,7 @@ export function CommandPalette({
                   flatIndex++;
                   const currentIndex = flatIndex;
                   const isSelected = selectedIndex === currentIndex;
+                  const isSearchResult = cmd.category === "search";
                   return (
                     <button
                       key={cmd.id}
@@ -441,14 +533,26 @@ export function CommandPalette({
                       }}
                     >
                       <span
+                        className="flex-shrink-0"
                         style={{
                           color: isSelected ? "rgba(255,255,255,0.8)" : "var(--color-text-muted)",
                         }}
                       >
                         {cmd.icon}
                       </span>
-                      <div className="flex-1 truncate">
-                        <div className="truncate font-medium">{cmd.title}</div>
+                      <div className="flex-1 min-w-0">
+                        <div className="truncate font-medium">
+                          {isSearchResult && query.trim()
+                            ? highlightText(cmd.title, query, {
+                                backgroundColor: isSelected
+                                  ? "rgba(255,255,255,0.3)"
+                                  : "rgba(139, 92, 246, 0.3)",
+                                color: "inherit",
+                                borderRadius: "2px",
+                                padding: "0 2px",
+                              })
+                            : cmd.title}
+                        </div>
                         {cmd.subtitle && (
                           <div
                             className="truncate text-xs"
@@ -459,10 +563,29 @@ export function CommandPalette({
                             {cmd.subtitle}
                           </div>
                         )}
+                        {cmd.snippet && (
+                          <div
+                            className="truncate text-xs mt-0.5"
+                            style={{
+                              color: isSelected ? "rgba(255,255,255,0.6)" : "var(--color-text-muted)",
+                            }}
+                          >
+                            {query.trim()
+                              ? highlightText(cmd.snippet, query, {
+                                  backgroundColor: isSelected
+                                    ? "rgba(255,255,255,0.3)"
+                                    : "rgba(139, 92, 246, 0.3)",
+                                  color: "inherit",
+                                  borderRadius: "2px",
+                                  padding: "0 2px",
+                                })
+                              : cmd.snippet}
+                          </div>
+                        )}
                       </div>
                       {cmd.score !== undefined && (
                         <span
-                          className="text-xs"
+                          className="flex-shrink-0 text-xs"
                           style={{
                             color: isSelected ? "rgba(255,255,255,0.5)" : "var(--color-text-muted)",
                           }}
@@ -693,6 +816,26 @@ function IconImport() {
       <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
       <polyline points="7 10 12 15 17 10" />
       <line x1="12" y1="15" x2="12" y2="3" />
+    </svg>
+  );
+}
+
+function IconHistory() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+      <path d="M3 3v5h5" />
+      <path d="M12 7v5l4 2" />
     </svg>
   );
 }

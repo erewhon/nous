@@ -27,10 +27,10 @@
 
 ### 1. Full-text Search Polish
 Already implemented with Tantivy, may need refinement:
-- [ ] Search result highlighting
-- [ ] Search within current notebook vs. all notebooks
-- [ ] Recent searches history
-- [ ] Search filters (by date, tags, notebook)
+- [x] Search result highlighting
+- [x] Search within current notebook vs. all notebooks
+- [x] Recent searches history
+- [x] Search filters (by notebook scope)
 
 ### 2. Wiki-link Support
 - [x] Parse `[[page-name]]` links in editor content
@@ -52,23 +52,25 @@ Already implemented with Tantivy, may need refinement:
 ## Medium-term
 
 ### 4. Smart Tagging
-- [ ] AI-powered tag suggestions based on content
-- [ ] Tag management UI (rename, merge, delete)
-- [ ] Tag cloud visualization
-- [ ] Filter pages by tag
+- [x] AI-powered tag suggestions based on content
+- [x] Tag management UI (rename, merge, delete)
+- [x] Tag cloud visualization
+- [x] Filter pages by tag
 
 ### 5. Auto-link Suggestions
-- [ ] AI analyzes page content for Zettelkasten connections
-- [ ] Suggest related pages to link
-- [ ] "Similar pages" panel
-- [ ] Graph view enhancements
+- [x] AI analyzes page content for Zettelkasten connections
+- [x] Suggest related pages to link
+- [x] "Similar pages" panel
+- [x] Graph view enhancements
 
 ### 6. Page Templates
-- [ ] Meeting notes template
-- [ ] Daily journal template
-- [ ] Project template
-- [ ] Custom user templates
-- [ ] Template selection on new page
+- [x] Meeting notes template
+- [x] Daily journal template
+- [x] Project template
+- [x] Reading notes template
+- [x] Blank page template
+- [x] Template selection on new page (Cmd+N)
+- [x] Custom user templates (save current page as template)
 
 ### 7. Backup & Restore
 - [ ] Export entire notebook as ZIP

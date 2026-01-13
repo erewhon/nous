@@ -11,6 +11,7 @@ interface KeyboardShortcuts {
   onExportPage?: () => void;
   onDuplicatePage?: () => void;
   onDeletePage?: () => void;
+  onTagManager?: () => void;
 }
 
 export function useKeyboardShortcuts({
@@ -24,6 +25,7 @@ export function useKeyboardShortcuts({
   onExportPage,
   onDuplicatePage,
   onDeletePage,
+  onTagManager,
 }: KeyboardShortcuts) {
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
@@ -98,8 +100,15 @@ export function useKeyboardShortcuts({
         onDeletePage?.();
         return;
       }
+
+      // Tag Manager: Cmd+T / Ctrl+T
+      if (isMod && e.key === "t" && !e.shiftKey) {
+        e.preventDefault();
+        onTagManager?.();
+        return;
+      }
     },
-    [onCommandPalette, onNewPage, onNewNotebook, onGraph, onAI, onWebResearch, onSettings, onExportPage, onDuplicatePage, onDeletePage]
+    [onCommandPalette, onNewPage, onNewNotebook, onGraph, onAI, onWebResearch, onSettings, onExportPage, onDuplicatePage, onDeletePage, onTagManager]
   );
 
   useEffect(() => {

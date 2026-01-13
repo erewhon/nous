@@ -128,6 +128,24 @@ pub struct ResearchSummary {
     pub suggested_tags: Vec<String>,
 }
 
+/// Page info for related pages suggestions
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PageInfo {
+    pub id: String,
+    pub title: String,
+    pub summary: Option<String>,
+}
+
+/// Related page suggestion from AI
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RelatedPageSuggestion {
+    pub id: String,
+    pub title: String,
+    pub reason: String,
+}
+
 /// Python AI bridge for calling Python functions
 pub struct PythonAI {
     katt_py_path: PathBuf,
@@ -394,6 +412,69 @@ impl PythonAI {
             let tags: Vec<String> = result.extract()?;
 
             Ok(tags)
+        })
+    }
+
+    /// Suggest related pages to link based on content analysis
+    pub fn suggest_related_pages(
+        &self,
+        content: String,
+        title: String,
+        available_pages: Vec<PageInfo>,
+        existing_links: Option<Vec<String>>,
+        max_suggestions: Option<i64>,
+        config: AIConfig,
+    ) -> Result<Vec<RelatedPageSuggestion>> {
+        Python::attach(|py| {
+            self.setup_python_path(py)?;
+
+            let chat_module = py.import("katt_ai.chat")?;
+            let suggest_fn = chat_module.getattr("suggest_related_pages_sync")?;
+
+            // Convert available_pages to Python list of dicts
+            let py_pages = PyList::empty(py);
+            for page in available_pages {
+                let dict = PyDict::new(py);
+                dict.set_item("id", page.id)?;
+                dict.set_item("title", page.title)?;
+                if let Some(summary) = page.summary {
+                    dict.set_item("summary", summary)?;
+                }
+                py_pages.append(dict)?;
+            }
+
+            let kwargs = PyDict::new(py);
+            kwargs.set_item("content", content)?;
+            kwargs.set_item("title", title)?;
+            kwargs.set_item("available_pages", py_pages)?;
+            kwargs.set_item("provider_type", config.provider_type)?;
+
+            if let Some(links) = existing_links {
+                kwargs.set_item("existing_links", links)?;
+            }
+            if let Some(max) = max_suggestions {
+                kwargs.set_item("max_suggestions", max)?;
+            }
+            if let Some(api_key) = config.api_key {
+                kwargs.set_item("api_key", api_key)?;
+            }
+            if let Some(model) = config.model {
+                kwargs.set_item("model", model)?;
+            }
+
+            let result = suggest_fn.call((), Some(&kwargs))?;
+            let suggestions_list: Vec<HashMap<String, Py<PyAny>>> = result.extract()?;
+
+            let suggestions: Vec<RelatedPageSuggestion> = suggestions_list
+                .into_iter()
+                .map(|s| RelatedPageSuggestion {
+                    id: s.get("id").and_then(|v| v.extract::<String>(py).ok()).unwrap_or_default(),
+                    title: s.get("title").and_then(|v| v.extract::<String>(py).ok()).unwrap_or_default(),
+                    reason: s.get("reason").and_then(|v| v.extract::<String>(py).ok()).unwrap_or_default(),
+                })
+                .collect();
+
+            Ok(suggestions)
         })
     }
 

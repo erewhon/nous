@@ -7,6 +7,7 @@ import { PageList } from "./PageList";
 import { BlockEditor } from "./BlockEditor";
 import { PageHeader } from "./PageHeader";
 import { BacklinksPanel } from "./BacklinksPanel";
+import { SimilarPagesPanel } from "./SimilarPagesPanel";
 import type { EditorData } from "../../types/page";
 import "./editor-styles.css";
 
@@ -213,6 +214,13 @@ export function EditorArea() {
                 <BacklinksPanel
                   pageTitle={selectedPage.title}
                   notebookId={selectedNotebook.id}
+                />
+
+                {/* Similar Pages panel (AI-powered) */}
+                <SimilarPagesPanel
+                  page={selectedPage}
+                  notebookId={selectedNotebook.id}
+                  allPages={notebookPages}
                 />
               </div>
             </div>

@@ -82,3 +82,96 @@ Do not include any other text or explanation."""
         # Filter out existing tags and empty strings
         existing_set = set(existing_tags) if existing_tags else set()
         return [tag for tag in tags if tag and tag not in existing_set]
+
+    async def suggest_related_pages(
+        self,
+        content: str,
+        title: str,
+        available_pages: list[dict[str, str]],
+        existing_links: list[str] | None = None,
+        max_suggestions: int = 5,
+    ) -> list[dict[str, str]]:
+        """Suggest related pages to link based on content similarity.
+
+        Args:
+            content: Content of the current page.
+            title: Title of the current page.
+            available_pages: List of dicts with 'id', 'title', and optionally 'summary' keys.
+            existing_links: Page titles already linked from the current page.
+            max_suggestions: Maximum number of suggestions to return.
+
+        Returns:
+            List of dicts with 'id', 'title', and 'reason' keys for suggested pages.
+        """
+        if not available_pages:
+            return []
+
+        existing_set = set(existing_links) if existing_links else set()
+        # Filter out current page and already linked pages
+        candidates = [
+            p for p in available_pages
+            if p["title"].lower() != title.lower()
+            and p["title"] not in existing_set
+        ]
+
+        if not candidates:
+            return []
+
+        # Build page list for the prompt
+        page_list = "\n".join(
+            f"- {p['title']}" + (f": {p.get('summary', '')[:100]}" if p.get('summary') else "")
+            for p in candidates[:50]  # Limit to avoid token overflow
+        )
+
+        system = f"""You are a helpful assistant that suggests relevant wiki-links for a Zettelkasten-style notebook.
+Analyze the content and suggest up to {max_suggestions} pages from the available list that would be valuable to link.
+Consider:
+- Conceptual relationships and shared topics
+- Pages that expand on ideas mentioned in the content
+- Pages that provide background context
+- Pages that reference similar concepts
+
+Return your response as a JSON array of objects with "title" and "reason" keys.
+Only suggest pages from the provided list. Return an empty array if no good matches exist.
+Example: [{{"title": "Page Title", "reason": "Brief explanation of the connection"}}]"""
+
+        prompt = f"""Current page: {title}
+
+Content:
+{content[:2000]}
+
+Available pages to link:
+{page_list}
+
+Suggest the most relevant pages to link from the current page."""
+
+        response = await self.complete(prompt, system=system)
+
+        # Parse JSON response
+        try:
+            import json
+            # Try to extract JSON from the response
+            text = response.content.strip()
+            # Handle potential markdown code blocks
+            if text.startswith("```"):
+                text = text.split("```")[1]
+                if text.startswith("json"):
+                    text = text[4:]
+            suggestions = json.loads(text)
+
+            # Match suggestions to available pages (to get IDs)
+            title_to_page = {p["title"].lower(): p for p in candidates}
+            results = []
+            for s in suggestions[:max_suggestions]:
+                title_lower = s.get("title", "").lower()
+                if title_lower in title_to_page:
+                    page = title_to_page[title_lower]
+                    results.append({
+                        "id": page["id"],
+                        "title": page["title"],
+                        "reason": s.get("reason", "Related content"),
+                    })
+            return results
+        except (json.JSONDecodeError, KeyError, TypeError):
+            # If parsing fails, return empty list
+            return []

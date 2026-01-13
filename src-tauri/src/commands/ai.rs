@@ -2,7 +2,7 @@
 
 use tauri::State;
 
-use crate::python_bridge::{AIConfig, ChatMessage, ChatResponse, PageContext};
+use crate::python_bridge::{AIConfig, ChatMessage, ChatResponse, PageContext, PageInfo, RelatedPageSuggestion};
 use crate::AppState;
 
 use super::notebook::CommandError;
@@ -123,5 +123,37 @@ pub fn ai_suggest_tags(
         .suggest_tags(content, existing_tags, config)
         .map_err(|e| CommandError {
             message: format!("AI tag suggestion error: {}", e),
+        })
+}
+
+/// Suggest related pages to link based on content analysis
+#[tauri::command]
+pub fn ai_suggest_related_pages(
+    state: State<AppState>,
+    content: String,
+    title: String,
+    available_pages: Vec<PageInfo>,
+    existing_links: Option<Vec<String>>,
+    max_suggestions: Option<i64>,
+    provider_type: Option<String>,
+    api_key: Option<String>,
+    model: Option<String>,
+) -> Result<Vec<RelatedPageSuggestion>, CommandError> {
+    let python_ai = state.python_ai.lock().map_err(|e| CommandError {
+        message: format!("Failed to acquire Python AI lock: {}", e),
+    })?;
+
+    let config = AIConfig {
+        provider_type: provider_type.unwrap_or_else(|| "openai".to_string()),
+        api_key,
+        model,
+        temperature: Some(0.3),
+        max_tokens: Some(1000),
+    };
+
+    python_ai
+        .suggest_related_pages(content, title, available_pages, existing_links, max_suggestions, config)
+        .map_err(|e| CommandError {
+            message: format!("AI related pages suggestion error: {}", e),
         })
 }

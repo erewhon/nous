@@ -1,5 +1,7 @@
+import { useState, useMemo, useEffect } from "react";
 import type { Page } from "../../types/page";
 import { usePageStore } from "../../stores/pageStore";
+import { useTagStore } from "../../stores/tagStore";
 
 interface PageListProps {
   pages: Page[];
@@ -15,6 +17,29 @@ export function PageList({
   notebookId,
 }: PageListProps) {
   const { createPage } = usePageStore();
+  const {
+    buildTagsFromPages,
+    getTagsByFrequency,
+    selectedTags,
+    toggleTagFilter,
+    clearTagFilter,
+    filterPagesByTags,
+  } = useTagStore();
+  const [showTagFilter, setShowTagFilter] = useState(false);
+
+  // Build tags from pages when pages change
+  useEffect(() => {
+    buildTagsFromPages(pages);
+  }, [pages, buildTagsFromPages]);
+
+  // Get tags sorted by frequency
+  const allTags = useMemo(() => getTagsByFrequency(), [getTagsByFrequency, pages]);
+
+  // Filter pages by selected tags
+  const filteredPages = useMemo(
+    () => filterPagesByTags(pages),
+    [filterPagesByTags, pages, selectedTags]
+  );
 
   return (
     <div className="flex h-full flex-col">
@@ -26,43 +51,168 @@ export function PageList({
         >
           Pages
         </span>
-        <button
-          onClick={() => createPage(notebookId, "Untitled")}
-          className="flex h-7 w-7 items-center justify-center rounded-lg transition-all"
-          style={{ color: "var(--color-text-muted)" }}
-          title="Create page"
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
+        <div className="flex items-center gap-1">
+          {/* Tag filter toggle */}
+          <button
+            onClick={() => setShowTagFilter(!showTagFilter)}
+            className="flex h-7 w-7 items-center justify-center rounded-lg transition-all"
+            style={{
+              color: selectedTags.length > 0 ? "var(--color-accent)" : "var(--color-text-muted)",
+              backgroundColor: selectedTags.length > 0 ? "rgba(139, 92, 246, 0.1)" : "transparent",
+            }}
+            title="Filter by tags"
           >
-            <path d="M12 5v14M5 12h14" />
-          </svg>
-        </button>
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" />
+              <line x1="7" y1="7" x2="7.01" y2="7" />
+            </svg>
+          </button>
+          {/* Create page button */}
+          <button
+            onClick={() => createPage(notebookId, "Untitled")}
+            className="flex h-7 w-7 items-center justify-center rounded-lg transition-all"
+            style={{ color: "var(--color-text-muted)" }}
+            title="Create page"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+          </button>
+        </div>
       </div>
+
+      {/* Tag filter section */}
+      {showTagFilter && (
+        <div
+          className="mx-4 mb-3 rounded-lg p-3"
+          style={{ backgroundColor: "var(--color-bg-tertiary)" }}
+        >
+          <div className="mb-2 flex items-center justify-between">
+            <span
+              className="text-xs font-medium"
+              style={{ color: "var(--color-text-muted)" }}
+            >
+              Filter by tags
+            </span>
+            {selectedTags.length > 0 && (
+              <button
+                onClick={clearTagFilter}
+                className="text-xs transition-colors hover:underline"
+                style={{ color: "var(--color-accent)" }}
+              >
+                Clear
+              </button>
+            )}
+          </div>
+          {allTags.length === 0 ? (
+            <span
+              className="text-xs"
+              style={{ color: "var(--color-text-muted)" }}
+            >
+              No tags yet
+            </span>
+          ) : (
+            <div className="flex flex-wrap gap-1">
+              {allTags.slice(0, 15).map((tag) => {
+                const isSelected = selectedTags.includes(tag.name.toLowerCase());
+                return (
+                  <button
+                    key={tag.name}
+                    onClick={() => toggleTagFilter(tag.name)}
+                    className="rounded-full px-2 py-0.5 text-xs transition-colors"
+                    style={{
+                      backgroundColor: isSelected
+                        ? "rgba(139, 92, 246, 0.3)"
+                        : "rgba(139, 92, 246, 0.1)",
+                      color: "var(--color-accent)",
+                      border: isSelected
+                        ? "1px solid var(--color-accent)"
+                        : "1px solid transparent",
+                    }}
+                  >
+                    {tag.name}
+                  </button>
+                );
+              })}
+              {allTags.length > 15 && (
+                <span
+                  className="px-2 py-0.5 text-xs"
+                  style={{ color: "var(--color-text-muted)" }}
+                >
+                  +{allTags.length - 15} more
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Active filter indicator */}
+      {selectedTags.length > 0 && !showTagFilter && (
+        <div className="mx-4 mb-2 flex items-center gap-2">
+          <span
+            className="text-xs"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            Filtered by:
+          </span>
+          {selectedTags.map((tag) => (
+            <span
+              key={tag}
+              className="rounded-full px-2 py-0.5 text-xs"
+              style={{
+                backgroundColor: "rgba(139, 92, 246, 0.15)",
+                color: "var(--color-accent)",
+              }}
+            >
+              {tag}
+            </span>
+          ))}
+          <button
+            onClick={clearTagFilter}
+            className="text-xs transition-colors hover:underline"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            Clear
+          </button>
+        </div>
+      )}
 
       {/* Page list */}
       <div className="flex-1 overflow-y-auto px-4 pb-4">
-        {pages.length === 0 ? (
+        {filteredPages.length === 0 ? (
           <div
             className="flex h-28 flex-col items-center justify-center gap-2 rounded-xl border border-dashed p-4 text-center"
             style={{ borderColor: "var(--color-border)" }}
           >
             <div className="text-xl opacity-50">📄</div>
             <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>
-              No pages yet
+              {selectedTags.length > 0 ? "No pages match selected tags" : "No pages yet"}
             </span>
           </div>
         ) : (
           <ul className="space-y-1">
-            {pages.map((page) => {
+            {filteredPages.map((page) => {
               const isSelected = selectedPageId === page.id;
               return (
                 <li key={page.id}>

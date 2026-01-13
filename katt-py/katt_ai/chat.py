@@ -188,6 +188,48 @@ async def suggest_page_tags(
     return await provider.suggest_tags(content, existing_tags)
 
 
+async def suggest_related_pages(
+    content: str,
+    title: str,
+    available_pages: list[dict[str, str]],
+    existing_links: list[str] | None = None,
+    max_suggestions: int = 5,
+    provider_type: str = "openai",
+    api_key: str | None = None,
+    model: str | None = None,
+) -> list[dict[str, str]]:
+    """Suggest related pages to link based on content analysis.
+
+    Uses AI to analyze the current page content and find conceptually
+    related pages from the available pages list.
+
+    Args:
+        content: The page content to analyze.
+        title: Title of the current page.
+        available_pages: List of dicts with 'id', 'title', and optionally 'summary' keys.
+        existing_links: Page titles already linked from the current page.
+        max_suggestions: Maximum number of suggestions to return.
+        provider_type: AI provider to use.
+        api_key: API key for the provider.
+        model: Model to use.
+
+    Returns:
+        List of dicts with 'id', 'title', and 'reason' keys for suggested pages.
+    """
+    config = ProviderConfig(
+        provider_type=ProviderType(provider_type),
+        api_key=api_key,
+        model=model or "",
+        temperature=0.3,  # Low temperature for consistent suggestions
+        max_tokens=1000,
+    )
+
+    provider = get_provider(config)
+    return await provider.suggest_related_pages(
+        content, title, available_pages, existing_links, max_suggestions
+    )
+
+
 # Synchronous wrappers for PyO3 (called from Rust)
 def chat_sync(
     messages: list[dict[str, str]],
@@ -247,3 +289,28 @@ def suggest_page_tags_sync(
 ) -> list[str]:
     """Synchronous wrapper for suggest_page_tags function."""
     return asyncio.run(suggest_page_tags(content, existing_tags, provider_type, api_key, model))
+
+
+def suggest_related_pages_sync(
+    content: str,
+    title: str,
+    available_pages: list[dict[str, str]],
+    existing_links: list[str] | None = None,
+    max_suggestions: int = 5,
+    provider_type: str = "openai",
+    api_key: str | None = None,
+    model: str | None = None,
+) -> list[dict[str, str]]:
+    """Synchronous wrapper for suggest_related_pages function."""
+    return asyncio.run(
+        suggest_related_pages(
+            content,
+            title,
+            available_pages,
+            existing_links,
+            max_suggestions,
+            provider_type,
+            api_key,
+            model,
+        )
+    )

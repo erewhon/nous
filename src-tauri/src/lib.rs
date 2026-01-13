@@ -76,6 +76,7 @@ pub fn run() {
             commands::ai_chat_with_context,
             commands::ai_summarize_page,
             commands::ai_suggest_tags,
+            commands::ai_suggest_related_pages,
             // Markdown commands
             commands::export_page_markdown,
             commands::import_markdown,
@@ -87,6 +88,12 @@ pub fn run() {
             commands::web_search,
             commands::scrape_url,
             commands::summarize_research,
+            // Tag management commands
+            commands::get_all_tags,
+            commands::get_notebook_tags,
+            commands::rename_tag,
+            commands::merge_tags,
+            commands::delete_tag,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
