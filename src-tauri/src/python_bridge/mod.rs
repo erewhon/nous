@@ -146,6 +146,35 @@ pub struct RelatedPageSuggestion {
     pub reason: String,
 }
 
+/// Notebook info for tool use context
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotebookInfo {
+    pub id: String,
+    pub name: String,
+}
+
+/// AI action from tool use
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AIAction {
+    pub tool: String,
+    pub arguments: serde_json::Value,
+    pub tool_call_id: String,
+}
+
+/// Response from AI chat with tool use
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatResponseWithActions {
+    pub content: String,
+    pub model: String,
+    pub provider: String,
+    pub tokens_used: Option<i64>,
+    pub finish_reason: Option<String>,
+    pub actions: Vec<AIAction>,
+}
+
 /// Python AI bridge for calling Python functions
 pub struct PythonAI {
     katt_py_path: PathBuf,
@@ -336,6 +365,153 @@ impl PythonAI {
                 finish_reason: result_dict
                     .get("finish_reason")
                     .and_then(|v| v.extract::<String>(py).ok()),
+            })
+        })
+    }
+
+    /// Chat with tools for creating notebooks/pages
+    pub fn chat_with_tools(
+        &self,
+        user_message: String,
+        page_context: Option<PageContext>,
+        conversation_history: Option<Vec<ChatMessage>>,
+        available_notebooks: Option<Vec<NotebookInfo>>,
+        current_notebook_id: Option<String>,
+        config: AIConfig,
+    ) -> Result<ChatResponseWithActions> {
+        Python::attach(|py| {
+            self.setup_python_path(py)?;
+
+            let chat_module = py.import("katt_ai.chat")?;
+            let chat_fn = chat_module.getattr("chat_with_tools_sync")?;
+
+            let kwargs = PyDict::new(py);
+            kwargs.set_item("user_message", user_message)?;
+            kwargs.set_item("provider_type", config.provider_type)?;
+
+            if let Some(api_key) = config.api_key {
+                kwargs.set_item("api_key", api_key)?;
+            }
+            if let Some(model) = config.model {
+                kwargs.set_item("model", model)?;
+            }
+            if let Some(temp) = config.temperature {
+                kwargs.set_item("temperature", temp)?;
+            }
+            if let Some(max_tokens) = config.max_tokens {
+                kwargs.set_item("max_tokens", max_tokens)?;
+            }
+
+            // Add page context if provided
+            if let Some(ctx) = page_context {
+                let ctx_dict = PyDict::new(py);
+                ctx_dict.set_item("page_id", ctx.page_id)?;
+                ctx_dict.set_item("title", ctx.title)?;
+                ctx_dict.set_item("content", ctx.content)?;
+                ctx_dict.set_item("tags", ctx.tags)?;
+                if let Some(notebook_name) = ctx.notebook_name {
+                    ctx_dict.set_item("notebook_name", notebook_name)?;
+                }
+                kwargs.set_item("page_context", ctx_dict)?;
+            }
+
+            // Add conversation history if provided
+            if let Some(history) = conversation_history {
+                let py_history = PyList::empty(py);
+                for msg in history {
+                    let dict = PyDict::new(py);
+                    dict.set_item("role", msg.role)?;
+                    dict.set_item("content", msg.content)?;
+                    py_history.append(dict)?;
+                }
+                kwargs.set_item("conversation_history", py_history)?;
+            }
+
+            // Add available notebooks if provided
+            if let Some(notebooks) = available_notebooks {
+                let py_notebooks = PyList::empty(py);
+                for nb in notebooks {
+                    let dict = PyDict::new(py);
+                    dict.set_item("id", nb.id)?;
+                    dict.set_item("name", nb.name)?;
+                    py_notebooks.append(dict)?;
+                }
+                kwargs.set_item("available_notebooks", py_notebooks)?;
+            }
+
+            // Add current notebook ID if provided
+            if let Some(notebook_id) = current_notebook_id {
+                kwargs.set_item("current_notebook_id", notebook_id)?;
+            }
+
+            let result = chat_fn.call((), Some(&kwargs))?;
+            let result_dict: HashMap<String, Py<PyAny>> = result.extract()?;
+
+            // Extract actions
+            let actions_list = result_dict
+                .get("actions")
+                .map(|v| {
+                    v.extract::<Vec<HashMap<String, Py<PyAny>>>>(py)
+                        .unwrap_or_default()
+                })
+                .unwrap_or_default();
+
+            let actions: Vec<AIAction> = actions_list
+                .into_iter()
+                .map(|a| {
+                    let tool = a.get("tool")
+                        .and_then(|v| v.extract::<String>(py).ok())
+                        .unwrap_or_default();
+                    let tool_call_id = a.get("tool_call_id")
+                        .and_then(|v| v.extract::<String>(py).ok())
+                        .unwrap_or_default();
+
+                    // Extract arguments as JSON
+                    let arguments = a.get("arguments")
+                        .map(|v| {
+                            // Convert Python dict to JSON string then parse
+                            let json_module = py.import("json").ok();
+                            if let Some(json_mod) = json_module {
+                                if let Ok(dumps) = json_mod.getattr("dumps") {
+                                    if let Ok(json_str) = dumps.call1((v,)) {
+                                        if let Ok(s) = json_str.extract::<String>() {
+                                            return serde_json::from_str(&s).unwrap_or(serde_json::Value::Null);
+                                        }
+                                    }
+                                }
+                            }
+                            serde_json::Value::Null
+                        })
+                        .unwrap_or(serde_json::Value::Null);
+
+                    AIAction {
+                        tool,
+                        arguments,
+                        tool_call_id,
+                    }
+                })
+                .collect();
+
+            Ok(ChatResponseWithActions {
+                content: result_dict
+                    .get("content")
+                    .map(|v| v.extract::<String>(py).unwrap_or_default())
+                    .unwrap_or_default(),
+                model: result_dict
+                    .get("model")
+                    .map(|v| v.extract::<String>(py).unwrap_or_default())
+                    .unwrap_or_default(),
+                provider: result_dict
+                    .get("provider")
+                    .map(|v| v.extract::<String>(py).unwrap_or_default())
+                    .unwrap_or_default(),
+                tokens_used: result_dict
+                    .get("tokens_used")
+                    .and_then(|v| v.extract::<i64>(py).ok()),
+                finish_reason: result_dict
+                    .get("finish_reason")
+                    .and_then(|v| v.extract::<String>(py).ok()),
+                actions,
             })
         })
     }

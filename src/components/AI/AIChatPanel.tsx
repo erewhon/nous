@@ -3,8 +3,14 @@ import ReactMarkdown from "react-markdown";
 import { useAIStore } from "../../stores/aiStore";
 import { usePageStore } from "../../stores/pageStore";
 import { useNotebookStore } from "../../stores/notebookStore";
-import { aiChatWithContext } from "../../utils/api";
-import type { ChatMessage, PageContext } from "../../types/ai";
+import {
+  aiChatWithTools,
+  createNotebook as apiCreateNotebook,
+  createPage as apiCreatePage,
+  updatePage as apiUpdatePage,
+} from "../../utils/api";
+import type { ChatMessage, PageContext, AIAction, CreateNotebookArgs, CreatePageArgs } from "../../types/ai";
+import type { EditorData } from "../../types/page";
 
 interface AIChatPanelProps {
   isOpen: boolean;
@@ -12,15 +18,23 @@ interface AIChatPanelProps {
   onOpenSettings?: () => void;
 }
 
+// Track created items to show in UI
+interface CreatedItem {
+  type: "notebook" | "page";
+  name: string;
+  notebookName?: string;
+}
+
 export function AIChatPanel({ isOpen, onClose, onOpenSettings }: AIChatPanelProps) {
   const [input, setInput] = useState("");
+  const [createdItems, setCreatedItems] = useState<CreatedItem[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const { settings, conversation, addMessage, setLoading, clearConversation } =
     useAIStore();
-  const { selectedPageId, pages } = usePageStore();
-  const { notebooks, selectedNotebookId } = useNotebookStore();
+  const { selectedPageId, pages, loadPages } = usePageStore();
+  const { notebooks, selectedNotebookId, loadNotebooks } = useNotebookStore();
 
   // Get current page context
   const currentPage = pages.find((p) => p.id === selectedPageId);
@@ -56,6 +70,96 @@ export function AIChatPanel({ isOpen, onClose, onOpenSettings }: AIChatPanelProp
       .join("\n");
   }, []);
 
+  // Execute AI actions (create notebooks/pages)
+  const executeActions = useCallback(async (actions: AIAction[]): Promise<CreatedItem[]> => {
+    const created: CreatedItem[] = [];
+    // Keep track of newly created notebooks (refresh the list once)
+    let needsNotebookRefresh = false;
+    let notebooksSnapshot = [...notebooks];
+
+    for (const action of actions) {
+      try {
+        if (action.tool === "create_notebook") {
+          const args = action.arguments as unknown as CreateNotebookArgs;
+          const newNotebook = await apiCreateNotebook(args.name);
+          notebooksSnapshot.push(newNotebook);
+          needsNotebookRefresh = true;
+          created.push({ type: "notebook", name: args.name });
+        } else if (action.tool === "create_page") {
+          const args = action.arguments as unknown as CreatePageArgs;
+
+          // Find the target notebook
+          let targetNotebookId = selectedNotebookId;
+          let targetNotebookName = currentNotebook?.name || "current notebook";
+
+          if (args.notebook_name !== "current") {
+            // Look for the notebook by name (in snapshot that includes new notebooks)
+            const targetNotebook = notebooksSnapshot.find(
+              (n) => n.name.toLowerCase() === args.notebook_name.toLowerCase()
+            );
+            if (targetNotebook) {
+              targetNotebookId = targetNotebook.id;
+              targetNotebookName = targetNotebook.name;
+            } else {
+              // Create the notebook if it doesn't exist
+              const newNotebook = await apiCreateNotebook(args.notebook_name);
+              notebooksSnapshot.push(newNotebook);
+              needsNotebookRefresh = true;
+              targetNotebookId = newNotebook.id;
+              targetNotebookName = newNotebook.name;
+              created.push({ type: "notebook", name: args.notebook_name });
+            }
+          }
+
+          if (!targetNotebookId) {
+            console.error("No target notebook found for page creation");
+            continue;
+          }
+
+          // Create the page
+          const newPage = await apiCreatePage(targetNotebookId, args.title);
+
+          // Convert content blocks to EditorData format
+          const editorData: EditorData = {
+            time: Date.now(),
+            version: "2.28.2",
+            blocks: args.content_blocks.map((block) => ({
+              id: crypto.randomUUID(),
+              type: block.type,
+              data: block.data as Record<string, unknown>,
+            })),
+          };
+
+          // Update page with content and optionally tags
+          const updates: { content: EditorData; tags?: string[] } = { content: editorData };
+          if (args.tags && args.tags.length > 0) {
+            updates.tags = args.tags;
+          }
+          await apiUpdatePage(targetNotebookId, newPage.id, updates);
+
+          created.push({
+            type: "page",
+            name: args.title,
+            notebookName: targetNotebookName,
+          });
+        }
+      } catch (error) {
+        console.error(`Failed to execute action ${action.tool}:`, error);
+      }
+    }
+
+    // Refresh stores once at the end
+    if (needsNotebookRefresh) {
+      await loadNotebooks();
+    }
+    // Reload pages for the current notebook if any pages were created
+    if (selectedNotebookId && created.some(c => c.type === "page")) {
+      await loadPages(selectedNotebookId);
+    }
+
+    return created;
+  }, [selectedNotebookId, currentNotebook, notebooks, loadNotebooks, loadPages]);
+
   const handleSubmit = async () => {
     if (!input.trim() || conversation.isLoading) return;
 
@@ -67,6 +171,7 @@ export function AIChatPanel({ isOpen, onClose, onOpenSettings }: AIChatPanelProp
     addMessage(userMessage);
     setInput("");
     setLoading(true);
+    setCreatedItems([]); // Clear previous created items
 
     try {
       // Build page context if a page is selected
@@ -81,15 +186,29 @@ export function AIChatPanel({ isOpen, onClose, onOpenSettings }: AIChatPanelProp
         };
       }
 
-      const response = await aiChatWithContext(userMessage.content, {
+      // Build available notebooks list
+      const availableNotebooks = notebooks.map((n) => ({
+        id: n.id,
+        name: n.name,
+      }));
+
+      const response = await aiChatWithTools(userMessage.content, {
         pageContext,
         conversationHistory: conversation.messages.slice(-10), // Last 10 messages
+        availableNotebooks,
+        currentNotebookId: selectedNotebookId || undefined,
         providerType: settings.providerType,
         apiKey: settings.apiKey || undefined,
         model: settings.model || undefined,
         temperature: settings.temperature,
         maxTokens: settings.maxTokens,
       });
+
+      // Execute any actions returned by the AI
+      if (response.actions && response.actions.length > 0) {
+        const created = await executeActions(response.actions);
+        setCreatedItems(created);
+      }
 
       const assistantMessage: ChatMessage = {
         role: "assistant",
@@ -335,6 +454,48 @@ export function AIChatPanel({ isOpen, onClose, onOpenSettings }: AIChatPanelProp
                 </div>
               </div>
             )}
+            {/* Show created items */}
+            {createdItems.length > 0 && (
+              <div
+                className="rounded-xl border p-4"
+                style={{
+                  backgroundColor: "rgba(166, 227, 161, 0.1)",
+                  borderColor: "var(--color-success)",
+                }}
+              >
+                <div className="flex items-center gap-2 mb-3">
+                  <IconCheck style={{ color: "var(--color-success)" }} />
+                  <span
+                    className="text-sm font-medium"
+                    style={{ color: "var(--color-success)" }}
+                  >
+                    Created {createdItems.length} item{createdItems.length > 1 ? "s" : ""}
+                  </span>
+                </div>
+                <div className="space-y-2">
+                  {createdItems.map((item, i) => (
+                    <div
+                      key={i}
+                      className="flex items-center gap-2 text-sm"
+                      style={{ color: "var(--color-text-secondary)" }}
+                    >
+                      {item.type === "notebook" ? (
+                        <IconBook style={{ width: 14, height: 14 }} />
+                      ) : (
+                        <IconFile style={{ width: 14, height: 14 }} />
+                      )}
+                      <span>
+                        {item.type === "notebook" ? (
+                          <>Notebook: <strong style={{ color: "var(--color-text-primary)" }}>{item.name}</strong></>
+                        ) : (
+                          <>Page: <strong style={{ color: "var(--color-text-primary)" }}>{item.name}</strong> in {item.notebookName}</>
+                        )}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             <div ref={messagesEndRef} />
           </div>
         )}
@@ -489,6 +650,64 @@ function IconSettings() {
     >
       <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
       <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
+function IconCheck({ style }: { style?: React.CSSProperties }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={style}
+    >
+      <polyline points="20 6 9 17 4 12" />
+    </svg>
+  );
+}
+
+function IconBook({ style }: { style?: React.CSSProperties }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={style}
+    >
+      <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" />
+    </svg>
+  );
+}
+
+function IconFile({ style }: { style?: React.CSSProperties }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={style}
+    >
+      <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+      <polyline points="14,2 14,8 20,8" />
     </svg>
   );
 }

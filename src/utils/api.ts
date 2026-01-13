@@ -87,7 +87,13 @@ export async function rebuildSearchIndex(): Promise<void> {
 
 // ===== AI API =====
 
-import type { ChatMessage, ChatResponse, PageContext } from "../types/ai";
+import type {
+  ChatMessage,
+  ChatResponse,
+  ChatResponseWithActions,
+  NotebookInfo,
+  PageContext,
+} from "../types/ai";
 
 export async function aiChat(
   messages: ChatMessage[],
@@ -204,6 +210,34 @@ export async function aiSuggestRelatedPages(
     providerType: options?.providerType,
     apiKey: options?.apiKey,
     model: options?.model,
+  });
+}
+
+export async function aiChatWithTools(
+  userMessage: string,
+  options?: {
+    pageContext?: PageContext;
+    conversationHistory?: ChatMessage[];
+    availableNotebooks?: NotebookInfo[];
+    currentNotebookId?: string;
+    providerType?: string;
+    apiKey?: string;
+    model?: string;
+    temperature?: number;
+    maxTokens?: number;
+  }
+): Promise<ChatResponseWithActions> {
+  return invoke<ChatResponseWithActions>("ai_chat_with_tools", {
+    userMessage,
+    pageContext: options?.pageContext,
+    conversationHistory: options?.conversationHistory,
+    availableNotebooks: options?.availableNotebooks,
+    currentNotebookId: options?.currentNotebookId,
+    providerType: options?.providerType,
+    apiKey: options?.apiKey,
+    model: options?.model,
+    temperature: options?.temperature,
+    maxTokens: options?.maxTokens,
   });
 }
 

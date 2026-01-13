@@ -77,6 +77,7 @@ pub fn run() {
             commands::ai_summarize_page,
             commands::ai_suggest_tags,
             commands::ai_suggest_related_pages,
+            commands::ai_chat_with_tools,
             // Markdown commands
             commands::export_page_markdown,
             commands::import_markdown,

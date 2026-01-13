@@ -2,7 +2,10 @@
 
 use tauri::State;
 
-use crate::python_bridge::{AIConfig, ChatMessage, ChatResponse, PageContext, PageInfo, RelatedPageSuggestion};
+use crate::python_bridge::{
+    AIConfig, ChatMessage, ChatResponse, ChatResponseWithActions,
+    NotebookInfo, PageContext, PageInfo, RelatedPageSuggestion,
+};
 use crate::AppState;
 
 use super::notebook::CommandError;
@@ -155,5 +158,46 @@ pub fn ai_suggest_related_pages(
         .suggest_related_pages(content, title, available_pages, existing_links, max_suggestions, config)
         .map_err(|e| CommandError {
             message: format!("AI related pages suggestion error: {}", e),
+        })
+}
+
+/// Chat with AI using tools for notebook/page creation
+#[tauri::command]
+pub fn ai_chat_with_tools(
+    state: State<AppState>,
+    user_message: String,
+    page_context: Option<PageContext>,
+    conversation_history: Option<Vec<ChatMessage>>,
+    available_notebooks: Option<Vec<NotebookInfo>>,
+    current_notebook_id: Option<String>,
+    provider_type: Option<String>,
+    api_key: Option<String>,
+    model: Option<String>,
+    temperature: Option<f64>,
+    max_tokens: Option<i64>,
+) -> Result<ChatResponseWithActions, CommandError> {
+    let python_ai = state.python_ai.lock().map_err(|e| CommandError {
+        message: format!("Failed to acquire Python AI lock: {}", e),
+    })?;
+
+    let config = AIConfig {
+        provider_type: provider_type.unwrap_or_else(|| "openai".to_string()),
+        api_key,
+        model,
+        temperature,
+        max_tokens,
+    };
+
+    python_ai
+        .chat_with_tools(
+            user_message,
+            page_context,
+            conversation_history,
+            available_notebooks,
+            current_notebook_id,
+            config,
+        )
+        .map_err(|e| CommandError {
+            message: format!("AI chat with tools error: {}", e),
         })
 }
