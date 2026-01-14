@@ -21,13 +21,28 @@ export type EditorData = z.infer<typeof EditorDataSchema>;
 export const FolderTypeSchema = z.enum(["standard", "archive"]);
 export type FolderType = z.infer<typeof FolderTypeSchema>;
 
+// Section schema (OneNote-style organizational layer)
+export const SectionSchema = z.object({
+  id: z.string().uuid(),
+  notebookId: z.string().uuid(),
+  name: z.string(),
+  color: z.string().optional(),
+  position: z.number().default(0),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+
+export type Section = z.infer<typeof SectionSchema>;
+
 // Folder schema
 export const FolderSchema = z.object({
   id: z.string().uuid(),
   notebookId: z.string().uuid(),
   name: z.string(),
   parentId: z.string().uuid().nullable().optional(),
+  sectionId: z.string().uuid().nullable().optional(),
   folderType: FolderTypeSchema.default("standard"),
+  color: z.string().optional(),
   position: z.number().default(0),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
@@ -43,7 +58,9 @@ export const PageSchema = z.object({
   content: EditorDataSchema,
   tags: z.array(z.string()),
   folderId: z.string().uuid().nullable().optional(),
+  sectionId: z.string().uuid().nullable().optional(),
   isArchived: z.boolean().default(false),
+  isCover: z.boolean().default(false),
   position: z.number().default(0),
   systemPrompt: z.string().optional(),
   createdAt: z.string().datetime(),

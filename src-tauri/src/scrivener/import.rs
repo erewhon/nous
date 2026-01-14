@@ -536,6 +536,7 @@ pub fn import_scrivener_project(
         notebook_type: NotebookType::Standard,
         icon: Some("📝".to_string()), // Writing icon for Scrivener
         color: None,
+        sections_enabled: false,
         system_prompt: None,
         created_at: now,
         updated_at: now,
@@ -605,7 +606,9 @@ pub fn import_scrivener_project(
             },
             tags,
             folder_id: None,
+            section_id: None,
             is_archived: false,
+            is_cover: false,
             position: pages.len() as i32,
             system_prompt: None,
             created_at: now,

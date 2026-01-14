@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use thiserror::Error;
 use uuid::Uuid;
 
-use super::models::{Folder, FolderType, Notebook, NotebookType, Page};
+use super::models::{Folder, FolderType, Notebook, NotebookType, Page, Section};
 
 #[derive(Error, Debug)]
 pub enum StorageError {
@@ -25,6 +25,9 @@ pub enum StorageError {
 
     #[error("Folder not found: {0}")]
     FolderNotFound(Uuid),
+
+    #[error("Section not found: {0}")]
+    SectionNotFound(Uuid),
 
     #[error("Data directory not found")]
     DataDirNotFound,
@@ -79,6 +82,11 @@ impl FileStorage {
         self.base_path.join("notebooks").join(notebook_id.to_string())
     }
 
+    /// Get the path to a notebook directory (public for git operations)
+    pub fn get_notebook_path(&self, notebook_id: Uuid) -> PathBuf {
+        self.notebook_dir(notebook_id)
+    }
+
     fn notebook_metadata_path(&self, notebook_id: Uuid) -> PathBuf {
         self.notebook_dir(notebook_id).join("notebook.json")
     }
@@ -93,6 +101,10 @@ impl FileStorage {
 
     fn folders_path(&self, notebook_id: Uuid) -> PathBuf {
         self.notebook_dir(notebook_id).join("folders.json")
+    }
+
+    fn sections_path(&self, notebook_id: Uuid) -> PathBuf {
+        self.notebook_dir(notebook_id).join("sections.json")
     }
 
     pub fn list_notebooks(&self) -> Result<Vec<Notebook>> {
@@ -573,6 +585,191 @@ impl FileStorage {
         self.save_folders(notebook_id, &folders)?;
 
         Ok(archive)
+    }
+
+    // ===== Section Operations =====
+
+    /// List all sections in a notebook
+    pub fn list_sections(&self, notebook_id: Uuid) -> Result<Vec<Section>> {
+        let sections_path = self.sections_path(notebook_id);
+
+        // If sections.json doesn't exist, return empty vec
+        if !sections_path.exists() {
+            return Ok(Vec::new());
+        }
+
+        let content = fs::read_to_string(&sections_path)?;
+        let sections: Vec<Section> = serde_json::from_str(&content)?;
+
+        Ok(sections)
+    }
+
+    /// Get a specific section by ID
+    pub fn get_section(&self, notebook_id: Uuid, section_id: Uuid) -> Result<Section> {
+        let sections = self.list_sections(notebook_id)?;
+
+        sections
+            .into_iter()
+            .find(|s| s.id == section_id)
+            .ok_or(StorageError::SectionNotFound(section_id))
+    }
+
+    /// Save all sections for a notebook
+    fn save_sections(&self, notebook_id: Uuid, sections: &[Section]) -> Result<()> {
+        let sections_path = self.sections_path(notebook_id);
+        let content = serde_json::to_string_pretty(sections)?;
+        fs::write(&sections_path, content)?;
+        Ok(())
+    }
+
+    /// Create a new section in a notebook
+    pub fn create_section(
+        &self,
+        notebook_id: Uuid,
+        name: String,
+        color: Option<String>,
+    ) -> Result<Section> {
+        // Verify notebook exists
+        if !self.notebook_dir(notebook_id).exists() {
+            return Err(StorageError::NotebookNotFound(notebook_id));
+        }
+
+        let mut sections = self.list_sections(notebook_id)?;
+
+        // Calculate position (last)
+        let max_position = sections
+            .iter()
+            .map(|s| s.position)
+            .max()
+            .unwrap_or(-1);
+
+        let mut section = Section::new(notebook_id, name);
+        section.color = color;
+        section.position = max_position + 1;
+
+        sections.push(section.clone());
+        self.save_sections(notebook_id, &sections)?;
+
+        Ok(section)
+    }
+
+    /// Update an existing section
+    pub fn update_section(&self, section: &Section) -> Result<()> {
+        let mut sections = self.list_sections(section.notebook_id)?;
+
+        let idx = sections
+            .iter()
+            .position(|s| s.id == section.id)
+            .ok_or(StorageError::SectionNotFound(section.id))?;
+
+        sections[idx] = section.clone();
+        self.save_sections(section.notebook_id, &sections)?;
+
+        Ok(())
+    }
+
+    /// Delete a section and optionally move its items to another section
+    pub fn delete_section(
+        &self,
+        notebook_id: Uuid,
+        section_id: Uuid,
+        move_items_to: Option<Uuid>,
+    ) -> Result<()> {
+        let mut sections = self.list_sections(notebook_id)?;
+
+        // Find and remove the section
+        let idx = sections
+            .iter()
+            .position(|s| s.id == section_id)
+            .ok_or(StorageError::SectionNotFound(section_id))?;
+
+        sections.remove(idx);
+        self.save_sections(notebook_id, &sections)?;
+
+        // Move folders to target section
+        let mut folders = self.list_folders(notebook_id)?;
+        for folder in folders.iter_mut() {
+            if folder.section_id == Some(section_id) {
+                folder.section_id = move_items_to;
+                folder.updated_at = chrono::Utc::now();
+            }
+        }
+        self.save_folders(notebook_id, &folders)?;
+
+        // Move pages to target section
+        let pages = self.list_pages(notebook_id)?;
+        for mut page in pages {
+            if page.section_id == Some(section_id) {
+                page.section_id = move_items_to;
+                page.updated_at = chrono::Utc::now();
+                self.update_page(&page)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Reorder sections
+    pub fn reorder_sections(&self, notebook_id: Uuid, section_ids: &[Uuid]) -> Result<()> {
+        let mut sections = self.list_sections(notebook_id)?;
+
+        // Update positions based on the order in section_ids
+        for (position, section_id) in section_ids.iter().enumerate() {
+            if let Some(section) = sections.iter_mut().find(|s| s.id == *section_id) {
+                section.position = position as i32;
+                section.updated_at = chrono::Utc::now();
+            }
+        }
+
+        // Sort by position before saving
+        sections.sort_by_key(|s| s.position);
+        self.save_sections(notebook_id, &sections)?;
+
+        Ok(())
+    }
+
+    // ===== Cover Page Operations =====
+
+    /// Get the cover page for a notebook, if it exists
+    pub fn get_cover_page(&self, notebook_id: Uuid) -> Result<Option<Page>> {
+        let pages = self.list_pages(notebook_id)?;
+        Ok(pages.into_iter().find(|p| p.is_cover))
+    }
+
+    /// Create a cover page for a notebook
+    pub fn create_cover_page(&self, notebook_id: Uuid) -> Result<Page> {
+        // Check if cover already exists
+        if let Some(cover) = self.get_cover_page(notebook_id)? {
+            return Ok(cover);
+        }
+
+        let page = Page::new_cover(notebook_id);
+        self.create_page_from(page)
+    }
+
+    /// Set or unset a page as the cover page
+    pub fn set_cover_page(&self, notebook_id: Uuid, page_id: Option<Uuid>) -> Result<Option<Page>> {
+        let pages = self.list_pages(notebook_id)?;
+
+        // First, unset any existing cover page
+        for mut page in pages.clone() {
+            if page.is_cover && Some(page.id) != page_id {
+                page.is_cover = false;
+                page.updated_at = chrono::Utc::now();
+                self.update_page(&page)?;
+            }
+        }
+
+        // If page_id is provided, set it as cover
+        if let Some(pid) = page_id {
+            let mut page = self.get_page(notebook_id, pid)?;
+            page.is_cover = true;
+            page.updated_at = chrono::Utc::now();
+            self.update_page(&page)?;
+            return Ok(Some(page));
+        }
+
+        Ok(None)
     }
 
     /// Move a page to a folder

@@ -40,7 +40,6 @@ pub mod storage;
 pub mod variables;
 
 // Re-export commonly used types
-pub use builtin::get_builtin_actions;
 pub use executor::ActionExecutor;
 pub use models::*;
 pub use scheduler::ActionScheduler;

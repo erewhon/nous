@@ -52,3 +52,6 @@ base64 = "0.22"
 # PyO3 for Python integration
 pyo3 = { version = "0.27", features = ["auto-initialize"] }
 tokio = { version = "1", features = ["full"] }
+
+# Git integration
+git2 = "0.20"

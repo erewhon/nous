@@ -20,12 +20,13 @@ interface FolderActions {
   createFolder: (
     notebookId: string,
     name: string,
-    parentId?: string
+    parentId?: string,
+    sectionId?: string
   ) => Promise<Folder | null>;
   updateFolder: (
     notebookId: string,
     folderId: string,
-    updates: { name?: string; parentId?: string | null }
+    updates: { name?: string; parentId?: string | null; color?: string | null; sectionId?: string | null }
   ) => Promise<void>;
   deleteFolder: (
     notebookId: string,
@@ -113,10 +114,10 @@ export const useFolderStore = create<FolderStore>()(
         set({ folders: [] });
       },
 
-      createFolder: async (notebookId, name, parentId) => {
+      createFolder: async (notebookId, name, parentId, sectionId) => {
         set({ error: null });
         try {
-          const folder = await api.createFolder(notebookId, name, parentId);
+          const folder = await api.createFolder(notebookId, name, parentId, sectionId);
           set((state) => ({
             folders: [...state.folders, folder],
           }));

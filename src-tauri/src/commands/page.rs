@@ -1,6 +1,7 @@
 use tauri::State;
 use uuid::Uuid;
 
+use crate::git;
 use crate::storage::{EditorData, Page};
 use crate::AppState;
 
@@ -50,6 +51,7 @@ pub fn create_page(
     notebook_id: String,
     title: String,
     folder_id: Option<String>,
+    section_id: Option<String>,
 ) -> CommandResult<Page> {
     let storage = state.storage.lock().unwrap();
     let nb_id = Uuid::parse_str(&notebook_id).map_err(|e| CommandError {
@@ -62,6 +64,13 @@ pub fn create_page(
             })
         })
         .transpose()?;
+    let sect_id = section_id
+        .map(|id| {
+            Uuid::parse_str(&id).map_err(|e| CommandError {
+                message: format!("Invalid section ID: {}", e),
+            })
+        })
+        .transpose()?;
 
     let mut page = storage.create_page(nb_id, title)?;
 
@@ -70,9 +79,24 @@ pub fn create_page(
         page = storage.move_page_to_folder(nb_id, page.id, fld_id, None)?;
     }
 
+    // If section_id specified, set the section
+    if sect_id.is_some() {
+        page.section_id = sect_id;
+        storage.update_page(&page)?;
+    }
+
     // Index the new page
     if let Ok(mut search_index) = state.search_index.lock() {
         let _ = search_index.index_page(&page);
+    }
+
+    // Auto-commit if git is enabled for this notebook
+    let notebook_path = storage.get_notebook_path(nb_id);
+    if git::is_git_repo(&notebook_path) {
+        let commit_message = format!("Create page: {}", page.title);
+        if let Err(e) = git::commit_all(&notebook_path, &commit_message) {
+            log::warn!("Failed to auto-commit page creation: {}", e);
+        }
     }
 
     Ok(page)
@@ -87,6 +111,7 @@ pub fn update_page(
     content: Option<EditorData>,
     tags: Option<Vec<String>>,
     system_prompt: Option<String>,
+    section_id: Option<Option<String>>,
 ) -> CommandResult<Page> {
     let storage = state.storage.lock().unwrap();
     let nb_id = Uuid::parse_str(&notebook_id).map_err(|e| CommandError {
@@ -111,6 +136,12 @@ pub fn update_page(
     if let Some(prompt) = system_prompt {
         page.system_prompt = if prompt.is_empty() { None } else { Some(prompt) };
     }
+    // Allow setting section_id (Some(Some(id)) to set, Some(None) to clear)
+    if let Some(sect_id) = section_id {
+        page.section_id = sect_id.map(|id| {
+            Uuid::parse_str(&id).expect("Invalid section ID")
+        });
+    }
     page.updated_at = chrono::Utc::now();
 
     storage.update_page(&page)?;
@@ -118,6 +149,15 @@ pub fn update_page(
     // Update the search index
     if let Ok(mut search_index) = state.search_index.lock() {
         let _ = search_index.index_page(&page);
+    }
+
+    // Auto-commit if git is enabled for this notebook
+    let notebook_path = storage.get_notebook_path(nb_id);
+    if git::is_git_repo(&notebook_path) {
+        let commit_message = format!("Update page: {}", page.title);
+        if let Err(e) = git::commit_all(&notebook_path, &commit_message) {
+            log::warn!("Failed to auto-commit page update: {}", e);
+        }
     }
 
     Ok(page)
@@ -137,11 +177,26 @@ pub fn delete_page(
         message: format!("Invalid page ID: {}", e),
     })?;
 
+    // Get page title for commit message before deleting
+    let page_title = storage
+        .get_page(nb_id, pg_id)
+        .map(|p| p.title)
+        .unwrap_or_else(|_| "Unknown".to_string());
+
     storage.delete_page(nb_id, pg_id)?;
 
     // Remove from search index
     if let Ok(mut search_index) = state.search_index.lock() {
         let _ = search_index.remove_page(pg_id);
+    }
+
+    // Auto-commit if git is enabled for this notebook
+    let notebook_path = storage.get_notebook_path(nb_id);
+    if git::is_git_repo(&notebook_path) {
+        let commit_message = format!("Delete page: {}", page_title);
+        if let Err(e) = git::commit_all(&notebook_path, &commit_message) {
+            log::warn!("Failed to auto-commit page deletion: {}", e);
+        }
     }
 
     Ok(())

@@ -18,7 +18,8 @@ interface PageActions {
   createPage: (
     notebookId: string,
     title: string,
-    folderId?: string
+    folderId?: string,
+    sectionId?: string
   ) => Promise<Page | null>;
   updatePage: (
     notebookId: string,
@@ -50,6 +51,11 @@ interface PageActions {
     notebookId: string,
     folderId: string | null,
     pageIds: string[]
+  ) => Promise<void>;
+  movePageToSection: (
+    notebookId: string,
+    pageId: string,
+    sectionId: string | null
   ) => Promise<void>;
 
   // Selection
@@ -86,10 +92,10 @@ export const usePageStore = create<PageStore>((set) => ({
     set({ pages: [], selectedPageId: null });
   },
 
-  createPage: async (notebookId, title, folderId) => {
+  createPage: async (notebookId, title, folderId, sectionId) => {
     set({ error: null });
     try {
-      const page = await api.createPage(notebookId, title, folderId);
+      const page = await api.createPage(notebookId, title, folderId, sectionId);
       set((state) => ({
         pages: [page, ...state.pages],
         selectedPageId: page.id,
@@ -250,6 +256,21 @@ export const usePageStore = create<PageStore>((set) => ({
     } catch (err) {
       set({
         error: err instanceof Error ? err.message : "Failed to reorder pages",
+      });
+    }
+  },
+
+  movePageToSection: async (notebookId, pageId, sectionId) => {
+    set({ error: null });
+    try {
+      const page = await api.updatePage(notebookId, pageId, { sectionId });
+      set((state) => ({
+        pages: state.pages.map((p) => (p.id === pageId ? page : p)),
+      }));
+    } catch (err) {
+      set({
+        error:
+          err instanceof Error ? err.message : "Failed to move page to section",
       });
     }
   },

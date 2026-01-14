@@ -5,6 +5,7 @@ use tauri::Manager;
 mod actions;
 mod commands;
 mod evernote;
+mod git;
 mod inbox;
 mod markdown;
 mod notion;
@@ -181,6 +182,17 @@ pub fn run() {
             commands::reorder_folders,
             commands::reorder_pages,
             commands::ensure_archive_folder,
+            // Section commands
+            commands::list_sections,
+            commands::get_section,
+            commands::create_section,
+            commands::update_section,
+            commands::delete_section,
+            commands::reorder_sections,
+            // Cover page commands
+            commands::get_cover_page,
+            commands::create_cover_page,
+            commands::set_cover_page,
             // Action commands
             commands::list_actions,
             commands::get_action,
@@ -202,6 +214,24 @@ pub fn run() {
             commands::inbox_apply_actions,
             commands::inbox_delete,
             commands::inbox_clear_processed,
+            // Git commands
+            commands::git_is_enabled,
+            commands::git_init,
+            commands::git_status,
+            commands::git_commit,
+            commands::git_history,
+            commands::git_get_page_at_commit,
+            commands::git_diff,
+            commands::git_restore_page,
+            commands::git_set_remote,
+            commands::git_remove_remote,
+            commands::git_fetch,
+            commands::git_push,
+            commands::git_pull,
+            commands::git_list_branches,
+            commands::git_current_branch,
+            commands::git_create_branch,
+            commands::git_switch_branch,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

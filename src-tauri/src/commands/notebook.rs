@@ -55,6 +55,7 @@ pub fn update_notebook(
     name: Option<String>,
     icon: Option<String>,
     color: Option<String>,
+    sections_enabled: Option<bool>,
     system_prompt: Option<String>,
 ) -> CommandResult<Notebook> {
     let storage = state.storage.lock().unwrap();
@@ -72,6 +73,9 @@ pub fn update_notebook(
     }
     if let Some(color) = color {
         notebook.color = Some(color);
+    }
+    if let Some(enabled) = sections_enabled {
+        notebook.sections_enabled = enabled;
     }
     // Allow setting system_prompt to None (empty string clears it)
     if let Some(prompt) = system_prompt {

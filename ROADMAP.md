@@ -28,6 +28,15 @@
   - Response stats (elapsed time, tokens, tok/s, model name)
   - Support for OpenAI, Anthropic, and Ollama providers
 
+- [x] **Sections, Color Coding & Cover Pages**
+  - Color coding for notebooks, sections, and folders
+  - Sections - OneNote-style organizational layer (Notebook → Section → Folders → Pages)
+  - Section tabs with colored indicators
+  - Enable/disable sections per notebook
+  - Cover pages - Optional styled entry page for notebooks
+  - Cover page editor with notebook color theming
+  - ColorPicker component with 16 presets and custom hex input
+
 ---
 
 ## Short-term (Next up)
@@ -174,24 +183,34 @@ Already implemented with Tantivy, may need refinement:
   - [x] "Apply" button to move/merge items
 - [x] Badge indicator showing unprocessed item count
 
-### 13. Version Control & Page History
-- [ ] Automatic revision snapshots:
-  - [ ] Save revision on each page save (debounced)
-  - [ ] Configurable retention policy (keep last N revisions, or by age)
-  - [ ] Efficient storage (delta/diff-based or full snapshots)
-- [ ] Page history panel:
-  - [ ] Browse revisions with timestamps
-  - [ ] Preview previous versions
-  - [ ] Restore any previous version
-- [ ] Diff view:
-  - [ ] Side-by-side comparison between revisions
-  - [ ] Inline diff highlighting (additions/deletions)
-- [ ] Git integration (optional):
-  - [ ] Initialize notebook as Git repository
-  - [ ] Auto-commit on save with meaningful messages
-  - [ ] Branch support for experimental edits
-  - [ ] Push/pull to remote (GitHub, GitLab, etc.)
-- [ ] Conflict resolution for sync scenarios
+### 13. Git-Backed Notebooks
+- [x] Git integration for notebooks:
+  - [x] Add `git2` crate for native Git operations
+  - [x] Initialize notebook directory as Git repository
+  - [x] Auto-commit on page save (debounced, meaningful commit messages)
+  - [x] Commit on notebook/folder changes
+  - [x] Git status tracking (dirty/clean state)
+- [x] Remote repository support:
+  - [x] Configure remote URL (GitHub, GitLab, self-hosted)
+  - [x] Push/pull commands via UI
+  - [x] Fetch and show remote status
+- [x] Page history via Git:
+  - [x] Browse page revisions from git log
+  - [x] Preview previous versions
+  - [x] Restore any previous version (git checkout)
+- [x] Notebook settings UI:
+  - [x] Enable/disable Git for notebook
+  - [x] Remote configuration
+  - [x] Push/pull buttons
+  - [x] History viewer
+- [ ] Branch support (future):
+  - [ ] Create/switch branches for experimental edits
+  - [ ] Merge branches back
+  - [ ] Branch indicator in UI
+- [ ] Conflict resolution (future):
+  - [ ] Detect merge conflicts on pull
+  - [ ] Simple conflict resolution UI
+  - [ ] Manual resolution fallback
 
 ---
 

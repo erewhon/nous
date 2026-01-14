@@ -50,7 +50,13 @@ export function NotebookList({
                 style={{
                   backgroundColor: isSelected ? "var(--color-bg-tertiary)" : "transparent",
                   color: isSelected ? "var(--color-text-primary)" : "var(--color-text-secondary)",
-                  borderLeft: `3px solid ${isSelected ? "var(--color-accent)" : "transparent"}`,
+                  borderLeft: `3px solid ${
+                    isSelected
+                      ? notebook.color || "var(--color-accent)"
+                      : notebook.color
+                        ? `${notebook.color}40`
+                        : "transparent"
+                  }`,
                 }}
               >
                 <button
@@ -60,8 +66,12 @@ export function NotebookList({
                   <div
                     className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg"
                     style={{
-                      backgroundColor: isSelected ? "var(--color-accent)" : "var(--color-bg-tertiary)",
-                      color: isSelected ? "white" : "var(--color-text-muted)",
+                      backgroundColor: notebook.color
+                        ? notebook.color
+                        : isSelected
+                          ? "var(--color-accent)"
+                          : "var(--color-bg-tertiary)",
+                      color: notebook.color || isSelected ? "white" : "var(--color-text-muted)",
                     }}
                   >
                     <NotebookIcon type={notebook.type} />

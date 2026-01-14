@@ -452,6 +452,7 @@ pub fn import_evernote_enex(
         notebook_type: NotebookType::Standard,
         icon: Some("🐘".to_string()), // Elephant for Evernote
         color: None,
+        sections_enabled: false,
         system_prompt: None,
         created_at: now,
         updated_at: now,
@@ -544,7 +545,9 @@ pub fn import_evernote_enex(
             },
             tags: note.tags,
             folder_id: None,
+            section_id: None,
             is_archived: false,
+            is_cover: false,
             position: 0,
             system_prompt: None,
             created_at: note.created.unwrap_or(now),

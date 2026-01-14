@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useDraggable, useDroppable } from "@dnd-kit/core";
-import type { Folder, Page } from "../../types/page";
+import type { Folder, Page, Section } from "../../types/page";
 
 interface FolderTreeItemProps {
   folder: Folder;
@@ -16,6 +16,9 @@ interface FolderTreeItemProps {
   onRenameFolder: (folderId: string, newName: string) => void;
   onDeleteFolder: (folderId: string) => void;
   renderFolder: (folder: Folder, depth: number) => React.ReactNode;
+  sections?: Section[];
+  onMoveToSection?: (pageId: string, sectionId: string | null) => void;
+  onMoveFolderToSection?: (folderId: string, sectionId: string | null) => void;
 }
 
 export function FolderTreeItem({
@@ -32,10 +35,15 @@ export function FolderTreeItem({
   onRenameFolder,
   onDeleteFolder,
   renderFolder,
+  sections,
+  onMoveToSection,
+  onMoveFolderToSection,
 }: FolderTreeItemProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState(folder.name);
   const [showActions, setShowActions] = useState(false);
+  const [showContextMenu, setShowContextMenu] = useState(false);
+  const [contextMenuPos, setContextMenuPos] = useState({ x: 0, y: 0 });
 
   // Make folder a drop target
   const { setNodeRef: setDroppableRef, isOver } = useDroppable({
@@ -64,7 +72,23 @@ export function FolderTreeItem({
     }
   };
 
+  const handleContextMenu = (e: React.MouseEvent) => {
+    if (sections && sections.length > 0 && onMoveFolderToSection && !isArchive) {
+      e.preventDefault();
+      setContextMenuPos({ x: e.clientX, y: e.clientY });
+      setShowContextMenu(true);
+    }
+  };
+
+  const handleMoveFolderToSection = (sectionId: string | null) => {
+    if (onMoveFolderToSection) {
+      onMoveFolderToSection(folder.id, sectionId);
+    }
+    setShowContextMenu(false);
+  };
+
   return (
+    <>
     <li ref={setDroppableRef}>
       {/* Folder row */}
       <div
@@ -82,6 +106,7 @@ export function FolderTreeItem({
         onMouseEnter={() => setShowActions(true)}
         onMouseLeave={() => setShowActions(false)}
         onClick={() => onToggleExpand(folder.id)}
+        onContextMenu={handleContextMenu}
       >
         {/* Expand/collapse chevron */}
         <button
@@ -115,7 +140,9 @@ export function FolderTreeItem({
         <span
           className="flex h-5 w-5 flex-shrink-0 items-center justify-center"
           style={{
-            color: isArchive ? "var(--color-text-muted)" : "var(--color-accent)",
+            color: isArchive
+              ? "var(--color-text-muted)"
+              : folder.color || "var(--color-accent)",
           }}
         >
           {isArchive ? (
@@ -283,11 +310,71 @@ export function FolderTreeItem({
               isSelected={selectedPageId === page.id}
               depth={depth + 1}
               onSelect={() => onSelectPage(page.id)}
+              sections={sections}
+              onMoveToSection={onMoveToSection}
             />
           ))}
         </ul>
       )}
     </li>
+
+    {/* Context menu for moving folder to section */}
+    {showContextMenu && sections && (
+      <div
+        className="fixed z-50 min-w-40 rounded-lg border py-1 shadow-lg"
+        style={{
+          left: contextMenuPos.x,
+          top: contextMenuPos.y,
+          backgroundColor: "var(--color-bg-secondary)",
+          borderColor: "var(--color-border)",
+        }}
+        onClick={(e) => e.stopPropagation()}
+        onMouseLeave={() => setShowContextMenu(false)}
+      >
+        <div
+          className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wider"
+          style={{ color: "var(--color-text-muted)" }}
+        >
+          Move to Section
+        </div>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            handleMoveFolderToSection(null);
+          }}
+          className="flex w-full items-center gap-2 px-3 py-1.5 text-sm transition-colors hover:bg-[var(--color-bg-tertiary)]"
+          style={{
+            color: folder.sectionId === null ? "var(--color-accent)" : "var(--color-text-primary)",
+          }}
+        >
+          <span
+            className="h-2 w-2 rounded-full"
+            style={{ backgroundColor: "var(--color-text-muted)" }}
+          />
+          No Section
+        </button>
+        {sections.map((section) => (
+          <button
+            key={section.id}
+            onClick={(e) => {
+              e.stopPropagation();
+              handleMoveFolderToSection(section.id);
+            }}
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-sm transition-colors hover:bg-[var(--color-bg-tertiary)]"
+            style={{
+              color: folder.sectionId === section.id ? "var(--color-accent)" : "var(--color-text-primary)",
+            }}
+          >
+            <span
+              className="h-2 w-2 rounded-full"
+              style={{ backgroundColor: section.color || "var(--color-accent)" }}
+            />
+            {section.name}
+          </button>
+        ))}
+      </div>
+    )}
+    </>
   );
 }
 
@@ -360,6 +447,8 @@ interface DraggablePageItemProps {
   isSelected: boolean;
   depth: number;
   onSelect: () => void;
+  sections?: Section[];
+  onMoveToSection?: (pageId: string, sectionId: string | null) => void;
 }
 
 function DraggablePageItem({
@@ -367,7 +456,11 @@ function DraggablePageItem({
   isSelected,
   depth,
   onSelect,
+  sections,
+  onMoveToSection,
 }: DraggablePageItemProps) {
+  const [showContextMenu, setShowContextMenu] = useState(false);
+  const [contextMenuPos, setContextMenuPos] = useState({ x: 0, y: 0 });
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: page.id,
     data: { type: "page", page },
@@ -381,62 +474,137 @@ function DraggablePageItem({
       }
     : undefined;
 
+  const handleContextMenu = (e: React.MouseEvent) => {
+    if (sections && sections.length > 0 && onMoveToSection) {
+      e.preventDefault();
+      setContextMenuPos({ x: e.clientX, y: e.clientY });
+      setShowContextMenu(true);
+    }
+  };
+
+  const handleMoveToSection = (sectionId: string | null) => {
+    if (onMoveToSection) {
+      onMoveToSection(page.id, sectionId);
+    }
+    setShowContextMenu(false);
+  };
+
   return (
-    <li
-      ref={setNodeRef}
-      style={style}
-      {...listeners}
-      {...attributes}
-      className={isDragging ? "opacity-50" : ""}
-    >
-      <button
-        onClick={onSelect}
-        className="flex w-full items-center gap-2 rounded-lg py-1.5 text-left transition-all cursor-grab active:cursor-grabbing"
-        style={{
-          paddingLeft: `${paddingLeft}px`,
-          paddingRight: "8px",
-          backgroundColor: isSelected ? "var(--color-bg-tertiary)" : "transparent",
-          color: isSelected
-            ? "var(--color-text-primary)"
-            : "var(--color-text-secondary)",
-        }}
+    <>
+      <li
+        ref={setNodeRef}
+        style={style}
+        {...listeners}
+        {...attributes}
+        className={isDragging ? "opacity-50" : ""}
+        onContextMenu={handleContextMenu}
       >
-        {/* Drag handle indicator */}
-        <span
-          className="flex h-5 w-5 flex-shrink-0 items-center justify-center"
+        <button
+          onClick={onSelect}
+          className="flex w-full items-center gap-2 rounded-lg py-1.5 text-left transition-all cursor-grab active:cursor-grabbing"
           style={{
-            color: isSelected ? "var(--color-accent)" : "var(--color-text-muted)",
+            paddingLeft: `${paddingLeft}px`,
+            paddingRight: "8px",
+            backgroundColor: isSelected ? "var(--color-bg-tertiary)" : "transparent",
+            color: isSelected
+              ? "var(--color-text-primary)"
+              : "var(--color-text-secondary)",
           }}
         >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
-            <polyline points="14,2 14,8 20,8" />
-          </svg>
-        </span>
-        <span className="flex-1 min-w-0 truncate text-sm">{page.title}</span>
-        {page.isArchived && (
+          {/* Drag handle indicator */}
           <span
-            className="flex-shrink-0 rounded px-1 py-0.5 text-xs"
+            className="flex h-5 w-5 flex-shrink-0 items-center justify-center"
             style={{
-              backgroundColor: "rgba(255, 193, 7, 0.15)",
-              color: "rgb(255, 193, 7)",
+              color: isSelected ? "var(--color-accent)" : "var(--color-text-muted)",
             }}
           >
-            Archived
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+              <polyline points="14,2 14,8 20,8" />
+            </svg>
           </span>
-        )}
-      </button>
-    </li>
+          <span className="flex-1 min-w-0 truncate text-sm">{page.title}</span>
+          {page.isArchived && (
+            <span
+              className="flex-shrink-0 rounded px-1 py-0.5 text-xs"
+              style={{
+                backgroundColor: "rgba(255, 193, 7, 0.15)",
+                color: "rgb(255, 193, 7)",
+              }}
+            >
+              Archived
+            </span>
+          )}
+        </button>
+      </li>
+
+      {/* Context menu for moving to section */}
+      {showContextMenu && sections && (
+        <div
+          className="fixed z-50 min-w-40 rounded-lg border py-1 shadow-lg"
+          style={{
+            left: contextMenuPos.x,
+            top: contextMenuPos.y,
+            backgroundColor: "var(--color-bg-secondary)",
+            borderColor: "var(--color-border)",
+          }}
+          onClick={(e) => e.stopPropagation()}
+          onMouseLeave={() => setShowContextMenu(false)}
+        >
+          <div
+            className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wider"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            Move to Section
+          </div>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              handleMoveToSection(null);
+            }}
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-sm transition-colors hover:bg-[var(--color-bg-tertiary)]"
+            style={{
+              color: page.sectionId === null ? "var(--color-accent)" : "var(--color-text-primary)",
+            }}
+          >
+            <span
+              className="h-2 w-2 rounded-full"
+              style={{ backgroundColor: "var(--color-text-muted)" }}
+            />
+            No Section
+          </button>
+          {sections.map((section) => (
+            <button
+              key={section.id}
+              onClick={(e) => {
+                e.stopPropagation();
+                handleMoveToSection(section.id);
+              }}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-sm transition-colors hover:bg-[var(--color-bg-tertiary)]"
+              style={{
+                color: page.sectionId === section.id ? "var(--color-accent)" : "var(--color-text-primary)",
+              }}
+            >
+              <span
+                className="h-2 w-2 rounded-full"
+                style={{ backgroundColor: section.color || "var(--color-accent)" }}
+              />
+              {section.name}
+            </button>
+          ))}
+        </div>
+      )}
+    </>
   );
 }
 

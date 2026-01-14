@@ -6,12 +6,12 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use chrono::{DateTime, Datelike, Local, NaiveTime, TimeZone, Timelike, Utc};
+use chrono::{DateTime, Datelike, Local, NaiveTime, TimeZone, Utc};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use crate::actions::executor::ActionExecutor;
-use crate::actions::models::{Action, ActionTrigger, Schedule};
+use crate::actions::models::Schedule;
 use crate::actions::storage::ActionStorage;
 
 /// Message types for scheduler communication
@@ -44,7 +44,7 @@ impl ActionScheduler {
         }
     }
 
-    /// Start the scheduler in a background tokio task
+    /// Start the scheduler in a background task
     pub fn start(&mut self) {
         let (tx, rx) = mpsc::channel(32);
         self.sender = Some(tx.clone());
@@ -52,33 +52,33 @@ impl ActionScheduler {
         let action_storage = Arc::clone(&self.action_storage);
         let executor = Arc::clone(&self.executor);
 
-        // Spawn scheduler task
-        tokio::spawn(async move {
+        // Spawn scheduler task using Tauri's async runtime
+        tauri::async_runtime::spawn(async move {
             scheduler_loop(action_storage, executor, rx).await;
         });
 
-        // Trigger initial load
-        let _ = tx.blocking_send(SchedulerMessage::Reload);
+        // Trigger initial load using try_send (non-blocking)
+        let _ = tx.try_send(SchedulerMessage::Reload);
     }
 
     /// Request scheduler to reload actions
     pub fn reload(&self) {
         if let Some(sender) = &self.sender {
-            let _ = sender.blocking_send(SchedulerMessage::Reload);
+            let _ = sender.try_send(SchedulerMessage::Reload);
         }
     }
 
     /// Request scheduler to execute an action immediately
     pub fn execute_now(&self, action_id: Uuid) {
         if let Some(sender) = &self.sender {
-            let _ = sender.blocking_send(SchedulerMessage::ExecuteNow(action_id));
+            let _ = sender.try_send(SchedulerMessage::ExecuteNow(action_id));
         }
     }
 
     /// Shutdown the scheduler
     pub fn shutdown(&self) {
         if let Some(sender) = &self.sender {
-            let _ = sender.blocking_send(SchedulerMessage::Shutdown);
+            let _ = sender.try_send(SchedulerMessage::Shutdown);
         }
     }
 }

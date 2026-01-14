@@ -44,6 +44,7 @@ pub fn create_folder(
     notebook_id: String,
     name: String,
     parent_id: Option<String>,
+    section_id: Option<String>,
 ) -> CommandResult<Folder> {
     let storage = state.storage.lock().unwrap();
     let nb_id = Uuid::parse_str(&notebook_id).map_err(|e| CommandError {
@@ -56,8 +57,23 @@ pub fn create_folder(
             })
         })
         .transpose()?;
+    let sect_id = section_id
+        .map(|id| {
+            Uuid::parse_str(&id).map_err(|e| CommandError {
+                message: format!("Invalid section ID: {}", e),
+            })
+        })
+        .transpose()?;
 
-    storage.create_folder(nb_id, name, parent).map_err(Into::into)
+    let mut folder = storage.create_folder(nb_id, name, parent)?;
+
+    // If section_id provided, update the folder with section
+    if sect_id.is_some() {
+        folder.section_id = sect_id;
+        storage.update_folder(&folder)?;
+    }
+
+    Ok(folder)
 }
 
 /// Update a folder's properties
@@ -68,6 +84,8 @@ pub fn update_folder(
     folder_id: String,
     name: Option<String>,
     parent_id: Option<Option<String>>, // None = don't change, Some(None) = move to root, Some(Some(id)) = move to folder
+    color: Option<Option<String>>,     // None = don't change, Some(None) = clear color, Some(Some(c)) = set color
+    section_id: Option<Option<String>>, // None = don't change, Some(None) = no section, Some(Some(id)) = set section
 ) -> CommandResult<Folder> {
     let storage = state.storage.lock().unwrap();
     let nb_id = Uuid::parse_str(&notebook_id).map_err(|e| CommandError {
@@ -91,6 +109,34 @@ pub fn update_folder(
                 })
             })
             .transpose()?;
+    }
+
+    if let Some(new_color) = color {
+        folder.color = new_color;
+    }
+
+    if let Some(new_section) = section_id {
+        let new_section_uuid = new_section
+            .map(|id| {
+                Uuid::parse_str(&id).map_err(|e| CommandError {
+                    message: format!("Invalid section ID: {}", e),
+                })
+            })
+            .transpose()?;
+
+        // If section is changing, also update all pages in this folder
+        if folder.section_id != new_section_uuid {
+            let pages = storage.list_pages(nb_id)?;
+            for mut page in pages {
+                if page.folder_id == Some(fld_id) {
+                    page.section_id = new_section_uuid;
+                    page.updated_at = chrono::Utc::now();
+                    storage.update_page(&page)?;
+                }
+            }
+        }
+
+        folder.section_id = new_section_uuid;
     }
 
     folder.updated_at = chrono::Utc::now();

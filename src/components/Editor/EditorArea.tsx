@@ -3,33 +3,75 @@ import type { OutputData } from "@editorjs/editorjs";
 import { useNotebookStore } from "../../stores/notebookStore";
 import { usePageStore } from "../../stores/pageStore";
 import { useFolderStore } from "../../stores/folderStore";
+import { useSectionStore } from "../../stores/sectionStore";
 import { useLinkStore } from "../../stores/linkStore";
 import { FolderTree } from "./FolderTree";
 import { BlockEditor } from "./BlockEditor";
 import { PageHeader } from "./PageHeader";
 import { BacklinksPanel } from "./BacklinksPanel";
 import { SimilarPagesPanel } from "./SimilarPagesPanel";
-import type { EditorData } from "../../types/page";
+import { CoverPage } from "../CoverPage";
+import { SectionList } from "../Sections";
+import type { EditorData, Page } from "../../types/page";
+import * as api from "../../utils/api";
 import "./editor-styles.css";
 
 export function EditorArea() {
   const { selectedNotebookId, notebooks } = useNotebookStore();
-  const { pages, selectedPageId, selectPage, updatePageContent, loadPages, createPage } =
+  const { pages, selectedPageId, selectPage, updatePageContent, loadPages, createPage, movePageToSection } =
     usePageStore();
-  const { folders, loadFolders, showArchived } = useFolderStore();
+  const { folders, loadFolders, showArchived, updateFolder } = useFolderStore();
+  const {
+    sections,
+    selectedSectionId,
+    selectSection,
+    loadSections,
+    clearSections,
+    createSection,
+    updateSection,
+    deleteSection,
+  } = useSectionStore();
   const { updatePageLinks, buildLinksFromPages } = useLinkStore();
   const [isSaving, setIsSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
 
+  // Cover page state
+  const [coverPage, setCoverPage] = useState<Page | null>(null);
+  const [showCover, setShowCover] = useState(false);
+
   const selectedNotebook = notebooks.find((n) => n.id === selectedNotebookId);
 
-  // Load pages and folders when notebook selection changes
+  // Load pages, folders, and sections when notebook selection changes
   useEffect(() => {
     if (selectedNotebookId) {
       loadPages(selectedNotebookId, showArchived);
       loadFolders(selectedNotebookId);
+      // Load sections if enabled for this notebook
+      if (selectedNotebook?.sectionsEnabled) {
+        loadSections(selectedNotebookId);
+      } else {
+        clearSections();
+      }
+    } else {
+      clearSections();
     }
-  }, [selectedNotebookId, loadPages, loadFolders, showArchived]);
+  }, [selectedNotebookId, selectedNotebook?.sectionsEnabled, loadPages, loadFolders, loadSections, clearSections, showArchived]);
+
+  // Load cover page when notebook changes
+  useEffect(() => {
+    if (selectedNotebookId) {
+      api.getCoverPage(selectedNotebookId).then((cover) => {
+        setCoverPage(cover);
+        // Show cover on notebook open if it exists
+        if (cover) {
+          setShowCover(true);
+        }
+      });
+    } else {
+      setCoverPage(null);
+      setShowCover(false);
+    }
+  }, [selectedNotebookId]);
 
   // Memoize filtered pages to prevent infinite re-renders
   const notebookPages = useMemo(
@@ -121,6 +163,32 @@ export function EditorArea() {
     [notebookPages, selectPage, selectedNotebookId, createPage]
   );
 
+  // Handle cover page save
+  const handleCoverSave = useCallback(
+    async (data: OutputData) => {
+      if (!selectedNotebookId || !coverPage) return;
+
+      const editorData: EditorData = {
+        time: data.time,
+        version: data.version,
+        blocks: data.blocks.map((block) => ({
+          id: block.id ?? crypto.randomUUID(),
+          type: block.type,
+          data: block.data as Record<string, unknown>,
+        })),
+      };
+
+      await updatePageContent(selectedNotebookId, coverPage.id, editorData);
+      setCoverPage((prev) => (prev ? { ...prev, content: editorData } : null));
+    },
+    [selectedNotebookId, coverPage, updatePageContent]
+  );
+
+  // Handle entering notebook from cover page
+  const handleEnterNotebook = useCallback(() => {
+    setShowCover(false);
+  }, []);
+
   if (!selectedNotebook) {
     return (
       <div
@@ -171,8 +239,41 @@ export function EditorArea() {
     );
   }
 
+  // Show cover page if enabled
+  if (showCover && coverPage) {
+    return (
+      <CoverPage
+        page={coverPage}
+        notebook={selectedNotebook}
+        onSave={handleCoverSave}
+        onEnterNotebook={handleEnterNotebook}
+        pages={notebookPages.map((p) => ({ id: p.id, title: p.title }))}
+      />
+    );
+  }
+
   return (
     <div className="flex h-full">
+      {/* Sections panel - shown when sections are enabled */}
+      {selectedNotebook.sectionsEnabled && (
+        <div
+          className="w-48 flex-shrink-0 border-r"
+          style={{
+            backgroundColor: "var(--color-bg-secondary)",
+            borderColor: "var(--color-border)",
+          }}
+        >
+          <SectionList
+            sections={sections}
+            selectedSectionId={selectedSectionId}
+            onSelectSection={selectSection}
+            onCreateSection={(name, color) => createSection(selectedNotebook.id, name, color)}
+            onUpdateSection={(sectionId, updates) => updateSection(selectedNotebook.id, sectionId, updates)}
+            onDeleteSection={(sectionId, moveItemsTo) => deleteSection(selectedNotebook.id, sectionId, moveItemsTo)}
+          />
+        </div>
+      )}
+
       {/* Page list panel with folder tree */}
       <div
         className="w-64 flex-shrink-0 border-r"
@@ -187,6 +288,17 @@ export function EditorArea() {
           folders={folders}
           selectedPageId={selectedPageId}
           onSelectPage={selectPage}
+          sectionsEnabled={selectedNotebook.sectionsEnabled}
+          selectedSectionId={selectedSectionId}
+          sections={sections}
+          onMovePageToSection={(pageId, sectionId) => movePageToSection(selectedNotebook.id, pageId, sectionId)}
+          onMoveFolderToSection={async (folderId, sectionId) => {
+            await updateFolder(selectedNotebook.id, folderId, { sectionId });
+            // Reload pages since folder section change also updates page sections
+            await loadPages(selectedNotebook.id, showArchived);
+          }}
+          hasCoverPage={coverPage !== null}
+          onViewCover={() => setShowCover(true)}
         />
       </div>
 

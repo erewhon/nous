@@ -11,7 +11,7 @@ import {
   type DragEndEvent,
   type DragOverEvent,
 } from "@dnd-kit/core";
-import type { Folder, Page } from "../../types/page";
+import type { Folder, Page, Section } from "../../types/page";
 import { useFolderStore } from "../../stores/folderStore";
 import { usePageStore } from "../../stores/pageStore";
 import { FolderTreeItem, DraggablePageItem } from "./FolderTreeItem";
@@ -22,6 +22,15 @@ interface FolderTreeProps {
   folders: Folder[];
   selectedPageId: string | null;
   onSelectPage: (pageId: string) => void;
+  // Section filtering (controlled by parent)
+  sectionsEnabled?: boolean;
+  selectedSectionId?: string | null;
+  sections?: Section[];
+  onMovePageToSection?: (pageId: string, sectionId: string | null) => void;
+  onMoveFolderToSection?: (folderId: string, sectionId: string | null) => void;
+  // Cover page props
+  hasCoverPage?: boolean;
+  onViewCover?: () => void;
 }
 
 export function FolderTree({
@@ -30,6 +39,13 @@ export function FolderTree({
   folders,
   selectedPageId,
   onSelectPage,
+  sectionsEnabled = false,
+  selectedSectionId = null,
+  sections = [],
+  onMovePageToSection,
+  onMoveFolderToSection,
+  hasCoverPage = false,
+  onViewCover,
 }: FolderTreeProps) {
   const { createPage, movePageToFolder } = usePageStore();
   const {
@@ -58,11 +74,23 @@ export function FolderTree({
     useSensor(KeyboardSensor)
   );
 
-  // Filter pages based on archive visibility
-  const visiblePages = useMemo(
-    () => (showArchived ? pages : pages.filter((p) => !p.isArchived)),
-    [pages, showArchived]
-  );
+  // Filter pages based on archive visibility and section
+  const visiblePages = useMemo(() => {
+    let filtered = showArchived ? pages : pages.filter((p) => !p.isArchived);
+    // Filter by section if a section is selected
+    if (sectionsEnabled && selectedSectionId !== null) {
+      filtered = filtered.filter((p) => p.sectionId === selectedSectionId);
+    }
+    return filtered;
+  }, [pages, showArchived, sectionsEnabled, selectedSectionId]);
+
+  // Filter folders by section
+  const visibleFolders = useMemo(() => {
+    if (!sectionsEnabled || selectedSectionId === null) {
+      return folders;
+    }
+    return folders.filter((f) => f.sectionId === selectedSectionId);
+  }, [folders, sectionsEnabled, selectedSectionId]);
 
   // Get pages for a specific folder
   const getPagesForFolder = useCallback(
@@ -77,7 +105,7 @@ export function FolderTree({
   // Get child folders for a parent
   const getChildFolders = useCallback(
     (parentId: string | null) => {
-      return folders
+      return visibleFolders
         .filter((f) => (f.parentId ?? null) === parentId)
         .sort((a, b) => {
           // Archive folder always last
@@ -86,25 +114,29 @@ export function FolderTree({
           return a.position - b.position;
         });
     },
-    [folders]
+    [visibleFolders]
   );
 
   // Handle creating a new page
   const handleCreatePage = useCallback(
     (folderId?: string) => {
-      createPage(notebookId, "Untitled", folderId);
+      // Pass the current section if sections are enabled and a section is selected
+      const sectionId = sectionsEnabled && selectedSectionId ? selectedSectionId : undefined;
+      createPage(notebookId, "Untitled", folderId, sectionId);
     },
-    [notebookId, createPage]
+    [notebookId, createPage, sectionsEnabled, selectedSectionId]
   );
 
   // Handle creating a new folder
   const handleCreateFolder = useCallback(async () => {
     if (newFolderName.trim()) {
-      await createFolder(notebookId, newFolderName.trim());
+      // Pass the current section if sections are enabled and a section is selected
+      const sectionId = sectionsEnabled && selectedSectionId ? selectedSectionId : undefined;
+      await createFolder(notebookId, newFolderName.trim(), undefined, sectionId);
       setNewFolderName("");
       setIsCreatingFolder(false);
     }
-  }, [notebookId, newFolderName, createFolder]);
+  }, [notebookId, newFolderName, createFolder, sectionsEnabled, selectedSectionId]);
 
   // Handle renaming a folder
   const handleRenameFolder = useCallback(
@@ -135,7 +167,7 @@ export function FolderTree({
       if (over) {
         const overId = over.id as string;
         // Check if we're over a folder
-        const folder = folders.find((f) => f.id === overId);
+        const folder = visibleFolders.find((f) => f.id === overId);
         if (folder) {
           setOverFolderId(overId);
           // Expand folder when hovering
@@ -149,7 +181,7 @@ export function FolderTree({
         setOverFolderId(null);
       }
     },
-    [folders, setFolderExpanded]
+    [visibleFolders, setFolderExpanded]
   );
 
   const handleDragEnd = useCallback(
@@ -175,7 +207,7 @@ export function FolderTree({
         targetFolderId = undefined;
       } else {
         // Check if over is a folder
-        const folder = folders.find((f) => f.id === overId);
+        const folder = visibleFolders.find((f) => f.id === overId);
         if (folder) {
           targetFolderId = folder.id;
         } else {
@@ -192,7 +224,7 @@ export function FolderTree({
         await movePageToFolder(notebookId, pageId, targetFolderId);
       }
     },
-    [pages, folders, notebookId, movePageToFolder]
+    [pages, visibleFolders, notebookId, movePageToFolder]
   );
 
   // Render a folder recursively
@@ -217,6 +249,9 @@ export function FolderTree({
           onRenameFolder={handleRenameFolder}
           onDeleteFolder={handleDeleteFolder}
           renderFolder={renderFolder}
+          sections={sectionsEnabled ? sections : undefined}
+          onMoveToSection={onMovePageToSection}
+          onMoveFolderToSection={onMoveFolderToSection}
         />
       );
     },
@@ -231,6 +266,10 @@ export function FolderTree({
       handleCreatePage,
       handleRenameFolder,
       handleDeleteFolder,
+      sectionsEnabled,
+      sections,
+      onMovePageToSection,
+      onMoveFolderToSection,
     ]
   );
 
@@ -262,6 +301,29 @@ export function FolderTree({
             Pages
           </span>
           <div className="flex items-center gap-1">
+            {/* View cover page button */}
+            {hasCoverPage && onViewCover && (
+              <button
+                onClick={onViewCover}
+                className="flex h-7 items-center gap-1 rounded-lg px-2 transition-all text-xs"
+                style={{ color: "var(--color-text-muted)" }}
+                title="View cover page"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" />
+                </svg>
+              </button>
+            )}
             {/* Show archived toggle */}
             {archivedCount > 0 && (
               <button
@@ -394,7 +456,7 @@ export function FolderTree({
 
         {/* Tree content */}
         <div className="flex-1 overflow-y-auto px-2 pb-4">
-          {folders.length === 0 && visiblePages.length === 0 ? (
+          {visibleFolders.length === 0 && visiblePages.length === 0 ? (
             <div
               className="flex h-28 flex-col items-center justify-center gap-2 rounded-xl border border-dashed p-4 text-center mx-2"
               style={{ borderColor: "var(--color-border)" }}
@@ -404,7 +466,9 @@ export function FolderTree({
                 className="text-xs"
                 style={{ color: "var(--color-text-muted)" }}
               >
-                No pages yet
+                {sectionsEnabled && selectedSectionId !== null
+                  ? "No pages in this section"
+                  : "No pages yet"}
               </span>
             </div>
           ) : (
@@ -420,6 +484,8 @@ export function FolderTree({
                   isSelected={selectedPageId === page.id}
                   depth={-1}
                   onSelect={() => onSelectPage(page.id)}
+                  sections={sectionsEnabled ? sections : undefined}
+                  onMoveToSection={onMovePageToSection}
                 />
               ))}
             </ul>

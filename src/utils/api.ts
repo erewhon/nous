@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { Notebook, NotebookType } from "../types/notebook";
-import type { Page, EditorData, SearchResult, Folder } from "../types/page";
+import type { Page, EditorData, SearchResult, Folder, Section } from "../types/page";
 
 // ===== Notebook API =====
 
@@ -21,7 +21,13 @@ export async function createNotebook(
 
 export async function updateNotebook(
   notebookId: string,
-  updates: { name?: string; icon?: string; color?: string; systemPrompt?: string }
+  updates: {
+    name?: string;
+    icon?: string;
+    color?: string;
+    sectionsEnabled?: boolean;
+    systemPrompt?: string;
+  }
 ): Promise<Notebook> {
   return invoke<Notebook>("update_notebook", { notebookId, ...updates });
 }
@@ -49,15 +55,16 @@ export async function getPage(
 export async function createPage(
   notebookId: string,
   title: string,
-  folderId?: string
+  folderId?: string,
+  sectionId?: string
 ): Promise<Page> {
-  return invoke<Page>("create_page", { notebookId, title, folderId });
+  return invoke<Page>("create_page", { notebookId, title, folderId, sectionId });
 }
 
 export async function updatePage(
   notebookId: string,
   pageId: string,
-  updates: { title?: string; content?: EditorData; tags?: string[]; systemPrompt?: string }
+  updates: { title?: string; content?: EditorData; tags?: string[]; systemPrompt?: string; sectionId?: string | null }
 ): Promise<Page> {
   return invoke<Page>("update_page", { notebookId, pageId, ...updates });
 }
@@ -85,21 +92,29 @@ export async function getFolder(
 export async function createFolder(
   notebookId: string,
   name: string,
-  parentId?: string
+  parentId?: string,
+  sectionId?: string
 ): Promise<Folder> {
-  return invoke<Folder>("create_folder", { notebookId, name, parentId });
+  return invoke<Folder>("create_folder", { notebookId, name, parentId, sectionId });
 }
 
 export async function updateFolder(
   notebookId: string,
   folderId: string,
-  updates: { name?: string; parentId?: string | null }
+  updates: {
+    name?: string;
+    parentId?: string | null;
+    color?: string | null;
+    sectionId?: string | null;
+  }
 ): Promise<Folder> {
   return invoke<Folder>("update_folder", {
     notebookId,
     folderId,
     name: updates.name,
     parentId: updates.parentId !== undefined ? updates.parentId : undefined,
+    color: updates.color !== undefined ? updates.color : undefined,
+    sectionId: updates.sectionId !== undefined ? updates.sectionId : undefined,
   });
 }
 
@@ -827,4 +842,208 @@ export async function inboxDelete(itemId: string): Promise<void> {
 
 export async function inboxClearProcessed(): Promise<number> {
   return invoke<number>("inbox_clear_processed");
+}
+
+// ========== Git Operations ==========
+
+export interface GitStatus {
+  is_repo: boolean;
+  is_dirty: boolean;
+  branch: string | null;
+  ahead: number;
+  behind: number;
+  has_remote: boolean;
+  remote_url: string | null;
+  last_commit: CommitInfo | null;
+}
+
+export interface CommitInfo {
+  id: string;
+  short_id: string;
+  message: string;
+  author: string;
+  timestamp: string;
+}
+
+export async function gitIsEnabled(notebookId: string): Promise<boolean> {
+  return invoke<boolean>("git_is_enabled", { notebookId });
+}
+
+export async function gitInit(notebookId: string): Promise<void> {
+  return invoke("git_init", { notebookId });
+}
+
+export async function gitStatus(notebookId: string): Promise<GitStatus> {
+  return invoke<GitStatus>("git_status", { notebookId });
+}
+
+export async function gitCommit(
+  notebookId: string,
+  message: string
+): Promise<CommitInfo> {
+  return invoke<CommitInfo>("git_commit", { notebookId, message });
+}
+
+export async function gitHistory(
+  notebookId: string,
+  pageId?: string,
+  limit?: number
+): Promise<CommitInfo[]> {
+  return invoke<CommitInfo[]>("git_history", { notebookId, pageId, limit });
+}
+
+export async function gitGetPageAtCommit(
+  notebookId: string,
+  pageId: string,
+  commitId: string
+): Promise<string> {
+  return invoke<string>("git_get_page_at_commit", {
+    notebookId,
+    pageId,
+    commitId,
+  });
+}
+
+export async function gitDiff(
+  notebookId: string,
+  pageId: string,
+  oldCommitId: string,
+  newCommitId: string
+): Promise<string> {
+  return invoke<string>("git_diff", {
+    notebookId,
+    pageId,
+    oldCommitId,
+    newCommitId,
+  });
+}
+
+export async function gitRestorePage(
+  notebookId: string,
+  pageId: string,
+  commitId: string
+): Promise<void> {
+  return invoke("git_restore_page", { notebookId, pageId, commitId });
+}
+
+export async function gitSetRemote(
+  notebookId: string,
+  url: string
+): Promise<void> {
+  return invoke("git_set_remote", { notebookId, url });
+}
+
+export async function gitRemoveRemote(notebookId: string): Promise<void> {
+  return invoke("git_remove_remote", { notebookId });
+}
+
+export async function gitFetch(
+  notebookId: string,
+  username?: string,
+  password?: string
+): Promise<void> {
+  return invoke("git_fetch", { notebookId, username, password });
+}
+
+export async function gitPush(
+  notebookId: string,
+  username?: string,
+  password?: string
+): Promise<void> {
+  return invoke("git_push", { notebookId, username, password });
+}
+
+export async function gitPull(
+  notebookId: string,
+  username?: string,
+  password?: string
+): Promise<void> {
+  return invoke("git_pull", { notebookId, username, password });
+}
+
+export async function gitListBranches(notebookId: string): Promise<string[]> {
+  return invoke<string[]>("git_list_branches", { notebookId });
+}
+
+export async function gitCurrentBranch(notebookId: string): Promise<string> {
+  return invoke<string>("git_current_branch", { notebookId });
+}
+
+export async function gitCreateBranch(
+  notebookId: string,
+  branchName: string
+): Promise<void> {
+  return invoke("git_create_branch", { notebookId, branchName });
+}
+
+export async function gitSwitchBranch(
+  notebookId: string,
+  branchName: string
+): Promise<void> {
+  return invoke("git_switch_branch", { notebookId, branchName });
+}
+
+// ========== Section Operations ==========
+
+export async function listSections(notebookId: string): Promise<Section[]> {
+  return invoke<Section[]>("list_sections", { notebookId });
+}
+
+export async function getSection(
+  notebookId: string,
+  sectionId: string
+): Promise<Section> {
+  return invoke<Section>("get_section", { notebookId, sectionId });
+}
+
+export async function createSection(
+  notebookId: string,
+  name: string,
+  color?: string
+): Promise<Section> {
+  return invoke<Section>("create_section", { notebookId, name, color });
+}
+
+export async function updateSection(
+  notebookId: string,
+  sectionId: string,
+  updates: { name?: string; color?: string | null }
+): Promise<Section> {
+  return invoke<Section>("update_section", {
+    notebookId,
+    sectionId,
+    ...updates,
+  });
+}
+
+export async function deleteSection(
+  notebookId: string,
+  sectionId: string,
+  moveItemsTo?: string
+): Promise<void> {
+  return invoke("delete_section", { notebookId, sectionId, moveItemsTo });
+}
+
+export async function reorderSections(
+  notebookId: string,
+  sectionIds: string[]
+): Promise<void> {
+  return invoke("reorder_sections", { notebookId, sectionIds });
+}
+
+// ========== Cover Page Operations ==========
+
+export async function getCoverPage(notebookId: string): Promise<Page | null> {
+  return invoke<Page | null>("get_cover_page", { notebookId });
+}
+
+export async function createCoverPage(notebookId: string): Promise<Page> {
+  return invoke<Page>("create_cover_page", { notebookId });
+}
+
+export async function setCoverPage(
+  notebookId: string,
+  pageId: string | null
+): Promise<Page | null> {
+  return invoke<Page | null>("set_cover_page", { notebookId, pageId });
 }

@@ -334,6 +334,7 @@ pub fn import_obsidian_vault(
         notebook_type: NotebookType::Standard,
         icon: Some("💎".to_string()), // Diamond for Obsidian
         color: None,
+        sections_enabled: false,
         system_prompt: None,
         created_at: now,
         updated_at: now,

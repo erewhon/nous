@@ -7,6 +7,7 @@ import { save, open } from "@tauri-apps/plugin-dialog";
 import { TagEditor } from "../Tags";
 import { SaveAsTemplateDialog } from "../TemplateDialog";
 import { PageSettingsDialog } from "../PageSettings";
+import { PageHistoryDialog } from "../PageHistory";
 import { useFolderStore } from "../../stores/folderStore";
 
 interface PageHeaderProps {
@@ -21,6 +22,7 @@ export function PageHeader({ page, isSaving, lastSaved }: PageHeaderProps) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [showSaveAsTemplate, setShowSaveAsTemplate] = useState(false);
   const [showPageSettings, setShowPageSettings] = useState(false);
+  const [showPageHistory, setShowPageHistory] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const { updatePage, selectPage, archivePage, unarchivePage, createPage, updatePageContent } = usePageStore();
@@ -106,6 +108,11 @@ export function PageHeader({ page, isSaving, lastSaved }: PageHeaderProps) {
   const handleOpenPageSettings = () => {
     setIsMenuOpen(false);
     setShowPageSettings(true);
+  };
+
+  const handleOpenPageHistory = () => {
+    setIsMenuOpen(false);
+    setShowPageHistory(true);
   };
 
   const handleArchive = async () => {
@@ -395,6 +402,28 @@ export function PageHeader({ page, isSaving, lastSaved }: PageHeaderProps) {
               </svg>
               AI Settings
             </button>
+            <button
+              onClick={handleOpenPageHistory}
+              className="flex w-full items-center gap-3 px-4 py-2 text-left text-sm transition-colors hover:opacity-80"
+              style={{ color: "var(--color-text-secondary)" }}
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                <path d="M3 3v5h5" />
+                <path d="M12 7v5l4 2" />
+              </svg>
+              View History
+            </button>
             <div
               className="my-1 border-t"
               style={{ borderColor: "var(--color-border)" }}
@@ -517,6 +546,13 @@ export function PageHeader({ page, isSaving, lastSaved }: PageHeaderProps) {
         isOpen={showPageSettings}
         page={page}
         onClose={() => setShowPageSettings(false)}
+      />
+
+      {/* Page History Dialog */}
+      <PageHistoryDialog
+        isOpen={showPageHistory}
+        page={page}
+        onClose={() => setShowPageHistory(false)}
       />
     </div>
   );
