@@ -4,7 +4,21 @@ import {
   type ColorScheme,
   type FontFamily,
   type EditorWidth,
+  type UIMode,
 } from "../../stores/themeStore";
+
+const UI_MODES: { value: UIMode; label: string; description: string }[] = [
+  {
+    value: "classic",
+    label: "Classic",
+    description: "Sidebar with notebooks, folders, and pages",
+  },
+  {
+    value: "overview",
+    label: "Overview",
+    description: "Tiled notebook view, like physical notebooks",
+  },
+];
 
 const THEME_MODES: { value: ThemeMode; label: string; description: string }[] = [
   { value: "light", label: "Light", description: "Light background, dark text" },
@@ -53,16 +67,75 @@ export function ThemeSettings() {
   const {
     settings,
     resolvedMode,
+    uiMode,
     setMode,
     setColorScheme,
     setFontFamily,
     setEditorWidth,
     setFontSize,
     setLineHeight,
+    setUIMode,
   } = useThemeStore();
 
   return (
     <div className="space-y-8">
+      {/* UI Layout Mode */}
+      <div>
+        <label
+          className="mb-3 block text-sm font-medium"
+          style={{ color: "var(--color-text-primary)" }}
+        >
+          Layout Mode
+        </label>
+        <div className="grid grid-cols-2 gap-3">
+          {UI_MODES.map((mode) => (
+            <button
+              key={mode.value}
+              onClick={() => setUIMode(mode.value)}
+              className="flex flex-col items-center gap-2 rounded-lg border p-4 transition-colors"
+              style={{
+                borderColor:
+                  uiMode === mode.value
+                    ? "var(--color-accent)"
+                    : "var(--color-border)",
+                backgroundColor:
+                  uiMode === mode.value
+                    ? "rgba(139, 92, 246, 0.1)"
+                    : "transparent",
+              }}
+            >
+              <div
+                className="flex h-12 w-16 items-center justify-center rounded-md border"
+                style={{
+                  backgroundColor: "var(--color-bg-tertiary)",
+                  borderColor: "var(--color-border)",
+                }}
+              >
+                {mode.value === "classic" ? (
+                  <IconSidebar />
+                ) : (
+                  <IconGrid />
+                )}
+              </div>
+              <div className="text-center">
+                <span
+                  className="block text-sm font-medium"
+                  style={{ color: "var(--color-text-primary)" }}
+                >
+                  {mode.label}
+                </span>
+                <span
+                  className="block text-xs"
+                  style={{ color: "var(--color-text-muted)" }}
+                >
+                  {mode.description}
+                </span>
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Theme Mode */}
       <div>
         <label
@@ -402,6 +475,46 @@ function IconSystem() {
       <rect x="2" y="3" width="20" height="14" rx="2" />
       <path d="M8 21h8" />
       <path d="M12 17v4" />
+    </svg>
+  );
+}
+
+function IconSidebar() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="24"
+      height="24"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="var(--color-text-muted)"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <path d="M9 3v18" />
+    </svg>
+  );
+}
+
+function IconGrid() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="24"
+      height="24"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="var(--color-text-muted)"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="3" y="3" width="7" height="7" />
+      <rect x="14" y="3" width="7" height="7" />
+      <rect x="14" y="14" width="7" height="7" />
+      <rect x="3" y="14" width="7" height="7" />
     </svg>
   );
 }

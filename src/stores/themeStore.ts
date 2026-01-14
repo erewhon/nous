@@ -5,6 +5,7 @@ export type ThemeMode = "light" | "dark" | "system";
 export type ColorScheme = "default" | "catppuccin" | "nord" | "dracula";
 export type FontFamily = "system" | "inter" | "jetbrains-mono" | "fira-code";
 export type EditorWidth = "narrow" | "medium" | "wide" | "full";
+export type UIMode = "classic" | "overview";
 
 interface ThemeSettings {
   mode: ThemeMode;
@@ -19,6 +20,7 @@ interface ThemeState {
   settings: ThemeSettings;
   resolvedMode: "light" | "dark"; // Actual mode after resolving "system"
   showPageStats: boolean;
+  uiMode: UIMode;
   setMode: (mode: ThemeMode) => void;
   setColorScheme: (scheme: ColorScheme) => void;
   setFontFamily: (font: FontFamily) => void;
@@ -26,6 +28,7 @@ interface ThemeState {
   setFontSize: (size: number) => void;
   setLineHeight: (height: number) => void;
   togglePageStats: () => void;
+  setUIMode: (mode: UIMode) => void;
   applyTheme: () => void;
 }
 
@@ -261,6 +264,7 @@ export const useThemeStore = create<ThemeState>()(
       settings: DEFAULT_SETTINGS,
       resolvedMode: "dark",
       showPageStats: true,
+      uiMode: "classic" as UIMode,
 
       setMode: (mode) => {
         set((state) => ({
@@ -309,6 +313,10 @@ export const useThemeStore = create<ThemeState>()(
         set((state) => ({ showPageStats: !state.showPageStats }));
       },
 
+      setUIMode: (mode) => {
+        set({ uiMode: mode });
+      },
+
       applyTheme: () => {
         const { settings, resolvedMode } = get();
         const root = document.documentElement;
@@ -344,7 +352,7 @@ export const useThemeStore = create<ThemeState>()(
     }),
     {
       name: "katt-theme",
-      partialize: (state) => ({ settings: state.settings, showPageStats: state.showPageStats }),
+      partialize: (state) => ({ settings: state.settings, showPageStats: state.showPageStats, uiMode: state.uiMode }),
       onRehydrateStorage: () => (state) => {
         if (state) {
           // Resolve system theme on rehydration
