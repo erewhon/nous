@@ -18,12 +18,14 @@ interface ThemeSettings {
 interface ThemeState {
   settings: ThemeSettings;
   resolvedMode: "light" | "dark"; // Actual mode after resolving "system"
+  showPageStats: boolean;
   setMode: (mode: ThemeMode) => void;
   setColorScheme: (scheme: ColorScheme) => void;
   setFontFamily: (font: FontFamily) => void;
   setEditorWidth: (width: EditorWidth) => void;
   setFontSize: (size: number) => void;
   setLineHeight: (height: number) => void;
+  togglePageStats: () => void;
   applyTheme: () => void;
 }
 
@@ -258,6 +260,7 @@ export const useThemeStore = create<ThemeState>()(
     (set, get) => ({
       settings: DEFAULT_SETTINGS,
       resolvedMode: "dark",
+      showPageStats: true,
 
       setMode: (mode) => {
         set((state) => ({
@@ -302,6 +305,10 @@ export const useThemeStore = create<ThemeState>()(
         get().applyTheme();
       },
 
+      togglePageStats: () => {
+        set((state) => ({ showPageStats: !state.showPageStats }));
+      },
+
       applyTheme: () => {
         const { settings, resolvedMode } = get();
         const root = document.documentElement;
@@ -337,7 +344,7 @@ export const useThemeStore = create<ThemeState>()(
     }),
     {
       name: "katt-theme",
-      partialize: (state) => ({ settings: state.settings }),
+      partialize: (state) => ({ settings: state.settings, showPageStats: state.showPageStats }),
       onRehydrateStorage: () => (state) => {
         if (state) {
           // Resolve system theme on rehydration

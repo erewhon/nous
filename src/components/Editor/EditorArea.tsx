@@ -14,6 +14,7 @@ import { CoverPage } from "../CoverPage";
 import { SectionList } from "../Sections";
 import type { EditorData, Page } from "../../types/page";
 import * as api from "../../utils/api";
+import { calculatePageStats, type PageStats } from "../../utils/pageStats";
 import "./editor-styles.css";
 
 export function EditorArea() {
@@ -100,6 +101,12 @@ export function EditorArea() {
       })),
     };
   }, [selectedPage?.id, selectedPage?.content]);
+
+  // Calculate page statistics
+  const pageStats: PageStats | null = useMemo(() => {
+    if (!selectedPage?.content?.blocks?.length) return null;
+    return calculatePageStats(selectedPage.content.blocks);
+  }, [selectedPage?.content?.blocks]);
 
   // Handle save
   const handleSave = useCallback(
@@ -313,6 +320,7 @@ export function EditorArea() {
               page={selectedPage}
               isSaving={isSaving}
               lastSaved={lastSaved}
+              stats={pageStats}
             />
             <div className="flex-1 overflow-y-auto px-16 py-10">
               <div
