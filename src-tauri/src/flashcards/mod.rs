@@ -11,4 +11,4 @@ pub mod models;
 pub mod storage;
 
 pub use models::*;
-pub use storage::FlashcardStorage;
+pub use storage::{FlashcardStorage, FlashcardStorageError};

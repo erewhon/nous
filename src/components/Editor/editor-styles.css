@@ -671,3 +671,154 @@ wiki-link.broken,
   font-family: inherit;
   font-size: 0.65rem;
 }
+
+/* Flashcard Block Styles */
+.flashcard-block {
+  margin: 1rem 0;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg-secondary);
+  overflow: hidden;
+}
+
+.flashcard-block--synced {
+  border-color: var(--color-accent);
+}
+
+.flashcard-container {
+  display: flex;
+  gap: 0;
+}
+
+.flashcard-side {
+  flex: 1;
+  padding: 1rem;
+  min-height: 100px;
+}
+
+.flashcard-front {
+  border-right: 1px solid var(--color-border);
+  background: var(--color-bg-primary);
+}
+
+.flashcard-back {
+  background: var(--color-bg-tertiary);
+}
+
+.flashcard-block--flipped .flashcard-back {
+  background: rgba(139, 92, 246, 0.1);
+}
+
+.flashcard-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-muted);
+  margin-bottom: 0.5rem;
+}
+
+.flashcard-content {
+  color: var(--color-text-primary);
+  line-height: 1.6;
+  outline: none;
+  min-height: 2rem;
+}
+
+.flashcard-content:empty::before {
+  content: attr(data-placeholder);
+  color: var(--color-text-muted);
+}
+
+.flashcard-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-bg-tertiary);
+}
+
+.flashcard-type-selector {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.flashcard-type-btn {
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-bg-secondary);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: 0.75rem;
+  transition: all 0.15s ease;
+}
+
+.flashcard-type-btn:hover {
+  color: var(--color-text-primary);
+}
+
+.flashcard-type-btn--active {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.flashcard-flip-btn {
+  margin-left: auto;
+  padding: 0.25rem 0.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: 0.75rem;
+  transition: all 0.15s ease;
+}
+
+.flashcard-flip-btn:hover {
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+}
+
+.flashcard-add-deck-btn {
+  padding: 0.25rem 0.75rem;
+  border: 1px solid var(--color-accent);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-accent);
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-weight: 500;
+  transition: all 0.15s ease;
+}
+
+.flashcard-add-deck-btn:hover {
+  background: var(--color-accent);
+  color: white;
+}
+
+.flashcard-add-deck-btn--synced {
+  background: rgba(16, 185, 129, 0.1);
+  border-color: #10b981;
+  color: #10b981;
+  cursor: default;
+}
+
+.flashcard-add-deck-btn--synced:hover {
+  background: rgba(16, 185, 129, 0.1);
+  color: #10b981;
+}
+
+/* Settings panel for flashcard */
+.flashcard-settings-section {
+  padding: 0.5rem;
+}
+
+.flashcard-settings-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  margin-bottom: 0.5rem;
+  padding: 0 0.5rem;
+}

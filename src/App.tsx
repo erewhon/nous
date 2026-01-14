@@ -11,6 +11,7 @@ import { TagManager } from "./components/Tags";
 import { BackupDialog } from "./components/Backup";
 import { ActionLibrary, ActionEditor } from "./components/Actions";
 import { QuickCapture, InboxPanel } from "./components/Inbox";
+import { FlashcardPanel } from "./components/Flashcards";
 import { useAppInit } from "./hooks/useAppInit";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useNotebookStore } from "./stores/notebookStore";
@@ -19,6 +20,7 @@ import { useThemeStore } from "./stores/themeStore";
 import { useActionStore } from "./stores/actionStore";
 import { useInboxStore } from "./stores/inboxStore";
 import { useAIStore } from "./stores/aiStore";
+import { useFlashcardStore } from "./stores/flashcardStore";
 import { exportPageToFile } from "./utils/api";
 import { save } from "@tauri-apps/plugin-dialog";
 
@@ -59,6 +61,7 @@ function App() {
     togglePanel: toggleAIPanel,
     closePanel: closeAIPanel,
   } = useAIStore();
+  const toggleFlashcardPanel = useFlashcardStore((state) => state.togglePanel);
   const { pages, selectedPageId, selectPage, deletePage, duplicatePage } = usePageStore();
 
   // Get the selected page
@@ -136,6 +139,7 @@ function App() {
     onActions: openActionLibrary,
     onQuickCapture: openQuickCapture,
     onInbox: openInboxPanel,
+    onFlashcards: toggleFlashcardPanel,
   });
 
   return (
@@ -231,6 +235,9 @@ function App() {
 
       {/* Inbox Panel */}
       <InboxPanel />
+
+      {/* Flashcard Panel */}
+      <FlashcardPanel />
     </>
   );
 }

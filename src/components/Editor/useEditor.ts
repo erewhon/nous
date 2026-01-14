@@ -12,6 +12,7 @@ import Image from "@editorjs/image";
 import { WikiLinkTool } from "./WikiLinkTool";
 import { CodeBlockTool } from "./CodeBlockTool";
 import { CalloutTool } from "./CalloutTool";
+import { FlashcardTool } from "./FlashcardTool";
 import { createImageUploader } from "./imageUploader";
 
 interface UseEditorOptions {
@@ -97,6 +98,13 @@ export function useEditor({
           config: {
             titlePlaceholder: "Callout title (optional)",
             contentPlaceholder: "Type callout content...",
+          },
+        },
+        flashcard: {
+          class: FlashcardTool as unknown as ToolConstructable,
+          config: {
+            frontPlaceholder: "Enter question...",
+            backPlaceholder: "Enter answer...",
           },
         },
         ...(notebookId

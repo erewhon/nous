@@ -1,12 +1,14 @@
 import { useNotebookStore } from "../../stores/notebookStore";
 import { useActionStore } from "../../stores/actionStore";
 import { useInboxStore } from "../../stores/inboxStore";
+import { useFlashcardStore } from "../../stores/flashcardStore";
 import { NotebookList } from "../NotebookList/NotebookList";
 
 export function Sidebar() {
   const { notebooks, selectedNotebookId, createNotebook } = useNotebookStore();
   const openActionLibrary = useActionStore((state) => state.openActionLibrary);
   const { summary, openQuickCapture, openInboxPanel } = useInboxStore();
+  const { togglePanel: toggleFlashcards, stats: flashcardStats } = useFlashcardStore();
 
   return (
     <aside
@@ -133,7 +135,7 @@ export function Sidebar() {
         style={{ borderColor: "var(--color-border)" }}
       >
         {/* Tool buttons - arranged in a grid */}
-        <div className="grid grid-cols-6 gap-1">
+        <div className="grid grid-cols-7 gap-1">
           {/* Quick Capture */}
           <button
             onClick={openQuickCapture}
@@ -235,6 +237,36 @@ export function Sidebar() {
             >
               <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
             </svg>
+          </button>
+          {/* Flashcards */}
+          <button
+            onClick={toggleFlashcards}
+            className="relative flex h-8 w-full items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
+            style={{ color: "var(--color-text-muted)" }}
+            title="Flashcards (⌘⇧F)"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="15"
+              height="15"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <rect x="2" y="4" width="20" height="16" rx="2" />
+              <line x1="2" y1="12" x2="22" y2="12" />
+            </svg>
+            {flashcardStats && flashcardStats.dueCards > 0 && (
+              <span
+                className="absolute right-1 top-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full text-[9px] font-bold text-white"
+                style={{ backgroundColor: "var(--color-accent)" }}
+              >
+                {flashcardStats.dueCards > 9 ? "9+" : flashcardStats.dueCards}
+              </span>
+            )}
           </button>
           {/* Graph View */}
           <button

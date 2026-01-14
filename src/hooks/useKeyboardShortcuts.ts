@@ -15,6 +15,7 @@ interface KeyboardShortcuts {
   onActions?: () => void;
   onQuickCapture?: () => void;
   onInbox?: () => void;
+  onFlashcards?: () => void;
 }
 
 export function useKeyboardShortcuts({
@@ -32,6 +33,7 @@ export function useKeyboardShortcuts({
   onActions,
   onQuickCapture,
   onInbox,
+  onFlashcards,
 }: KeyboardShortcuts) {
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
@@ -134,8 +136,15 @@ export function useKeyboardShortcuts({
         onInbox?.();
         return;
       }
+
+      // Flashcards: Cmd+Shift+F / Ctrl+Shift+F
+      if (isMod && e.shiftKey && (e.key === "f" || e.key === "F")) {
+        e.preventDefault();
+        onFlashcards?.();
+        return;
+      }
     },
-    [onCommandPalette, onNewPage, onNewNotebook, onGraph, onAI, onWebResearch, onSettings, onExportPage, onDuplicatePage, onDeletePage, onTagManager, onActions, onQuickCapture, onInbox]
+    [onCommandPalette, onNewPage, onNewNotebook, onGraph, onAI, onWebResearch, onSettings, onExportPage, onDuplicatePage, onDeletePage, onTagManager, onActions, onQuickCapture, onInbox, onFlashcards]
   );
 
   useEffect(() => {

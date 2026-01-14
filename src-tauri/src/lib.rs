@@ -5,6 +5,7 @@ use tauri::Manager;
 mod actions;
 mod commands;
 mod evernote;
+mod flashcards;
 mod git;
 mod inbox;
 mod markdown;
@@ -16,6 +17,7 @@ mod search;
 mod storage;
 
 use actions::{ActionExecutor, ActionScheduler, ActionStorage};
+use flashcards::FlashcardStorage;
 use inbox::InboxStorage;
 use python_bridge::PythonAI;
 use search::SearchIndex;
@@ -29,6 +31,7 @@ pub struct AppState {
     pub action_executor: Arc<Mutex<ActionExecutor>>,
     pub action_scheduler: Mutex<ActionScheduler>,
     pub inbox_storage: Mutex<InboxStorage>,
+    pub flashcard_storage: Mutex<FlashcardStorage>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -57,6 +60,9 @@ pub fn run() {
     let inbox_storage = InboxStorage::new(data_dir.clone())
         .expect("Failed to initialize inbox storage");
 
+    // Initialize flashcard storage
+    let flashcard_storage = FlashcardStorage::new(data_dir.join("notebooks"));
+
     // Wrap storage in Arc<Mutex<>> for sharing with executor
     let storage_arc = Arc::new(Mutex::new(storage));
     let action_storage_arc = Arc::new(Mutex::new(action_storage));
@@ -84,6 +90,7 @@ pub fn run() {
         action_executor: action_executor_arc,
         action_scheduler: Mutex::new(action_scheduler),
         inbox_storage: Mutex::new(inbox_storage),
+        flashcard_storage: Mutex::new(flashcard_storage),
     };
 
     tauri::Builder::default()
@@ -232,6 +239,23 @@ pub fn run() {
             commands::git_current_branch,
             commands::git_create_branch,
             commands::git_switch_branch,
+            // Flashcard commands
+            commands::list_decks,
+            commands::get_deck,
+            commands::create_deck,
+            commands::update_deck,
+            commands::delete_deck,
+            commands::list_cards,
+            commands::get_card,
+            commands::create_card,
+            commands::create_card_from_block,
+            commands::update_card,
+            commands::delete_card,
+            commands::get_due_cards,
+            commands::submit_review,
+            commands::get_review_stats,
+            commands::get_card_state,
+            commands::preview_review_intervals,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

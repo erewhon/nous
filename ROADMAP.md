@@ -217,10 +217,12 @@ Already implemented with Tantivy, may need refinement:
 ## Future
 
 ### 14. Spaced Repetition
-- [ ] Mark content as "flashcard"
-- [ ] Review queue with spaced intervals
-- [ ] Progress tracking
-- [ ] Integration with page content
+- [x] Flashcard decks per notebook
+- [x] Editor block for inline flashcards
+- [x] SM-2 spaced repetition algorithm
+- [x] Full-screen and floating panel review modes
+- [x] Due card tracking and statistics
+- [x] Keyboard shortcut (`Cmd+Shift+F`)
 
 ### 15. PDF Import & Annotation
 - [ ] Import PDF files
@@ -247,12 +249,24 @@ Already implemented with Tantivy, may need refinement:
 - [ ] Mobile companion app (or PWA)
 - [ ] Offline support
 
-### 19. Import from Other Apps
+### 19. Page Stats & Writing Assistance
+- [ ] Page statistics (word count, character count, reading time)
+- [ ] Real-time spell checking
+- [ ] Grammar checking
+- [ ] Reading level analysis (Flesch-Kincaid, etc.)
+
+### 20. Editor Customization
+- [ ] VI key bindings mode
+- [ ] Emacs key bindings mode
+- [ ] External editor support (open page in VS Code, Vim, etc.)
+
+### 21. Import from Other Apps
 - [ ] OneNote notebook import
 - [x] Scrivener project import (.scriv folders with RTF content)
 - [x] Evernote export import (.enex XML with HTML content)
 - [x] Notion export import (ZIP with markdown & CSV databases)
 - [x] Obsidian vault import (markdown with YAML frontmatter, wiki-links, attachments)
+- [ ] Joplin export import (JEX archive or raw data)
 - [ ] Apple Notes import
 
 ---
