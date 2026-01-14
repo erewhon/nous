@@ -10,12 +10,15 @@ import { TemplateDialog } from "./components/TemplateDialog";
 import { TagManager } from "./components/Tags";
 import { BackupDialog } from "./components/Backup";
 import { ActionLibrary, ActionEditor } from "./components/Actions";
+import { QuickCapture, InboxPanel } from "./components/Inbox";
 import { useAppInit } from "./hooks/useAppInit";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useNotebookStore } from "./stores/notebookStore";
 import { usePageStore } from "./stores/pageStore";
 import { useThemeStore } from "./stores/themeStore";
 import { useActionStore } from "./stores/actionStore";
+import { useInboxStore } from "./stores/inboxStore";
+import { useAIStore } from "./stores/aiStore";
 import { exportPageToFile } from "./utils/api";
 import { save } from "@tauri-apps/plugin-dialog";
 
@@ -30,7 +33,6 @@ function App() {
 
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [showGraph, setShowGraph] = useState(false);
-  const [showAI, setShowAI] = useState(false);
   const [showWebResearch, setShowWebResearch] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [settingsTab, setSettingsTab] = useState<"ai" | "web-research">("ai");
@@ -48,6 +50,15 @@ function App() {
     closeActionLibrary,
     closeActionEditor,
   } = useActionStore();
+  const {
+    openQuickCapture,
+    openInboxPanel,
+  } = useInboxStore();
+  const {
+    panel: aiPanel,
+    togglePanel: toggleAIPanel,
+    closePanel: closeAIPanel,
+  } = useAIStore();
   const { pages, selectedPageId, selectPage, deletePage, duplicatePage } = usePageStore();
 
   // Get the selected page
@@ -115,7 +126,7 @@ function App() {
     onNewPage: handleNewPage,
     onNewNotebook: handleNewNotebook,
     onGraph: () => setShowGraph(true),
-    onAI: () => setShowAI((prev) => !prev),
+    onAI: toggleAIPanel,
     onWebResearch: () => setShowWebResearch((prev) => !prev),
     onSettings: () => setShowSettings((prev) => !prev),
     onExportPage: handleExportPage,
@@ -123,6 +134,8 @@ function App() {
     onDeletePage: handleDeletePage,
     onTagManager: () => setShowTagManager((prev) => !prev),
     onActions: openActionLibrary,
+    onQuickCapture: openQuickCapture,
+    onInbox: openInboxPanel,
   });
 
   return (
@@ -148,8 +161,8 @@ function App() {
 
       {/* AI Chat Panel */}
       <AIChatPanel
-        isOpen={showAI}
-        onClose={() => setShowAI(false)}
+        isOpen={aiPanel.isOpen}
+        onClose={closeAIPanel}
         onOpenSettings={() => handleOpenSettings("ai")}
       />
 
@@ -212,6 +225,12 @@ function App() {
         onClose={closeActionEditor}
         editingActionId={editingActionId}
       />
+
+      {/* Quick Capture */}
+      <QuickCapture />
+
+      {/* Inbox Panel */}
+      <InboxPanel />
     </>
   );
 }

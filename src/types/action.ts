@@ -208,11 +208,15 @@ export const SearchAndProcessStepSchema: z.ZodType<SearchAndProcessStep> = z.laz
   })
 );
 
+export const SummaryStyleSchema = z.enum(["concise", "detailed", "bullets", "narrative"]);
+export type SummaryStyle = z.infer<typeof SummaryStyleSchema>;
+
 export const AiSummarizeStepSchema = z.object({
   type: z.literal("aiSummarize"),
   selector: PageSelectorSchema,
   outputTarget: SummaryOutputSchema,
   customPrompt: z.string().optional(),
+  summaryStyle: SummaryStyleSchema.optional().default("concise"),
 });
 
 export const CarryForwardItemsStepSchema = z.object({

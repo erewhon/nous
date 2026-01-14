@@ -4,13 +4,18 @@ use tauri::Manager;
 
 mod actions;
 mod commands;
+mod evernote;
+mod inbox;
 mod markdown;
 mod notion;
+mod obsidian;
 mod python_bridge;
+mod scrivener;
 mod search;
 mod storage;
 
 use actions::{ActionExecutor, ActionScheduler, ActionStorage};
+use inbox::InboxStorage;
 use python_bridge::PythonAI;
 use search::SearchIndex;
 use storage::FileStorage;
@@ -22,6 +27,7 @@ pub struct AppState {
     pub action_storage: Arc<Mutex<ActionStorage>>,
     pub action_executor: Arc<Mutex<ActionExecutor>>,
     pub action_scheduler: Mutex<ActionScheduler>,
+    pub inbox_storage: Mutex<InboxStorage>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -46,14 +52,20 @@ pub fn run() {
     let action_storage = ActionStorage::new(data_dir.clone())
         .expect("Failed to initialize action storage");
 
+    // Initialize inbox storage
+    let inbox_storage = InboxStorage::new(data_dir.clone())
+        .expect("Failed to initialize inbox storage");
+
     // Wrap storage in Arc<Mutex<>> for sharing with executor
     let storage_arc = Arc::new(Mutex::new(storage));
     let action_storage_arc = Arc::new(Mutex::new(action_storage));
+    let python_ai_arc = Arc::new(Mutex::new(python_ai));
 
-    // Initialize action executor (needs references to storage and action_storage)
+    // Initialize action executor (needs references to storage, action_storage, and python_ai)
     let action_executor = ActionExecutor::new(
         Arc::clone(&storage_arc),
         Arc::clone(&action_storage_arc),
+        Arc::clone(&python_ai_arc),
     );
     let action_executor_arc = Arc::new(Mutex::new(action_executor));
 
@@ -66,10 +78,11 @@ pub fn run() {
     let state = AppState {
         storage: storage_arc,
         search_index: Mutex::new(search_index),
-        python_ai: Arc::new(Mutex::new(python_ai)),
+        python_ai: python_ai_arc,
         action_storage: action_storage_arc,
         action_executor: action_executor_arc,
         action_scheduler: Mutex::new(action_scheduler),
+        inbox_storage: Mutex::new(inbox_storage),
     };
 
     tauri::Builder::default()
@@ -119,6 +132,7 @@ pub fn run() {
             commands::ai_suggest_related_pages,
             commands::ai_chat_with_tools,
             commands::ai_chat_stream,
+            commands::ai_summarize_pages,
             // Markdown commands
             commands::export_page_markdown,
             commands::import_markdown,
@@ -146,6 +160,15 @@ pub fn run() {
             // Notion import commands
             commands::preview_notion_export,
             commands::import_notion_export,
+            // Obsidian import commands
+            commands::preview_obsidian_vault_cmd,
+            commands::import_obsidian_vault_cmd,
+            // Evernote import commands
+            commands::preview_evernote_enex_cmd,
+            commands::import_evernote_enex_cmd,
+            // Scrivener import commands
+            commands::preview_scrivener_project_cmd,
+            commands::import_scrivener_project_cmd,
             // Folder commands
             commands::list_folders,
             commands::get_folder,
@@ -170,6 +193,15 @@ pub fn run() {
             commands::get_actions_by_category,
             commands::get_scheduled_actions,
             commands::set_action_enabled,
+            // Inbox commands
+            commands::inbox_capture,
+            commands::inbox_list,
+            commands::inbox_list_unprocessed,
+            commands::inbox_summary,
+            commands::inbox_classify,
+            commands::inbox_apply_actions,
+            commands::inbox_delete,
+            commands::inbox_clear_processed,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

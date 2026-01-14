@@ -7,7 +7,8 @@ use uuid::Uuid;
 use crate::actions::models::*;
 use crate::actions::storage::ActionStorage;
 use crate::actions::variables::VariableResolver;
-use crate::storage::{FileStorage, NotebookType, StorageError};
+use crate::python_bridge::{AIConfig, PageSummaryInput, PythonAI};
+use crate::storage::{EditorBlock, EditorData, FileStorage, NotebookType, StorageError};
 
 /// Error type for action execution
 #[derive(Debug, thiserror::Error)]
@@ -51,6 +52,8 @@ pub struct ExecutionContext {
     pub modified_pages: Vec<String>,
     /// Errors encountered
     pub errors: Vec<String>,
+    /// AI configuration for AI-powered steps
+    pub ai_config: Option<AIConfig>,
 }
 
 impl ExecutionContext {
@@ -62,6 +65,7 @@ impl ExecutionContext {
             created_notebooks: Vec::new(),
             modified_pages: Vec::new(),
             errors: Vec::new(),
+            ai_config: None,
         }
     }
 
@@ -72,6 +76,11 @@ impl ExecutionContext {
 
     pub fn with_variables(mut self, variables: HashMap<String, String>) -> Self {
         self.variables = variables;
+        self
+    }
+
+    pub fn with_ai_config(mut self, config: AIConfig) -> Self {
+        self.ai_config = Some(config);
         self
     }
 }
@@ -86,6 +95,7 @@ impl Default for ExecutionContext {
 pub struct ActionExecutor {
     storage: Arc<Mutex<FileStorage>>,
     action_storage: Arc<Mutex<ActionStorage>>,
+    python_ai: Arc<Mutex<PythonAI>>,
     variable_resolver: VariableResolver,
 }
 
@@ -93,10 +103,12 @@ impl ActionExecutor {
     pub fn new(
         storage: Arc<Mutex<FileStorage>>,
         action_storage: Arc<Mutex<ActionStorage>>,
+        python_ai: Arc<Mutex<PythonAI>>,
     ) -> Self {
         Self {
             storage,
             action_storage,
+            python_ai,
             variable_resolver: VariableResolver::new(),
         }
     }
@@ -271,10 +283,7 @@ impl ActionExecutor {
             }
 
             ActionStep::AiSummarize { selector, output_target, custom_prompt } => {
-                // AI summarization would need Python bridge
-                // For now, just a placeholder
-                log::info!("AiSummarize: selector={:?}, output={:?}", selector, output_target);
-                Ok(())
+                self.execute_ai_summarize(selector, output_target, custom_prompt.as_ref(), context)
             }
         }
     }
@@ -552,6 +561,224 @@ impl ActionExecutor {
 
         // Note: The actual content with incomplete items would be set by frontend
         // since EditorJS content format is complex. We just create the page here.
+
+        Ok(())
+    }
+
+    /// Execute AI summarization step
+    fn execute_ai_summarize(
+        &self,
+        selector: &PageSelector,
+        output_target: &SummaryOutput,
+        custom_prompt: Option<&String>,
+        context: &mut ExecutionContext,
+    ) -> Result<(), ExecutionError> {
+        // Find pages to summarize
+        let pages = self.find_pages(selector, context)?;
+        if pages.is_empty() {
+            log::info!("AiSummarize: No pages found matching selector");
+            return Ok(());
+        }
+
+        // Get AI config from context or use default
+        let ai_config = context.ai_config.clone().unwrap_or_default();
+
+        // Convert pages to PageSummaryInput
+        let page_inputs: Vec<PageSummaryInput> = pages
+            .iter()
+            .map(|p| {
+                // Extract text content from EditorJS blocks
+                let content = p.content.blocks.iter()
+                    .filter_map(|block| {
+                        match block.block_type.as_str() {
+                            "paragraph" | "header" | "quote" => {
+                                block.data.get("text").and_then(|t| t.as_str()).map(String::from)
+                            }
+                            "list" | "checklist" => {
+                                block.data.get("items").and_then(|items| {
+                                    items.as_array().map(|arr| {
+                                        arr.iter()
+                                            .filter_map(|item| {
+                                                if let Some(text) = item.get("text").and_then(|t| t.as_str()) {
+                                                    Some(format!("- {}", text))
+                                                } else if let Some(text) = item.as_str() {
+                                                    Some(format!("- {}", text))
+                                                } else {
+                                                    None
+                                                }
+                                            })
+                                            .collect::<Vec<_>>()
+                                            .join("\n")
+                                    })
+                                })
+                            }
+                            _ => None,
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n\n");
+
+                PageSummaryInput {
+                    title: p.title.clone(),
+                    content,
+                    tags: p.tags.clone(),
+                }
+            })
+            .collect();
+
+        // Call Python AI for summarization
+        let python_ai = self.python_ai.lock().map_err(|e| {
+            ExecutionError::StepFailed(format!("Failed to lock Python AI: {}", e))
+        })?;
+
+        let summary_result = python_ai
+            .summarize_pages(
+                page_inputs,
+                custom_prompt.cloned(),
+                Some("concise".to_string()),
+                ai_config,
+            )
+            .map_err(|e| ExecutionError::StepFailed(format!("AI summarization failed: {}", e)))?;
+
+        // Handle output based on target
+        match output_target {
+            SummaryOutput::NewPage { notebook_target, title_template } => {
+                let notebook_id = self.resolve_notebook_target(notebook_target, context)?;
+                let storage = self.storage.lock().map_err(|e| {
+                    ExecutionError::StepFailed(format!("Failed to lock storage: {}", e))
+                })?;
+
+                // Resolve title template
+                let title = self.variable_resolver.substitute(title_template, &context.variables);
+
+                // Create page with summary content
+                let page = storage.create_page(notebook_id, title)?;
+                context.created_pages.push(page.id.to_string());
+
+                // Build EditorJS content with summary
+                let mut blocks = vec![
+                    serde_json::json!({
+                        "type": "paragraph",
+                        "data": { "text": summary_result.summary }
+                    }),
+                ];
+
+                // Add key points as a list
+                if !summary_result.key_points.is_empty() {
+                    blocks.push(serde_json::json!({
+                        "type": "header",
+                        "data": { "text": "Key Points", "level": 2 }
+                    }));
+                    blocks.push(serde_json::json!({
+                        "type": "list",
+                        "data": {
+                            "style": "unordered",
+                            "items": summary_result.key_points
+                        }
+                    }));
+                }
+
+                // Add action items as a checklist
+                if !summary_result.action_items.is_empty() {
+                    blocks.push(serde_json::json!({
+                        "type": "header",
+                        "data": { "text": "Action Items", "level": 2 }
+                    }));
+                    let checklist_items: Vec<_> = summary_result.action_items
+                        .iter()
+                        .map(|item| serde_json::json!({ "text": item, "checked": false }))
+                        .collect();
+                    blocks.push(serde_json::json!({
+                        "type": "checklist",
+                        "data": { "items": checklist_items }
+                    }));
+                }
+
+                // Add themes as tags info
+                if !summary_result.themes.is_empty() {
+                    blocks.push(serde_json::json!({
+                        "type": "header",
+                        "data": { "text": "Themes", "level": 2 }
+                    }));
+                    blocks.push(serde_json::json!({
+                        "type": "paragraph",
+                        "data": { "text": summary_result.themes.join(", ") }
+                    }));
+                }
+
+                // Update page with content
+                let mut updated_page = page.clone();
+                updated_page.content = EditorData {
+                    time: Some(chrono::Utc::now().timestamp_millis()),
+                    blocks: blocks.iter().map(|b| {
+                        serde_json::from_value(b.clone()).unwrap_or_else(|_| {
+                            EditorBlock {
+                                id: uuid::Uuid::new_v4().to_string(),
+                                block_type: "paragraph".to_string(),
+                                data: serde_json::json!({}),
+                            }
+                        })
+                    }).collect(),
+                    version: Some("2.30.0".to_string()),
+                };
+                updated_page.tags = summary_result.themes.clone();
+                storage.update_page(&updated_page)?;
+
+                log::info!(
+                    "AiSummarize: Created summary page '{}' from {} pages",
+                    updated_page.title,
+                    summary_result.pages_count
+                );
+            }
+
+            SummaryOutput::PrependToPage { page_selector } => {
+                // Find target page and prepend summary
+                let target_pages = self.find_pages(page_selector, context)?;
+                if let Some(target_page) = target_pages.first() {
+                    let storage = self.storage.lock().map_err(|e| {
+                        ExecutionError::StepFailed(format!("Failed to lock storage: {}", e))
+                    })?;
+
+                    let mut updated_page = target_page.clone();
+
+                    // Create summary block
+                    let summary_block = EditorBlock {
+                        id: uuid::Uuid::new_v4().to_string(),
+                        block_type: "paragraph".to_string(),
+                        data: serde_json::json!({ "text": format!("**Summary:** {}", summary_result.summary) }),
+                    };
+
+                    // Prepend to existing blocks
+                    let mut new_blocks = vec![summary_block];
+                    new_blocks.extend(updated_page.content.blocks.clone());
+                    updated_page.content.blocks = new_blocks;
+
+                    storage.update_page(&updated_page)?;
+                    context.modified_pages.push(updated_page.id.to_string());
+
+                    log::info!("AiSummarize: Prepended summary to page '{}'", updated_page.title);
+                }
+            }
+
+            SummaryOutput::Result => {
+                // Store result in context variable for chaining
+                context.variables.insert("_summary".to_string(), summary_result.summary.clone());
+                context.variables.insert(
+                    "_key_points".to_string(),
+                    summary_result.key_points.join("\n"),
+                );
+                context.variables.insert(
+                    "_action_items".to_string(),
+                    summary_result.action_items.join("\n"),
+                );
+                context.variables.insert(
+                    "_themes".to_string(),
+                    summary_result.themes.join(", "),
+                );
+
+                log::info!("AiSummarize: Stored summary result in context variables");
+            }
+        }
 
         Ok(())
     }

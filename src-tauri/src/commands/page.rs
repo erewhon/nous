@@ -86,6 +86,7 @@ pub fn update_page(
     title: Option<String>,
     content: Option<EditorData>,
     tags: Option<Vec<String>>,
+    system_prompt: Option<String>,
 ) -> CommandResult<Page> {
     let storage = state.storage.lock().unwrap();
     let nb_id = Uuid::parse_str(&notebook_id).map_err(|e| CommandError {
@@ -105,6 +106,10 @@ pub fn update_page(
     }
     if let Some(tags) = tags {
         page.tags = tags;
+    }
+    // Allow setting system_prompt to None (empty string clears it)
+    if let Some(prompt) = system_prompt {
+        page.system_prompt = if prompt.is_empty() { None } else { Some(prompt) };
     }
     page.updated_at = chrono::Utc::now();
 

@@ -4,7 +4,8 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::python_bridge::{
     AIConfig, ChatMessage, ChatResponse, ChatResponseWithActions,
-    NotebookInfo, PageContext, PageInfo, RelatedPageSuggestion, StreamEvent,
+    NotebookInfo, PageContext, PageInfo, PageSummaryInput, PagesSummaryResult,
+    RelatedPageSuggestion, StreamEvent,
 };
 use crate::AppState;
 
@@ -227,6 +228,7 @@ pub async fn ai_chat_stream(
     model: Option<String>,
     temperature: Option<f64>,
     max_tokens: Option<i64>,
+    system_prompt: Option<String>,
 ) -> Result<(), CommandError> {
     let python_ai = state.python_ai.clone();
 
@@ -252,6 +254,7 @@ pub async fn ai_chat_stream(
                 available_notebooks,
                 current_notebook_id,
                 config,
+                system_prompt,
             )
             .map_err(|e| CommandError {
                 message: format!("AI streaming error: {}", e),
@@ -280,4 +283,42 @@ pub async fn ai_chat_stream(
     })?;
 
     Ok(())
+}
+
+/// Summarize multiple pages into a single summary
+#[tauri::command]
+pub async fn ai_summarize_pages(
+    state: State<'_, AppState>,
+    pages: Vec<PageSummaryInput>,
+    custom_prompt: Option<String>,
+    summary_style: Option<String>,
+    provider_type: Option<String>,
+    api_key: Option<String>,
+    model: Option<String>,
+) -> Result<PagesSummaryResult, CommandError> {
+    let python_ai = state.python_ai.clone();
+
+    let config = AIConfig {
+        provider_type: provider_type.unwrap_or_else(|| "openai".to_string()),
+        api_key,
+        model,
+        temperature: Some(0.5),
+        max_tokens: Some(4096),
+    };
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let python_ai = python_ai.lock().map_err(|e| CommandError {
+            message: format!("Failed to acquire Python AI lock: {}", e),
+        })?;
+
+        python_ai
+            .summarize_pages(pages, custom_prompt, summary_style, config)
+            .map_err(|e| CommandError {
+                message: format!("AI summarization error: {}", e),
+            })
+    })
+    .await
+    .map_err(|e| CommandError {
+        message: format!("Task join error: {}", e),
+    })?
 }

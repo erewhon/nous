@@ -55,6 +55,7 @@ pub fn update_notebook(
     name: Option<String>,
     icon: Option<String>,
     color: Option<String>,
+    system_prompt: Option<String>,
 ) -> CommandResult<Notebook> {
     let storage = state.storage.lock().unwrap();
     let id = Uuid::parse_str(&notebook_id).map_err(|e| CommandError {
@@ -71,6 +72,10 @@ pub fn update_notebook(
     }
     if let Some(color) = color {
         notebook.color = Some(color);
+    }
+    // Allow setting system_prompt to None (empty string clears it)
+    if let Some(prompt) = system_prompt {
+        notebook.system_prompt = if prompt.is_empty() { None } else { Some(prompt) };
     }
     notebook.updated_at = chrono::Utc::now();
 

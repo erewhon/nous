@@ -54,6 +54,28 @@ pub struct PageContext {
     pub notebook_name: Option<String>,
 }
 
+/// Input for batch page summarization
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PageSummaryInput {
+    pub title: String,
+    pub content: String,
+    pub tags: Vec<String>,
+}
+
+/// Result from batch page summarization
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PagesSummaryResult {
+    pub summary: String,
+    pub key_points: Vec<String>,
+    pub action_items: Vec<String>,
+    pub themes: Vec<String>,
+    pub pages_count: i64,
+    pub model: String,
+    pub tokens_used: Option<i64>,
+}
+
 /// AI provider configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -557,6 +579,7 @@ impl PythonAI {
         available_notebooks: Option<Vec<NotebookInfo>>,
         current_notebook_id: Option<String>,
         config: AIConfig,
+        system_prompt: Option<String>,
     ) -> Result<mpsc::Receiver<StreamEvent>> {
         let (tx, rx) = mpsc::channel();
         let katt_py_path = self.katt_py_path.clone();
@@ -727,6 +750,10 @@ impl PythonAI {
                     kwargs.set_item("current_notebook_id", notebook_id)?;
                 }
 
+                if let Some(prompt) = system_prompt {
+                    kwargs.set_item("system_prompt", prompt)?;
+                }
+
                 // Call the streaming function - this will block until complete
                 // but will call our callback for each chunk
                 chat_fn.call((), Some(&kwargs))?;
@@ -781,6 +808,82 @@ impl PythonAI {
                 .get("summary")
                 .map(|v| v.extract::<String>(py).unwrap_or_default())
                 .unwrap_or_default())
+        })
+    }
+
+    /// Summarize multiple pages into a single summary
+    pub fn summarize_pages(
+        &self,
+        pages: Vec<PageSummaryInput>,
+        custom_prompt: Option<String>,
+        summary_style: Option<String>,
+        config: AIConfig,
+    ) -> Result<PagesSummaryResult> {
+        Python::attach(|py| {
+            self.setup_python_path(py)?;
+
+            let chat_module = py.import("katt_ai.chat")?;
+            let summarize_fn = chat_module.getattr("summarize_pages_sync")?;
+
+            // Convert pages to Python list of dicts
+            let py_pages = PyList::empty(py);
+            for page in pages {
+                let dict = PyDict::new(py);
+                dict.set_item("title", page.title)?;
+                dict.set_item("content", page.content)?;
+                dict.set_item("tags", page.tags)?;
+                py_pages.append(dict)?;
+            }
+
+            let kwargs = PyDict::new(py);
+            kwargs.set_item("pages", py_pages)?;
+            kwargs.set_item("provider_type", config.provider_type)?;
+
+            if let Some(prompt) = custom_prompt {
+                kwargs.set_item("custom_prompt", prompt)?;
+            }
+            if let Some(style) = summary_style {
+                kwargs.set_item("summary_style", style)?;
+            }
+            if let Some(api_key) = config.api_key {
+                kwargs.set_item("api_key", api_key)?;
+            }
+            if let Some(model) = config.model {
+                kwargs.set_item("model", model)?;
+            }
+
+            let result = summarize_fn.call((), Some(&kwargs))?;
+            let result_dict: HashMap<String, Py<PyAny>> = result.extract()?;
+
+            Ok(PagesSummaryResult {
+                summary: result_dict
+                    .get("summary")
+                    .and_then(|v| v.extract::<String>(py).ok())
+                    .unwrap_or_default(),
+                key_points: result_dict
+                    .get("key_points")
+                    .and_then(|v| v.extract::<Vec<String>>(py).ok())
+                    .unwrap_or_default(),
+                action_items: result_dict
+                    .get("action_items")
+                    .and_then(|v| v.extract::<Vec<String>>(py).ok())
+                    .unwrap_or_default(),
+                themes: result_dict
+                    .get("themes")
+                    .and_then(|v| v.extract::<Vec<String>>(py).ok())
+                    .unwrap_or_default(),
+                pages_count: result_dict
+                    .get("pages_count")
+                    .and_then(|v| v.extract::<i64>(py).ok())
+                    .unwrap_or(0),
+                model: result_dict
+                    .get("model")
+                    .and_then(|v| v.extract::<String>(py).ok())
+                    .unwrap_or_default(),
+                tokens_used: result_dict
+                    .get("tokens_used")
+                    .and_then(|v| v.extract::<i64>(py).ok()),
+            })
         })
     }
 
@@ -1034,6 +1137,158 @@ impl PythonAI {
                 key_points: result_dict.get("key_points").and_then(|v| v.extract::<Vec<String>>(py).ok()).unwrap_or_default(),
                 sources,
                 suggested_tags: result_dict.get("suggested_tags").and_then(|v| v.extract::<Vec<String>>(py).ok()).unwrap_or_default(),
+            })
+        })
+    }
+
+    /// Classify an inbox item to determine where it should be filed
+    pub fn classify_inbox_item(
+        &self,
+        title: &str,
+        content: &str,
+        tags: &[String],
+        notebooks: &[serde_json::Value],
+        pages: &[serde_json::Value],
+    ) -> Result<crate::inbox::InboxClassification> {
+        Python::attach(|py| {
+            self.setup_python_path(py)?;
+
+            let inbox_module = py.import("katt_ai.inbox")?;
+            let classify_fn = inbox_module.getattr("classify_inbox_item_sync")?;
+
+            // Convert notebooks to Python list
+            let py_notebooks = PyList::empty(py);
+            for nb in notebooks {
+                let dict = PyDict::new(py);
+                if let Some(id) = nb.get("id").and_then(|v| v.as_str()) {
+                    dict.set_item("id", id)?;
+                }
+                if let Some(name) = nb.get("name").and_then(|v| v.as_str()) {
+                    dict.set_item("name", name)?;
+                }
+                py_notebooks.append(dict)?;
+            }
+
+            // Convert pages to Python list
+            let py_pages = PyList::empty(py);
+            for page in pages {
+                let dict = PyDict::new(py);
+                if let Some(notebook_id) = page.get("notebookId").and_then(|v| v.as_str()) {
+                    dict.set_item("notebook_id", notebook_id)?;
+                }
+                if let Some(notebook_name) = page.get("notebookName").and_then(|v| v.as_str()) {
+                    dict.set_item("notebook_name", notebook_name)?;
+                }
+                if let Some(page_id) = page.get("pageId").and_then(|v| v.as_str()) {
+                    dict.set_item("page_id", page_id)?;
+                }
+                if let Some(title) = page.get("title").and_then(|v| v.as_str()) {
+                    dict.set_item("title", title)?;
+                }
+                py_pages.append(dict)?;
+            }
+
+            let kwargs = PyDict::new(py);
+            kwargs.set_item("title", title)?;
+            kwargs.set_item("content", content)?;
+            kwargs.set_item("tags", tags.to_vec())?;
+            kwargs.set_item("notebooks", py_notebooks)?;
+            kwargs.set_item("pages", py_pages)?;
+
+            let result = classify_fn.call((), Some(&kwargs))?;
+            let result_dict: HashMap<String, Py<PyAny>> = result.extract()?;
+
+            // Extract action type and build ClassificationAction
+            let action_type = result_dict
+                .get("action_type")
+                .and_then(|v| v.extract::<String>(py).ok())
+                .unwrap_or_else(|| "keep_in_inbox".to_string());
+
+            let action = match action_type.as_str() {
+                "create_page" => {
+                    let notebook_id_str = result_dict
+                        .get("notebook_id")
+                        .and_then(|v| v.extract::<String>(py).ok())
+                        .unwrap_or_default();
+                    let notebook_id = uuid::Uuid::parse_str(&notebook_id_str)
+                        .unwrap_or_else(|_| uuid::Uuid::nil());
+
+                    crate::inbox::ClassificationAction::CreatePage {
+                        notebook_id,
+                        notebook_name: result_dict
+                            .get("notebook_name")
+                            .and_then(|v| v.extract::<String>(py).ok())
+                            .unwrap_or_default(),
+                        suggested_title: result_dict
+                            .get("suggested_title")
+                            .and_then(|v| v.extract::<String>(py).ok())
+                            .unwrap_or_else(|| title.to_string()),
+                        suggested_tags: result_dict
+                            .get("suggested_tags")
+                            .and_then(|v| v.extract::<Vec<String>>(py).ok())
+                            .unwrap_or_default(),
+                    }
+                }
+                "append_to_page" => {
+                    let notebook_id_str = result_dict
+                        .get("notebook_id")
+                        .and_then(|v| v.extract::<String>(py).ok())
+                        .unwrap_or_default();
+                    let notebook_id = uuid::Uuid::parse_str(&notebook_id_str)
+                        .unwrap_or_else(|_| uuid::Uuid::nil());
+
+                    let page_id_str = result_dict
+                        .get("page_id")
+                        .and_then(|v| v.extract::<String>(py).ok())
+                        .unwrap_or_default();
+                    let page_id = uuid::Uuid::parse_str(&page_id_str)
+                        .unwrap_or_else(|_| uuid::Uuid::nil());
+
+                    crate::inbox::ClassificationAction::AppendToPage {
+                        notebook_id,
+                        notebook_name: result_dict
+                            .get("notebook_name")
+                            .and_then(|v| v.extract::<String>(py).ok())
+                            .unwrap_or_default(),
+                        page_id,
+                        page_title: result_dict
+                            .get("page_title")
+                            .and_then(|v| v.extract::<String>(py).ok())
+                            .unwrap_or_default(),
+                    }
+                }
+                "create_notebook" => crate::inbox::ClassificationAction::CreateNotebook {
+                    suggested_name: result_dict
+                        .get("suggested_name")
+                        .and_then(|v| v.extract::<String>(py).ok())
+                        .unwrap_or_else(|| "New Notebook".to_string()),
+                    suggested_icon: result_dict
+                        .get("suggested_icon")
+                        .and_then(|v| v.extract::<String>(py).ok()),
+                },
+                _ => crate::inbox::ClassificationAction::KeepInInbox {
+                    reason: result_dict
+                        .get("reason")
+                        .and_then(|v| v.extract::<String>(py).ok())
+                        .unwrap_or_else(|| "Could not determine appropriate destination".to_string()),
+                },
+            };
+
+            let confidence = result_dict
+                .get("confidence")
+                .and_then(|v| v.extract::<f32>(py).ok())
+                .unwrap_or(0.5);
+
+            let reasoning = result_dict
+                .get("reasoning")
+                .and_then(|v| v.extract::<String>(py).ok())
+                .unwrap_or_default();
+
+            Ok(crate::inbox::InboxClassification {
+                action,
+                confidence,
+                reasoning,
+                classified_at: chrono::Utc::now(),
             })
         })
     }

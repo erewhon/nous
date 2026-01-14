@@ -9,6 +9,7 @@ import {
 import { useNotebookStore } from "../../stores/notebookStore";
 import { usePageStore } from "../../stores/pageStore";
 import { useSearchStore } from "../../stores/searchStore";
+import { useActionStore } from "../../stores/actionStore";
 import { searchPages, exportPageToFile, importMarkdownFile } from "../../utils/api";
 import { save, open } from "@tauri-apps/plugin-dialog";
 import { highlightText } from "../../utils/highlightText";
@@ -20,7 +21,7 @@ interface Command {
   subtitle?: string;
   snippet?: string;
   icon: React.ReactNode;
-  category: "page" | "action" | "notebook" | "search" | "recent";
+  category: "page" | "action" | "notebook" | "search" | "recent" | "automation";
   action: () => void;
   keywords?: string[];
   score?: number;
@@ -54,6 +55,7 @@ export function CommandPalette({
   const { pages, selectPage, createPage } = usePageStore();
   const { recentSearches, searchScope, addRecentSearch, setSearchScope, clearRecentSearches } =
     useSearchStore();
+  const { actions, runAction: executeAction, openActionLibrary } = useActionStore();
 
   // Debounced search
   useEffect(() => {
@@ -207,6 +209,51 @@ export function CommandPalette({
       keywords: ["backup", "restore", "export", "import", "zip", "archive"],
     });
 
+    // Browse all actions
+    cmds.push({
+      id: "action-browse-actions",
+      title: "Browse Actions",
+      subtitle: "View and manage all automations",
+      icon: <IconZap />,
+      category: "action",
+      action: () => {
+        onClose();
+        openActionLibrary();
+      },
+      keywords: ["actions", "automations", "workflows", "browse", "library"],
+    });
+
+    // Add runnable actions (enabled actions with manual trigger)
+    const runnableActions = actions.filter(
+      (a) => a.enabled && a.triggers.some((t) => t.type === "manual")
+    );
+
+    for (const action of runnableActions) {
+      cmds.push({
+        id: `automation-${action.id}`,
+        title: `Run: ${action.name}`,
+        subtitle: action.description,
+        icon: <IconZap />,
+        category: "automation",
+        action: async () => {
+          onClose();
+          try {
+            await executeAction(action.id, {
+              currentNotebookId: selectedNotebookId || undefined,
+            });
+          } catch (error) {
+            console.error("Failed to run action:", error);
+          }
+        },
+        keywords: [
+          action.name.toLowerCase(),
+          ...action.triggers
+            .filter((t): t is { type: "aiChat"; keywords: string[] } => t.type === "aiChat")
+            .flatMap((t) => t.keywords),
+        ],
+      });
+    }
+
     // Only show local pages/notebooks if no search query (to avoid duplication)
     if (!query.trim()) {
       // Pages in current notebook
@@ -259,6 +306,9 @@ export function CommandPalette({
     onNewPage,
     onOpenBackup,
     query,
+    actions,
+    executeAction,
+    openActionLibrary,
   ]);
 
   // Convert search results to commands
@@ -329,7 +379,8 @@ export function CommandPalette({
 
     const recentMatches = allCommands.filter((c) => c.category === "recent");
     const searchMatches = allCommands.filter((c) => c.category === "search");
-    const actions = allCommands.filter((c) => c.category === "action");
+    const actionCommands = allCommands.filter((c) => c.category === "action");
+    const automationCommands = allCommands.filter((c) => c.category === "automation");
     const pageResults = allCommands.filter((c) => c.category === "page");
     const notebookResults = allCommands.filter((c) => c.category === "notebook");
 
@@ -341,8 +392,11 @@ export function CommandPalette({
     if (searchMatches.length > 0) {
       groups.push({ category: "Search Results", commands: searchMatches });
     }
-    if (actions.length > 0) {
-      groups.push({ category: "Actions", commands: actions });
+    if (actionCommands.length > 0) {
+      groups.push({ category: "Actions", commands: actionCommands });
+    }
+    if (automationCommands.length > 0) {
+      groups.push({ category: "Automations", commands: automationCommands });
     }
     if (pageResults.length > 0) {
       groups.push({ category: "Pages", commands: pageResults });
@@ -874,6 +928,24 @@ function IconArchive() {
       <polyline points="21 8 21 21 3 21 3 8" />
       <rect x="1" y="3" width="22" height="5" />
       <line x1="10" y1="12" x2="14" y2="12" />
+    </svg>
+  );
+}
+
+function IconZap() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
     </svg>
   );
 }

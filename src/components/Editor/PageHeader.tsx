@@ -6,6 +6,7 @@ import { exportPageToFile, importMarkdownFile } from "../../utils/api";
 import { save, open } from "@tauri-apps/plugin-dialog";
 import { TagEditor } from "../Tags";
 import { SaveAsTemplateDialog } from "../TemplateDialog";
+import { PageSettingsDialog } from "../PageSettings";
 import { useFolderStore } from "../../stores/folderStore";
 
 interface PageHeaderProps {
@@ -19,6 +20,7 @@ export function PageHeader({ page, isSaving, lastSaved }: PageHeaderProps) {
   const [title, setTitle] = useState(page.title);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [showSaveAsTemplate, setShowSaveAsTemplate] = useState(false);
+  const [showPageSettings, setShowPageSettings] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const { updatePage, selectPage, archivePage, unarchivePage, createPage, updatePageContent } = usePageStore();
@@ -99,6 +101,11 @@ export function PageHeader({ page, isSaving, lastSaved }: PageHeaderProps) {
   const handleSaveAsTemplate = () => {
     setIsMenuOpen(false);
     setShowSaveAsTemplate(true);
+  };
+
+  const handleOpenPageSettings = () => {
+    setIsMenuOpen(false);
+    setShowPageSettings(true);
   };
 
   const handleArchive = async () => {
@@ -194,6 +201,31 @@ export function PageHeader({ page, isSaving, lastSaved }: PageHeaderProps) {
                   title={`Template: ${pageTemplate.name}`}
                 >
                   Template
+                </span>
+              )}
+              {page.systemPrompt && (
+                <span
+                  className="flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium"
+                  style={{
+                    backgroundColor: "rgba(59, 130, 246, 0.15)",
+                    color: "rgb(59, 130, 246)",
+                  }}
+                  title="Has custom AI prompt"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="10"
+                    height="10"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                  </svg>
+                  AI Prompt
                 </span>
               )}
               {page.isArchived && (
@@ -343,6 +375,26 @@ export function PageHeader({ page, isSaving, lastSaved }: PageHeaderProps) {
               </svg>
               Save as Template
             </button>
+            <button
+              onClick={handleOpenPageSettings}
+              className="flex w-full items-center gap-3 px-4 py-2 text-left text-sm transition-colors hover:opacity-80"
+              style={{ color: "var(--color-text-secondary)" }}
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+              </svg>
+              AI Settings
+            </button>
             <div
               className="my-1 border-t"
               style={{ borderColor: "var(--color-border)" }}
@@ -458,6 +510,13 @@ export function PageHeader({ page, isSaving, lastSaved }: PageHeaderProps) {
         isOpen={showSaveAsTemplate}
         onClose={() => setShowSaveAsTemplate(false)}
         page={page}
+      />
+
+      {/* Page Settings Dialog */}
+      <PageSettingsDialog
+        isOpen={showPageSettings}
+        page={page}
+        onClose={() => setShowPageSettings(false)}
       />
     </div>
   );

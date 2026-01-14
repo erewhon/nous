@@ -21,7 +21,7 @@ export async function createNotebook(
 
 export async function updateNotebook(
   notebookId: string,
-  updates: { name?: string; icon?: string; color?: string }
+  updates: { name?: string; icon?: string; color?: string; systemPrompt?: string }
 ): Promise<Notebook> {
   return invoke<Notebook>("update_notebook", { notebookId, ...updates });
 }
@@ -57,7 +57,7 @@ export async function createPage(
 export async function updatePage(
   notebookId: string,
   pageId: string,
-  updates: { title?: string; content?: EditorData; tags?: string[] }
+  updates: { title?: string; content?: EditorData; tags?: string[]; systemPrompt?: string }
 ): Promise<Page> {
   return invoke<Page>("update_page", { notebookId, pageId, ...updates });
 }
@@ -312,6 +312,42 @@ export async function aiSuggestRelatedPages(
   });
 }
 
+export interface PageSummaryInput {
+  title: string;
+  content: string;
+  tags: string[];
+}
+
+export interface PagesSummaryResult {
+  summary: string;
+  keyPoints: string[];
+  actionItems: string[];
+  themes: string[];
+  pagesCount: number;
+  model: string;
+  tokensUsed?: number;
+}
+
+export async function aiSummarizePages(
+  pages: PageSummaryInput[],
+  options?: {
+    customPrompt?: string;
+    summaryStyle?: "concise" | "detailed" | "bullets" | "narrative";
+    providerType?: string;
+    apiKey?: string;
+    model?: string;
+  }
+): Promise<PagesSummaryResult> {
+  return invoke<PagesSummaryResult>("ai_summarize_pages", {
+    pages,
+    customPrompt: options?.customPrompt,
+    summaryStyle: options?.summaryStyle,
+    providerType: options?.providerType,
+    apiKey: options?.apiKey,
+    model: options?.model,
+  });
+}
+
 export async function aiChatWithTools(
   userMessage: string,
   options?: {
@@ -352,6 +388,7 @@ export async function aiChatStream(
     model?: string;
     temperature?: number;
     maxTokens?: number;
+    systemPrompt?: string;
   }
 ): Promise<void> {
   return invoke("ai_chat_stream", {
@@ -365,6 +402,7 @@ export async function aiChatStream(
     model: options?.model,
     temperature: options?.temperature,
     maxTokens: options?.maxTokens,
+    systemPrompt: options?.systemPrompt,
   });
 }
 
@@ -557,6 +595,98 @@ export async function importNotionExport(
   return invoke<Notebook>("import_notion_export", { zipPath, notebookName });
 }
 
+// ===== Obsidian Import API =====
+
+export interface ObsidianPagePreview {
+  title: string;
+  path: string;
+  tags: string[];
+  hasWikiLinks: boolean;
+}
+
+export interface ObsidianImportPreview {
+  pageCount: number;
+  assetCount: number;
+  folderCount: number;
+  nestedDepth: number;
+  pages: ObsidianPagePreview[];
+  suggestedName: string;
+  warnings: string[];
+  hasObsidianConfig: boolean;
+}
+
+export async function previewObsidianVault(
+  vaultPath: string
+): Promise<ObsidianImportPreview> {
+  return invoke<ObsidianImportPreview>("preview_obsidian_vault_cmd", { vaultPath });
+}
+
+export async function importObsidianVault(
+  vaultPath: string,
+  notebookName?: string
+): Promise<Notebook> {
+  return invoke<Notebook>("import_obsidian_vault_cmd", { vaultPath, notebookName });
+}
+
+// ===== Evernote Import API =====
+
+export interface EvernoteNotePreview {
+  title: string;
+  tags: string[];
+  hasAttachments: boolean;
+  created: string | null;
+}
+
+export interface EvernoteImportPreview {
+  noteCount: number;
+  resourceCount: number;
+  notes: EvernoteNotePreview[];
+  suggestedName: string;
+  warnings: string[];
+}
+
+export async function previewEvernoteEnex(
+  enexPath: string
+): Promise<EvernoteImportPreview> {
+  return invoke<EvernoteImportPreview>("preview_evernote_enex_cmd", { enexPath });
+}
+
+export async function importEvernoteEnex(
+  enexPath: string,
+  notebookName?: string
+): Promise<Notebook> {
+  return invoke<Notebook>("import_evernote_enex_cmd", { enexPath, notebookName });
+}
+
+// ===== Scrivener Import API =====
+
+export interface ScrivenerDocPreview {
+  title: string;
+  folderPath: string | null;
+  hasContent: boolean;
+}
+
+export interface ScrivenerImportPreview {
+  documentCount: number;
+  folderCount: number;
+  documents: ScrivenerDocPreview[];
+  projectTitle: string;
+  warnings: string[];
+}
+
+export async function previewScrivenerProject(
+  scrivPath: string
+): Promise<ScrivenerImportPreview> {
+  return invoke<ScrivenerImportPreview>("preview_scrivener_project_cmd", { scrivPath });
+}
+
+export async function importScrivenerProject(
+  scrivPath: string,
+  notebookName?: string
+): Promise<Notebook> {
+  return invoke<Notebook>("import_scrivener_project_cmd", { scrivPath, notebookName });
+}
+
 // ===== Actions API =====
 
 import type {
@@ -653,4 +783,48 @@ export async function setActionEnabled(
   enabled: boolean
 ): Promise<Action> {
   return invoke<Action>("set_action_enabled", { actionId, enabled });
+}
+
+// ===== Inbox API =====
+
+import type {
+  InboxItem,
+  InboxSummary,
+  CaptureRequest,
+  ApplyActionsRequest,
+  ApplyActionsResult,
+} from "../types/inbox";
+
+export async function inboxCapture(request: CaptureRequest): Promise<InboxItem> {
+  return invoke<InboxItem>("inbox_capture", { request });
+}
+
+export async function inboxList(): Promise<InboxItem[]> {
+  return invoke<InboxItem[]>("inbox_list");
+}
+
+export async function inboxListUnprocessed(): Promise<InboxItem[]> {
+  return invoke<InboxItem[]>("inbox_list_unprocessed");
+}
+
+export async function inboxSummary(): Promise<InboxSummary> {
+  return invoke<InboxSummary>("inbox_summary");
+}
+
+export async function inboxClassify(itemIds?: string[]): Promise<InboxItem[]> {
+  return invoke<InboxItem[]>("inbox_classify", { itemIds });
+}
+
+export async function inboxApplyActions(
+  request: ApplyActionsRequest
+): Promise<ApplyActionsResult> {
+  return invoke<ApplyActionsResult>("inbox_apply_actions", { request });
+}
+
+export async function inboxDelete(itemId: string): Promise<void> {
+  return invoke("inbox_delete", { itemId });
+}
+
+export async function inboxClearProcessed(): Promise<number> {
+  return invoke<number>("inbox_clear_processed");
 }

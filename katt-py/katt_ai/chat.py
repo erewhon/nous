@@ -272,6 +272,7 @@ async def chat_with_tools(
     model: str | None = None,
     temperature: float = 0.7,
     max_tokens: int = 4096,
+    system_prompt: str | None = None,
 ) -> dict[str, Any]:
     """Chat with AI using tools for notebook/page creation.
 
@@ -290,6 +291,7 @@ async def chat_with_tools(
         model: Model to use.
         temperature: Sampling temperature.
         max_tokens: Maximum tokens in response.
+        system_prompt: Custom system prompt (overrides default).
 
     Returns:
         Dict with response content, metadata, and actions to execute.
@@ -308,14 +310,22 @@ async def chat_with_tools(
     # Build messages
     messages: list[dict[str, Any]] = []
 
-    # Build system prompt
-    system_parts = [
-        "You are a helpful AI assistant integrated into a personal notebook application called Katt.",
-        "You have the ability to create notebooks, pages, and run custom actions for the user.",
-        "When the user asks to create content, organize notes, or set up a system (like Agile Results, GTD, etc.), use the available tools.",
-        "When the user mentions running their 'daily goals', 'weekly review', or any workflow, use the run_action tool.",
-        "Create well-structured content with appropriate headings, lists, and organization.",
-    ]
+    # Build system prompt - use custom prompt if provided, otherwise use default
+    if system_prompt:
+        system_parts = [system_prompt]
+        # Add tool usage instructions even with custom prompt
+        system_parts.append(
+            "\nYou have the ability to create notebooks, pages, and run custom actions for the user. "
+            "When asked to create content or run workflows, use the available tools."
+        )
+    else:
+        system_parts = [
+            "You are a helpful AI assistant integrated into a personal notebook application called Katt.",
+            "You have the ability to create notebooks, pages, and run custom actions for the user.",
+            "When the user asks to create content, organize notes, or set up a system (like Agile Results, GTD, etc.), use the available tools.",
+            "When the user mentions running their 'daily goals', 'weekly review', or any workflow, use the run_action tool.",
+            "Create well-structured content with appropriate headings, lists, and organization.",
+        ]
 
     if available_notebooks:
         notebook_names = [n.get("name", "") for n in available_notebooks]
@@ -671,6 +681,118 @@ async def suggest_related_pages(
     )
 
 
+async def summarize_pages(
+    pages: list[dict[str, Any]],
+    custom_prompt: str | None = None,
+    summary_style: str = "concise",
+    provider_type: str = "openai",
+    api_key: str | None = None,
+    model: str | None = None,
+) -> dict[str, Any]:
+    """Summarize multiple pages into a single summary.
+
+    This is useful for weekly reviews, project summaries, or batch processing.
+
+    Args:
+        pages: List of page dicts with 'title', 'content', and optionally 'tags'.
+        custom_prompt: Custom prompt to use instead of default summary prompt.
+        summary_style: Style of summary - 'concise', 'detailed', 'bullets', 'narrative'.
+        provider_type: AI provider to use.
+        api_key: API key for the provider.
+        model: Model to use.
+
+    Returns:
+        Dict with summary, key_points, and metadata.
+    """
+    config = ProviderConfig(
+        provider_type=ProviderType(provider_type),
+        api_key=api_key,
+        model=model or "",
+        temperature=0.5,
+        max_tokens=4096,
+    )
+
+    provider = get_provider(config)
+
+    # Build combined content from all pages
+    combined_content = ""
+    for i, page in enumerate(pages, 1):
+        title = page.get("title", f"Page {i}")
+        content = page.get("content", "")
+        tags = page.get("tags", [])
+        tag_str = f" [Tags: {', '.join(tags)}]" if tags else ""
+        combined_content += f"\n\n--- {title}{tag_str} ---\n{content}"
+
+    # Build the prompt based on style
+    style_instructions = {
+        "concise": "Provide a brief, focused summary highlighting the most important points.",
+        "detailed": "Provide a comprehensive summary covering all significant details and nuances.",
+        "bullets": "Summarize using bullet points, organized by theme or topic.",
+        "narrative": "Write a flowing narrative summary that tells the story of these pages.",
+    }
+
+    style_instruction = style_instructions.get(summary_style, style_instructions["concise"])
+
+    if custom_prompt:
+        prompt = f"""{custom_prompt}
+
+Pages to summarize:
+{combined_content}"""
+    else:
+        prompt = f"""Summarize the following {len(pages)} page(s). {style_instruction}
+
+Also extract:
+1. Key points (3-7 bullet points)
+2. Action items or todos mentioned (if any)
+3. Themes or topics covered
+
+Pages:
+{combined_content}
+
+Respond in the following JSON format:
+{{
+    "summary": "Your summary here",
+    "key_points": ["point 1", "point 2", ...],
+    "action_items": ["item 1", "item 2", ...],
+    "themes": ["theme 1", "theme 2", ...]
+}}"""
+
+    messages = [{"role": "user", "content": prompt}]
+    response = await provider.chat(messages)
+
+    # Try to parse JSON response, fallback to plain text
+    content = response.content
+    try:
+        import json
+        # Find JSON in response
+        start = content.find("{")
+        end = content.rfind("}") + 1
+        if start >= 0 and end > start:
+            result = json.loads(content[start:end])
+            return {
+                "summary": result.get("summary", content),
+                "key_points": result.get("key_points", []),
+                "action_items": result.get("action_items", []),
+                "themes": result.get("themes", []),
+                "pages_count": len(pages),
+                "model": response.model,
+                "tokens_used": response.tokens_used,
+            }
+    except json.JSONDecodeError:
+        pass
+
+    # Fallback if JSON parsing fails
+    return {
+        "summary": content,
+        "key_points": [],
+        "action_items": [],
+        "themes": [],
+        "pages_count": len(pages),
+        "model": response.model,
+        "tokens_used": response.tokens_used,
+    }
+
+
 # Synchronous wrappers for PyO3 (called from Rust)
 def chat_sync(
     messages: list[dict[str, str]],
@@ -721,6 +843,20 @@ def summarize_page_sync(
     return asyncio.run(summarize_page(content, title, max_length, provider_type, api_key, model))
 
 
+def summarize_pages_sync(
+    pages: list[dict[str, Any]],
+    custom_prompt: str | None = None,
+    summary_style: str = "concise",
+    provider_type: str = "openai",
+    api_key: str | None = None,
+    model: str | None = None,
+) -> dict[str, Any]:
+    """Synchronous wrapper for summarize_pages function."""
+    return asyncio.run(
+        summarize_pages(pages, custom_prompt, summary_style, provider_type, api_key, model)
+    )
+
+
 def suggest_page_tags_sync(
     content: str,
     existing_tags: list[str] | None = None,
@@ -768,6 +904,7 @@ def chat_with_tools_sync(
     model: str | None = None,
     temperature: float = 0.7,
     max_tokens: int = 4096,
+    system_prompt: str | None = None,
 ) -> dict[str, Any]:
     """Synchronous wrapper for chat_with_tools function."""
     return asyncio.run(
@@ -782,6 +919,7 @@ def chat_with_tools_sync(
             model,
             temperature,
             max_tokens,
+            system_prompt,
         )
     )
 
@@ -798,6 +936,7 @@ async def chat_with_tools_stream(
     model: str | None = None,
     temperature: float = 0.7,
     max_tokens: int = 4096,
+    system_prompt: str | None = None,
 ) -> dict[str, Any]:
     """Chat with AI using tools, streaming the response via callback.
 
@@ -820,14 +959,22 @@ async def chat_with_tools_stream(
         max_tokens=max_tokens,
     )
 
-    # Build system prompt (same as non-streaming version)
-    system_parts = [
-        "You are a helpful AI assistant integrated into a personal notebook application called Katt.",
-        "You have the ability to create notebooks, pages, and run custom actions for the user.",
-        "When the user asks to create content, organize notes, or set up a system (like Agile Results, GTD, etc.), use the available tools.",
-        "When the user mentions running their 'daily goals', 'weekly review', or any workflow, use the run_action tool.",
-        "Create well-structured content with appropriate headings, lists, and organization.",
-    ]
+    # Build system prompt - use custom prompt if provided, otherwise use default
+    if system_prompt:
+        system_parts = [system_prompt]
+        # Add tool usage instructions even with custom prompt
+        system_parts.append(
+            "\nYou have the ability to create notebooks, pages, and run custom actions for the user. "
+            "When asked to create content or run workflows, use the available tools."
+        )
+    else:
+        system_parts = [
+            "You are a helpful AI assistant integrated into a personal notebook application called Katt.",
+            "You have the ability to create notebooks, pages, and run custom actions for the user.",
+            "When the user asks to create content, organize notes, or set up a system (like Agile Results, GTD, etc.), use the available tools.",
+            "When the user mentions running their 'daily goals', 'weekly review', or any workflow, use the run_action tool.",
+            "Create well-structured content with appropriate headings, lists, and organization.",
+        ]
 
     if available_notebooks:
         notebook_names = [n.get("name", "") for n in available_notebooks]
@@ -1090,6 +1237,7 @@ def chat_with_tools_stream_sync(
     model: str | None = None,
     temperature: float = 0.7,
     max_tokens: int = 4096,
+    system_prompt: str | None = None,
 ) -> dict[str, Any]:
     """Synchronous wrapper for streaming chat with callback."""
     return asyncio.run(
@@ -1105,5 +1253,6 @@ def chat_with_tools_stream_sync(
             model,
             temperature,
             max_tokens,
+            system_prompt,
         )
     )

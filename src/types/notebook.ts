@@ -9,6 +9,7 @@ export const NotebookSchema = z.object({
   type: NotebookTypeSchema,
   icon: z.string().optional(),
   color: z.string().optional(),
+  systemPrompt: z.string().optional(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });

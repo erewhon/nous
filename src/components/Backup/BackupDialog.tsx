@@ -9,8 +9,17 @@ import {
   getBackupMetadata,
   previewNotionExport,
   importNotionExport,
+  previewObsidianVault,
+  importObsidianVault,
+  previewEvernoteEnex,
+  importEvernoteEnex,
+  previewScrivenerProject,
+  importScrivenerProject,
   type BackupInfo,
   type NotionImportPreview,
+  type ObsidianImportPreview,
+  type EvernoteImportPreview,
+  type ScrivenerImportPreview,
 } from "../../utils/api";
 import { useNotebookStore } from "../../stores/notebookStore";
 import type { Notebook } from "../../types/notebook";
@@ -20,8 +29,10 @@ interface BackupDialogProps {
   onClose: () => void;
 }
 
+type ImportTab = "export" | "import" | "notion" | "obsidian" | "evernote" | "scrivener" | "backups";
+
 export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
-  const [activeTab, setActiveTab] = useState<"export" | "import" | "notion" | "backups">("export");
+  const [activeTab, setActiveTab] = useState<ImportTab>("export");
   const [backups, setBackups] = useState<BackupInfo[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -31,6 +42,21 @@ export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
   const [notionPreview, setNotionPreview] = useState<NotionImportPreview | null>(null);
   const [notionZipPath, setNotionZipPath] = useState<string | null>(null);
   const [notionNotebookName, setNotionNotebookName] = useState("");
+
+  // Obsidian import state
+  const [obsidianPreview, setObsidianPreview] = useState<ObsidianImportPreview | null>(null);
+  const [obsidianVaultPath, setObsidianVaultPath] = useState<string | null>(null);
+  const [obsidianNotebookName, setObsidianNotebookName] = useState("");
+
+  // Evernote import state
+  const [evernotePreview, setEvernotePreview] = useState<EvernoteImportPreview | null>(null);
+  const [evernoteEnexPath, setEvernoteEnexPath] = useState<string | null>(null);
+  const [evernoteNotebookName, setEvernoteNotebookName] = useState("");
+
+  // Scrivener import state
+  const [scrivenerPreview, setScrivenerPreview] = useState<ScrivenerImportPreview | null>(null);
+  const [scrivenerProjectPath, setScrivenerProjectPath] = useState<string | null>(null);
+  const [scrivenerNotebookName, setScrivenerNotebookName] = useState("");
 
   const { notebooks, loadNotebooks } = useNotebookStore();
 
@@ -234,6 +260,183 @@ export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
     setError(null);
   };
 
+  // Obsidian Import handlers
+  const handleObsidianSelectFolder = async () => {
+    try {
+      setError(null);
+      setSuccess(null);
+      setObsidianPreview(null);
+      setObsidianVaultPath(null);
+
+      const path = await open({
+        directory: true,
+        multiple: false,
+      });
+
+      if (!path) return;
+
+      setIsLoading(true);
+      const preview = await previewObsidianVault(path);
+      setObsidianPreview(preview);
+      setObsidianVaultPath(path);
+      setObsidianNotebookName(preview.suggestedName);
+    } catch (err) {
+      setError(`Failed to read Obsidian vault: ${err}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleObsidianImport = async () => {
+    if (!obsidianVaultPath) return;
+
+    try {
+      setError(null);
+      setSuccess(null);
+      setIsLoading(true);
+
+      const notebook = await importObsidianVault(
+        obsidianVaultPath,
+        obsidianNotebookName || undefined
+      );
+      await loadNotebooks();
+      setSuccess(`Imported "${notebook.name}" from Obsidian successfully`);
+
+      setObsidianPreview(null);
+      setObsidianVaultPath(null);
+      setObsidianNotebookName("");
+    } catch (err) {
+      setError(`Obsidian import failed: ${err}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleObsidianCancel = () => {
+    setObsidianPreview(null);
+    setObsidianVaultPath(null);
+    setObsidianNotebookName("");
+    setError(null);
+  };
+
+  // Evernote Import handlers
+  const handleEvernoteSelectFile = async () => {
+    try {
+      setError(null);
+      setSuccess(null);
+      setEvernotePreview(null);
+      setEvernoteEnexPath(null);
+
+      const path = await open({
+        multiple: false,
+        filters: [{ name: "Evernote Export", extensions: ["enex"] }],
+      });
+
+      if (!path) return;
+
+      setIsLoading(true);
+      const preview = await previewEvernoteEnex(path);
+      setEvernotePreview(preview);
+      setEvernoteEnexPath(path);
+      setEvernoteNotebookName(preview.suggestedName);
+    } catch (err) {
+      setError(`Failed to read Evernote export: ${err}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleEvernoteImport = async () => {
+    if (!evernoteEnexPath) return;
+
+    try {
+      setError(null);
+      setSuccess(null);
+      setIsLoading(true);
+
+      const notebook = await importEvernoteEnex(
+        evernoteEnexPath,
+        evernoteNotebookName || undefined
+      );
+      await loadNotebooks();
+      setSuccess(`Imported "${notebook.name}" from Evernote successfully`);
+
+      setEvernotePreview(null);
+      setEvernoteEnexPath(null);
+      setEvernoteNotebookName("");
+    } catch (err) {
+      setError(`Evernote import failed: ${err}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleEvernoteCancel = () => {
+    setEvernotePreview(null);
+    setEvernoteEnexPath(null);
+    setEvernoteNotebookName("");
+    setError(null);
+  };
+
+  // Scrivener Import handlers
+  const handleScrivenerSelectFolder = async () => {
+    try {
+      setError(null);
+      setSuccess(null);
+      setScrivenerPreview(null);
+      setScrivenerProjectPath(null);
+
+      const path = await open({
+        directory: true,
+        multiple: false,
+      });
+
+      if (!path) return;
+
+      setIsLoading(true);
+      const preview = await previewScrivenerProject(path);
+      setScrivenerPreview(preview);
+      setScrivenerProjectPath(path);
+      setScrivenerNotebookName(preview.projectTitle);
+    } catch (err) {
+      setError(`Failed to read Scrivener project: ${err}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleScrivenerImport = async () => {
+    if (!scrivenerProjectPath) return;
+
+    try {
+      setError(null);
+      setSuccess(null);
+      setIsLoading(true);
+
+      const notebook = await importScrivenerProject(
+        scrivenerProjectPath,
+        scrivenerNotebookName || undefined
+      );
+      await loadNotebooks();
+      setSuccess(`Imported "${notebook.name}" from Scrivener successfully`);
+
+      setScrivenerPreview(null);
+      setScrivenerProjectPath(null);
+      setScrivenerNotebookName("");
+    } catch (err) {
+      setError(`Scrivener import failed: ${err}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleScrivenerCancel = () => {
+    setScrivenerPreview(null);
+    setScrivenerProjectPath(null);
+    setScrivenerNotebookName("");
+    setError(null);
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -275,6 +478,9 @@ export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
               { id: "export" as const, label: "Export", icon: <IconUpload /> },
               { id: "import" as const, label: "Import", icon: <IconDownload /> },
               { id: "notion" as const, label: "Notion", icon: <IconNotion /> },
+              { id: "obsidian" as const, label: "Obsidian", icon: <IconObsidian /> },
+              { id: "evernote" as const, label: "Evernote", icon: <IconEvernote /> },
+              { id: "scrivener" as const, label: "Scrivener", icon: <IconScrivener /> },
               { id: "backups" as const, label: "Auto-Backups", icon: <IconArchive /> },
             ].map((tab) => (
               <button
@@ -313,6 +519,9 @@ export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
               {activeTab === "export" && "Export Notebook"}
               {activeTab === "import" && "Import Notebook"}
               {activeTab === "notion" && "Import from Notion"}
+              {activeTab === "obsidian" && "Import from Obsidian"}
+              {activeTab === "evernote" && "Import from Evernote"}
+              {activeTab === "scrivener" && "Import from Scrivener"}
               {activeTab === "backups" && "Auto-Backups"}
             </h3>
             <button
@@ -374,6 +583,39 @@ export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
                 onImport={handleNotionImport}
                 onCancel={handleNotionCancel}
                 onNameChange={setNotionNotebookName}
+              />
+            )}
+            {activeTab === "obsidian" && (
+              <ObsidianImportTab
+                isLoading={isLoading}
+                preview={obsidianPreview}
+                notebookName={obsidianNotebookName}
+                onSelectFolder={handleObsidianSelectFolder}
+                onImport={handleObsidianImport}
+                onCancel={handleObsidianCancel}
+                onNameChange={setObsidianNotebookName}
+              />
+            )}
+            {activeTab === "evernote" && (
+              <EvernoteImportTab
+                isLoading={isLoading}
+                preview={evernotePreview}
+                notebookName={evernoteNotebookName}
+                onSelectFile={handleEvernoteSelectFile}
+                onImport={handleEvernoteImport}
+                onCancel={handleEvernoteCancel}
+                onNameChange={setEvernoteNotebookName}
+              />
+            )}
+            {activeTab === "scrivener" && (
+              <ScrivenerImportTab
+                isLoading={isLoading}
+                preview={scrivenerPreview}
+                notebookName={scrivenerNotebookName}
+                onSelectFolder={handleScrivenerSelectFolder}
+                onImport={handleScrivenerImport}
+                onCancel={handleScrivenerCancel}
+                onNameChange={setScrivenerNotebookName}
               />
             )}
             {activeTab === "backups" && (
@@ -992,5 +1234,719 @@ function IconNotion({ size = 16 }: { size?: number }) {
       <path d="M8 12h4" />
       <path d="M8 16h6" />
     </svg>
+  );
+}
+
+function IconObsidian({ size = 16 }: { size?: number }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <polygon points="12 2 22 8.5 22 15.5 12 22 2 15.5 2 8.5 12 2" />
+      <line x1="12" y1="22" x2="12" y2="15.5" />
+      <polyline points="22 8.5 12 15.5 2 8.5" />
+    </svg>
+  );
+}
+
+function IconEvernote({ size = 16 }: { size?: number }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M12 3c-1.2 0-2.4.6-3 1.7A3.6 3.6 0 0 0 4.6 9c-1.3 1-2.1 2.6-2.1 4.2a5 5 0 0 0 10 0" />
+      <path d="M9 12h6" />
+      <path d="M12 9v6" />
+      <path d="M16 8h2a3 3 0 0 1 3 3v6a4 4 0 0 1-4 4h-6" />
+    </svg>
+  );
+}
+
+function IconScrivener({ size = 16 }: { size?: number }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+      <path d="m15 5 4 4" />
+    </svg>
+  );
+}
+
+// Obsidian Import Tab
+function ObsidianImportTab({
+  isLoading,
+  preview,
+  notebookName,
+  onSelectFolder,
+  onImport,
+  onCancel,
+  onNameChange,
+}: {
+  isLoading: boolean;
+  preview: ObsidianImportPreview | null;
+  notebookName: string;
+  onSelectFolder: () => void;
+  onImport: () => void;
+  onCancel: () => void;
+  onNameChange: (name: string) => void;
+}) {
+  if (!preview) {
+    return (
+      <div className="space-y-6">
+        <p
+          className="text-sm"
+          style={{ color: "var(--color-text-muted)" }}
+        >
+          Import pages from an Obsidian vault. Select your vault folder to begin.
+        </p>
+
+        <div
+          className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed p-12"
+          style={{ borderColor: "var(--color-border)" }}
+        >
+          <div
+            className="mb-4 rounded-full p-4"
+            style={{ backgroundColor: "var(--color-bg-tertiary)" }}
+          >
+            <IconObsidian size={32} />
+          </div>
+          <h4
+            className="mb-2 text-lg font-medium"
+            style={{ color: "var(--color-text-primary)" }}
+          >
+            Import from Obsidian
+          </h4>
+          <p
+            className="mb-6 text-center text-sm"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            Select your Obsidian vault folder
+          </p>
+          <button
+            onClick={onSelectFolder}
+            disabled={isLoading}
+            className="rounded-lg px-6 py-2.5 text-sm font-medium transition-colors"
+            style={{
+              backgroundColor: "var(--color-accent)",
+              color: "white",
+              opacity: isLoading ? 0.5 : 1,
+            }}
+          >
+            {isLoading ? "Loading..." : "Choose Folder"}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <p
+        className="text-sm"
+        style={{ color: "var(--color-text-muted)" }}
+      >
+        Review the import preview and confirm.
+      </p>
+
+      <div
+        className="grid grid-cols-3 gap-4 rounded-lg border p-4"
+        style={{
+          borderColor: "var(--color-border)",
+          backgroundColor: "var(--color-bg-secondary)",
+        }}
+      >
+        <div>
+          <div
+            className="text-2xl font-bold"
+            style={{ color: "var(--color-accent)" }}
+          >
+            {preview.pageCount}
+          </div>
+          <div
+            className="text-sm"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            Pages
+          </div>
+        </div>
+        <div>
+          <div
+            className="text-2xl font-bold"
+            style={{ color: "var(--color-accent)" }}
+          >
+            {preview.assetCount}
+          </div>
+          <div
+            className="text-sm"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            Assets
+          </div>
+        </div>
+        <div>
+          <div
+            className="text-2xl font-bold"
+            style={{ color: "var(--color-accent)" }}
+          >
+            {preview.folderCount}
+          </div>
+          <div
+            className="text-sm"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            Folders
+          </div>
+        </div>
+      </div>
+
+      {preview.pages.length > 0 && (
+        <div>
+          <h4
+            className="mb-2 text-sm font-medium"
+            style={{ color: "var(--color-text-primary)" }}
+          >
+            Sample Pages
+          </h4>
+          <div
+            className="max-h-32 space-y-1 overflow-y-auto rounded-lg border p-2"
+            style={{
+              borderColor: "var(--color-border)",
+              backgroundColor: "var(--color-bg-secondary)",
+            }}
+          >
+            {preview.pages.map((page, i) => (
+              <div
+                key={i}
+                className="flex items-center gap-2 text-sm"
+                style={{ color: "var(--color-text-secondary)" }}
+              >
+                <span>{page.hasWikiLinks ? "🔗" : "📄"}</span>
+                <span className="truncate">{page.title}</span>
+                {page.tags.length > 0 && (
+                  <span className="text-xs opacity-60">
+                    {page.tags.slice(0, 2).map(t => `#${t}`).join(" ")}
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {preview.warnings.length > 0 && (
+        <div
+          className="rounded-lg p-3 text-sm"
+          style={{
+            backgroundColor: "rgba(234, 179, 8, 0.1)",
+            color: "var(--color-warning)",
+          }}
+        >
+          <strong>Warnings:</strong>
+          <ul className="mt-1 list-disc pl-4">
+            {preview.warnings.map((w, i) => (
+              <li key={i}>{w}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <div>
+        <label
+          className="mb-2 block text-sm font-medium"
+          style={{ color: "var(--color-text-primary)" }}
+        >
+          Notebook Name
+        </label>
+        <input
+          type="text"
+          value={notebookName}
+          onChange={(e) => onNameChange(e.target.value)}
+          className="w-full rounded-lg border px-4 py-2 text-sm"
+          style={{
+            borderColor: "var(--color-border)",
+            backgroundColor: "var(--color-bg-secondary)",
+            color: "var(--color-text-primary)",
+          }}
+          placeholder="Enter notebook name"
+        />
+      </div>
+
+      <div className="flex justify-end gap-3">
+        <button
+          onClick={onCancel}
+          disabled={isLoading}
+          className="rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+          style={{
+            backgroundColor: "var(--color-bg-tertiary)",
+            color: "var(--color-text-secondary)",
+          }}
+        >
+          Cancel
+        </button>
+        <button
+          onClick={onImport}
+          disabled={isLoading}
+          className="rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+          style={{
+            backgroundColor: "var(--color-accent)",
+            color: "white",
+            opacity: isLoading ? 0.5 : 1,
+          }}
+        >
+          {isLoading ? "Importing..." : "Import Notebook"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Evernote Import Tab
+function EvernoteImportTab({
+  isLoading,
+  preview,
+  notebookName,
+  onSelectFile,
+  onImport,
+  onCancel,
+  onNameChange,
+}: {
+  isLoading: boolean;
+  preview: EvernoteImportPreview | null;
+  notebookName: string;
+  onSelectFile: () => void;
+  onImport: () => void;
+  onCancel: () => void;
+  onNameChange: (name: string) => void;
+}) {
+  if (!preview) {
+    return (
+      <div className="space-y-6">
+        <p
+          className="text-sm"
+          style={{ color: "var(--color-text-muted)" }}
+        >
+          Import notes from an Evernote export file (.enex). Export your notebooks from Evernote first.
+        </p>
+
+        <div
+          className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed p-12"
+          style={{ borderColor: "var(--color-border)" }}
+        >
+          <div
+            className="mb-4 rounded-full p-4"
+            style={{ backgroundColor: "var(--color-bg-tertiary)" }}
+          >
+            <IconEvernote size={32} />
+          </div>
+          <h4
+            className="mb-2 text-lg font-medium"
+            style={{ color: "var(--color-text-primary)" }}
+          >
+            Import from Evernote
+          </h4>
+          <p
+            className="mb-6 text-center text-sm"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            Select an Evernote export file (.enex)
+          </p>
+          <button
+            onClick={onSelectFile}
+            disabled={isLoading}
+            className="rounded-lg px-6 py-2.5 text-sm font-medium transition-colors"
+            style={{
+              backgroundColor: "var(--color-accent)",
+              color: "white",
+              opacity: isLoading ? 0.5 : 1,
+            }}
+          >
+            {isLoading ? "Loading..." : "Choose File"}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <p
+        className="text-sm"
+        style={{ color: "var(--color-text-muted)" }}
+      >
+        Review the import preview and confirm.
+      </p>
+
+      <div
+        className="grid grid-cols-2 gap-4 rounded-lg border p-4"
+        style={{
+          borderColor: "var(--color-border)",
+          backgroundColor: "var(--color-bg-secondary)",
+        }}
+      >
+        <div>
+          <div
+            className="text-2xl font-bold"
+            style={{ color: "var(--color-accent)" }}
+          >
+            {preview.noteCount}
+          </div>
+          <div
+            className="text-sm"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            Notes
+          </div>
+        </div>
+        <div>
+          <div
+            className="text-2xl font-bold"
+            style={{ color: "var(--color-accent)" }}
+          >
+            {preview.resourceCount}
+          </div>
+          <div
+            className="text-sm"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            Attachments
+          </div>
+        </div>
+      </div>
+
+      {preview.notes.length > 0 && (
+        <div>
+          <h4
+            className="mb-2 text-sm font-medium"
+            style={{ color: "var(--color-text-primary)" }}
+          >
+            Sample Notes
+          </h4>
+          <div
+            className="max-h-32 space-y-1 overflow-y-auto rounded-lg border p-2"
+            style={{
+              borderColor: "var(--color-border)",
+              backgroundColor: "var(--color-bg-secondary)",
+            }}
+          >
+            {preview.notes.map((note, i) => (
+              <div
+                key={i}
+                className="flex items-center gap-2 text-sm"
+                style={{ color: "var(--color-text-secondary)" }}
+              >
+                <span>{note.hasAttachments ? "📎" : "📄"}</span>
+                <span className="truncate">{note.title}</span>
+                {note.tags.length > 0 && (
+                  <span className="text-xs opacity-60">
+                    {note.tags.slice(0, 2).map(t => `#${t}`).join(" ")}
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {preview.warnings.length > 0 && (
+        <div
+          className="rounded-lg p-3 text-sm"
+          style={{
+            backgroundColor: "rgba(234, 179, 8, 0.1)",
+            color: "var(--color-warning)",
+          }}
+        >
+          <strong>Warnings:</strong>
+          <ul className="mt-1 list-disc pl-4">
+            {preview.warnings.map((w, i) => (
+              <li key={i}>{w}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <div>
+        <label
+          className="mb-2 block text-sm font-medium"
+          style={{ color: "var(--color-text-primary)" }}
+        >
+          Notebook Name
+        </label>
+        <input
+          type="text"
+          value={notebookName}
+          onChange={(e) => onNameChange(e.target.value)}
+          className="w-full rounded-lg border px-4 py-2 text-sm"
+          style={{
+            borderColor: "var(--color-border)",
+            backgroundColor: "var(--color-bg-secondary)",
+            color: "var(--color-text-primary)",
+          }}
+          placeholder="Enter notebook name"
+        />
+      </div>
+
+      <div className="flex justify-end gap-3">
+        <button
+          onClick={onCancel}
+          disabled={isLoading}
+          className="rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+          style={{
+            backgroundColor: "var(--color-bg-tertiary)",
+            color: "var(--color-text-secondary)",
+          }}
+        >
+          Cancel
+        </button>
+        <button
+          onClick={onImport}
+          disabled={isLoading}
+          className="rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+          style={{
+            backgroundColor: "var(--color-accent)",
+            color: "white",
+            opacity: isLoading ? 0.5 : 1,
+          }}
+        >
+          {isLoading ? "Importing..." : "Import Notebook"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Scrivener Import Tab
+function ScrivenerImportTab({
+  isLoading,
+  preview,
+  notebookName,
+  onSelectFolder,
+  onImport,
+  onCancel,
+  onNameChange,
+}: {
+  isLoading: boolean;
+  preview: ScrivenerImportPreview | null;
+  notebookName: string;
+  onSelectFolder: () => void;
+  onImport: () => void;
+  onCancel: () => void;
+  onNameChange: (name: string) => void;
+}) {
+  if (!preview) {
+    return (
+      <div className="space-y-6">
+        <p
+          className="text-sm"
+          style={{ color: "var(--color-text-muted)" }}
+        >
+          Import documents from a Scrivener project (.scriv folder). Select your project folder to begin.
+        </p>
+
+        <div
+          className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed p-12"
+          style={{ borderColor: "var(--color-border)" }}
+        >
+          <div
+            className="mb-4 rounded-full p-4"
+            style={{ backgroundColor: "var(--color-bg-tertiary)" }}
+          >
+            <IconScrivener size={32} />
+          </div>
+          <h4
+            className="mb-2 text-lg font-medium"
+            style={{ color: "var(--color-text-primary)" }}
+          >
+            Import from Scrivener
+          </h4>
+          <p
+            className="mb-6 text-center text-sm"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            Select your .scriv project folder
+          </p>
+          <button
+            onClick={onSelectFolder}
+            disabled={isLoading}
+            className="rounded-lg px-6 py-2.5 text-sm font-medium transition-colors"
+            style={{
+              backgroundColor: "var(--color-accent)",
+              color: "white",
+              opacity: isLoading ? 0.5 : 1,
+            }}
+          >
+            {isLoading ? "Loading..." : "Choose Folder"}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <p
+        className="text-sm"
+        style={{ color: "var(--color-text-muted)" }}
+      >
+        Review the import preview and confirm.
+      </p>
+
+      <div
+        className="grid grid-cols-2 gap-4 rounded-lg border p-4"
+        style={{
+          borderColor: "var(--color-border)",
+          backgroundColor: "var(--color-bg-secondary)",
+        }}
+      >
+        <div>
+          <div
+            className="text-2xl font-bold"
+            style={{ color: "var(--color-accent)" }}
+          >
+            {preview.documentCount}
+          </div>
+          <div
+            className="text-sm"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            Documents
+          </div>
+        </div>
+        <div>
+          <div
+            className="text-2xl font-bold"
+            style={{ color: "var(--color-accent)" }}
+          >
+            {preview.folderCount}
+          </div>
+          <div
+            className="text-sm"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            Folders
+          </div>
+        </div>
+      </div>
+
+      {preview.documents.length > 0 && (
+        <div>
+          <h4
+            className="mb-2 text-sm font-medium"
+            style={{ color: "var(--color-text-primary)" }}
+          >
+            Sample Documents
+          </h4>
+          <div
+            className="max-h-32 space-y-1 overflow-y-auto rounded-lg border p-2"
+            style={{
+              borderColor: "var(--color-border)",
+              backgroundColor: "var(--color-bg-secondary)",
+            }}
+          >
+            {preview.documents.map((doc, i) => (
+              <div
+                key={i}
+                className="flex items-center gap-2 text-sm"
+                style={{ color: "var(--color-text-secondary)" }}
+              >
+                <span>📄</span>
+                <span className="truncate">{doc.title}</span>
+                {doc.folderPath && (
+                  <span className="text-xs opacity-60">in {doc.folderPath}</span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {preview.warnings.length > 0 && (
+        <div
+          className="rounded-lg p-3 text-sm"
+          style={{
+            backgroundColor: "rgba(234, 179, 8, 0.1)",
+            color: "var(--color-warning)",
+          }}
+        >
+          <strong>Warnings:</strong>
+          <ul className="mt-1 list-disc pl-4">
+            {preview.warnings.map((w, i) => (
+              <li key={i}>{w}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <div>
+        <label
+          className="mb-2 block text-sm font-medium"
+          style={{ color: "var(--color-text-primary)" }}
+        >
+          Notebook Name
+        </label>
+        <input
+          type="text"
+          value={notebookName}
+          onChange={(e) => onNameChange(e.target.value)}
+          className="w-full rounded-lg border px-4 py-2 text-sm"
+          style={{
+            borderColor: "var(--color-border)",
+            backgroundColor: "var(--color-bg-secondary)",
+            color: "var(--color-text-primary)",
+          }}
+          placeholder="Enter notebook name"
+        />
+      </div>
+
+      <div className="flex justify-end gap-3">
+        <button
+          onClick={onCancel}
+          disabled={isLoading}
+          className="rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+          style={{
+            backgroundColor: "var(--color-bg-tertiary)",
+            color: "var(--color-text-secondary)",
+          }}
+        >
+          Cancel
+        </button>
+        <button
+          onClick={onImport}
+          disabled={isLoading}
+          className="rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+          style={{
+            backgroundColor: "var(--color-accent)",
+            color: "white",
+            opacity: isLoading ? 0.5 : 1,
+          }}
+        >
+          {isLoading ? "Importing..." : "Import Notebook"}
+        </button>
+      </div>
+    </div>
   );
 }

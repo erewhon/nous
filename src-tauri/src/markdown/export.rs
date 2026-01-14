@@ -360,6 +360,7 @@ mod tests {
             folder_id: None,
             is_archived: false,
             position: 0,
+            system_prompt: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };

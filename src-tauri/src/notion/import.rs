@@ -519,6 +519,7 @@ pub fn import_notion_zip(
         notebook_type: NotebookType::Standard,
         icon: Some("📥".to_string()),
         color: None,
+        system_prompt: None,
         created_at: now,
         updated_at: now,
     };

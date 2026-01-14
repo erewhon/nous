@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { useAIStore } from "../../stores/aiStore";
+import { useAIStore, AI_PANEL_CONSTRAINTS } from "../../stores/aiStore";
 import { usePageStore } from "../../stores/pageStore";
 import { useNotebookStore } from "../../stores/notebookStore";
 import {
@@ -14,8 +14,8 @@ import type { ChatMessage, PageContext, AIAction, CreateNotebookArgs, CreatePage
 import type { EditorData } from "../../types/page";
 
 interface AIChatPanelProps {
-  isOpen: boolean;
-  onClose: () => void;
+  isOpen?: boolean; // Optional - uses store if not provided
+  onClose?: () => void; // Optional - uses store if not provided
   onOpenSettings?: () => void;
 }
 
@@ -39,20 +39,44 @@ interface DisplayMessage {
   };
 }
 
-export function AIChatPanel({ isOpen, onClose, onOpenSettings }: AIChatPanelProps) {
+export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSettings }: AIChatPanelProps) {
   const [input, setInput] = useState("");
   const [createdItems, setCreatedItems] = useState<CreatedItem[]>([]);
   const [statusText, setStatusText] = useState<string>("");
   const [displayMessages, setDisplayMessages] = useState<DisplayMessage[]>([]);
   const [expandedThinking, setExpandedThinking] = useState<Set<number>>(new Set());
+  const [isResizing, setIsResizing] = useState<"left" | "top" | "corner" | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const isStreamingRef = useRef(false); // Track if we're currently streaming
+  const resizeStartRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
+  const dragStartRef = useRef<{ x: number; y: number; panelX: number; panelY: number } | null>(null);
 
-  const { settings, conversation, addMessage, setLoading, clearConversation } =
-    useAIStore();
+  const {
+    settings,
+    panel,
+    conversation,
+    addMessage,
+    setLoading,
+    clearConversation,
+    togglePin,
+    closePanel,
+    lockContext,
+    unlockContext,
+    setPanelSize,
+    resetPanelSize,
+    setPanelPosition,
+    resetPanelPosition,
+    toggleDetached,
+  } = useAIStore();
   const { selectedPageId, pages, loadPages } = usePageStore();
   const { notebooks, selectedNotebookId, loadNotebooks } = useNotebookStore();
+
+  // Use props if provided, otherwise use store state
+  const isOpen = isOpenProp !== undefined ? isOpenProp : panel.isOpen;
+  const handleClose = onCloseProp || closePanel;
 
   // Sync display messages with conversation messages (but not during streaming)
   useEffect(() => {
@@ -76,9 +100,133 @@ export function AIChatPanel({ isOpen, onClose, onOpenSettings }: AIChatPanelProp
     });
   }, [conversation.messages]);
 
-  // Get current page context
-  const currentPage = pages.find((p) => p.id === selectedPageId);
-  const currentNotebook = notebooks.find((n) => n.id === selectedNotebookId);
+  // Get current page context (or locked context if pinned)
+  const currentPage = panel.lockedContext
+    ? pages.find((p) => p.id === panel.lockedContext?.pageId)
+    : pages.find((p) => p.id === selectedPageId);
+  const currentNotebook = panel.lockedContext
+    ? notebooks.find((n) => n.id === panel.lockedContext?.notebookId)
+    : notebooks.find((n) => n.id === selectedNotebookId);
+
+  // Handle locking context to current page
+  const handleLockContext = useCallback(() => {
+    if (currentPage && currentNotebook) {
+      lockContext({
+        pageId: currentPage.id,
+        pageTitle: currentPage.title,
+        notebookId: currentNotebook.id,
+        notebookName: currentNotebook.name,
+      });
+    }
+  }, [currentPage, currentNotebook, lockContext]);
+
+  // Resize handlers
+  const handleResizeStart = useCallback((edge: "left" | "top" | "corner") => (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsResizing(edge);
+    resizeStartRef.current = {
+      x: e.clientX,
+      y: e.clientY,
+      width: panel.size.width,
+      height: panel.size.height,
+    };
+  }, [panel.size.width, panel.size.height]);
+
+  // Handle resize mouse move
+  useEffect(() => {
+    if (!isResizing) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!resizeStartRef.current) return;
+
+      const { x: startX, y: startY, width: startWidth, height: startHeight } = resizeStartRef.current;
+
+      let newWidth = startWidth;
+      let newHeight = startHeight;
+
+      // Since panel is positioned at bottom-right, dragging left edge increases width
+      if (isResizing === "left" || isResizing === "corner") {
+        newWidth = startWidth + (startX - e.clientX);
+      }
+      // Dragging top edge increases height
+      if (isResizing === "top" || isResizing === "corner") {
+        newHeight = startHeight + (startY - e.clientY);
+      }
+
+      setPanelSize({ width: newWidth, height: newHeight });
+    };
+
+    const handleMouseUp = () => {
+      setIsResizing(null);
+      resizeStartRef.current = null;
+    };
+
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("mouseup", handleMouseUp);
+
+    return () => {
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [isResizing, setPanelSize]);
+
+  // Drag handlers for moving the panel (only when detached)
+  const handleDragStart = useCallback((e: React.MouseEvent) => {
+    // Only allow dragging when detached
+    if (!panel.isDetached) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+
+    // Get current position (or calculate from default bottom-right)
+    const currentX = panel.position?.x ?? window.innerWidth - panel.size.width - 24;
+    const currentY = panel.position?.y ?? window.innerHeight - panel.size.height - 24;
+
+    dragStartRef.current = {
+      x: e.clientX,
+      y: e.clientY,
+      panelX: currentX,
+      panelY: currentY,
+    };
+  }, [panel.isDetached, panel.position, panel.size.width, panel.size.height]);
+
+  // Handle drag mouse move
+  useEffect(() => {
+    if (!isDragging) return;
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!dragStartRef.current) return;
+
+      const { x: startX, y: startY, panelX, panelY } = dragStartRef.current;
+
+      const deltaX = e.clientX - startX;
+      const deltaY = e.clientY - startY;
+
+      // Calculate new position with bounds checking
+      const maxX = window.innerWidth - panel.size.width - 10;
+      const maxY = window.innerHeight - panel.size.height - 10;
+
+      const newX = Math.min(Math.max(10, panelX + deltaX), maxX);
+      const newY = Math.min(Math.max(10, panelY + deltaY), maxY);
+
+      setPanelPosition({ x: newX, y: newY });
+    };
+
+    const handleMouseUp = () => {
+      setIsDragging(false);
+      dragStartRef.current = null;
+    };
+
+    document.addEventListener("mousemove", handleMouseMove);
+    document.addEventListener("mouseup", handleMouseUp);
+
+    return () => {
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [isDragging, panel.size.width, panel.size.height, setPanelPosition]);
 
   // Scroll to bottom when messages change or loading state changes
   useEffect(() => {
@@ -362,6 +510,13 @@ export function AIChatPanel({ isOpen, onClose, onOpenSettings }: AIChatPanelProp
         name: n.name,
       }));
 
+      // Resolve system prompt with inheritance: page -> notebook -> app
+      const resolvedSystemPrompt =
+        currentPage?.systemPrompt ||
+        currentNotebook?.systemPrompt ||
+        settings.systemPrompt ||
+        undefined;
+
       // Start the streaming request - command now waits for completion
       await aiChatStream(userMessage.content, {
         pageContext,
@@ -373,6 +528,7 @@ export function AIChatPanel({ isOpen, onClose, onOpenSettings }: AIChatPanelProp
         model: settings.model || undefined,
         temperature: settings.temperature,
         maxTokens: settings.maxTokens,
+        systemPrompt: resolvedSystemPrompt,
       });
 
       const elapsedMs = Date.now() - startTime;
@@ -457,26 +613,90 @@ export function AIChatPanel({ isOpen, onClose, onOpenSettings }: AIChatPanelProp
       handleSubmit();
     }
     if (e.key === "Escape") {
-      onClose();
+      handleClose();
     }
   };
 
   if (!isOpen) return null;
 
+  // Calculate panel position styles
+  const getPanelPositionStyle = () => {
+    if (panel.isDetached && panel.position) {
+      // Custom position when detached
+      return {
+        left: `${panel.position.x}px`,
+        top: `${panel.position.y}px`,
+        bottom: "auto",
+        right: "auto",
+      };
+    }
+    // Default bottom-right position
+    return {
+      bottom: "24px",
+      right: "24px",
+      left: "auto",
+      top: "auto",
+    };
+  };
+
   return (
     <div
-      className="fixed bottom-6 right-6 z-50 flex h-[650px] w-[480px] flex-col overflow-hidden rounded-2xl border shadow-2xl"
+      ref={panelRef}
+      className="fixed z-50 flex flex-col overflow-hidden rounded-2xl border shadow-2xl"
       style={{
         backgroundColor: "var(--color-bg-panel)",
         borderColor: "var(--color-border)",
+        width: `${panel.size.width}px`,
+        height: `${panel.size.height}px`,
+        minWidth: `${AI_PANEL_CONSTRAINTS.minWidth}px`,
+        minHeight: `${AI_PANEL_CONSTRAINTS.minHeight}px`,
+        maxWidth: `${AI_PANEL_CONSTRAINTS.maxWidth}px`,
+        maxHeight: `${AI_PANEL_CONSTRAINTS.maxHeight}px`,
+        ...getPanelPositionStyle(),
       }}
     >
-      {/* Header */}
+      {/* Resize handles */}
+      {/* Left edge */}
       <div
-        className="flex items-center justify-between px-5 py-4"
+        className="absolute left-0 top-0 bottom-0 w-1 cursor-ew-resize hover:bg-violet-500/30 transition-colors"
+        onMouseDown={handleResizeStart("left")}
+        style={{ zIndex: 10 }}
+      />
+      {/* Top edge */}
+      <div
+        className="absolute left-0 right-0 top-0 h-1 cursor-ns-resize hover:bg-violet-500/30 transition-colors"
+        onMouseDown={handleResizeStart("top")}
+        style={{ zIndex: 10 }}
+      />
+      {/* Top-left corner */}
+      <div
+        className="absolute left-0 top-0 w-3 h-3 cursor-nwse-resize hover:bg-violet-500/50 transition-colors rounded-tl-2xl"
+        onMouseDown={handleResizeStart("corner")}
+        style={{ zIndex: 11 }}
+      />
+      {/* Resize indicator when resizing */}
+      {isResizing && (
+        <div
+          className="absolute inset-0 bg-violet-500/5 pointer-events-none"
+          style={{ zIndex: 5 }}
+        />
+      )}
+
+      {/* Drag indicator when dragging */}
+      {isDragging && (
+        <div
+          className="absolute inset-0 bg-violet-500/10 pointer-events-none"
+          style={{ zIndex: 5 }}
+        />
+      )}
+
+      {/* Header - draggable when detached */}
+      <div
+        className={`flex items-center justify-between px-5 py-4 ${panel.isDetached ? "cursor-move" : ""}`}
         style={{
           background: "linear-gradient(to right, rgba(139, 92, 246, 0.1), rgba(124, 58, 237, 0.05))",
         }}
+        onMouseDown={handleDragStart}
       >
         <div className="flex items-center gap-3">
           <div
@@ -488,23 +708,108 @@ export function AIChatPanel({ isOpen, onClose, onOpenSettings }: AIChatPanelProp
             <IconSparkles style={{ color: "white" }} />
           </div>
           <div>
-            <span
-              className="font-semibold"
-              style={{ color: "var(--color-text-primary)" }}
-            >
-              AI Assistant
-            </span>
+            <div className="flex items-center gap-2">
+              <span
+                className="font-semibold"
+                style={{ color: "var(--color-text-primary)" }}
+              >
+                AI Assistant
+              </span>
+              {panel.isPinned && (
+                <span
+                  className="rounded-full px-1.5 py-0.5 text-[10px] font-medium"
+                  style={{
+                    backgroundColor: "rgba(139, 92, 246, 0.2)",
+                    color: "var(--color-accent)",
+                  }}
+                >
+                  Pinned
+                </span>
+              )}
+              {panel.isDetached && (
+                <span
+                  className="rounded-full px-1.5 py-0.5 text-[10px] font-medium"
+                  style={{
+                    backgroundColor: "rgba(124, 58, 237, 0.2)",
+                    color: "var(--color-accent-secondary)",
+                  }}
+                >
+                  Floating
+                </span>
+              )}
+            </div>
             {currentPage && (
               <p
-                className="text-xs"
+                className="text-xs flex items-center gap-1"
                 style={{ color: "var(--color-text-muted)" }}
               >
-                Context: {currentPage.title}
+                {panel.lockedContext && (
+                  <span style={{ color: "var(--color-accent)" }}>Locked:</span>
+                )}
+                {panel.lockedContext ? panel.lockedContext.pageTitle : currentPage.title}
               </p>
             )}
           </div>
         </div>
         <div className="flex items-center gap-1">
+          {/* Context lock button - only show when a page is selected */}
+          {currentPage && (
+            <button
+              onClick={panel.lockedContext ? unlockContext : handleLockContext}
+              className="flex h-8 w-8 items-center justify-center rounded-lg transition-all hover:bg-[--color-bg-tertiary]"
+              style={{
+                color: panel.lockedContext ? "var(--color-accent)" : "var(--color-text-muted)",
+              }}
+              title={panel.lockedContext ? "Unlock context (follow current page)" : "Lock context to this page"}
+            >
+              <IconLock filled={!!panel.lockedContext} />
+            </button>
+          )}
+          {/* Pin button */}
+          <button
+            onClick={togglePin}
+            className="flex h-8 w-8 items-center justify-center rounded-lg transition-all hover:bg-[--color-bg-tertiary]"
+            style={{
+              color: panel.isPinned ? "var(--color-accent)" : "var(--color-text-muted)",
+            }}
+            title={panel.isPinned ? "Unpin panel" : "Pin panel (keep open)"}
+          >
+            <IconPin filled={panel.isPinned} />
+          </button>
+          {/* Detach/attach toggle button */}
+          <button
+            onClick={toggleDetached}
+            className="flex h-8 w-8 items-center justify-center rounded-lg transition-all hover:bg-[--color-bg-tertiary]"
+            style={{
+              color: panel.isDetached ? "var(--color-accent)" : "var(--color-text-muted)",
+            }}
+            title={panel.isDetached ? "Attach to corner (snap back)" : "Detach (enable dragging)"}
+          >
+            <IconDetach detached={panel.isDetached} />
+          </button>
+          {/* Reset position button - only show when detached and has custom position */}
+          {panel.isDetached && panel.position && (
+            <button
+              onClick={resetPanelPosition}
+              className="flex h-8 w-8 items-center justify-center rounded-lg transition-all hover:bg-[--color-bg-tertiary]"
+              style={{ color: "var(--color-text-muted)" }}
+              title="Reset position"
+            >
+              <IconTarget />
+            </button>
+          )}
+          {/* Reset size button - only show if size has changed */}
+          {(panel.size.width !== AI_PANEL_CONSTRAINTS.defaultWidth ||
+            panel.size.height !== AI_PANEL_CONSTRAINTS.defaultHeight) && (
+            <button
+              onClick={resetPanelSize}
+              className="flex h-8 w-8 items-center justify-center rounded-lg transition-all hover:bg-[--color-bg-tertiary]"
+              style={{ color: "var(--color-text-muted)" }}
+              title="Reset panel size"
+            >
+              <IconResize />
+            </button>
+          )}
           <button
             onClick={onOpenSettings}
             className="flex h-8 w-8 items-center justify-center rounded-lg transition-all hover:bg-[--color-bg-tertiary]"
@@ -515,16 +820,17 @@ export function AIChatPanel({ isOpen, onClose, onOpenSettings }: AIChatPanelProp
           </button>
           <button
             onClick={clearConversation}
-            className="flex h-8 w-8 items-center justify-center rounded-lg transition-all"
+            className="flex h-8 w-8 items-center justify-center rounded-lg transition-all hover:bg-[--color-bg-tertiary]"
             style={{ color: "var(--color-text-muted)" }}
             title="Clear conversation"
           >
             <IconTrash />
           </button>
           <button
-            onClick={onClose}
-            className="flex h-8 w-8 items-center justify-center rounded-lg transition-all"
+            onClick={handleClose}
+            className="flex h-8 w-8 items-center justify-center rounded-lg transition-all hover:bg-[--color-bg-tertiary]"
             style={{ color: "var(--color-text-muted)" }}
+            title={panel.isPinned ? "Close (panel is pinned)" : "Close"}
           >
             <IconX />
           </button>
@@ -1112,6 +1418,123 @@ function IconZap({ style }: { style?: React.CSSProperties }) {
       style={style}
     >
       <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+    </svg>
+  );
+}
+
+function IconPin({ filled }: { filled?: boolean }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill={filled ? "currentColor" : "none"}
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <line x1="12" x2="12" y1="17" y2="22" />
+      <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z" />
+    </svg>
+  );
+}
+
+function IconLock({ filled }: { filled?: boolean }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill={filled ? "currentColor" : "none"}
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
+      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+    </svg>
+  );
+}
+
+function IconResize() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M15 3h6v6" />
+      <path d="M9 21H3v-6" />
+      <path d="M21 3l-7 7" />
+      <path d="M3 21l7-7" />
+    </svg>
+  );
+}
+
+function IconDetach({ detached }: { detached?: boolean }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      {detached ? (
+        // Arrows pointing inward (attach/dock)
+        <>
+          <path d="M9 3h6" />
+          <path d="M9 21h6" />
+          <path d="M3 9v6" />
+          <path d="M21 9v6" />
+          <path d="M9 9L4 4" />
+          <path d="M15 9l5-5" />
+          <path d="M9 15l-5 5" />
+          <path d="M15 15l5 5" />
+        </>
+      ) : (
+        // Arrows pointing outward (detach/float)
+        <>
+          <path d="M8 3H5a2 2 0 0 0-2 2v3" />
+          <path d="M21 8V5a2 2 0 0 0-2-2h-3" />
+          <path d="M3 16v3a2 2 0 0 0 2 2h3" />
+          <path d="M16 21h3a2 2 0 0 0 2-2v-3" />
+        </>
+      )}
+    </svg>
+  );
+}
+
+function IconTarget() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="12" cy="12" r="10" />
+      <circle cx="12" cy="12" r="6" />
+      <circle cx="12" cy="12" r="2" />
     </svg>
   );
 }

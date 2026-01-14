@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useAIStore } from "../../stores/aiStore";
+import { useAIStore, DEFAULT_SYSTEM_PROMPT } from "../../stores/aiStore";
 import { useWebResearchStore } from "../../stores/webResearchStore";
 import { ThemeSettings } from "./ThemeSettings";
 import type { ProviderType } from "../../types/ai";
@@ -7,14 +7,15 @@ import type { ProviderType } from "../../types/ai";
 interface SettingsDialogProps {
   isOpen: boolean;
   onClose: () => void;
-  initialTab?: "ai" | "web-research" | "theme";
+  initialTab?: "ai" | "web-research" | "theme" | "system-prompt";
 }
 
-type TabId = "ai" | "web-research" | "theme";
+type TabId = "ai" | "web-research" | "theme" | "system-prompt";
 
 const TABS: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: "theme", label: "Appearance", icon: <IconPalette /> },
   { id: "ai", label: "AI Provider", icon: <IconSparkles /> },
+  { id: "system-prompt", label: "System Prompt", icon: <IconPrompt /> },
   { id: "web-research", label: "Web Research", icon: <IconGlobe /> },
 ];
 
@@ -130,6 +131,7 @@ export function SettingsDialog({ isOpen, onClose, initialTab = "theme" }: Settin
           <div className="flex-1 overflow-y-auto p-6">
             {activeTab === "theme" && <ThemeSettings />}
             {activeTab === "ai" && <AISettingsContent />}
+            {activeTab === "system-prompt" && <SystemPromptSettingsContent />}
             {activeTab === "web-research" && <WebResearchSettingsContent />}
           </div>
         </div>
@@ -586,6 +588,217 @@ function WebResearchSettingsContent() {
   );
 }
 
+// System Prompt Settings Content
+function SystemPromptSettingsContent() {
+  const { settings, setSystemPrompt } = useAIStore();
+  const [localPrompt, setLocalPrompt] = useState(settings.systemPrompt);
+  const [hasChanges, setHasChanges] = useState(false);
+
+  const handleSave = () => {
+    setSystemPrompt(localPrompt);
+    setHasChanges(false);
+  };
+
+  const handleReset = () => {
+    setLocalPrompt(DEFAULT_SYSTEM_PROMPT);
+    setSystemPrompt(DEFAULT_SYSTEM_PROMPT);
+    setHasChanges(false);
+  };
+
+  const handleChange = (value: string) => {
+    setLocalPrompt(value);
+    setHasChanges(value !== settings.systemPrompt);
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Info Banner */}
+      <div
+        className="flex items-start gap-3 rounded-lg border p-4"
+        style={{
+          backgroundColor: "rgba(139, 92, 246, 0.1)",
+          borderColor: "var(--color-accent)",
+        }}
+      >
+        <IconInfo style={{ color: "var(--color-accent)", flexShrink: 0, marginTop: 2 }} />
+        <div>
+          <p
+            className="text-sm font-medium"
+            style={{ color: "var(--color-text-primary)" }}
+          >
+            System Prompt Configuration
+          </p>
+          <p
+            className="mt-1 text-xs"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            The system prompt defines the AI assistant's personality and behavior.
+            You can also set custom prompts at the notebook or page level for more
+            specific contexts. Prompts inherit: Page → Notebook → App default.
+          </p>
+        </div>
+      </div>
+
+      {/* App-level System Prompt */}
+      <div>
+        <div className="mb-2 flex items-center justify-between">
+          <label
+            className="text-sm font-medium"
+            style={{ color: "var(--color-text-primary)" }}
+          >
+            Default System Prompt
+          </label>
+          <div className="flex items-center gap-2">
+            {hasChanges && (
+              <span
+                className="text-xs"
+                style={{ color: "var(--color-warning)" }}
+              >
+                Unsaved changes
+              </span>
+            )}
+            <button
+              onClick={handleReset}
+              className="rounded-lg px-2 py-1 text-xs transition-colors hover:bg-[--color-bg-tertiary]"
+              style={{ color: "var(--color-text-muted)" }}
+              title="Reset to default"
+            >
+              Reset
+            </button>
+          </div>
+        </div>
+        <textarea
+          value={localPrompt}
+          onChange={(e) => handleChange(e.target.value)}
+          placeholder="Enter your system prompt..."
+          rows={8}
+          className="w-full resize-none rounded-lg border px-3 py-2.5 text-sm outline-none transition-colors focus:border-[--color-accent]"
+          style={{
+            backgroundColor: "var(--color-bg-secondary)",
+            borderColor: "var(--color-border)",
+            color: "var(--color-text-primary)",
+          }}
+        />
+        <p
+          className="mt-1.5 text-xs"
+          style={{ color: "var(--color-text-muted)" }}
+        >
+          This prompt is sent to the AI with every conversation to set context and behavior.
+        </p>
+      </div>
+
+      {/* Save Button */}
+      {hasChanges && (
+        <div className="flex justify-end">
+          <button
+            onClick={handleSave}
+            className="rounded-lg px-4 py-2 text-sm font-medium text-white transition-colors"
+            style={{
+              background: "linear-gradient(to bottom right, var(--color-accent), var(--color-accent-secondary))",
+            }}
+          >
+            Save Changes
+          </button>
+        </div>
+      )}
+
+      {/* Notebook & Page Prompts Info */}
+      <div
+        className="rounded-lg border p-4"
+        style={{
+          backgroundColor: "var(--color-bg-secondary)",
+          borderColor: "var(--color-border)",
+        }}
+      >
+        <h4
+          className="mb-3 flex items-center gap-2 text-sm font-medium"
+          style={{ color: "var(--color-text-primary)" }}
+        >
+          <IconLayers />
+          Prompt Inheritance
+        </h4>
+        <div className="space-y-3">
+          <div className="flex items-start gap-3">
+            <div
+              className="flex h-6 w-6 items-center justify-center rounded-full text-xs font-medium"
+              style={{
+                backgroundColor: "rgba(139, 92, 246, 0.2)",
+                color: "var(--color-accent)",
+              }}
+            >
+              1
+            </div>
+            <div>
+              <p
+                className="text-sm font-medium"
+                style={{ color: "var(--color-text-primary)" }}
+              >
+                Page-level prompt
+              </p>
+              <p
+                className="text-xs"
+                style={{ color: "var(--color-text-muted)" }}
+              >
+                Set via the page header menu. Highest priority.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-start gap-3">
+            <div
+              className="flex h-6 w-6 items-center justify-center rounded-full text-xs font-medium"
+              style={{
+                backgroundColor: "rgba(139, 92, 246, 0.15)",
+                color: "var(--color-accent)",
+              }}
+            >
+              2
+            </div>
+            <div>
+              <p
+                className="text-sm font-medium"
+                style={{ color: "var(--color-text-primary)" }}
+              >
+                Notebook-level prompt
+              </p>
+              <p
+                className="text-xs"
+                style={{ color: "var(--color-text-muted)" }}
+              >
+                Set via notebook settings. Used if no page prompt is set.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-start gap-3">
+            <div
+              className="flex h-6 w-6 items-center justify-center rounded-full text-xs font-medium"
+              style={{
+                backgroundColor: "rgba(139, 92, 246, 0.1)",
+                color: "var(--color-accent)",
+              }}
+            >
+              3
+            </div>
+            <div>
+              <p
+                className="text-sm font-medium"
+                style={{ color: "var(--color-text-primary)" }}
+              >
+                App default (above)
+              </p>
+              <p
+                className="text-xs"
+                style={{ color: "var(--color-text-muted)" }}
+              >
+                Fallback when no notebook or page prompt is set.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Icons
 function IconPalette() {
   return (
@@ -700,6 +913,66 @@ function IconEyeOff() {
     >
       <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
       <line x1="1" y1="1" x2="23" y2="23" />
+    </svg>
+  );
+}
+
+function IconPrompt() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+      <line x1="9" y1="10" x2="15" y2="10" />
+    </svg>
+  );
+}
+
+function IconInfo({ style }: { style?: React.CSSProperties }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={style}
+    >
+      <circle cx="12" cy="12" r="10" />
+      <line x1="12" y1="16" x2="12" y2="12" />
+      <line x1="12" y1="8" x2="12.01" y2="8" />
+    </svg>
+  );
+}
+
+function IconLayers() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <polygon points="12 2 2 7 12 12 22 7 12 2" />
+      <polyline points="2 17 12 22 22 17" />
+      <polyline points="2 12 12 17 22 12" />
     </svg>
   );
 }

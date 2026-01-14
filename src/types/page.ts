@@ -45,6 +45,7 @@ export const PageSchema = z.object({
   folderId: z.string().uuid().nullable().optional(),
   isArchived: z.boolean().default(false),
   position: z.number().default(0),
+  systemPrompt: z.string().optional(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });

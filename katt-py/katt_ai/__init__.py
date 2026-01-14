@@ -12,6 +12,7 @@ from katt_ai.models import (
     ResearchSummary,
 )
 from katt_ai.web_research import web_search, scrape_url, summarize_research
+from katt_ai.inbox import classify_inbox_item, classify_inbox_item_sync
 
 __all__ = [
     "chat",
@@ -29,4 +30,7 @@ __all__ = [
     "SearchResponse",
     "ScrapedContent",
     "ResearchSummary",
+    # Inbox classification
+    "classify_inbox_item",
+    "classify_inbox_item_sync",
 ]

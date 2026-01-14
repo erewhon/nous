@@ -1,10 +1,12 @@
 import { useNotebookStore } from "../../stores/notebookStore";
 import { useActionStore } from "../../stores/actionStore";
+import { useInboxStore } from "../../stores/inboxStore";
 import { NotebookList } from "../NotebookList/NotebookList";
 
 export function Sidebar() {
   const { notebooks, selectedNotebookId, createNotebook } = useNotebookStore();
   const openActionLibrary = useActionStore((state) => state.openActionLibrary);
+  const { summary, openQuickCapture, openInboxPanel } = useInboxStore();
 
   return (
     <aside
@@ -135,6 +137,57 @@ export function Sidebar() {
             {notebooks.length} notebook{notebooks.length !== 1 ? "s" : ""}
           </span>
           <div className="flex items-center gap-1">
+            {/* Quick Capture button */}
+            <button
+              onClick={openQuickCapture}
+              className="flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
+              style={{ color: "var(--color-text-muted)" }}
+              title="Quick Capture (⌘⇧C)"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+            </button>
+            {/* Inbox button */}
+            <button
+              onClick={openInboxPanel}
+              className="relative flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
+              style={{ color: "var(--color-text-muted)" }}
+              title="Inbox (⌘⇧I)"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <polyline points="22 12 16 12 14 15 10 15 8 12 2 12" />
+                <path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
+              </svg>
+              {summary && summary.unprocessed_count > 0 && (
+                <span
+                  className="absolute -right-0.5 -top-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full text-[9px] font-bold text-white"
+                  style={{ backgroundColor: "var(--color-accent)" }}
+                >
+                  {summary.unprocessed_count > 9 ? "9+" : summary.unprocessed_count}
+                </span>
+              )}
+            </button>
             <button
               onClick={() => {
                 window.dispatchEvent(

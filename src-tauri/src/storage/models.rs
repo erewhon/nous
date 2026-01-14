@@ -90,6 +90,9 @@ pub struct Notebook {
     pub icon: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
+    /// Custom AI system prompt for this notebook (overrides app default)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system_prompt: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -103,6 +106,7 @@ impl Notebook {
             notebook_type,
             icon: None,
             color: None,
+            system_prompt: None,
             created_at: now,
             updated_at: now,
         }
@@ -153,6 +157,9 @@ pub struct Page {
     /// Position for ordering within folder or root
     #[serde(default)]
     pub position: i32,
+    /// Custom AI system prompt for this page (overrides notebook and app defaults)
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub system_prompt: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -169,6 +176,7 @@ impl Page {
             folder_id: None,
             is_archived: false,
             position: 0,
+            system_prompt: None,
             created_at: now,
             updated_at: now,
         }

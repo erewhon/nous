@@ -96,56 +96,144 @@ Already implemented with Tantivy, may need refinement:
 
 ---
 
+### 9. Custom Actions & Automations
+- [x] Define custom actions with triggers and steps
+- [x] Action editor wizard (basics, triggers, steps, review)
+- [x] Trigger types: Manual, AI Chat (keywords), Scheduled (daily/weekly/monthly)
+- [x] Step types: CreatePageFromTemplate, CreateNotebook, CreateFolder, MovePages, ArchivePages, ManageTags, CarryForwardItems, Delay, Conditional
+- [x] Variable substitution ({{date}}, {{dayOfWeek}}, {{weekNumber}}, {{monthName}}, {{year}})
+- [x] Invoke actions via AI chat (e.g., "create my daily goals")
+- [x] Command Palette integration (search and run actions)
+- [x] Agile Results workflow support:
+  - [x] Daily outcomes template with auto-date
+  - [x] Weekly outcomes with day breakdown
+  - [x] Monthly/yearly goal templates
+  - [x] Carry forward incomplete items
+- [x] Scheduled automations (tokio-based in-app scheduler)
+- [x] Action library with pre-built workflows (6 built-in actions)
+- [x] Action enable/disable toggle
+- [x] UI components: ActionLibrary, ActionEditor, ActionCard, TriggerEditor, ScheduleEditor, StepBuilder
+
+---
+
+## Short-term (Next up)
+
+### 10. AI Page Summarization
+- [x] AiSummarize action step implementation
+- [x] Summarize pages matching selector criteria
+- [x] Custom prompts for different summary styles (concise, detailed, bullets, narrative)
+- [x] Output to new page, prepend to page, or store as variable
+- [x] Integration with existing AI providers (OpenAI/Anthropic/Ollama)
+- [x] Batch summarization of multiple pages (e.g., weekly review)
+- [x] Extracts key points, action items, and themes automatically
+- [x] Frontend API and Tauri command for direct invocation
+
+---
+
+## Short-term (Next up)
+
+### 11. AI Chat Enhancements
+- [x] Pinnable AI chat window (stays open while navigating)
+  - [x] Pin button in header - panel stays open when pinned
+  - [x] Context lock button - lock to specific page or follow current page
+  - [x] Visual indicators for pinned/locked state
+  - [x] State persisted across sessions
+- [x] Resizable chat panel (drag to resize width/height)
+  - [x] Drag left edge to resize width
+  - [x] Drag top edge to resize height
+  - [x] Drag top-left corner to resize both
+  - [x] Min/max size constraints (320-800px width, 400-900px height)
+  - [x] Reset size button when size has changed
+  - [x] Size persisted across sessions
+- [x] Movable/detachable chat window (floating mode)
+  - [x] Detach button to enter floating mode
+  - [x] Drag header to move panel anywhere on screen
+  - [x] Bounds checking to keep panel visible
+  - [x] Reset position button
+  - [x] Visual "Floating" badge indicator
+  - [x] Position persisted across sessions
+- [x] System prompt configuration:
+  - [x] Application-level default system prompt (in Settings)
+  - [x] Notebook-level system prompt override
+  - [x] Page-level system prompt override
+  - [x] Prompt inheritance (page → notebook → app fallback)
+
+### 12. Inbox & Quick Capture
+- [x] Global quick capture hotkey (`Cmd+Shift+C` for capture, `Cmd+Shift+I` for inbox)
+- [x] Quick capture button in sidebar toolbar
+- [x] Inbox storage with file-based persistence
+- [x] Minimal capture UI (title + content + tags, instant save)
+- [x] AI-powered inbox classification:
+  - [x] Analyze inbox items to suggest target notebook
+  - [x] Suggest existing page to append to (or create new)
+  - [x] Confidence scoring for suggestions
+- [x] Inbox review panel:
+  - [x] List all inbox items with AI-suggested actions
+  - [x] Select/deselect items for batch processing
+  - [x] Override suggested destination per item (architecture ready)
+  - [x] "Apply" button to move/merge items
+- [x] Badge indicator showing unprocessed item count
+
+### 13. Version Control & Page History
+- [ ] Automatic revision snapshots:
+  - [ ] Save revision on each page save (debounced)
+  - [ ] Configurable retention policy (keep last N revisions, or by age)
+  - [ ] Efficient storage (delta/diff-based or full snapshots)
+- [ ] Page history panel:
+  - [ ] Browse revisions with timestamps
+  - [ ] Preview previous versions
+  - [ ] Restore any previous version
+- [ ] Diff view:
+  - [ ] Side-by-side comparison between revisions
+  - [ ] Inline diff highlighting (additions/deletions)
+- [ ] Git integration (optional):
+  - [ ] Initialize notebook as Git repository
+  - [ ] Auto-commit on save with meaningful messages
+  - [ ] Branch support for experimental edits
+  - [ ] Push/pull to remote (GitHub, GitLab, etc.)
+- [ ] Conflict resolution for sync scenarios
+
+---
+
 ## Future
 
-### 9. Custom Actions & Automations
-- [ ] Define custom actions with triggers and steps
-- [ ] Invoke actions via AI chat (e.g., "create my daily goals")
-- [ ] Agile Results workflow support:
-  - [ ] Daily outcomes template with auto-date
-  - [ ] Weekly outcomes with day breakdown
-  - [ ] Monthly/yearly goal templates
-  - [ ] Carry forward incomplete items
-- [ ] Scheduled automations (daily/weekly triggers)
-- [ ] Action library with pre-built workflows
-
-### 10. Spaced Repetition
+### 14. Spaced Repetition
 - [ ] Mark content as "flashcard"
 - [ ] Review queue with spaced intervals
 - [ ] Progress tracking
 - [ ] Integration with page content
 
-### 11. PDF Import & Annotation
+### 15. PDF Import & Annotation
 - [ ] Import PDF files
 - [ ] PDF viewer in app
 - [ ] Highlight and annotate
 - [ ] Extract highlights to page
 
-### 12. Notebook Encryption
+### 16. Notebook Encryption
 - [ ] Password-protected notebooks
 - [ ] Encrypt notebook data at rest
 - [ ] Secure unlock flow
 - [ ] Optional biometric unlock
 
-### 13. Theme Customization
+### 17. Theme Customization
 - [x] Light/dark mode toggle (with system preference support)
 - [x] Custom color schemes (Catppuccin, Default, Nord, Dracula)
 - [x] Font selection (System, Inter, JetBrains Mono, Fira Code)
 - [x] Editor width settings (Narrow, Medium, Wide, Full)
 - [x] Font size and line height customization
 
-### 14. Mobile & Sync
+### 18. Mobile & Sync
 - [ ] Cloud sync between devices
 - [ ] Conflict resolution
 - [ ] Mobile companion app (or PWA)
 - [ ] Offline support
 
-### 15. Import from Other Apps
+### 19. Import from Other Apps
 - [ ] OneNote notebook import
-- [ ] Scrivener project import
-- [ ] Evernote export import (.enex)
+- [x] Scrivener project import (.scriv folders with RTF content)
+- [x] Evernote export import (.enex XML with HTML content)
 - [x] Notion export import (ZIP with markdown & CSV databases)
-- [ ] Obsidian vault import
+- [x] Obsidian vault import (markdown with YAML frontmatter, wiki-links, attachments)
 - [ ] Apple Notes import
 
 ---

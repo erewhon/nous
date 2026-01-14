@@ -13,6 +13,8 @@ interface KeyboardShortcuts {
   onDeletePage?: () => void;
   onTagManager?: () => void;
   onActions?: () => void;
+  onQuickCapture?: () => void;
+  onInbox?: () => void;
 }
 
 export function useKeyboardShortcuts({
@@ -28,6 +30,8 @@ export function useKeyboardShortcuts({
   onDeletePage,
   onTagManager,
   onActions,
+  onQuickCapture,
+  onInbox,
 }: KeyboardShortcuts) {
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
@@ -116,8 +120,22 @@ export function useKeyboardShortcuts({
         onActions?.();
         return;
       }
+
+      // Quick Capture: Cmd+Shift+C / Ctrl+Shift+C
+      if (isMod && e.shiftKey && (e.key === "c" || e.key === "C")) {
+        e.preventDefault();
+        onQuickCapture?.();
+        return;
+      }
+
+      // Inbox: Cmd+Shift+I / Ctrl+Shift+I
+      if (isMod && e.shiftKey && (e.key === "i" || e.key === "I")) {
+        e.preventDefault();
+        onInbox?.();
+        return;
+      }
     },
-    [onCommandPalette, onNewPage, onNewNotebook, onGraph, onAI, onWebResearch, onSettings, onExportPage, onDuplicatePage, onDeletePage, onTagManager, onActions]
+    [onCommandPalette, onNewPage, onNewNotebook, onGraph, onAI, onWebResearch, onSettings, onExportPage, onDuplicatePage, onDeletePage, onTagManager, onActions, onQuickCapture, onInbox]
   );
 
   useEffect(() => {

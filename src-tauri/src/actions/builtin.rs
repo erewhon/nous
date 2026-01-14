@@ -5,8 +5,8 @@
 use uuid::Uuid;
 
 use crate::actions::models::{
-    Action, ActionCategory, ActionStep, ActionTrigger, ActionVariable, NotebookTarget, Schedule,
-    VariableType,
+    Action, ActionCategory, ActionStep, ActionTrigger, ActionVariable, NotebookTarget, PageSelector,
+    Schedule, VariableType,
 };
 
 /// Create all built-in actions
@@ -17,6 +17,7 @@ pub fn get_builtin_actions() -> Vec<Action> {
         create_monthly_review_action(),
         create_daily_reflection_action(),
         create_weekly_review_action(),
+        create_carry_forward_action(),
     ]
 }
 
@@ -286,6 +287,69 @@ fn create_weekly_review_action() -> Action {
     }
 }
 
+/// Carry Forward action - copies incomplete items from yesterday to today
+fn create_carry_forward_action() -> Action {
+    let id = Uuid::parse_str("00000000-0000-0000-0001-000000000006").unwrap();
+
+    Action {
+        id,
+        name: "Carry Forward".to_string(),
+        description: "Copy incomplete checklist items from yesterday's page to today's page"
+            .to_string(),
+        icon: Some("arrow-right".to_string()),
+        category: ActionCategory::DailyRoutines,
+        triggers: vec![
+            ActionTrigger::Manual,
+            ActionTrigger::AiChat {
+                keywords: vec![
+                    "carry forward".to_string(),
+                    "incomplete items".to_string(),
+                    "unfinished tasks".to_string(),
+                    "move tasks".to_string(),
+                    "yesterday's tasks".to_string(),
+                ],
+            },
+        ],
+        steps: vec![ActionStep::CarryForwardItems {
+            source_selector: PageSelector {
+                notebook: Some(NotebookTarget::Current),
+                title_pattern: None,
+                with_tags: vec!["daily-outcomes".to_string()],
+                without_tags: vec![],
+                created_within_days: Some(1),
+                updated_within_days: None,
+                archived_only: false,
+                in_folder: None,
+            },
+            destination: NotebookTarget::Current,
+            title_template: "{{dayOfWeek}}, {{date}} - Carried Forward".to_string(),
+            template_id: Some("agile-results-daily".to_string()),
+        }],
+        enabled: true,
+        is_built_in: true,
+        variables: vec![
+            ActionVariable {
+                name: "date".to_string(),
+                description: "Today's date".to_string(),
+                default_value: None,
+                variable_type: VariableType::CurrentDateFormatted {
+                    format: "%B %d, %Y".to_string(),
+                },
+            },
+            ActionVariable {
+                name: "dayOfWeek".to_string(),
+                description: "Day of the week".to_string(),
+                default_value: None,
+                variable_type: VariableType::DayOfWeek,
+            },
+        ],
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+        last_run: None,
+        next_run: None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -293,7 +357,7 @@ mod tests {
     #[test]
     fn test_builtin_actions_created() {
         let actions = get_builtin_actions();
-        assert_eq!(actions.len(), 5);
+        assert_eq!(actions.len(), 6);
     }
 
     #[test]
