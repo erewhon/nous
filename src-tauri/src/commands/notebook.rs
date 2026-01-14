@@ -1,6 +1,7 @@
 use tauri::State;
 use uuid::Uuid;
 
+use crate::git;
 use crate::storage::{Notebook, NotebookType, StorageError};
 use crate::AppState;
 
@@ -84,6 +85,16 @@ pub fn update_notebook(
     notebook.updated_at = chrono::Utc::now();
 
     storage.update_notebook(&notebook)?;
+
+    // Auto-commit if git is enabled for this notebook
+    let notebook_path = storage.get_notebook_path(id);
+    if git::is_git_repo(&notebook_path) {
+        let commit_message = format!("Update notebook: {}", notebook.name);
+        if let Err(e) = git::commit_all(&notebook_path, &commit_message) {
+            log::warn!("Failed to auto-commit notebook update: {}", e);
+        }
+    }
+
     Ok(notebook)
 }
 

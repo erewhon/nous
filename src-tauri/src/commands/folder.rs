@@ -3,6 +3,7 @@
 use tauri::State;
 use uuid::Uuid;
 
+use crate::git;
 use crate::storage::Folder;
 use crate::AppState;
 
@@ -65,12 +66,21 @@ pub fn create_folder(
         })
         .transpose()?;
 
-    let mut folder = storage.create_folder(nb_id, name, parent)?;
+    let mut folder = storage.create_folder(nb_id, name.clone(), parent)?;
 
     // If section_id provided, update the folder with section
     if sect_id.is_some() {
         folder.section_id = sect_id;
         storage.update_folder(&folder)?;
+    }
+
+    // Auto-commit if git is enabled for this notebook
+    let notebook_path = storage.get_notebook_path(nb_id);
+    if git::is_git_repo(&notebook_path) {
+        let commit_message = format!("Create folder: {}", name);
+        if let Err(e) = git::commit_all(&notebook_path, &commit_message) {
+            log::warn!("Failed to auto-commit folder creation: {}", e);
+        }
     }
 
     Ok(folder)
@@ -142,6 +152,15 @@ pub fn update_folder(
     folder.updated_at = chrono::Utc::now();
     storage.update_folder(&folder)?;
 
+    // Auto-commit if git is enabled for this notebook
+    let notebook_path = storage.get_notebook_path(nb_id);
+    if git::is_git_repo(&notebook_path) {
+        let commit_message = format!("Update folder: {}", folder.name);
+        if let Err(e) = git::commit_all(&notebook_path, &commit_message) {
+            log::warn!("Failed to auto-commit folder update: {}", e);
+        }
+    }
+
     Ok(folder)
 }
 
@@ -168,9 +187,18 @@ pub fn delete_folder(
         })
         .transpose()?;
 
-    storage
-        .delete_folder(nb_id, fld_id, target)
-        .map_err(Into::into)
+    storage.delete_folder(nb_id, fld_id, target)?;
+
+    // Auto-commit if git is enabled for this notebook
+    let notebook_path = storage.get_notebook_path(nb_id);
+    if git::is_git_repo(&notebook_path) {
+        let commit_message = "Delete folder".to_string();
+        if let Err(e) = git::commit_all(&notebook_path, &commit_message) {
+            log::warn!("Failed to auto-commit folder deletion: {}", e);
+        }
+    }
+
+    Ok(())
 }
 
 /// Move a page to a folder (or root if folder_id is None)
@@ -197,9 +225,18 @@ pub fn move_page_to_folder(
         })
         .transpose()?;
 
-    storage
-        .move_page_to_folder(nb_id, pg_id, fld_id, position)
-        .map_err(Into::into)
+    let page = storage.move_page_to_folder(nb_id, pg_id, fld_id, position)?;
+
+    // Auto-commit if git is enabled for this notebook
+    let notebook_path = storage.get_notebook_path(nb_id);
+    if git::is_git_repo(&notebook_path) {
+        let commit_message = format!("Move page: {}", page.title);
+        if let Err(e) = git::commit_all(&notebook_path, &commit_message) {
+            log::warn!("Failed to auto-commit page move: {}", e);
+        }
+    }
+
+    Ok(page)
 }
 
 /// Archive a page
@@ -217,7 +254,18 @@ pub fn archive_page(
         message: format!("Invalid page ID: {}", e),
     })?;
 
-    storage.archive_page(nb_id, pg_id).map_err(Into::into)
+    let page = storage.archive_page(nb_id, pg_id)?;
+
+    // Auto-commit if git is enabled for this notebook
+    let notebook_path = storage.get_notebook_path(nb_id);
+    if git::is_git_repo(&notebook_path) {
+        let commit_message = format!("Archive page: {}", page.title);
+        if let Err(e) = git::commit_all(&notebook_path, &commit_message) {
+            log::warn!("Failed to auto-commit page archive: {}", e);
+        }
+    }
+
+    Ok(page)
 }
 
 /// Unarchive a page
@@ -243,9 +291,18 @@ pub fn unarchive_page(
         })
         .transpose()?;
 
-    storage
-        .unarchive_page(nb_id, pg_id, fld_id)
-        .map_err(Into::into)
+    let page = storage.unarchive_page(nb_id, pg_id, fld_id)?;
+
+    // Auto-commit if git is enabled for this notebook
+    let notebook_path = storage.get_notebook_path(nb_id);
+    if git::is_git_repo(&notebook_path) {
+        let commit_message = format!("Unarchive page: {}", page.title);
+        if let Err(e) = git::commit_all(&notebook_path, &commit_message) {
+            log::warn!("Failed to auto-commit page unarchive: {}", e);
+        }
+    }
+
+    Ok(page)
 }
 
 /// Reorder folders within a parent

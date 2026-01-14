@@ -3,6 +3,7 @@
 use tauri::State;
 use uuid::Uuid;
 
+use crate::git;
 use crate::storage::{Page, Section};
 use crate::AppState;
 
@@ -50,9 +51,18 @@ pub fn create_section(
         message: format!("Invalid notebook ID: {}", e),
     })?;
 
-    storage
-        .create_section(nb_id, name, color)
-        .map_err(Into::into)
+    let section = storage.create_section(nb_id, name.clone(), color)?;
+
+    // Auto-commit if git is enabled for this notebook
+    let notebook_path = storage.get_notebook_path(nb_id);
+    if git::is_git_repo(&notebook_path) {
+        let commit_message = format!("Create section: {}", name);
+        if let Err(e) = git::commit_all(&notebook_path, &commit_message) {
+            log::warn!("Failed to auto-commit section creation: {}", e);
+        }
+    }
+
+    Ok(section)
 }
 
 /// Update a section's properties
@@ -85,6 +95,15 @@ pub fn update_section(
     section.updated_at = chrono::Utc::now();
     storage.update_section(&section)?;
 
+    // Auto-commit if git is enabled for this notebook
+    let notebook_path = storage.get_notebook_path(nb_id);
+    if git::is_git_repo(&notebook_path) {
+        let commit_message = format!("Update section: {}", section.name);
+        if let Err(e) = git::commit_all(&notebook_path, &commit_message) {
+            log::warn!("Failed to auto-commit section update: {}", e);
+        }
+    }
+
     Ok(section)
 }
 
@@ -111,9 +130,18 @@ pub fn delete_section(
         })
         .transpose()?;
 
-    storage
-        .delete_section(nb_id, sec_id, target)
-        .map_err(Into::into)
+    storage.delete_section(nb_id, sec_id, target)?;
+
+    // Auto-commit if git is enabled for this notebook
+    let notebook_path = storage.get_notebook_path(nb_id);
+    if git::is_git_repo(&notebook_path) {
+        let commit_message = "Delete section".to_string();
+        if let Err(e) = git::commit_all(&notebook_path, &commit_message) {
+            log::warn!("Failed to auto-commit section deletion: {}", e);
+        }
+    }
+
+    Ok(())
 }
 
 /// Reorder sections in a notebook
@@ -136,9 +164,19 @@ pub fn reorder_sections(
         })
         .collect();
 
-    storage
-        .reorder_sections(nb_id, &ids?)
-        .map_err(Into::into)
+    let section_ids = ids?;
+    storage.reorder_sections(nb_id, &section_ids)?;
+
+    // Auto-commit if git is enabled for this notebook
+    let notebook_path = storage.get_notebook_path(nb_id);
+    if git::is_git_repo(&notebook_path) {
+        let commit_message = "Reorder sections".to_string();
+        if let Err(e) = git::commit_all(&notebook_path, &commit_message) {
+            log::warn!("Failed to auto-commit section reorder: {}", e);
+        }
+    }
+
+    Ok(())
 }
 
 // ===== Cover Page Commands =====
