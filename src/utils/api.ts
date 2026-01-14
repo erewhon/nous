@@ -27,6 +27,8 @@ export async function updateNotebook(
     color?: string;
     sectionsEnabled?: boolean;
     systemPrompt?: string;
+    aiProvider?: string;
+    aiModel?: string;
   }
 ): Promise<Notebook> {
   return invoke<Notebook>("update_notebook", { notebookId, ...updates });

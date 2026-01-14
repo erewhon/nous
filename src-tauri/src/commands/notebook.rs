@@ -58,6 +58,8 @@ pub fn update_notebook(
     color: Option<String>,
     sections_enabled: Option<bool>,
     system_prompt: Option<String>,
+    ai_provider: Option<String>,
+    ai_model: Option<String>,
 ) -> CommandResult<Notebook> {
     let storage = state.storage.lock().unwrap();
     let id = Uuid::parse_str(&notebook_id).map_err(|e| CommandError {
@@ -81,6 +83,14 @@ pub fn update_notebook(
     // Allow setting system_prompt to None (empty string clears it)
     if let Some(prompt) = system_prompt {
         notebook.system_prompt = if prompt.is_empty() { None } else { Some(prompt) };
+    }
+    // Allow setting ai_provider to None (empty string clears it)
+    if let Some(provider) = ai_provider {
+        notebook.ai_provider = if provider.is_empty() { None } else { Some(provider) };
+    }
+    // Allow setting ai_model to None (empty string clears it)
+    if let Some(model) = ai_model {
+        notebook.ai_model = if model.is_empty() { None } else { Some(model) };
     }
     notebook.updated_at = chrono::Utc::now();
 

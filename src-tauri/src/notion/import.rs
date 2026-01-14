@@ -521,6 +521,8 @@ pub fn import_notion_zip(
         color: None,
         sections_enabled: false,
         system_prompt: None,
+        ai_provider: None,
+        ai_model: None,
         created_at: now,
         updated_at: now,
     };

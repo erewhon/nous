@@ -5,11 +5,13 @@ from katt_ai.providers.base import BaseProvider
 from katt_ai.providers.openai_provider import OpenAIProvider
 from katt_ai.providers.anthropic_provider import AnthropicProvider
 from katt_ai.providers.ollama_provider import OllamaProvider
+from katt_ai.providers.lmstudio_provider import LMStudioProvider
 
 _PROVIDERS: dict[ProviderType, type[BaseProvider]] = {
     ProviderType.OPENAI: OpenAIProvider,
     ProviderType.ANTHROPIC: AnthropicProvider,
     ProviderType.OLLAMA: OllamaProvider,
+    ProviderType.LMSTUDIO: LMStudioProvider,
 }
 
 
@@ -31,6 +33,7 @@ __all__ = [
     "OpenAIProvider",
     "AnthropicProvider",
     "OllamaProvider",
+    "LMStudioProvider",
     "get_provider",
     "list_providers",
 ]

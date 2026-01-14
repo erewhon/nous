@@ -32,7 +32,7 @@ export type PageContext = z.infer<typeof PageContextSchema>;
 
 // AI configuration
 export const AIConfigSchema = z.object({
-  providerType: z.enum(["openai", "anthropic", "ollama"]).default("openai"),
+  providerType: z.enum(["openai", "anthropic", "ollama", "lmstudio"]).default("openai"),
   apiKey: z.string().optional(),
   model: z.string().optional(),
   temperature: z.number().min(0).max(2).default(0.7),
@@ -42,7 +42,7 @@ export const AIConfigSchema = z.object({
 export type AIConfig = z.infer<typeof AIConfigSchema>;
 
 // Provider types
-export type ProviderType = "openai" | "anthropic" | "ollama";
+export type ProviderType = "openai" | "anthropic" | "ollama" | "lmstudio";
 
 // Notebook info for AI context
 export const NotebookInfoSchema = z.object({

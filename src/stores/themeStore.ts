@@ -6,6 +6,7 @@ export type ColorScheme = "default" | "catppuccin" | "nord" | "dracula";
 export type FontFamily = "system" | "inter" | "jetbrains-mono" | "fira-code";
 export type EditorWidth = "narrow" | "medium" | "wide" | "full";
 export type UIMode = "classic" | "overview";
+export type NotebookSortOption = "name-asc" | "name-desc" | "updated" | "created" | "pages";
 
 interface ThemeSettings {
   mode: ThemeMode;
@@ -21,6 +22,7 @@ interface ThemeState {
   resolvedMode: "light" | "dark"; // Actual mode after resolving "system"
   showPageStats: boolean;
   uiMode: UIMode;
+  notebookSortBy: NotebookSortOption;
   setMode: (mode: ThemeMode) => void;
   setColorScheme: (scheme: ColorScheme) => void;
   setFontFamily: (font: FontFamily) => void;
@@ -29,6 +31,7 @@ interface ThemeState {
   setLineHeight: (height: number) => void;
   togglePageStats: () => void;
   setUIMode: (mode: UIMode) => void;
+  setNotebookSortBy: (sort: NotebookSortOption) => void;
   applyTheme: () => void;
 }
 
@@ -265,6 +268,7 @@ export const useThemeStore = create<ThemeState>()(
       resolvedMode: "dark",
       showPageStats: true,
       uiMode: "classic" as UIMode,
+      notebookSortBy: "name-asc" as NotebookSortOption,
 
       setMode: (mode) => {
         set((state) => ({
@@ -317,6 +321,10 @@ export const useThemeStore = create<ThemeState>()(
         set({ uiMode: mode });
       },
 
+      setNotebookSortBy: (sort) => {
+        set({ notebookSortBy: sort });
+      },
+
       applyTheme: () => {
         const { settings, resolvedMode } = get();
         const root = document.documentElement;
@@ -352,7 +360,7 @@ export const useThemeStore = create<ThemeState>()(
     }),
     {
       name: "katt-theme",
-      partialize: (state) => ({ settings: state.settings, showPageStats: state.showPageStats, uiMode: state.uiMode }),
+      partialize: (state) => ({ settings: state.settings, showPageStats: state.showPageStats, uiMode: state.uiMode, notebookSortBy: state.notebookSortBy }),
       onRehydrateStorage: () => (state) => {
         if (state) {
           // Resolve system theme on rehydration

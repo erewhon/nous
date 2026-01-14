@@ -35,6 +35,11 @@ const PROVIDERS: { value: ProviderType; label: string; description: string }[] =
     label: "Ollama",
     description: "Local models (Llama, Mistral, etc.)",
   },
+  {
+    value: "lmstudio",
+    label: "LM Studio",
+    description: "Local models via LM Studio",
+  },
 ];
 
 const DEFAULT_MODELS: Record<ProviderType, string[]> = {
@@ -46,6 +51,7 @@ const DEFAULT_MODELS: Record<ProviderType, string[]> = {
     "claude-3-5-haiku-20241022",
   ],
   ollama: ["llama3.2", "llama3.1", "mistral", "codellama", "phi3"],
+  lmstudio: ["local-model"],
 };
 
 export function SettingsDialog({ isOpen, onClose, initialTab = "theme" }: SettingsDialogProps) {
@@ -217,7 +223,7 @@ function AISettingsContent() {
       </div>
 
       {/* API Key */}
-      {settings.providerType !== "ollama" && (
+      {settings.providerType !== "ollama" && settings.providerType !== "lmstudio" && (
         <div>
           <label
             className="mb-2 block text-sm font-medium"
@@ -287,6 +293,35 @@ function AISettingsContent() {
         </div>
       )}
 
+      {/* LM Studio URL */}
+      {settings.providerType === "lmstudio" && (
+        <div>
+          <label
+            className="mb-2 block text-sm font-medium"
+            style={{ color: "var(--color-text-primary)" }}
+          >
+            LM Studio Server
+          </label>
+          <input
+            type="text"
+            value="http://localhost:1234/v1"
+            disabled
+            className="w-full rounded-lg border px-3 py-2.5 text-sm"
+            style={{
+              backgroundColor: "var(--color-bg-tertiary)",
+              borderColor: "var(--color-border)",
+              color: "var(--color-text-muted)",
+            }}
+          />
+          <p
+            className="mt-1.5 text-xs"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            Make sure LM Studio is running with local server enabled
+          </p>
+        </div>
+      )}
+
       {/* Model Selection */}
       <div>
         <label
@@ -306,11 +341,26 @@ function AISettingsContent() {
           }}
         >
           {currentModels.map((model) => (
-            <option key={model} value={model}>
+            <option
+              key={model}
+              value={model}
+              style={{
+                backgroundColor: "var(--color-bg-secondary)",
+                color: "var(--color-text-primary)",
+              }}
+            >
               {model}
             </option>
           ))}
         </select>
+        {settings.providerType === "lmstudio" && (
+          <p
+            className="mt-1.5 text-xs"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            The model loaded in LM Studio will be used automatically
+          </p>
+        )}
       </div>
 
       {/* Temperature */}

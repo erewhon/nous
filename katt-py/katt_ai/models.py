@@ -12,6 +12,7 @@ class ProviderType(str, Enum):
     OPENAI = "openai"
     ANTHROPIC = "anthropic"
     OLLAMA = "ollama"
+    LMSTUDIO = "lmstudio"
 
 
 class ChatMessage(BaseModel):
@@ -48,6 +49,7 @@ class ProviderConfig(BaseModel):
                 ProviderType.OPENAI: "gpt-4o",
                 ProviderType.ANTHROPIC: "claude-sonnet-4-20250514",
                 ProviderType.OLLAMA: "llama3.2",
+                ProviderType.LMSTUDIO: "local-model",
             }
             self.model = defaults.get(self.provider_type, "gpt-4o")
 

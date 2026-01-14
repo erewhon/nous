@@ -7,6 +7,7 @@ interface NotebookCardProps {
   coverPage: Page | null;
   pageCount: number;
   onClick: () => void;
+  onSettings: () => void;
 }
 
 export function NotebookCard({
@@ -14,6 +15,7 @@ export function NotebookCard({
   coverPage,
   pageCount,
   onClick,
+  onSettings,
 }: NotebookCardProps) {
   const accentColor = notebook.color || "var(--color-accent)";
 
@@ -31,22 +33,42 @@ export function NotebookCard({
   }, [coverPage]);
 
   return (
-    <button
-      onClick={onClick}
-      className="group relative flex w-64 flex-col overflow-hidden rounded-lg transition-all duration-300 hover:scale-[1.02] hover:shadow-2xl focus:outline-none focus:ring-2 focus:ring-[--color-accent] focus:ring-offset-2"
+    <div
+      className="group relative flex w-64 flex-col overflow-hidden rounded-lg transition-all duration-300 hover:scale-[1.02] hover:shadow-2xl focus-within:ring-2 focus-within:ring-[--color-accent] focus-within:ring-offset-2"
       style={{
         backgroundColor: "var(--color-bg-secondary)",
         boxShadow: "0 4px 20px rgba(0, 0, 0, 0.15)",
       }}
     >
-      {/* Notebook spine */}
-      <div
-        className="absolute left-0 top-0 h-full w-3 transition-all group-hover:w-4"
-        style={{ backgroundColor: accentColor }}
-      />
+      {/* Settings button - appears on hover */}
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          onSettings();
+        }}
+        className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-md opacity-0 transition-all hover:bg-[--color-bg-tertiary] group-hover:opacity-100"
+        style={{
+          backgroundColor: "var(--color-bg-secondary)",
+          color: "var(--color-text-muted)",
+        }}
+        title="Notebook settings"
+      >
+        <IconSettings />
+      </button>
 
-      {/* Notebook cover content */}
-      <div className="ml-3 flex flex-1 flex-col p-5">
+      {/* Main clickable area */}
+      <button
+        onClick={onClick}
+        className="flex flex-1 flex-col focus:outline-none"
+      >
+        {/* Notebook spine */}
+        <div
+          className="absolute left-0 top-0 h-full w-3 transition-all group-hover:w-4"
+          style={{ backgroundColor: accentColor }}
+        />
+
+        {/* Notebook cover content */}
+        <div className="ml-3 flex flex-1 flex-col p-5">
         {/* Cover image/preview area */}
         <div
           className="mb-4 flex h-32 items-center justify-center overflow-hidden rounded-md"
@@ -116,12 +138,33 @@ export function NotebookCard({
         )}
       </div>
 
-      {/* Hover indicator */}
-      <div
-        className="absolute bottom-0 left-3 right-0 h-1 translate-y-full transition-transform group-hover:translate-y-0"
-        style={{ backgroundColor: accentColor }}
-      />
-    </button>
+        {/* Hover indicator */}
+        <div
+          className="absolute bottom-0 left-3 right-0 h-1 translate-y-full transition-transform group-hover:translate-y-0"
+          style={{ backgroundColor: accentColor }}
+        />
+      </button>
+    </div>
+  );
+}
+
+function IconSettings() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="12" cy="12" r="1" />
+      <circle cx="12" cy="5" r="1" />
+      <circle cx="12" cy="19" r="1" />
+    </svg>
   );
 }
 

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import type { Notebook } from "../../types/notebook";
+import type { Notebook, AIProviderType } from "../../types/notebook";
 import { useNotebookStore } from "../../stores/notebookStore";
+import { useAIStore } from "../../stores/aiStore";
 import {
   gitIsEnabled,
   gitInit,
@@ -15,6 +16,25 @@ import {
 } from "../../utils/api";
 import { InlineColorPicker } from "../ColorPicker/ColorPicker";
 
+const AI_PROVIDERS: { value: AIProviderType; label: string }[] = [
+  { value: "openai", label: "OpenAI" },
+  { value: "anthropic", label: "Anthropic" },
+  { value: "ollama", label: "Ollama" },
+  { value: "lmstudio", label: "LM Studio" },
+];
+
+const AI_MODELS: Record<AIProviderType, string[]> = {
+  openai: ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"],
+  anthropic: [
+    "claude-sonnet-4-20250514",
+    "claude-opus-4-5-20251101",
+    "claude-opus-4-20250514",
+    "claude-3-5-haiku-20241022",
+  ],
+  ollama: ["llama3.2", "llama3.1", "mistral", "codellama", "phi3"],
+  lmstudio: ["local-model"],
+};
+
 interface NotebookSettingsDialogProps {
   isOpen: boolean;
   notebook: Notebook | null;
@@ -27,10 +47,14 @@ export function NotebookSettingsDialog({
   onClose,
 }: NotebookSettingsDialogProps) {
   const { updateNotebook, deleteNotebook } = useNotebookStore();
+  const { settings: appAISettings } = useAIStore();
   const [name, setName] = useState("");
   const [color, setColor] = useState<string | undefined>(undefined);
   const [sectionsEnabled, setSectionsEnabled] = useState(false);
   const [systemPrompt, setSystemPrompt] = useState("");
+  const [aiProvider, setAiProvider] = useState<AIProviderType | undefined>(undefined);
+  const [aiModel, setAiModel] = useState<string | undefined>(undefined);
+  const [useAppDefault, setUseAppDefault] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const nameInputRef = useRef<HTMLInputElement>(null);
@@ -80,6 +104,9 @@ export function NotebookSettingsDialog({
       setColor(notebook.color);
       setSectionsEnabled(notebook.sectionsEnabled ?? false);
       setSystemPrompt(notebook.systemPrompt || "");
+      setAiProvider(notebook.aiProvider);
+      setAiModel(notebook.aiModel);
+      setUseAppDefault(!notebook.aiProvider);
       loadGitStatus();
       loadCoverStatus();
     }
@@ -116,6 +143,8 @@ export function NotebookSettingsDialog({
         color: color || undefined,
         sectionsEnabled,
         systemPrompt: systemPrompt.trim() || undefined,
+        aiProvider: useAppDefault ? undefined : aiProvider,
+        aiModel: useAppDefault ? undefined : aiModel,
       });
       onClose();
     } finally {
@@ -144,7 +173,9 @@ export function NotebookSettingsDialog({
     name !== notebook.name ||
     (color || null) !== (notebook.color || null) ||
     sectionsEnabled !== (notebook.sectionsEnabled ?? false) ||
-    (systemPrompt || "") !== (notebook.systemPrompt || "");
+    (systemPrompt || "") !== (notebook.systemPrompt || "") ||
+    (useAppDefault ? undefined : aiProvider) !== notebook.aiProvider ||
+    (useAppDefault ? undefined : aiModel) !== notebook.aiModel;
 
   return (
     <div
@@ -311,6 +342,137 @@ export function NotebookSettingsDialog({
               >
                 {isCoverLoading ? "Creating..." : "Create Cover"}
               </button>
+            )}
+          </div>
+
+          {/* AI Model Settings */}
+          <div
+            className="rounded-lg border p-4"
+            style={{ borderColor: "var(--color-border)" }}
+          >
+            <div className="mb-3 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <IconAI />
+                <span
+                  className="text-sm font-medium"
+                  style={{ color: "var(--color-text-primary)" }}
+                >
+                  AI Model
+                </span>
+              </div>
+              <button
+                onClick={() => {
+                  setUseAppDefault(!useAppDefault);
+                  if (!useAppDefault) {
+                    // Switching back to app default
+                    setAiProvider(undefined);
+                    setAiModel(undefined);
+                  } else {
+                    // Switching to custom, initialize with app defaults
+                    setAiProvider(appAISettings.providerType as AIProviderType);
+                    setAiModel(appAISettings.model || AI_MODELS[appAISettings.providerType as AIProviderType][0]);
+                  }
+                }}
+                className="relative h-6 w-11 rounded-full transition-colors"
+                style={{
+                  backgroundColor: useAppDefault
+                    ? "var(--color-bg-tertiary)"
+                    : "var(--color-accent)",
+                }}
+              >
+                <span
+                  className="absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm transition-transform"
+                  style={{
+                    left: useAppDefault ? "0.125rem" : "calc(100% - 1.375rem)",
+                  }}
+                />
+              </button>
+            </div>
+
+            {useAppDefault ? (
+              <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
+                Using app default: <strong style={{ color: "var(--color-text-secondary)" }}>
+                  {AI_PROVIDERS.find(p => p.value === appAISettings.providerType)?.label || appAISettings.providerType}
+                </strong> / <strong style={{ color: "var(--color-text-secondary)" }}>
+                  {appAISettings.model || "default"}
+                </strong>
+              </p>
+            ) : (
+              <div className="space-y-3">
+                {/* Provider Selection */}
+                <div>
+                  <label
+                    className="mb-1.5 block text-xs font-medium"
+                    style={{ color: "var(--color-text-secondary)" }}
+                  >
+                    Provider
+                  </label>
+                  <select
+                    value={aiProvider || ""}
+                    onChange={(e) => {
+                      const newProvider = e.target.value as AIProviderType;
+                      setAiProvider(newProvider);
+                      setAiModel(AI_MODELS[newProvider][0]);
+                    }}
+                    className="w-full rounded-md border px-2.5 py-1.5 text-sm outline-none transition-colors focus:border-[--color-accent]"
+                    style={{
+                      backgroundColor: "var(--color-bg-tertiary)",
+                      borderColor: "var(--color-border)",
+                      color: "var(--color-text-primary)",
+                    }}
+                  >
+                    {AI_PROVIDERS.map((provider) => (
+                      <option
+                        key={provider.value}
+                        value={provider.value}
+                        style={{
+                          backgroundColor: "var(--color-bg-tertiary)",
+                          color: "var(--color-text-primary)",
+                        }}
+                      >
+                        {provider.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Model Selection */}
+                <div>
+                  <label
+                    className="mb-1.5 block text-xs font-medium"
+                    style={{ color: "var(--color-text-secondary)" }}
+                  >
+                    Model
+                  </label>
+                  <select
+                    value={aiModel || ""}
+                    onChange={(e) => setAiModel(e.target.value)}
+                    className="w-full rounded-md border px-2.5 py-1.5 text-sm outline-none transition-colors focus:border-[--color-accent]"
+                    style={{
+                      backgroundColor: "var(--color-bg-tertiary)",
+                      borderColor: "var(--color-border)",
+                      color: "var(--color-text-primary)",
+                    }}
+                  >
+                    {(aiProvider ? AI_MODELS[aiProvider] : []).map((model) => (
+                      <option
+                        key={model}
+                        value={model}
+                        style={{
+                          backgroundColor: "var(--color-bg-tertiary)",
+                          color: "var(--color-text-primary)",
+                        }}
+                      >
+                        {model}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
+                  Override the AI model used for this notebook's chat sessions.
+                </p>
+              </div>
             )}
           </div>
 
@@ -759,6 +921,26 @@ function IconUpload() {
       <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
       <polyline points="17 8 12 3 7 8" />
       <line x1="12" y1="3" x2="12" y2="15" />
+    </svg>
+  );
+}
+
+function IconAI() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{ color: "var(--color-text-muted)" }}
+    >
+      <path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z" />
+      <path d="M19 13l1 3 3 1-3 1-1 3-1-3-3-1 3-1 1-3z" />
     </svg>
   );
 }

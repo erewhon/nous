@@ -138,6 +138,12 @@ pub struct Notebook {
     /// Custom AI system prompt for this notebook (overrides app default)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub system_prompt: Option<String>,
+    /// AI provider override for this notebook (e.g., "openai", "anthropic", "ollama", "lmstudio")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ai_provider: Option<String>,
+    /// AI model override for this notebook (e.g., "gpt-4o", "claude-sonnet-4-20250514")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ai_model: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -153,6 +159,8 @@ impl Notebook {
             color: None,
             sections_enabled: false,
             system_prompt: None,
+            ai_provider: None,
+            ai_model: None,
             created_at: now,
             updated_at: now,
         }

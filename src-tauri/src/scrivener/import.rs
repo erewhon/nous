@@ -538,6 +538,8 @@ pub fn import_scrivener_project(
         color: None,
         sections_enabled: false,
         system_prompt: None,
+        ai_provider: None,
+        ai_model: None,
         created_at: now,
         updated_at: now,
     };
