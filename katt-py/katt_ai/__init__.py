@@ -13,6 +13,17 @@ from katt_ai.models import (
 )
 from katt_ai.web_research import web_search, scrape_url, summarize_research
 from katt_ai.inbox import classify_inbox_item, classify_inbox_item_sync
+from katt_ai.document_convert import (
+    convert_document,
+    convert_document_sync,
+    convert_documents_batch,
+    convert_documents_batch_sync,
+    get_supported_extensions,
+    get_supported_extensions_sync,
+    is_supported_file,
+    is_supported_file_sync,
+    ConversionResult,
+)
 
 __all__ = [
     "chat",
@@ -33,4 +44,14 @@ __all__ = [
     # Inbox classification
     "classify_inbox_item",
     "classify_inbox_item_sync",
+    # Document conversion
+    "convert_document",
+    "convert_document_sync",
+    "convert_documents_batch",
+    "convert_documents_batch_sync",
+    "get_supported_extensions",
+    "get_supported_extensions_sync",
+    "is_supported_file",
+    "is_supported_file_sync",
+    "ConversionResult",
 ]

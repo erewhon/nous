@@ -10,7 +10,7 @@ import { useNotebookStore } from "../../stores/notebookStore";
 import { usePageStore } from "../../stores/pageStore";
 import { useSearchStore } from "../../stores/searchStore";
 import { useActionStore } from "../../stores/actionStore";
-import { searchPages, exportPageToFile, importMarkdownFile } from "../../utils/api";
+import { searchPages, exportPageToFile, importMarkdownFile, convertDocument, importMarkdown } from "../../utils/api";
 import { save, open } from "@tauri-apps/plugin-dialog";
 import { highlightText } from "../../utils/highlightText";
 import type { SearchResult } from "../../types/page";
@@ -192,6 +192,54 @@ export function CommandPalette({
         onClose();
       },
       keywords: ["import", "markdown", "md", "load", "file"],
+    });
+
+    cmds.push({
+      id: "action-import-document",
+      title: "Import Document",
+      subtitle: "Import PDF, Word, Excel, PowerPoint, and more",
+      icon: <IconDocument />,
+      category: "action",
+      action: async () => {
+        if (selectedNotebookId) {
+          const selected = await open({
+            multiple: false,
+            filters: [
+              {
+                name: "Documents",
+                extensions: [
+                  "pdf", "docx", "doc", "pptx", "ppt", "xlsx", "xls",
+                  "html", "htm", "csv", "json", "xml", "epub", "zip",
+                  "png", "jpg", "jpeg", "gif", "webp",
+                  "mp3", "wav", "m4a", "ogg"
+                ],
+              },
+            ],
+          });
+          if (selected) {
+            try {
+              // Convert document to markdown using markitdown
+              const result = await convertDocument(selected);
+              if (result.error) {
+                console.error("Document conversion error:", result.error);
+                return;
+              }
+              // Import the converted markdown as a new page
+              const filename = selected.split("/").pop() || selected.split("\\").pop() || "Imported";
+              const newPage = await importMarkdown(
+                selectedNotebookId,
+                result.content,
+                filename
+              );
+              selectPage(newPage.id);
+            } catch (err) {
+              console.error("Failed to import document:", err);
+            }
+          }
+        }
+        onClose();
+      },
+      keywords: ["import", "document", "pdf", "word", "excel", "powerpoint", "docx", "xlsx", "pptx", "convert"],
     });
 
     cmds.push({
@@ -888,6 +936,28 @@ function IconImport() {
       <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
       <polyline points="7 10 12 15 17 10" />
       <line x1="12" y1="15" x2="12" y2="3" />
+    </svg>
+  );
+}
+
+function IconDocument() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+      <polyline points="14 2 14 8 20 8" />
+      <line x1="16" y1="13" x2="8" y2="13" />
+      <line x1="16" y1="17" x2="8" y2="17" />
+      <line x1="10" y1="9" x2="8" y2="9" />
     </svg>
   );
 }

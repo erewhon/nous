@@ -307,6 +307,10 @@ Already implemented with Tantivy, may need refinement:
 - [x] Notion export import (ZIP with markdown & CSV databases)
 - [x] Obsidian vault import (markdown with YAML frontmatter, wiki-links, attachments)
 - [x] Joplin export import (JEX archive or raw directory)
+- [ ] Org-mode import (.org files)
+  - Parse org-mode syntax (headers, lists, TODOs, tags, properties)
+  - Convert org timestamps and scheduling to page metadata
+  - Handle org-mode links and attachments
 - [ ] Apple Notes import
   - **Complexity: Medium-High** (1-2 days with existing tools, 3-4 days from scratch)
   - Notes stored in SQLite at `~/Library/Group Containers/group.com.apple.notes/NoteStore.sqlite`
@@ -314,6 +318,44 @@ Already implemented with Tantivy, may need refinement:
   - Embedded images, drawings, tables, checklists stored separately
   - Locked notes require password
   - Options: (1) Parse SQLite + protobuf directly, (2) AppleScript export (text only), (3) Use `apple-notes-liberator` or similar
+
+### 22. Page Markup & Drawing
+- [ ] Drawing/annotation tool for pages
+  - Freehand drawing on canvas overlay
+  - Shape tools (rectangles, circles, arrows, lines)
+  - Color and stroke width options
+  - Eraser and selection tools
+- [ ] Save drawings as page annotations
+- [ ] Export drawings as images
+- [ ] Touch/stylus support for tablet users
+
+### 23. Video Transcription
+- [ ] Import video files (MP4, WebM, etc.)
+  - Video player block in editor
+  - Store videos in notebook assets folder
+- [ ] Transcribe video audio to text
+  - Integration with Whisper (local or API)
+  - Speaker diarization (optional)
+  - Timestamps for each segment
+- [ ] Sync transcription with video playback
+  - Click transcript to jump to timestamp
+  - Highlight current segment during playback
+- [ ] Edit and export transcriptions
+
+### 24. Potential Integrations
+- [x] **markitdown** integration
+  - Microsoft's tool for converting documents to markdown
+  - Support for PDF, Word, Excel, PowerPoint, images, audio, HTML, CSV, JSON, XML, ZIP, EPUB
+  - Python module: `katt_ai/document_convert.py`
+  - Rust bridge: `python_bridge/mod.rs` (convert_document, convert_documents_batch)
+  - Tauri commands: convert_document, convert_documents_batch, get_supported_document_extensions, is_supported_document
+  - Command Palette: "Import Document" command
+  - https://github.com/microsoft/markitdown
+- [ ] **browser-use** integration
+  - AI-powered browser automation for web research
+  - Automated web scraping and data extraction
+  - Could enhance AI web research features
+  - https://github.com/browser-use/browser-use
 
 ---
 

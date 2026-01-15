@@ -10,6 +10,7 @@ dependencies = [
     "anthropic>=0.40",
     "tavily-python>=0.5",
     "trafilatura>=1.12",
+    "markitdown>=0.1",
 ]
 
 [project.optional-dependencies]

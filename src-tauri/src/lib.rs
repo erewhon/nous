@@ -302,6 +302,11 @@ pub fn run() {
             commands::sync_now,
             commands::sync_queue_status,
             commands::sync_disable,
+            // Document conversion commands (markitdown)
+            commands::convert_document,
+            commands::convert_documents_batch,
+            commands::get_supported_document_extensions,
+            commands::is_supported_document,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

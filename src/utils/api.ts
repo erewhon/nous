@@ -1251,3 +1251,51 @@ export async function syncQueueStatus(
 export async function syncDisable(notebookId: string): Promise<void> {
   return invoke("sync_disable", { notebookId });
 }
+
+// ===== Document Conversion API (markitdown) =====
+
+export interface DocumentConversionResult {
+  content: string;
+  sourcePath: string;
+  sourceType: string;
+  title: string | null;
+  wordCount: number;
+  error?: string;
+}
+
+/**
+ * Convert a document to Markdown using markitdown.
+ * Supports PDF, Word, Excel, PowerPoint, images, audio, HTML, CSV, JSON, XML, ZIP, EPUB.
+ */
+export async function convertDocument(
+  filePath: string
+): Promise<DocumentConversionResult> {
+  return invoke<DocumentConversionResult>("convert_document", { filePath });
+}
+
+/**
+ * Convert multiple documents to Markdown.
+ * Returns results for each file, including errors for failed conversions.
+ */
+export async function convertDocumentsBatch(
+  filePaths: string[]
+): Promise<DocumentConversionResult[]> {
+  return invoke<DocumentConversionResult[]>("convert_documents_batch", {
+    filePaths,
+  });
+}
+
+/**
+ * Get list of supported file extensions for document conversion.
+ * Returns extensions like ['.pdf', '.docx', '.xlsx', ...].
+ */
+export async function getSupportedDocumentExtensions(): Promise<string[]> {
+  return invoke<string[]>("get_supported_document_extensions");
+}
+
+/**
+ * Check if a file type is supported for conversion.
+ */
+export async function isSupportedDocument(filePath: string): Promise<boolean> {
+  return invoke<boolean>("is_supported_document", { filePath });
+}

@@ -151,6 +151,19 @@ pub struct ResearchSummary {
     pub suggested_tags: Vec<String>,
 }
 
+/// Result from document conversion (markitdown)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentConversionResult {
+    pub content: String,
+    pub source_path: String,
+    pub source_type: String,
+    pub title: Option<String>,
+    pub word_count: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
 /// Page info for related pages suggestions
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1290,6 +1303,137 @@ impl PythonAI {
                 reasoning,
                 classified_at: chrono::Utc::now(),
             })
+        })
+    }
+
+    // ===== Document Conversion (markitdown) =====
+
+    /// Convert a document to Markdown using markitdown
+    pub fn convert_document(&self, file_path: String) -> Result<DocumentConversionResult> {
+        Python::attach(|py| {
+            self.setup_python_path(py)?;
+
+            let doc_module = py.import("katt_ai.document_convert")?;
+            let convert_fn = doc_module.getattr("convert_document_sync")?;
+
+            let kwargs = PyDict::new(py);
+            kwargs.set_item("file_path", file_path)?;
+
+            let result = convert_fn.call((), Some(&kwargs))?;
+            let result_dict: HashMap<String, Py<PyAny>> = result.extract()?;
+
+            Ok(DocumentConversionResult {
+                content: result_dict
+                    .get("content")
+                    .and_then(|v| v.extract::<String>(py).ok())
+                    .unwrap_or_default(),
+                source_path: result_dict
+                    .get("source_path")
+                    .and_then(|v| v.extract::<String>(py).ok())
+                    .unwrap_or_default(),
+                source_type: result_dict
+                    .get("source_type")
+                    .and_then(|v| v.extract::<String>(py).ok())
+                    .unwrap_or_default(),
+                title: result_dict
+                    .get("title")
+                    .and_then(|v| v.extract::<String>(py).ok()),
+                word_count: result_dict
+                    .get("word_count")
+                    .and_then(|v| v.extract::<i64>(py).ok())
+                    .unwrap_or(0),
+                error: result_dict
+                    .get("error")
+                    .and_then(|v| v.extract::<String>(py).ok()),
+            })
+        })
+    }
+
+    /// Convert multiple documents to Markdown
+    pub fn convert_documents_batch(
+        &self,
+        file_paths: Vec<String>,
+    ) -> Result<Vec<DocumentConversionResult>> {
+        Python::attach(|py| {
+            self.setup_python_path(py)?;
+
+            let doc_module = py.import("katt_ai.document_convert")?;
+            let convert_fn = doc_module.getattr("convert_documents_batch_sync")?;
+
+            // Convert file paths to Python list
+            let py_paths = PyList::empty(py);
+            for path in file_paths {
+                py_paths.append(path)?;
+            }
+
+            let kwargs = PyDict::new(py);
+            kwargs.set_item("file_paths", py_paths)?;
+
+            let result = convert_fn.call((), Some(&kwargs))?;
+            let result_list: Vec<HashMap<String, Py<PyAny>>> = result.extract()?;
+
+            let mut results = Vec::new();
+            for result_dict in result_list {
+                results.push(DocumentConversionResult {
+                    content: result_dict
+                        .get("content")
+                        .and_then(|v| v.extract::<String>(py).ok())
+                        .unwrap_or_default(),
+                    source_path: result_dict
+                        .get("source_path")
+                        .and_then(|v| v.extract::<String>(py).ok())
+                        .unwrap_or_default(),
+                    source_type: result_dict
+                        .get("source_type")
+                        .and_then(|v| v.extract::<String>(py).ok())
+                        .unwrap_or_default(),
+                    title: result_dict
+                        .get("title")
+                        .and_then(|v| v.extract::<String>(py).ok()),
+                    word_count: result_dict
+                        .get("word_count")
+                        .and_then(|v| v.extract::<i64>(py).ok())
+                        .unwrap_or(0),
+                    error: result_dict
+                        .get("error")
+                        .and_then(|v| v.extract::<String>(py).ok()),
+                });
+            }
+
+            Ok(results)
+        })
+    }
+
+    /// Get list of supported file extensions for document conversion
+    pub fn get_supported_extensions(&self) -> Result<Vec<String>> {
+        Python::attach(|py| {
+            self.setup_python_path(py)?;
+
+            let doc_module = py.import("katt_ai.document_convert")?;
+            let get_ext_fn = doc_module.getattr("get_supported_extensions_sync")?;
+
+            let result = get_ext_fn.call0()?;
+            let extensions: Vec<String> = result.extract()?;
+
+            Ok(extensions)
+        })
+    }
+
+    /// Check if a file type is supported for conversion
+    pub fn is_supported_file(&self, file_path: String) -> Result<bool> {
+        Python::attach(|py| {
+            self.setup_python_path(py)?;
+
+            let doc_module = py.import("katt_ai.document_convert")?;
+            let is_supported_fn = doc_module.getattr("is_supported_file_sync")?;
+
+            let kwargs = PyDict::new(py);
+            kwargs.set_item("file_path", file_path)?;
+
+            let result = is_supported_fn.call((), Some(&kwargs))?;
+            let is_supported: bool = result.extract()?;
+
+            Ok(is_supported)
         })
     }
 }
