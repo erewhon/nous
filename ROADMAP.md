@@ -277,7 +277,14 @@ Already implemented with Tantivy, may need refinement:
 - [x] Writing Assistance panel with issue categorization (spelling, grammar, punctuation, style)
 
 ### 20. Editor Customization
-- [ ] VI key bindings mode
+- [x] VI key bindings mode
+  - Modal editing (Normal/Insert modes)
+  - Navigation: h, j, k, l, w, b, e, 0, $, gg, G
+  - Insert mode: i, a, A, I, o, O
+  - Operations: dd (delete block), yy (yank), p/P (paste), u (undo)
+  - jj or Escape to exit insert mode
+  - Visual mode indicator
+  - Settings toggle (Appearance > Editor Keybindings)
 - [ ] Emacs key bindings mode
 - [ ] External editor support (open page in VS Code, Vim, etc.)
 

@@ -7,12 +7,14 @@ export type FontFamily = "system" | "inter" | "jetbrains-mono" | "fira-code";
 export type EditorWidth = "narrow" | "medium" | "wide" | "full";
 export type UIMode = "classic" | "overview";
 export type NotebookSortOption = "name-asc" | "name-desc" | "updated" | "created" | "pages";
+export type EditorKeymap = "standard" | "vim";
 
 interface ThemeSettings {
   mode: ThemeMode;
   colorScheme: ColorScheme;
   fontFamily: FontFamily;
   editorWidth: EditorWidth;
+  editorKeymap: EditorKeymap;
   fontSize: number; // 12-20
   lineHeight: number; // 1.4-2.0
 }
@@ -27,6 +29,7 @@ interface ThemeState {
   setColorScheme: (scheme: ColorScheme) => void;
   setFontFamily: (font: FontFamily) => void;
   setEditorWidth: (width: EditorWidth) => void;
+  setEditorKeymap: (keymap: EditorKeymap) => void;
   setFontSize: (size: number) => void;
   setLineHeight: (height: number) => void;
   togglePageStats: () => void;
@@ -40,6 +43,7 @@ const DEFAULT_SETTINGS: ThemeSettings = {
   colorScheme: "catppuccin",
   fontFamily: "system",
   editorWidth: "medium",
+  editorKeymap: "standard",
   fontSize: 16,
   lineHeight: 1.6,
 };
@@ -297,6 +301,12 @@ export const useThemeStore = create<ThemeState>()(
           settings: { ...state.settings, editorWidth },
         }));
         get().applyTheme();
+      },
+
+      setEditorKeymap: (editorKeymap) => {
+        set((state) => ({
+          settings: { ...state.settings, editorKeymap },
+        }));
       },
 
       setFontSize: (fontSize) => {

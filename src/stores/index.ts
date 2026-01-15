@@ -9,4 +9,5 @@ export type {
   ColorScheme,
   FontFamily,
   EditorWidth,
+  EditorKeymap,
 } from "./themeStore";

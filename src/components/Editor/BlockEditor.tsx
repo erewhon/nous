@@ -1,8 +1,11 @@
-import { useEffect, useId, useCallback, useRef } from "react";
+import { useEffect, useId, useCallback, useRef, useState } from "react";
 import type { OutputData } from "@editorjs/editorjs";
 import { useEditor } from "./useEditor";
+import { useVimMode, type VimMode } from "./useVimMode";
+import { VimModeIndicator } from "./VimModeIndicator";
 import { WikiLinkAutocomplete } from "./WikiLinkAutocomplete";
 import { WikiLinkTool } from "./WikiLinkTool";
+import { useThemeStore } from "../../stores/themeStore";
 
 interface BlockEditorProps {
   initialData?: OutputData;
@@ -30,6 +33,13 @@ export function BlockEditor({
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
+  // Get vim mode setting from theme store
+  const editorKeymap = useThemeStore((state) => state.settings.editorKeymap);
+  const isVimModeEnabled = editorKeymap === "vim" && !readOnly;
+
+  // Track vim mode state for indicator (used by useVimMode callback)
+  const [, setCurrentVimMode] = useState<VimMode>("normal");
+
   // Debounced save
   const handleChange = useCallback(
     (data: OutputData) => {
@@ -47,13 +57,21 @@ export function BlockEditor({
     [onChange, onSave]
   );
 
-  const { save } = useEditor({
+  const { editor, save } = useEditor({
     holderId,
     initialData,
     onChange: handleChange,
     onLinkClick,
     readOnly,
     notebookId,
+  });
+
+  // VI keybindings mode
+  const { mode: vimMode, pendingKeys } = useVimMode({
+    enabled: isVimModeEnabled,
+    editorRef: editor,
+    containerRef: containerRef as React.RefObject<HTMLElement>,
+    onModeChange: setCurrentVimMode,
   });
 
   // Cleanup timeout on unmount
@@ -159,6 +177,11 @@ export function BlockEditor({
           pages={pages}
           onInsertLink={handleInsertLink}
         />
+      )}
+      {isVimModeEnabled && (
+        <div className="pointer-events-none fixed bottom-4 left-4 z-50">
+          <VimModeIndicator mode={vimMode} pendingKeys={pendingKeys} />
+        </div>
       )}
     </div>
   );

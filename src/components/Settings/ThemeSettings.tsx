@@ -4,6 +4,7 @@ import {
   type ColorScheme,
   type FontFamily,
   type EditorWidth,
+  type EditorKeymap,
   type UIMode,
 } from "../../stores/themeStore";
 
@@ -63,6 +64,11 @@ const EDITOR_WIDTHS: { value: EditorWidth; label: string; description: string }[
   { value: "full", label: "Full", description: "100%" },
 ];
 
+const EDITOR_KEYMAPS: { value: EditorKeymap; label: string; description: string }[] = [
+  { value: "standard", label: "Standard", description: "Default editor keybindings" },
+  { value: "vim", label: "Vim", description: "VI-style modal editing (hjkl, w, b, i, a, etc.)" },
+];
+
 export function ThemeSettings() {
   const {
     settings,
@@ -72,6 +78,7 @@ export function ThemeSettings() {
     setColorScheme,
     setFontFamily,
     setEditorWidth,
+    setEditorKeymap,
     setFontSize,
     setLineHeight,
     setUIMode,
@@ -410,6 +417,63 @@ export function ThemeSettings() {
           ))}
         </div>
       </div>
+
+      {/* Editor Keybindings */}
+      <div>
+        <label
+          className="mb-3 block text-sm font-medium"
+          style={{ color: "var(--color-text-primary)" }}
+        >
+          Editor Keybindings
+        </label>
+        <div className="grid grid-cols-2 gap-3">
+          {EDITOR_KEYMAPS.map((keymap) => (
+            <button
+              key={keymap.value}
+              onClick={() => setEditorKeymap(keymap.value)}
+              className="flex flex-col items-center gap-2 rounded-lg border p-4 transition-colors"
+              style={{
+                borderColor:
+                  settings.editorKeymap === keymap.value
+                    ? "var(--color-accent)"
+                    : "var(--color-border)",
+                backgroundColor:
+                  settings.editorKeymap === keymap.value
+                    ? "rgba(139, 92, 246, 0.1)"
+                    : "transparent",
+              }}
+            >
+              <div
+                className="flex h-12 w-16 items-center justify-center rounded-md border"
+                style={{
+                  backgroundColor: "var(--color-bg-tertiary)",
+                  borderColor: "var(--color-border)",
+                }}
+              >
+                {keymap.value === "vim" ? (
+                  <IconVim />
+                ) : (
+                  <IconKeyboard />
+                )}
+              </div>
+              <div className="text-center">
+                <span
+                  className="block text-sm font-medium"
+                  style={{ color: "var(--color-text-primary)" }}
+                >
+                  {keymap.label}
+                </span>
+                <span
+                  className="block text-xs"
+                  style={{ color: "var(--color-text-muted)" }}
+                >
+                  {keymap.description}
+                </span>
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
@@ -515,6 +579,54 @@ function IconGrid() {
       <rect x="14" y="3" width="7" height="7" />
       <rect x="14" y="14" width="7" height="7" />
       <rect x="3" y="14" width="7" height="7" />
+    </svg>
+  );
+}
+
+function IconVim() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="24"
+      height="24"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="var(--color-text-muted)"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      {/* V shape for Vim */}
+      <path d="M4 4l8 16 8-16" />
+      <path d="M4 4h3" />
+      <path d="M17 4h3" />
+    </svg>
+  );
+}
+
+function IconKeyboard() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="24"
+      height="24"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="var(--color-text-muted)"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="2" y="4" width="20" height="16" rx="2" />
+      <path d="M6 8h.01" />
+      <path d="M10 8h.01" />
+      <path d="M14 8h.01" />
+      <path d="M18 8h.01" />
+      <path d="M6 12h.01" />
+      <path d="M10 12h.01" />
+      <path d="M14 12h.01" />
+      <path d="M18 12h.01" />
+      <path d="M8 16h8" />
     </svg>
   );
 }
