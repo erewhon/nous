@@ -12,11 +12,19 @@ import {
   gitRemoveRemote,
   gitPush,
   gitPull,
+  gitListBranches,
+  gitCreateBranch,
+  gitSwitchBranch,
+  gitDeleteBranch,
+  gitMergeBranch,
+  gitIsMerging,
   getCoverPage,
   createCoverPage,
   type GitStatus,
+  type MergeResult,
 } from "../../utils/api";
 import { InlineColorPicker } from "../ColorPicker/ColorPicker";
+import { GitConflictDialog } from "./GitConflictDialog";
 
 const AI_PROVIDERS: { value: AIProviderType; label: string }[] = [
   { value: "openai", label: "OpenAI" },
@@ -68,6 +76,15 @@ export function NotebookSettingsDialog({
   const [isGitLoading, setIsGitLoading] = useState(false);
   const [gitError, setGitError] = useState<string | null>(null);
 
+  // Branch state
+  const [branches, setBranches] = useState<string[]>([]);
+  const [showBranchDropdown, setShowBranchDropdown] = useState(false);
+  const [newBranchName, setNewBranchName] = useState("");
+  const [showNewBranchInput, setShowNewBranchInput] = useState(false);
+  const [showMergeDropdown, setShowMergeDropdown] = useState(false);
+  const [isMerging, setIsMerging] = useState(false);
+  const [showConflictDialog, setShowConflictDialog] = useState(false);
+
   // Cover page state
   const [hasCoverPage, setHasCoverPage] = useState(false);
   const [isCoverLoading, setIsCoverLoading] = useState(false);
@@ -115,6 +132,17 @@ export function NotebookSettingsDialog({
         const status = await gitStatus(notebook.id);
         setGitStatusData(status);
         setRemoteUrl(status.remote_url || "");
+
+        // Load branches
+        const branchList = await gitListBranches(notebook.id);
+        setBranches(branchList);
+
+        // Check if we're in a merge state
+        const merging = await gitIsMerging(notebook.id);
+        setIsMerging(merging);
+        if (merging) {
+          setShowConflictDialog(true);
+        }
       }
     } catch (e) {
       console.error("Failed to load git status:", e);
@@ -613,22 +641,288 @@ export function NotebookSettingsDialog({
 
             {gitEnabled && gitStatusData && (
               <div className="space-y-3">
-                {/* Status */}
-                <div className="flex items-center gap-4 text-xs" style={{ color: "var(--color-text-muted)" }}>
-                  <span>
-                    Branch: <strong style={{ color: "var(--color-text-primary)" }}>{gitStatusData.branch || "main"}</strong>
-                  </span>
-                  {gitStatusData.is_dirty ? (
-                    <span className="text-yellow-500">Uncommitted changes</span>
-                  ) : (
-                    <span className="text-green-500">Clean</span>
+                {/* Merge in progress warning */}
+                {isMerging && (
+                  <div
+                    className="flex items-center justify-between rounded-md px-3 py-2"
+                    style={{
+                      backgroundColor: "rgba(234, 179, 8, 0.15)",
+                      border: "1px solid rgba(234, 179, 8, 0.3)",
+                    }}
+                  >
+                    <span className="text-xs text-yellow-500">
+                      ⚠ Merge in progress - resolve conflicts to continue
+                    </span>
+                    <button
+                      onClick={() => setShowConflictDialog(true)}
+                      className="rounded px-2 py-1 text-xs font-medium text-yellow-500 hover:bg-yellow-500/20"
+                    >
+                      Resolve Conflicts
+                    </button>
+                  </div>
+                )}
+
+                {/* Branch management */}
+                <div className="flex flex-wrap items-center gap-2">
+                  {/* Current branch dropdown */}
+                  <div className="relative">
+                    <button
+                      onClick={() => setShowBranchDropdown(!showBranchDropdown)}
+                      className="flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs transition-colors"
+                      style={{
+                        backgroundColor: "var(--color-bg-tertiary)",
+                        borderColor: "var(--color-border)",
+                        color: "var(--color-text-primary)",
+                      }}
+                    >
+                      <IconBranch />
+                      <span className="font-medium">{gitStatusData.branch || "main"}</span>
+                      <IconChevron />
+                    </button>
+
+                    {showBranchDropdown && (
+                      <div
+                        className="absolute left-0 top-full z-50 mt-1 min-w-[180px] rounded-md border shadow-lg"
+                        style={{
+                          backgroundColor: "var(--color-bg-secondary)",
+                          borderColor: "var(--color-border)",
+                        }}
+                      >
+                        <div className="max-h-48 overflow-y-auto p-1">
+                          {branches.map((branch) => (
+                            <button
+                              key={branch}
+                              onClick={async () => {
+                                if (!notebook || branch === gitStatusData.branch) {
+                                  setShowBranchDropdown(false);
+                                  return;
+                                }
+                                setIsGitLoading(true);
+                                setGitError(null);
+                                try {
+                                  await gitSwitchBranch(notebook.id, branch);
+                                  await loadGitStatus();
+                                } catch (e) {
+                                  setGitError(e instanceof Error ? e.message : "Failed to switch branch");
+                                } finally {
+                                  setIsGitLoading(false);
+                                  setShowBranchDropdown(false);
+                                }
+                              }}
+                              className="flex w-full items-center justify-between rounded px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-white/5"
+                              style={{ color: "var(--color-text-primary)" }}
+                            >
+                              <span>{branch}</span>
+                              {branch === gitStatusData.branch && (
+                                <span className="text-green-500">✓</span>
+                              )}
+                            </button>
+                          ))}
+                        </div>
+                        <div
+                          className="border-t p-1"
+                          style={{ borderColor: "var(--color-border)" }}
+                        >
+                          <button
+                            onClick={() => {
+                              setShowBranchDropdown(false);
+                              setShowNewBranchInput(true);
+                            }}
+                            className="flex w-full items-center gap-1.5 rounded px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-white/5"
+                            style={{ color: "var(--color-accent)" }}
+                          >
+                            <IconPlus /> New Branch
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* New branch input */}
+                  {showNewBranchInput && (
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="text"
+                        value={newBranchName}
+                        onChange={(e) => setNewBranchName(e.target.value)}
+                        placeholder="branch-name"
+                        autoFocus
+                        className="rounded-md border px-2 py-1 text-xs outline-none focus:border-[--color-accent]"
+                        style={{
+                          backgroundColor: "var(--color-bg-tertiary)",
+                          borderColor: "var(--color-border)",
+                          color: "var(--color-text-primary)",
+                          width: "120px",
+                        }}
+                        onKeyDown={async (e) => {
+                          if (e.key === "Enter" && newBranchName.trim() && notebook) {
+                            setIsGitLoading(true);
+                            try {
+                              await gitCreateBranch(notebook.id, newBranchName.trim());
+                              await gitSwitchBranch(notebook.id, newBranchName.trim());
+                              await loadGitStatus();
+                              setNewBranchName("");
+                              setShowNewBranchInput(false);
+                            } catch (err) {
+                              setGitError(err instanceof Error ? err.message : "Failed to create branch");
+                            } finally {
+                              setIsGitLoading(false);
+                            }
+                          } else if (e.key === "Escape") {
+                            setNewBranchName("");
+                            setShowNewBranchInput(false);
+                          }
+                        }}
+                      />
+                      <button
+                        onClick={() => {
+                          setNewBranchName("");
+                          setShowNewBranchInput(false);
+                        }}
+                        className="rounded p-1 text-xs hover:bg-white/10"
+                        style={{ color: "var(--color-text-muted)" }}
+                      >
+                        ✕
+                      </button>
+                    </div>
                   )}
-                  {gitStatusData.ahead > 0 && (
-                    <span>↑ {gitStatusData.ahead} ahead</span>
+
+                  {/* Merge branch dropdown */}
+                  {branches.length > 1 && !isMerging && (
+                    <div className="relative">
+                      <button
+                        onClick={() => setShowMergeDropdown(!showMergeDropdown)}
+                        disabled={isGitLoading}
+                        className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors"
+                        style={{
+                          backgroundColor: "var(--color-bg-tertiary)",
+                          color: "var(--color-text-secondary)",
+                        }}
+                      >
+                        <IconMerge /> Merge
+                      </button>
+
+                      {showMergeDropdown && (
+                        <div
+                          className="absolute left-0 top-full z-50 mt-1 min-w-[180px] rounded-md border shadow-lg"
+                          style={{
+                            backgroundColor: "var(--color-bg-secondary)",
+                            borderColor: "var(--color-border)",
+                          }}
+                        >
+                          <div className="p-1">
+                            <p
+                              className="px-2.5 py-1 text-xs"
+                              style={{ color: "var(--color-text-muted)" }}
+                            >
+                              Merge into {gitStatusData.branch}:
+                            </p>
+                            {branches
+                              .filter((b) => b !== gitStatusData.branch)
+                              .map((branch) => (
+                                <button
+                                  key={branch}
+                                  onClick={async () => {
+                                    if (!notebook) return;
+                                    setShowMergeDropdown(false);
+                                    setIsGitLoading(true);
+                                    setGitError(null);
+                                    try {
+                                      const result: MergeResult = await gitMergeBranch(
+                                        notebook.id,
+                                        branch
+                                      );
+                                      if (result.hasConflicts) {
+                                        setIsMerging(true);
+                                        setShowConflictDialog(true);
+                                      } else {
+                                        await loadGitStatus();
+                                      }
+                                    } catch (e) {
+                                      setGitError(
+                                        e instanceof Error ? e.message : "Merge failed"
+                                      );
+                                    } finally {
+                                      setIsGitLoading(false);
+                                    }
+                                  }}
+                                  className="flex w-full items-center gap-1.5 rounded px-2.5 py-1.5 text-left text-xs transition-colors hover:bg-white/5"
+                                  style={{ color: "var(--color-text-primary)" }}
+                                >
+                                  <IconBranch /> {branch}
+                                </button>
+                              ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   )}
-                  {gitStatusData.behind > 0 && (
-                    <span>↓ {gitStatusData.behind} behind</span>
+
+                  {/* Delete branch (only if not current and more than 1 branch) */}
+                  {branches.length > 1 && (
+                    <div className="relative">
+                      <select
+                        onChange={async (e) => {
+                          const branchToDelete = e.target.value;
+                          if (!branchToDelete || !notebook) return;
+                          if (
+                            !confirm(
+                              `Delete branch "${branchToDelete}"? This cannot be undone.`
+                            )
+                          ) {
+                            e.target.value = "";
+                            return;
+                          }
+                          setIsGitLoading(true);
+                          setGitError(null);
+                          try {
+                            await gitDeleteBranch(notebook.id, branchToDelete);
+                            await loadGitStatus();
+                          } catch (err) {
+                            setGitError(
+                              err instanceof Error ? err.message : "Failed to delete branch"
+                            );
+                          } finally {
+                            setIsGitLoading(false);
+                            e.target.value = "";
+                          }
+                        }}
+                        className="rounded-md border px-2 py-1.5 text-xs outline-none"
+                        style={{
+                          backgroundColor: "var(--color-bg-tertiary)",
+                          borderColor: "var(--color-border)",
+                          color: "var(--color-text-muted)",
+                        }}
+                        defaultValue=""
+                      >
+                        <option value="" disabled>
+                          Delete branch...
+                        </option>
+                        {branches
+                          .filter((b) => b !== gitStatusData.branch)
+                          .map((branch) => (
+                            <option key={branch} value={branch}>
+                              {branch}
+                            </option>
+                          ))}
+                      </select>
+                    </div>
                   )}
+
+                  {/* Status indicators */}
+                  <div className="flex items-center gap-2 text-xs" style={{ color: "var(--color-text-muted)" }}>
+                    {gitStatusData.is_dirty ? (
+                      <span className="text-yellow-500">● Uncommitted</span>
+                    ) : (
+                      <span className="text-green-500">● Clean</span>
+                    )}
+                    {gitStatusData.ahead > 0 && (
+                      <span>↑{gitStatusData.ahead}</span>
+                    )}
+                    {gitStatusData.behind > 0 && (
+                      <span>↓{gitStatusData.behind}</span>
+                    )}
+                  </div>
                 </div>
 
                 {/* Last commit */}
@@ -1145,6 +1439,22 @@ export function NotebookSettingsDialog({
           </div>
         </div>
       )}
+
+      {/* Git Conflict Resolution Dialog */}
+      {notebook && (
+        <GitConflictDialog
+          isOpen={showConflictDialog}
+          onClose={() => {
+            setShowConflictDialog(false);
+            loadGitStatus();
+          }}
+          notebookId={notebook.id}
+          onResolved={() => {
+            setIsMerging(false);
+            loadGitStatus();
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -1309,6 +1619,84 @@ function IconSync({ spinning = false }: { spinning?: boolean }) {
       <path d="M3 3v5h5" />
       <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
       <path d="M16 16h5v5" />
+    </svg>
+  );
+}
+
+function IconBranch() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <line x1="6" y1="3" x2="6" y2="15" />
+      <circle cx="18" cy="6" r="3" />
+      <circle cx="6" cy="18" r="3" />
+      <path d="M18 9a9 9 0 0 1-9 9" />
+    </svg>
+  );
+}
+
+function IconChevron() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <polyline points="6 9 12 15 18 9" />
+    </svg>
+  );
+}
+
+function IconPlus() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <line x1="12" y1="5" x2="12" y2="19" />
+      <line x1="5" y1="12" x2="19" y2="12" />
+    </svg>
+  );
+}
+
+function IconMerge() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="18" cy="18" r="3" />
+      <circle cx="6" cy="6" r="3" />
+      <path d="M6 21V9a9 9 0 0 0 9 9" />
     </svg>
   );
 }

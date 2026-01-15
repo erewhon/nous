@@ -873,6 +873,29 @@ export interface CommitInfo {
   timestamp: string;
 }
 
+export interface MergeResult {
+  success: boolean;
+  hasConflicts: boolean;
+  conflicts: ConflictInfo[];
+  message: string;
+}
+
+export interface ConflictInfo {
+  path: string;
+  ancestorId: string | null;
+  ourId: string | null;
+  theirId: string | null;
+}
+
+export interface ConflictContent {
+  path: string;
+  ancestor: string | null;
+  ours: string | null;
+  theirs: string | null;
+}
+
+export type ResolutionStrategy = "ours" | "theirs" | "custom";
+
 export async function gitIsEnabled(notebookId: string): Promise<boolean> {
   return invoke<boolean>("git_is_enabled", { notebookId });
 }
@@ -989,6 +1012,72 @@ export async function gitSwitchBranch(
   branchName: string
 ): Promise<void> {
   return invoke("git_switch_branch", { notebookId, branchName });
+}
+
+export async function gitDeleteBranch(
+  notebookId: string,
+  branchName: string
+): Promise<void> {
+  return invoke("git_delete_branch", { notebookId, branchName });
+}
+
+export async function gitMergeBranch(
+  notebookId: string,
+  branchName: string
+): Promise<MergeResult> {
+  return invoke<MergeResult>("git_merge_branch", { notebookId, branchName });
+}
+
+export async function gitIsMerging(notebookId: string): Promise<boolean> {
+  return invoke<boolean>("git_is_merging", { notebookId });
+}
+
+export async function gitListConflicts(
+  notebookId: string
+): Promise<ConflictInfo[]> {
+  return invoke<ConflictInfo[]>("git_list_conflicts", { notebookId });
+}
+
+export async function gitGetConflictContent(
+  notebookId: string,
+  filePath: string
+): Promise<ConflictContent> {
+  return invoke<ConflictContent>("git_get_conflict_content", {
+    notebookId,
+    filePath,
+  });
+}
+
+export async function gitResolveConflict(
+  notebookId: string,
+  filePath: string,
+  strategy: ResolutionStrategy,
+  customContent?: string
+): Promise<void> {
+  return invoke("git_resolve_conflict", {
+    notebookId,
+    filePath,
+    strategy,
+    customContent,
+  });
+}
+
+export async function gitResolveAllConflicts(
+  notebookId: string,
+  strategy: ResolutionStrategy
+): Promise<void> {
+  return invoke("git_resolve_all_conflicts", { notebookId, strategy });
+}
+
+export async function gitCommitMerge(
+  notebookId: string,
+  message?: string
+): Promise<CommitInfo> {
+  return invoke<CommitInfo>("git_commit_merge", { notebookId, message });
+}
+
+export async function gitAbortMerge(notebookId: string): Promise<void> {
+  return invoke("git_abort_merge", { notebookId });
 }
 
 // ========== Section Operations ==========

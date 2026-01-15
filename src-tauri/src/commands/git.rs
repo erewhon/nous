@@ -6,7 +6,7 @@ use serde::Serialize;
 use tauri::State;
 use uuid::Uuid;
 
-use crate::git::{self, CommitInfo, GitStatus};
+use crate::git::{self, CommitInfo, ConflictContent, ConflictInfo, GitStatus, MergeResult, ResolutionStrategy};
 use crate::AppState;
 
 /// Error type for git commands
@@ -258,4 +258,111 @@ pub fn git_switch_branch(
 ) -> CommandResult<()> {
     let path = get_notebook_path(&state, &notebook_id)?;
     git::switch_branch(&path, &branch_name).map_err(Into::into)
+}
+
+/// Delete a branch
+#[tauri::command]
+pub fn git_delete_branch(
+    state: State<AppState>,
+    notebook_id: String,
+    branch_name: String,
+) -> CommandResult<()> {
+    let path = get_notebook_path(&state, &notebook_id)?;
+    git::delete_branch(&path, &branch_name).map_err(Into::into)
+}
+
+/// Merge another branch into current
+#[tauri::command]
+pub fn git_merge_branch(
+    state: State<AppState>,
+    notebook_id: String,
+    branch_name: String,
+) -> CommandResult<MergeResult> {
+    let path = get_notebook_path(&state, &notebook_id)?;
+    git::merge_branch(&path, &branch_name).map_err(Into::into)
+}
+
+/// Check if repository is in merge state
+#[tauri::command]
+pub fn git_is_merging(state: State<AppState>, notebook_id: String) -> CommandResult<bool> {
+    let path = get_notebook_path(&state, &notebook_id)?;
+    git::is_merging(&path).map_err(Into::into)
+}
+
+/// List conflicts in current merge
+#[tauri::command]
+pub fn git_list_conflicts(
+    state: State<AppState>,
+    notebook_id: String,
+) -> CommandResult<Vec<ConflictInfo>> {
+    let path = get_notebook_path(&state, &notebook_id)?;
+    git::list_conflicts(&path).map_err(Into::into)
+}
+
+/// Get content of conflicted file from all versions
+#[tauri::command]
+pub fn git_get_conflict_content(
+    state: State<AppState>,
+    notebook_id: String,
+    file_path: String,
+) -> CommandResult<ConflictContent> {
+    let path = get_notebook_path(&state, &notebook_id)?;
+    git::get_conflict_content(&path, &file_path).map_err(Into::into)
+}
+
+/// Resolve a single conflict
+#[tauri::command]
+pub fn git_resolve_conflict(
+    state: State<AppState>,
+    notebook_id: String,
+    file_path: String,
+    strategy: String,
+    custom_content: Option<String>,
+) -> CommandResult<()> {
+    let path = get_notebook_path(&state, &notebook_id)?;
+
+    let strategy = match strategy.as_str() {
+        "ours" => ResolutionStrategy::Ours,
+        "theirs" => ResolutionStrategy::Theirs,
+        "custom" => ResolutionStrategy::Custom,
+        _ => return Err(GitCommandError::new(&format!("Invalid resolution strategy: {}", strategy))),
+    };
+
+    git::resolve_conflict(&path, &file_path, strategy, custom_content.as_deref()).map_err(Into::into)
+}
+
+/// Resolve all conflicts with a strategy
+#[tauri::command]
+pub fn git_resolve_all_conflicts(
+    state: State<AppState>,
+    notebook_id: String,
+    strategy: String,
+) -> CommandResult<()> {
+    let path = get_notebook_path(&state, &notebook_id)?;
+
+    let strategy = match strategy.as_str() {
+        "ours" => ResolutionStrategy::Ours,
+        "theirs" => ResolutionStrategy::Theirs,
+        _ => return Err(GitCommandError::new(&format!("Invalid resolution strategy: {}", strategy))),
+    };
+
+    git::resolve_all_conflicts(&path, strategy).map_err(Into::into)
+}
+
+/// Commit after resolving merge conflicts
+#[tauri::command]
+pub fn git_commit_merge(
+    state: State<AppState>,
+    notebook_id: String,
+    message: Option<String>,
+) -> CommandResult<CommitInfo> {
+    let path = get_notebook_path(&state, &notebook_id)?;
+    git::commit_merge(&path, message.as_deref()).map_err(Into::into)
+}
+
+/// Abort the current merge
+#[tauri::command]
+pub fn git_abort_merge(state: State<AppState>, notebook_id: String) -> CommandResult<()> {
+    let path = get_notebook_path(&state, &notebook_id)?;
+    git::abort_merge(&path).map_err(Into::into)
 }

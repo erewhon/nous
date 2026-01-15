@@ -212,14 +212,16 @@ Already implemented with Tantivy, may need refinement:
   - [x] Remote configuration
   - [x] Push/pull buttons
   - [x] History viewer
-- [ ] Branch support (future):
-  - [ ] Create/switch branches for experimental edits
-  - [ ] Merge branches back
-  - [ ] Branch indicator in UI
-- [ ] Conflict resolution (future):
-  - [ ] Detect merge conflicts on pull
-  - [ ] Simple conflict resolution UI
-  - [ ] Manual resolution fallback
+- [x] Branch support:
+  - [x] Create/switch branches for experimental edits
+  - [x] Merge branches back
+  - [x] Delete branches
+  - [x] Branch indicator and selector in UI
+- [x] Conflict resolution:
+  - [x] Detect merge conflicts on pull/merge
+  - [x] Conflict resolution dialog with side-by-side view
+  - [x] Accept ours/theirs/all resolution strategies
+  - [x] Abort merge option
 
 ---
 

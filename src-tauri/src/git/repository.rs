@@ -576,6 +576,398 @@ pub fn switch_branch(path: &Path, branch_name: &str) -> Result<()> {
     Ok(())
 }
 
+/// Delete a branch
+pub fn delete_branch(path: &Path, branch_name: &str) -> Result<()> {
+    let repo = open_repo(path)?;
+
+    // Can't delete the current branch
+    let current = current_branch(path)?;
+    if current == branch_name {
+        return Err(GitOperationError::InvalidPath(
+            "Cannot delete the current branch".to_string()
+        ));
+    }
+
+    let mut branch = repo.find_branch(branch_name, git2::BranchType::Local)?;
+    branch.delete()?;
+
+    log::info!("Deleted branch: {}", branch_name);
+    Ok(())
+}
+
+/// Merge result
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MergeResult {
+    pub success: bool,
+    pub has_conflicts: bool,
+    pub conflicts: Vec<ConflictInfo>,
+    pub message: String,
+}
+
+/// Information about a merge conflict
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConflictInfo {
+    pub path: String,
+    pub ancestor_id: Option<String>,
+    pub our_id: Option<String>,
+    pub their_id: Option<String>,
+}
+
+/// Content of a conflicted file from different versions
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConflictContent {
+    pub path: String,
+    pub ancestor: Option<String>,
+    pub ours: Option<String>,
+    pub theirs: Option<String>,
+}
+
+/// Merge another branch into the current branch
+pub fn merge_branch(path: &Path, branch_name: &str) -> Result<MergeResult> {
+    let repo = open_repo(path)?;
+
+    // Get the branch to merge
+    let refname = format!("refs/heads/{}", branch_name);
+    let reference = repo.find_reference(&refname)?;
+    let commit = reference.peel_to_commit()?;
+    let annotated = repo.find_annotated_commit(commit.id())?;
+
+    // Analyze merge situation
+    let (analysis, _preference) = repo.merge_analysis(&[&annotated])?;
+
+    if analysis.is_up_to_date() {
+        return Ok(MergeResult {
+            success: true,
+            has_conflicts: false,
+            conflicts: vec![],
+            message: "Already up to date".to_string(),
+        });
+    }
+
+    if analysis.is_fast_forward() {
+        // Fast-forward merge
+        let mut head_ref = repo.head()?;
+        head_ref.set_target(commit.id(), &format!("Fast-forward to {}", branch_name))?;
+        repo.checkout_head(Some(git2::build::CheckoutBuilder::default().force()))?;
+
+        log::info!("Fast-forward merge to {}", branch_name);
+        return Ok(MergeResult {
+            success: true,
+            has_conflicts: false,
+            conflicts: vec![],
+            message: format!("Fast-forward merge to {}", branch_name),
+        });
+    }
+
+    // Normal merge
+    repo.merge(&[&annotated], None, None)?;
+
+    // Check for conflicts
+    let mut index = repo.index()?;
+    if index.has_conflicts() {
+        let conflicts = list_conflicts_internal(&repo)?;
+        let conflict_count = conflicts.len();
+
+        log::warn!("Merge has {} conflicts", conflict_count);
+        return Ok(MergeResult {
+            success: false,
+            has_conflicts: true,
+            conflicts,
+            message: format!("Merge has {} conflicts that need to be resolved", conflict_count),
+        });
+    }
+
+    // No conflicts - create merge commit
+    let sig = get_signature(&repo)?;
+    let tree_id = index.write_tree()?;
+    let tree = repo.find_tree(tree_id)?;
+    let head_commit = repo.head()?.peel_to_commit()?;
+
+    let message = format!("Merge branch '{}'", branch_name);
+    repo.commit(
+        Some("HEAD"),
+        &sig,
+        &sig,
+        &message,
+        &tree,
+        &[&head_commit, &commit],
+    )?;
+    repo.cleanup_state()?;
+
+    log::info!("Merged branch {}", branch_name);
+    Ok(MergeResult {
+        success: true,
+        has_conflicts: false,
+        conflicts: vec![],
+        message: format!("Successfully merged branch '{}'", branch_name),
+    })
+}
+
+/// List conflicts in the current merge
+fn list_conflicts_internal(repo: &Repository) -> Result<Vec<ConflictInfo>> {
+    let index = repo.index()?;
+    let conflicts = index.conflicts()?;
+
+    let mut conflict_list = Vec::new();
+    for conflict_result in conflicts {
+        let conflict = conflict_result?;
+
+        // Get path from whichever entry is available
+        let path = conflict.our
+            .as_ref()
+            .or(conflict.their.as_ref())
+            .or(conflict.ancestor.as_ref())
+            .map(|e| {
+                String::from_utf8_lossy(&e.path).to_string()
+            })
+            .unwrap_or_default();
+
+        conflict_list.push(ConflictInfo {
+            path,
+            ancestor_id: conflict.ancestor.as_ref().map(|e| e.id.to_string()),
+            our_id: conflict.our.as_ref().map(|e| e.id.to_string()),
+            their_id: conflict.their.as_ref().map(|e| e.id.to_string()),
+        });
+    }
+
+    Ok(conflict_list)
+}
+
+/// List conflicts in the current merge (public wrapper)
+pub fn list_conflicts(path: &Path) -> Result<Vec<ConflictInfo>> {
+    let repo = open_repo(path)?;
+    list_conflicts_internal(&repo)
+}
+
+/// Check if repository is in a merge state
+pub fn is_merging(path: &Path) -> Result<bool> {
+    let repo = open_repo(path)?;
+    Ok(repo.state() == git2::RepositoryState::Merge)
+}
+
+/// Get the content of a conflicted file from all versions
+pub fn get_conflict_content(path: &Path, file_path: &str) -> Result<ConflictContent> {
+    let repo = open_repo(path)?;
+    let index = repo.index()?;
+
+    let conflicts = index.conflicts()?;
+
+    for conflict_result in conflicts {
+        let conflict = conflict_result?;
+
+        // Check if this conflict matches the requested file
+        let conflict_path = conflict.our
+            .as_ref()
+            .or(conflict.their.as_ref())
+            .or(conflict.ancestor.as_ref())
+            .map(|e| String::from_utf8_lossy(&e.path).to_string())
+            .unwrap_or_default();
+
+        if conflict_path == file_path {
+            // Get content from each version
+            let ancestor = conflict.ancestor
+                .as_ref()
+                .and_then(|e| repo.find_blob(e.id).ok())
+                .and_then(|b| std::str::from_utf8(b.content()).ok().map(String::from));
+
+            let ours = conflict.our
+                .as_ref()
+                .and_then(|e| repo.find_blob(e.id).ok())
+                .and_then(|b| std::str::from_utf8(b.content()).ok().map(String::from));
+
+            let theirs = conflict.their
+                .as_ref()
+                .and_then(|e| repo.find_blob(e.id).ok())
+                .and_then(|b| std::str::from_utf8(b.content()).ok().map(String::from));
+
+            return Ok(ConflictContent {
+                path: file_path.to_string(),
+                ancestor,
+                ours,
+                theirs,
+            });
+        }
+    }
+
+    Err(GitOperationError::InvalidPath(format!(
+        "No conflict found for file: {}",
+        file_path
+    )))
+}
+
+/// Resolution strategy for conflicts
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ResolutionStrategy {
+    /// Use our version (current branch)
+    Ours,
+    /// Use their version (branch being merged)
+    Theirs,
+    /// Use custom content
+    Custom,
+}
+
+/// Resolve a conflict
+pub fn resolve_conflict(
+    path: &Path,
+    file_path: &str,
+    strategy: ResolutionStrategy,
+    custom_content: Option<&str>,
+) -> Result<()> {
+    let repo = open_repo(path)?;
+    let mut index = repo.index()?;
+
+    // Find the conflict entries
+    let conflicts: Vec<_> = index.conflicts()?.collect::<std::result::Result<Vec<_>, _>>()?;
+
+    let conflict = conflicts.iter().find(|c| {
+        c.our.as_ref()
+            .or(c.their.as_ref())
+            .or(c.ancestor.as_ref())
+            .map(|e| String::from_utf8_lossy(&e.path).to_string())
+            .unwrap_or_default() == file_path
+    }).ok_or_else(|| GitOperationError::InvalidPath(format!(
+        "No conflict found for file: {}",
+        file_path
+    )))?;
+
+    // Get the content based on strategy
+    let content = match strategy {
+        ResolutionStrategy::Ours => {
+            conflict.our
+                .as_ref()
+                .and_then(|e| repo.find_blob(e.id).ok())
+                .map(|b| b.content().to_vec())
+                .ok_or_else(|| GitOperationError::InvalidPath(
+                    "Our version not available".to_string()
+                ))?
+        }
+        ResolutionStrategy::Theirs => {
+            conflict.their
+                .as_ref()
+                .and_then(|e| repo.find_blob(e.id).ok())
+                .map(|b| b.content().to_vec())
+                .ok_or_else(|| GitOperationError::InvalidPath(
+                    "Their version not available".to_string()
+                ))?
+        }
+        ResolutionStrategy::Custom => {
+            custom_content
+                .ok_or_else(|| GitOperationError::InvalidPath(
+                    "Custom content required for custom resolution".to_string()
+                ))?
+                .as_bytes()
+                .to_vec()
+        }
+    };
+
+    // Write the resolved content to the working directory
+    let full_path = path.join(file_path);
+    std::fs::write(&full_path, &content)
+        .map_err(|e| GitOperationError::InvalidPath(e.to_string()))?;
+
+    // Stage the resolved file
+    index.add_path(Path::new(file_path))?;
+    index.write()?;
+
+    // Remove the conflict marker
+    index.remove_path(Path::new(file_path))?;
+    index.add_path(Path::new(file_path))?;
+    index.write()?;
+
+    log::info!("Resolved conflict for {} using {:?}", file_path, strategy);
+    Ok(())
+}
+
+/// Resolve all conflicts with a single strategy
+pub fn resolve_all_conflicts(path: &Path, strategy: ResolutionStrategy) -> Result<()> {
+    let conflicts = list_conflicts(path)?;
+
+    for conflict in conflicts {
+        resolve_conflict(path, &conflict.path, strategy, None)?;
+    }
+
+    Ok(())
+}
+
+/// Commit the merge after resolving conflicts
+pub fn commit_merge(path: &Path, message: Option<&str>) -> Result<CommitInfo> {
+    let repo = open_repo(path)?;
+
+    // Check if we're in a merge state
+    if repo.state() != git2::RepositoryState::Merge {
+        return Err(GitOperationError::InvalidPath(
+            "Not in a merge state".to_string()
+        ));
+    }
+
+    // Check for remaining conflicts
+    let index = repo.index()?;
+    if index.has_conflicts() {
+        return Err(GitOperationError::MergeConflict);
+    }
+
+    // Get MERGE_HEAD
+    let merge_head_path = path.join(".git").join("MERGE_HEAD");
+    let merge_head_content = std::fs::read_to_string(&merge_head_path)
+        .map_err(|e| GitOperationError::InvalidPath(e.to_string()))?;
+    let merge_head_id = git2::Oid::from_str(merge_head_content.trim())?;
+    let merge_commit = repo.find_commit(merge_head_id)?;
+
+    // Get HEAD commit
+    let head_commit = repo.head()?.peel_to_commit()?;
+
+    // Create merge commit
+    let sig = get_signature(&repo)?;
+    let mut index = repo.index()?;
+    let tree_id = index.write_tree()?;
+    let tree = repo.find_tree(tree_id)?;
+
+    let default_message = format!(
+        "Merge commit (resolved conflicts)"
+    );
+    let message = message.unwrap_or(&default_message);
+
+    let commit_id = repo.commit(
+        Some("HEAD"),
+        &sig,
+        &sig,
+        message,
+        &tree,
+        &[&head_commit, &merge_commit],
+    )?;
+
+    repo.cleanup_state()?;
+
+    let commit = repo.find_commit(commit_id)?;
+    log::info!("Created merge commit: {}", &commit_id.to_string()[..7]);
+
+    Ok(commit_to_info(&commit))
+}
+
+/// Abort the current merge
+pub fn abort_merge(path: &Path) -> Result<()> {
+    let repo = open_repo(path)?;
+
+    // Check if we're in a merge state
+    if repo.state() != git2::RepositoryState::Merge {
+        return Err(GitOperationError::InvalidPath(
+            "Not in a merge state".to_string()
+        ));
+    }
+
+    // Reset to HEAD and cleanup merge state
+    let head = repo.head()?.peel_to_commit()?;
+    repo.reset(head.as_object(), git2::ResetType::Hard, None)?;
+    repo.cleanup_state()?;
+
+    log::info!("Merge aborted");
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
