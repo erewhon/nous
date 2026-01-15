@@ -67,6 +67,7 @@ const EDITOR_WIDTHS: { value: EditorWidth; label: string; description: string }[
 const EDITOR_KEYMAPS: { value: EditorKeymap; label: string; description: string }[] = [
   { value: "standard", label: "Standard", description: "Default editor keybindings" },
   { value: "vim", label: "Vim", description: "VI-style modal editing (hjkl, w, b, i, a, etc.)" },
+  { value: "emacs", label: "Emacs", description: "Emacs-style keybindings (C-f, C-b, C-n, C-p, C-k, etc.)" },
 ];
 
 export function ThemeSettings() {
@@ -452,6 +453,8 @@ export function ThemeSettings() {
               >
                 {keymap.value === "vim" ? (
                   <IconVim />
+                ) : keymap.value === "emacs" ? (
+                  <IconEmacs />
                 ) : (
                   <IconKeyboard />
                 )}
@@ -627,6 +630,29 @@ function IconKeyboard() {
       <path d="M14 12h.01" />
       <path d="M18 12h.01" />
       <path d="M8 16h8" />
+    </svg>
+  );
+}
+
+function IconEmacs() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="24"
+      height="24"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="var(--color-text-muted)"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      {/* Stylized E for Emacs */}
+      <rect x="4" y="4" width="16" height="16" rx="2" />
+      <path d="M8 8h8" />
+      <path d="M8 12h6" />
+      <path d="M8 16h8" />
+      <path d="M8 8v8" />
     </svg>
   );
 }

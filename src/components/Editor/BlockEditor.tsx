@@ -2,6 +2,7 @@ import { useEffect, useId, useCallback, useRef, useState } from "react";
 import type { OutputData } from "@editorjs/editorjs";
 import { useEditor } from "./useEditor";
 import { useVimMode, type VimMode } from "./useVimMode";
+import { useEmacsMode } from "./useEmacsMode";
 import { VimModeIndicator } from "./VimModeIndicator";
 import { WikiLinkAutocomplete } from "./WikiLinkAutocomplete";
 import { WikiLinkTool } from "./WikiLinkTool";
@@ -33,9 +34,10 @@ export function BlockEditor({
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Get vim mode setting from theme store
+  // Get keymap setting from theme store
   const editorKeymap = useThemeStore((state) => state.settings.editorKeymap);
   const isVimModeEnabled = editorKeymap === "vim" && !readOnly;
+  const isEmacsModeEnabled = editorKeymap === "emacs" && !readOnly;
 
   // Track vim mode state for indicator (used by useVimMode callback)
   const [, setCurrentVimMode] = useState<VimMode>("normal");
@@ -72,6 +74,13 @@ export function BlockEditor({
     editorRef: editor,
     containerRef: containerRef as React.RefObject<HTMLElement>,
     onModeChange: setCurrentVimMode,
+  });
+
+  // Emacs keybindings mode
+  useEmacsMode({
+    enabled: isEmacsModeEnabled,
+    editorRef: editor,
+    containerRef: containerRef as React.RefObject<HTMLElement>,
   });
 
   // Cleanup timeout on unmount

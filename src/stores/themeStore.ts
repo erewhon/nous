@@ -7,7 +7,7 @@ export type FontFamily = "system" | "inter" | "jetbrains-mono" | "fira-code";
 export type EditorWidth = "narrow" | "medium" | "wide" | "full";
 export type UIMode = "classic" | "overview";
 export type NotebookSortOption = "name-asc" | "name-desc" | "updated" | "created" | "pages";
-export type EditorKeymap = "standard" | "vim";
+export type EditorKeymap = "standard" | "vim" | "emacs";
 
 interface ThemeSettings {
   mode: ThemeMode;

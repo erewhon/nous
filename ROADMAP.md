@@ -287,7 +287,12 @@ Already implemented with Tantivy, may need refinement:
   - jj or Escape to exit insert mode
   - Visual mode indicator
   - Settings toggle (Appearance > Editor Keybindings)
-- [ ] Emacs key bindings mode
+- [x] Emacs key bindings mode
+  - Navigation: C-f, C-b, C-n, C-p, C-a, C-e, M-f, M-b, M-<, M->
+  - Editing: C-d, C-h, C-k (kill line), C-w (kill region), M-w (copy), C-y (yank)
+  - Mark: C-Space (set mark), C-g (cancel)
+  - Undo: C-/, C-Shift-/ (redo)
+  - Settings toggle (Appearance > Editor Keybindings)
 - [ ] External editor support (open page in VS Code, Vim, etc.)
 
 ### 21. Import from Other Apps
@@ -298,6 +303,12 @@ Already implemented with Tantivy, may need refinement:
 - [x] Obsidian vault import (markdown with YAML frontmatter, wiki-links, attachments)
 - [x] Joplin export import (JEX archive or raw directory)
 - [ ] Apple Notes import
+  - **Complexity: Medium-High** (1-2 days with existing tools, 3-4 days from scratch)
+  - Notes stored in SQLite at `~/Library/Group Containers/group.com.apple.notes/NoteStore.sqlite`
+  - Content is protobuf-encoded (undocumented, changes between macOS versions)
+  - Embedded images, drawings, tables, checklists stored separately
+  - Locked notes require password
+  - Options: (1) Parse SQLite + protobuf directly, (2) AppleScript export (text only), (3) Use `apple-notes-liberator` or similar
 
 ---
 
