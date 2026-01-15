@@ -523,6 +523,7 @@ pub fn import_notion_zip(
         system_prompt: None,
         ai_provider: None,
         ai_model: None,
+        sync_config: None,
         created_at: now,
         updated_at: now,
     };

@@ -102,7 +102,7 @@ Already implemented with Tantivy, may need refinement:
 - [x] Export entire notebook as ZIP
 - [x] Import notebook from ZIP
 - [x] Auto-backup with local storage (manual trigger + auto cleanup)
-- [ ] Backup to cloud storage (optional)
+- [ ] Backup to cloud storage (optional) - Note: WebDAV sync now available for cloud access
 
 ### 8. Folders & Organization
 - [x] Folders within notebooks for organizing pages
@@ -253,10 +253,21 @@ Already implemented with Tantivy, may need refinement:
 - [x] Font size and line height customization
 
 ### 18. Mobile & Sync
-- [ ] Cloud sync between devices
-- [ ] Conflict resolution
-- [ ] Mobile companion app (or PWA)
-- [ ] Offline support
+- [x] Cloud sync via WebDAV
+  - [x] WebDAV client (Nextcloud, ownCloud, etc.)
+  - [x] Per-notebook sync configuration
+  - [x] Credential storage in OS keyring
+  - [x] Manual, on-save, and periodic sync modes
+  - [x] Sync UI in Notebook Settings
+- [x] CRDT-based conflict resolution (Yrs/Yjs)
+  - [x] EditorData <-> Yrs document conversion
+  - [x] Automatic merge on sync conflicts
+  - [x] Binary CRDT state files for efficient sync
+- [x] Offline support
+  - [x] Local-first architecture
+  - [x] Offline change queue
+  - [x] Queue persistence across app restarts
+- [ ] Mobile companion app (Tauri-based, future)
 
 ### 19. Page Stats & Writing Assistance
 - [x] Page statistics (word count, character count, reading time) - toggleable in page header

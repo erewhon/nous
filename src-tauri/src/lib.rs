@@ -15,6 +15,7 @@ mod python_bridge;
 mod scrivener;
 mod search;
 mod storage;
+pub mod sync;
 
 use actions::{ActionExecutor, ActionScheduler, ActionStorage};
 use flashcards::FlashcardStorage;
@@ -22,6 +23,7 @@ use inbox::InboxStorage;
 use python_bridge::PythonAI;
 use search::SearchIndex;
 use storage::FileStorage;
+use sync::SyncManager;
 
 pub struct AppState {
     pub storage: Arc<Mutex<FileStorage>>,
@@ -32,6 +34,7 @@ pub struct AppState {
     pub action_scheduler: Mutex<ActionScheduler>,
     pub inbox_storage: Mutex<InboxStorage>,
     pub flashcard_storage: Mutex<FlashcardStorage>,
+    pub sync_manager: Arc<tokio::sync::Mutex<SyncManager>>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -63,6 +66,10 @@ pub fn run() {
     // Initialize flashcard storage
     let flashcard_storage = FlashcardStorage::new(data_dir.join("notebooks"));
 
+    // Initialize sync manager
+    let sync_manager = SyncManager::new(data_dir.clone());
+    let sync_manager_arc = Arc::new(tokio::sync::Mutex::new(sync_manager));
+
     // Wrap storage in Arc<Mutex<>> for sharing with executor
     let storage_arc = Arc::new(Mutex::new(storage));
     let action_storage_arc = Arc::new(Mutex::new(action_storage));
@@ -91,6 +98,7 @@ pub fn run() {
         action_scheduler: Mutex::new(action_scheduler),
         inbox_storage: Mutex::new(inbox_storage),
         flashcard_storage: Mutex::new(flashcard_storage),
+        sync_manager: sync_manager_arc,
     };
 
     tauri::Builder::default()
@@ -256,6 +264,13 @@ pub fn run() {
             commands::get_review_stats,
             commands::get_card_state,
             commands::preview_review_intervals,
+            // Sync commands
+            commands::sync_test_connection,
+            commands::sync_configure,
+            commands::sync_status,
+            commands::sync_now,
+            commands::sync_queue_status,
+            commands::sync_disable,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

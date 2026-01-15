@@ -55,3 +55,9 @@ tokio = { version = "1", features = ["full"] }
 
 # Git integration
 git2 = "0.20"
+
+# Sync support
+reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
+yrs = "0.22"
+keyring = "3.0"
+hostname = "0.4"

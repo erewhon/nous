@@ -1,6 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { Notebook, NotebookType } from "../types/notebook";
 import type { Page, EditorData, SearchResult, Folder, Section } from "../types/page";
+import type {
+  SyncConfigInput,
+  SyncStatus,
+  SyncResult,
+  QueueItem,
+} from "../types/sync";
 
 // ===== Notebook API =====
 
@@ -1048,4 +1054,43 @@ export async function setCoverPage(
   pageId: string | null
 ): Promise<Page | null> {
   return invoke<Page | null>("set_cover_page", { notebookId, pageId });
+}
+
+// ========== Sync Operations ==========
+
+export async function syncTestConnection(
+  serverUrl: string,
+  username: string,
+  password: string
+): Promise<boolean> {
+  return invoke<boolean>("sync_test_connection", {
+    serverUrl,
+    username,
+    password,
+  });
+}
+
+export async function syncConfigure(
+  notebookId: string,
+  config: SyncConfigInput
+): Promise<void> {
+  return invoke("sync_configure", { notebookId, config });
+}
+
+export async function syncStatus(notebookId: string): Promise<SyncStatus> {
+  return invoke<SyncStatus>("sync_status", { notebookId });
+}
+
+export async function syncNow(notebookId: string): Promise<SyncResult> {
+  return invoke<SyncResult>("sync_now", { notebookId });
+}
+
+export async function syncQueueStatus(
+  notebookId: string
+): Promise<QueueItem[]> {
+  return invoke<QueueItem[]>("sync_queue_status", { notebookId });
+}
+
+export async function syncDisable(notebookId: string): Promise<void> {
+  return invoke("sync_disable", { notebookId });
 }

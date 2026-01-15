@@ -262,6 +262,20 @@ impl FileStorage {
         Ok(page)
     }
 
+    /// Create a page with a specific ID (used for sync)
+    pub fn create_page_with_id(&self, notebook_id: Uuid, page: &Page) -> Result<Page> {
+        // Verify notebook exists
+        if !self.notebook_dir(notebook_id).exists() {
+            return Err(StorageError::NotebookNotFound(notebook_id));
+        }
+
+        let page_path = self.page_path(notebook_id, page.id);
+        let content = serde_json::to_string_pretty(page)?;
+        fs::write(&page_path, content)?;
+
+        Ok(page.clone())
+    }
+
     pub fn update_page(&self, page: &Page) -> Result<()> {
         let page_path = self.page_path(page.notebook_id, page.id);
 

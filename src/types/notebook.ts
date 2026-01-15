@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { SyncConfigSchema } from "./sync";
 
 export const NotebookTypeSchema = z.enum(["standard", "zettelkasten"]);
 export type NotebookType = z.infer<typeof NotebookTypeSchema>;
@@ -16,6 +17,7 @@ export const NotebookSchema = z.object({
   systemPrompt: z.string().optional(),
   aiProvider: AIProviderTypeSchema.optional(),
   aiModel: z.string().optional(),
+  syncConfig: SyncConfigSchema.optional(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });

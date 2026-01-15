@@ -2,6 +2,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::sync::config::SyncConfig;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum NotebookType {
@@ -144,6 +146,9 @@ pub struct Notebook {
     /// AI model override for this notebook (e.g., "gpt-4o", "claude-sonnet-4-20250514")
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ai_model: Option<String>,
+    /// Sync configuration for this notebook
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sync_config: Option<SyncConfig>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -161,6 +166,7 @@ impl Notebook {
             system_prompt: None,
             ai_provider: None,
             ai_model: None,
+            sync_config: None,
             created_at: now,
             updated_at: now,
         }

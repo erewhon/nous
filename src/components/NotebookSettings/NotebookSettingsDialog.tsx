@@ -1,7 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import type { Notebook, AIProviderType } from "../../types/notebook";
+import type { SyncMode, AuthType } from "../../types/sync";
 import { useNotebookStore } from "../../stores/notebookStore";
 import { useAIStore } from "../../stores/aiStore";
+import { useSyncStore } from "../../stores/syncStore";
 import {
   gitIsEnabled,
   gitInit,
@@ -70,6 +72,39 @@ export function NotebookSettingsDialog({
   const [hasCoverPage, setHasCoverPage] = useState(false);
   const [isCoverLoading, setIsCoverLoading] = useState(false);
 
+  // Sync state
+  const {
+    testConnection,
+    configure: configureSync,
+    loadStatus: loadSyncStatus,
+    syncNow: triggerSync,
+    disable: disableSync,
+    isTestingConnection,
+    testConnectionResult,
+    clearTestResult,
+    isConfiguring,
+    getStatus: getSyncStatus,
+    isSyncing,
+  } = useSyncStore();
+
+  const [showSyncConfig, setShowSyncConfig] = useState(false);
+  const [syncServerUrl, setSyncServerUrl] = useState("");
+  const [syncUsername, setSyncUsername] = useState("");
+  const [syncPassword, setSyncPassword] = useState("");
+  const [syncRemotePath, setSyncRemotePath] = useState("");
+  const [syncMode, setSyncMode] = useState<SyncMode>("manual");
+  const [syncError, setSyncError] = useState<string | null>(null);
+
+  // Load sync status
+  const loadSyncStatusData = useCallback(async () => {
+    if (!notebook) return;
+    try {
+      await loadSyncStatus(notebook.id);
+    } catch (e) {
+      console.error("Failed to load sync status:", e);
+    }
+  }, [notebook, loadSyncStatus]);
+
   // Load git status
   const loadGitStatus = useCallback(async () => {
     if (!notebook) return;
@@ -109,8 +144,15 @@ export function NotebookSettingsDialog({
       setUseAppDefault(!notebook.aiProvider);
       loadGitStatus();
       loadCoverStatus();
+      loadSyncStatusData();
+      // Initialize sync config form if already configured
+      if (notebook.syncConfig) {
+        setSyncServerUrl(notebook.syncConfig.serverUrl);
+        setSyncRemotePath(notebook.syncConfig.remotePath);
+        setSyncMode(notebook.syncConfig.syncMode);
+      }
     }
-  }, [notebook, loadGitStatus, loadCoverStatus]);
+  }, [notebook, loadGitStatus, loadCoverStatus, loadSyncStatusData]);
 
   // Focus name input when dialog opens
   useEffect(() => {
@@ -713,6 +755,291 @@ export function NotebookSettingsDialog({
             )}
           </div>
 
+          {/* Cloud Sync */}
+          <div
+            className="rounded-lg border p-4"
+            style={{ borderColor: "var(--color-border)" }}
+          >
+            <div className="mb-3 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <IconCloud />
+                <span
+                  className="text-sm font-medium"
+                  style={{ color: "var(--color-text-primary)" }}
+                >
+                  Cloud Sync
+                </span>
+              </div>
+              {notebook?.syncConfig?.enabled ? (
+                <span
+                  className="flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium"
+                  style={{
+                    backgroundColor: "rgba(34, 197, 94, 0.15)",
+                    color: "rgb(34, 197, 94)",
+                  }}
+                >
+                  <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
+                  Enabled
+                </span>
+              ) : (
+                <button
+                  onClick={() => setShowSyncConfig(!showSyncConfig)}
+                  className="rounded-md px-3 py-1.5 text-xs font-medium transition-colors hover:opacity-90"
+                  style={{
+                    backgroundColor: "var(--color-accent)",
+                    color: "white",
+                  }}
+                >
+                  Configure
+                </button>
+              )}
+            </div>
+
+            {/* Sync configuration form */}
+            {showSyncConfig && !notebook?.syncConfig?.enabled && (
+              <div className="space-y-3">
+                {/* Server URL */}
+                <div>
+                  <label className="mb-1.5 block text-xs font-medium" style={{ color: "var(--color-text-secondary)" }}>
+                    WebDAV Server URL
+                  </label>
+                  <input
+                    type="text"
+                    value={syncServerUrl}
+                    onChange={(e) => setSyncServerUrl(e.target.value)}
+                    placeholder="https://cloud.example.com/remote.php/dav/files/user/"
+                    className="w-full rounded-md border px-2.5 py-1.5 text-xs outline-none transition-colors focus:border-[--color-accent]"
+                    style={{
+                      backgroundColor: "var(--color-bg-tertiary)",
+                      borderColor: "var(--color-border)",
+                      color: "var(--color-text-primary)",
+                    }}
+                  />
+                </div>
+
+                {/* Remote Path */}
+                <div>
+                  <label className="mb-1.5 block text-xs font-medium" style={{ color: "var(--color-text-secondary)" }}>
+                    Remote Path
+                  </label>
+                  <input
+                    type="text"
+                    value={syncRemotePath}
+                    onChange={(e) => setSyncRemotePath(e.target.value)}
+                    placeholder="/katt-sync/my-notebook"
+                    className="w-full rounded-md border px-2.5 py-1.5 text-xs outline-none transition-colors focus:border-[--color-accent]"
+                    style={{
+                      backgroundColor: "var(--color-bg-tertiary)",
+                      borderColor: "var(--color-border)",
+                      color: "var(--color-text-primary)",
+                    }}
+                  />
+                </div>
+
+                {/* Username */}
+                <div>
+                  <label className="mb-1.5 block text-xs font-medium" style={{ color: "var(--color-text-secondary)" }}>
+                    Username
+                  </label>
+                  <input
+                    type="text"
+                    value={syncUsername}
+                    onChange={(e) => setSyncUsername(e.target.value)}
+                    placeholder="username"
+                    className="w-full rounded-md border px-2.5 py-1.5 text-xs outline-none transition-colors focus:border-[--color-accent]"
+                    style={{
+                      backgroundColor: "var(--color-bg-tertiary)",
+                      borderColor: "var(--color-border)",
+                      color: "var(--color-text-primary)",
+                    }}
+                  />
+                </div>
+
+                {/* Password */}
+                <div>
+                  <label className="mb-1.5 block text-xs font-medium" style={{ color: "var(--color-text-secondary)" }}>
+                    Password / App Token
+                  </label>
+                  <input
+                    type="password"
+                    value={syncPassword}
+                    onChange={(e) => setSyncPassword(e.target.value)}
+                    placeholder="password"
+                    className="w-full rounded-md border px-2.5 py-1.5 text-xs outline-none transition-colors focus:border-[--color-accent]"
+                    style={{
+                      backgroundColor: "var(--color-bg-tertiary)",
+                      borderColor: "var(--color-border)",
+                      color: "var(--color-text-primary)",
+                    }}
+                  />
+                </div>
+
+                {/* Sync Mode */}
+                <div>
+                  <label className="mb-1.5 block text-xs font-medium" style={{ color: "var(--color-text-secondary)" }}>
+                    Sync Mode
+                  </label>
+                  <select
+                    value={syncMode}
+                    onChange={(e) => setSyncMode(e.target.value as SyncMode)}
+                    className="w-full rounded-md border px-2.5 py-1.5 text-xs outline-none transition-colors focus:border-[--color-accent]"
+                    style={{
+                      backgroundColor: "var(--color-bg-tertiary)",
+                      borderColor: "var(--color-border)",
+                      color: "var(--color-text-primary)",
+                    }}
+                  >
+                    <option value="manual">Manual</option>
+                    <option value="onsave">On Save</option>
+                    <option value="periodic">Periodic</option>
+                  </select>
+                </div>
+
+                {/* Test Connection + Enable buttons */}
+                <div className="flex gap-2">
+                  <button
+                    onClick={async () => {
+                      setSyncError(null);
+                      const result = await testConnection(syncServerUrl, syncUsername, syncPassword);
+                      if (!result) {
+                        setSyncError("Connection failed. Check your URL and credentials.");
+                      }
+                    }}
+                    disabled={isTestingConnection || !syncServerUrl || !syncUsername || !syncPassword}
+                    className="flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition-colors"
+                    style={{
+                      backgroundColor: "var(--color-bg-tertiary)",
+                      color: "var(--color-text-secondary)",
+                    }}
+                  >
+                    {isTestingConnection ? "Testing..." : testConnectionResult === true ? "Connected!" : "Test Connection"}
+                  </button>
+                  <button
+                    onClick={async () => {
+                      if (!notebook) return;
+                      setSyncError(null);
+                      try {
+                        await configureSync(notebook.id, {
+                          serverUrl: syncServerUrl,
+                          remotePath: syncRemotePath || `/katt-sync/${notebook.id}`,
+                          username: syncUsername,
+                          password: syncPassword,
+                          authType: "basic" as AuthType,
+                          syncMode,
+                        });
+                        setShowSyncConfig(false);
+                        clearTestResult();
+                      } catch (e) {
+                        setSyncError(e instanceof Error ? e.message : "Failed to enable sync");
+                      }
+                    }}
+                    disabled={isConfiguring || !syncServerUrl || !syncUsername || !syncPassword}
+                    className="flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition-colors hover:opacity-90"
+                    style={{
+                      backgroundColor: "var(--color-accent)",
+                      color: "white",
+                    }}
+                  >
+                    {isConfiguring ? "Enabling..." : "Enable Sync"}
+                  </button>
+                </div>
+
+                {/* Test result / Error */}
+                {testConnectionResult === true && (
+                  <p className="text-xs text-green-500">Connection successful!</p>
+                )}
+                {syncError && (
+                  <p className="text-xs" style={{ color: "var(--color-error)" }}>{syncError}</p>
+                )}
+              </div>
+            )}
+
+            {/* Sync enabled - show status and controls */}
+            {notebook?.syncConfig?.enabled && (
+              <div className="space-y-3">
+                {/* Status */}
+                <div className="flex items-center gap-4 text-xs" style={{ color: "var(--color-text-muted)" }}>
+                  <span>
+                    Mode: <strong style={{ color: "var(--color-text-primary)" }}>
+                      {notebook.syncConfig.syncMode === "manual" ? "Manual" :
+                       notebook.syncConfig.syncMode === "onsave" ? "On Save" : "Periodic"}
+                    </strong>
+                  </span>
+                  {getSyncStatus(notebook.id)?.pendingChanges ? (
+                    <span className="text-yellow-500">
+                      {getSyncStatus(notebook.id)?.pendingChanges} pending
+                    </span>
+                  ) : (
+                    <span className="text-green-500">Up to date</span>
+                  )}
+                </div>
+
+                {/* Last sync */}
+                {notebook.syncConfig.lastSync && (
+                  <div className="text-xs" style={{ color: "var(--color-text-muted)" }}>
+                    Last sync: <span style={{ color: "var(--color-text-secondary)" }}>
+                      {new Date(notebook.syncConfig.lastSync).toLocaleString()}
+                    </span>
+                  </div>
+                )}
+
+                {/* Sync Now + Disable buttons */}
+                <div className="flex gap-2">
+                  <button
+                    onClick={async () => {
+                      if (!notebook) return;
+                      setSyncError(null);
+                      try {
+                        await triggerSync(notebook.id);
+                      } catch (e) {
+                        setSyncError(e instanceof Error ? e.message : "Sync failed");
+                      }
+                    }}
+                    disabled={isSyncing(notebook.id)}
+                    className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors hover:opacity-90"
+                    style={{
+                      backgroundColor: "var(--color-accent)",
+                      color: "white",
+                    }}
+                  >
+                    <IconSync spinning={isSyncing(notebook.id)} />
+                    {isSyncing(notebook.id) ? "Syncing..." : "Sync Now"}
+                  </button>
+                  <button
+                    onClick={async () => {
+                      if (!notebook) return;
+                      if (confirm("Disable cloud sync for this notebook? Local data will be preserved.")) {
+                        try {
+                          await disableSync(notebook.id);
+                        } catch (e) {
+                          setSyncError(e instanceof Error ? e.message : "Failed to disable sync");
+                        }
+                      }
+                    }}
+                    className="rounded-md px-3 py-1.5 text-xs font-medium transition-colors"
+                    style={{
+                      backgroundColor: "var(--color-bg-tertiary)",
+                      color: "var(--color-text-secondary)",
+                    }}
+                  >
+                    Disable
+                  </button>
+                </div>
+
+                {/* Error message */}
+                {syncError && (
+                  <p className="text-xs" style={{ color: "var(--color-error)" }}>{syncError}</p>
+                )}
+              </div>
+            )}
+
+            {!notebook?.syncConfig?.enabled && !showSyncConfig && (
+              <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
+                Sync this notebook to a WebDAV server (Nextcloud, ownCloud, etc.) for offline access and multi-device sync.
+              </p>
+            )}
+          </div>
+
           {/* Info */}
           <div
             className="flex items-start gap-2 rounded-lg border p-3"
@@ -941,6 +1268,47 @@ function IconAI() {
     >
       <path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z" />
       <path d="M19 13l1 3 3 1-3 1-1 3-1-3-3-1 3-1 1-3z" />
+    </svg>
+  );
+}
+
+function IconCloud() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{ color: "var(--color-text-muted)" }}
+    >
+      <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z" />
+    </svg>
+  );
+}
+
+function IconSync({ spinning = false }: { spinning?: boolean }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={spinning ? { animation: "spin 1s linear infinite" } : undefined}
+    >
+      <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+      <path d="M3 3v5h5" />
+      <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
+      <path d="M16 16h5v5" />
     </svg>
   );
 }
