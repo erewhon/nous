@@ -9,6 +9,7 @@ import {
   createNotebook as apiCreateNotebook,
   createPage as apiCreatePage,
   updatePage as apiUpdatePage,
+  runBrowserTask,
 } from "../../utils/api";
 import type { ChatMessage, PageContext, AIAction, CreateNotebookArgs, CreatePageArgs, StreamEvent } from "../../types/ai";
 import type { EditorData } from "../../types/page";
@@ -21,9 +22,10 @@ interface AIChatPanelProps {
 
 // Track created items to show in UI
 interface CreatedItem {
-  type: "notebook" | "page" | "action" | "info";
+  type: "notebook" | "page" | "action" | "info" | "browser";
   name: string;
   notebookName?: string;
+  browserResult?: string;
 }
 
 // Extended message with optional thinking and stats
@@ -300,6 +302,47 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
             type: "info",
             name: "Listed available actions",
           });
+        } else if (action.tool === "browse_web") {
+          const args = action.arguments as unknown as { task: string; capture_screenshot?: boolean };
+          try {
+            // Get AI settings for provider config
+            const { settings } = useAIStore.getState();
+            if (!settings.apiKey) {
+              created.push({
+                type: "browser",
+                name: "Browser task",
+                browserResult: "Error: No API key configured for AI provider",
+              });
+              continue;
+            }
+            const result = await runBrowserTask(
+              args.task,
+              settings.providerType,
+              settings.apiKey,
+              settings.model,
+              args.capture_screenshot ?? false
+            );
+            if (result.success) {
+              created.push({
+                type: "browser",
+                name: "Browser task completed",
+                browserResult: result.content,
+              });
+            } else {
+              created.push({
+                type: "browser",
+                name: "Browser task failed",
+                browserResult: result.error || "Unknown error",
+              });
+            }
+          } catch (error) {
+            console.error("Browser automation error:", error);
+            created.push({
+              type: "browser",
+              name: "Browser task error",
+              browserResult: String(error),
+            });
+          }
         } else if (action.tool === "create_page") {
           const args = action.arguments as unknown as CreatePageArgs;
 
@@ -1086,21 +1129,38 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
                   {createdItems.map((item, i) => (
                     <div
                       key={i}
-                      className="flex items-center gap-2 text-sm"
+                      className="flex items-start gap-2 text-sm"
                       style={{ color: "var(--color-text-secondary)" }}
                     >
-                      {item.type === "notebook" ? (
-                        <IconBook style={{ width: 14, height: 14 }} />
-                      ) : (
-                        <IconFile style={{ width: 14, height: 14 }} />
-                      )}
-                      <span>
-                        {item.type === "notebook" ? (
+                      {item.type === "notebook" && <IconBook style={{ width: 14, height: 14, flexShrink: 0, marginTop: 2 }} />}
+                      {item.type === "page" && <IconFile style={{ width: 14, height: 14, flexShrink: 0, marginTop: 2 }} />}
+                      {item.type === "browser" && <IconGlobe style={{ width: 14, height: 14, flexShrink: 0, marginTop: 2 }} />}
+                      {item.type === "action" && <IconZap style={{ width: 14, height: 14, flexShrink: 0, marginTop: 2 }} />}
+                      {item.type === "info" && <IconCheck style={{ width: 14, height: 14, flexShrink: 0, marginTop: 2 }} />}
+                      <div className="flex-1">
+                        {item.type === "notebook" && (
                           <>Notebook: <strong style={{ color: "var(--color-text-primary)" }}>{item.name}</strong></>
-                        ) : (
+                        )}
+                        {item.type === "page" && (
                           <>Page: <strong style={{ color: "var(--color-text-primary)" }}>{item.name}</strong> in {item.notebookName}</>
                         )}
-                      </span>
+                        {item.type === "action" && (
+                          <>Action: <strong style={{ color: "var(--color-text-primary)" }}>{item.name}</strong> {item.notebookName && `(${item.notebookName})`}</>
+                        )}
+                        {item.type === "info" && (
+                          <>{item.name}</>
+                        )}
+                        {item.type === "browser" && (
+                          <div>
+                            <strong style={{ color: "var(--color-text-primary)" }}>{item.name}</strong>
+                            {item.browserResult && (
+                              <div className="mt-1 text-xs whitespace-pre-wrap" style={{ color: "var(--color-text-secondary)", maxHeight: 200, overflow: "auto" }}>
+                                {item.browserResult.length > 500 ? item.browserResult.slice(0, 500) + "..." : item.browserResult}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1318,6 +1378,27 @@ function IconFile({ style }: { style?: React.CSSProperties }) {
     >
       <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
       <polyline points="14,2 14,8 20,8" />
+    </svg>
+  );
+}
+
+function IconGlobe({ style }: { style?: React.CSSProperties }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={style}
+    >
+      <circle cx="12" cy="12" r="10" />
+      <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20" />
+      <path d="M2 12h20" />
     </svg>
   );
 }

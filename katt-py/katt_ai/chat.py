@@ -154,6 +154,28 @@ NOTEBOOK_TOOLS = [
                 "required": []
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browse_web",
+            "description": "Use an AI-controlled browser to interact with websites. Use this when you need to: navigate dynamic/JavaScript-heavy pages, fill forms, click buttons, log in to sites, or extract data that requires browser interaction. The browser will autonomously complete the task you describe.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task": {
+                        "type": "string",
+                        "description": "Detailed description of what to do in the browser. Be specific about: the website to visit, actions to take, and what information to extract. Example: 'Go to github.com/browser-use/browser-use and extract the number of stars and the latest release version'"
+                    },
+                    "capture_screenshot": {
+                        "type": "boolean",
+                        "description": "Whether to capture a screenshot of the final page state",
+                        "default": False
+                    }
+                },
+                "required": ["task"]
+            }
+        }
     }
 ]
 
@@ -419,6 +441,9 @@ async def chat_with_tools(
                     result = f"Running action: {func_args.get('action_name')}"
                 elif func_name == "list_actions":
                     result = "Listing actions"
+                elif func_name == "browse_web":
+                    task_preview = func_args.get('task', '')[:100]
+                    result = f"Browser task initiated: {task_preview}..."
                 else:
                     result = "Action completed"
 
@@ -507,6 +532,9 @@ async def chat_with_tools(
                         result = f"Running action: {func_args.get('action_name')}"
                     elif func_name == "list_actions":
                         result = "Listing actions"
+                    elif func_name == "browse_web":
+                        task_preview = func_args.get('task', '')[:100]
+                        result = f"Browser task initiated: {task_preview}..."
                     else:
                         result = "Action completed"
 
@@ -1065,6 +1093,9 @@ async def chat_with_tools_stream(
                     result = f"Running action: {func_args.get('action_name')}"
                 elif func_name == "list_actions":
                     result = "Listing actions"
+                elif func_name == "browse_web":
+                    task_preview = func_args.get('task', '')[:100]
+                    result = f"Browser task initiated: {task_preview}..."
                 else:
                     result = "Action completed"
 
@@ -1153,6 +1184,9 @@ async def chat_with_tools_stream(
                         result = f"Running action: {func_args.get('action_name')}"
                     elif func_name == "list_actions":
                         result = "Listing actions"
+                    elif func_name == "browse_web":
+                        task_preview = func_args.get('task', '')[:100]
+                        result = f"Browser task initiated: {task_preview}..."
                     else:
                         result = "Action completed"
 

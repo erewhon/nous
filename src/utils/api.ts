@@ -502,6 +502,7 @@ import type {
   SearchResponse,
   ScrapedContent,
   ResearchSummary,
+  BrowserTaskResult,
 } from "../types/webResearch";
 
 export async function webSearch(
@@ -541,6 +542,24 @@ export async function summarizeResearch(
     providerType: options?.providerType,
     apiKey: options?.apiKey,
     model: options?.model,
+  });
+}
+
+// ===== Browser Automation API =====
+
+export async function runBrowserTask(
+  task: string,
+  providerType: string,
+  apiKey: string,
+  model: string,
+  captureScreenshot = false
+): Promise<BrowserTaskResult> {
+  return invoke<BrowserTaskResult>("browser_run_task", {
+    task,
+    providerType,
+    apiKey,
+    model,
+    captureScreenshot,
   });
 }
 

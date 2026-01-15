@@ -354,10 +354,15 @@ Already implemented with Tantivy, may need refinement:
   - Tauri commands: convert_document, convert_documents_batch, get_supported_document_extensions, is_supported_document
   - Command Palette: "Import Document" command
   - https://github.com/microsoft/markitdown
-- [ ] **browser-use** integration
+- [x] **browser-use** integration
   - AI-powered browser automation for web research
-  - Automated web scraping and data extraction
-  - Could enhance AI web research features
+  - Integrated as AI chat tool (`browse_web`)
+  - AI can autonomously browse websites, fill forms, extract data
+  - Works with OpenAI and Anthropic providers
+  - Screenshot capture support
+  - Optional dependency (install with `uv pip install browser-use && uvx browser-use install`)
+  - Python module: `katt_ai/browser_automation.py`
+  - Tauri command: `browser_run_task`
   - https://github.com/browser-use/browser-use
 
 ---

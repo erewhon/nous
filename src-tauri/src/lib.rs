@@ -159,6 +159,7 @@ pub fn run() {
             commands::ai_chat_with_tools,
             commands::ai_chat_stream,
             commands::ai_summarize_pages,
+            commands::browser_run_task,
             // Markdown commands
             commands::export_page_markdown,
             commands::import_markdown,

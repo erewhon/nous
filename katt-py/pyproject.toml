@@ -22,6 +22,9 @@ dev = [
 ollama = [
     "ollama>=0.4",
 ]
+browser = [
+    "browser-use>=0.2",
+]
 
 [build-system]
 requires = ["hatchling"]

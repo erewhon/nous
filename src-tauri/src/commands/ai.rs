@@ -3,7 +3,7 @@
 use tauri::{AppHandle, Emitter, State};
 
 use crate::python_bridge::{
-    AIConfig, ChatMessage, ChatResponse, ChatResponseWithActions,
+    AIConfig, BrowserTaskResult, ChatMessage, ChatResponse, ChatResponseWithActions,
     NotebookInfo, PageContext, PageInfo, PageSummaryInput, PagesSummaryResult,
     RelatedPageSuggestion, StreamEvent,
 };
@@ -315,6 +315,41 @@ pub async fn ai_summarize_pages(
             .summarize_pages(pages, custom_prompt, summary_style, config)
             .map_err(|e| CommandError {
                 message: format!("AI summarization error: {}", e),
+            })
+    })
+    .await
+    .map_err(|e| CommandError {
+        message: format!("Task join error: {}", e),
+    })?
+}
+
+/// Run a browser automation task using AI
+#[tauri::command]
+pub async fn browser_run_task(
+    state: State<'_, AppState>,
+    task: String,
+    provider_type: String,
+    api_key: String,
+    model: String,
+    capture_screenshot: Option<bool>,
+) -> Result<BrowserTaskResult, CommandError> {
+    let python_ai = state.python_ai.clone();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let python_ai = python_ai.lock().map_err(|e| CommandError {
+            message: format!("Failed to acquire Python AI lock: {}", e),
+        })?;
+
+        python_ai
+            .run_browser_task(
+                &task,
+                &provider_type,
+                &api_key,
+                &model,
+                capture_screenshot.unwrap_or(false),
+            )
+            .map_err(|e| CommandError {
+                message: format!("Browser automation error: {}", e),
             })
     })
     .await

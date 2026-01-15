@@ -237,6 +237,17 @@ pub enum StreamEvent {
     Error { message: String },
 }
 
+/// Result from browser automation task
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserTaskResult {
+    pub success: bool,
+    pub content: String,
+    pub screenshot: Option<String>,
+    pub structured_data: Option<serde_json::Value>,
+    pub error: Option<String>,
+}
+
 /// Python AI bridge for calling Python functions
 pub struct PythonAI {
     katt_py_path: PathBuf,
@@ -1434,6 +1445,63 @@ impl PythonAI {
             let is_supported: bool = result.extract()?;
 
             Ok(is_supported)
+        })
+    }
+
+    // ===== Browser Automation =====
+
+    /// Run a browser automation task using AI
+    pub fn run_browser_task(
+        &self,
+        task: &str,
+        provider_type: &str,
+        api_key: &str,
+        model: &str,
+        capture_screenshot: bool,
+    ) -> Result<BrowserTaskResult> {
+        Python::attach(|py| {
+            self.setup_python_path(py)?;
+
+            let browser_module = py.import("katt_ai.browser_automation")?;
+            let run_fn = browser_module.getattr("run_browser_task_sync")?;
+
+            let kwargs = PyDict::new(py);
+            kwargs.set_item("task", task)?;
+            kwargs.set_item("provider_type", provider_type)?;
+            kwargs.set_item("api_key", api_key)?;
+            kwargs.set_item("model", model)?;
+            kwargs.set_item("capture_screenshot", capture_screenshot)?;
+
+            let result = run_fn.call((), Some(&kwargs))?;
+            let result_dict: HashMap<String, Py<PyAny>> = result.extract()?;
+
+            Ok(BrowserTaskResult {
+                success: result_dict
+                    .get("success")
+                    .and_then(|v| v.extract::<bool>(py).ok())
+                    .unwrap_or(false),
+                content: result_dict
+                    .get("content")
+                    .and_then(|v| v.extract::<String>(py).ok())
+                    .unwrap_or_default(),
+                screenshot: result_dict
+                    .get("screenshot")
+                    .and_then(|v| v.extract::<String>(py).ok()),
+                structured_data: result_dict
+                    .get("structured_data")
+                    .and_then(|v| {
+                        // Convert Python dict to JSON value
+                        let json_mod = py.import("json").ok()?;
+                        let json_str: String = json_mod
+                            .getattr("dumps").ok()?
+                            .call1((v,)).ok()?
+                            .extract().ok()?;
+                        serde_json::from_str(&json_str).ok()
+                    }),
+                error: result_dict
+                    .get("error")
+                    .and_then(|v| v.extract::<String>(py).ok()),
+            })
         })
     }
 }

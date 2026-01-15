@@ -53,6 +53,17 @@ export const ResearchSummarySchema = z.object({
 
 export type ResearchSummary = z.infer<typeof ResearchSummarySchema>;
 
+// Browser automation task result
+export const BrowserTaskResultSchema = z.object({
+  success: z.boolean(),
+  content: z.string(),
+  screenshot: z.string().nullable().optional(),
+  structuredData: z.record(z.string(), z.unknown()).nullable().optional(),
+  error: z.string().nullable().optional(),
+});
+
+export type BrowserTaskResult = z.infer<typeof BrowserTaskResultSchema>;
+
 // ===== State Types =====
 
 // Research session state
