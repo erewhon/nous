@@ -15,11 +15,14 @@ import {
   importEvernoteEnex,
   previewScrivenerProject,
   importScrivenerProject,
+  previewOrgmode,
+  importOrgmode,
   type BackupInfo,
   type NotionImportPreview,
   type ObsidianImportPreview,
   type EvernoteImportPreview,
   type ScrivenerImportPreview,
+  type OrgmodeImportPreview,
 } from "../../utils/api";
 import { useNotebookStore } from "../../stores/notebookStore";
 import { useToastStore } from "../../stores/toastStore";
@@ -30,7 +33,7 @@ interface BackupDialogProps {
   onClose: () => void;
 }
 
-type ImportTab = "export" | "import" | "notion" | "obsidian" | "evernote" | "scrivener" | "backups";
+type ImportTab = "export" | "import" | "notion" | "obsidian" | "evernote" | "scrivener" | "orgmode" | "backups";
 
 export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
   const [activeTab, setActiveTab] = useState<ImportTab>("export");
@@ -58,6 +61,11 @@ export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
   const [scrivenerPreview, setScrivenerPreview] = useState<ScrivenerImportPreview | null>(null);
   const [scrivenerProjectPath, setScrivenerProjectPath] = useState<string | null>(null);
   const [scrivenerNotebookName, setScrivenerNotebookName] = useState("");
+
+  // Org-mode import state
+  const [orgmodePreview, setOrgmodePreview] = useState<OrgmodeImportPreview | null>(null);
+  const [orgmodeSourcePath, setOrgmodeSourcePath] = useState<string | null>(null);
+  const [orgmodeNotebookName, setOrgmodeNotebookName] = useState("");
 
   const { notebooks, loadNotebooks } = useNotebookStore();
   const toast = useToastStore();
@@ -451,6 +459,92 @@ export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
     setError(null);
   };
 
+  // Org-mode Import handlers
+  const handleOrgmodeSelectSource = async () => {
+    try {
+      setError(null);
+      setSuccess(null);
+      setOrgmodePreview(null);
+      setOrgmodeSourcePath(null);
+
+      // Allow selecting either a file or directory
+      const path = await open({
+        multiple: false,
+        filters: [{ name: "Org-mode files", extensions: ["org"] }],
+      });
+
+      if (!path) return;
+
+      setIsLoading(true);
+      const preview = await previewOrgmode(path);
+      setOrgmodePreview(preview);
+      setOrgmodeSourcePath(path);
+      setOrgmodeNotebookName(preview.suggestedName);
+    } catch (err) {
+      setError(`Failed to read org-mode file: ${err}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleOrgmodeSelectFolder = async () => {
+    try {
+      setError(null);
+      setSuccess(null);
+      setOrgmodePreview(null);
+      setOrgmodeSourcePath(null);
+
+      const path = await open({
+        directory: true,
+        multiple: false,
+      });
+
+      if (!path) return;
+
+      setIsLoading(true);
+      const preview = await previewOrgmode(path);
+      setOrgmodePreview(preview);
+      setOrgmodeSourcePath(path);
+      setOrgmodeNotebookName(preview.suggestedName);
+    } catch (err) {
+      setError(`Failed to read org-mode folder: ${err}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleOrgmodeImport = async () => {
+    if (!orgmodeSourcePath) return;
+
+    try {
+      setError(null);
+      setSuccess(null);
+      setIsLoading(true);
+
+      const notebook = await importOrgmode(
+        orgmodeSourcePath,
+        orgmodeNotebookName || undefined
+      );
+      await loadNotebooks();
+      setSuccess(`Imported "${notebook.name}" from Org-mode successfully`);
+
+      setOrgmodePreview(null);
+      setOrgmodeSourcePath(null);
+      setOrgmodeNotebookName("");
+    } catch (err) {
+      setError(`Org-mode import failed: ${err}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleOrgmodeCancel = () => {
+    setOrgmodePreview(null);
+    setOrgmodeSourcePath(null);
+    setOrgmodeNotebookName("");
+    setError(null);
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -495,6 +589,7 @@ export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
               { id: "obsidian" as const, label: "Obsidian", icon: <IconObsidian /> },
               { id: "evernote" as const, label: "Evernote", icon: <IconEvernote /> },
               { id: "scrivener" as const, label: "Scrivener", icon: <IconScrivener /> },
+              { id: "orgmode" as const, label: "Org-mode", icon: <IconOrgmode /> },
               { id: "backups" as const, label: "Auto-Backups", icon: <IconArchive /> },
             ].map((tab) => (
               <button
@@ -536,6 +631,7 @@ export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
               {activeTab === "obsidian" && "Import from Obsidian"}
               {activeTab === "evernote" && "Import from Evernote"}
               {activeTab === "scrivener" && "Import from Scrivener"}
+              {activeTab === "orgmode" && "Import from Org-mode"}
               {activeTab === "backups" && "Auto-Backups"}
             </h3>
             <button
@@ -630,6 +726,18 @@ export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
                 onImport={handleScrivenerImport}
                 onCancel={handleScrivenerCancel}
                 onNameChange={setScrivenerNotebookName}
+              />
+            )}
+            {activeTab === "orgmode" && (
+              <OrgmodeImportTab
+                isLoading={isLoading}
+                preview={orgmodePreview}
+                notebookName={orgmodeNotebookName}
+                onSelectFile={handleOrgmodeSelectSource}
+                onSelectFolder={handleOrgmodeSelectFolder}
+                onImport={handleOrgmodeImport}
+                onCancel={handleOrgmodeCancel}
+                onNameChange={setOrgmodeNotebookName}
               />
             )}
             {activeTab === "backups" && (
@@ -1962,5 +2070,268 @@ function ScrivenerImportTab({
         </button>
       </div>
     </div>
+  );
+}
+
+// Org-mode Import Tab
+function OrgmodeImportTab({
+  isLoading,
+  preview,
+  notebookName,
+  onSelectFile,
+  onSelectFolder,
+  onImport,
+  onCancel,
+  onNameChange,
+}: {
+  isLoading: boolean;
+  preview: OrgmodeImportPreview | null;
+  notebookName: string;
+  onSelectFile: () => void;
+  onSelectFolder: () => void;
+  onImport: () => void;
+  onCancel: () => void;
+  onNameChange: (name: string) => void;
+}) {
+  if (!preview) {
+    return (
+      <div className="space-y-6">
+        <p
+          className="text-sm"
+          style={{ color: "var(--color-text-muted)" }}
+        >
+          Import pages from Emacs Org-mode files (.org). You can select a single file or a folder containing multiple org files.
+        </p>
+
+        <div
+          className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed p-12"
+          style={{ borderColor: "var(--color-border)" }}
+        >
+          <div
+            className="mb-4 rounded-full p-4"
+            style={{ backgroundColor: "var(--color-bg-tertiary)" }}
+          >
+            <IconOrgmode size={32} />
+          </div>
+          <h4
+            className="mb-2 text-lg font-medium"
+            style={{ color: "var(--color-text-primary)" }}
+          >
+            Import from Org-mode
+          </h4>
+          <p
+            className="mb-6 text-center text-sm"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            Select an .org file or folder
+          </p>
+          <div className="flex gap-3">
+            <button
+              onClick={onSelectFile}
+              disabled={isLoading}
+              className="rounded-lg px-6 py-2.5 text-sm font-medium transition-colors"
+              style={{
+                backgroundColor: "var(--color-accent)",
+                color: "white",
+                opacity: isLoading ? 0.5 : 1,
+              }}
+            >
+              {isLoading ? "Loading..." : "Choose File"}
+            </button>
+            <button
+              onClick={onSelectFolder}
+              disabled={isLoading}
+              className="rounded-lg px-6 py-2.5 text-sm font-medium transition-colors"
+              style={{
+                backgroundColor: "var(--color-bg-tertiary)",
+                color: "var(--color-text-secondary)",
+                opacity: isLoading ? 0.5 : 1,
+              }}
+            >
+              Choose Folder
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <p
+        className="text-sm"
+        style={{ color: "var(--color-text-muted)" }}
+      >
+        Review the import preview and confirm.
+      </p>
+
+      <div
+        className="grid grid-cols-3 gap-4 rounded-lg border p-4"
+        style={{
+          borderColor: "var(--color-border)",
+          backgroundColor: "var(--color-bg-secondary)",
+        }}
+      >
+        <div>
+          <div
+            className="text-2xl font-bold"
+            style={{ color: "var(--color-accent)" }}
+          >
+            {preview.pageCount}
+          </div>
+          <div
+            className="text-sm"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            {preview.isSingleFile ? "File" : "Files"}
+          </div>
+        </div>
+        <div>
+          <div
+            className="text-2xl font-bold"
+            style={{ color: "var(--color-accent)" }}
+          >
+            {preview.assetCount}
+          </div>
+          <div
+            className="text-sm"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            Assets
+          </div>
+        </div>
+        <div>
+          <div
+            className="text-2xl font-bold"
+            style={{ color: "var(--color-accent)" }}
+          >
+            {preview.folderCount}
+          </div>
+          <div
+            className="text-sm"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            Folders
+          </div>
+        </div>
+      </div>
+
+      {preview.pages.length > 0 && (
+        <div>
+          <h4
+            className="mb-2 text-sm font-medium"
+            style={{ color: "var(--color-text-primary)" }}
+          >
+            Sample Pages
+          </h4>
+          <div
+            className="max-h-32 space-y-1 overflow-y-auto rounded-lg border p-2"
+            style={{
+              borderColor: "var(--color-border)",
+              backgroundColor: "var(--color-bg-secondary)",
+            }}
+          >
+            {preview.pages.map((page, i) => (
+              <div
+                key={i}
+                className="flex items-center gap-2 text-sm"
+                style={{ color: "var(--color-text-secondary)" }}
+              >
+                <span>{page.hasTodos ? "☑️" : page.hasScheduled ? "📅" : "📄"}</span>
+                <span className="truncate">{page.title}</span>
+                {page.tags.length > 0 && (
+                  <span className="text-xs opacity-60">
+                    {page.tags.slice(0, 2).map(t => `:${t}:`).join(" ")}
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {preview.warnings.length > 0 && (
+        <div
+          className="rounded-lg p-3 text-sm"
+          style={{
+            backgroundColor: "rgba(234, 179, 8, 0.1)",
+            color: "var(--color-warning)",
+          }}
+        >
+          <strong>Warnings:</strong>
+          <ul className="mt-1 list-disc pl-4">
+            {preview.warnings.map((w, i) => (
+              <li key={i}>{w}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <div>
+        <label
+          className="mb-2 block text-sm font-medium"
+          style={{ color: "var(--color-text-primary)" }}
+        >
+          Notebook Name
+        </label>
+        <input
+          type="text"
+          value={notebookName}
+          onChange={(e) => onNameChange(e.target.value)}
+          className="w-full rounded-lg border px-4 py-2 text-sm"
+          style={{
+            borderColor: "var(--color-border)",
+            backgroundColor: "var(--color-bg-secondary)",
+            color: "var(--color-text-primary)",
+          }}
+          placeholder="Enter notebook name"
+        />
+      </div>
+
+      <div className="flex justify-end gap-3">
+        <button
+          onClick={onCancel}
+          disabled={isLoading}
+          className="rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+          style={{
+            backgroundColor: "var(--color-bg-tertiary)",
+            color: "var(--color-text-secondary)",
+          }}
+        >
+          Cancel
+        </button>
+        <button
+          onClick={onImport}
+          disabled={isLoading}
+          className="rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+          style={{
+            backgroundColor: "var(--color-accent)",
+            color: "white",
+            opacity: isLoading ? 0.5 : 1,
+          }}
+        >
+          {isLoading ? "Importing..." : "Import Notebook"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function IconOrgmode({ size = 16 }: { size?: number }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="12" cy="12" r="10" />
+      <path d="M12 6v6l4 2" />
+    </svg>
   );
 }

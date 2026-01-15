@@ -13,6 +13,7 @@ mod joplin;
 mod markdown;
 mod notion;
 mod obsidian;
+mod orgmode;
 mod python_bridge;
 mod scrivener;
 mod search;
@@ -197,6 +198,9 @@ pub fn run() {
             // Joplin import commands
             commands::preview_joplin_import_cmd,
             commands::import_joplin_cmd,
+            // Org-mode import commands
+            commands::preview_orgmode_cmd,
+            commands::import_orgmode_cmd,
             // Folder commands
             commands::list_folders,
             commands::get_folder,

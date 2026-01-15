@@ -710,6 +710,40 @@ export async function importScrivenerProject(
   return invoke<Notebook>("import_scrivener_project_cmd", { scrivPath, notebookName });
 }
 
+// ===== Org-mode Import API =====
+
+export interface OrgmodePagePreview {
+  title: string;
+  path: string;
+  tags: string[];
+  hasTodos: boolean;
+  hasScheduled: boolean;
+}
+
+export interface OrgmodeImportPreview {
+  pageCount: number;
+  assetCount: number;
+  folderCount: number;
+  nestedDepth: number;
+  pages: OrgmodePagePreview[];
+  suggestedName: string;
+  warnings: string[];
+  isSingleFile: boolean;
+}
+
+export async function previewOrgmode(
+  sourcePath: string
+): Promise<OrgmodeImportPreview> {
+  return invoke<OrgmodeImportPreview>("preview_orgmode_cmd", { sourcePath });
+}
+
+export async function importOrgmode(
+  sourcePath: string,
+  notebookName?: string
+): Promise<Notebook> {
+  return invoke<Notebook>("import_orgmode_cmd", { sourcePath, notebookName });
+}
+
 // ===== Actions API =====
 
 import type {

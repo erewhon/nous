@@ -307,10 +307,13 @@ Already implemented with Tantivy, may need refinement:
 - [x] Notion export import (ZIP with markdown & CSV databases)
 - [x] Obsidian vault import (markdown with YAML frontmatter, wiki-links, attachments)
 - [x] Joplin export import (JEX archive or raw directory)
-- [ ] Org-mode import (.org files)
+- [x] Org-mode import (.org files)
   - Parse org-mode syntax (headers, lists, TODOs, tags, properties)
   - Convert org timestamps and scheduling to page metadata
   - Handle org-mode links and attachments
+  - Import single .org file or folder of .org files
+  - Preserves inline formatting (*bold*, /italic/, =code=)
+  - Converts code blocks, quotes, checklists
 - [ ] Apple Notes import
   - **Complexity: Medium-High** (1-2 days with existing tools, 3-4 days from scratch)
   - Notes stored in SQLite at `~/Library/Group Containers/group.com.apple.notes/NoteStore.sqlite`
