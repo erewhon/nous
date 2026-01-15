@@ -4,6 +4,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useAIStore, AI_PANEL_CONSTRAINTS } from "../../stores/aiStore";
 import { usePageStore } from "../../stores/pageStore";
 import { useNotebookStore } from "../../stores/notebookStore";
+import { useSectionStore } from "../../stores/sectionStore";
 import {
   aiChatStream,
   createNotebook as apiCreateNotebook,
@@ -75,6 +76,7 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
   } = useAIStore();
   const { selectedPageId, pages, loadPages } = usePageStore();
   const { notebooks, selectedNotebookId, loadNotebooks } = useNotebookStore();
+  const { sections } = useSectionStore();
 
   // Use props if provided, otherwise use store state
   const isOpen = isOpenProp !== undefined ? isOpenProp : panel.isOpen;
@@ -109,6 +111,10 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
   const currentNotebook = panel.lockedContext
     ? notebooks.find((n) => n.id === panel.lockedContext?.notebookId)
     : notebooks.find((n) => n.id === selectedNotebookId);
+  // Get current section based on page's sectionId
+  const currentSection = currentPage?.sectionId
+    ? sections.find((s) => s.id === currentPage.sectionId)
+    : undefined;
 
   // Handle locking context to current page
   const handleLockContext = useCallback(() => {
@@ -553,12 +559,75 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
         name: n.name,
       }));
 
-      // Resolve system prompt with inheritance: page -> notebook -> app
-      const resolvedSystemPrompt =
-        currentPage?.systemPrompt ||
-        currentNotebook?.systemPrompt ||
-        settings.systemPrompt ||
-        undefined;
+      // Resolve system prompt with inheritance and concatenation support
+      // Hierarchy: page -> section -> notebook -> app
+      // Each level can either override higher-level prompts or concatenate with them
+      const resolveSystemPrompt = (): string | undefined => {
+        const promptParts: string[] = [];
+
+        // Start with app default (always included as base if nothing overrides)
+        const appPrompt = settings.systemPrompt;
+
+        // Check notebook level
+        const notebookPrompt = currentNotebook?.systemPrompt;
+        const notebookMode = currentNotebook?.systemPromptMode || "override";
+
+        // Check section level
+        const sectionPrompt = currentSection?.systemPrompt;
+        const sectionMode = currentSection?.systemPromptMode || "override";
+
+        // Check page level
+        const pagePrompt = currentPage?.systemPrompt;
+        const pageMode = currentPage?.systemPromptMode || "override";
+
+        // Build prompt from top (app) to bottom (page)
+        // Each level either overrides or concatenates
+
+        // Start with app default
+        if (appPrompt) {
+          promptParts.push(appPrompt);
+        }
+
+        // Notebook level
+        if (notebookPrompt) {
+          if (notebookMode === "override") {
+            // Clear previous and use only notebook prompt
+            promptParts.length = 0;
+            promptParts.push(notebookPrompt);
+          } else {
+            // Concatenate with previous
+            promptParts.push(notebookPrompt);
+          }
+        }
+
+        // Section level
+        if (sectionPrompt) {
+          if (sectionMode === "override") {
+            // Clear previous and use only section prompt
+            promptParts.length = 0;
+            promptParts.push(sectionPrompt);
+          } else {
+            // Concatenate with previous
+            promptParts.push(sectionPrompt);
+          }
+        }
+
+        // Page level
+        if (pagePrompt) {
+          if (pageMode === "override") {
+            // Clear previous and use only page prompt
+            promptParts.length = 0;
+            promptParts.push(pagePrompt);
+          } else {
+            // Concatenate with previous
+            promptParts.push(pagePrompt);
+          }
+        }
+
+        return promptParts.length > 0 ? promptParts.join("\n\n") : undefined;
+      };
+
+      const resolvedSystemPrompt = resolveSystemPrompt();
 
       // Start the streaming request - command now waits for completion
       await aiChatStream(userMessage.content, {

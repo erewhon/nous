@@ -31,6 +31,22 @@ impl Default for FolderType {
     }
 }
 
+/// Mode for how system prompts are applied
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum SystemPromptMode {
+    /// Override higher-level prompts (default behavior)
+    Override,
+    /// Concatenate with higher-level prompts
+    Concatenate,
+}
+
+impl Default for SystemPromptMode {
+    fn default() -> Self {
+        Self::Override
+    }
+}
+
 /// A section within a notebook for grouping folders and pages (like OneNote)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -41,6 +57,12 @@ pub struct Section {
     /// Color for the section tab (CSS color string: hex, rgb, etc.)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
+    /// Custom AI system prompt for this section
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system_prompt: Option<String>,
+    /// How this prompt interacts with higher-level prompts
+    #[serde(default)]
+    pub system_prompt_mode: SystemPromptMode,
     /// Position for ordering sections
     #[serde(default)]
     pub position: i32,
@@ -56,6 +78,8 @@ impl Section {
             notebook_id,
             name,
             color: None,
+            system_prompt: None,
+            system_prompt_mode: SystemPromptMode::default(),
             position: 0,
             created_at: now,
             updated_at: now,
@@ -140,6 +164,9 @@ pub struct Notebook {
     /// Custom AI system prompt for this notebook (overrides app default)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub system_prompt: Option<String>,
+    /// How this prompt interacts with higher-level prompts
+    #[serde(default)]
+    pub system_prompt_mode: SystemPromptMode,
     /// AI provider override for this notebook (e.g., "openai", "anthropic", "ollama", "lmstudio")
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ai_provider: Option<String>,
@@ -164,6 +191,7 @@ impl Notebook {
             color: None,
             sections_enabled: false,
             system_prompt: None,
+            system_prompt_mode: SystemPromptMode::default(),
             ai_provider: None,
             ai_model: None,
             sync_config: None,
@@ -226,6 +254,9 @@ pub struct Page {
     /// Custom AI system prompt for this page (overrides notebook and app defaults)
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub system_prompt: Option<String>,
+    /// How this prompt interacts with higher-level prompts
+    #[serde(default)]
+    pub system_prompt_mode: SystemPromptMode,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -245,6 +276,7 @@ impl Page {
             is_cover: false,
             position: 0,
             system_prompt: None,
+            system_prompt_mode: SystemPromptMode::default(),
             created_at: now,
             updated_at: now,
         }

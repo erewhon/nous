@@ -23,6 +23,7 @@ import { PageHistoryDialog } from "../PageHistory";
 import { WritingAssistancePanel } from "./WritingAssistancePanel";
 import { useFolderStore } from "../../stores/folderStore";
 import { useToastStore } from "../../stores/toastStore";
+import { useDrawingStore } from "../../stores/drawingStore";
 import type { PageStats } from "../../utils/pageStats";
 
 interface PageHeaderProps {
@@ -53,6 +54,7 @@ export function PageHeader({ page, isSaving, lastSaved, stats, pageText = "" }: 
   const { getTemplateForPage } = useTemplateStore();
   const { showPageStats, togglePageStats } = useThemeStore();
   const toast = useToastStore();
+  const { openAnnotationOverlay } = useDrawingStore();
 
   // Check if this page is a template source
   const pageTemplate = getTemplateForPage(page.id);
@@ -380,6 +382,32 @@ export function PageHeader({ page, isSaving, lastSaved, stats, pageText = "" }: 
           Use Template
         </button>
       )}
+
+      {/* Annotate button */}
+      <button
+        onClick={() => openAnnotationOverlay(page.notebookId, page.id)}
+        className="ml-4 rounded-lg p-2 transition-colors hover:opacity-80"
+        style={{ backgroundColor: "var(--color-bg-tertiary)" }}
+        title="Annotate page"
+      >
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="18"
+          height="18"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          style={{ color: "var(--color-text-muted)" }}
+        >
+          <path d="M12 19l7-7 3 3-7 7-3-3z" />
+          <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z" />
+          <path d="M2 2l7.586 7.586" />
+          <circle cx="11" cy="11" r="2" />
+        </svg>
+      </button>
 
       {/* Menu button */}
       <div ref={menuRef} className="relative ml-4">

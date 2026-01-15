@@ -21,12 +21,18 @@ export type EditorData = z.infer<typeof EditorDataSchema>;
 export const FolderTypeSchema = z.enum(["standard", "archive"]);
 export type FolderType = z.infer<typeof FolderTypeSchema>;
 
+// System prompt mode enum
+export const SystemPromptModeSchema = z.enum(["override", "concatenate"]);
+export type SystemPromptMode = z.infer<typeof SystemPromptModeSchema>;
+
 // Section schema (OneNote-style organizational layer)
 export const SectionSchema = z.object({
   id: z.string().uuid(),
   notebookId: z.string().uuid(),
   name: z.string(),
   color: z.string().optional(),
+  systemPrompt: z.string().optional(),
+  systemPromptMode: SystemPromptModeSchema.default("override"),
   position: z.number().default(0),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
@@ -63,6 +69,7 @@ export const PageSchema = z.object({
   isCover: z.boolean().default(false),
   position: z.number().default(0),
   systemPrompt: z.string().optional(),
+  systemPromptMode: SystemPromptModeSchema.default("override"),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });

@@ -24,8 +24,6 @@ export function VideoFullScreen({ onExportTranscript }: VideoFullScreenProps) {
     videoData,
     currentTime,
     isPlaying,
-    showTranscript,
-    highlightedSegmentId,
   } = viewerState;
 
   // Sync video element with store state

@@ -161,6 +161,7 @@ pub fn sync_from_external_editor(
         is_cover: existing_page.is_cover,
         position: existing_page.position,
         system_prompt: existing_page.system_prompt,
+        system_prompt_mode: existing_page.system_prompt_mode,
         created_at: existing_page.created_at,
         updated_at: chrono::Utc::now(),
     };

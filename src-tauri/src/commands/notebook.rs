@@ -58,6 +58,7 @@ pub fn update_notebook(
     color: Option<String>,
     sections_enabled: Option<bool>,
     system_prompt: Option<String>,
+    system_prompt_mode: Option<String>,
     ai_provider: Option<String>,
     ai_model: Option<String>,
 ) -> CommandResult<Notebook> {
@@ -83,6 +84,13 @@ pub fn update_notebook(
     // Allow setting system_prompt to None (empty string clears it)
     if let Some(prompt) = system_prompt {
         notebook.system_prompt = if prompt.is_empty() { None } else { Some(prompt) };
+    }
+    // Set system_prompt_mode
+    if let Some(mode) = system_prompt_mode {
+        notebook.system_prompt_mode = match mode.as_str() {
+            "concatenate" => crate::storage::SystemPromptMode::Concatenate,
+            _ => crate::storage::SystemPromptMode::Override,
+        };
     }
     // Allow setting ai_provider to None (empty string clears it)
     if let Some(provider) = ai_provider {

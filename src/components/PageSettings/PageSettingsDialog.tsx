@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import type { Page } from "../../types/page";
+import type { Page, SystemPromptMode } from "../../types/page";
 import { usePageStore } from "../../stores/pageStore";
 
 interface PageSettingsDialogProps {
@@ -15,6 +15,7 @@ export function PageSettingsDialog({
 }: PageSettingsDialogProps) {
   const { updatePage } = usePageStore();
   const [systemPrompt, setSystemPrompt] = useState("");
+  const [systemPromptMode, setSystemPromptMode] = useState<SystemPromptMode>("override");
   const [isSaving, setIsSaving] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -22,6 +23,7 @@ export function PageSettingsDialog({
   useEffect(() => {
     if (page) {
       setSystemPrompt(page.systemPrompt || "");
+      setSystemPromptMode(page.systemPromptMode || "override");
     }
   }, [page]);
 
@@ -53,6 +55,7 @@ export function PageSettingsDialog({
     try {
       await updatePage(page.notebookId, page.id, {
         systemPrompt: systemPrompt.trim() || undefined,
+        systemPromptMode,
       });
       onClose();
     } finally {
@@ -69,7 +72,9 @@ export function PageSettingsDialog({
 
   if (!isOpen || !page) return null;
 
-  const hasChanges = (systemPrompt || "") !== (page.systemPrompt || "");
+  const hasChanges =
+    (systemPrompt || "") !== (page.systemPrompt || "") ||
+    systemPromptMode !== (page.systemPromptMode || "override");
 
   return (
     <div
@@ -145,11 +150,31 @@ export function PageSettingsDialog({
                 color: "var(--color-text-primary)",
               }}
             />
+            {/* Mode toggle - only show if there's a prompt */}
+            {systemPrompt && (
+              <label className="mt-3 flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={systemPromptMode === "concatenate"}
+                  onChange={(e) => setSystemPromptMode(e.target.checked ? "concatenate" : "override")}
+                  className="rounded"
+                  style={{ accentColor: "var(--color-accent)" }}
+                />
+                <span
+                  className="text-sm"
+                  style={{ color: "var(--color-text-secondary)" }}
+                >
+                  Append to higher-level prompts (instead of replacing)
+                </span>
+              </label>
+            )}
             <p
               className="mt-1.5 text-xs"
               style={{ color: "var(--color-text-muted)" }}
             >
-              This prompt has the highest priority and overrides both notebook and app defaults when chatting with AI on this page.
+              {systemPromptMode === "concatenate"
+                ? "This prompt will be appended to notebook and app prompts."
+                : "This prompt has the highest priority and overrides both notebook and app defaults when chatting with AI on this page."}
             </p>
           </div>
 

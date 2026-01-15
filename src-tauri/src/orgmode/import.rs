@@ -651,6 +651,7 @@ fn import_org_file(content: &str, notebook_id: Uuid, fallback_title: &str) -> Pa
         is_cover: false,
         position: 0,
         system_prompt: None,
+        system_prompt_mode: crate::storage::SystemPromptMode::default(),
         created_at,
         updated_at: now,
     }
@@ -951,6 +952,7 @@ pub fn import_orgmode(
         color: None,
         sections_enabled: false,
         system_prompt: None,
+        system_prompt_mode: crate::storage::SystemPromptMode::default(),
         ai_provider: None,
         ai_model: None,
         sync_config: None,

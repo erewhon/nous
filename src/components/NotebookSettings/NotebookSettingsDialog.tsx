@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import type { Notebook, AIProviderType } from "../../types/notebook";
+import type { SystemPromptMode } from "../../types/page";
 import type { SyncMode, AuthType } from "../../types/sync";
 import { useNotebookStore } from "../../stores/notebookStore";
 import { useAIStore } from "../../stores/aiStore";
@@ -62,6 +63,7 @@ export function NotebookSettingsDialog({
   const [color, setColor] = useState<string | undefined>(undefined);
   const [sectionsEnabled, setSectionsEnabled] = useState(false);
   const [systemPrompt, setSystemPrompt] = useState("");
+  const [systemPromptMode, setSystemPromptMode] = useState<SystemPromptMode>("override");
   const [aiProvider, setAiProvider] = useState<AIProviderType | undefined>(undefined);
   const [aiModel, setAiModel] = useState<string | undefined>(undefined);
   const [useAppDefault, setUseAppDefault] = useState(true);
@@ -167,6 +169,7 @@ export function NotebookSettingsDialog({
       setColor(notebook.color);
       setSectionsEnabled(notebook.sectionsEnabled ?? false);
       setSystemPrompt(notebook.systemPrompt || "");
+      setSystemPromptMode(notebook.systemPromptMode || "override");
       setAiProvider(notebook.aiProvider);
       setAiModel(notebook.aiModel);
       setUseAppDefault(!notebook.aiProvider);
@@ -213,6 +216,7 @@ export function NotebookSettingsDialog({
         color: color || undefined,
         sectionsEnabled,
         systemPrompt: systemPrompt.trim() || undefined,
+        systemPromptMode,
         aiProvider: useAppDefault ? undefined : aiProvider,
         aiModel: useAppDefault ? undefined : aiModel,
       });
@@ -244,6 +248,7 @@ export function NotebookSettingsDialog({
     (color || null) !== (notebook.color || null) ||
     sectionsEnabled !== (notebook.sectionsEnabled ?? false) ||
     (systemPrompt || "") !== (notebook.systemPrompt || "") ||
+    systemPromptMode !== (notebook.systemPromptMode || "override") ||
     (useAppDefault ? undefined : aiProvider) !== notebook.aiProvider ||
     (useAppDefault ? undefined : aiModel) !== notebook.aiModel;
 
@@ -577,12 +582,31 @@ export function NotebookSettingsDialog({
                 color: "var(--color-text-primary)",
               }}
             />
+            {/* Mode toggle - only show if there's a prompt */}
+            {systemPrompt && (
+              <label className="mt-3 flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={systemPromptMode === "concatenate"}
+                  onChange={(e) => setSystemPromptMode(e.target.checked ? "concatenate" : "override")}
+                  className="rounded"
+                  style={{ accentColor: "var(--color-accent)" }}
+                />
+                <span
+                  className="text-sm"
+                  style={{ color: "var(--color-text-secondary)" }}
+                >
+                  Append to app default prompt (instead of replacing)
+                </span>
+              </label>
+            )}
             <p
               className="mt-1.5 text-xs"
               style={{ color: "var(--color-text-muted)" }}
             >
-              This prompt overrides the app default for all pages in this notebook,
-              unless a page has its own custom prompt.
+              {systemPromptMode === "concatenate"
+                ? "This prompt will be appended to the app default prompt."
+                : "This prompt overrides the app default for all pages in this notebook, unless a page has its own custom prompt."}
             </p>
           </div>
 

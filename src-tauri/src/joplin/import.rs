@@ -699,6 +699,7 @@ pub fn import_joplin(
         color: None,
         sections_enabled: false,
         system_prompt: None,
+        system_prompt_mode: crate::storage::SystemPromptMode::default(),
         ai_provider: None,
         ai_model: None,
         sync_config: None,

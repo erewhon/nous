@@ -111,6 +111,7 @@ pub fn update_page(
     content: Option<EditorData>,
     tags: Option<Vec<String>>,
     system_prompt: Option<String>,
+    system_prompt_mode: Option<String>,
     section_id: Option<Option<String>>,
 ) -> CommandResult<Page> {
     let storage = state.storage.lock().unwrap();
@@ -135,6 +136,13 @@ pub fn update_page(
     // Allow setting system_prompt to None (empty string clears it)
     if let Some(prompt) = system_prompt {
         page.system_prompt = if prompt.is_empty() { None } else { Some(prompt) };
+    }
+    // Set system_prompt_mode
+    if let Some(mode) = system_prompt_mode {
+        page.system_prompt_mode = match mode.as_str() {
+            "concatenate" => crate::storage::SystemPromptMode::Concatenate,
+            _ => crate::storage::SystemPromptMode::Override,
+        };
     }
     // Allow setting section_id (Some(Some(id)) to set, Some(None) to clear)
     if let Some(sect_id) = section_id {

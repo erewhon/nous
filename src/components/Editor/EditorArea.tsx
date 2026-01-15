@@ -7,6 +7,7 @@ import { useSectionStore } from "../../stores/sectionStore";
 import { useLinkStore } from "../../stores/linkStore";
 import { usePDFStore } from "../../stores/pdfStore";
 import { useVideoStore } from "../../stores/videoStore";
+import { useDrawingStore } from "../../stores/drawingStore";
 import { FolderTree } from "./FolderTree";
 import { BlockEditor } from "./BlockEditor";
 import { PageHeader } from "./PageHeader";
@@ -16,6 +17,7 @@ import { CoverPage } from "../CoverPage";
 import { SectionList } from "../Sections";
 import { PDFFullScreen } from "../PDF";
 import { VideoFullScreen } from "../Video";
+import { DrawingFullScreen, PageAnnotationOverlay } from "../Drawing";
 import type { EditorData, Page } from "../../types/page";
 import * as api from "../../utils/api";
 import { calculatePageStats, type PageStats } from "../../utils/pageStats";
@@ -40,6 +42,7 @@ export function EditorArea() {
   const { updatePageLinks, buildLinksFromPages } = useLinkStore();
   const { viewerState, closeViewer } = usePDFStore();
   const { viewerState: videoViewerState } = useVideoStore();
+  const { annotationState } = useDrawingStore();
   const [isSaving, setIsSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
 
@@ -486,6 +489,17 @@ export function EditorArea() {
 
       {/* Video Full Screen Viewer */}
       <VideoFullScreen onExportTranscript={handleExportVideoTranscript} />
+
+      {/* Drawing Full Screen Viewer */}
+      <DrawingFullScreen />
+
+      {/* Page Annotation Overlay */}
+      {annotationState.isActive && annotationState.pageId && annotationState.notebookId && (
+        <PageAnnotationOverlay
+          pageId={annotationState.pageId}
+          notebookId={annotationState.notebookId}
+        />
+      )}
     </div>
   );
 }

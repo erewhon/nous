@@ -175,6 +175,11 @@ Already implemented with Tantivy, may need refinement:
   - [x] Notebook-level system prompt override
   - [x] Page-level system prompt override
   - [x] Prompt inheritance (page → notebook → app fallback)
+  - [x] Section-level system prompt (between notebook and page in hierarchy)
+  - [x] Override vs concatenate mode toggle
+    - Checkbox on each prompt level to choose behavior
+    - Override: replaces all higher-level prompts (current behavior)
+    - Concatenate: appends to higher-level prompts (for additive context)
 
 ### 12. Inbox & Quick Capture
 - [x] Global quick capture hotkey (`Cmd+Shift+C` for capture, `Cmd+Shift+I` for inbox)
@@ -323,27 +328,53 @@ Already implemented with Tantivy, may need refinement:
   - Options: (1) Parse SQLite + protobuf directly, (2) AppleScript export (text only), (3) Use `apple-notes-liberator` or similar
 
 ### 22. Page Markup & Drawing
-- [ ] Drawing/annotation tool for pages
-  - Freehand drawing on canvas overlay
-  - Shape tools (rectangles, circles, arrows, lines)
-  - Color and stroke width options
-  - Eraser and selection tools
-- [ ] Save drawings as page annotations
-- [ ] Export drawings as images
-- [ ] Touch/stylus support for tablet users
+- [x] Drawing/annotation tool for pages
+  - Drawing block for Editor.js with Fabric.js canvas
+  - Freehand drawing with PencilBrush
+  - Shape tools (rectangles, circles, ellipses, arrows, lines)
+  - Text tool with editable IText
+  - Color and stroke width options (9 presets + custom hex)
+  - Eraser and selection/move tools
+  - Undo/redo with JSON history
+  - Display modes: compact (200px), standard (400px), large (600px)
+  - Full-screen editor with keyboard shortcuts
+- [x] Page annotation overlay
+  - Fixed overlay covering entire viewport
+  - Draggable floating toolbar
+  - Transparent canvas over page content
+  - Toggle from page header button
+- [x] Save drawings as page annotations
+  - Vector JSON storage (resolution-independent, editable)
+  - Stored in notebook assets/annotations folder
+  - Tauri commands for CRUD operations
+- [x] Export drawings as images
+  - PNG export via Fabric.js toDataURL
+  - Download button in toolbar
+- [x] Touch/stylus support for tablet users
+  - Fabric.js native touch handling
 
 ### 23. Video Transcription
-- [ ] Import video files (MP4, WebM, etc.)
-  - Video player block in editor
+- [x] Import video files (MP4, WebM, MOV, MKV, AVI, M4V, FLV)
+  - Video player block in editor (VideoTool.ts)
   - Store videos in notebook assets folder
-- [ ] Transcribe video audio to text
-  - Integration with Whisper (local or API)
-  - Speaker diarization (optional)
-  - Timestamps for each segment
-- [ ] Sync transcription with video playback
-  - Click transcript to jump to timestamp
-  - Highlight current segment during playback
-- [ ] Edit and export transcriptions
+  - Drag-and-drop or click to upload
+  - Display modes: compact, standard, large
+- [x] Transcribe video audio to text
+  - Integration with faster-whisper (CTranslate2-optimized, local)
+  - Word-level timestamps for precise synchronization
+  - Auto-detect language with confidence scoring
+  - Python module: `katt_ai/video_transcribe.py`
+  - Tauri commands: transcribe_video, get_video_duration, is_supported_video
+- [x] Sync transcription with video playback
+  - Click transcript segment to jump to timestamp
+  - Auto-scroll to current segment during playback
+  - Inline transcript preview in editor block
+  - Full-screen viewer with transcript sidebar panel
+  - Searchable transcript with keyword highlighting
+- [x] Export transcriptions
+  - Plain text with timestamps (.txt)
+  - SRT subtitle format (.srt)
+  - WebVTT format (.vtt)
 
 ### 24. Potential Integrations
 - [x] **markitdown** integration

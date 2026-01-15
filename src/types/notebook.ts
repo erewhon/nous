@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { SyncConfigSchema } from "./sync";
+import { SystemPromptModeSchema } from "./page";
 
 export const NotebookTypeSchema = z.enum(["standard", "zettelkasten"]);
 export type NotebookType = z.infer<typeof NotebookTypeSchema>;
@@ -15,6 +16,7 @@ export const NotebookSchema = z.object({
   color: z.string().optional(),
   sectionsEnabled: z.boolean().default(false),
   systemPrompt: z.string().optional(),
+  systemPromptMode: SystemPromptModeSchema.default("override"),
   aiProvider: AIProviderTypeSchema.optional(),
   aiModel: z.string().optional(),
   syncConfig: SyncConfigSchema.optional(),

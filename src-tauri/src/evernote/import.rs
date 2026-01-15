@@ -454,6 +454,7 @@ pub fn import_evernote_enex(
         color: None,
         sections_enabled: false,
         system_prompt: None,
+        system_prompt_mode: crate::storage::SystemPromptMode::default(),
         ai_provider: None,
         ai_model: None,
         sync_config: None,
@@ -553,6 +554,7 @@ pub fn import_evernote_enex(
             is_cover: false,
             position: 0,
             system_prompt: None,
+            system_prompt_mode: crate::storage::SystemPromptMode::default(),
             created_at: note.created.unwrap_or(now),
             updated_at: note.updated.unwrap_or(now),
         };

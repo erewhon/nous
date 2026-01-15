@@ -317,6 +317,10 @@ pub fn run() {
             commands::get_video_duration,
             commands::is_supported_video,
             commands::get_supported_video_extensions,
+            // Drawing/annotation commands
+            commands::get_page_annotation,
+            commands::save_page_annotation,
+            commands::delete_page_annotation,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

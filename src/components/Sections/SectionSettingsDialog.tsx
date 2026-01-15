@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import type { Section } from "../../types/page";
+import type { Section, SystemPromptMode } from "../../types/page";
 import { InlineColorPicker } from "../ColorPicker/ColorPicker";
 
 interface SectionSettingsDialogProps {
@@ -7,7 +7,7 @@ interface SectionSettingsDialogProps {
   section: Section | null; // null for creating new
   sections: Section[]; // other sections for move-to dropdown
   onClose: () => void;
-  onSave: (updates: { name?: string; color?: string | null }) => Promise<void>;
+  onSave: (updates: { name?: string; color?: string | null; systemPrompt?: string | null; systemPromptMode?: SystemPromptMode }) => Promise<void>;
   onDelete?: (moveItemsTo?: string) => Promise<void>;
 }
 
@@ -21,6 +21,8 @@ export function SectionSettingsDialog({
 }: SectionSettingsDialogProps) {
   const [name, setName] = useState(section?.name || "");
   const [color, setColor] = useState<string | undefined>(section?.color);
+  const [systemPrompt, setSystemPrompt] = useState<string>(section?.systemPrompt || "");
+  const [systemPromptMode, setSystemPromptMode] = useState<SystemPromptMode>(section?.systemPromptMode || "override");
   const [isDeleting, setIsDeleting] = useState(false);
   const [moveItemsTo, setMoveItemsTo] = useState<string>("root");
   const [isSaving, setIsSaving] = useState(false);
@@ -33,6 +35,8 @@ export function SectionSettingsDialog({
     if (isOpen) {
       setName(section?.name || "");
       setColor(section?.color);
+      setSystemPrompt(section?.systemPrompt || "");
+      setSystemPromptMode(section?.systemPromptMode || "override");
       setIsDeleting(false);
       setMoveItemsTo("root");
       setIsSaving(false);
@@ -47,6 +51,8 @@ export function SectionSettingsDialog({
       await onSave({
         name: name.trim(),
         color: color || null,
+        systemPrompt: systemPrompt.trim() || null,
+        systemPromptMode,
       });
     } finally {
       setIsSaving(false);
@@ -208,6 +214,64 @@ export function SectionSettingsDialog({
                 onChange={(c) => setColor(c)}
                 showClear={true}
               />
+            </div>
+
+            {/* System prompt */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label
+                  className="block text-sm font-medium"
+                  style={{ color: "var(--color-text-secondary)" }}
+                >
+                  AI System Prompt
+                </label>
+                {systemPrompt && (
+                  <button
+                    type="button"
+                    onClick={() => setSystemPrompt("")}
+                    className="text-xs transition-colors hover:opacity-80"
+                    style={{ color: "var(--color-text-muted)" }}
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+              <textarea
+                value={systemPrompt}
+                onChange={(e) => setSystemPrompt(e.target.value)}
+                placeholder="Custom AI system prompt for pages in this section (optional). Leave empty to use the notebook or app default."
+                rows={4}
+                className="w-full rounded-lg border px-3 py-2 text-sm outline-none resize-none"
+                style={{
+                  backgroundColor: "var(--color-bg-tertiary)",
+                  borderColor: "var(--color-border)",
+                  color: "var(--color-text-primary)",
+                }}
+              />
+              {/* Mode toggle - only show if there's a prompt */}
+              {systemPrompt && (
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={systemPromptMode === "concatenate"}
+                    onChange={(e) => setSystemPromptMode(e.target.checked ? "concatenate" : "override")}
+                    className="rounded"
+                    style={{ accentColor: "var(--color-accent)" }}
+                  />
+                  <span
+                    className="text-xs"
+                    style={{ color: "var(--color-text-secondary)" }}
+                  >
+                    Append to higher-level prompts (instead of replacing)
+                  </span>
+                </label>
+              )}
+              <p
+                className="text-xs"
+                style={{ color: "var(--color-text-muted)" }}
+              >
+                This prompt will be used for AI chat when viewing pages in this section.
+              </p>
             </div>
 
             {/* Actions */}
