@@ -3,7 +3,18 @@ import type { Page, EditorData } from "../../types/page";
 import { usePageStore } from "../../stores/pageStore";
 import { useTemplateStore } from "../../stores/templateStore";
 import { useThemeStore } from "../../stores/themeStore";
-import { exportPageToFile, importMarkdownFile } from "../../utils/api";
+import {
+  exportPageToFile,
+  importMarkdownFile,
+  getExternalEditors,
+  openPageInEditor,
+  getExternalEditSession,
+  checkExternalChanges,
+  syncFromExternalEditor,
+  endExternalEditSession,
+  type EditorConfig,
+  type EditSession,
+} from "../../utils/api";
 import { save, open } from "@tauri-apps/plugin-dialog";
 import { TagEditor } from "../Tags";
 import { SaveAsTemplateDialog } from "../TemplateDialog";
@@ -29,6 +40,11 @@ export function PageHeader({ page, isSaving, lastSaved, stats, pageText = "" }: 
   const [showPageSettings, setShowPageSettings] = useState(false);
   const [showPageHistory, setShowPageHistory] = useState(false);
   const [showWritingAssistance, setShowWritingAssistance] = useState(false);
+  const [externalEditSession, setExternalEditSession] = useState<EditSession | null>(null);
+  const [availableEditors, setAvailableEditors] = useState<EditorConfig[]>([]);
+  const [showEditorPicker, setShowEditorPicker] = useState(false);
+  const [hasExternalChanges, setHasExternalChanges] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const { updatePage, selectPage, archivePage, unarchivePage, createPage, updatePageContent } = usePageStore();
@@ -83,6 +99,41 @@ export function PageHeader({ page, isSaving, lastSaved, stats, pageText = "" }: 
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [isMenuOpen]);
 
+  // Load available editors on mount
+  useEffect(() => {
+    getExternalEditors().then(setAvailableEditors).catch(console.error);
+  }, []);
+
+  // Check for existing external edit session when page changes
+  useEffect(() => {
+    getExternalEditSession(page.id)
+      .then(setExternalEditSession)
+      .catch(() => setExternalEditSession(null));
+  }, [page.id]);
+
+  // Periodically check for external changes when in an edit session
+  useEffect(() => {
+    if (!externalEditSession) {
+      setHasExternalChanges(false);
+      return;
+    }
+
+    const checkChanges = async () => {
+      try {
+        const changes = await checkExternalChanges(page.id);
+        setHasExternalChanges(changes !== null);
+      } catch {
+        // Session may have ended
+        setExternalEditSession(null);
+      }
+    };
+
+    // Check immediately and then every 2 seconds
+    checkChanges();
+    const interval = setInterval(checkChanges, 2000);
+    return () => clearInterval(interval);
+  }, [externalEditSession, page.id]);
+
   const handleExport = async () => {
     const suggestedName = page.title?.replace(/[/\\?%*:|"<>]/g, "-") || "page";
     const path = await save({
@@ -132,6 +183,43 @@ export function PageHeader({ page, isSaving, lastSaved, stats, pageText = "" }: 
   const handleUnarchive = async () => {
     setIsMenuOpen(false);
     await unarchivePage(page.notebookId, page.id);
+  };
+
+  const handleOpenInEditor = async (editor?: EditorConfig) => {
+    setIsMenuOpen(false);
+    setShowEditorPicker(false);
+    try {
+      await openPageInEditor(page.notebookId, page.id, editor);
+      const session = await getExternalEditSession(page.id);
+      setExternalEditSession(session);
+    } catch (error) {
+      console.error("Failed to open in external editor:", error);
+    }
+  };
+
+  const handleSyncFromEditor = async () => {
+    if (!externalEditSession) return;
+    setIsSyncing(true);
+    try {
+      await syncFromExternalEditor(page.notebookId, page.id);
+      setHasExternalChanges(false);
+      // Reload the page to get updated content
+      selectPage(page.id);
+    } catch (error) {
+      console.error("Failed to sync from external editor:", error);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleEndExternalEdit = async () => {
+    try {
+      await endExternalEditSession(page.id);
+      setExternalEditSession(null);
+      setHasExternalChanges(false);
+    } catch (error) {
+      console.error("Failed to end external edit session:", error);
+    }
   };
 
   // Handle using this page as a template to create a new page
@@ -363,6 +451,64 @@ export function PageHeader({ page, isSaving, lastSaved, stats, pageText = "" }: 
               </svg>
               Import Markdown
             </button>
+            <div className="relative">
+              <button
+                onClick={() => setShowEditorPicker(!showEditorPicker)}
+                className="flex w-full items-center justify-between gap-3 px-4 py-2 text-left text-sm transition-colors hover:opacity-80"
+                style={{ color: "var(--color-text-secondary)" }}
+              >
+                <div className="flex items-center gap-3">
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                  </svg>
+                  Open in External Editor
+                </div>
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <polyline points="9 18 15 12 9 6" />
+                </svg>
+              </button>
+              {showEditorPicker && (
+                <div
+                  className="absolute left-full top-0 ml-1 min-w-44 rounded-lg border py-1 shadow-lg"
+                  style={{
+                    backgroundColor: "var(--color-bg-secondary)",
+                    borderColor: "var(--color-border)",
+                  }}
+                >
+                  {availableEditors.map((editor) => (
+                    <button
+                      key={editor.name}
+                      onClick={() => handleOpenInEditor(editor)}
+                      className="flex w-full items-center gap-3 px-4 py-2 text-left text-sm transition-colors hover:opacity-80"
+                      style={{ color: "var(--color-text-secondary)" }}
+                    >
+                      {editor.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
             <div
               className="my-1 border-t"
               style={{ borderColor: "var(--color-border)" }}
@@ -626,6 +772,146 @@ export function PageHeader({ page, isSaving, lastSaved, stats, pageText = "" }: 
           ) : null}
         </div>
       </div>
+
+      {/* External Editor Session Banner */}
+      {externalEditSession && (
+        <div
+          className="mt-3 flex items-center justify-between rounded-lg px-4 py-3"
+          style={{
+            backgroundColor: hasExternalChanges
+              ? "rgba(245, 158, 11, 0.15)"
+              : "rgba(59, 130, 246, 0.1)",
+            border: hasExternalChanges
+              ? "1px solid rgba(245, 158, 11, 0.3)"
+              : "1px solid rgba(59, 130, 246, 0.2)",
+          }}
+        >
+          <div className="flex items-center gap-3">
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              style={{
+                color: hasExternalChanges
+                  ? "rgb(245, 158, 11)"
+                  : "rgb(59, 130, 246)",
+              }}
+            >
+              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+            </svg>
+            <div>
+              <span
+                className="text-sm font-medium"
+                style={{
+                  color: hasExternalChanges
+                    ? "rgb(245, 158, 11)"
+                    : "rgb(59, 130, 246)",
+                }}
+              >
+                {hasExternalChanges
+                  ? "External changes detected"
+                  : "Editing in external editor"}
+              </span>
+              <span
+                className="ml-2 text-xs"
+                style={{ color: "var(--color-text-muted)" }}
+              >
+                {externalEditSession.tempPath.split("/").pop()}
+              </span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            {hasExternalChanges && (
+              <button
+                onClick={handleSyncFromEditor}
+                disabled={isSyncing}
+                className="flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors hover:opacity-90"
+                style={{
+                  backgroundColor: "rgb(245, 158, 11)",
+                  color: "white",
+                }}
+              >
+                {isSyncing ? (
+                  <>
+                    <svg
+                      className="h-4 w-4 animate-spin"
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                    >
+                      <circle
+                        className="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        strokeWidth="4"
+                      />
+                      <path
+                        className="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                      />
+                    </svg>
+                    Syncing...
+                  </>
+                ) : (
+                  <>
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M21 2v6h-6" />
+                      <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
+                      <path d="M3 22v-6h6" />
+                      <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
+                    </svg>
+                    Sync Changes
+                  </>
+                )}
+              </button>
+            )}
+            <button
+              onClick={handleEndExternalEdit}
+              className="flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm transition-colors hover:opacity-80"
+              style={{
+                backgroundColor: "var(--color-bg-tertiary)",
+                color: "var(--color-text-secondary)",
+              }}
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+              End Session
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Tag Editor */}
       <div className="relative mt-3">

@@ -5,6 +5,7 @@ use tauri::Manager;
 mod actions;
 mod commands;
 mod evernote;
+mod external_editor;
 mod flashcards;
 mod git;
 mod inbox;
@@ -19,6 +20,7 @@ mod storage;
 pub mod sync;
 
 use actions::{ActionExecutor, ActionScheduler, ActionStorage};
+use external_editor::ExternalEditorManager;
 use flashcards::FlashcardStorage;
 use inbox::InboxStorage;
 use python_bridge::PythonAI;
@@ -36,6 +38,7 @@ pub struct AppState {
     pub inbox_storage: Mutex<InboxStorage>,
     pub flashcard_storage: Mutex<FlashcardStorage>,
     pub sync_manager: Arc<tokio::sync::Mutex<SyncManager>>,
+    pub external_editor: Mutex<ExternalEditorManager>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -71,6 +74,10 @@ pub fn run() {
     let sync_manager = SyncManager::new(data_dir.clone());
     let sync_manager_arc = Arc::new(tokio::sync::Mutex::new(sync_manager));
 
+    // Initialize external editor manager
+    let external_editor = ExternalEditorManager::new()
+        .expect("Failed to initialize external editor manager");
+
     // Wrap storage in Arc<Mutex<>> for sharing with executor
     let storage_arc = Arc::new(Mutex::new(storage));
     let action_storage_arc = Arc::new(Mutex::new(action_storage));
@@ -100,6 +107,7 @@ pub fn run() {
         inbox_storage: Mutex::new(inbox_storage),
         flashcard_storage: Mutex::new(flashcard_storage),
         sync_manager: sync_manager_arc,
+        external_editor: Mutex::new(external_editor),
     };
 
     tauri::Builder::default()
@@ -260,6 +268,16 @@ pub fn run() {
             commands::git_resolve_all_conflicts,
             commands::git_commit_merge,
             commands::git_abort_merge,
+            // External editor commands
+            commands::get_external_editors,
+            commands::open_page_in_editor,
+            commands::check_external_changes,
+            commands::get_external_file_content,
+            commands::sync_from_external_editor,
+            commands::end_external_edit_session,
+            commands::get_external_edit_session,
+            commands::get_all_external_edit_sessions,
+            commands::cleanup_external_edit_sessions,
             // Flashcard commands
             commands::list_decks,
             commands::get_deck,

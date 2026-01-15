@@ -293,7 +293,12 @@ Already implemented with Tantivy, may need refinement:
   - Mark: C-Space (set mark), C-g (cancel)
   - Undo: C-/, C-Shift-/ (redo)
   - Settings toggle (Appearance > Editor Keybindings)
-- [ ] External editor support (open page in VS Code, Vim, etc.)
+- [x] External editor support (open page in VS Code, Vim, etc.)
+  - Export page to temp markdown file for editing
+  - Open in configurable external editors (VS Code, Vim, Neovim, Sublime, Emacs, Zed, etc.)
+  - Detect external file changes with polling
+  - Sync changes back with one-click import
+  - Session management (end session, cleanup old sessions)
 
 ### 21. Import from Other Apps
 - [ ] OneNote notebook import

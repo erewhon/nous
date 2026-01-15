@@ -1080,6 +1080,74 @@ export async function gitAbortMerge(notebookId: string): Promise<void> {
   return invoke("git_abort_merge", { notebookId });
 }
 
+// ========== External Editor Operations ==========
+
+export interface EditorConfig {
+  name: string;
+  command: string;
+  args: string[];
+  wait: boolean;
+}
+
+export interface EditSession {
+  pageId: string;
+  notebookId: string;
+  tempPath: string;
+  lastModified: string;
+  startedAt: string;
+}
+
+export async function getExternalEditors(): Promise<EditorConfig[]> {
+  return invoke<EditorConfig[]>("get_external_editors");
+}
+
+export async function openPageInEditor(
+  notebookId: string,
+  pageId: string,
+  editorConfig?: EditorConfig
+): Promise<string> {
+  return invoke<string>("open_page_in_editor", {
+    notebookId,
+    pageId,
+    editorConfig,
+  });
+}
+
+export async function checkExternalChanges(
+  pageId: string
+): Promise<string | null> {
+  return invoke<string | null>("check_external_changes", { pageId });
+}
+
+export async function getExternalFileContent(pageId: string): Promise<string> {
+  return invoke<string>("get_external_file_content", { pageId });
+}
+
+export async function syncFromExternalEditor(
+  notebookId: string,
+  pageId: string
+): Promise<void> {
+  return invoke("sync_from_external_editor", { notebookId, pageId });
+}
+
+export async function endExternalEditSession(pageId: string): Promise<void> {
+  return invoke("end_external_edit_session", { pageId });
+}
+
+export async function getExternalEditSession(
+  pageId: string
+): Promise<EditSession | null> {
+  return invoke<EditSession | null>("get_external_edit_session", { pageId });
+}
+
+export async function getAllExternalEditSessions(): Promise<EditSession[]> {
+  return invoke<EditSession[]>("get_all_external_edit_sessions");
+}
+
+export async function cleanupExternalEditSessions(): Promise<void> {
+  return invoke("cleanup_external_edit_sessions");
+}
+
 // ========== Section Operations ==========
 
 export async function listSections(notebookId: string): Promise<Section[]> {
