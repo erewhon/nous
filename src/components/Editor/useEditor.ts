@@ -14,6 +14,7 @@ import { CodeBlockTool } from "./CodeBlockTool";
 import { CalloutTool } from "./CalloutTool";
 import { FlashcardTool } from "./FlashcardTool";
 import { PDFTool } from "./PDFTool";
+import { VideoTool } from "./VideoTool";
 import { createImageUploader } from "./imageUploader";
 
 interface UseEditorOptions {
@@ -119,6 +120,12 @@ export function useEditor({
               },
               pdf: {
                 class: PDFTool as unknown as ToolConstructable,
+                config: {
+                  notebookId,
+                },
+              },
+              video: {
+                class: VideoTool as unknown as ToolConstructable,
                 config: {
                   notebookId,
                 },

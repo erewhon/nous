@@ -21,6 +21,7 @@ mod section;
 mod search;
 mod sync;
 mod tags;
+mod video;
 mod web_research;
 
 pub use actions::*;
@@ -46,4 +47,5 @@ pub use section::*;
 pub use search::*;
 pub use sync::*;
 pub use tags::*;
+pub use video::*;
 pub use web_research::*;

@@ -248,6 +248,43 @@ pub struct BrowserTaskResult {
     pub error: Option<String>,
 }
 
+// ===== Video Transcription Types =====
+
+/// Word-level timestamp in transcription
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TranscriptWord {
+    pub word: String,
+    pub start: f64,
+    pub end: f64,
+    pub probability: f64,
+}
+
+/// Segment of transcription with word timestamps
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TranscriptSegment {
+    pub id: i64,
+    pub start: f64,
+    pub end: f64,
+    pub text: String,
+    pub words: Vec<TranscriptWord>,
+}
+
+/// Result from video transcription
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TranscriptionResult {
+    pub video_path: String,
+    pub audio_path: Option<String>,
+    pub language: String,
+    pub language_probability: f64,
+    pub duration: f64,
+    pub segments: Vec<TranscriptSegment>,
+    pub word_count: i64,
+    pub transcription_time: f64,
+}
+
 /// Python AI bridge for calling Python functions
 pub struct PythonAI {
     katt_py_path: PathBuf,
@@ -1502,6 +1539,152 @@ impl PythonAI {
                     .get("error")
                     .and_then(|v| v.extract::<String>(py).ok()),
             })
+        })
+    }
+
+    // ===== Video Transcription =====
+
+    /// Transcribe a video file using faster-whisper
+    pub fn transcribe_video(
+        &self,
+        video_path: &str,
+        model_size: Option<&str>,
+        language: Option<&str>,
+    ) -> Result<TranscriptionResult> {
+        Python::attach(|py| {
+            self.setup_python_path(py)?;
+
+            let video_module = py.import("katt_ai.video_transcribe")?;
+            let transcribe_fn = video_module.getattr("transcribe_video_sync")?;
+
+            let kwargs = PyDict::new(py);
+            kwargs.set_item("video_path", video_path)?;
+            if let Some(size) = model_size {
+                kwargs.set_item("model_size", size)?;
+            }
+            if let Some(lang) = language {
+                kwargs.set_item("language", lang)?;
+            }
+
+            let result = transcribe_fn.call((), Some(&kwargs))?;
+            let result_dict: HashMap<String, Py<PyAny>> = result.extract()?;
+
+            // Extract segments
+            let segments_list = result_dict
+                .get("segments")
+                .map(|v| {
+                    v.extract::<Vec<HashMap<String, Py<PyAny>>>>(py)
+                        .unwrap_or_default()
+                })
+                .unwrap_or_default();
+
+            let segments: Vec<TranscriptSegment> = segments_list
+                .into_iter()
+                .map(|s| {
+                    // Extract words for this segment
+                    let words_list = s
+                        .get("words")
+                        .map(|v| {
+                            v.extract::<Vec<HashMap<String, Py<PyAny>>>>(py)
+                                .unwrap_or_default()
+                        })
+                        .unwrap_or_default();
+
+                    let words: Vec<TranscriptWord> = words_list
+                        .into_iter()
+                        .map(|w| TranscriptWord {
+                            word: w.get("word").and_then(|v| v.extract::<String>(py).ok()).unwrap_or_default(),
+                            start: w.get("start").and_then(|v| v.extract::<f64>(py).ok()).unwrap_or(0.0),
+                            end: w.get("end").and_then(|v| v.extract::<f64>(py).ok()).unwrap_or(0.0),
+                            probability: w.get("probability").and_then(|v| v.extract::<f64>(py).ok()).unwrap_or(0.0),
+                        })
+                        .collect();
+
+                    TranscriptSegment {
+                        id: s.get("id").and_then(|v| v.extract::<i64>(py).ok()).unwrap_or(0),
+                        start: s.get("start").and_then(|v| v.extract::<f64>(py).ok()).unwrap_or(0.0),
+                        end: s.get("end").and_then(|v| v.extract::<f64>(py).ok()).unwrap_or(0.0),
+                        text: s.get("text").and_then(|v| v.extract::<String>(py).ok()).unwrap_or_default(),
+                        words,
+                    }
+                })
+                .collect();
+
+            Ok(TranscriptionResult {
+                video_path: result_dict
+                    .get("video_path")
+                    .and_then(|v| v.extract::<String>(py).ok())
+                    .unwrap_or_default(),
+                audio_path: result_dict
+                    .get("audio_path")
+                    .and_then(|v| v.extract::<String>(py).ok()),
+                language: result_dict
+                    .get("language")
+                    .and_then(|v| v.extract::<String>(py).ok())
+                    .unwrap_or_default(),
+                language_probability: result_dict
+                    .get("language_probability")
+                    .and_then(|v| v.extract::<f64>(py).ok())
+                    .unwrap_or(0.0),
+                duration: result_dict
+                    .get("duration")
+                    .and_then(|v| v.extract::<f64>(py).ok())
+                    .unwrap_or(0.0),
+                segments,
+                word_count: result_dict
+                    .get("word_count")
+                    .and_then(|v| v.extract::<i64>(py).ok())
+                    .unwrap_or(0),
+                transcription_time: result_dict
+                    .get("transcription_time")
+                    .and_then(|v| v.extract::<f64>(py).ok())
+                    .unwrap_or(0.0),
+            })
+        })
+    }
+
+    /// Get video duration in seconds
+    pub fn get_video_duration(&self, video_path: &str) -> Result<f64> {
+        Python::attach(|py| {
+            self.setup_python_path(py)?;
+
+            let video_module = py.import("katt_ai.video_transcribe")?;
+            let duration_fn = video_module.getattr("get_video_duration_sync")?;
+
+            let result = duration_fn.call1((video_path,))?;
+            let duration: f64 = result.extract()?;
+
+            Ok(duration)
+        })
+    }
+
+    /// Check if a file is a supported video format
+    pub fn is_supported_video(&self, file_path: &str) -> Result<bool> {
+        Python::attach(|py| {
+            self.setup_python_path(py)?;
+
+            let video_module = py.import("katt_ai.video_transcribe")?;
+            let check_fn = video_module.getattr("is_supported_video_sync")?;
+
+            let result = check_fn.call1((file_path,))?;
+            let is_supported: bool = result.extract()?;
+
+            Ok(is_supported)
+        })
+    }
+
+    /// Get list of supported video extensions
+    pub fn get_supported_video_extensions(&self) -> Result<Vec<String>> {
+        Python::attach(|py| {
+            self.setup_python_path(py)?;
+
+            let video_module = py.import("katt_ai.video_transcribe")?;
+            let get_ext_fn = video_module.getattr("get_supported_extensions_sync")?;
+
+            let result = get_ext_fn.call0()?;
+            let extensions: Vec<String> = result.extract()?;
+
+            Ok(extensions)
         })
     }
 }

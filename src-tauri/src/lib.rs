@@ -312,6 +312,11 @@ pub fn run() {
             commands::convert_documents_batch,
             commands::get_supported_document_extensions,
             commands::is_supported_document,
+            // Video transcription commands
+            commands::transcribe_video,
+            commands::get_video_duration,
+            commands::is_supported_video,
+            commands::get_supported_video_extensions,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
