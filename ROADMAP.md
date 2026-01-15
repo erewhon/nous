@@ -287,7 +287,7 @@ Already implemented with Tantivy, may need refinement:
 - [x] Evernote export import (.enex XML with HTML content)
 - [x] Notion export import (ZIP with markdown & CSV databases)
 - [x] Obsidian vault import (markdown with YAML frontmatter, wiki-links, attachments)
-- [ ] Joplin export import (JEX archive or raw data)
+- [x] Joplin export import (JEX archive or raw directory)
 - [ ] Apple Notes import
 
 ---

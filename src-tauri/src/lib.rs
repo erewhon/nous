@@ -8,6 +8,7 @@ mod evernote;
 mod flashcards;
 mod git;
 mod inbox;
+mod joplin;
 mod markdown;
 mod notion;
 mod obsidian;
@@ -185,6 +186,9 @@ pub fn run() {
             // Scrivener import commands
             commands::preview_scrivener_project_cmd,
             commands::import_scrivener_project_cmd,
+            // Joplin import commands
+            commands::preview_joplin_import_cmd,
+            commands::import_joplin_cmd,
             // Folder commands
             commands::list_folders,
             commands::get_folder,

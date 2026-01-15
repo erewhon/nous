@@ -49,6 +49,9 @@ quick-xml = { version = "0.36", features = ["serialize"] }
 html-escape = "0.2"
 base64 = "0.22"
 
+# Joplin import support
+tar = "0.4"
+
 # PyO3 for Python integration
 pyo3 = { version = "0.27", features = ["auto-initialize"] }
 tokio = { version = "1", features = ["full"] }
