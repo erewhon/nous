@@ -12,6 +12,7 @@ import { BackupDialog } from "./components/Backup";
 import { ActionLibrary, ActionEditor } from "./components/Actions";
 import { QuickCapture, InboxPanel } from "./components/Inbox";
 import { FlashcardPanel } from "./components/Flashcards";
+import { ToastContainer } from "./components/Toast";
 import { useAppInit } from "./hooks/useAppInit";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useNotebookStore } from "./stores/notebookStore";
@@ -238,6 +239,9 @@ function App() {
 
       {/* Flashcard Panel */}
       <FlashcardPanel />
+
+      {/* Toast Notifications */}
+      <ToastContainer />
     </>
   );
 }

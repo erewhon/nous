@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, memo, useCallback } from "react";
 import { useDraggable, useDroppable } from "@dnd-kit/core";
 import type { Folder, Page, Section } from "../../types/page";
 
@@ -21,7 +21,7 @@ interface FolderTreeItemProps {
   onMoveFolderToSection?: (folderId: string, sectionId: string | null) => void;
 }
 
-export function FolderTreeItem({
+export const FolderTreeItem = memo(function FolderTreeItem({
   folder,
   pages,
   childFolders,
@@ -56,36 +56,53 @@ export function FolderTreeItem({
   const paddingLeft = 12 + depth * 16;
   const showDropHighlight = isDropTarget || isOver;
 
-  const handleSubmitRename = () => {
+  const handleSubmitRename = useCallback(() => {
     if (editName.trim() && editName !== folder.name) {
       onRenameFolder(folder.id, editName.trim());
     }
     setIsEditing(false);
-  };
+  }, [editName, folder.id, folder.name, onRenameFolder]);
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === "Enter") {
       handleSubmitRename();
     } else if (e.key === "Escape") {
       setEditName(folder.name);
       setIsEditing(false);
     }
-  };
+  }, [handleSubmitRename, folder.name]);
 
-  const handleContextMenu = (e: React.MouseEvent) => {
+  const handleContextMenu = useCallback((e: React.MouseEvent) => {
     if (sections && sections.length > 0 && onMoveFolderToSection && !isArchive) {
       e.preventDefault();
       setContextMenuPos({ x: e.clientX, y: e.clientY });
       setShowContextMenu(true);
     }
-  };
+  }, [sections, onMoveFolderToSection, isArchive]);
 
-  const handleMoveFolderToSection = (sectionId: string | null) => {
+  const handleMoveFolderToSection = useCallback((sectionId: string | null) => {
     if (onMoveFolderToSection) {
       onMoveFolderToSection(folder.id, sectionId);
     }
     setShowContextMenu(false);
-  };
+  }, [onMoveFolderToSection, folder.id]);
+
+  const handleToggleExpand = useCallback(() => {
+    onToggleExpand(folder.id);
+  }, [onToggleExpand, folder.id]);
+
+  const handleCreatePage = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    onCreatePage(folder.id);
+  }, [onCreatePage, folder.id]);
+
+  const handleDeleteFolder = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    onDeleteFolder(folder.id);
+  }, [onDeleteFolder, folder.id]);
+
+  const handleMouseEnter = useCallback(() => setShowActions(true), []);
+  const handleMouseLeave = useCallback(() => setShowActions(false), []);
 
   return (
     <>
@@ -103,16 +120,16 @@ export function FolderTreeItem({
             ? "1px dashed var(--color-accent)"
             : "1px solid transparent",
         }}
-        onMouseEnter={() => setShowActions(true)}
-        onMouseLeave={() => setShowActions(false)}
-        onClick={() => onToggleExpand(folder.id)}
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
+        onClick={handleToggleExpand}
         onContextMenu={handleContextMenu}
       >
         {/* Expand/collapse chevron */}
         <button
           onClick={(e) => {
             e.stopPropagation();
-            onToggleExpand(folder.id);
+            handleToggleExpand();
           }}
           className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded transition-colors"
           style={{ color: "var(--color-text-muted)" }}
@@ -246,10 +263,7 @@ export function FolderTreeItem({
           <div className="flex items-center gap-0.5 flex-shrink-0">
             {/* Add page in folder */}
             <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onCreatePage(folder.id);
-              }}
+              onClick={handleCreatePage}
               className="flex h-5 w-5 items-center justify-center rounded transition-colors"
               style={{ color: "var(--color-text-muted)" }}
               title="Add page in folder"
@@ -270,10 +284,7 @@ export function FolderTreeItem({
             </button>
             {/* Delete folder */}
             <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onDeleteFolder(folder.id);
-              }}
+              onClick={handleDeleteFolder}
               className="flex h-5 w-5 items-center justify-center rounded transition-colors"
               style={{ color: "var(--color-text-muted)" }}
               title="Delete folder"
@@ -376,7 +387,7 @@ export function FolderTreeItem({
     )}
     </>
   );
-}
+});
 
 // Page item component (non-draggable, for display in drag overlay etc)
 interface PageItemProps {
@@ -386,7 +397,7 @@ interface PageItemProps {
   onSelect: () => void;
 }
 
-function PageItem({ page, isSelected, depth, onSelect }: PageItemProps) {
+const PageItem = memo(function PageItem({ page, isSelected, depth, onSelect }: PageItemProps) {
   const paddingLeft = 12 + (depth + 1) * 16;
 
   return (
@@ -439,7 +450,7 @@ function PageItem({ page, isSelected, depth, onSelect }: PageItemProps) {
       </button>
     </li>
   );
-}
+});
 
 // Draggable page item
 interface DraggablePageItemProps {
@@ -451,7 +462,7 @@ interface DraggablePageItemProps {
   onMoveToSection?: (pageId: string, sectionId: string | null) => void;
 }
 
-function DraggablePageItem({
+const DraggablePageItem = memo(function DraggablePageItem({
   page,
   isSelected,
   depth,
@@ -474,20 +485,20 @@ function DraggablePageItem({
       }
     : undefined;
 
-  const handleContextMenu = (e: React.MouseEvent) => {
+  const handleContextMenu = useCallback((e: React.MouseEvent) => {
     if (sections && sections.length > 0 && onMoveToSection) {
       e.preventDefault();
       setContextMenuPos({ x: e.clientX, y: e.clientY });
       setShowContextMenu(true);
     }
-  };
+  }, [sections, onMoveToSection]);
 
-  const handleMoveToSection = (sectionId: string | null) => {
+  const handleMoveToSection = useCallback((sectionId: string | null) => {
     if (onMoveToSection) {
       onMoveToSection(page.id, sectionId);
     }
     setShowContextMenu(false);
-  };
+  }, [onMoveToSection, page.id]);
 
   return (
     <>
@@ -606,6 +617,6 @@ function DraggablePageItem({
       )}
     </>
   );
-}
+});
 
 export { PageItem, DraggablePageItem };

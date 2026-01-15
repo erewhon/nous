@@ -1,4 +1,5 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useId } from "react";
+import { useFocusTrap } from "../../hooks/useFocusTrap";
 
 interface ConfirmDialogProps {
   isOpen: boolean;
@@ -21,8 +22,10 @@ export function ConfirmDialog({
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
-  const dialogRef = useRef<HTMLDivElement>(null);
   const confirmButtonRef = useRef<HTMLButtonElement>(null);
+  const focusTrapRef = useFocusTrap(isOpen);
+  const titleId = useId();
+  const descriptionId = useId();
 
   // Focus confirm button when dialog opens
   useEffect(() => {
@@ -38,7 +41,8 @@ export function ConfirmDialog({
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         onCancel();
-      } else if (e.key === "Enter") {
+      } else if (e.key === "Enter" && document.activeElement === confirmButtonRef.current) {
+        // Only confirm if the confirm button is focused to avoid accidental confirms
         onConfirm();
       }
     };
@@ -60,9 +64,14 @@ export function ConfirmDialog({
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
       onClick={handleBackdropClick}
+      role="presentation"
     >
       <div
-        ref={dialogRef}
+        ref={focusTrapRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={descriptionId}
         className="w-full max-w-md rounded-xl border p-6 shadow-2xl"
         style={{
           backgroundColor: "var(--color-bg-secondary)",
@@ -70,18 +79,20 @@ export function ConfirmDialog({
         }}
       >
         <h2
+          id={titleId}
           className="mb-2 text-lg font-semibold"
           style={{ color: "var(--color-text-primary)" }}
         >
           {title}
         </h2>
         <p
+          id={descriptionId}
           className="mb-6 text-sm"
           style={{ color: "var(--color-text-secondary)" }}
         >
           {message}
         </p>
-        <div className="flex justify-end gap-3">
+        <div className="flex justify-end gap-3" role="group" aria-label="Dialog actions">
           <button
             onClick={onCancel}
             className="rounded-lg px-4 py-2 text-sm font-medium transition-colors"

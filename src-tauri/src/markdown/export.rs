@@ -329,34 +329,17 @@ mod tests {
     use chrono::Utc;
     use uuid::Uuid;
 
-    #[test]
-    fn test_export_simple_page() {
-        let page = Page {
+    fn create_test_page(title: &str, blocks: Vec<EditorBlock>, tags: Vec<String>) -> Page {
+        Page {
             id: Uuid::new_v4(),
             notebook_id: Uuid::new_v4(),
-            title: "Test Page".to_string(),
+            title: title.to_string(),
             content: EditorData {
                 time: None,
                 version: None,
-                blocks: vec![
-                    EditorBlock {
-                        id: "1".to_string(),
-                        block_type: "header".to_string(),
-                        data: serde_json::json!({
-                            "text": "Hello World",
-                            "level": 1
-                        }),
-                    },
-                    EditorBlock {
-                        id: "2".to_string(),
-                        block_type: "paragraph".to_string(),
-                        data: serde_json::json!({
-                            "text": "This is a test paragraph."
-                        }),
-                    },
-                ],
+                blocks,
             },
-            tags: vec!["test".to_string()],
+            tags,
             folder_id: None,
             section_id: None,
             is_archived: false,
@@ -365,7 +348,32 @@ mod tests {
             system_prompt: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
-        };
+        }
+    }
+
+    #[test]
+    fn test_export_simple_page() {
+        let page = create_test_page(
+            "Test Page",
+            vec![
+                EditorBlock {
+                    id: "1".to_string(),
+                    block_type: "header".to_string(),
+                    data: serde_json::json!({
+                        "text": "Hello World",
+                        "level": 1
+                    }),
+                },
+                EditorBlock {
+                    id: "2".to_string(),
+                    block_type: "paragraph".to_string(),
+                    data: serde_json::json!({
+                        "text": "This is a test paragraph."
+                    }),
+                },
+            ],
+            vec!["test".to_string()],
+        );
 
         let markdown = export_page_to_markdown(&page);
 
@@ -391,5 +399,216 @@ mod tests {
         let result = convert_block_to_markdown(&block);
         assert!(result.contains("- [x] Task 1"));
         assert!(result.contains("- [ ] Task 2"));
+    }
+
+    #[test]
+    fn test_convert_code_block() {
+        let block = EditorBlock {
+            id: "1".to_string(),
+            block_type: "code".to_string(),
+            data: serde_json::json!({
+                "code": "fn main() {\n    println!(\"Hello\");\n}",
+                "language": "rust"
+            }),
+        };
+
+        let result = convert_block_to_markdown(&block);
+        assert!(result.starts_with("```rust"));
+        assert!(result.contains("fn main()"));
+        assert!(result.ends_with("```"));
+    }
+
+    #[test]
+    fn test_convert_ordered_list() {
+        let block = EditorBlock {
+            id: "1".to_string(),
+            block_type: "list".to_string(),
+            data: serde_json::json!({
+                "style": "ordered",
+                "items": ["First", "Second", "Third"]
+            }),
+        };
+
+        let result = convert_block_to_markdown(&block);
+        assert!(result.contains("1. First"));
+        assert!(result.contains("2. Second"));
+        assert!(result.contains("3. Third"));
+    }
+
+    #[test]
+    fn test_convert_unordered_list() {
+        let block = EditorBlock {
+            id: "1".to_string(),
+            block_type: "list".to_string(),
+            data: serde_json::json!({
+                "style": "unordered",
+                "items": ["Apple", "Banana", "Cherry"]
+            }),
+        };
+
+        let result = convert_block_to_markdown(&block);
+        assert!(result.contains("- Apple"));
+        assert!(result.contains("- Banana"));
+        assert!(result.contains("- Cherry"));
+    }
+
+    #[test]
+    fn test_convert_table() {
+        let block = EditorBlock {
+            id: "1".to_string(),
+            block_type: "table".to_string(),
+            data: serde_json::json!({
+                "withHeadings": true,
+                "content": [
+                    ["Name", "Age"],
+                    ["Alice", "30"],
+                    ["Bob", "25"]
+                ]
+            }),
+        };
+
+        let result = convert_block_to_markdown(&block);
+        assert!(result.contains("| Name | Age |"));
+        assert!(result.contains("| --- | --- |"));
+        assert!(result.contains("| Alice | 30 |"));
+        assert!(result.contains("| Bob | 25 |"));
+    }
+
+    #[test]
+    fn test_convert_callout() {
+        let block = EditorBlock {
+            id: "1".to_string(),
+            block_type: "callout".to_string(),
+            data: serde_json::json!({
+                "type": "warning",
+                "title": "Important",
+                "content": "Be careful with this operation."
+            }),
+        };
+
+        let result = convert_block_to_markdown(&block);
+        assert!(result.contains("> [!WARNING] Important"));
+        assert!(result.contains("> Be careful with this operation."));
+    }
+
+    #[test]
+    fn test_convert_image() {
+        let block = EditorBlock {
+            id: "1".to_string(),
+            block_type: "image".to_string(),
+            data: serde_json::json!({
+                "file": {
+                    "url": "/path/to/assets/image.png"
+                },
+                "caption": "A test image"
+            }),
+        };
+
+        let result = convert_block_to_markdown(&block);
+        assert!(result.contains("![A test image]"));
+        assert!(result.contains("assets/image.png"));
+    }
+
+    #[test]
+    fn test_convert_quote() {
+        let block = EditorBlock {
+            id: "1".to_string(),
+            block_type: "quote".to_string(),
+            data: serde_json::json!({
+                "text": "To be or not to be.\nThat is the question."
+            }),
+        };
+
+        let result = convert_block_to_markdown(&block);
+        assert!(result.contains("> To be or not to be."));
+        assert!(result.contains("> That is the question."));
+    }
+
+    #[test]
+    fn test_convert_delimiter() {
+        let block = EditorBlock {
+            id: "1".to_string(),
+            block_type: "delimiter".to_string(),
+            data: serde_json::json!({}),
+        };
+
+        let result = convert_block_to_markdown(&block);
+        assert_eq!(result, "---");
+    }
+
+    #[test]
+    fn test_convert_inline_formatting() {
+        let result = convert_inline_html_to_markdown("<b>bold</b> and <i>italic</i>");
+        assert_eq!(result, "**bold** and *italic*");
+    }
+
+    #[test]
+    fn test_convert_inline_code() {
+        let result = convert_inline_html_to_markdown("Use <code>println!</code> to print");
+        assert_eq!(result, "Use `println!` to print");
+    }
+
+    #[test]
+    fn test_convert_inline_link() {
+        let result = convert_inline_html_to_markdown("Visit <a href=\"https://example.com\">Example</a>");
+        assert_eq!(result, "Visit [Example](https://example.com)");
+    }
+
+    #[test]
+    fn test_escape_yaml_string() {
+        assert_eq!(escape_yaml_string("simple"), "simple");
+        assert_eq!(escape_yaml_string("with \"quotes\""), "with \\\"quotes\\\"");
+        assert_eq!(escape_yaml_string("back\\slash"), "back\\\\slash");
+    }
+
+    #[test]
+    fn test_export_page_with_no_tags() {
+        let page = create_test_page(
+            "No Tags Page",
+            vec![EditorBlock {
+                id: "1".to_string(),
+                block_type: "paragraph".to_string(),
+                data: serde_json::json!({ "text": "Content here" }),
+            }],
+            vec![],
+        );
+
+        let markdown = export_page_to_markdown(&page);
+        assert!(markdown.contains("title: \"No Tags Page\""));
+        assert!(!markdown.contains("tags:"));
+    }
+
+    #[test]
+    fn test_export_page_with_special_characters() {
+        let page = create_test_page(
+            "Page with \"quotes\" and \\backslash",
+            vec![EditorBlock {
+                id: "1".to_string(),
+                block_type: "paragraph".to_string(),
+                data: serde_json::json!({ "text": "Content with <special> chars & entities" }),
+            }],
+            vec![],
+        );
+
+        let markdown = export_page_to_markdown(&page);
+        assert!(markdown.contains("\\\"quotes\\\""));
+        assert!(markdown.contains("\\\\backslash"));
+    }
+
+    #[test]
+    fn test_header_levels() {
+        for level in 1..=6 {
+            let block = EditorBlock {
+                id: "1".to_string(),
+                block_type: "header".to_string(),
+                data: serde_json::json!({
+                    "text": "Header",
+                    "level": level
+                }),
+            };
+            let result = convert_block_to_markdown(&block);
+            let expected_prefix = "#".repeat(level);
+            assert!(result.starts_with(&format!("{} ", expected_prefix)));
+        }
     }
 }

@@ -1,5 +1,5 @@
 import type { ReactElement } from "react";
-import { useState } from "react";
+import { useState, memo, useCallback } from "react";
 import type { Action, ActionTrigger } from "../../types/action";
 import { ACTION_CATEGORY_LABELS } from "../../stores/actionStore";
 
@@ -12,7 +12,7 @@ interface ActionCardProps {
   isRunning?: boolean;
 }
 
-export function ActionCard({
+export const ActionCard = memo(function ActionCard({
   action,
   onRun,
   onEdit,
@@ -22,20 +22,32 @@ export function ActionCard({
 }: ActionCardProps) {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
-  const handleRun = () => {
+  const handleRun = useCallback(() => {
     if (!isRunning) {
       onRun(action.id);
     }
-  };
+  }, [isRunning, onRun, action.id]);
 
-  const handleDeleteClick = () => {
+  const handleDeleteClick = useCallback(() => {
     setShowDeleteConfirm(true);
-  };
+  }, []);
 
-  const handleConfirmDelete = () => {
+  const handleConfirmDelete = useCallback(() => {
     onDelete(action.id);
     setShowDeleteConfirm(false);
-  };
+  }, [onDelete, action.id]);
+
+  const handleCancelDelete = useCallback(() => {
+    setShowDeleteConfirm(false);
+  }, []);
+
+  const handleToggleEnabled = useCallback(() => {
+    onToggleEnabled(action.id, !action.enabled);
+  }, [onToggleEnabled, action.id, action.enabled]);
+
+  const handleEdit = useCallback(() => {
+    onEdit(action.id);
+  }, [onEdit, action.id]);
 
   const getTriggerBadges = () => {
     const badges: { label: string; icon: ReactElement }[] = [];
@@ -117,7 +129,7 @@ export function ActionCard({
         </div>
         <div className="flex justify-end gap-2">
           <button
-            onClick={() => setShowDeleteConfirm(false)}
+            onClick={handleCancelDelete}
             className="rounded-lg px-3 py-1.5 text-sm font-medium transition-colors hover:opacity-80"
             style={{
               backgroundColor: "var(--color-bg-tertiary)",
@@ -177,7 +189,7 @@ export function ActionCard({
         {/* Enable/disable toggle */}
         {!action.isBuiltIn && (
           <button
-            onClick={() => onToggleEnabled(action.id, !action.enabled)}
+            onClick={handleToggleEnabled}
             className="flex-shrink-0 rounded-full p-1 transition-colors"
             style={{
               backgroundColor: action.enabled
@@ -265,7 +277,7 @@ export function ActionCard({
         {!action.isBuiltIn && (
           <>
             <button
-              onClick={() => onEdit(action.id)}
+              onClick={handleEdit}
               className="rounded-lg p-2 transition-colors hover:opacity-80"
               style={{ backgroundColor: "var(--color-bg-tertiary)" }}
               title="Edit action"
@@ -285,7 +297,7 @@ export function ActionCard({
       </div>
     </div>
   );
-}
+});
 
 // Helper to get category icon
 function getIconForCategory(category: string): ReactElement {

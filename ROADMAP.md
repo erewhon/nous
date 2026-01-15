@@ -319,11 +319,28 @@ Already implemented with Tantivy, may need refinement:
 
 ## Technical Debt & Polish
 
-- [ ] Add comprehensive error handling for file operations
-- [ ] Add loading states for async operations
-- [ ] Improve accessibility (keyboard navigation, screen readers)
-- [ ] Add unit tests for markdown conversion
-- [ ] Performance optimization for large notebooks
+- [x] Add comprehensive error handling for file operations
+  - Toast notification system (success, error, warning, info)
+  - ToastContainer component with auto-dismiss and manual close
+  - Wired up to external editor, backup, and quick capture operations
+- [x] Add loading states for async operations
+  - LoadingSpinner, LoadingOverlay, LoadingButton components
+  - Reusable loading indicators for buttons and overlays
+- [x] Improve accessibility (keyboard navigation, screen readers)
+  - Focus trap hook for modal dialogs
+  - ARIA attributes on dialogs (role="dialog", aria-modal, aria-labelledby)
+  - aria-labels on icon-only buttons
+  - Proper keyboard handling (Tab trapping, Escape to close)
+- [x] Add unit tests for markdown conversion
+  - 35 tests covering export and import
+  - Tests for all block types: headers, paragraphs, lists, checklists, code, tables, callouts, images, quotes
+  - Tests for frontmatter parsing, inline formatting, special characters
+- [x] Performance optimization for large notebooks
+  - React.memo on list item components (FolderTreeItem, PageItem, DraggablePageItem)
+  - React.memo on NotebookCard and ActionCard components
+  - useCallback for event handlers to maintain stable references
+  - Extracted PageListItem as a memoized component
+  - Prevents unnecessary re-renders when parent state changes
 
 ---
 

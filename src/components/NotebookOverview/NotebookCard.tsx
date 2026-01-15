@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, memo, useCallback } from "react";
 import type { Notebook } from "../../types/notebook";
 import type { Page } from "../../types/page";
 
@@ -10,7 +10,7 @@ interface NotebookCardProps {
   onSettings: () => void;
 }
 
-export function NotebookCard({
+export const NotebookCard = memo(function NotebookCard({
   notebook,
   coverPage,
   pageCount,
@@ -18,6 +18,11 @@ export function NotebookCard({
   onSettings,
 }: NotebookCardProps) {
   const accentColor = notebook.color || "var(--color-accent)";
+
+  const handleSettings = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    onSettings();
+  }, [onSettings]);
 
   // Extract text preview from cover page if available
   const coverPreview = useMemo(() => {
@@ -42,10 +47,7 @@ export function NotebookCard({
     >
       {/* Settings button - appears on hover */}
       <button
-        onClick={(e) => {
-          e.stopPropagation();
-          onSettings();
-        }}
+        onClick={handleSettings}
         className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-md opacity-0 transition-all hover:bg-[--color-bg-tertiary] group-hover:opacity-100"
         style={{
           backgroundColor: "var(--color-bg-secondary)",
@@ -146,7 +148,7 @@ export function NotebookCard({
       </button>
     </div>
   );
-}
+});
 
 function IconSettings() {
   return (

@@ -22,6 +22,7 @@ import {
   type ScrivenerImportPreview,
 } from "../../utils/api";
 import { useNotebookStore } from "../../stores/notebookStore";
+import { useToastStore } from "../../stores/toastStore";
 import type { Notebook } from "../../types/notebook";
 
 interface BackupDialogProps {
@@ -59,6 +60,7 @@ export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
   const [scrivenerNotebookName, setScrivenerNotebookName] = useState("");
 
   const { notebooks, loadNotebooks } = useNotebookStore();
+  const toast = useToastStore();
 
   useEffect(() => {
     if (isOpen && activeTab === "backups") {
@@ -93,9 +95,13 @@ export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
 
       setIsLoading(true);
       const info = await exportNotebookZip(notebook.id, path);
-      setSuccess(`Exported "${info.notebookName}" with ${info.pageCount} pages`);
+      const message = `Exported "${info.notebookName}" with ${info.pageCount} pages`;
+      setSuccess(message);
+      toast.success(message);
     } catch (err) {
-      setError(`Export failed: ${err}`);
+      const message = `Export failed: ${err}`;
+      setError(message);
+      toast.error(message);
     } finally {
       setIsLoading(false);
     }
@@ -130,9 +136,13 @@ export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
 
       const notebook = await importNotebookZip(path);
       await loadNotebooks();
-      setSuccess(`Imported "${notebook.name}" successfully`);
+      const message = `Imported "${notebook.name}" successfully`;
+      setSuccess(message);
+      toast.success(message);
     } catch (err) {
-      setError(`Import failed: ${err}`);
+      const message = `Import failed: ${err}`;
+      setError(message);
+      toast.error(message);
     } finally {
       setIsLoading(false);
     }
@@ -145,10 +155,14 @@ export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
       setIsLoading(true);
 
       const info = await createNotebookBackup(notebook.id);
-      setSuccess(`Auto-backup created for "${info.notebookName}"`);
+      const message = `Auto-backup created for "${info.notebookName}"`;
+      setSuccess(message);
+      toast.success(message);
       await loadBackups();
     } catch (err) {
-      setError(`Backup failed: ${err}`);
+      const message = `Backup failed: ${err}`;
+      setError(message);
+      toast.error(message);
     } finally {
       setIsLoading(false);
     }

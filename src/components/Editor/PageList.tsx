@@ -1,7 +1,92 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, memo, useCallback } from "react";
 import type { Page } from "../../types/page";
 import { usePageStore } from "../../stores/pageStore";
 import { useTagStore } from "../../stores/tagStore";
+
+// Memoized page list item for better performance
+interface PageListItemProps {
+  page: Page;
+  isSelected: boolean;
+  onSelect: (pageId: string) => void;
+}
+
+const PageListItem = memo(function PageListItem({
+  page,
+  isSelected,
+  onSelect,
+}: PageListItemProps) {
+  const handleClick = useCallback(() => {
+    onSelect(page.id);
+  }, [onSelect, page.id]);
+
+  return (
+    <li>
+      <button
+        onClick={handleClick}
+        className="flex w-full items-center gap-3 rounded-lg text-left transition-all p-3"
+        style={{
+          backgroundColor: isSelected ? "var(--color-bg-tertiary)" : "transparent",
+          color: isSelected ? "var(--color-text-primary)" : "var(--color-text-secondary)",
+          borderLeft: `3px solid ${isSelected ? "var(--color-accent)" : "transparent"}`,
+        }}
+      >
+        <div
+          className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg"
+          style={{
+            backgroundColor: isSelected
+              ? "rgba(139, 92, 246, 0.2)"
+              : "var(--color-bg-tertiary)",
+            color: isSelected ? "var(--color-accent)" : "var(--color-text-muted)",
+          }}
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+            <polyline points="14,2 14,8 20,8" />
+          </svg>
+        </div>
+        <div className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-medium">
+            {page.title}
+          </span>
+          {page.tags.length > 0 && (
+            <div className="mt-1 flex flex-wrap gap-1">
+              {page.tags.slice(0, 2).map((tag) => (
+                <span
+                  key={tag}
+                  className="rounded-full text-xs px-2 py-0.5"
+                  style={{
+                    backgroundColor: "rgba(139, 92, 246, 0.1)",
+                    color: "var(--color-accent)",
+                  }}
+                >
+                  {tag}
+                </span>
+              ))}
+              {page.tags.length > 2 && (
+                <span
+                  className="text-xs"
+                  style={{ color: "var(--color-text-muted)" }}
+                >
+                  +{page.tags.length - 2}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+      </button>
+    </li>
+  );
+});
 
 interface PageListProps {
   pages: Page[];
@@ -212,76 +297,14 @@ export function PageList({
           </div>
         ) : (
           <ul className="space-y-1">
-            {filteredPages.map((page) => {
-              const isSelected = selectedPageId === page.id;
-              return (
-                <li key={page.id}>
-                  <button
-                    onClick={() => onSelectPage(page.id)}
-                    className="flex w-full items-center gap-3 rounded-lg text-left transition-all p-3"
-                    style={{
-                      backgroundColor: isSelected ? "var(--color-bg-tertiary)" : "transparent",
-                      color: isSelected ? "var(--color-text-primary)" : "var(--color-text-secondary)",
-                      borderLeft: `3px solid ${isSelected ? "var(--color-accent)" : "transparent"}`,
-                    }}
-                  >
-                    <div
-                      className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg"
-                      style={{
-                        backgroundColor: isSelected
-                          ? "rgba(139, 92, 246, 0.2)"
-                          : "var(--color-bg-tertiary)",
-                        color: isSelected ? "var(--color-accent)" : "var(--color-text-muted)",
-                      }}
-                    >
-                      <svg
-                        xmlns="http://www.w3.org/2000/svg"
-                        width="14"
-                        height="14"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
-                        <polyline points="14,2 14,8 20,8" />
-                      </svg>
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium">
-                        {page.title}
-                      </span>
-                      {page.tags.length > 0 && (
-                        <div className="mt-1 flex flex-wrap gap-1">
-                          {page.tags.slice(0, 2).map((tag) => (
-                            <span
-                              key={tag}
-                              className="rounded-full text-xs px-2 py-0.5"
-                              style={{
-                                backgroundColor: "rgba(139, 92, 246, 0.1)",
-                                color: "var(--color-accent)",
-                              }}
-                            >
-                              {tag}
-                            </span>
-                          ))}
-                          {page.tags.length > 2 && (
-                            <span
-                              className="text-xs"
-                              style={{ color: "var(--color-text-muted)" }}
-                            >
-                              +{page.tags.length - 2}
-                            </span>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </button>
-                </li>
-              );
-            })}
+            {filteredPages.map((page) => (
+              <PageListItem
+                key={page.id}
+                page={page}
+                isSelected={selectedPageId === page.id}
+                onSelect={onSelectPage}
+              />
+            ))}
           </ul>
         )}
       </div>

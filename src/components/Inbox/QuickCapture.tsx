@@ -1,5 +1,7 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useId } from "react";
 import { useInboxStore } from "../../stores/inboxStore";
+import { useToastStore } from "../../stores/toastStore";
+import { useFocusTrap } from "../../hooks/useFocusTrap";
 
 interface QuickCaptureProps {
   onClose?: () => void;
@@ -14,6 +16,9 @@ export function QuickCapture({ onClose }: QuickCaptureProps) {
 
   const titleRef = useRef<HTMLInputElement>(null);
   const { quickCapture, showQuickCapture, closeQuickCapture } = useInboxStore();
+  const toast = useToastStore();
+  const focusTrapRef = useFocusTrap(showQuickCapture);
+  const titleId = useId();
 
   const isOpen = showQuickCapture;
   const handleClose = onClose || closeQuickCapture;
@@ -54,12 +59,14 @@ export function QuickCapture({ onClose }: QuickCaptureProps) {
       setTags([]);
       setTagInput("");
       handleClose();
+      toast.success("Item captured to inbox");
     } catch (err) {
-      console.error("Failed to capture:", err);
+      const message = err instanceof Error ? err.message : "Failed to capture";
+      toast.error(message);
     } finally {
       setIsSubmitting(false);
     }
-  }, [title, content, tags, quickCapture, handleClose]);
+  }, [title, content, tags, quickCapture, handleClose, toast]);
 
   const handleAddTag = (tag: string) => {
     const trimmed = tag.trim();
@@ -95,8 +102,13 @@ export function QuickCapture({ onClose }: QuickCaptureProps) {
     <div
       className="fixed inset-0 z-50 flex items-start justify-center pt-[15vh] bg-black/50"
       onClick={handleBackdropClick}
+      role="presentation"
     >
       <div
+        ref={focusTrapRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
         className="w-full max-w-lg rounded-xl border shadow-2xl"
         style={{
           backgroundColor: "var(--color-bg-secondary)",
@@ -126,6 +138,7 @@ export function QuickCapture({ onClose }: QuickCaptureProps) {
               <line x1="9" y1="14" x2="15" y2="14" />
             </svg>
             <h2
+              id={titleId}
               className="text-sm font-semibold"
               style={{ color: "var(--color-text-primary)" }}
             >
@@ -134,6 +147,7 @@ export function QuickCapture({ onClose }: QuickCaptureProps) {
           </div>
           <button
             onClick={handleClose}
+            aria-label="Close dialog"
             className="rounded p-1 transition-colors hover:bg-white/10"
             style={{ color: "var(--color-text-muted)" }}
           >
@@ -203,6 +217,7 @@ export function QuickCapture({ onClose }: QuickCaptureProps) {
                 {tag}
                 <button
                   onClick={() => handleRemoveTag(tag)}
+                  aria-label={`Remove tag ${tag}`}
                   className="ml-0.5 rounded-full p-0.5 transition-colors hover:bg-white/20"
                 >
                   <svg

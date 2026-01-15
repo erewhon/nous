@@ -22,6 +22,7 @@ import { PageSettingsDialog } from "../PageSettings";
 import { PageHistoryDialog } from "../PageHistory";
 import { WritingAssistancePanel } from "./WritingAssistancePanel";
 import { useFolderStore } from "../../stores/folderStore";
+import { useToastStore } from "../../stores/toastStore";
 import type { PageStats } from "../../utils/pageStats";
 
 interface PageHeaderProps {
@@ -51,6 +52,7 @@ export function PageHeader({ page, isSaving, lastSaved, stats, pageText = "" }: 
   const { loadFolders } = useFolderStore();
   const { getTemplateForPage } = useTemplateStore();
   const { showPageStats, togglePageStats } = useThemeStore();
+  const toast = useToastStore();
 
   // Check if this page is a template source
   const pageTemplate = getTemplateForPage(page.id);
@@ -192,8 +194,10 @@ export function PageHeader({ page, isSaving, lastSaved, stats, pageText = "" }: 
       await openPageInEditor(page.notebookId, page.id, editor);
       const session = await getExternalEditSession(page.id);
       setExternalEditSession(session);
+      toast.success(`Opened in ${editor?.name || "external editor"}`);
     } catch (error) {
-      console.error("Failed to open in external editor:", error);
+      const message = error instanceof Error ? error.message : "Failed to open in external editor";
+      toast.error(message);
     }
   };
 
@@ -205,8 +209,10 @@ export function PageHeader({ page, isSaving, lastSaved, stats, pageText = "" }: 
       setHasExternalChanges(false);
       // Reload the page to get updated content
       selectPage(page.id);
+      toast.success("Changes synced from external editor");
     } catch (error) {
-      console.error("Failed to sync from external editor:", error);
+      const message = error instanceof Error ? error.message : "Failed to sync from external editor";
+      toast.error(message);
     } finally {
       setIsSyncing(false);
     }
@@ -217,8 +223,10 @@ export function PageHeader({ page, isSaving, lastSaved, stats, pageText = "" }: 
       await endExternalEditSession(page.id);
       setExternalEditSession(null);
       setHasExternalChanges(false);
+      toast.info("External edit session ended");
     } catch (error) {
-      console.error("Failed to end external edit session:", error);
+      const message = error instanceof Error ? error.message : "Failed to end external edit session";
+      toast.error(message);
     }
   };
 

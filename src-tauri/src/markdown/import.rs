@@ -515,6 +515,7 @@ fn generate_block_id() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Datelike;
 
     #[test]
     fn test_parse_frontmatter() {
@@ -533,6 +534,22 @@ updated: 2024-01-02T00:00:00Z
         assert_eq!(fm.title, Some("Test Title".to_string()));
         assert_eq!(fm.tags, vec!["tag1", "tag2"]);
         assert!(body.contains("# Content here"));
+    }
+
+    #[test]
+    fn test_parse_frontmatter_no_frontmatter() {
+        let markdown = "# Just a heading\n\nSome content.";
+        let (fm, body) = parse_frontmatter(markdown);
+        assert_eq!(fm.title, None);
+        assert!(fm.tags.is_empty());
+        assert_eq!(body, markdown);
+    }
+
+    #[test]
+    fn test_parse_yaml_string_quoted() {
+        assert_eq!(parse_yaml_string("\"quoted value\""), "quoted value");
+        assert_eq!(parse_yaml_string("'single quoted'"), "single quoted");
+        assert_eq!(parse_yaml_string("unquoted"), "unquoted");
     }
 
     #[test]
@@ -572,5 +589,190 @@ This is a paragraph.
             .find(|b| b.block_type == "checklist");
 
         assert!(checklist.is_some());
+        let items = checklist.unwrap().data.get("items").unwrap().as_array().unwrap();
+        assert_eq!(items.len(), 2);
+    }
+
+    #[test]
+    fn test_import_code_block() {
+        let markdown = r#"```rust
+fn main() {
+    println!("Hello");
+}
+```
+"#;
+        let page = import_markdown_to_page(markdown, Uuid::new_v4(), "Untitled");
+
+        let code_block = page.content.blocks.iter()
+            .find(|b| b.block_type == "code");
+
+        assert!(code_block.is_some());
+        let block = code_block.unwrap();
+        assert_eq!(block.data.get("language").unwrap().as_str().unwrap(), "rust");
+        assert!(block.data.get("code").unwrap().as_str().unwrap().contains("fn main()"));
+    }
+
+    #[test]
+    fn test_import_table() {
+        let markdown = r#"| Name | Age |
+| --- | --- |
+| Alice | 30 |
+| Bob | 25 |
+"#;
+        let page = import_markdown_to_page(markdown, Uuid::new_v4(), "Untitled");
+
+        let table_block = page.content.blocks.iter()
+            .find(|b| b.block_type == "table");
+
+        assert!(table_block.is_some());
+        let block = table_block.unwrap();
+        assert!(block.data.get("withHeadings").unwrap().as_bool().unwrap());
+        let content = block.data.get("content").unwrap().as_array().unwrap();
+        assert_eq!(content.len(), 3); // header + 2 data rows
+    }
+
+    #[test]
+    fn test_import_callout() {
+        let markdown = r#"> [!WARNING] Be Careful
+> This is important information.
+"#;
+        let page = import_markdown_to_page(markdown, Uuid::new_v4(), "Untitled");
+
+        let callout_block = page.content.blocks.iter()
+            .find(|b| b.block_type == "callout");
+
+        assert!(callout_block.is_some());
+        let block = callout_block.unwrap();
+        assert_eq!(block.data.get("type").unwrap().as_str().unwrap(), "warning");
+    }
+
+    #[test]
+    fn test_import_ordered_list() {
+        let markdown = r#"1. First item
+2. Second item
+3. Third item
+"#;
+        let page = import_markdown_to_page(markdown, Uuid::new_v4(), "Untitled");
+
+        let list_block = page.content.blocks.iter()
+            .find(|b| b.block_type == "list");
+
+        assert!(list_block.is_some());
+        let block = list_block.unwrap();
+        assert_eq!(block.data.get("style").unwrap().as_str().unwrap(), "ordered");
+    }
+
+    #[test]
+    fn test_import_horizontal_rule() {
+        let markdown = r#"Some text
+
+---
+
+More text
+"#;
+        let page = import_markdown_to_page(markdown, Uuid::new_v4(), "Untitled");
+
+        let delimiter = page.content.blocks.iter()
+            .find(|b| b.block_type == "delimiter");
+
+        assert!(delimiter.is_some());
+    }
+
+    #[test]
+    fn test_import_with_inline_formatting() {
+        let markdown = "This has **bold** and *italic* and `code` text.";
+        let page = import_markdown_to_page(markdown, Uuid::new_v4(), "Untitled");
+
+        let paragraph = page.content.blocks.iter()
+            .find(|b| b.block_type == "paragraph");
+
+        assert!(paragraph.is_some());
+        let text = paragraph.unwrap().data.get("text").unwrap().as_str().unwrap();
+        assert!(text.contains("<b>bold</b>"));
+        assert!(text.contains("<i>italic</i>"));
+        assert!(text.contains("<code>code</code>"));
+    }
+
+    #[test]
+    fn test_import_image() {
+        let markdown = "![Alt text](https://example.com/image.png)";
+        let page = import_markdown_to_page(markdown, Uuid::new_v4(), "Untitled");
+
+        let image_block = page.content.blocks.iter()
+            .find(|b| b.block_type == "image");
+
+        assert!(image_block.is_some());
+        let block = image_block.unwrap();
+        let url = block.data.get("file").unwrap().get("url").unwrap().as_str().unwrap();
+        assert_eq!(url, "https://example.com/image.png");
+    }
+
+    #[test]
+    fn test_import_uses_fallback_title() {
+        let markdown = "Just some content without a heading.";
+        let page = import_markdown_to_page(markdown, Uuid::new_v4(), "Fallback Title");
+        assert_eq!(page.title, "Fallback Title");
+    }
+
+    #[test]
+    fn test_import_preserves_dates_from_frontmatter() {
+        let markdown = r#"---
+title: "Dated Page"
+created: 2023-06-15T10:30:00Z
+updated: 2023-06-16T14:00:00Z
+---
+
+Content
+"#;
+        let page = import_markdown_to_page(markdown, Uuid::new_v4(), "Untitled");
+
+        // Check that dates were parsed from frontmatter
+        assert_eq!(page.created_at.year(), 2023);
+        assert_eq!(page.created_at.month(), 6);
+        assert_eq!(page.created_at.day(), 15);
+    }
+
+    #[test]
+    fn test_parse_checklist_item() {
+        assert_eq!(parse_checklist_item("[ ] unchecked"), Some(("unchecked".to_string(), false)));
+        assert_eq!(parse_checklist_item("[x] checked"), Some(("checked".to_string(), true)));
+        assert_eq!(parse_checklist_item("[X] checked uppercase"), Some(("checked uppercase".to_string(), true)));
+        assert_eq!(parse_checklist_item("not a checklist"), None);
+    }
+
+    #[test]
+    fn test_heading_levels() {
+        let markdown = r#"# H1
+## H2
+### H3
+#### H4
+##### H5
+###### H6
+"#;
+        let page = import_markdown_to_page(markdown, Uuid::new_v4(), "Untitled");
+
+        let headers: Vec<_> = page.content.blocks.iter()
+            .filter(|b| b.block_type == "header")
+            .collect();
+
+        assert_eq!(headers.len(), 6);
+
+        for (i, header) in headers.iter().enumerate() {
+            let level = header.data.get("level").unwrap().as_u64().unwrap();
+            assert_eq!(level, (i + 1) as u64);
+        }
+    }
+
+    #[test]
+    fn test_import_link() {
+        let markdown = "Check out [this link](https://example.com).";
+        let page = import_markdown_to_page(markdown, Uuid::new_v4(), "Untitled");
+
+        let paragraph = page.content.blocks.iter()
+            .find(|b| b.block_type == "paragraph");
+
+        assert!(paragraph.is_some());
+        let text = paragraph.unwrap().data.get("text").unwrap().as_str().unwrap();
+        assert!(text.contains("<a href=\"https://example.com\">this link</a>"));
     }
 }

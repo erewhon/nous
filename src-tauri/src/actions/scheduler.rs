@@ -322,6 +322,7 @@ fn calculate_next_run(schedule: &Schedule) -> Option<DateTime<Utc>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Timelike;
 
     #[test]
     fn test_parse_time() {

@@ -4,6 +4,7 @@ export { useLinkStore } from "./linkStore";
 export { useThemeStore } from "./themeStore";
 export { useInboxStore } from "./inboxStore";
 export { useSyncStore } from "./syncStore";
+export { useToastStore } from "./toastStore";
 export type {
   ThemeMode,
   ColorScheme,
@@ -11,3 +12,4 @@ export type {
   EditorWidth,
   EditorKeymap,
 } from "./themeStore";
+export type { Toast, ToastType } from "./toastStore";
