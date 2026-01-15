@@ -9,6 +9,7 @@ import { TagEditor } from "../Tags";
 import { SaveAsTemplateDialog } from "../TemplateDialog";
 import { PageSettingsDialog } from "../PageSettings";
 import { PageHistoryDialog } from "../PageHistory";
+import { WritingAssistancePanel } from "./WritingAssistancePanel";
 import { useFolderStore } from "../../stores/folderStore";
 import type { PageStats } from "../../utils/pageStats";
 
@@ -17,15 +18,17 @@ interface PageHeaderProps {
   isSaving: boolean;
   lastSaved: Date | null;
   stats?: PageStats | null;
+  pageText?: string; // Plain text content for writing assistance
 }
 
-export function PageHeader({ page, isSaving, lastSaved, stats }: PageHeaderProps) {
+export function PageHeader({ page, isSaving, lastSaved, stats, pageText = "" }: PageHeaderProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [title, setTitle] = useState(page.title);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [showSaveAsTemplate, setShowSaveAsTemplate] = useState(false);
   const [showPageSettings, setShowPageSettings] = useState(false);
   const [showPageHistory, setShowPageHistory] = useState(false);
+  const [showWritingAssistance, setShowWritingAssistance] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const { updatePage, selectPage, archivePage, unarchivePage, createPage, updatePageContent } = usePageStore();
@@ -428,6 +431,31 @@ export function PageHeader({ page, isSaving, lastSaved, stats }: PageHeaderProps
               </svg>
               View History
             </button>
+            <button
+              onClick={() => {
+                setIsMenuOpen(false);
+                setShowWritingAssistance(true);
+              }}
+              className="flex w-full items-center gap-3 px-4 py-2 text-left text-sm transition-colors hover:opacity-80"
+              style={{ color: "var(--color-text-secondary)" }}
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="m6 16 6-12 6 12" />
+                <path d="M8 12h8" />
+                <path d="m16 20 2 2 4-4" />
+              </svg>
+              Check Writing
+            </button>
             <div
               className="my-1 border-t"
               style={{ borderColor: "var(--color-border)" }}
@@ -486,12 +514,26 @@ export function PageHeader({ page, isSaving, lastSaved, stats }: PageHeaderProps
         {stats && (
           <div className="ml-4 flex items-center gap-2">
             {showPageStats && (
-              <span
-                className="text-xs whitespace-nowrap"
-                style={{ color: "var(--color-text-muted)" }}
-              >
-                {stats.words} words · {stats.readingTime} min read
-              </span>
+              <div className="flex items-center gap-3">
+                <span
+                  className="text-xs whitespace-nowrap"
+                  style={{ color: "var(--color-text-muted)" }}
+                >
+                  {stats.words.toLocaleString()} words · {stats.characters.toLocaleString()} chars · {stats.readingTime} min
+                </span>
+                {stats.readingLevel && (
+                  <span
+                    className="text-xs whitespace-nowrap rounded-full px-2 py-0.5"
+                    style={{
+                      backgroundColor: getReadingLevelColor(stats.readingLevel.score),
+                      color: "white",
+                    }}
+                    title={`Flesch-Kincaid Grade Level: ${stats.readingLevel.grade}`}
+                  >
+                    {stats.readingLevel.label}
+                  </span>
+                )}
+              </div>
             )}
             <button
               onClick={togglePageStats}
@@ -610,6 +652,23 @@ export function PageHeader({ page, isSaving, lastSaved, stats }: PageHeaderProps
         page={page}
         onClose={() => setShowPageHistory(false)}
       />
+
+      {/* Writing Assistance Panel */}
+      <WritingAssistancePanel
+        isOpen={showWritingAssistance}
+        onClose={() => setShowWritingAssistance(false)}
+        text={pageText}
+      />
     </div>
   );
+}
+
+/**
+ * Get background color for reading level badge based on Flesch score
+ */
+function getReadingLevelColor(score: number): string {
+  if (score >= 80) return "rgb(34, 197, 94)";   // Green - Easy
+  if (score >= 60) return "rgb(59, 130, 246)";  // Blue - Standard
+  if (score >= 40) return "rgb(245, 158, 11)";  // Amber - Moderate
+  return "rgb(239, 68, 68)";                     // Red - Difficult
 }

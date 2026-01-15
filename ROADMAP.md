@@ -26,7 +26,8 @@
   - AI can create notebooks and pages via tool use
   - Thinking/reasoning display (collapsible, for Claude models)
   - Response stats (elapsed time, tokens, tok/s, model name)
-  - Support for OpenAI, Anthropic, and Ollama providers
+  - Support for OpenAI, Anthropic, Ollama, and LM Studio providers
+  - Notebook-level AI provider/model override (in notebook settings)
 
 - [x] **Sections, Color Coding & Cover Pages**
   - Color coding for notebooks, sections, and folders
@@ -36,6 +37,14 @@
   - Cover pages - Optional styled entry page for notebooks
   - Cover page editor with notebook color theming
   - ColorPicker component with 16 presets and custom hex input
+
+- [x] **Overview UI Mode**
+  - Alternative tiled notebook view (switchable in Appearance settings)
+  - Physical notebook-style cards with cover page preview
+  - Search/filter notebooks
+  - Sort by name, updated date, created date, or page count (persisted)
+  - Notebook dropdown for switching between notebooks
+  - Quick access to notebook settings from cards
 
 ---
 
@@ -225,10 +234,10 @@ Already implemented with Tantivy, may need refinement:
 - [x] Keyboard shortcut (`Cmd+Shift+F`)
 
 ### 15. PDF Import & Annotation
-- [ ] Import PDF files
-- [ ] PDF viewer in app
-- [ ] Highlight and annotate
-- [ ] Extract highlights to page
+- [x] Import PDF files (drag-drop or file picker)
+- [x] PDF viewer in app (embedded block and full-screen mode)
+- [x] Highlight and annotate (text selection, color options, notes)
+- [x] Extract highlights to page (creates new page with quotes)
 
 ### 16. Notebook Encryption
 - [ ] Password-protected notebooks
@@ -250,10 +259,11 @@ Already implemented with Tantivy, may need refinement:
 - [ ] Offline support
 
 ### 19. Page Stats & Writing Assistance
-- [ ] Page statistics (word count, character count, reading time)
-- [ ] Real-time spell checking
-- [ ] Grammar checking
-- [ ] Reading level analysis (Flesch-Kincaid, etc.)
+- [x] Page statistics (word count, character count, reading time) - toggleable in page header
+- [x] Reading level analysis (Flesch-Kincaid Reading Ease and Grade Level)
+- [x] Spell checking (browser native on contenteditable)
+- [x] Grammar checking (LanguageTool API integration)
+- [x] Writing Assistance panel with issue categorization (spelling, grammar, punctuation, style)
 
 ### 20. Editor Customization
 - [ ] VI key bindings mode

@@ -822,3 +822,191 @@ wiki-link.broken,
   margin-bottom: 0.5rem;
   padding: 0 0.5rem;
 }
+
+/* PDF Block Styles */
+.pdf-block {
+  margin: 1rem 0;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg-secondary);
+  overflow: hidden;
+}
+
+.pdf-uploader {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
+  padding: 2rem;
+  cursor: pointer;
+  background: var(--color-bg-tertiary);
+  border: 2px dashed var(--color-border);
+  border-radius: 8px;
+  margin: 0.5rem;
+  transition: all 0.2s ease;
+}
+
+.pdf-uploader:hover {
+  border-color: var(--color-accent);
+  background: rgba(139, 92, 246, 0.05);
+}
+
+.pdf-uploader--dragover {
+  border-color: var(--color-accent);
+  background: rgba(139, 92, 246, 0.1);
+}
+
+.pdf-uploader-content {
+  text-align: center;
+}
+
+.pdf-viewer-container {
+  display: flex;
+  flex-direction: column;
+}
+
+.pdf-block-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  background: var(--color-bg-tertiary);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.pdf-filename {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 200px;
+}
+
+.pdf-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.pdf-page-nav {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.pdf-nav-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-bg-secondary);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.pdf-nav-btn:hover {
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  border-color: var(--color-accent);
+}
+
+.pdf-page-info {
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  padding: 0 0.5rem;
+  min-width: 50px;
+  text-align: center;
+}
+
+.pdf-fullscreen-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-bg-secondary);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.pdf-fullscreen-btn:hover {
+  background: var(--color-accent);
+  color: white;
+  border-color: var(--color-accent);
+}
+
+.pdf-viewer-wrapper {
+  min-height: 200px;
+}
+
+.pdf-caption {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  border: none;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-bg-primary);
+  color: var(--color-text-muted);
+  font-size: 0.875rem;
+  text-align: center;
+  outline: none;
+}
+
+.pdf-caption::placeholder {
+  color: var(--color-text-muted);
+}
+
+.pdf-caption:focus {
+  color: var(--color-text-secondary);
+}
+
+/* PDF settings */
+.pdf-settings {
+  padding: 0.5rem;
+}
+
+.pdf-settings-section {
+  padding: 0.25rem;
+}
+
+/* PDF Viewer styles */
+.pdf-viewer .react-pdf__Document {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.pdf-viewer .react-pdf__Page {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  margin: 0.5rem 0;
+}
+
+.pdf-viewer .react-pdf__Page canvas {
+  display: block;
+}
+
+/* PDF highlight colors */
+.pdf-highlight--yellow { background-color: rgba(250, 204, 21, 0.4); }
+.pdf-highlight--green { background-color: rgba(74, 222, 128, 0.4); }
+.pdf-highlight--blue { background-color: rgba(96, 165, 250, 0.4); }
+.pdf-highlight--pink { background-color: rgba(244, 114, 182, 0.4); }
+.pdf-highlight--orange { background-color: rgba(251, 146, 60, 0.4); }
+
+/* Spinning animation for loading */
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
+}

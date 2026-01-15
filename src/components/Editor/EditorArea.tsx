@@ -5,6 +5,7 @@ import { usePageStore } from "../../stores/pageStore";
 import { useFolderStore } from "../../stores/folderStore";
 import { useSectionStore } from "../../stores/sectionStore";
 import { useLinkStore } from "../../stores/linkStore";
+import { usePDFStore } from "../../stores/pdfStore";
 import { FolderTree } from "./FolderTree";
 import { BlockEditor } from "./BlockEditor";
 import { PageHeader } from "./PageHeader";
@@ -12,6 +13,7 @@ import { BacklinksPanel } from "./BacklinksPanel";
 import { SimilarPagesPanel } from "./SimilarPagesPanel";
 import { CoverPage } from "../CoverPage";
 import { SectionList } from "../Sections";
+import { PDFFullScreen } from "../PDF";
 import type { EditorData, Page } from "../../types/page";
 import * as api from "../../utils/api";
 import { calculatePageStats, type PageStats } from "../../utils/pageStats";
@@ -33,6 +35,7 @@ export function EditorArea() {
     deleteSection,
   } = useSectionStore();
   const { updatePageLinks, buildLinksFromPages } = useLinkStore();
+  const { viewerState, closeViewer } = usePDFStore();
   const [isSaving, setIsSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
 
@@ -196,6 +199,82 @@ export function EditorArea() {
     setShowCover(false);
   }, []);
 
+  // Handle extracting PDF highlights to a new page
+  const handleExtractHighlights = useCallback(async () => {
+    if (!selectedNotebookId || !viewerState.pdfData) return;
+
+    const pdfData = viewerState.pdfData;
+    const highlights = pdfData.highlights;
+
+    if (highlights.length === 0) return;
+
+    // Create page title
+    const title = `Highlights: ${pdfData.originalName || "PDF"}`;
+
+    // Create page with highlights as quote blocks
+    const newPage = await createPage(selectedNotebookId, title);
+
+    // Build content blocks
+    const blocks: Array<{ id: string; type: string; data: Record<string, unknown> }> = [
+      {
+        id: crypto.randomUUID(),
+        type: "header",
+        data: { text: title, level: 2 },
+      },
+      {
+        id: crypto.randomUUID(),
+        type: "paragraph",
+        data: { text: `Extracted from: ${pdfData.originalName || "PDF document"}` },
+      },
+    ];
+
+    // Group highlights by page
+    const byPage = highlights.reduce(
+      (acc, h) => {
+        (acc[h.pageNumber] ||= []).push(h);
+        return acc;
+      },
+      {} as Record<number, typeof highlights>
+    );
+
+    // Add highlights grouped by page
+    for (const [pageNum, pageHighlights] of Object.entries(byPage).sort(
+      ([a], [b]) => Number(a) - Number(b)
+    )) {
+      blocks.push({
+        id: crypto.randomUUID(),
+        type: "header",
+        data: { text: `Page ${pageNum}`, level: 3 },
+      });
+
+      for (const highlight of pageHighlights) {
+        blocks.push({
+          id: crypto.randomUUID(),
+          type: "quote",
+          data: {
+            text: highlight.selectedText,
+            caption: highlight.note || "",
+          },
+        });
+      }
+    }
+
+    if (!newPage) return;
+
+    // Update the new page with content
+    const contentData: EditorData = {
+      time: Date.now(),
+      version: "2.28.2",
+      blocks,
+    };
+
+    await updatePageContent(selectedNotebookId, newPage.id, contentData);
+
+    // Close the PDF viewer and select the new page
+    closeViewer();
+    selectPage(newPage.id);
+  }, [selectedNotebookId, viewerState.pdfData, createPage, updatePageContent, closeViewer, selectPage]);
+
   if (!selectedNotebook) {
     return (
       <div
@@ -321,6 +400,7 @@ export function EditorArea() {
               isSaving={isSaving}
               lastSaved={lastSaved}
               stats={pageStats}
+              pageText={pageStats?.text}
             />
             <div className="flex-1 overflow-y-auto px-16 py-10">
               <div
@@ -382,6 +462,9 @@ export function EditorArea() {
           </div>
         )}
       </div>
+
+      {/* PDF Full Screen Viewer */}
+      <PDFFullScreen onExtractHighlights={handleExtractHighlights} />
     </div>
   );
 }

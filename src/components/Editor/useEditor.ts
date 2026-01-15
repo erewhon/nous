@@ -13,6 +13,7 @@ import { WikiLinkTool } from "./WikiLinkTool";
 import { CodeBlockTool } from "./CodeBlockTool";
 import { CalloutTool } from "./CalloutTool";
 import { FlashcardTool } from "./FlashcardTool";
+import { PDFTool } from "./PDFTool";
 import { createImageUploader } from "./imageUploader";
 
 interface UseEditorOptions {
@@ -114,6 +115,12 @@ export function useEditor({
                 config: {
                   uploader: createImageUploader({ notebookId }),
                   captionPlaceholder: "Image caption",
+                },
+              },
+              pdf: {
+                class: PDFTool as unknown as ToolConstructable,
+                config: {
+                  notebookId,
                 },
               },
             }
