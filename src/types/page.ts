@@ -34,6 +34,7 @@ export const SectionSchema = z.object({
   color: z.string().optional(),
   systemPrompt: z.string().optional(),
   systemPromptMode: SystemPromptModeSchema.default("override"),
+  aiModel: z.string().optional(), // Model override (format: "provider:model" or just "model")
   position: z.number().default(0),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
@@ -71,6 +72,7 @@ export const PageSchema = z.object({
   position: z.number().default(0),
   systemPrompt: z.string().optional(),
   systemPromptMode: SystemPromptModeSchema.default("override"),
+  aiModel: z.string().optional(), // Model override (format: "provider:model" or just "model")
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });

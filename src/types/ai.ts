@@ -1,5 +1,81 @@
 import { z } from "zod";
 
+// Provider types
+export const ProviderTypeSchema = z.enum(["openai", "anthropic", "ollama", "lmstudio"]);
+export type ProviderType = z.infer<typeof ProviderTypeSchema>;
+
+// Model configuration for a provider
+export const ModelConfigSchema = z.object({
+  id: z.string(),              // Model identifier (e.g., "gpt-4o")
+  name: z.string(),            // Display name (e.g., "GPT-4o")
+  enabled: z.boolean(),        // Show in model selectors
+  isDefault: z.boolean(),      // Is this a built-in default model
+  isCustom: z.boolean(),       // User-added model
+});
+
+export type ModelConfig = z.infer<typeof ModelConfigSchema>;
+
+// Provider configuration
+export const ProviderConfigSchema = z.object({
+  type: ProviderTypeSchema,
+  enabled: z.boolean(),                    // Whether this provider is configured/active
+  apiKey: z.string().optional(),           // For cloud providers
+  baseUrl: z.string().optional(),          // For Ollama/LMStudio (custom endpoints)
+  models: z.array(ModelConfigSchema),      // Available models for this provider
+});
+
+export type ProviderConfig = z.infer<typeof ProviderConfigSchema>;
+
+// Default models for each provider
+export const DEFAULT_MODELS: Record<ProviderType, Array<{ id: string; name: string }>> = {
+  openai: [
+    { id: "gpt-4o", name: "GPT-4o" },
+    { id: "gpt-4o-mini", name: "GPT-4o Mini" },
+    { id: "gpt-4-turbo", name: "GPT-4 Turbo" },
+    { id: "gpt-3.5-turbo", name: "GPT-3.5 Turbo" },
+    { id: "o1", name: "o1" },
+    { id: "o1-mini", name: "o1 Mini" },
+  ],
+  anthropic: [
+    { id: "claude-sonnet-4-20250514", name: "Claude Sonnet 4" },
+    { id: "claude-opus-4-5-20251101", name: "Claude Opus 4.5" },
+    { id: "claude-opus-4-20250514", name: "Claude Opus 4" },
+    { id: "claude-3-5-haiku-20241022", name: "Claude 3.5 Haiku" },
+  ],
+  ollama: [
+    { id: "llama3.2", name: "Llama 3.2" },
+    { id: "llama3.1", name: "Llama 3.1" },
+    { id: "mistral", name: "Mistral" },
+    { id: "codellama", name: "Code Llama" },
+    { id: "phi3", name: "Phi-3" },
+  ],
+  lmstudio: [
+    { id: "local-model", name: "Local Model" },
+  ],
+};
+
+// Default base URLs for local providers
+export const DEFAULT_BASE_URLS: Partial<Record<ProviderType, string>> = {
+  ollama: "http://localhost:11434",
+  lmstudio: "http://localhost:1234/v1",
+};
+
+// Helper to create default provider config
+export function createDefaultProviderConfig(type: ProviderType): ProviderConfig {
+  return {
+    type,
+    enabled: false,
+    apiKey: "",
+    baseUrl: DEFAULT_BASE_URLS[type],
+    models: DEFAULT_MODELS[type].map((m) => ({
+      ...m,
+      enabled: true,
+      isDefault: true,
+      isCustom: false,
+    })),
+  };
+}
+
 // Chat message schema
 export const ChatMessageSchema = z.object({
   role: z.enum(["system", "user", "assistant"]),
@@ -30,9 +106,9 @@ export const PageContextSchema = z.object({
 
 export type PageContext = z.infer<typeof PageContextSchema>;
 
-// AI configuration
+// Legacy AI configuration (kept for backward compatibility)
 export const AIConfigSchema = z.object({
-  providerType: z.enum(["openai", "anthropic", "ollama", "lmstudio"]).default("openai"),
+  providerType: ProviderTypeSchema.default("openai"),
   apiKey: z.string().optional(),
   model: z.string().optional(),
   temperature: z.number().min(0).max(2).default(0.7),
@@ -40,9 +116,6 @@ export const AIConfigSchema = z.object({
 });
 
 export type AIConfig = z.infer<typeof AIConfigSchema>;
-
-// Provider types
-export type ProviderType = "openai" | "anthropic" | "ollama" | "lmstudio";
 
 // Notebook info for AI context
 export const NotebookInfoSchema = z.object({

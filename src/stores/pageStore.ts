@@ -7,6 +7,8 @@ interface PageState {
   selectedPageId: string | null;
   isLoading: boolean;
   error: string | null;
+  // Incremented when page data is fetched fresh, to force memo recomputation
+  pageDataVersion: number;
 }
 
 interface PageActions {
@@ -74,6 +76,7 @@ export const usePageStore = create<PageStore>((set) => ({
   selectedPageId: null,
   isLoading: false,
   error: null,
+  pageDataVersion: 0,
 
   // Actions
   loadPages: async (notebookId, includeArchived) => {
@@ -127,10 +130,10 @@ export const usePageStore = create<PageStore>((set) => ({
   updatePageContent: async (notebookId, pageId, content, commit) => {
     // Don't set error state here - it causes re-renders
     try {
-      // Save to backend but don't update local store - the editor already has the content
-      // and updating the store causes unnecessary re-renders that steal focus
+      // Save to backend but don't update local store during editing
+      // Updating the store causes re-renders that steal focus from the editor
+      // Fresh content is fetched when switching pages via selectPage
       await api.updatePage(notebookId, pageId, { content }, commit);
-      // Don't update local state - the editor has the authoritative content
     } catch (err) {
       // Only update state on error
       set({
@@ -279,6 +282,25 @@ export const usePageStore = create<PageStore>((set) => ({
 
   selectPage: (id) => {
     set({ selectedPageId: id });
+    // When selecting a page, fetch fresh data from backend
+    // This ensures we have the latest content even if it was saved
+    // without updating the local store (to prevent focus loss during editing)
+    if (id) {
+      const state = usePageStore.getState();
+      const page = state.pages.find((p) => p.id === id);
+      if (page) {
+        // Fetch fresh page data in the background
+        api.getPage(page.notebookId, id).then((freshPage) => {
+          set((state) => ({
+            pages: state.pages.map((p) => (p.id === id ? freshPage : p)),
+            // Increment version to force memo recomputation in EditorArea
+            pageDataVersion: state.pageDataVersion + 1,
+          }));
+        }).catch(() => {
+          // Silently ignore errors - we still have the cached version
+        });
+      }
+    }
   },
 
   clearError: () => {

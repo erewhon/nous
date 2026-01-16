@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
 export type ThemeMode = "light" | "dark" | "system";
-export type ColorScheme = "default" | "catppuccin" | "nord" | "dracula";
+export type ColorScheme = "default" | "catppuccin" | "nord" | "dracula" | "tufte";
 export type FontFamily = "system" | "inter" | "jetbrains-mono" | "fira-code";
 export type EditorWidth = "narrow" | "medium" | "wide" | "full";
 export type UIMode = "classic" | "overview";
@@ -237,6 +237,55 @@ const COLOR_SCHEMES = {
       "--color-border": "#e0e0db",
       "--color-border-muted": "#f0f0eb",
       "--color-selection": "rgba(152, 88, 211, 0.2)",
+    },
+  },
+  tufte: {
+    light: {
+      // Tufte-inspired light - warm, readable, minimal
+      // Based on Edward Tufte's design principles: fffff8 cream background
+      "--color-bg-primary": "#fffff8",
+      "--color-bg-secondary": "#f8f8f0",
+      "--color-bg-tertiary": "#eeeedf",
+      "--color-bg-elevated": "#e0e0d1",
+      "--color-bg-sidebar": "#fafaf2",
+      "--color-bg-panel": "#fffff8",
+      "--color-text-primary": "#111111",
+      "--color-text-secondary": "#333333",
+      "--color-text-muted": "#888888",
+      "--color-accent": "#a00000", // Tufte's signature dark red
+      "--color-accent-hover": "#c00000",
+      "--color-accent-secondary": "#800000",
+      "--color-accent-tertiary": "#600000",
+      "--color-success": "#2e7d32",
+      "--color-warning": "#b8860b",
+      "--color-error": "#c62828",
+      "--color-info": "#1565c0",
+      "--color-border": "#ddddd5",
+      "--color-border-muted": "#eeeedf",
+      "--color-selection": "rgba(160, 0, 0, 0.15)",
+    },
+    dark: {
+      // Tufte-inspired dark - warm dark tones, readable
+      "--color-bg-primary": "#1a1a18",
+      "--color-bg-secondary": "#141412",
+      "--color-bg-tertiary": "#252522",
+      "--color-bg-elevated": "#333330",
+      "--color-bg-sidebar": "#0f0f0e",
+      "--color-bg-panel": "#1a1a18",
+      "--color-text-primary": "#e8e8e0",
+      "--color-text-secondary": "#b8b8b0",
+      "--color-text-muted": "#707068",
+      "--color-accent": "#e85450", // Warm red, more visible in dark
+      "--color-accent-hover": "#ff6b66",
+      "--color-accent-secondary": "#c4423e",
+      "--color-accent-tertiary": "#a0322e",
+      "--color-success": "#66bb6a",
+      "--color-warning": "#daa520",
+      "--color-error": "#ef5350",
+      "--color-info": "#42a5f5",
+      "--color-border": "#333330",
+      "--color-border-muted": "#252522",
+      "--color-selection": "rgba(232, 84, 80, 0.25)",
     },
   },
 };

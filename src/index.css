@@ -127,6 +127,24 @@ select:focus {
   outline: none;
 }
 
+/* Select dropdown styling for dark mode */
+select {
+  color-scheme: dark light;
+}
+
+select option {
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  padding: 8px;
+}
+
+/* Force dark mode styling for select in dark themes */
+[data-theme="dark"] select,
+[data-theme="dark"] select option {
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
 /* Custom focus styles for form elements */
 input:focus-visible,
 textarea:focus-visible,

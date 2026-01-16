@@ -3,7 +3,7 @@ import { useAIStore, DEFAULT_SYSTEM_PROMPT } from "../../stores/aiStore";
 import { useWebResearchStore } from "../../stores/webResearchStore";
 import { ThemeSettings } from "./ThemeSettings";
 import { LibrarySettingsPanel } from "../Library";
-import type { ProviderType } from "../../types/ai";
+import type { ProviderType, ProviderConfig } from "../../types/ai";
 
 interface SettingsDialogProps {
   isOpen: boolean;
@@ -16,44 +16,32 @@ type TabId = "ai" | "web-research" | "theme" | "system-prompt" | "libraries";
 const TABS: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: "theme", label: "Appearance", icon: <IconPalette /> },
   { id: "libraries", label: "Libraries", icon: <IconLibrary /> },
-  { id: "ai", label: "AI Provider", icon: <IconSparkles /> },
+  { id: "ai", label: "AI Providers", icon: <IconSparkles /> },
   { id: "system-prompt", label: "System Prompt", icon: <IconPrompt /> },
   { id: "web-research", label: "Web Research", icon: <IconGlobe /> },
 ];
 
-const PROVIDERS: { value: ProviderType; label: string; description: string }[] = [
-  {
-    value: "openai",
+const PROVIDER_INFO: Record<ProviderType, { label: string; description: string; needsApiKey: boolean }> = {
+  openai: {
     label: "OpenAI",
-    description: "GPT-4o, GPT-4, GPT-3.5 Turbo",
+    description: "GPT-4o, GPT-4, o1 models",
+    needsApiKey: true,
   },
-  {
-    value: "anthropic",
+  anthropic: {
     label: "Anthropic",
-    description: "Claude Sonnet 4, Claude Opus 4.5, Claude Haiku",
+    description: "Claude Sonnet, Opus, Haiku",
+    needsApiKey: true,
   },
-  {
-    value: "ollama",
+  ollama: {
     label: "Ollama",
     description: "Local models (Llama, Mistral, etc.)",
+    needsApiKey: false,
   },
-  {
-    value: "lmstudio",
+  lmstudio: {
     label: "LM Studio",
     description: "Local models via LM Studio",
+    needsApiKey: false,
   },
-];
-
-const DEFAULT_MODELS: Record<ProviderType, string[]> = {
-  openai: ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"],
-  anthropic: [
-    "claude-sonnet-4-20250514",
-    "claude-opus-4-5-20251101",
-    "claude-opus-4-20250514",
-    "claude-3-5-haiku-20241022",
-  ],
-  ollama: ["llama3.2", "llama3.1", "mistral", "codellama", "phi3"],
-  lmstudio: ["local-model"],
 };
 
 export function SettingsDialog({ isOpen, onClose, initialTab = "theme" }: SettingsDialogProps) {
@@ -153,282 +141,481 @@ export function SettingsDialog({ isOpen, onClose, initialTab = "theme" }: Settin
 function AISettingsContent() {
   const {
     settings,
-    setProvider,
-    setApiKey,
-    setModel,
+    setProviderEnabled,
+    setProviderApiKey,
+    setProviderBaseUrl,
+    toggleModel,
+    addModel,
+    removeModel,
+    setDefaultProvider,
+    setDefaultModel,
     setTemperature,
     setMaxTokens,
   } = useAIStore();
 
-  const [showApiKey, setShowApiKey] = useState(false);
-  const currentModels = DEFAULT_MODELS[settings.providerType] || [];
+  const [expandedProvider, setExpandedProvider] = useState<ProviderType | null>(
+    settings.defaultProvider
+  );
+  const [showApiKeys, setShowApiKeys] = useState<Record<ProviderType, boolean>>({
+    openai: false,
+    anthropic: false,
+    ollama: false,
+    lmstudio: false,
+  });
+  const [newModelInputs, setNewModelInputs] = useState<Record<ProviderType, string>>({
+    openai: "",
+    anthropic: "",
+    ollama: "",
+    lmstudio: "",
+  });
+
+  const toggleApiKeyVisibility = (type: ProviderType) => {
+    setShowApiKeys((prev) => ({ ...prev, [type]: !prev[type] }));
+  };
+
+  const handleAddModel = (type: ProviderType) => {
+    const modelName = newModelInputs[type].trim();
+    if (modelName) {
+      addModel(type, { id: modelName, name: modelName });
+      setNewModelInputs((prev) => ({ ...prev, [type]: "" }));
+    }
+  };
+
+  // Get enabled models for the default model dropdown
+  const enabledModels = settings.providers
+    .filter((p) => p.enabled)
+    .flatMap((p) =>
+      p.models.filter((m) => m.enabled).map((m) => ({
+        provider: p.type,
+        model: m,
+        displayName: `${PROVIDER_INFO[p.type].label}: ${m.name}`,
+      }))
+    );
 
   return (
     <div className="space-y-6">
-      {/* Provider Selection */}
-      <div>
-        <label
-          className="mb-3 block text-sm font-medium"
-          style={{ color: "var(--color-text-primary)" }}
-        >
-          AI Provider
-        </label>
-        <div className="space-y-2">
-          {PROVIDERS.map((provider) => (
-            <button
-              key={provider.value}
-              onClick={() => setProvider(provider.value)}
-              className="flex w-full items-center gap-3 rounded-lg border p-3 text-left transition-colors"
-              style={{
-                borderColor:
-                  settings.providerType === provider.value
-                    ? "var(--color-accent)"
-                    : "var(--color-border)",
-                backgroundColor:
-                  settings.providerType === provider.value
-                    ? "rgba(139, 92, 246, 0.1)"
-                    : "transparent",
-              }}
-            >
-              <div
-                className="flex h-4 w-4 items-center justify-center rounded-full border-2"
-                style={{
-                  borderColor:
-                    settings.providerType === provider.value
-                      ? "var(--color-accent)"
-                      : "var(--color-text-muted)",
-                }}
-              >
-                {settings.providerType === provider.value && (
-                  <div
-                    className="h-2 w-2 rounded-full"
-                    style={{ backgroundColor: "var(--color-accent)" }}
-                  />
-                )}
-              </div>
-              <div>
-                <div
-                  className="font-medium"
-                  style={{ color: "var(--color-text-primary)" }}
-                >
-                  {provider.label}
-                </div>
-                <div
-                  className="text-xs"
-                  style={{ color: "var(--color-text-muted)" }}
-                >
-                  {provider.description}
-                </div>
-              </div>
-            </button>
-          ))}
-        </div>
+      {/* Provider Accordions */}
+      <div className="space-y-2">
+        {settings.providers.map((provider) => (
+          <ProviderAccordion
+            key={provider.type}
+            provider={provider}
+            info={PROVIDER_INFO[provider.type]}
+            isExpanded={expandedProvider === provider.type}
+            onToggleExpand={() =>
+              setExpandedProvider(
+                expandedProvider === provider.type ? null : provider.type
+              )
+            }
+            onToggleEnabled={(enabled) => setProviderEnabled(provider.type, enabled)}
+            showApiKey={showApiKeys[provider.type]}
+            onToggleApiKeyVisibility={() => toggleApiKeyVisibility(provider.type)}
+            onApiKeyChange={(key) => setProviderApiKey(provider.type, key)}
+            onBaseUrlChange={(url) => setProviderBaseUrl(provider.type, url)}
+            onToggleModel={(modelId, enabled) =>
+              toggleModel(provider.type, modelId, enabled)
+            }
+            onRemoveModel={(modelId) => removeModel(provider.type, modelId)}
+            newModelInput={newModelInputs[provider.type]}
+            onNewModelInputChange={(value) =>
+              setNewModelInputs((prev) => ({ ...prev, [provider.type]: value }))
+            }
+            onAddModel={() => handleAddModel(provider.type)}
+          />
+        ))}
       </div>
 
-      {/* API Key */}
-      {settings.providerType !== "ollama" && settings.providerType !== "lmstudio" && (
-        <div>
-          <label
-            className="mb-2 block text-sm font-medium"
-            style={{ color: "var(--color-text-primary)" }}
-          >
-            API Key
-          </label>
-          <div className="relative">
-            <input
-              type={showApiKey ? "text" : "password"}
-              value={settings.apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              placeholder={`Enter your ${settings.providerType === "openai" ? "OpenAI" : "Anthropic"} API key`}
-              className="w-full rounded-lg border px-3 py-2.5 pr-10 text-sm outline-none transition-colors focus:border-[--color-accent]"
+      {/* Default Settings Section */}
+      <div
+        className="rounded-lg border p-4"
+        style={{
+          backgroundColor: "var(--color-bg-secondary)",
+          borderColor: "var(--color-border)",
+        }}
+      >
+        <h4
+          className="mb-4 text-sm font-medium"
+          style={{ color: "var(--color-text-primary)" }}
+        >
+          Default Settings
+        </h4>
+
+        <div className="space-y-4">
+          {/* Default Provider */}
+          <div>
+            <label
+              className="mb-2 block text-xs font-medium"
+              style={{ color: "var(--color-text-muted)" }}
+            >
+              Default Provider
+            </label>
+            <select
+              value={settings.defaultProvider}
+              onChange={(e) => setDefaultProvider(e.target.value as ProviderType)}
+              className="w-full rounded-lg border px-3 py-2 text-sm outline-none transition-colors focus:border-[--color-accent] dark-select"
               style={{
-                backgroundColor: "var(--color-bg-secondary)",
+                backgroundColor: "var(--color-bg-tertiary)",
+                borderColor: "var(--color-border)",
+                color: "var(--color-text-primary)",
+              }}
+            >
+              {settings.providers
+                .filter((p) => p.enabled)
+                .map((p) => (
+                  <option key={p.type} value={p.type}>
+                    {PROVIDER_INFO[p.type].label}
+                  </option>
+                ))}
+              {settings.providers.filter((p) => p.enabled).length === 0 && (
+                <option value="" disabled>
+                  Enable a provider first
+                </option>
+              )}
+            </select>
+          </div>
+
+          {/* Default Model */}
+          <div>
+            <label
+              className="mb-2 block text-xs font-medium"
+              style={{ color: "var(--color-text-muted)" }}
+            >
+              Default Model
+            </label>
+            <select
+              value={settings.defaultModel}
+              onChange={(e) => setDefaultModel(e.target.value)}
+              className="w-full rounded-lg border px-3 py-2 text-sm outline-none transition-colors focus:border-[--color-accent] dark-select"
+              style={{
+                backgroundColor: "var(--color-bg-tertiary)",
+                borderColor: "var(--color-border)",
+                color: "var(--color-text-primary)",
+              }}
+            >
+              {enabledModels.map(({ provider, model, displayName }) => (
+                <option key={`${provider}:${model.id}`} value={model.id}>
+                  {displayName}
+                </option>
+              ))}
+              {enabledModels.length === 0 && (
+                <option value="" disabled>
+                  No models enabled
+                </option>
+              )}
+            </select>
+          </div>
+
+          {/* Temperature */}
+          <div>
+            <div className="mb-2 flex items-center justify-between">
+              <label
+                className="text-xs font-medium"
+                style={{ color: "var(--color-text-muted)" }}
+              >
+                Temperature
+              </label>
+              <span
+                className="text-xs"
+                style={{ color: "var(--color-text-muted)" }}
+              >
+                {settings.temperature.toFixed(1)}
+              </span>
+            </div>
+            <input
+              type="range"
+              min="0"
+              max="2"
+              step="0.1"
+              value={settings.temperature}
+              onChange={(e) => setTemperature(parseFloat(e.target.value))}
+              className="w-full accent-[--color-accent]"
+            />
+            <div
+              className="mt-1 flex justify-between text-xs"
+              style={{ color: "var(--color-text-muted)" }}
+            >
+              <span>Precise</span>
+              <span>Creative</span>
+            </div>
+          </div>
+
+          {/* Max Tokens */}
+          <div>
+            <label
+              className="mb-2 block text-xs font-medium"
+              style={{ color: "var(--color-text-muted)" }}
+            >
+              Max Tokens
+            </label>
+            <input
+              type="number"
+              min="100"
+              max="32000"
+              step="100"
+              value={settings.maxTokens}
+              onChange={(e) => setMaxTokens(parseInt(e.target.value) || 4096)}
+              className="w-full rounded-lg border px-3 py-2 text-sm outline-none transition-colors focus:border-[--color-accent]"
+              style={{
+                backgroundColor: "var(--color-bg-tertiary)",
                 borderColor: "var(--color-border)",
                 color: "var(--color-text-primary)",
               }}
             />
-            <button
-              type="button"
-              onClick={() => setShowApiKey(!showApiKey)}
-              className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 transition-colors hover:bg-[--color-bg-tertiary]"
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Provider Accordion Component
+function ProviderAccordion({
+  provider,
+  info,
+  isExpanded,
+  onToggleExpand,
+  onToggleEnabled,
+  showApiKey,
+  onToggleApiKeyVisibility,
+  onApiKeyChange,
+  onBaseUrlChange,
+  onToggleModel,
+  onRemoveModel,
+  newModelInput,
+  onNewModelInputChange,
+  onAddModel,
+}: {
+  provider: ProviderConfig;
+  info: { label: string; description: string; needsApiKey: boolean };
+  isExpanded: boolean;
+  onToggleExpand: () => void;
+  onToggleEnabled: (enabled: boolean) => void;
+  showApiKey: boolean;
+  onToggleApiKeyVisibility: () => void;
+  onApiKeyChange: (key: string) => void;
+  onBaseUrlChange: (url: string) => void;
+  onToggleModel: (modelId: string, enabled: boolean) => void;
+  onRemoveModel: (modelId: string) => void;
+  newModelInput: string;
+  onNewModelInputChange: (value: string) => void;
+  onAddModel: () => void;
+}) {
+  return (
+    <div
+      className="overflow-hidden rounded-lg border"
+      style={{
+        borderColor: provider.enabled
+          ? "var(--color-accent)"
+          : "var(--color-border)",
+        backgroundColor: provider.enabled
+          ? "rgba(139, 92, 246, 0.05)"
+          : "transparent",
+      }}
+    >
+      {/* Header */}
+      <button
+        onClick={onToggleExpand}
+        className="flex w-full items-center justify-between p-3 text-left"
+      >
+        <div className="flex items-center gap-3">
+          <span style={{ color: "var(--color-text-muted)" }}>
+            {isExpanded ? <IconChevronDown /> : <IconChevronRight />}
+          </span>
+          <div>
+            <div
+              className="font-medium"
+              style={{ color: "var(--color-text-primary)" }}
+            >
+              {info.label}
+            </div>
+            <div className="text-xs" style={{ color: "var(--color-text-muted)" }}>
+              {info.description}
+            </div>
+          </div>
+        </div>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleEnabled(!provider.enabled);
+          }}
+          className="relative h-5 w-9 rounded-full transition-colors"
+          style={{
+            backgroundColor: provider.enabled
+              ? "var(--color-accent)"
+              : "var(--color-bg-tertiary)",
+          }}
+        >
+          <span
+            className="absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform"
+            style={{
+              transform: provider.enabled ? "translateX(16px)" : "translateX(2px)",
+            }}
+          />
+        </button>
+      </button>
+
+      {/* Expanded Content */}
+      {isExpanded && (
+        <div
+          className="border-t px-3 pb-3 pt-3"
+          style={{ borderColor: "var(--color-border)" }}
+        >
+          {/* API Key (for cloud providers) */}
+          {info.needsApiKey && (
+            <div className="mb-4">
+              <label
+                className="mb-1.5 block text-xs font-medium"
+                style={{ color: "var(--color-text-muted)" }}
+              >
+                API Key
+              </label>
+              <div className="relative">
+                <input
+                  type={showApiKey ? "text" : "password"}
+                  value={provider.apiKey || ""}
+                  onChange={(e) => onApiKeyChange(e.target.value)}
+                  placeholder={`Enter your ${info.label} API key`}
+                  className="w-full rounded-lg border px-3 py-2 pr-10 text-sm outline-none transition-colors focus:border-[--color-accent]"
+                  style={{
+                    backgroundColor: "var(--color-bg-tertiary)",
+                    borderColor: "var(--color-border)",
+                    color: "var(--color-text-primary)",
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={onToggleApiKeyVisibility}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 transition-colors hover:bg-[--color-bg-secondary]"
+                  style={{ color: "var(--color-text-muted)" }}
+                >
+                  {showApiKey ? <IconEyeOff /> : <IconEye />}
+                </button>
+              </div>
+              <p className="mt-1 text-xs" style={{ color: "var(--color-text-muted)" }}>
+                {provider.type === "openai"
+                  ? "Get your API key from platform.openai.com"
+                  : "Get your API key from console.anthropic.com"}
+              </p>
+            </div>
+          )}
+
+          {/* Base URL (for local providers) */}
+          {!info.needsApiKey && (
+            <div className="mb-4">
+              <label
+                className="mb-1.5 block text-xs font-medium"
+                style={{ color: "var(--color-text-muted)" }}
+              >
+                Server URL
+              </label>
+              <input
+                type="text"
+                value={provider.baseUrl || ""}
+                onChange={(e) => onBaseUrlChange(e.target.value)}
+                placeholder="http://localhost:11434"
+                className="w-full rounded-lg border px-3 py-2 text-sm outline-none transition-colors focus:border-[--color-accent]"
+                style={{
+                  backgroundColor: "var(--color-bg-tertiary)",
+                  borderColor: "var(--color-border)",
+                  color: "var(--color-text-primary)",
+                }}
+              />
+              <p className="mt-1 text-xs" style={{ color: "var(--color-text-muted)" }}>
+                {provider.type === "ollama"
+                  ? "Make sure Ollama is running locally"
+                  : "Make sure LM Studio is running with local server enabled"}
+              </p>
+            </div>
+          )}
+
+          {/* Models */}
+          <div>
+            <label
+              className="mb-2 block text-xs font-medium"
               style={{ color: "var(--color-text-muted)" }}
             >
-              {showApiKey ? <IconEyeOff /> : <IconEye />}
-            </button>
+              Available Models
+            </label>
+            <div className="space-y-1.5">
+              {provider.models.map((model) => (
+                <div
+                  key={model.id}
+                  className="flex items-center justify-between rounded-md px-2 py-1.5"
+                  style={{ backgroundColor: "var(--color-bg-tertiary)" }}
+                >
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={model.enabled}
+                      onChange={(e) => onToggleModel(model.id, e.target.checked)}
+                      className="h-3.5 w-3.5 rounded border-gray-300 accent-[--color-accent]"
+                    />
+                    <span
+                      className="text-sm"
+                      style={{ color: "var(--color-text-primary)" }}
+                    >
+                      {model.name}
+                    </span>
+                    {model.isCustom && (
+                      <span
+                        className="rounded px-1.5 py-0.5 text-xs"
+                        style={{
+                          backgroundColor: "var(--color-bg-secondary)",
+                          color: "var(--color-text-muted)",
+                        }}
+                      >
+                        Custom
+                      </span>
+                    )}
+                  </label>
+                  {model.isCustom && (
+                    <button
+                      onClick={() => onRemoveModel(model.id)}
+                      className="rounded p-1 transition-colors hover:bg-[--color-bg-secondary]"
+                      style={{ color: "var(--color-text-muted)" }}
+                    >
+                      <IconX />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {/* Add Custom Model */}
+            <div className="mt-2 flex gap-2">
+              <input
+                type="text"
+                value={newModelInput}
+                onChange={(e) => onNewModelInputChange(e.target.value)}
+                placeholder="Add custom model..."
+                className="flex-1 rounded-lg border px-3 py-1.5 text-sm outline-none transition-colors focus:border-[--color-accent]"
+                style={{
+                  backgroundColor: "var(--color-bg-tertiary)",
+                  borderColor: "var(--color-border)",
+                  color: "var(--color-text-primary)",
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    onAddModel();
+                  }
+                }}
+              />
+              <button
+                onClick={onAddModel}
+                disabled={!newModelInput.trim()}
+                className="rounded-lg px-3 py-1.5 text-sm font-medium transition-colors disabled:opacity-50"
+                style={{
+                  backgroundColor: "var(--color-accent)",
+                  color: "white",
+                }}
+              >
+                Add
+              </button>
+            </div>
           </div>
-          <p
-            className="mt-1.5 text-xs"
-            style={{ color: "var(--color-text-muted)" }}
-          >
-            {settings.providerType === "openai"
-              ? "Get your API key from platform.openai.com"
-              : "Get your API key from console.anthropic.com"}
-          </p>
         </div>
       )}
-
-      {/* Ollama URL */}
-      {settings.providerType === "ollama" && (
-        <div>
-          <label
-            className="mb-2 block text-sm font-medium"
-            style={{ color: "var(--color-text-primary)" }}
-          >
-            Ollama Server
-          </label>
-          <input
-            type="text"
-            value="http://localhost:11434"
-            disabled
-            className="w-full rounded-lg border px-3 py-2.5 text-sm"
-            style={{
-              backgroundColor: "var(--color-bg-tertiary)",
-              borderColor: "var(--color-border)",
-              color: "var(--color-text-muted)",
-            }}
-          />
-          <p
-            className="mt-1.5 text-xs"
-            style={{ color: "var(--color-text-muted)" }}
-          >
-            Make sure Ollama is running locally
-          </p>
-        </div>
-      )}
-
-      {/* LM Studio URL */}
-      {settings.providerType === "lmstudio" && (
-        <div>
-          <label
-            className="mb-2 block text-sm font-medium"
-            style={{ color: "var(--color-text-primary)" }}
-          >
-            LM Studio Server
-          </label>
-          <input
-            type="text"
-            value="http://localhost:1234/v1"
-            disabled
-            className="w-full rounded-lg border px-3 py-2.5 text-sm"
-            style={{
-              backgroundColor: "var(--color-bg-tertiary)",
-              borderColor: "var(--color-border)",
-              color: "var(--color-text-muted)",
-            }}
-          />
-          <p
-            className="mt-1.5 text-xs"
-            style={{ color: "var(--color-text-muted)" }}
-          >
-            Make sure LM Studio is running with local server enabled
-          </p>
-        </div>
-      )}
-
-      {/* Model Selection */}
-      <div>
-        <label
-          className="mb-2 block text-sm font-medium"
-          style={{ color: "var(--color-text-primary)" }}
-        >
-          Model
-        </label>
-        <select
-          value={settings.model || currentModels[0] || ""}
-          onChange={(e) => setModel(e.target.value)}
-          className="w-full rounded-lg border px-3 py-2.5 text-sm outline-none transition-colors focus:border-[--color-accent]"
-          style={{
-            backgroundColor: "var(--color-bg-secondary)",
-            borderColor: "var(--color-border)",
-            color: "var(--color-text-primary)",
-          }}
-        >
-          {currentModels.map((model) => (
-            <option
-              key={model}
-              value={model}
-              style={{
-                backgroundColor: "var(--color-bg-secondary)",
-                color: "var(--color-text-primary)",
-              }}
-            >
-              {model}
-            </option>
-          ))}
-        </select>
-        {settings.providerType === "lmstudio" && (
-          <p
-            className="mt-1.5 text-xs"
-            style={{ color: "var(--color-text-muted)" }}
-          >
-            The model loaded in LM Studio will be used automatically
-          </p>
-        )}
-      </div>
-
-      {/* Temperature */}
-      <div>
-        <div className="mb-2 flex items-center justify-between">
-          <label
-            className="text-sm font-medium"
-            style={{ color: "var(--color-text-primary)" }}
-          >
-            Temperature
-          </label>
-          <span
-            className="text-sm"
-            style={{ color: "var(--color-text-muted)" }}
-          >
-            {settings.temperature.toFixed(1)}
-          </span>
-        </div>
-        <input
-          type="range"
-          min="0"
-          max="2"
-          step="0.1"
-          value={settings.temperature}
-          onChange={(e) => setTemperature(parseFloat(e.target.value))}
-          className="w-full accent-[--color-accent]"
-        />
-        <div
-          className="mt-1 flex justify-between text-xs"
-          style={{ color: "var(--color-text-muted)" }}
-        >
-          <span>Precise</span>
-          <span>Creative</span>
-        </div>
-      </div>
-
-      {/* Max Tokens */}
-      <div>
-        <label
-          className="mb-2 block text-sm font-medium"
-          style={{ color: "var(--color-text-primary)" }}
-        >
-          Max Tokens
-        </label>
-        <input
-          type="number"
-          min="100"
-          max="32000"
-          step="100"
-          value={settings.maxTokens}
-          onChange={(e) => setMaxTokens(parseInt(e.target.value) || 4096)}
-          className="w-full rounded-lg border px-3 py-2.5 text-sm outline-none transition-colors focus:border-[--color-accent]"
-          style={{
-            backgroundColor: "var(--color-bg-secondary)",
-            borderColor: "var(--color-border)",
-            color: "var(--color-text-primary)",
-          }}
-        />
-        <p
-          className="mt-1.5 text-xs"
-          style={{ color: "var(--color-text-muted)" }}
-        >
-          Maximum length of the AI response
-        </p>
-      </div>
     </div>
   );
 }
@@ -1045,6 +1232,42 @@ function IconLibrary() {
     >
       <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" />
       <path d="M8 7h6M8 11h8" />
+    </svg>
+  );
+}
+
+function IconChevronDown() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <polyline points="6 9 12 15 18 9" />
+    </svg>
+  );
+}
+
+function IconChevronRight() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <polyline points="9 18 15 12 9 6" />
     </svg>
   );
 }

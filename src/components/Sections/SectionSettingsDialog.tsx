@@ -1,13 +1,14 @@
 import { useState, useEffect } from "react";
 import type { Section, SystemPromptMode } from "../../types/page";
 import { InlineColorPicker } from "../ColorPicker/ColorPicker";
+import { useAIStore } from "../../stores/aiStore";
 
 interface SectionSettingsDialogProps {
   isOpen: boolean;
   section: Section | null; // null for creating new
   sections: Section[]; // other sections for move-to dropdown
   onClose: () => void;
-  onSave: (updates: { name?: string; description?: string | null; color?: string | null; systemPrompt?: string | null; systemPromptMode?: SystemPromptMode }) => Promise<void>;
+  onSave: (updates: { name?: string; description?: string | null; color?: string | null; systemPrompt?: string | null; systemPromptMode?: SystemPromptMode; aiModel?: string | null }) => Promise<void>;
   onDelete?: (moveItemsTo?: string) => Promise<void>;
 }
 
@@ -19,17 +20,20 @@ export function SectionSettingsDialog({
   onSave,
   onDelete,
 }: SectionSettingsDialogProps) {
+  const { getEnabledModels, settings: aiSettings } = useAIStore();
   const [name, setName] = useState(section?.name || "");
   const [description, setDescription] = useState(section?.description || "");
   const [color, setColor] = useState<string | undefined>(section?.color);
   const [systemPrompt, setSystemPrompt] = useState<string>(section?.systemPrompt || "");
   const [systemPromptMode, setSystemPromptMode] = useState<SystemPromptMode>(section?.systemPromptMode || "override");
+  const [aiModel, setAiModel] = useState<string | undefined>(section?.aiModel);
   const [isDeleting, setIsDeleting] = useState(false);
   const [moveItemsTo, setMoveItemsTo] = useState<string>("root");
   const [isSaving, setIsSaving] = useState(false);
 
   const isCreating = section === null;
   const otherSections = sections.filter((s) => s.id !== section?.id);
+  const enabledModels = getEnabledModels();
 
   // Reset state when dialog opens/closes or section changes
   useEffect(() => {
@@ -39,6 +43,7 @@ export function SectionSettingsDialog({
       setColor(section?.color);
       setSystemPrompt(section?.systemPrompt || "");
       setSystemPromptMode(section?.systemPromptMode || "override");
+      setAiModel(section?.aiModel);
       setIsDeleting(false);
       setMoveItemsTo("root");
       setIsSaving(false);
@@ -56,6 +61,7 @@ export function SectionSettingsDialog({
         color: color || null,
         systemPrompt: systemPrompt.trim() || null,
         systemPromptMode,
+        aiModel: aiModel || null,
       });
     } finally {
       setIsSaving(false);
@@ -296,6 +302,51 @@ export function SectionSettingsDialog({
                 style={{ color: "var(--color-text-muted)" }}
               >
                 This prompt will be used for AI chat when viewing pages in this section.
+              </p>
+            </div>
+
+            {/* Model override */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label
+                  className="block text-sm font-medium"
+                  style={{ color: "var(--color-text-secondary)" }}
+                >
+                  AI Model Override
+                </label>
+                {aiModel && (
+                  <button
+                    type="button"
+                    onClick={() => setAiModel(undefined)}
+                    className="text-xs transition-colors hover:opacity-80"
+                    style={{ color: "var(--color-text-muted)" }}
+                  >
+                    Use default
+                  </button>
+                )}
+              </div>
+              <select
+                value={aiModel || ""}
+                onChange={(e) => setAiModel(e.target.value || undefined)}
+                className="w-full rounded-lg border px-3 py-2 text-sm outline-none"
+                style={{
+                  backgroundColor: "var(--color-bg-tertiary)",
+                  borderColor: "var(--color-border)",
+                  color: "var(--color-text-primary)",
+                }}
+              >
+                <option value="">Use default ({aiSettings.defaultModel})</option>
+                {enabledModels.map(({ provider, model }) => (
+                  <option key={`${provider}:${model.id}`} value={model.id}>
+                    {model.name} ({provider})
+                  </option>
+                ))}
+              </select>
+              <p
+                className="text-xs"
+                style={{ color: "var(--color-text-muted)" }}
+              >
+                Override the AI model for pages in this section.
               </p>
             </div>
 

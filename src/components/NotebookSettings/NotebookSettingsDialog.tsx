@@ -58,7 +58,7 @@ export function NotebookSettingsDialog({
   onClose,
 }: NotebookSettingsDialogProps) {
   const { updateNotebook, deleteNotebook } = useNotebookStore();
-  const { settings: appAISettings } = useAIStore();
+  const { settings: appAISettings, getActiveProviderType, getActiveModel } = useAIStore();
   const [name, setName] = useState("");
   const [color, setColor] = useState<string | undefined>(undefined);
   const [sectionsEnabled, setSectionsEnabled] = useState(false);
@@ -444,8 +444,9 @@ export function NotebookSettingsDialog({
                     setAiModel(undefined);
                   } else {
                     // Switching to custom, initialize with app defaults
-                    setAiProvider(appAISettings.providerType as AIProviderType);
-                    setAiModel(appAISettings.model || AI_MODELS[appAISettings.providerType as AIProviderType][0]);
+                    const activeProvider = getActiveProviderType();
+                    setAiProvider(activeProvider as AIProviderType);
+                    setAiModel(getActiveModel() || AI_MODELS[activeProvider as AIProviderType][0]);
                   }
                 }}
                 className="relative h-6 w-11 rounded-full transition-colors"
@@ -467,9 +468,9 @@ export function NotebookSettingsDialog({
             {useAppDefault ? (
               <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
                 Using app default: <strong style={{ color: "var(--color-text-secondary)" }}>
-                  {AI_PROVIDERS.find(p => p.value === appAISettings.providerType)?.label || appAISettings.providerType}
+                  {AI_PROVIDERS.find(p => p.value === appAISettings.defaultProvider)?.label || appAISettings.defaultProvider}
                 </strong> / <strong style={{ color: "var(--color-text-secondary)" }}>
-                  {appAISettings.model || "default"}
+                  {appAISettings.defaultModel || "default"}
                 </strong>
               </p>
             ) : (

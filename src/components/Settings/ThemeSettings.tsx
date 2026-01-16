@@ -48,6 +48,11 @@ const COLOR_SCHEMES: { value: ColorScheme; label: string; colors: string[] }[] =
     label: "Dracula",
     colors: ["#bd93f9", "#f8f8f2", "#282a36"],
   },
+  {
+    value: "tufte",
+    label: "Tufte",
+    colors: ["#a00000", "#fffff8", "#1a1a18"],
+  },
 ];
 
 const FONT_FAMILIES: { value: FontFamily; label: string; preview: string }[] = [

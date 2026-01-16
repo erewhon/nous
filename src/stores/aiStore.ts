@@ -1,14 +1,26 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { ChatMessage, ProviderType } from "../types/ai";
+import type { ChatMessage, ProviderType, ProviderConfig, ModelConfig } from "../types/ai";
+import { createDefaultProviderConfig, DEFAULT_MODELS } from "../types/ai";
 
 interface AISettings {
+  // Multi-provider configuration
+  providers: ProviderConfig[];
+  defaultProvider: ProviderType;
+  defaultModel: string;  // Format: "provider:model" or just "model" for default provider
+  temperature: number;
+  maxTokens: number;
+  systemPrompt: string; // App-level default system prompt
+}
+
+// Legacy settings format for migration
+interface LegacyAISettings {
   providerType: ProviderType;
   apiKey: string;
   model: string;
   temperature: number;
   maxTokens: number;
-  systemPrompt: string; // App-level default system prompt
+  systemPrompt: string;
 }
 
 // Locked context for pinned chat - when set, the chat uses this context instead of current page
@@ -53,13 +65,33 @@ interface AIState {
   // Conversation state (not persisted)
   conversation: ConversationState;
 
-  // Actions
-  setProvider: (providerType: ProviderType) => void;
-  setApiKey: (apiKey: string) => void;
-  setModel: (model: string) => void;
+  // Provider configuration actions
+  updateProviderConfig: (type: ProviderType, updates: Partial<Omit<ProviderConfig, "type" | "models">>) => void;
+  setProviderEnabled: (type: ProviderType, enabled: boolean) => void;
+  setProviderApiKey: (type: ProviderType, apiKey: string) => void;
+  setProviderBaseUrl: (type: ProviderType, baseUrl: string) => void;
+
+  // Model management actions
+  addModel: (providerType: ProviderType, model: { id: string; name: string }) => void;
+  removeModel: (providerType: ProviderType, modelId: string) => void;
+  toggleModel: (providerType: ProviderType, modelId: string, enabled: boolean) => void;
+
+  // Default settings actions
+  setDefaultProvider: (providerType: ProviderType) => void;
+  setDefaultModel: (model: string) => void;
   setTemperature: (temperature: number) => void;
   setMaxTokens: (maxTokens: number) => void;
   setSystemPrompt: (systemPrompt: string) => void;
+
+  // Helper to get provider config
+  getProviderConfig: (type: ProviderType) => ProviderConfig | undefined;
+  getEnabledModels: () => Array<{ provider: ProviderType; model: ModelConfig }>;
+
+  // Legacy compatibility helpers - return active provider/model info
+  getActiveProviderType: () => ProviderType;
+  getActiveApiKey: () => string;
+  getActiveModel: () => string;
+  getActiveBaseUrl: () => string | undefined;
 
   // Panel actions
   togglePin: () => void;
@@ -84,14 +116,59 @@ interface AIState {
 
 const DEFAULT_SYSTEM_PROMPT = `You are a helpful AI assistant integrated into a note-taking application called Katt. You help users with their notes, answer questions about their content, provide summaries, brainstorm ideas, and assist with writing and organizing information. Be concise, helpful, and context-aware.`;
 
-const defaultSettings: AISettings = {
-  providerType: "openai",
-  apiKey: "",
-  model: "",
-  temperature: 0.7,
-  maxTokens: 4096,
-  systemPrompt: DEFAULT_SYSTEM_PROMPT,
-};
+// Create default settings with all providers initialized
+function createDefaultSettings(): AISettings {
+  const providers: ProviderConfig[] = [
+    createDefaultProviderConfig("openai"),
+    createDefaultProviderConfig("anthropic"),
+    createDefaultProviderConfig("ollama"),
+    createDefaultProviderConfig("lmstudio"),
+  ];
+
+  return {
+    providers,
+    defaultProvider: "openai",
+    defaultModel: "gpt-4o",
+    temperature: 0.7,
+    maxTokens: 4096,
+    systemPrompt: DEFAULT_SYSTEM_PROMPT,
+  };
+}
+
+// Migrate legacy settings to new format
+function migrateSettings(stored: unknown): AISettings {
+  // Check if it's already the new format
+  if (stored && typeof stored === "object" && "providers" in stored) {
+    return stored as AISettings;
+  }
+
+  // Check if it's the legacy format
+  if (stored && typeof stored === "object" && "providerType" in stored) {
+    const legacy = stored as LegacyAISettings;
+    const newSettings = createDefaultSettings();
+
+    // Migrate the legacy settings
+    newSettings.defaultProvider = legacy.providerType;
+    newSettings.defaultModel = legacy.model || DEFAULT_MODELS[legacy.providerType][0]?.id || "";
+    newSettings.temperature = legacy.temperature;
+    newSettings.maxTokens = legacy.maxTokens;
+    newSettings.systemPrompt = legacy.systemPrompt;
+
+    // Enable and configure the legacy provider
+    const providerIndex = newSettings.providers.findIndex(p => p.type === legacy.providerType);
+    if (providerIndex !== -1) {
+      newSettings.providers[providerIndex].enabled = true;
+      newSettings.providers[providerIndex].apiKey = legacy.apiKey;
+    }
+
+    return newSettings;
+  }
+
+  // Return fresh default settings
+  return createDefaultSettings();
+}
+
+const defaultSettings: AISettings = createDefaultSettings();
 
 const DEFAULT_PANEL_WIDTH = 480;
 const DEFAULT_PANEL_HEIGHT = 650;
@@ -126,7 +203,7 @@ export const AI_PANEL_CONSTRAINTS = {
 
 export const useAIStore = create<AIState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       settings: defaultSettings,
       panel: defaultPanelState,
       conversation: {
@@ -134,19 +211,116 @@ export const useAIStore = create<AIState>()(
         isLoading: false,
       },
 
-      setProvider: (providerType) =>
+      // Provider configuration actions
+      updateProviderConfig: (type, updates) =>
         set((state) => ({
-          settings: { ...state.settings, providerType, model: "" },
+          settings: {
+            ...state.settings,
+            providers: state.settings.providers.map((p) =>
+              p.type === type ? { ...p, ...updates } : p
+            ),
+          },
         })),
 
-      setApiKey: (apiKey) =>
+      setProviderEnabled: (type, enabled) =>
         set((state) => ({
-          settings: { ...state.settings, apiKey },
+          settings: {
+            ...state.settings,
+            providers: state.settings.providers.map((p) =>
+              p.type === type ? { ...p, enabled } : p
+            ),
+          },
         })),
 
-      setModel: (model) =>
+      setProviderApiKey: (type, apiKey) =>
         set((state) => ({
-          settings: { ...state.settings, model },
+          settings: {
+            ...state.settings,
+            providers: state.settings.providers.map((p) =>
+              p.type === type ? { ...p, apiKey } : p
+            ),
+          },
+        })),
+
+      setProviderBaseUrl: (type, baseUrl) =>
+        set((state) => ({
+          settings: {
+            ...state.settings,
+            providers: state.settings.providers.map((p) =>
+              p.type === type ? { ...p, baseUrl } : p
+            ),
+          },
+        })),
+
+      // Model management actions
+      addModel: (providerType, model) =>
+        set((state) => ({
+          settings: {
+            ...state.settings,
+            providers: state.settings.providers.map((p) =>
+              p.type === providerType
+                ? {
+                    ...p,
+                    models: [
+                      ...p.models,
+                      { ...model, enabled: true, isDefault: false, isCustom: true },
+                    ],
+                  }
+                : p
+            ),
+          },
+        })),
+
+      removeModel: (providerType, modelId) =>
+        set((state) => ({
+          settings: {
+            ...state.settings,
+            providers: state.settings.providers.map((p) =>
+              p.type === providerType
+                ? {
+                    ...p,
+                    models: p.models.filter((m) => !(m.id === modelId && m.isCustom)),
+                  }
+                : p
+            ),
+          },
+        })),
+
+      toggleModel: (providerType, modelId, enabled) =>
+        set((state) => ({
+          settings: {
+            ...state.settings,
+            providers: state.settings.providers.map((p) =>
+              p.type === providerType
+                ? {
+                    ...p,
+                    models: p.models.map((m) =>
+                      m.id === modelId ? { ...m, enabled } : m
+                    ),
+                  }
+                : p
+            ),
+          },
+        })),
+
+      // Default settings actions
+      setDefaultProvider: (providerType) =>
+        set((state) => {
+          // Get the first enabled model from the new provider
+          const provider = state.settings.providers.find((p) => p.type === providerType);
+          const firstModel = provider?.models.find((m) => m.enabled)?.id || "";
+          return {
+            settings: {
+              ...state.settings,
+              defaultProvider: providerType,
+              defaultModel: firstModel,
+            },
+          };
+        }),
+
+      setDefaultModel: (model) =>
+        set((state) => ({
+          settings: { ...state.settings, defaultModel: model },
         })),
 
       setTemperature: (temperature) =>
@@ -163,6 +337,47 @@ export const useAIStore = create<AIState>()(
         set((state) => ({
           settings: { ...state.settings, systemPrompt },
         })),
+
+      // Helper functions
+      getProviderConfig: (type) => {
+        return get().settings.providers.find((p) => p.type === type);
+      },
+
+      getEnabledModels: () => {
+        const providers = get().settings.providers;
+        const result: Array<{ provider: ProviderType; model: ModelConfig }> = [];
+        for (const provider of providers) {
+          if (provider.enabled) {
+            for (const model of provider.models) {
+              if (model.enabled) {
+                result.push({ provider: provider.type, model });
+              }
+            }
+          }
+        }
+        return result;
+      },
+
+      // Legacy compatibility helpers
+      getActiveProviderType: () => {
+        return get().settings.defaultProvider;
+      },
+
+      getActiveApiKey: () => {
+        const settings = get().settings;
+        const provider = settings.providers.find((p) => p.type === settings.defaultProvider);
+        return provider?.apiKey || "";
+      },
+
+      getActiveModel: () => {
+        return get().settings.defaultModel;
+      },
+
+      getActiveBaseUrl: () => {
+        const settings = get().settings;
+        const provider = settings.providers.find((p) => p.type === settings.defaultProvider);
+        return provider?.baseUrl;
+      },
 
       // Panel actions
       togglePin: () =>
@@ -287,11 +502,24 @@ export const useAIStore = create<AIState>()(
     }),
     {
       name: "katt-ai-settings",
+      version: 2, // Increment when making breaking changes
       // Persist settings and panel state, not conversation
       partialize: (state) => ({
         settings: state.settings,
         panel: state.panel,
       }),
+      // Migration from old format to new format
+      migrate: (persistedState, version) => {
+        if (version < 2) {
+          // Version 1 or undefined - migrate from legacy format
+          const state = persistedState as { settings?: unknown; panel?: AIPanelState };
+          return {
+            settings: migrateSettings(state?.settings),
+            panel: state?.panel || defaultPanelState,
+          };
+        }
+        return persistedState;
+      },
     }
   )
 );

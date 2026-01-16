@@ -45,16 +45,46 @@ export const FolderTreeItem = memo(function FolderTreeItem({
   const [showContextMenu, setShowContextMenu] = useState(false);
   const [contextMenuPos, setContextMenuPos] = useState({ x: 0, y: 0 });
 
+  const isArchive = folder.folderType === "archive";
+
   // Make folder a drop target
   const { setNodeRef: setDroppableRef, isOver } = useDroppable({
     id: folder.id,
     data: { type: "folder", folder },
   });
 
-  const isArchive = folder.folderType === "archive";
+  // Make folder draggable (except archive folder)
+  const {
+    attributes: dragAttributes,
+    listeners: dragListeners,
+    setNodeRef: setDraggableRef,
+    transform: dragTransform,
+    isDragging,
+  } = useDraggable({
+    id: `folder-${folder.id}`,
+    data: { type: "folder", folder },
+    disabled: isArchive,
+  });
+
+  // Combine refs for both draggable and droppable
+  const combinedRef = useCallback(
+    (node: HTMLLIElement | null) => {
+      setDroppableRef(node);
+      setDraggableRef(node);
+    },
+    [setDroppableRef, setDraggableRef]
+  );
+
   const hasChildren = childFolders.length > 0 || pages.length > 0;
   const paddingLeft = 12 + depth * 16;
   const showDropHighlight = isDropTarget || isOver;
+
+  const dragStyle = dragTransform
+    ? {
+        transform: `translate3d(${dragTransform.x}px, ${dragTransform.y}px, 0)`,
+        zIndex: 100,
+      }
+    : undefined;
 
   const handleSubmitRename = useCallback(() => {
     if (editName.trim() && editName !== folder.name) {
@@ -106,7 +136,11 @@ export const FolderTreeItem = memo(function FolderTreeItem({
 
   return (
     <>
-    <li ref={setDroppableRef}>
+    <li
+      ref={combinedRef}
+      style={dragStyle}
+      className={isDragging ? "opacity-50" : ""}
+    >
       {/* Folder row */}
       <div
         className="group flex items-center gap-1 rounded-lg py-1.5 transition-all cursor-pointer"
@@ -115,6 +149,8 @@ export const FolderTreeItem = memo(function FolderTreeItem({
           paddingRight: "8px",
           backgroundColor: showDropHighlight
             ? "rgba(139, 92, 246, 0.15)"
+            : isDragging
+            ? "var(--color-bg-tertiary)"
             : "transparent",
           border: showDropHighlight
             ? "1px dashed var(--color-accent)"
@@ -153,14 +189,16 @@ export const FolderTreeItem = memo(function FolderTreeItem({
           </svg>
         </button>
 
-        {/* Folder icon */}
+        {/* Folder icon - also serves as drag handle */}
         <span
-          className="flex h-5 w-5 flex-shrink-0 items-center justify-center"
+          className={`flex h-5 w-5 flex-shrink-0 items-center justify-center ${!isArchive ? "cursor-grab active:cursor-grabbing" : ""}`}
           style={{
             color: isArchive
               ? "var(--color-text-muted)"
               : folder.color || "var(--color-accent)",
           }}
+          {...(isArchive ? {} : dragListeners)}
+          {...(isArchive ? {} : dragAttributes)}
         >
           {isArchive ? (
             <svg

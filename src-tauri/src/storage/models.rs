@@ -66,6 +66,9 @@ pub struct Section {
     /// How this prompt interacts with higher-level prompts
     #[serde(default)]
     pub system_prompt_mode: SystemPromptMode,
+    /// AI model override for this section (e.g., "gpt-4o", "claude-sonnet-4-20250514")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ai_model: Option<String>,
     /// Position for ordering sections
     #[serde(default)]
     pub position: i32,
@@ -84,6 +87,7 @@ impl Section {
             color: None,
             system_prompt: None,
             system_prompt_mode: SystemPromptMode::default(),
+            ai_model: None,
             position: 0,
             created_at: now,
             updated_at: now,
@@ -261,6 +265,9 @@ pub struct Page {
     /// How this prompt interacts with higher-level prompts
     #[serde(default)]
     pub system_prompt_mode: SystemPromptMode,
+    /// AI model override for this page (e.g., "gpt-4o", "claude-sonnet-4-20250514")
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub ai_model: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -281,6 +288,7 @@ impl Page {
             position: 0,
             system_prompt: None,
             system_prompt_mode: SystemPromptMode::default(),
+            ai_model: None,
             created_at: now,
             updated_at: now,
         }

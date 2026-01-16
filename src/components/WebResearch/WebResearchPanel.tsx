@@ -42,7 +42,7 @@ export function WebResearchPanel({ isOpen, onClose, onOpenSettings }: WebResearc
     setError,
   } = useWebResearchStore();
 
-  const { settings: aiSettings } = useAIStore();
+  const { getActiveProviderType, getActiveApiKey, getActiveModel } = useAIStore();
   const { selectedNotebookId } = useNotebookStore();
   const { loadPages } = usePageStore();
 
@@ -157,9 +157,9 @@ export function WebResearchPanel({ isOpen, onClose, onOpenSettings }: WebResearc
       }
 
       const summary = await summarizeResearch(contents, session.query, {
-        providerType: aiSettings.providerType,
-        apiKey: aiSettings.apiKey || undefined,
-        model: aiSettings.model || undefined,
+        providerType: getActiveProviderType(),
+        apiKey: getActiveApiKey() || undefined,
+        model: getActiveModel() || undefined,
       });
 
       setSummary(summary);

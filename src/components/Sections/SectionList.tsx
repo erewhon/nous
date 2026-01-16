@@ -12,6 +12,8 @@ interface SectionListProps {
     updates: { name?: string; color?: string | null }
   ) => Promise<void>;
   onDeleteSection: (sectionId: string, moveItemsTo?: string) => Promise<void>;
+  // Count of pages that don't have a section assigned
+  unassignedPagesCount?: number;
 }
 
 export function SectionList({
@@ -21,6 +23,7 @@ export function SectionList({
   onCreateSection,
   onUpdateSection,
   onDeleteSection,
+  unassignedPagesCount = 0,
 }: SectionListProps) {
   const [editingSection, setEditingSection] = useState<Section | null>(null);
   const [isCreating, setIsCreating] = useState(false);
@@ -84,46 +87,54 @@ export function SectionList({
       {/* Section list */}
       <div className="flex-1 overflow-y-auto px-2">
         <ul className="space-y-1">
-          {/* All sections option */}
-          <li>
-            <button
-              onClick={() => onSelectSection(null)}
-              className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-all"
-              style={{
-                backgroundColor:
-                  selectedSectionId === null
-                    ? "var(--color-bg-tertiary)"
-                    : "transparent",
-                color:
-                  selectedSectionId === null
-                    ? "var(--color-text-primary)"
-                    : "var(--color-text-secondary)",
-              }}
-            >
-              <span
-                className="flex h-5 w-5 items-center justify-center"
-                style={{ color: "var(--color-text-muted)" }}
+          {/* All sections option - only show if there are unassigned pages */}
+          {unassignedPagesCount > 0 && (
+            <li>
+              <button
+                onClick={() => onSelectSection(null)}
+                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-all"
+                style={{
+                  backgroundColor:
+                    selectedSectionId === null
+                      ? "var(--color-bg-tertiary)"
+                      : "transparent",
+                  color:
+                    selectedSectionId === null
+                      ? "var(--color-text-primary)"
+                      : "var(--color-text-secondary)",
+                }}
               >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
+                <span
+                  className="flex h-5 w-5 items-center justify-center"
+                  style={{ color: "var(--color-text-muted)" }}
                 >
-                  <rect x="3" y="3" width="7" height="7" />
-                  <rect x="14" y="3" width="7" height="7" />
-                  <rect x="14" y="14" width="7" height="7" />
-                  <rect x="3" y="14" width="7" height="7" />
-                </svg>
-              </span>
-              <span className="font-medium">All</span>
-            </button>
-          </li>
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <rect x="3" y="3" width="7" height="7" />
+                    <rect x="14" y="3" width="7" height="7" />
+                    <rect x="14" y="14" width="7" height="7" />
+                    <rect x="3" y="14" width="7" height="7" />
+                  </svg>
+                </span>
+                <span className="font-medium">Unsorted</span>
+                <span
+                  className="ml-auto text-xs"
+                  style={{ color: "var(--color-text-muted)" }}
+                >
+                  {unassignedPagesCount}
+                </span>
+              </button>
+            </li>
+          )}
 
           {/* Individual sections */}
           {sections.map((section) => {

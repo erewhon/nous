@@ -7,6 +7,7 @@ import {
   PointerSensor,
   useSensor,
   useSensors,
+  useDroppable,
   type DragStartEvent,
   type DragEndEvent,
   type DragOverEvent,
@@ -15,6 +16,83 @@ import type { Folder, Page, Section } from "../../types/page";
 import { useFolderStore } from "../../stores/folderStore";
 import { usePageStore } from "../../stores/pageStore";
 import { FolderTreeItem, DraggablePageItem } from "./FolderTreeItem";
+
+// Droppable section component for drag-and-drop to sections
+function DroppableSection({
+  section,
+  isOver,
+  children,
+}: {
+  section: Section;
+  isOver: boolean;
+  children: React.ReactNode;
+}) {
+  const { setNodeRef } = useDroppable({
+    id: `section-${section.id}`,
+    data: { type: "section", section },
+  });
+
+  return (
+    <div
+      ref={setNodeRef}
+      className="flex items-center gap-2 rounded-lg px-2 py-1.5 transition-all"
+      style={{
+        backgroundColor: isOver
+          ? section.color
+            ? `${section.color}30`
+            : "var(--color-bg-elevated)"
+          : "transparent",
+        border: isOver ? `2px dashed ${section.color || "var(--color-accent)"}` : "2px solid transparent",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+// Droppable "Unsorted" zone for removing section from page
+function DroppableUnsorted({ isOver }: { isOver: boolean }) {
+  const { setNodeRef } = useDroppable({
+    id: "section-unsorted",
+    data: { type: "section", section: null },
+  });
+
+  return (
+    <div
+      ref={setNodeRef}
+      className="flex items-center gap-2 rounded-lg px-2 py-1.5 transition-all"
+      style={{
+        backgroundColor: isOver ? "var(--color-bg-elevated)" : "transparent",
+        border: isOver ? "2px dashed var(--color-text-muted)" : "2px solid transparent",
+      }}
+    >
+      <span
+        className="flex h-4 w-4 items-center justify-center"
+        style={{ color: "var(--color-text-muted)" }}
+      >
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="12"
+          height="12"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <rect x="3" y="3" width="7" height="7" />
+          <rect x="14" y="3" width="7" height="7" />
+          <rect x="14" y="14" width="7" height="7" />
+          <rect x="3" y="14" width="7" height="7" />
+        </svg>
+      </span>
+      <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>
+        Unsorted
+      </span>
+    </div>
+  );
+}
 
 interface FolderTreeProps {
   notebookId: string;
@@ -62,7 +140,10 @@ export function FolderTree({
   const [isCreatingFolder, setIsCreatingFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
   const [activePageId, setActivePageId] = useState<string | null>(null);
+  const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
   const [overFolderId, setOverFolderId] = useState<string | null>(null);
+  const [overSectionId, setOverSectionId] = useState<string | null>(null);
+  const [showSectionDropZones, setShowSectionDropZones] = useState(false);
 
   // Configure DnD sensors
   const sensors = useSensors(
@@ -158,27 +239,53 @@ export function FolderTree({
   // DnD handlers
   const handleDragStart = useCallback((event: DragStartEvent) => {
     const { active } = event;
-    setActivePageId(active.id as string);
-  }, []);
+    const activeData = active.data.current;
+
+    if (activeData?.type === "folder") {
+      setActiveFolderId(activeData.folder.id);
+      setActivePageId(null);
+    } else {
+      setActivePageId(active.id as string);
+      setActiveFolderId(null);
+    }
+
+    // Show section drop zones when dragging starts (if sections are enabled)
+    if (sectionsEnabled && sections.length > 0) {
+      setShowSectionDropZones(true);
+    }
+  }, [sectionsEnabled, sections.length]);
 
   const handleDragOver = useCallback(
     (event: DragOverEvent) => {
       const { over } = event;
       if (over) {
         const overId = over.id as string;
+        const overData = over.data.current;
+
+        // Check if we're over a section drop zone
+        if (overData?.type === "section") {
+          setOverSectionId(overData.section?.id ?? "unsorted");
+          setOverFolderId(null);
+          return;
+        }
+
         // Check if we're over a folder
         const folder = visibleFolders.find((f) => f.id === overId);
         if (folder) {
           setOverFolderId(overId);
+          setOverSectionId(null);
           // Expand folder when hovering
           setFolderExpanded(overId, true);
         } else if (overId === "root") {
           setOverFolderId(null);
+          setOverSectionId(null);
         } else {
           setOverFolderId(null);
+          setOverSectionId(null);
         }
       } else {
         setOverFolderId(null);
+        setOverSectionId(null);
       }
     },
     [visibleFolders, setFolderExpanded]
@@ -187,17 +294,49 @@ export function FolderTree({
   const handleDragEnd = useCallback(
     async (event: DragEndEvent) => {
       const { active, over } = event;
+      const activeData = active.data.current;
+
       setActivePageId(null);
+      setActiveFolderId(null);
       setOverFolderId(null);
+      setOverSectionId(null);
+      setShowSectionDropZones(false);
 
       if (!over) return;
 
-      const pageId = active.id as string;
       const overId = over.id as string;
+      const overData = over.data.current;
+
+      // Handle folder being dragged
+      if (activeData?.type === "folder") {
+        const folder = activeData.folder;
+        // Check if dropped on a section
+        if (overData?.type === "section" && onMoveFolderToSection) {
+          const targetSectionId = overData.section?.id ?? null;
+          // Only move if section is different
+          if ((folder.sectionId ?? null) !== targetSectionId) {
+            onMoveFolderToSection(folder.id, targetSectionId);
+          }
+        }
+        return;
+      }
+
+      // Handle page being dragged
+      const pageId = active.id as string;
 
       // Find the page being dragged
       const page = pages.find((p) => p.id === pageId);
       if (!page) return;
+
+      // Check if dropped on a section
+      if (overData?.type === "section" && onMovePageToSection) {
+        const targetSectionId = overData.section?.id ?? null;
+        // Only move if section is different
+        if ((page.sectionId ?? null) !== targetSectionId) {
+          onMovePageToSection(pageId, targetSectionId);
+        }
+        return;
+      }
 
       // Determine target folder
       let targetFolderId: string | undefined = undefined;
@@ -224,7 +363,7 @@ export function FolderTree({
         await movePageToFolder(notebookId, pageId, targetFolderId);
       }
     },
-    [pages, visibleFolders, notebookId, movePageToFolder]
+    [pages, visibleFolders, notebookId, movePageToFolder, onMovePageToSection, onMoveFolderToSection]
   );
 
   // Render a folder recursively
@@ -282,6 +421,7 @@ export function FolderTree({
 
   // Get active page for drag overlay
   const activePage = activePageId ? pages.find((p) => p.id === activePageId) : null;
+  const activeFolder = activeFolderId ? folders.find((f) => f.id === activeFolderId) : null;
 
   return (
     <DndContext
@@ -454,6 +594,44 @@ export function FolderTree({
           </div>
         )}
 
+        {/* Section drop zones - shown when dragging */}
+        {showSectionDropZones && sectionsEnabled && (
+          <div
+            className="mx-2 mb-2 rounded-lg p-2"
+            style={{
+              backgroundColor: "var(--color-bg-tertiary)",
+              border: "1px solid var(--color-border)",
+            }}
+          >
+            <div
+              className="mb-1.5 text-xs font-medium"
+              style={{ color: "var(--color-text-muted)" }}
+            >
+              Drop to move to section:
+            </div>
+            <div className="flex flex-col gap-1">
+              <DroppableUnsorted isOver={overSectionId === "unsorted"} />
+              {sections.map((section) => (
+                <DroppableSection
+                  key={section.id}
+                  section={section}
+                  isOver={overSectionId === section.id}
+                >
+                  <span
+                    className="h-3 w-3 flex-shrink-0 rounded-full"
+                    style={{
+                      backgroundColor: section.color || "var(--color-text-muted)",
+                    }}
+                  />
+                  <span className="text-xs truncate" style={{ color: "var(--color-text-primary)" }}>
+                    {section.name}
+                  </span>
+                </DroppableSection>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Tree content */}
         <div className="flex-1 overflow-y-auto px-2 pb-4">
           {visibleFolders.length === 0 && visiblePages.length === 0 ? (
@@ -505,6 +683,31 @@ export function FolderTree({
             }}
           >
             {activePage.title}
+          </div>
+        )}
+        {activeFolder && (
+          <div
+            className="flex items-center gap-2 rounded-lg py-1.5 px-3 text-sm shadow-lg"
+            style={{
+              backgroundColor: "var(--color-bg-secondary)",
+              color: "var(--color-text-primary)",
+              border: `1px solid ${activeFolder.color || "var(--color-accent)"}`,
+            }}
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke={activeFolder.color || "var(--color-accent)"}
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+            </svg>
+            {activeFolder.name}
           </div>
         )}
       </DragOverlay>

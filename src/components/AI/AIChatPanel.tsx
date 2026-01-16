@@ -50,6 +50,8 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
   const [expandedThinking, setExpandedThinking] = useState<Set<number>>(new Set());
   const [isResizing, setIsResizing] = useState<"left" | "top" | "corner" | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [chatModelOverride, setChatModelOverride] = useState<string | null>(null);
+  const [showModelSelector, setShowModelSelector] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -73,6 +75,9 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
     setPanelPosition,
     resetPanelPosition,
     toggleDetached,
+    getActiveProviderType,
+    getActiveApiKey,
+    getEnabledModels,
   } = useAIStore();
   const { selectedPageId, pages, loadPages } = usePageStore();
   const { notebooks, selectedNotebookId, loadNotebooks } = useNotebookStore();
@@ -312,8 +317,9 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
           const args = action.arguments as unknown as { task: string; capture_screenshot?: boolean };
           try {
             // Get AI settings for provider config
-            const { settings } = useAIStore.getState();
-            if (!settings.apiKey) {
+            const { getActiveProviderType, getActiveApiKey, getActiveModel } = useAIStore.getState();
+            const activeApiKey = getActiveApiKey();
+            if (!activeApiKey) {
               created.push({
                 type: "browser",
                 name: "Browser task",
@@ -323,9 +329,9 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
             }
             const result = await runBrowserTask(
               args.task,
-              settings.providerType,
-              settings.apiKey,
-              settings.model,
+              getActiveProviderType(),
+              activeApiKey,
+              getActiveModel(),
               args.capture_screenshot ?? false
             );
             if (result.success) {
@@ -629,15 +635,26 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
 
       const resolvedSystemPrompt = resolveSystemPrompt();
 
+      // Resolve model with inheritance: chat override > page > section > notebook > app default
+      const resolveModel = (): string => {
+        if (chatModelOverride) return chatModelOverride;
+        if (currentPage?.aiModel) return currentPage.aiModel;
+        if (currentSection?.aiModel) return currentSection.aiModel;
+        if (currentNotebook?.aiModel) return currentNotebook.aiModel;
+        return settings.defaultModel;
+      };
+
+      const resolvedModel = resolveModel();
+
       // Start the streaming request - command now waits for completion
       await aiChatStream(userMessage.content, {
         pageContext,
         conversationHistory: conversation.messages.slice(-10),
         availableNotebooks,
         currentNotebookId: selectedNotebookId || undefined,
-        providerType: settings.providerType,
-        apiKey: settings.apiKey || undefined,
-        model: settings.model || undefined,
+        providerType: getActiveProviderType(),
+        apiKey: getActiveApiKey() || undefined,
+        model: resolvedModel || undefined,
         temperature: settings.temperature,
         maxTokens: settings.maxTokens,
         systemPrompt: resolvedSystemPrompt,
@@ -950,7 +967,7 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
       </div>
 
       {/* Settings hint if no API key */}
-      {!settings.apiKey && settings.providerType !== "ollama" && (
+      {!getActiveApiKey() && settings.defaultProvider !== "ollama" && (
         <button
           onClick={onOpenSettings}
           className="flex w-full items-center gap-2 border-b px-5 py-3 text-left text-sm transition-all hover:bg-[--color-bg-tertiary]"
@@ -965,7 +982,7 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
             <line x1="12" y1="8" x2="12" y2="12" />
             <line x1="12" y1="16" x2="12.01" y2="16" />
           </svg>
-          <span>Configure your {settings.providerType} API key to get started</span>
+          <span>Configure your {settings.defaultProvider} API key to get started</span>
         </button>
       )}
 
@@ -1280,17 +1297,108 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
           className="mt-3 flex items-center justify-between text-xs"
           style={{ color: "var(--color-text-muted)" }}
         >
-          <div className="flex items-center gap-2">
-            <span
-              className="rounded-full px-2 py-0.5"
-              style={{
-                backgroundColor: "rgba(166, 227, 161, 0.2)",
-                color: "var(--color-success)",
-              }}
+          <div className="relative">
+            <button
+              onClick={() => setShowModelSelector(!showModelSelector)}
+              className="flex items-center gap-2 rounded-lg px-2 py-1 transition-colors hover:bg-[--color-bg-tertiary]"
             >
-              {settings.providerType}
-            </span>
-            <span>{settings.model || "default"}</span>
+              <span
+                className="rounded-full px-2 py-0.5"
+                style={{
+                  backgroundColor: "rgba(166, 227, 161, 0.2)",
+                  color: "var(--color-success)",
+                }}
+              >
+                {settings.defaultProvider}
+              </span>
+              <span>
+                {chatModelOverride || currentPage?.aiModel || currentSection?.aiModel || currentNotebook?.aiModel || settings.defaultModel || "default"}
+              </span>
+              {(chatModelOverride || currentPage?.aiModel || currentSection?.aiModel || currentNotebook?.aiModel) && (
+                <span
+                  className="rounded px-1 py-0.5"
+                  style={{
+                    backgroundColor: "rgba(139, 92, 246, 0.2)",
+                    color: "var(--color-accent)",
+                    fontSize: "9px",
+                  }}
+                >
+                  {chatModelOverride ? "chat" : currentPage?.aiModel ? "page" : currentSection?.aiModel ? "section" : "notebook"}
+                </span>
+              )}
+              <IconChevron
+                style={{
+                  width: 12,
+                  height: 12,
+                  transform: showModelSelector ? "rotate(180deg)" : "rotate(0deg)",
+                  transition: "transform 0.2s",
+                }}
+              />
+            </button>
+            {/* Model selector dropdown */}
+            {showModelSelector && (
+              <div
+                className="absolute bottom-full left-0 mb-2 min-w-[200px] rounded-lg border p-2 shadow-lg"
+                style={{
+                  backgroundColor: "var(--color-bg-secondary)",
+                  borderColor: "var(--color-border)",
+                }}
+              >
+                {/* Clear override option */}
+                {chatModelOverride && (
+                  <button
+                    onClick={() => {
+                      setChatModelOverride(null);
+                      setShowModelSelector(false);
+                    }}
+                    className="w-full rounded-lg px-3 py-2 text-left transition-colors hover:bg-[--color-bg-tertiary]"
+                    style={{ color: "var(--color-text-muted)" }}
+                  >
+                    Use default (clear override)
+                  </button>
+                )}
+                {/* Group models by provider */}
+                {(() => {
+                  const enabledModels = getEnabledModels();
+                  const grouped = enabledModels.reduce((acc, { provider, model }) => {
+                    if (!acc[provider]) acc[provider] = [];
+                    acc[provider].push(model);
+                    return acc;
+                  }, {} as Record<string, typeof enabledModels[0]["model"][]>);
+
+                  return Object.entries(grouped).map(([provider, models]) => (
+                    <div key={provider} className="mt-2 first:mt-0">
+                      <div
+                        className="px-3 py-1 text-xs font-medium uppercase"
+                        style={{ color: "var(--color-text-muted)" }}
+                      >
+                        {provider}
+                      </div>
+                      {models.map((model) => {
+                        const isActive = chatModelOverride === model.id ||
+                          (!chatModelOverride && model.id === (currentPage?.aiModel || currentSection?.aiModel || currentNotebook?.aiModel || settings.defaultModel));
+                        return (
+                          <button
+                            key={model.id}
+                            onClick={() => {
+                              setChatModelOverride(model.id);
+                              setShowModelSelector(false);
+                            }}
+                            className="w-full rounded-lg px-3 py-2 text-left transition-colors hover:bg-[--color-bg-tertiary]"
+                            style={{
+                              color: isActive ? "var(--color-accent)" : "var(--color-text-primary)",
+                              backgroundColor: isActive ? "rgba(139, 92, 246, 0.1)" : undefined,
+                            }}
+                          >
+                            {model.name}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ));
+                })()}
+              </div>
+            )}
           </div>
           <span className="opacity-75">Enter to send</span>
         </div>

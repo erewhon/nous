@@ -398,6 +398,72 @@ export function useVimMode({
           pasteBlock(true);
           return true;
 
+        // Delete character under cursor (x)
+        case "x": {
+          const selection = window.getSelection();
+          if (selection && selection.anchorNode) {
+            const range = selection.getRangeAt(0);
+            const text = selection.anchorNode.textContent || "";
+            if (range.startOffset < text.length) {
+              range.setEnd(range.startContainer, range.startOffset + 1);
+              range.deleteContents();
+            }
+          }
+          return true;
+        }
+
+        // Delete to end of line (D)
+        case "D": {
+          const selection = window.getSelection();
+          if (selection && selection.anchorNode) {
+            const range = selection.getRangeAt(0);
+            const text = selection.anchorNode.textContent || "";
+            range.setEnd(range.startContainer, text.length);
+            range.deleteContents();
+          }
+          return true;
+        }
+
+        // Change to end of line (C) - delete to end and enter insert mode
+        case "C": {
+          const selection = window.getSelection();
+          if (selection && selection.anchorNode) {
+            const range = selection.getRangeAt(0);
+            const text = selection.anchorNode.textContent || "";
+            range.setEnd(range.startContainer, text.length);
+            range.deleteContents();
+          }
+          enterInsertMode("cursor");
+          return true;
+        }
+
+        // Substitute character (s) - delete char and enter insert mode
+        case "s": {
+          const selection = window.getSelection();
+          if (selection && selection.anchorNode) {
+            const range = selection.getRangeAt(0);
+            const text = selection.anchorNode.textContent || "";
+            if (range.startOffset < text.length) {
+              range.setEnd(range.startContainer, range.startOffset + 1);
+              range.deleteContents();
+            }
+          }
+          enterInsertMode("cursor");
+          return true;
+        }
+
+        // Substitute line (S) - delete line content and enter insert mode
+        case "S": {
+          const selection = window.getSelection();
+          if (selection && selection.anchorNode) {
+            const range = document.createRange();
+            range.selectNodeContents(selection.anchorNode);
+            range.deleteContents();
+          }
+          enterInsertMode("cursor");
+          return true;
+        }
+
         // Undo/Redo
         case "u":
           document.execCommand("undo");
@@ -407,7 +473,8 @@ export function useVimMode({
             document.execCommand("redo");
             return true;
           }
-          break;
+          // Single 'r' for replace character - not implemented yet, prevent insertion
+          return true;
 
         // Search (opens command palette via existing shortcut)
         case "/":
@@ -419,6 +486,37 @@ export function useVimMode({
           // Already in normal mode, clear pending
           setVimState((s) => ({ ...s, pendingKeys: "" }));
           return true;
+
+        // Join lines (J)
+        case "J": {
+          // Join current line with next - simplified: just remove newline
+          const currentIndex = getCurrentBlockIndex();
+          const editor = editorRef.current;
+          if (editor && currentIndex >= 0) {
+            editor.save().then((data) => {
+              if (data.blocks[currentIndex + 1]) {
+                const currentBlock = data.blocks[currentIndex];
+                const nextBlock = data.blocks[currentIndex + 1];
+                if (currentBlock.type === "paragraph" && nextBlock.type === "paragraph") {
+                  const currentText = (currentBlock.data as { text?: string }).text || "";
+                  const nextText = (nextBlock.data as { text?: string }).text || "";
+                  editor.blocks.update(currentBlock.id!, { text: currentText + " " + nextText });
+                  editor.blocks.delete(currentIndex + 1);
+                }
+              }
+            });
+          }
+          return true;
+        }
+
+        default:
+          // In normal mode, prevent any other printable characters from inserting
+          // Allow special keys like arrows, function keys, etc.
+          if (key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+            // Single character key that's not handled - block it in normal mode
+            return true;
+          }
+          break;
       }
 
       return false;

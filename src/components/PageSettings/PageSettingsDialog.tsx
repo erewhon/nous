@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import type { Page, SystemPromptMode } from "../../types/page";
 import { usePageStore } from "../../stores/pageStore";
+import { useAIStore } from "../../stores/aiStore";
 
 interface PageSettingsDialogProps {
   isOpen: boolean;
@@ -14,16 +15,22 @@ export function PageSettingsDialog({
   onClose,
 }: PageSettingsDialogProps) {
   const { updatePage } = usePageStore();
+  const { getEnabledModels, settings: aiSettings } = useAIStore();
   const [systemPrompt, setSystemPrompt] = useState("");
   const [systemPromptMode, setSystemPromptMode] = useState<SystemPromptMode>("override");
+  const [aiModel, setAiModel] = useState<string | undefined>(undefined);
   const [isSaving, setIsSaving] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Get enabled models for the dropdown
+  const enabledModels = getEnabledModels();
 
   // Reset form when page changes
   useEffect(() => {
     if (page) {
       setSystemPrompt(page.systemPrompt || "");
       setSystemPromptMode(page.systemPromptMode || "override");
+      setAiModel(page.aiModel);
     }
   }, [page]);
 
@@ -56,6 +63,7 @@ export function PageSettingsDialog({
       await updatePage(page.notebookId, page.id, {
         systemPrompt: systemPrompt.trim() || undefined,
         systemPromptMode,
+        aiModel: aiModel || undefined,
       });
       onClose();
     } finally {
@@ -74,7 +82,8 @@ export function PageSettingsDialog({
 
   const hasChanges =
     (systemPrompt || "") !== (page.systemPrompt || "") ||
-    systemPromptMode !== (page.systemPromptMode || "override");
+    systemPromptMode !== (page.systemPromptMode || "override") ||
+    (aiModel || undefined) !== (page.aiModel || undefined);
 
   return (
     <div
@@ -178,6 +187,50 @@ export function PageSettingsDialog({
             </p>
           </div>
 
+          {/* Model Override */}
+          <div>
+            <div className="mb-2 flex items-center justify-between">
+              <label
+                className="text-sm font-medium"
+                style={{ color: "var(--color-text-primary)" }}
+              >
+                AI Model Override
+              </label>
+              {aiModel && (
+                <button
+                  onClick={() => setAiModel(undefined)}
+                  className="text-xs transition-colors hover:underline"
+                  style={{ color: "var(--color-text-muted)" }}
+                >
+                  Use default
+                </button>
+              )}
+            </div>
+            <select
+              value={aiModel || ""}
+              onChange={(e) => setAiModel(e.target.value || undefined)}
+              className="w-full rounded-lg border px-3 py-2.5 text-sm outline-none transition-colors focus:border-[--color-accent] dark-select"
+              style={{
+                backgroundColor: "var(--color-bg-tertiary)",
+                borderColor: "var(--color-border)",
+                color: "var(--color-text-primary)",
+              }}
+            >
+              <option value="">Use default ({aiSettings.defaultModel})</option>
+              {enabledModels.map(({ provider, model }) => (
+                <option key={`${provider}:${model.id}`} value={model.id}>
+                  {model.name} ({provider})
+                </option>
+              ))}
+            </select>
+            <p
+              className="mt-1.5 text-xs"
+              style={{ color: "var(--color-text-muted)" }}
+            >
+              Override the AI model for chats on this page.
+            </p>
+          </div>
+
           {/* Info */}
           <div
             className="flex items-start gap-2 rounded-lg border p-3"
@@ -189,15 +242,16 @@ export function PageSettingsDialog({
             <IconInfo />
             <div className="text-xs" style={{ color: "var(--color-text-muted)" }}>
               <p className="font-medium" style={{ color: "var(--color-text-secondary)" }}>
-                Prompt Inheritance
+                Settings Inheritance
               </p>
               <p className="mt-1">
-                When you chat with AI, prompts are resolved in this order:
+                When you chat with AI, settings are resolved in this order:
               </p>
               <ol className="mt-1 list-inside list-decimal space-y-0.5">
-                <li><strong>Page prompt</strong> (this setting) - highest priority</li>
-                <li><strong>Notebook prompt</strong> - if no page prompt is set</li>
-                <li><strong>App default</strong> - fallback if neither is set</li>
+                <li><strong>Page settings</strong> (this page) - highest priority</li>
+                <li><strong>Section settings</strong> - if no page setting is set</li>
+                <li><strong>Notebook settings</strong> - if no section setting is set</li>
+                <li><strong>App default</strong> - fallback if none are set</li>
               </ol>
             </div>
           </div>

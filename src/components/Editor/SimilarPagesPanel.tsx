@@ -46,10 +46,14 @@ export function SimilarPagesPanel({ page, notebookId, allPages }: SimilarPagesPa
 
   const { selectPage } = usePageStore();
   const { outgoingLinks } = useLinkStore();
-  const { settings: aiSettings } = useAIStore();
+  const { getActiveProviderType, getActiveApiKey, getActiveModel } = useAIStore();
+
+  // Get active API key for UI checks
+  const activeApiKey = getActiveApiKey();
 
   const fetchSuggestions = useCallback(async () => {
-    if (!aiSettings.apiKey) {
+    const apiKey = getActiveApiKey();
+    if (!apiKey) {
       setError("Configure AI in Settings to get suggestions");
       return;
     }
@@ -84,9 +88,9 @@ export function SimilarPagesPanel({ page, notebookId, allPages }: SimilarPagesPa
       const result = await aiSuggestRelatedPages(content, page.title, availablePages, {
         existingLinks,
         maxSuggestions: 5,
-        providerType: aiSettings.providerType,
-        apiKey: aiSettings.apiKey,
-        model: aiSettings.model || undefined,
+        providerType: getActiveProviderType(),
+        apiKey: apiKey,
+        model: getActiveModel() || undefined,
       });
 
       setSuggestions(result);
@@ -97,7 +101,7 @@ export function SimilarPagesPanel({ page, notebookId, allPages }: SimilarPagesPa
     } finally {
       setIsLoading(false);
     }
-  }, [page, notebookId, allPages, outgoingLinks, aiSettings]);
+  }, [page, notebookId, allPages, outgoingLinks, getActiveProviderType, getActiveApiKey, getActiveModel]);
 
   // Refresh suggestions when page content changes significantly
   useEffect(() => {
@@ -112,7 +116,7 @@ export function SimilarPagesPanel({ page, notebookId, allPages }: SimilarPagesPa
   };
 
   // Don't show anything if no API key configured
-  if (!aiSettings.apiKey && !hasLoaded) {
+  if (!activeApiKey && !hasLoaded) {
     return null;
   }
 
@@ -142,7 +146,7 @@ export function SimilarPagesPanel({ page, notebookId, allPages }: SimilarPagesPa
         </h3>
         <button
           onClick={fetchSuggestions}
-          disabled={isLoading || !aiSettings.apiKey}
+          disabled={isLoading || !activeApiKey}
           className="rounded px-2 py-1 text-xs transition-colors hover:bg-white/10 disabled:opacity-50"
           style={{ color: "var(--color-accent)" }}
           title="Find similar pages using AI"

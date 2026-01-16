@@ -26,7 +26,7 @@ import "./editor-styles.css";
 
 export function EditorArea() {
   const { selectedNotebookId, notebooks } = useNotebookStore();
-  const { pages, selectedPageId, selectPage, updatePageContent, loadPages, createPage, movePageToSection } =
+  const { pages, selectedPageId, selectPage, updatePageContent, loadPages, createPage, movePageToSection, pageDataVersion } =
     usePageStore();
   const { folders, loadFolders, showArchived, updateFolder } = useFolderStore();
   const {
@@ -91,6 +91,12 @@ export function EditorArea() {
   );
   const selectedPage = pages.find((p) => p.id === selectedPageId);
 
+  // Count pages without a section assigned (for hiding "All" in section list)
+  const unassignedPagesCount = useMemo(
+    () => notebookPages.filter((p) => !p.sectionId && !p.isArchived).length,
+    [notebookPages]
+  );
+
   // Build links when pages change
   useEffect(() => {
     if (notebookPages.length > 0) {
@@ -99,8 +105,10 @@ export function EditorArea() {
   }, [notebookPages, buildLinksFromPages]);
 
   // Convert page content to Editor.js format
-  // IMPORTANT: Only depend on page ID, not content. Content changes happen during saves
-  // and we don't want to re-render the editor (which would lose pending changes).
+  // IMPORTANT: Only depend on page ID and pageDataVersion, not content directly.
+  // Content changes happen during saves and we don't want to re-render the editor
+  // (which would lose pending changes). pageDataVersion is incremented when fresh
+  // data is fetched on page switch, ensuring we get updated content.
   // The key={selectedPage.id} on BlockEditor handles remounting on page switch.
   const editorData: OutputData | undefined = useMemo(() => {
     if (!selectedPage?.content) return undefined;
@@ -114,7 +122,7 @@ export function EditorArea() {
       })),
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedPage?.id]);
+  }, [selectedPage?.id, pageDataVersion]);
 
   // Calculate page statistics
   const pageStats: PageStats | null = useMemo(() => {
@@ -419,6 +427,7 @@ export function EditorArea() {
             onCreateSection={(name, color) => createSection(selectedNotebook.id, name, color)}
             onUpdateSection={(sectionId, updates) => updateSection(selectedNotebook.id, sectionId, updates)}
             onDeleteSection={(sectionId, moveItemsTo) => deleteSection(selectedNotebook.id, sectionId, moveItemsTo)}
+            unassignedPagesCount={unassignedPagesCount}
           />
         </div>
       )}

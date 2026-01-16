@@ -46,7 +46,10 @@ export function TagEditor({ page, onTagsChange }: TagEditorProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   const { updatePage } = usePageStore();
-  const { settings: aiSettings } = useAIStore();
+  const { getActiveProviderType, getActiveApiKey, getActiveModel } = useAIStore();
+
+  // Get active API key for UI checks
+  const activeApiKey = getActiveApiKey();
 
   const tags = page.tags || [];
 
@@ -112,7 +115,8 @@ export function TagEditor({ page, onTagsChange }: TagEditorProps) {
   };
 
   const fetchAISuggestions = useCallback(async () => {
-    if (!aiSettings.apiKey) {
+    const apiKey = getActiveApiKey();
+    if (!apiKey) {
       setSuggestions([]);
       return;
     }
@@ -122,9 +126,9 @@ export function TagEditor({ page, onTagsChange }: TagEditorProps) {
       const content = `${page.title}\n\n${extractPlainText(page.content)}`;
       const suggested = await aiSuggestTags(content, {
         existingTags: tags,
-        providerType: aiSettings.providerType,
-        apiKey: aiSettings.apiKey,
-        model: aiSettings.model || undefined,
+        providerType: getActiveProviderType(),
+        apiKey: apiKey,
+        model: getActiveModel() || undefined,
       });
 
       // Filter out tags that already exist
@@ -138,11 +142,11 @@ export function TagEditor({ page, onTagsChange }: TagEditorProps) {
     } finally {
       setIsLoadingSuggestions(false);
     }
-  }, [page.title, page.content, tags, aiSettings]);
+  }, [page.title, page.content, tags, getActiveProviderType, getActiveApiKey, getActiveModel]);
 
   const handleShowSuggestions = () => {
     setShowSuggestions(true);
-    if (suggestions.length === 0 && aiSettings.apiKey) {
+    if (suggestions.length === 0 && activeApiKey) {
       fetchAISuggestions();
     }
   };
@@ -295,7 +299,7 @@ export function TagEditor({ page, onTagsChange }: TagEditorProps) {
               className="py-4 text-center text-xs"
               style={{ color: "var(--color-text-muted)" }}
             >
-              {aiSettings.apiKey
+              {activeApiKey
                 ? "No suggestions available"
                 : "Configure AI in Settings"}
             </div>
@@ -335,7 +339,7 @@ export function TagEditor({ page, onTagsChange }: TagEditorProps) {
 
           <button
             onClick={fetchAISuggestions}
-            disabled={isLoadingSuggestions || !aiSettings.apiKey}
+            disabled={isLoadingSuggestions || !activeApiKey}
             className="mt-2 w-full rounded py-1 text-xs transition-colors hover:bg-white/10 disabled:opacity-50"
             style={{ color: "var(--color-text-muted)" }}
           >
