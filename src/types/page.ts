@@ -30,6 +30,7 @@ export const SectionSchema = z.object({
   id: z.string().uuid(),
   notebookId: z.string().uuid(),
   name: z.string(),
+  description: z.string().optional(),
   color: z.string().optional(),
   systemPrompt: z.string().optional(),
   systemPromptMode: SystemPromptModeSchema.default("override"),

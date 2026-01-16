@@ -72,6 +72,7 @@ pub fn update_section(
     notebook_id: String,
     section_id: String,
     name: Option<String>,
+    description: Option<Option<String>>, // None = don't change, Some(None) = clear, Some(Some(d)) = set
     color: Option<Option<String>>, // None = don't change, Some(None) = clear color, Some(Some(c)) = set color
     system_prompt: Option<Option<String>>, // None = don't change, Some(None) = clear, Some(Some(p)) = set
     system_prompt_mode: Option<String>, // None = don't change, Some("override") or Some("concatenate")
@@ -88,6 +89,10 @@ pub fn update_section(
 
     if let Some(new_name) = name {
         section.name = new_name;
+    }
+
+    if let Some(new_description) = description {
+        section.description = new_description;
     }
 
     if let Some(new_color) = color {

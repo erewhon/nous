@@ -54,6 +54,9 @@ pub struct Section {
     pub id: Uuid,
     pub notebook_id: Uuid,
     pub name: String,
+    /// Description for the section
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     /// Color for the section tab (CSS color string: hex, rgb, etc.)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
@@ -77,6 +80,7 @@ impl Section {
             id: Uuid::new_v4(),
             notebook_id,
             name,
+            description: None,
             color: None,
             system_prompt: None,
             system_prompt_mode: SystemPromptMode::default(),

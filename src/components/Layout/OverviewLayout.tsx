@@ -125,7 +125,7 @@ export function OverviewLayout() {
           })),
         };
 
-        await updatePageContent(selectedNotebookId, selectedPageId, editorData);
+        await updatePageContent(selectedNotebookId, selectedPageId, editorData, false);
 
         // Update links after save
         updatePageLinks({
@@ -175,7 +175,7 @@ export function OverviewLayout() {
         })),
       };
 
-      await updatePageContent(selectedNotebookId, coverPage.id, editorData);
+      await updatePageContent(selectedNotebookId, coverPage.id, editorData, false);
       setCoverPage((prev) => (prev ? { ...prev, content: editorData } : null));
     },
     [selectedNotebookId, coverPage, updatePageContent]

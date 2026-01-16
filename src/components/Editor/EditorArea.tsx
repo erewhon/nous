@@ -99,6 +99,9 @@ export function EditorArea() {
   }, [notebookPages, buildLinksFromPages]);
 
   // Convert page content to Editor.js format
+  // IMPORTANT: Only depend on page ID, not content. Content changes happen during saves
+  // and we don't want to re-render the editor (which would lose pending changes).
+  // The key={selectedPage.id} on BlockEditor handles remounting on page switch.
   const editorData: OutputData | undefined = useMemo(() => {
     if (!selectedPage?.content) return undefined;
     return {
@@ -110,7 +113,8 @@ export function EditorArea() {
         data: block.data as Record<string, unknown>,
       })),
     };
-  }, [selectedPage?.id, selectedPage?.content]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedPage?.id]);
 
   // Calculate page statistics
   const pageStats: PageStats | null = useMemo(() => {
@@ -118,8 +122,45 @@ export function EditorArea() {
     return calculatePageStats(selectedPage.content.blocks);
   }, [selectedPage?.content?.blocks]);
 
-  // Handle save
+  // Handle auto-save (debounced, no git commit)
+  // Minimizes state updates to avoid stealing focus from the editor
   const handleSave = useCallback(
+    async (data: OutputData) => {
+      if (!selectedNotebookId || !selectedPageId || !selectedPage) return;
+
+      const editorData: EditorData = {
+        time: data.time,
+        version: data.version,
+        blocks: data.blocks.map((block) => ({
+          id: block.id ?? crypto.randomUUID(),
+          type: block.type,
+          data: block.data as Record<string, unknown>,
+        })),
+      };
+
+      // Auto-save without git commit - don't update React state to avoid focus loss
+      await updatePageContent(selectedNotebookId, selectedPageId, editorData, false);
+
+      // Defer non-critical updates to avoid interfering with editor focus
+      requestAnimationFrame(() => {
+        updatePageLinks({
+          ...selectedPage,
+          content: editorData,
+        });
+        setLastSaved(new Date());
+      });
+    },
+    [
+      selectedNotebookId,
+      selectedPageId,
+      selectedPage,
+      updatePageContent,
+      updatePageLinks,
+    ]
+  );
+
+  // Handle explicit save (Ctrl+S, with git commit)
+  const handleExplicitSave = useCallback(
     async (data: OutputData) => {
       if (!selectedNotebookId || !selectedPageId || !selectedPage) return;
 
@@ -135,7 +176,8 @@ export function EditorArea() {
           })),
         };
 
-        await updatePageContent(selectedNotebookId, selectedPageId, editorData);
+        // Explicit save with git commit
+        await updatePageContent(selectedNotebookId, selectedPageId, editorData, true);
 
         // Update links after save
         updatePageLinks({
@@ -180,7 +222,7 @@ export function EditorArea() {
     [notebookPages, selectPage, selectedNotebookId, createPage]
   );
 
-  // Handle cover page save
+  // Handle cover page save (auto-save, no git commit)
   const handleCoverSave = useCallback(
     async (data: OutputData) => {
       if (!selectedNotebookId || !coverPage) return;
@@ -195,7 +237,7 @@ export function EditorArea() {
         })),
       };
 
-      await updatePageContent(selectedNotebookId, coverPage.id, editorData);
+      await updatePageContent(selectedNotebookId, coverPage.id, editorData, false);
       setCoverPage((prev) => (prev ? { ...prev, content: editorData } : null));
     },
     [selectedNotebookId, coverPage, updatePageContent]
@@ -432,6 +474,7 @@ export function EditorArea() {
                   key={selectedPage.id}
                   initialData={editorData}
                   onSave={handleSave}
+                  onExplicitSave={handleExplicitSave}
                   onLinkClick={handleLinkClick}
                   notebookId={selectedNotebook.id}
                   pages={notebookPages.map((p) => ({ id: p.id, title: p.title }))}

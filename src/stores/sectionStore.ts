@@ -23,7 +23,7 @@ interface SectionActions {
   updateSection: (
     notebookId: string,
     sectionId: string,
-    updates: { name?: string; color?: string | null; systemPrompt?: string | null; systemPromptMode?: string }
+    updates: { name?: string; description?: string | null; color?: string | null; systemPrompt?: string | null; systemPromptMode?: string }
   ) => Promise<void>;
   deleteSection: (
     notebookId: string,

@@ -22,6 +22,7 @@ export function CoverPage({
   const [isSaving, setIsSaving] = useState(false);
 
   // Convert page content to Editor.js format
+  // Only depend on page ID - content changes during saves shouldn't re-render the editor
   const editorData: OutputData | undefined = useMemo(() => {
     if (!page?.content) return undefined;
     return {
@@ -33,7 +34,8 @@ export function CoverPage({
         data: block.data as Record<string, unknown>,
       })),
     };
-  }, [page?.id, page?.content]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page?.id]);
 
   const handleSave = useCallback(
     async (data: OutputData) => {

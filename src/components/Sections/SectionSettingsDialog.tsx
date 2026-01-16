@@ -7,7 +7,7 @@ interface SectionSettingsDialogProps {
   section: Section | null; // null for creating new
   sections: Section[]; // other sections for move-to dropdown
   onClose: () => void;
-  onSave: (updates: { name?: string; color?: string | null; systemPrompt?: string | null; systemPromptMode?: SystemPromptMode }) => Promise<void>;
+  onSave: (updates: { name?: string; description?: string | null; color?: string | null; systemPrompt?: string | null; systemPromptMode?: SystemPromptMode }) => Promise<void>;
   onDelete?: (moveItemsTo?: string) => Promise<void>;
 }
 
@@ -20,6 +20,7 @@ export function SectionSettingsDialog({
   onDelete,
 }: SectionSettingsDialogProps) {
   const [name, setName] = useState(section?.name || "");
+  const [description, setDescription] = useState(section?.description || "");
   const [color, setColor] = useState<string | undefined>(section?.color);
   const [systemPrompt, setSystemPrompt] = useState<string>(section?.systemPrompt || "");
   const [systemPromptMode, setSystemPromptMode] = useState<SystemPromptMode>(section?.systemPromptMode || "override");
@@ -34,6 +35,7 @@ export function SectionSettingsDialog({
   useEffect(() => {
     if (isOpen) {
       setName(section?.name || "");
+      setDescription(section?.description || "");
       setColor(section?.color);
       setSystemPrompt(section?.systemPrompt || "");
       setSystemPromptMode(section?.systemPromptMode || "override");
@@ -50,6 +52,7 @@ export function SectionSettingsDialog({
     try {
       await onSave({
         name: name.trim(),
+        description: description.trim() || null,
         color: color || null,
         systemPrompt: systemPrompt.trim() || null,
         systemPromptMode,
@@ -198,6 +201,28 @@ export function SectionSettingsDialog({
                   color: "var(--color-text-primary)",
                 }}
                 autoFocus
+              />
+            </div>
+
+            {/* Description input */}
+            <div className="space-y-2">
+              <label
+                className="block text-sm font-medium"
+                style={{ color: "var(--color-text-secondary)" }}
+              >
+                Description
+              </label>
+              <input
+                type="text"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="Brief description (optional)..."
+                className="w-full rounded-lg border px-3 py-2 text-sm outline-none"
+                style={{
+                  backgroundColor: "var(--color-bg-tertiary)",
+                  borderColor: "var(--color-border)",
+                  color: "var(--color-text-primary)",
+                }}
               />
             </div>
 

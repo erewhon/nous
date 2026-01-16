@@ -12,6 +12,7 @@ interface BlockEditorProps {
   initialData?: OutputData;
   onChange?: (data: OutputData) => void;
   onSave?: (data: OutputData) => void;
+  onExplicitSave?: (data: OutputData) => void; // Called on Ctrl+S - should trigger git commit
   onLinkClick?: (pageTitle: string) => void;
   readOnly?: boolean;
   className?: string;
@@ -23,6 +24,7 @@ export function BlockEditor({
   initialData,
   onChange,
   onSave,
+  onExplicitSave,
   onLinkClick,
   readOnly = false,
   className = "",
@@ -54,7 +56,7 @@ export function BlockEditor({
 
       saveTimeoutRef.current = setTimeout(() => {
         onSave?.(data);
-      }, 1000); // Auto-save after 1 second of inactivity
+      }, 2000); // Auto-save after 2 seconds of inactivity
     },
     [onChange, onSave]
   );
@@ -92,21 +94,22 @@ export function BlockEditor({
     };
   }, []);
 
-  // Save on Ctrl+S
+  // Save on Ctrl+S - this is an explicit save that should trigger git commit
   useEffect(() => {
     const handleKeyDown = async (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === "s") {
         e.preventDefault();
         const data = await save();
         if (data) {
-          onSave?.(data);
+          // Use explicit save callback if provided, otherwise fall back to regular save
+          (onExplicitSave ?? onSave)?.(data);
         }
       }
     };
 
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [save, onSave]);
+  }, [save, onSave, onExplicitSave]);
 
   // Mark broken links when pages change or content renders
   useEffect(() => {

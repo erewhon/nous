@@ -113,6 +113,8 @@ pub fn update_page(
     system_prompt: Option<String>,
     system_prompt_mode: Option<String>,
     section_id: Option<Option<String>>,
+    #[allow(unused_variables)]
+    commit: Option<bool>, // Whether to create a git commit (default: false)
 ) -> CommandResult<Page> {
     let storage = state.storage.lock().unwrap();
     let nb_id = Uuid::parse_str(&notebook_id).map_err(|e| CommandError {
@@ -159,12 +161,15 @@ pub fn update_page(
         let _ = search_index.index_page(&page);
     }
 
-    // Auto-commit if git is enabled for this notebook
-    let notebook_path = storage.get_notebook_path(nb_id);
-    if git::is_git_repo(&notebook_path) {
-        let commit_message = format!("Update page: {}", page.title);
-        if let Err(e) = git::commit_all(&notebook_path, &commit_message) {
-            log::warn!("Failed to auto-commit page update: {}", e);
+    // Only commit if explicitly requested (not on every auto-save)
+    let should_commit = commit.unwrap_or(false);
+    if should_commit {
+        let notebook_path = storage.get_notebook_path(nb_id);
+        if git::is_git_repo(&notebook_path) {
+            let commit_message = format!("Update page: {}", page.title);
+            if let Err(e) = git::commit_all(&notebook_path, &commit_message) {
+                log::warn!("Failed to auto-commit page update: {}", e);
+            }
         }
     }
 

@@ -73,9 +73,10 @@ export async function createPage(
 export async function updatePage(
   notebookId: string,
   pageId: string,
-  updates: { title?: string; content?: EditorData; tags?: string[]; systemPrompt?: string; systemPromptMode?: string; sectionId?: string | null }
+  updates: { title?: string; content?: EditorData; tags?: string[]; systemPrompt?: string; systemPromptMode?: string; sectionId?: string | null },
+  commit?: boolean // Whether to create a git commit (default: false, use true for explicit saves)
 ): Promise<Page> {
-  return invoke<Page>("update_page", { notebookId, pageId, ...updates });
+  return invoke<Page>("update_page", { notebookId, pageId, ...updates, commit });
 }
 
 export async function deletePage(
@@ -1226,7 +1227,7 @@ export async function createSection(
 export async function updateSection(
   notebookId: string,
   sectionId: string,
-  updates: { name?: string; color?: string | null; systemPrompt?: string | null; systemPromptMode?: string }
+  updates: { name?: string; description?: string | null; color?: string | null; systemPrompt?: string | null; systemPromptMode?: string }
 ): Promise<Section> {
   return invoke<Section>("update_section", {
     notebookId,

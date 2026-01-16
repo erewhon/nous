@@ -29,7 +29,8 @@ interface PageActions {
   updatePageContent: (
     notebookId: string,
     pageId: string,
-    content: EditorData
+    content: EditorData,
+    commit?: boolean // Whether to create a git commit (default: false)
   ) => Promise<void>;
   deletePage: (notebookId: string, pageId: string) => Promise<void>;
   duplicatePage: (notebookId: string, pageId: string) => Promise<void>;
@@ -123,14 +124,15 @@ export const usePageStore = create<PageStore>((set) => ({
     }
   },
 
-  updatePageContent: async (notebookId, pageId, content) => {
-    set({ error: null });
+  updatePageContent: async (notebookId, pageId, content, commit) => {
+    // Don't set error state here - it causes re-renders
     try {
-      const page = await api.updatePage(notebookId, pageId, { content });
-      set((state) => ({
-        pages: state.pages.map((p) => (p.id === pageId ? page : p)),
-      }));
+      // Save to backend but don't update local store - the editor already has the content
+      // and updating the store causes unnecessary re-renders that steal focus
+      await api.updatePage(notebookId, pageId, { content }, commit);
+      // Don't update local state - the editor has the authoritative content
     } catch (err) {
+      // Only update state on error
       set({
         error:
           err instanceof Error ? err.message : "Failed to update page content",
