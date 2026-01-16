@@ -3,6 +3,7 @@ import { useActionStore } from "../../stores/actionStore";
 import { useInboxStore } from "../../stores/inboxStore";
 import { useFlashcardStore } from "../../stores/flashcardStore";
 import { NotebookList } from "../NotebookList/NotebookList";
+import { LibrarySwitcher } from "../Library";
 
 export function Sidebar() {
   const { notebooks, selectedNotebookId, createNotebook } = useNotebookStore();
@@ -110,6 +111,19 @@ export function Sidebar() {
           </kbd>
         </button>
       </div>
+
+      {/* Library Switcher */}
+      <LibrarySwitcher
+        onManageLibraries={() => {
+          window.dispatchEvent(
+            new KeyboardEvent("keydown", {
+              key: ",",
+              metaKey: true,
+              bubbles: true,
+            })
+          );
+        }}
+      />
 
       {/* Section label */}
       <div className="px-5 py-3">

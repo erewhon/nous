@@ -396,6 +396,14 @@ Already implemented with Tantivy, may need refinement:
   - Tauri command: `browser_run_task`
   - https://github.com/browser-use/browser-use
 
+### 25. Libraries
+- [x] Library concept for organizing notebooks
+  - Libraries are collections of notebooks stored in different locations
+  - Default library contains all existing notebooks (current behavior)
+  - Add/remove libraries from settings
+  - Switch between libraries in sidebar
+  - Each library has its own storage path
+
 ---
 
 ## Technical Debt & Polish

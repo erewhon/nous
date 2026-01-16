@@ -10,6 +10,7 @@ mod flashcards;
 mod git;
 mod inbox;
 mod joplin;
+mod library;
 mod markdown;
 mod notion;
 mod obsidian;
@@ -24,12 +25,14 @@ use actions::{ActionExecutor, ActionScheduler, ActionStorage};
 use external_editor::ExternalEditorManager;
 use flashcards::FlashcardStorage;
 use inbox::InboxStorage;
+use library::LibraryStorage;
 use python_bridge::PythonAI;
 use search::SearchIndex;
 use storage::FileStorage;
 use sync::SyncManager;
 
 pub struct AppState {
+    pub library_storage: Arc<Mutex<LibraryStorage>>,
     pub storage: Arc<Mutex<FileStorage>>,
     pub search_index: Mutex<SearchIndex>,
     pub python_ai: Arc<Mutex<PythonAI>>,
@@ -44,13 +47,22 @@ pub struct AppState {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Initialize storage
+    // Get base data directory
     let data_dir = FileStorage::default_data_dir().expect("Failed to get data directory");
-    let storage = FileStorage::new(data_dir.clone());
+
+    // Initialize library storage first - this handles default library creation
+    let library_storage = LibraryStorage::new(data_dir.clone());
+    let current_library = library_storage.init().expect("Failed to initialize library storage");
+
+    // Use the current library's path for storage components
+    let library_path = current_library.path.clone();
+
+    // Initialize file storage at the library path
+    let storage = FileStorage::new(library_path.clone());
     storage.init().expect("Failed to initialize storage");
 
-    // Initialize search index
-    let search_dir = data_dir.join("search_index");
+    // Initialize search index at the library path
+    let search_dir = current_library.search_index_path();
     let search_index = SearchIndex::new(search_dir).expect("Failed to initialize search index");
 
     // Initialize Python AI bridge
@@ -98,7 +110,10 @@ pub fn run() {
         Arc::clone(&action_executor_arc),
     );
 
+    let library_storage_arc = Arc::new(Mutex::new(library_storage));
+
     let state = AppState {
+        library_storage: library_storage_arc,
         storage: storage_arc,
         search_index: Mutex::new(search_index),
         python_ai: python_ai_arc,
@@ -321,6 +336,17 @@ pub fn run() {
             commands::get_page_annotation,
             commands::save_page_annotation,
             commands::delete_page_annotation,
+            // Library commands
+            commands::list_libraries,
+            commands::get_library,
+            commands::get_current_library,
+            commands::create_library,
+            commands::update_library,
+            commands::delete_library,
+            commands::switch_library,
+            commands::get_library_stats,
+            commands::validate_library_path,
+            commands::pick_library_folder,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

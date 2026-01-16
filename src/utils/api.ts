@@ -1353,3 +1353,84 @@ export async function getSupportedDocumentExtensions(): Promise<string[]> {
 export async function isSupportedDocument(filePath: string): Promise<boolean> {
   return invoke<boolean>("is_supported_document", { filePath });
 }
+
+// ===== Library API =====
+
+import type { Library, LibraryStats } from "../types/library";
+
+/**
+ * List all libraries
+ */
+export async function listLibraries(): Promise<Library[]> {
+  return invoke<Library[]>("list_libraries");
+}
+
+/**
+ * Get a library by ID
+ */
+export async function getLibrary(libraryId: string): Promise<Library> {
+  return invoke<Library>("get_library", { libraryId });
+}
+
+/**
+ * Get the current active library
+ */
+export async function getCurrentLibrary(): Promise<Library> {
+  return invoke<Library>("get_current_library");
+}
+
+/**
+ * Create a new library
+ */
+export async function createLibrary(
+  name: string,
+  path: string
+): Promise<Library> {
+  return invoke<Library>("create_library", { name, path });
+}
+
+/**
+ * Update a library's metadata
+ */
+export async function updateLibrary(
+  libraryId: string,
+  updates: { name?: string; icon?: string; color?: string }
+): Promise<Library> {
+  return invoke<Library>("update_library", { libraryId, ...updates });
+}
+
+/**
+ * Delete a library (cannot delete default library)
+ */
+export async function deleteLibrary(libraryId: string): Promise<void> {
+  return invoke("delete_library", { libraryId });
+}
+
+/**
+ * Switch to a different library
+ * This reinitializes storage and search index
+ */
+export async function switchLibrary(libraryId: string): Promise<Library> {
+  return invoke<Library>("switch_library", { libraryId });
+}
+
+/**
+ * Get statistics for a library
+ */
+export async function getLibraryStats(libraryId: string): Promise<LibraryStats> {
+  return invoke<LibraryStats>("get_library_stats", { libraryId });
+}
+
+/**
+ * Validate a path for use as a library location
+ */
+export async function validateLibraryPath(path: string): Promise<boolean> {
+  return invoke<boolean>("validate_library_path", { path });
+}
+
+/**
+ * Open a folder picker dialog for selecting a library location
+ */
+export async function pickLibraryFolder(): Promise<string | null> {
+  return invoke<string | null>("pick_library_folder");
+}

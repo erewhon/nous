@@ -2,18 +2,20 @@ import { useState } from "react";
 import { useAIStore, DEFAULT_SYSTEM_PROMPT } from "../../stores/aiStore";
 import { useWebResearchStore } from "../../stores/webResearchStore";
 import { ThemeSettings } from "./ThemeSettings";
+import { LibrarySettingsPanel } from "../Library";
 import type { ProviderType } from "../../types/ai";
 
 interface SettingsDialogProps {
   isOpen: boolean;
   onClose: () => void;
-  initialTab?: "ai" | "web-research" | "theme" | "system-prompt";
+  initialTab?: "ai" | "web-research" | "theme" | "system-prompt" | "libraries";
 }
 
-type TabId = "ai" | "web-research" | "theme" | "system-prompt";
+type TabId = "ai" | "web-research" | "theme" | "system-prompt" | "libraries";
 
 const TABS: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: "theme", label: "Appearance", icon: <IconPalette /> },
+  { id: "libraries", label: "Libraries", icon: <IconLibrary /> },
   { id: "ai", label: "AI Provider", icon: <IconSparkles /> },
   { id: "system-prompt", label: "System Prompt", icon: <IconPrompt /> },
   { id: "web-research", label: "Web Research", icon: <IconGlobe /> },
@@ -136,6 +138,7 @@ export function SettingsDialog({ isOpen, onClose, initialTab = "theme" }: Settin
           {/* Tab Content */}
           <div className="flex-1 overflow-y-auto p-6">
             {activeTab === "theme" && <ThemeSettings />}
+            {activeTab === "libraries" && <LibrarySettingsPanel />}
             {activeTab === "ai" && <AISettingsContent />}
             {activeTab === "system-prompt" && <SystemPromptSettingsContent />}
             {activeTab === "web-research" && <WebResearchSettingsContent />}
@@ -1023,6 +1026,25 @@ function IconLayers() {
       <polygon points="12 2 2 7 12 12 22 7 12 2" />
       <polyline points="2 17 12 22 22 17" />
       <polyline points="2 12 12 17 22 12" />
+    </svg>
+  );
+}
+
+function IconLibrary() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" />
+      <path d="M8 7h6M8 11h8" />
     </svg>
   );
 }
