@@ -57,6 +57,7 @@ pub fn update_notebook(
     icon: Option<String>,
     color: Option<String>,
     sections_enabled: Option<bool>,
+    archived: Option<bool>,
     system_prompt: Option<String>,
     system_prompt_mode: Option<String>,
     ai_provider: Option<String>,
@@ -80,6 +81,9 @@ pub fn update_notebook(
     }
     if let Some(enabled) = sections_enabled {
         notebook.sections_enabled = enabled;
+    }
+    if let Some(archived_val) = archived {
+        notebook.archived = archived_val;
     }
     // Allow setting system_prompt to None (empty string clears it)
     if let Some(prompt) = system_prompt {

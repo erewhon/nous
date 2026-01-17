@@ -79,6 +79,15 @@ export function NotebookList({
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5">
                       <span className="block truncate font-medium">{notebook.name}</span>
+                      {notebook.archived && (
+                        <span
+                          title="Archived"
+                          className="flex h-4 w-4 items-center justify-center"
+                          style={{ color: "var(--color-text-muted)" }}
+                        >
+                          <IconArchive />
+                        </span>
+                      )}
                       {notebook.systemPrompt && (
                         <span
                           title="Has custom AI prompt"
@@ -158,6 +167,26 @@ function IconPrompt() {
       strokeLinejoin="round"
     >
       <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+    </svg>
+  );
+}
+
+function IconArchive() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="2" y="4" width="20" height="5" rx="2" />
+      <path d="M4 9v9a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9" />
+      <path d="M10 13h4" />
     </svg>
   );
 }

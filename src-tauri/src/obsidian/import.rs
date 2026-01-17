@@ -335,6 +335,7 @@ pub fn import_obsidian_vault(
         icon: Some("💎".to_string()), // Diamond for Obsidian
         color: None,
         sections_enabled: false,
+        archived: false,
         system_prompt: None,
         system_prompt_mode: crate::storage::SystemPromptMode::default(),
         ai_provider: None,

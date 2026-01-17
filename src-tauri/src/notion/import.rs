@@ -520,6 +520,7 @@ pub fn import_notion_zip(
         icon: Some("📥".to_string()),
         color: None,
         sections_enabled: false,
+        archived: false,
         system_prompt: None,
         system_prompt_mode: crate::storage::SystemPromptMode::default(),
         ai_provider: None,

@@ -453,6 +453,7 @@ pub fn import_evernote_enex(
         icon: Some("🐘".to_string()), // Elephant for Evernote
         color: None,
         sections_enabled: false,
+        archived: false,
         system_prompt: None,
         system_prompt_mode: crate::storage::SystemPromptMode::default(),
         ai_provider: None,

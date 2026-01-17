@@ -169,6 +169,9 @@ pub struct Notebook {
     /// Whether sections are enabled for this notebook
     #[serde(default)]
     pub sections_enabled: bool,
+    /// Whether this notebook is archived (hidden from default list)
+    #[serde(default)]
+    pub archived: bool,
     /// Custom AI system prompt for this notebook (overrides app default)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub system_prompt: Option<String>,
@@ -198,6 +201,7 @@ impl Notebook {
             icon: None,
             color: None,
             sections_enabled: false,
+            archived: false,
             system_prompt: None,
             system_prompt_mode: SystemPromptMode::default(),
             ai_provider: None,

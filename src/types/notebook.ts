@@ -15,6 +15,7 @@ export const NotebookSchema = z.object({
   icon: z.string().optional(),
   color: z.string().optional(),
   sectionsEnabled: z.boolean().default(false),
+  archived: z.boolean().default(false),
   systemPrompt: z.string().optional(),
   systemPromptMode: SystemPromptModeSchema.default("override"),
   aiProvider: AIProviderTypeSchema.optional(),

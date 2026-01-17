@@ -952,6 +952,7 @@ pub fn import_orgmode(
         icon: Some("🦄".to_string()), // Unicorn for org-mode
         color: None,
         sections_enabled: false,
+        archived: false,
         system_prompt: None,
         system_prompt_mode: crate::storage::SystemPromptMode::default(),
         ai_provider: None,

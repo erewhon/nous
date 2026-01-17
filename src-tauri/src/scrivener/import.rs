@@ -537,6 +537,7 @@ pub fn import_scrivener_project(
         icon: Some("📝".to_string()), // Writing icon for Scrivener
         color: None,
         sections_enabled: false,
+        archived: false,
         system_prompt: None,
         system_prompt_mode: crate::storage::SystemPromptMode::default(),
         ai_provider: None,

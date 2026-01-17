@@ -6,7 +6,9 @@ import { NotebookList } from "../NotebookList/NotebookList";
 import { LibrarySwitcher } from "../Library";
 
 export function Sidebar() {
-  const { notebooks, selectedNotebookId, createNotebook } = useNotebookStore();
+  const { selectedNotebookId, createNotebook, getVisibleNotebooks, showArchived, toggleShowArchived, getArchivedNotebooks } = useNotebookStore();
+  const visibleNotebooks = getVisibleNotebooks();
+  const archivedCount = getArchivedNotebooks().length;
   const openActionLibrary = useActionStore((state) => state.openActionLibrary);
   const { summary, openQuickCapture, openInboxPanel } = useInboxStore();
   const { togglePanel: toggleFlashcards, stats: flashcardStats } = useFlashcardStore();
@@ -138,7 +140,7 @@ export function Sidebar() {
       {/* Notebook List */}
       <div className="flex-1 overflow-y-auto px-3">
         <NotebookList
-          notebooks={notebooks}
+          notebooks={visibleNotebooks}
           selectedNotebookId={selectedNotebookId}
         />
       </div>
@@ -346,13 +348,44 @@ export function Sidebar() {
             </svg>
           </button>
         </div>
-        {/* Notebook count */}
-        <div className="mt-2 text-center">
+        {/* Notebook count and archive toggle */}
+        <div className="mt-2 flex items-center justify-center gap-2">
           <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>
-            {notebooks.length} notebook{notebooks.length !== 1 ? "s" : ""}
+            {visibleNotebooks.length} notebook{visibleNotebooks.length !== 1 ? "s" : ""}
           </span>
+          {archivedCount > 0 && (
+            <button
+              onClick={toggleShowArchived}
+              className="flex items-center gap-1 rounded px-1.5 py-0.5 text-xs transition-colors hover:bg-[--color-bg-tertiary]"
+              style={{ color: showArchived ? "var(--color-accent)" : "var(--color-text-muted)" }}
+              title={showArchived ? "Hide archived notebooks" : `Show ${archivedCount} archived notebook${archivedCount !== 1 ? "s" : ""}`}
+            >
+              <IconArchive />
+              {archivedCount}
+            </button>
+          )}
         </div>
       </div>
     </aside>
+  );
+}
+
+function IconArchive() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="2" y="4" width="20" height="5" rx="2" />
+      <path d="M4 9v9a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9" />
+      <path d="M10 13h4" />
+    </svg>
   );
 }

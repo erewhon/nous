@@ -5,6 +5,7 @@ import * as api from "../utils/api";
 interface NotebookState {
   notebooks: Notebook[];
   selectedNotebookId: string | null;
+  showArchived: boolean;
   isLoading: boolean;
   error: string | null;
 }
@@ -17,9 +18,18 @@ interface NotebookActions {
   createNotebook: (name: string, type?: NotebookType) => Promise<void>;
   updateNotebook: (id: string, updates: Partial<Notebook>) => Promise<void>;
   deleteNotebook: (id: string) => Promise<void>;
+  archiveNotebook: (id: string) => Promise<void>;
+  unarchiveNotebook: (id: string) => Promise<void>;
 
   // Selection
   selectNotebook: (id: string | null) => void;
+
+  // Archive visibility
+  toggleShowArchived: () => void;
+
+  // Computed
+  getVisibleNotebooks: () => Notebook[];
+  getArchivedNotebooks: () => Notebook[];
 
   // Error handling
   clearError: () => void;
@@ -27,10 +37,11 @@ interface NotebookActions {
 
 type NotebookStore = NotebookState & NotebookActions;
 
-export const useNotebookStore = create<NotebookStore>((set) => ({
+export const useNotebookStore = create<NotebookStore>((set, get) => ({
   // Initial state
   notebooks: [],
   selectedNotebookId: null,
+  showArchived: false,
   isLoading: false,
   error: null,
 
@@ -96,8 +107,60 @@ export const useNotebookStore = create<NotebookStore>((set) => ({
     }
   },
 
+  archiveNotebook: async (id) => {
+    set({ error: null });
+    try {
+      const notebook = await api.updateNotebook(id, { archived: true });
+      set((state) => ({
+        notebooks: state.notebooks.map((n) => (n.id === id ? notebook : n)),
+        // Deselect if the archived notebook was selected and we're not showing archived
+        selectedNotebookId:
+          state.selectedNotebookId === id && !state.showArchived
+            ? null
+            : state.selectedNotebookId,
+      }));
+    } catch (err) {
+      set({
+        error:
+          err instanceof Error ? err.message : "Failed to archive notebook",
+      });
+    }
+  },
+
+  unarchiveNotebook: async (id) => {
+    set({ error: null });
+    try {
+      const notebook = await api.updateNotebook(id, { archived: false });
+      set((state) => ({
+        notebooks: state.notebooks.map((n) => (n.id === id ? notebook : n)),
+      }));
+    } catch (err) {
+      set({
+        error:
+          err instanceof Error ? err.message : "Failed to unarchive notebook",
+      });
+    }
+  },
+
   selectNotebook: (id) => {
     set({ selectedNotebookId: id });
+  },
+
+  toggleShowArchived: () => {
+    set((state) => ({ showArchived: !state.showArchived }));
+  },
+
+  getVisibleNotebooks: () => {
+    const { notebooks, showArchived } = get();
+    if (showArchived) {
+      return notebooks;
+    }
+    return notebooks.filter((n) => !n.archived);
+  },
+
+  getArchivedNotebooks: () => {
+    const { notebooks } = get();
+    return notebooks.filter((n) => n.archived);
   },
 
   clearError: () => {

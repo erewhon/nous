@@ -57,7 +57,7 @@ export function NotebookSettingsDialog({
   notebook,
   onClose,
 }: NotebookSettingsDialogProps) {
-  const { updateNotebook, deleteNotebook } = useNotebookStore();
+  const { updateNotebook, deleteNotebook, archiveNotebook, unarchiveNotebook } = useNotebookStore();
   const { settings: appAISettings, getActiveProviderType, getActiveModel } = useAIStore();
   const [name, setName] = useState("");
   const [color, setColor] = useState<string | undefined>(undefined);
@@ -1380,13 +1380,30 @@ export function NotebookSettingsDialog({
           className="flex flex-shrink-0 items-center justify-between border-t px-6 py-4"
           style={{ borderColor: "var(--color-border)" }}
         >
-          <button
-            onClick={() => setShowDeleteConfirm(true)}
-            className="rounded-lg px-3 py-2 text-sm font-medium transition-colors hover:bg-red-500/10"
-            style={{ color: "var(--color-error)" }}
-          >
-            Delete Notebook
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={async () => {
+                if (!notebook) return;
+                if (notebook.archived) {
+                  await unarchiveNotebook(notebook.id);
+                } else {
+                  await archiveNotebook(notebook.id);
+                }
+                onClose();
+              }}
+              className="rounded-lg px-3 py-2 text-sm font-medium transition-colors hover:bg-[--color-bg-tertiary]"
+              style={{ color: "var(--color-text-secondary)" }}
+            >
+              {notebook?.archived ? "Unarchive" : "Archive"}
+            </button>
+            <button
+              onClick={() => setShowDeleteConfirm(true)}
+              className="rounded-lg px-3 py-2 text-sm font-medium transition-colors hover:bg-red-500/10"
+              style={{ color: "var(--color-error)" }}
+            >
+              Delete
+            </button>
+          </div>
           <div className="flex gap-3">
             <button
               onClick={onClose}

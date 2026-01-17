@@ -32,6 +32,7 @@ export async function updateNotebook(
     icon?: string;
     color?: string;
     sectionsEnabled?: boolean;
+    archived?: boolean;
     systemPrompt?: string;
     systemPromptMode?: string;
     aiProvider?: string;
