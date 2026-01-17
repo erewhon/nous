@@ -652,6 +652,7 @@ fn import_org_file(content: &str, notebook_id: Uuid, fallback_title: &str) -> Pa
         position: 0,
         system_prompt: None,
         system_prompt_mode: crate::storage::SystemPromptMode::default(),
+        ai_model: None,
         created_at,
         updated_at: now,
     }

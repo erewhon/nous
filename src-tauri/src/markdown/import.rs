@@ -42,6 +42,7 @@ pub fn import_markdown_to_page(markdown: &str, notebook_id: Uuid, fallback_title
         position: 0,
         system_prompt: None,
         system_prompt_mode: crate::storage::SystemPromptMode::default(),
+        ai_model: None,
         created_at: frontmatter.created.unwrap_or(now),
         updated_at: frontmatter.updated.unwrap_or(now),
     }

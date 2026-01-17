@@ -593,6 +593,7 @@ impl SyncManager {
             position: 0,
             system_prompt: None,
             system_prompt_mode: crate::storage::SystemPromptMode::default(),
+            ai_model: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };

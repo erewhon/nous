@@ -616,6 +616,7 @@ pub fn import_scrivener_project(
             position: pages.len() as i32,
             system_prompt: None,
             system_prompt_mode: crate::storage::SystemPromptMode::default(),
+            ai_model: None,
             created_at: now,
             updated_at: now,
         };

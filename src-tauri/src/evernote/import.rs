@@ -555,6 +555,7 @@ pub fn import_evernote_enex(
             position: 0,
             system_prompt: None,
             system_prompt_mode: crate::storage::SystemPromptMode::default(),
+            ai_model: None,
             created_at: note.created.unwrap_or(now),
             updated_at: note.updated.unwrap_or(now),
         };
