@@ -349,6 +349,11 @@ mod tests {
             system_prompt: None,
             system_prompt_mode: crate::storage::SystemPromptMode::default(),
             ai_model: None,
+            page_type: crate::storage::PageType::default(),
+            source_file: None,
+            storage_mode: None,
+            file_extension: None,
+            last_file_sync: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }

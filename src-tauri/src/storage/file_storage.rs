@@ -4,7 +4,9 @@ use std::path::PathBuf;
 use thiserror::Error;
 use uuid::Uuid;
 
-use super::models::{Folder, FolderType, Notebook, NotebookType, Page, Section};
+use super::models::{
+    FileStorageMode, Folder, FolderType, Notebook, NotebookType, Page, PageType, Section,
+};
 
 #[derive(Error, Debug)]
 pub enum StorageError {
@@ -37,6 +39,15 @@ pub enum StorageError {
 
     #[error("Invalid operation: {0}")]
     InvalidOperation(String),
+
+    #[error("Unsupported file type: {0}")]
+    UnsupportedFileType(String),
+
+    #[error("File not found: {0}")]
+    FileNotFound(String),
+
+    #[error("Invalid page type for operation: expected {expected}, got {actual}")]
+    InvalidPageType { expected: String, actual: String },
 }
 
 pub type Result<T> = std::result::Result<T, StorageError>;
@@ -913,6 +924,338 @@ impl FileStorage {
         if !folders_path.exists() {
             // Create empty folders array
             self.save_folders(notebook_id, &[])?;
+        }
+
+        Ok(())
+    }
+
+    // ===== File-Based Page Operations =====
+
+    /// Get path for a native text file (markdown, ics)
+    fn native_file_path(&self, notebook_id: Uuid, page_id: Uuid, ext: &str) -> PathBuf {
+        self.pages_dir(notebook_id).join(format!("{}.{}", page_id, ext))
+    }
+
+    /// Get path for metadata JSON file (for non-standard pages)
+    fn metadata_path(&self, notebook_id: Uuid, page_id: Uuid) -> PathBuf {
+        self.pages_dir(notebook_id)
+            .join(format!("{}.metadata.json", page_id))
+    }
+
+    /// Get path for embedded binary files (pdf, epub, ipynb)
+    fn embedded_file_path(&self, notebook_id: Uuid, page_id: Uuid, ext: &str) -> PathBuf {
+        self.notebook_dir(notebook_id)
+            .join("assets")
+            .join("embedded")
+            .join(format!("{}.{}", page_id, ext))
+    }
+
+    /// Get the embedded assets directory
+    pub fn embedded_assets_dir(&self, notebook_id: Uuid) -> PathBuf {
+        self.notebook_dir(notebook_id).join("assets").join("embedded")
+    }
+
+    /// Determine page type from file extension
+    pub fn page_type_from_extension(ext: &str) -> Option<PageType> {
+        match ext.to_lowercase().as_str() {
+            "md" | "markdown" => Some(PageType::Markdown),
+            "pdf" => Some(PageType::Pdf),
+            "ipynb" => Some(PageType::Jupyter),
+            "epub" => Some(PageType::Epub),
+            "ics" | "ical" => Some(PageType::Calendar),
+            _ => None,
+        }
+    }
+
+    /// Import a file as a new page
+    pub fn import_file_as_page(
+        &self,
+        notebook_id: Uuid,
+        file_path: &std::path::Path,
+        storage_mode: FileStorageMode,
+        folder_id: Option<Uuid>,
+        section_id: Option<Uuid>,
+    ) -> Result<Page> {
+        // Verify notebook exists
+        if !self.notebook_dir(notebook_id).exists() {
+            return Err(StorageError::NotebookNotFound(notebook_id));
+        }
+
+        // Get file extension and determine page type
+        let ext = file_path
+            .extension()
+            .and_then(|e| e.to_str())
+            .ok_or_else(|| StorageError::UnsupportedFileType("No file extension".to_string()))?;
+
+        let page_type = Self::page_type_from_extension(ext)
+            .ok_or_else(|| StorageError::UnsupportedFileType(ext.to_string()))?;
+
+        // Get title from filename
+        let title = file_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("Untitled")
+            .to_string();
+
+        // Create page
+        let page_id = Uuid::new_v4();
+        let now = chrono::Utc::now();
+
+        // Determine source file path based on storage mode
+        let source_file = match storage_mode {
+            FileStorageMode::Embedded => {
+                // Copy file to embedded assets
+                let dest_path = self.embedded_file_path(notebook_id, page_id, ext);
+                fs::create_dir_all(dest_path.parent().unwrap())?;
+                fs::copy(file_path, &dest_path)?;
+                format!("assets/embedded/{}.{}", page_id, ext)
+            }
+            FileStorageMode::Linked => {
+                // Store absolute path
+                file_path
+                    .canonicalize()?
+                    .to_string_lossy()
+                    .to_string()
+            }
+        };
+
+        let page = Page {
+            id: page_id,
+            notebook_id,
+            title,
+            content: super::models::EditorData::default(), // Empty for file-based pages
+            tags: Vec::new(),
+            folder_id,
+            parent_page_id: None,
+            section_id,
+            is_archived: false,
+            is_cover: false,
+            position: 0,
+            system_prompt: None,
+            system_prompt_mode: super::models::SystemPromptMode::default(),
+            ai_model: None,
+            page_type,
+            source_file: Some(source_file),
+            storage_mode: Some(storage_mode),
+            file_extension: Some(ext.to_lowercase()),
+            last_file_sync: Some(now),
+            created_at: now,
+            updated_at: now,
+        };
+
+        // Save page metadata
+        let metadata_path = self.metadata_path(notebook_id, page_id);
+        let content = serde_json::to_string_pretty(&page)?;
+        fs::write(&metadata_path, content)?;
+
+        Ok(page)
+    }
+
+    /// Read content of a native text file (markdown, ics)
+    pub fn read_native_file_content(&self, page: &Page) -> Result<String> {
+        let source_file = page.source_file.as_ref().ok_or_else(|| {
+            StorageError::InvalidPageType {
+                expected: "file-based page".to_string(),
+                actual: "standard".to_string(),
+            }
+        })?;
+
+        let file_path = match page.storage_mode {
+            Some(FileStorageMode::Embedded) => {
+                self.notebook_dir(page.notebook_id).join(source_file)
+            }
+            Some(FileStorageMode::Linked) | None => PathBuf::from(source_file),
+        };
+
+        if !file_path.exists() {
+            return Err(StorageError::FileNotFound(file_path.to_string_lossy().to_string()));
+        }
+
+        let content = fs::read_to_string(&file_path)?;
+        Ok(content)
+    }
+
+    /// Write content to a native text file (markdown, ics)
+    pub fn write_native_file_content(&self, page: &Page, content: &str) -> Result<()> {
+        let source_file = page.source_file.as_ref().ok_or_else(|| {
+            StorageError::InvalidPageType {
+                expected: "file-based page".to_string(),
+                actual: "standard".to_string(),
+            }
+        })?;
+
+        let file_path = match page.storage_mode {
+            Some(FileStorageMode::Embedded) => {
+                self.notebook_dir(page.notebook_id).join(source_file)
+            }
+            Some(FileStorageMode::Linked) | None => PathBuf::from(source_file),
+        };
+
+        fs::write(&file_path, content)?;
+        Ok(())
+    }
+
+    /// Get the absolute path to a file-based page's content
+    pub fn get_file_path(&self, page: &Page) -> Result<PathBuf> {
+        let source_file = page.source_file.as_ref().ok_or_else(|| {
+            StorageError::InvalidPageType {
+                expected: "file-based page".to_string(),
+                actual: "standard".to_string(),
+            }
+        })?;
+
+        let file_path = match page.storage_mode {
+            Some(FileStorageMode::Embedded) => {
+                self.notebook_dir(page.notebook_id).join(source_file)
+            }
+            Some(FileStorageMode::Linked) | None => PathBuf::from(source_file),
+        };
+
+        Ok(file_path)
+    }
+
+    /// Read binary file content (pdf, epub, ipynb)
+    pub fn read_binary_file(&self, page: &Page) -> Result<Vec<u8>> {
+        let file_path = self.get_file_path(page)?;
+
+        if !file_path.exists() {
+            return Err(StorageError::FileNotFound(file_path.to_string_lossy().to_string()));
+        }
+
+        let content = fs::read(&file_path)?;
+        Ok(content)
+    }
+
+    /// Check if a linked file has been modified externally
+    pub fn check_linked_file_modified(&self, page: &Page) -> Result<bool> {
+        if page.storage_mode != Some(FileStorageMode::Linked) {
+            return Ok(false);
+        }
+
+        let file_path = self.get_file_path(page)?;
+        if !file_path.exists() {
+            return Err(StorageError::FileNotFound(file_path.to_string_lossy().to_string()));
+        }
+
+        let metadata = fs::metadata(&file_path)?;
+        let modified_time = metadata
+            .modified()?
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|e| StorageError::InvalidOperation(e.to_string()))?;
+
+        if let Some(last_sync) = page.last_file_sync {
+            let last_sync_timestamp = last_sync.timestamp() as u64;
+            Ok(modified_time.as_secs() > last_sync_timestamp)
+        } else {
+            Ok(true) // No last sync, assume modified
+        }
+    }
+
+    /// Update page metadata (for file-based pages stored in metadata.json)
+    pub fn update_page_metadata(&self, page: &Page) -> Result<()> {
+        if page.page_type == PageType::Standard {
+            // Standard pages use the regular page file
+            return self.update_page(page);
+        }
+
+        let metadata_path = self.metadata_path(page.notebook_id, page.id);
+        let content = serde_json::to_string_pretty(page)?;
+        fs::write(&metadata_path, content)?;
+        Ok(())
+    }
+
+    /// Get a page by ID, checking both standard and metadata files
+    pub fn get_page_any_type(&self, notebook_id: Uuid, page_id: Uuid) -> Result<Page> {
+        // First try standard page path
+        let page_path = self.page_path(notebook_id, page_id);
+        if page_path.exists() {
+            let content = fs::read_to_string(&page_path)?;
+            let page: Page = serde_json::from_str(&content)?;
+            return Ok(page);
+        }
+
+        // Then try metadata path
+        let metadata_path = self.metadata_path(notebook_id, page_id);
+        if metadata_path.exists() {
+            let content = fs::read_to_string(&metadata_path)?;
+            let page: Page = serde_json::from_str(&content)?;
+            return Ok(page);
+        }
+
+        Err(StorageError::PageNotFound(page_id))
+    }
+
+    /// List all pages including file-based pages
+    pub fn list_all_pages(&self, notebook_id: Uuid) -> Result<Vec<Page>> {
+        let pages_dir = self.pages_dir(notebook_id);
+
+        if !pages_dir.exists() {
+            return Err(StorageError::NotebookNotFound(notebook_id));
+        }
+
+        let mut pages = Vec::new();
+        let mut seen_ids = std::collections::HashSet::new();
+
+        for entry in fs::read_dir(&pages_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+
+            if !path.is_file() {
+                continue;
+            }
+
+            let ext = path.extension().and_then(|e| e.to_str());
+
+            // Check for standard JSON pages
+            if ext == Some("json") && !path.to_string_lossy().contains(".metadata.json") {
+                let content = fs::read_to_string(&path)?;
+                let page: Page = serde_json::from_str(&content)?;
+                if !seen_ids.contains(&page.id) {
+                    seen_ids.insert(page.id);
+                    pages.push(page);
+                }
+            }
+            // Check for metadata files (file-based pages)
+            else if path.to_string_lossy().ends_with(".metadata.json") {
+                let content = fs::read_to_string(&path)?;
+                let page: Page = serde_json::from_str(&content)?;
+                if !seen_ids.contains(&page.id) {
+                    seen_ids.insert(page.id);
+                    pages.push(page);
+                }
+            }
+        }
+
+        // Sort by updated_at descending
+        pages.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+
+        Ok(pages)
+    }
+
+    /// Delete a file-based page and its associated files
+    pub fn delete_file_page(&self, notebook_id: Uuid, page_id: Uuid) -> Result<()> {
+        let page = self.get_page_any_type(notebook_id, page_id)?;
+
+        // Delete the content file if embedded
+        if page.storage_mode == Some(FileStorageMode::Embedded) {
+            if let Some(source_file) = &page.source_file {
+                let file_path = self.notebook_dir(notebook_id).join(source_file);
+                if file_path.exists() {
+                    fs::remove_file(&file_path)?;
+                }
+            }
+        }
+
+        // Delete metadata file
+        let metadata_path = self.metadata_path(notebook_id, page_id);
+        if metadata_path.exists() {
+            fs::remove_file(&metadata_path)?;
+        }
+
+        // Also try to delete standard page file (in case it exists)
+        let page_path = self.page_path(notebook_id, page_id);
+        if page_path.exists() {
+            fs::remove_file(&page_path)?;
         }
 
         Ok(())

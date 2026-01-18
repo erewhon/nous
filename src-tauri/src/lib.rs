@@ -66,10 +66,21 @@ pub fn run() {
     let search_index = SearchIndex::new(search_dir).expect("Failed to initialize search index");
 
     // Initialize Python AI bridge
-    // The katt-py package should be in the project root
+    // The katt-py package is in the project root (same level as src-tauri)
+    // When running from src-tauri, we need to go up one level
     let katt_py_path = std::env::current_dir()
-        .map(|p| p.join("../katt-py"))
+        .map(|p| {
+            // Check if katt-py exists in current dir or parent
+            let direct = p.join("katt-py");
+            if direct.exists() {
+                direct
+            } else {
+                // Try parent directory (when running from src-tauri)
+                p.parent().map(|parent| parent.join("katt-py")).unwrap_or(direct)
+            }
+        })
         .unwrap_or_else(|_| std::path::PathBuf::from("katt-py"));
+    log::info!("Python AI bridge path: {:?}", katt_py_path);
     let python_ai = PythonAI::new(katt_py_path);
 
     // Initialize action storage
@@ -338,6 +349,14 @@ pub fn run() {
             commands::get_page_annotation,
             commands::save_page_annotation,
             commands::delete_page_annotation,
+            // File-based page commands
+            commands::import_file_as_page,
+            commands::get_file_content,
+            commands::update_file_content,
+            commands::get_file_path,
+            commands::check_linked_file_modified,
+            commands::get_supported_page_extensions,
+            commands::delete_file_page,
             // Library commands
             commands::list_libraries,
             commands::get_library,

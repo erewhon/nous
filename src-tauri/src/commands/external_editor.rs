@@ -164,6 +164,11 @@ pub fn sync_from_external_editor(
         system_prompt: existing_page.system_prompt,
         system_prompt_mode: existing_page.system_prompt_mode,
         ai_model: existing_page.ai_model,
+        page_type: existing_page.page_type,
+        source_file: existing_page.source_file,
+        storage_mode: existing_page.storage_mode,
+        file_extension: existing_page.file_extension,
+        last_file_sync: existing_page.last_file_sync,
         created_at: existing_page.created_at,
         updated_at: chrono::Utc::now(),
     };

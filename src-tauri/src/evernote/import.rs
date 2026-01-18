@@ -558,6 +558,11 @@ pub fn import_evernote_enex(
             system_prompt: None,
             system_prompt_mode: crate::storage::SystemPromptMode::default(),
             ai_model: None,
+            page_type: crate::storage::PageType::default(),
+            source_file: None,
+            storage_mode: None,
+            file_extension: None,
+            last_file_sync: None,
             created_at: note.created.unwrap_or(now),
             updated_at: note.updated.unwrap_or(now),
         };

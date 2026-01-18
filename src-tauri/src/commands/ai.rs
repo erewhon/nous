@@ -264,17 +264,34 @@ pub async fn ai_chat_stream(
     // Read from channel and emit events in a blocking task
     // This ensures events are emitted as they arrive
     tauri::async_runtime::spawn_blocking(move || {
+        log::info!("AI stream: waiting for events from Python bridge");
+        let mut event_count = 0;
+
         while let Ok(event) = rx.recv() {
+            event_count += 1;
             let is_done = matches!(event, StreamEvent::Done { .. });
             let is_error = matches!(event, StreamEvent::Error { .. });
 
+            if is_error {
+                if let StreamEvent::Error { ref message } = event {
+                    log::error!("AI stream error: {}", message);
+                }
+            }
+
             // Emit the event to the frontend
-            let _ = app.emit("ai-stream", &event);
+            if let Err(e) = app.emit("ai-stream", &event) {
+                log::error!("Failed to emit AI stream event: {}", e);
+            }
 
             // Stop if we're done or got an error
             if is_done || is_error {
+                log::info!("AI stream: completed after {} events (done={}, error={})", event_count, is_done, is_error);
                 break;
             }
+        }
+
+        if event_count == 0 {
+            log::warn!("AI stream: channel closed without receiving any events");
         }
     })
     .await

@@ -47,6 +47,40 @@ impl Default for SystemPromptMode {
     }
 }
 
+/// Type of page content - determines storage format and viewer/editor
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum PageType {
+    /// Standard Editor.js block-based content (default)
+    Standard,
+    /// Native markdown file (.md)
+    Markdown,
+    /// PDF document
+    Pdf,
+    /// Jupyter notebook (.ipynb)
+    Jupyter,
+    /// E-book (.epub)
+    Epub,
+    /// Calendar file (.ics)
+    Calendar,
+}
+
+impl Default for PageType {
+    fn default() -> Self {
+        Self::Standard
+    }
+}
+
+/// How a file-based page's content is stored
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum FileStorageMode {
+    /// File is copied into notebook assets directory
+    Embedded,
+    /// File remains at its original location (path stored as reference)
+    Linked,
+}
+
 /// A section within a notebook for grouping folders and pages (like OneNote)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -275,6 +309,21 @@ pub struct Page {
     /// AI model override for this page (e.g., "gpt-4o", "claude-sonnet-4-20250514")
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub ai_model: Option<String>,
+    /// Type of page content - determines storage format and viewer/editor
+    #[serde(default)]
+    pub page_type: PageType,
+    /// For non-standard pages: path to the actual content file (relative to notebook or absolute for linked)
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub source_file: Option<String>,
+    /// How the file is stored (embedded in assets or linked externally)
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub storage_mode: Option<FileStorageMode>,
+    /// Original file extension (e.g., "pdf", "md", "ipynb")
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub file_extension: Option<String>,
+    /// Last sync time for linked files (to detect external changes)
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub last_file_sync: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -297,6 +346,11 @@ impl Page {
             system_prompt: None,
             system_prompt_mode: SystemPromptMode::default(),
             ai_model: None,
+            page_type: PageType::default(),
+            source_file: None,
+            storage_mode: None,
+            file_extension: None,
+            last_file_sync: None,
             created_at: now,
             updated_at: now,
         }

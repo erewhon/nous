@@ -13,10 +13,13 @@ import {
   type DragOverEvent,
 } from "@dnd-kit/core";
 import { arrayMove } from "@dnd-kit/sortable";
-import type { Folder, Page, Section } from "../../types/page";
+import { open } from "@tauri-apps/plugin-dialog";
+import type { Folder, Page, Section, FileStorageMode } from "../../types/page";
 import { useFolderStore } from "../../stores/folderStore";
 import { usePageStore } from "../../stores/pageStore";
+import * as api from "../../utils/api";
 import { FolderTreeItem, DraggablePageItem } from "./FolderTreeItem";
+import { FileImportDialog } from "../Import/FileImportDialog";
 
 // Droppable section component for drag-and-drop to sections
 function DroppableSection({
@@ -129,7 +132,7 @@ export function FolderTree({
   onViewCover,
   onReorderPages,
 }: FolderTreeProps) {
-  const { createPage, createSubpage, movePageToFolder, movePageToParent } = usePageStore();
+  const { createPage, createSubpage, movePageToFolder, movePageToParent, loadPages } = usePageStore();
   const {
     expandedFolderIds,
     toggleFolderExpanded,
@@ -149,6 +152,8 @@ export function FolderTree({
   const [overSectionId, setOverSectionId] = useState<string | null>(null);
   const [showSectionDropZones, setShowSectionDropZones] = useState(false);
   const [expandedPageIds, setExpandedPageIds] = useState<Set<string>>(new Set());
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [pendingImportPath, setPendingImportPath] = useState<string | null>(null);
 
   // Toggle page expansion for nested pages
   const togglePageExpanded = useCallback((pageId: string) => {
@@ -235,6 +240,60 @@ export function FolderTree({
     },
     [notebookId, createPage, sectionsEnabled, selectedSectionId]
   );
+
+  // Handle opening file picker for import
+  const handleImportFile = useCallback(async () => {
+    try {
+      const selected = await open({
+        multiple: false,
+        filters: [
+          {
+            name: "Supported Files",
+            extensions: ["md", "pdf", "ipynb", "epub", "ics"],
+          },
+          { name: "Markdown", extensions: ["md"] },
+          { name: "PDF", extensions: ["pdf"] },
+          { name: "Jupyter Notebook", extensions: ["ipynb"] },
+          { name: "EPUB", extensions: ["epub"] },
+          { name: "Calendar", extensions: ["ics"] },
+        ],
+      });
+
+      if (selected) {
+        // Show dialog to choose storage mode
+        setPendingImportPath(selected);
+        setImportDialogOpen(true);
+      }
+    } catch (err) {
+      console.error("Failed to open file picker:", err);
+    }
+  }, []);
+
+  // Handle confirming the import with storage mode
+  const handleConfirmImport = useCallback(
+    async (storageMode: FileStorageMode) => {
+      if (!pendingImportPath) return;
+
+      try {
+        const sectionId = sectionsEnabled && selectedSectionId ? selectedSectionId : undefined;
+        await api.importFileAsPage(notebookId, pendingImportPath, storageMode, undefined, sectionId);
+        // Refresh the page list to show the imported page
+        await loadPages(notebookId);
+      } catch (err) {
+        console.error("Failed to import file:", err);
+      } finally {
+        setImportDialogOpen(false);
+        setPendingImportPath(null);
+      }
+    },
+    [notebookId, pendingImportPath, sectionsEnabled, selectedSectionId, loadPages]
+  );
+
+  // Handle canceling the import
+  const handleCancelImport = useCallback(() => {
+    setImportDialogOpen(false);
+    setPendingImportPath(null);
+  }, []);
 
   // Handle creating a subpage
   const handleCreateSubpage = useCallback(
@@ -557,13 +616,20 @@ export function FolderTree({
   const activeFolder = activeFolderId ? folders.find((f) => f.id === activeFolderId) : null;
 
   return (
-    <DndContext
-      sensors={sensors}
-      collisionDetection={closestCenter}
-      onDragStart={handleDragStart}
-      onDragOver={handleDragOver}
-      onDragEnd={handleDragEnd}
-    >
+    <>
+      <FileImportDialog
+        isOpen={importDialogOpen}
+        filePath={pendingImportPath || ""}
+        onConfirm={handleConfirmImport}
+        onCancel={handleCancelImport}
+      />
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragStart={handleDragStart}
+        onDragOver={handleDragOver}
+        onDragEnd={handleDragEnd}
+      >
       <div className="flex h-full flex-col">
         {/* Header */}
         <div className="flex items-center justify-between p-5">
@@ -672,6 +738,29 @@ export function FolderTree({
                 strokeLinejoin="round"
               >
                 <path d="M12 5v14M5 12h14" />
+              </svg>
+            </button>
+            {/* Import file button */}
+            <button
+              onClick={handleImportFile}
+              className="flex h-7 w-7 items-center justify-center rounded-lg transition-all"
+              style={{ color: "var(--color-text-muted)" }}
+              title="Import file (Markdown, PDF, Jupyter, EPUB, Calendar)"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="17 8 12 3 7 8" />
+                <line x1="12" y1="3" x2="12" y2="15" />
               </svg>
             </button>
           </div>
@@ -851,5 +940,6 @@ export function FolderTree({
         )}
       </DragOverlay>
     </DndContext>
+    </>
   );
 }

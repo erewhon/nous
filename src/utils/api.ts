@@ -1481,3 +1481,93 @@ export async function validateLibraryPath(path: string): Promise<boolean> {
 export async function pickLibraryFolder(): Promise<string | null> {
   return invoke<string | null>("pick_library_folder");
 }
+
+// ===== File-Based Page API =====
+
+export interface ImportFileResult {
+  page: Page;
+  fileType: string;
+}
+
+export interface FileContentResponse {
+  content: string;
+  pageType: string;
+  fileExtension: string | null;
+}
+
+/**
+ * Import a file as a page in a notebook
+ */
+export async function importFileAsPage(
+  notebookId: string,
+  filePath: string,
+  storageMode: "embedded" | "linked",
+  folderId?: string,
+  sectionId?: string
+): Promise<ImportFileResult> {
+  return invoke<ImportFileResult>("import_file_as_page", {
+    notebookId,
+    filePath,
+    storageMode,
+    folderId: folderId || null,
+    sectionId: sectionId || null,
+  });
+}
+
+/**
+ * Get content of a text-based file page (markdown, calendar)
+ */
+export async function getFileContent(
+  notebookId: string,
+  pageId: string
+): Promise<FileContentResponse> {
+  return invoke<FileContentResponse>("get_file_content", { notebookId, pageId });
+}
+
+/**
+ * Update content of a text-based file page
+ */
+export async function updateFileContent(
+  notebookId: string,
+  pageId: string,
+  content: string
+): Promise<Page> {
+  return invoke<Page>("update_file_content", { notebookId, pageId, content });
+}
+
+/**
+ * Get the file path for a file-based page
+ */
+export async function getFilePath(
+  notebookId: string,
+  pageId: string
+): Promise<string> {
+  return invoke<string>("get_file_path", { notebookId, pageId });
+}
+
+/**
+ * Check if a linked file has been modified externally
+ */
+export async function checkLinkedFileModified(
+  notebookId: string,
+  pageId: string
+): Promise<boolean> {
+  return invoke<boolean>("check_linked_file_modified", { notebookId, pageId });
+}
+
+/**
+ * Get list of supported file extensions for import
+ */
+export async function getSupportedPageExtensions(): Promise<string[]> {
+  return invoke<string[]>("get_supported_page_extensions");
+}
+
+/**
+ * Delete a file-based page
+ */
+export async function deleteFilePage(
+  notebookId: string,
+  pageId: string
+): Promise<void> {
+  return invoke<void>("delete_file_page", { notebookId, pageId });
+}

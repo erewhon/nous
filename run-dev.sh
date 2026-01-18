@@ -3,15 +3,15 @@
 
 set -e
 
-# Python 3.14 library path for PyO3
-PYTHON_LIB_DIR="/home/linuxbrew/.linuxbrew/opt/python@3.14/lib"
-PYTHON_PREFIX="/home/linuxbrew/.linuxbrew/opt/python@3.14"
+# Python 3.13 library path for PyO3 (system Python)
+PYTHON_LIB_DIR="/usr/lib/x86_64-linux-gnu"
+PYTHON_PREFIX="/usr"
 
 # Set LD_LIBRARY_PATH so the Rust binary can find libpython
 export LD_LIBRARY_PATH="${PYTHON_LIB_DIR}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
 # Tell PyO3 which Python to use
-export PYO3_PYTHON="${PYTHON_PREFIX}/bin/python3.14"
+export PYO3_PYTHON="/usr/bin/python3.13"
 
 # Activate the katt-py virtual environment for Python dependencies
 VENV_DIR="$(dirname "$0")/katt-py/.venv"

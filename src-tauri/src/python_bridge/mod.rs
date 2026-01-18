@@ -656,31 +656,89 @@ impl PythonAI {
                 })?;
 
                 let katt_py_str = katt_py_path.to_string_lossy().to_string();
+                log::info!("Python bridge: katt_py_path = {}", katt_py_str);
+
+                // Log current sys.path for debugging
+                let current_paths: Vec<String> = path_list.iter()
+                    .filter_map(|p| p.extract::<String>().ok())
+                    .collect();
+                log::info!("Python bridge: initial sys.path = {:?}", current_paths);
+
                 let already_added = path_list.iter().any(|p| {
                     p.extract::<String>().ok() == Some(katt_py_str.clone())
                 });
 
                 if !already_added {
                     path_list.insert(0, katt_py_str.clone())?;
+                    log::info!("Python bridge: added {} to sys.path", katt_py_str);
                 }
 
                 // Add venv site-packages
-                let version_info = sys.getattr("version_info")?;
-                let major: i32 = version_info.getattr("major")?.extract()?;
-                let minor: i32 = version_info.getattr("minor")?.extract()?;
-                let site_packages = format!(
-                    "{}/.venv/lib/python{}.{}/site-packages",
-                    katt_py_str, major, minor
-                );
+                // Try to find the actual site-packages directory (venv may use different Python version)
+                let venv_lib = format!("{}/.venv/lib", katt_py_str);
+                let mut site_packages = String::new();
+
+                // Look for any pythonX.Y directory in .venv/lib
+                if let Ok(entries) = std::fs::read_dir(&venv_lib) {
+                    for entry in entries.flatten() {
+                        let name = entry.file_name().to_string_lossy().to_string();
+                        if name.starts_with("python") {
+                            let candidate = format!("{}/{}/site-packages", venv_lib, name);
+                            if std::path::Path::new(&candidate).exists() {
+                                site_packages = candidate;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                // Fallback to current Python version if no venv found
+                if site_packages.is_empty() {
+                    let version_info = sys.getattr("version_info")?;
+                    let major: i32 = version_info.getattr("major")?.extract()?;
+                    let minor: i32 = version_info.getattr("minor")?.extract()?;
+                    site_packages = format!(
+                        "{}/.venv/lib/python{}.{}/site-packages",
+                        katt_py_str, major, minor
+                    );
+                }
+                log::info!("Python bridge: site_packages = {}", site_packages);
 
                 let site_already_added = path_list.iter().any(|p| {
                     p.extract::<String>().ok() == Some(site_packages.clone())
                 });
 
                 if !site_already_added {
-                    path_list.insert(0, site_packages)?;
+                    path_list.insert(0, site_packages.clone())?;
+                    log::info!("Python bridge: added {} to sys.path", site_packages);
                 }
 
+                // Log full sys.path for debugging
+                let sys_path: Vec<String> = path_list.iter()
+                    .filter_map(|p| p.extract::<String>().ok())
+                    .collect();
+                log::info!("Python bridge: sys.path = {:?}", sys_path);
+
+                // Test importing pydantic first to get better error messages
+                log::info!("Python bridge: attempting to import pydantic_core");
+                match py.import("pydantic_core") {
+                    Ok(_) => log::info!("Python bridge: pydantic_core imported successfully"),
+                    Err(e) => {
+                        log::error!("Python bridge: failed to import pydantic_core: {}", e);
+                        // Try to get more details
+                        if let Ok(traceback_module) = py.import("traceback") {
+                            if let Ok(format_exc) = traceback_module.getattr("format_exc") {
+                                if let Ok(tb) = format_exc.call0() {
+                                    if let Ok(tb_str) = tb.extract::<String>() {
+                                        log::error!("Python traceback:\n{}", tb_str);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                log::info!("Python bridge: attempting to import katt_ai.chat");
                 let chat_module = py.import("katt_ai.chat")?;
                 let chat_fn = chat_module.getattr("chat_with_tools_stream_sync")?;
 
@@ -745,7 +803,16 @@ impl PythonAI {
                                             .unwrap_or(0);
                                         StreamEvent::Done { model, tokens_used }
                                     }
-                                    _ => return,
+                                    "error" => {
+                                        let message = event_dict.get("message")
+                                            .and_then(|v| v.extract::<String>(py).ok())
+                                            .unwrap_or_else(|| "Unknown error".to_string());
+                                        StreamEvent::Error { message }
+                                    }
+                                    other => {
+                                        log::warn!("Unknown AI stream event type: {}", other);
+                                        return;
+                                    }
                                 };
 
                                 let _ = tx_clone.send(event);

@@ -1029,6 +1029,13 @@ async def chat_with_tools_stream(
     response_model = config.model
     tokens_used = 0
 
+    # Validate API key for cloud providers
+    if provider_type in ("openai", "anthropic") and not api_key:
+        import os
+        env_key = os.environ.get("OPENAI_API_KEY" if provider_type == "openai" else "ANTHROPIC_API_KEY")
+        if not env_key:
+            raise ValueError(f"No API key provided for {provider_type}. Please configure your API key in Settings > AI Providers.")
+
     if provider_type == "openai":
         client = AsyncOpenAI(api_key=api_key)
 
@@ -1273,20 +1280,46 @@ def chat_with_tools_stream_sync(
     max_tokens: int = 4096,
     system_prompt: str | None = None,
 ) -> dict[str, Any]:
-    """Synchronous wrapper for streaming chat with callback."""
-    return asyncio.run(
-        chat_with_tools_stream(
-            user_message,
-            callback,
-            page_context,
-            conversation_history,
-            available_notebooks,
-            current_notebook_id,
-            provider_type,
-            api_key,
-            model,
-            temperature,
-            max_tokens,
-            system_prompt,
+    """Synchronous wrapper for streaming chat with callback.
+
+    This wrapper catches exceptions and emits them as error events via the callback,
+    ensuring the frontend always receives feedback about what happened.
+    """
+    try:
+        return asyncio.run(
+            chat_with_tools_stream(
+                user_message,
+                callback,
+                page_context,
+                conversation_history,
+                available_notebooks,
+                current_notebook_id,
+                provider_type,
+                api_key,
+                model,
+                temperature,
+                max_tokens,
+                system_prompt,
+            )
         )
-    )
+    except Exception as e:
+        # Emit error event so frontend knows what happened
+        error_message = str(e)
+        # Check for common issues and provide helpful messages
+        if "api_key" in error_message.lower() or "authentication" in error_message.lower():
+            error_message = f"API key error: {error_message}. Please check your API key in Settings."
+        elif "rate limit" in error_message.lower():
+            error_message = f"Rate limit exceeded: {error_message}. Please wait a moment and try again."
+        elif "model" in error_message.lower() and "not found" in error_message.lower():
+            error_message = f"Model not found: {error_message}. Please check your model settings."
+
+        callback({"type": "error", "message": error_message})
+        return {
+            "content": "",
+            "model": model or "",
+            "provider": provider_type,
+            "tokens_used": 0,
+            "finish_reason": "error",
+            "actions": [],
+            "thinking": "",
+        }

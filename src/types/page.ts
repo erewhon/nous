@@ -25,6 +25,24 @@ export type FolderType = z.infer<typeof FolderTypeSchema>;
 export const SystemPromptModeSchema = z.enum(["override", "concatenate"]);
 export type SystemPromptMode = z.infer<typeof SystemPromptModeSchema>;
 
+// Page type enum - determines storage format and viewer/editor
+export const PageTypeSchema = z.enum([
+  "standard", // Editor.js block-based content (default)
+  "markdown", // Native markdown file (.md)
+  "pdf", // PDF document
+  "jupyter", // Jupyter notebook (.ipynb)
+  "epub", // E-book (.epub)
+  "calendar", // Calendar file (.ics)
+]);
+export type PageType = z.infer<typeof PageTypeSchema>;
+
+// File storage mode - how file-based page content is stored
+export const FileStorageModeSchema = z.enum([
+  "embedded", // File copied into notebook assets directory
+  "linked", // File remains at original location (path stored as reference)
+]);
+export type FileStorageMode = z.infer<typeof FileStorageModeSchema>;
+
 // Section schema (OneNote-style organizational layer)
 export const SectionSchema = z.object({
   id: z.string().uuid(),
@@ -74,6 +92,12 @@ export const PageSchema = z.object({
   systemPrompt: z.string().optional(),
   systemPromptMode: SystemPromptModeSchema.default("override"),
   aiModel: z.string().optional(), // Model override (format: "provider:model" or just "model")
+  // File type support
+  pageType: PageTypeSchema.default("standard"),
+  sourceFile: z.string().nullable().optional(), // Path to actual file for non-standard pages
+  storageMode: FileStorageModeSchema.nullable().optional(), // How file is stored (embedded/linked)
+  fileExtension: z.string().nullable().optional(), // Original file extension (e.g., "pdf", "md")
+  lastFileSync: z.string().datetime().nullable().optional(), // Last sync time for linked files
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });

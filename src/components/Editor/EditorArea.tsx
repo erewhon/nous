@@ -13,12 +13,16 @@ import { useThemeStore } from "../../stores/themeStore";
 import { FolderTree } from "./FolderTree";
 import { BlockEditor } from "./BlockEditor";
 import { PageHeader } from "./PageHeader";
+import { MarkdownEditor } from "../Markdown";
+import { PDFPageViewer, PDFFullScreen } from "../PDF";
+import { JupyterViewer } from "../Jupyter";
+import { EpubReader } from "../Epub";
+import { CalendarViewer } from "../Calendar";
 import { BacklinksPanel } from "./BacklinksPanel";
 import { SimilarPagesPanel } from "./SimilarPagesPanel";
 import { TabBar } from "./TabBar";
 import { CoverPage } from "../CoverPage";
 import { SectionList } from "../Sections";
-import { PDFFullScreen } from "../PDF";
 import { VideoFullScreen } from "../Video";
 import { DrawingFullScreen, PageAnnotationOverlay } from "../Drawing";
 import { ResizeHandle } from "../Layout/ResizeHandle";
@@ -606,29 +610,76 @@ export function EditorArea() {
                 className="mx-auto"
                 style={{ maxWidth: "var(--editor-max-width)" }}
               >
-                <BlockEditor
-                  key={selectedPage.id}
-                  initialData={editorData}
-                  onSave={handleSave}
-                  onExplicitSave={handleExplicitSave}
-                  onLinkClick={handleLinkClick}
-                  notebookId={selectedNotebook.id}
-                  pages={notebookPages.map((p) => ({ id: p.id, title: p.title }))}
-                  className="min-h-[calc(100vh-300px)]"
-                />
+                {/* Conditional rendering based on page type */}
+                {selectedPage.pageType === "markdown" && (
+                  <MarkdownEditor
+                    key={selectedPage.id}
+                    page={selectedPage}
+                    notebookId={selectedNotebook.id}
+                    className="min-h-[calc(100vh-300px)]"
+                  />
+                )}
+                {selectedPage.pageType === "pdf" && (
+                  <PDFPageViewer
+                    key={selectedPage.id}
+                    page={selectedPage}
+                    notebookId={selectedNotebook.id}
+                    className="min-h-[calc(100vh-300px)]"
+                  />
+                )}
+                {selectedPage.pageType === "jupyter" && (
+                  <JupyterViewer
+                    key={selectedPage.id}
+                    page={selectedPage}
+                    notebookId={selectedNotebook.id}
+                    className="min-h-[calc(100vh-300px)]"
+                  />
+                )}
+                {selectedPage.pageType === "epub" && (
+                  <EpubReader
+                    key={selectedPage.id}
+                    page={selectedPage}
+                    notebookId={selectedNotebook.id}
+                    className="min-h-[calc(100vh-300px)]"
+                  />
+                )}
+                {selectedPage.pageType === "calendar" && (
+                  <CalendarViewer
+                    key={selectedPage.id}
+                    page={selectedPage}
+                    notebookId={selectedNotebook.id}
+                    className="min-h-[calc(100vh-300px)]"
+                  />
+                )}
+                {(selectedPage.pageType === "standard" || !selectedPage.pageType) && (
+                  <BlockEditor
+                    key={selectedPage.id}
+                    initialData={editorData}
+                    onSave={handleSave}
+                    onExplicitSave={handleExplicitSave}
+                    onLinkClick={handleLinkClick}
+                    notebookId={selectedNotebook.id}
+                    pages={notebookPages.map((p) => ({ id: p.id, title: p.title }))}
+                    className="min-h-[calc(100vh-300px)]"
+                  />
+                )}
 
-                {/* Backlinks panel */}
-                <BacklinksPanel
-                  pageTitle={selectedPage.title}
-                  notebookId={selectedNotebook.id}
-                />
+                {/* Backlinks panel - only for standard pages */}
+                {(selectedPage.pageType === "standard" || !selectedPage.pageType) && (
+                  <BacklinksPanel
+                    pageTitle={selectedPage.title}
+                    notebookId={selectedNotebook.id}
+                  />
+                )}
 
-                {/* Similar Pages panel (AI-powered) */}
-                <SimilarPagesPanel
-                  page={selectedPage}
-                  notebookId={selectedNotebook.id}
-                  allPages={notebookPages}
-                />
+                {/* Similar Pages panel (AI-powered) - only for standard pages */}
+                {(selectedPage.pageType === "standard" || !selectedPage.pageType) && (
+                  <SimilarPagesPanel
+                    page={selectedPage}
+                    notebookId={selectedNotebook.id}
+                    allPages={notebookPages}
+                  />
+                )}
               </div>
             </div>
           </>
