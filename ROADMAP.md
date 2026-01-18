@@ -406,6 +406,38 @@ Already implemented with Tantivy, may need refinement:
 
 ---
 
+## Multi-Format Page Support Enhancements
+
+### 26. Multi-Format Pages (Core Complete)
+- [x] Import files as pages (Markdown, PDF, Jupyter, EPUB, Calendar)
+- [x] File import dialog with embed/link storage mode selection
+- [x] Dedicated viewers for each file type:
+  - [x] MarkdownEditor (CodeMirror 6 with syntax highlighting)
+  - [x] PDFPageViewer (react-pdf with zoom, page navigation)
+  - [x] JupyterViewer (cell rendering, syntax highlighting, outputs)
+  - [x] EpubReader (epub.js with TOC navigation)
+  - [x] CalendarViewer (ical.js with list/month views)
+
+### 27. Multi-Format UI Polish
+- [ ] File type icons in sidebar (distinct icons for PDF, Jupyter, EPUB, Calendar pages)
+- [ ] Drag-drop import (drop files directly into page tree)
+- [ ] Search results display by page type
+
+### 28. Multi-Format Search Indexing
+- [ ] Extract text from PDF files for search (via pdfplumber or similar)
+- [ ] Index Jupyter notebook content (code cells + markdown cells)
+- [ ] Index EPUB text content (chapter text)
+- [ ] Index Calendar events (event summaries and descriptions)
+
+### 29. Multi-Format Advanced Features
+- [ ] Linked file sync detection (detect external file changes, prompt to reload)
+- [ ] Jupyter cell execution via Python kernel
+- [ ] PDF annotation persistence (save highlights/notes)
+- [ ] EPUB reading progress tracking
+- [ ] EPUB highlight/annotation support
+
+---
+
 ## Technical Debt & Polish
 
 - [x] Add comprehensive error handling for file operations

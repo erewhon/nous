@@ -124,9 +124,9 @@ pub fn get_file_content(
             message: format!("Page not found: {}", e),
         })?;
 
-    // Only allow reading text-based files
+    // Only allow reading text-based files (Jupyter is JSON, so also text-based)
     match page.page_type {
-        PageType::Markdown | PageType::Calendar => {}
+        PageType::Markdown | PageType::Calendar | PageType::Jupyter => {}
         _ => {
             return Err(CommandError {
                 message: format!(
