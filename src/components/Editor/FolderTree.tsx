@@ -17,6 +17,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import type { Folder, Page, Section, FileStorageMode } from "../../types/page";
 import { useFolderStore } from "../../stores/folderStore";
 import { usePageStore } from "../../stores/pageStore";
+import { useThemeStore } from "../../stores/themeStore";
 import * as api from "../../utils/api";
 import { FolderTreeItem, DraggablePageItem } from "./FolderTreeItem";
 import { FileImportDialog } from "../Import/FileImportDialog";
@@ -143,6 +144,8 @@ export function FolderTree({
     updateFolder,
     deleteFolder: deleteFolderApi,
   } = useFolderStore();
+  const autoHidePanels = useThemeStore((state) => state.autoHidePanels);
+  const setAutoHidePanels = useThemeStore((state) => state.setAutoHidePanels);
 
   const [isCreatingFolder, setIsCreatingFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState("");
@@ -640,6 +643,15 @@ export function FolderTree({
             Pages
           </span>
           <div className="flex items-center gap-1">
+            {/* Auto-hide toggle */}
+            <button
+              onClick={() => setAutoHidePanels(!autoHidePanels)}
+              className="flex h-7 w-7 items-center justify-center rounded-lg transition-all"
+              style={{ color: autoHidePanels ? "var(--color-accent)" : "var(--color-text-muted)" }}
+              title={autoHidePanels ? "Disable auto-hide panels" : "Enable auto-hide panels"}
+            >
+              <IconPanelClose />
+            </button>
             {/* View cover page button */}
             {hasCoverPage && onViewCover && (
               <button
@@ -941,5 +953,25 @@ export function FolderTree({
       </DragOverlay>
     </DndContext>
     </>
+  );
+}
+
+function IconPanelClose() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <path d="M9 3v18" />
+      <path d="M16 15l-3-3 3-3" />
+    </svg>
   );
 }

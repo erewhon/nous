@@ -425,13 +425,14 @@ Already implemented with Tantivy, may need refinement:
 
 ### 28. Multi-Format Search Indexing
 - [ ] Extract text from PDF files for search (via pdfplumber or similar)
-- [ ] Index Jupyter notebook content (code cells + markdown cells)
+- [x] Index Jupyter notebook content (code cells + markdown cells)
 - [ ] Index EPUB text content (chapter text)
 - [ ] Index Calendar events (event summaries and descriptions)
 
 ### 29. Multi-Format Advanced Features
 - [ ] Linked file sync detection (detect external file changes, prompt to reload)
-- [ ] Jupyter cell execution via Python kernel
+- [x] Jupyter cell editing (add, delete, reorder, edit cell content)
+- [x] Jupyter cell execution via Python kernel
 - [ ] PDF annotation persistence (save highlights/notes)
 - [ ] EPUB reading progress tracking
 - [ ] EPUB highlight/annotation support

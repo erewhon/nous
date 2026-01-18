@@ -15,6 +15,9 @@ export interface PanelWidths {
   folderTree: number;   // Default 256px
 }
 
+// Unified auto-hide setting for all panels
+export type AutoHidePanels = boolean;
+
 const DEFAULT_PANEL_WIDTHS: PanelWidths = {
   sidebar: 256,
   sections: 192,
@@ -50,6 +53,8 @@ interface ThemeState {
   uiMode: UIMode;
   notebookSortBy: NotebookSortOption;
   panelWidths: PanelWidths;
+  autoHidePanels: boolean;  // Auto-hide all panels together
+  panelsHovered: boolean;   // Track hover state for auto-hide (all panels as one)
   setMode: (mode: ThemeMode) => void;
   setColorScheme: (scheme: ColorScheme) => void;
   setFontFamily: (font: FontFamily) => void;
@@ -61,6 +66,8 @@ interface ThemeState {
   setUIMode: (mode: UIMode) => void;
   setNotebookSortBy: (sort: NotebookSortOption) => void;
   setPanelWidth: (panel: keyof PanelWidths, width: number) => void;
+  setAutoHidePanels: (enabled: boolean) => void;
+  setPanelsHovered: (hovered: boolean) => void;
   applyTheme: () => void;
 }
 
@@ -349,6 +356,8 @@ export const useThemeStore = create<ThemeState>()(
       uiMode: "classic" as UIMode,
       notebookSortBy: "name-asc" as NotebookSortOption,
       panelWidths: DEFAULT_PANEL_WIDTHS,
+      autoHidePanels: false,
+      panelsHovered: false,
 
       setMode: (mode) => {
         set((state) => ({
@@ -420,6 +429,18 @@ export const useThemeStore = create<ThemeState>()(
         }));
       },
 
+      setAutoHidePanels: (enabled) => {
+        set({
+          autoHidePanels: enabled,
+          // When enabling auto-hide, start with panels hidden
+          panelsHovered: enabled ? false : false,
+        });
+      },
+
+      setPanelsHovered: (hovered) => {
+        set({ panelsHovered: hovered });
+      },
+
       applyTheme: () => {
         const { settings, resolvedMode } = get();
         const root = document.documentElement;
@@ -455,7 +476,7 @@ export const useThemeStore = create<ThemeState>()(
     }),
     {
       name: "katt-theme",
-      partialize: (state) => ({ settings: state.settings, showPageStats: state.showPageStats, uiMode: state.uiMode, notebookSortBy: state.notebookSortBy, panelWidths: state.panelWidths }),
+      partialize: (state) => ({ settings: state.settings, showPageStats: state.showPageStats, uiMode: state.uiMode, notebookSortBy: state.notebookSortBy, panelWidths: state.panelWidths, autoHidePanels: state.autoHidePanels }),
       onRehydrateStorage: () => (state) => {
         if (state) {
           // Resolve system theme on rehydration
@@ -471,6 +492,14 @@ export const useThemeStore = create<ThemeState>()(
             // Ensure all panel widths exist (in case new panels are added)
             state.panelWidths = { ...DEFAULT_PANEL_WIDTHS, ...state.panelWidths };
           }
+          // Migration: convert old autoHide object to new autoHidePanels boolean
+          if (state.autoHidePanels === undefined) {
+            // Check if any of the old settings were true
+            const oldAutoHide = (state as unknown as { autoHide?: { sidebar?: boolean; sections?: boolean; folderTree?: boolean } }).autoHide;
+            state.autoHidePanels = oldAutoHide?.sidebar || oldAutoHide?.sections || oldAutoHide?.folderTree || false;
+          }
+          // Reset hover state on load
+          state.panelsHovered = false;
           // Apply theme after rehydration
           setTimeout(() => state.applyTheme(), 0);
         }

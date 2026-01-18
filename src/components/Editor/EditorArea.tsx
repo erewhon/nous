@@ -1,4 +1,4 @@
-import { useMemo, useCallback, useState, useEffect } from "react";
+import { useMemo, useCallback, useState, useEffect, useRef } from "react";
 import type { OutputData } from "@editorjs/editorjs";
 import { useNotebookStore } from "../../stores/notebookStore";
 import { usePageStore } from "../../stores/pageStore";
@@ -59,8 +59,15 @@ export function EditorArea() {
   } = useTabStore();
   const panelWidths = useThemeStore((state) => state.panelWidths);
   const setPanelWidth = useThemeStore((state) => state.setPanelWidth);
+  const autoHidePanels = useThemeStore((state) => state.autoHidePanels);
+  const panelsHovered = useThemeStore((state) => state.panelsHovered);
+  const setPanelsHovered = useThemeStore((state) => state.setPanelsHovered);
   const [isSaving, setIsSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
+
+  // Auto-hide panel state
+  const [panelsTransitioning, setPanelsTransitioning] = useState(false);
+  const hideTimeoutRef = useRef<number | null>(null);
 
   // Panel resize handlers
   const handleSectionsResize = useCallback(
@@ -76,6 +83,32 @@ export function EditorArea() {
     },
     [panelWidths.folderTree, setPanelWidth]
   );
+
+  // Auto-hide hover handlers for inner panels (unified with sidebar)
+  const handlePanelsMouseEnter = useCallback(() => {
+    if (!autoHidePanels) return;
+    if (hideTimeoutRef.current) {
+      window.clearTimeout(hideTimeoutRef.current);
+      hideTimeoutRef.current = null;
+    }
+  }, [autoHidePanels]);
+
+  const handlePanelsMouseLeave = useCallback(() => {
+    if (!autoHidePanels) return;
+    hideTimeoutRef.current = window.setTimeout(() => {
+      setPanelsHovered(false);
+      setPanelsTransitioning(true);
+    }, 300);
+  }, [autoHidePanels, setPanelsHovered]);
+
+  // Cleanup timeouts on unmount
+  useEffect(() => {
+    return () => {
+      if (hideTimeoutRef.current) {
+        window.clearTimeout(hideTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // Cover page state
   const [coverPage, setCoverPage] = useState<Page | null>(null);
@@ -534,57 +567,77 @@ export function EditorArea() {
       {selectedNotebook.sectionsEnabled && (
         <>
           <div
-            className="flex-shrink-0 border-r"
+            className="flex-shrink-0 border-r overflow-hidden"
             style={{
-              width: `${panelWidths.sections}px`,
+              width: autoHidePanels && !panelsHovered ? 0 : `${panelWidths.sections}px`,
               backgroundColor: "var(--color-bg-secondary)",
               borderColor: "var(--color-border)",
+              transition: autoHidePanels ? "width 0.2s ease-in-out" : "none",
             }}
+            onMouseEnter={handlePanelsMouseEnter}
+            onMouseLeave={handlePanelsMouseLeave}
+            onTransitionEnd={() => setPanelsTransitioning(false)}
           >
-            <SectionList
-              sections={sections}
-              selectedSectionId={selectedSectionId}
-              onSelectSection={selectSection}
-              onCreateSection={(name, color) => createSection(selectedNotebook.id, name, color)}
-              onUpdateSection={(sectionId, updates) => updateSection(selectedNotebook.id, sectionId, updates)}
-              onDeleteSection={(sectionId, moveItemsTo) => deleteSection(selectedNotebook.id, sectionId, moveItemsTo)}
-              unassignedPagesCount={unassignedPagesCount}
-            />
+            {((!autoHidePanels || panelsHovered) || panelsTransitioning) && (
+              <div style={{ width: `${panelWidths.sections}px` }}>
+                <SectionList
+                  sections={sections}
+                  selectedSectionId={selectedSectionId}
+                  onSelectSection={selectSection}
+                  onCreateSection={(name, color) => createSection(selectedNotebook.id, name, color)}
+                  onUpdateSection={(sectionId, updates) => updateSection(selectedNotebook.id, sectionId, updates)}
+                  onDeleteSection={(sectionId, moveItemsTo) => deleteSection(selectedNotebook.id, sectionId, moveItemsTo)}
+                  unassignedPagesCount={unassignedPagesCount}
+                />
+              </div>
+            )}
           </div>
-          <ResizeHandle direction="horizontal" onResize={handleSectionsResize} />
+          {!autoHidePanels && (
+            <ResizeHandle direction="horizontal" onResize={handleSectionsResize} />
+          )}
         </>
       )}
 
       {/* Page list panel with folder tree */}
       <div
-        className="flex-shrink-0 border-r"
+        className="flex-shrink-0 border-r overflow-hidden"
         style={{
-          width: `${panelWidths.folderTree}px`,
+          width: autoHidePanels && !panelsHovered ? 0 : `${panelWidths.folderTree}px`,
           backgroundColor: "var(--color-bg-secondary)",
           borderColor: "var(--color-border)",
+          transition: autoHidePanels ? "width 0.2s ease-in-out" : "none",
         }}
+        onMouseEnter={handlePanelsMouseEnter}
+        onMouseLeave={handlePanelsMouseLeave}
+        onTransitionEnd={() => setPanelsTransitioning(false)}
       >
-        <FolderTree
-          notebookId={selectedNotebook.id}
-          pages={notebookPages}
-          folders={folders}
-          selectedPageId={selectedPageId}
-          onSelectPage={selectPage}
-          sectionsEnabled={selectedNotebook.sectionsEnabled}
-          selectedSectionId={selectedSectionId}
-          sections={sections}
-          onMovePageToSection={(pageId, sectionId) => movePageToSection(selectedNotebook.id, pageId, sectionId)}
-          onMoveFolderToSection={async (folderId, sectionId) => {
-            await updateFolder(selectedNotebook.id, folderId, { sectionId });
-            // Reload pages since folder section change also updates page sections
-            await loadPages(selectedNotebook.id, showArchived);
-          }}
-          hasCoverPage={coverPage !== null}
-          onViewCover={() => setShowCover(true)}
-          onReorderPages={(folderId, pageIds) => reorderPages(selectedNotebook.id, folderId, pageIds)}
-        />
+        {((!autoHidePanels || panelsHovered) || panelsTransitioning) && (
+          <div style={{ width: `${panelWidths.folderTree}px` }}>
+            <FolderTree
+              notebookId={selectedNotebook.id}
+              pages={notebookPages}
+              folders={folders}
+              selectedPageId={selectedPageId}
+              onSelectPage={selectPage}
+              sectionsEnabled={selectedNotebook.sectionsEnabled}
+              selectedSectionId={selectedSectionId}
+              sections={sections}
+              onMovePageToSection={(pageId, sectionId) => movePageToSection(selectedNotebook.id, pageId, sectionId)}
+              onMoveFolderToSection={async (folderId, sectionId) => {
+                await updateFolder(selectedNotebook.id, folderId, { sectionId });
+                // Reload pages since folder section change also updates page sections
+                await loadPages(selectedNotebook.id, showArchived);
+              }}
+              hasCoverPage={coverPage !== null}
+              onViewCover={() => setShowCover(true)}
+              onReorderPages={(folderId, pageIds) => reorderPages(selectedNotebook.id, folderId, pageIds)}
+            />
+          </div>
+        )}
       </div>
-      <ResizeHandle direction="horizontal" onResize={handleFolderTreeResize} />
+      {!autoHidePanels && (
+        <ResizeHandle direction="horizontal" onResize={handleFolderTreeResize} />
+      )}
 
       {/* Editor panel */}
       <div

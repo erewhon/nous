@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
 use tantivy::collector::TopDocs;
 use tantivy::query::{FuzzyTermQuery, QueryParser};
 use tantivy::schema::{Field, Schema, Value, STORED, TEXT};
@@ -8,7 +9,7 @@ use tantivy::{doc, Index, IndexReader, IndexWriter, ReloadPolicy, TantivyDocumen
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::storage::{EditorBlock, Page};
+use crate::storage::{EditorBlock, Page, PageType};
 
 #[derive(Error, Debug)]
 pub enum SearchError {
@@ -198,7 +199,93 @@ impl SearchIndex {
             .to_string()
     }
 
-    /// Index a page
+    /// Extract plain text from Jupyter notebook JSON content
+    fn extract_text_from_jupyter(json_content: &str) -> String {
+        let mut text_parts: Vec<String> = Vec::new();
+
+        // Parse the notebook JSON
+        let notebook: JsonValue = match serde_json::from_str(json_content) {
+            Ok(v) => v,
+            Err(_) => return String::new(),
+        };
+
+        // Get cells array
+        if let Some(cells) = notebook.get("cells").and_then(|c| c.as_array()) {
+            for cell in cells {
+                let cell_type = cell.get("cell_type").and_then(|t| t.as_str()).unwrap_or("");
+
+                // Only index code and markdown cells
+                if cell_type != "code" && cell_type != "markdown" {
+                    continue;
+                }
+
+                // Extract source (can be string or array of strings)
+                if let Some(source) = cell.get("source") {
+                    let source_text = if let Some(s) = source.as_str() {
+                        s.to_string()
+                    } else if let Some(arr) = source.as_array() {
+                        arr.iter()
+                            .filter_map(|v| v.as_str())
+                            .collect::<Vec<_>>()
+                            .join("")
+                    } else {
+                        continue;
+                    };
+
+                    if !source_text.trim().is_empty() {
+                        text_parts.push(source_text);
+                    }
+                }
+
+                // For code cells, also extract text outputs
+                if cell_type == "code" {
+                    if let Some(outputs) = cell.get("outputs").and_then(|o| o.as_array()) {
+                        for output in outputs {
+                            // Handle stream output (stdout/stderr)
+                            if let Some(text) = output.get("text") {
+                                let text_str = if let Some(s) = text.as_str() {
+                                    s.to_string()
+                                } else if let Some(arr) = text.as_array() {
+                                    arr.iter()
+                                        .filter_map(|v| v.as_str())
+                                        .collect::<Vec<_>>()
+                                        .join("")
+                                } else {
+                                    continue;
+                                };
+                                if !text_str.trim().is_empty() {
+                                    text_parts.push(text_str);
+                                }
+                            }
+
+                            // Handle execute_result and display_data with text/plain
+                            if let Some(data) = output.get("data") {
+                                if let Some(text_plain) = data.get("text/plain") {
+                                    let text_str = if let Some(s) = text_plain.as_str() {
+                                        s.to_string()
+                                    } else if let Some(arr) = text_plain.as_array() {
+                                        arr.iter()
+                                            .filter_map(|v| v.as_str())
+                                            .collect::<Vec<_>>()
+                                            .join("")
+                                    } else {
+                                        continue;
+                                    };
+                                    if !text_str.trim().is_empty() {
+                                        text_parts.push(text_str);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        text_parts.join("\n")
+    }
+
+    /// Index a page (for standard Editor.js pages)
     pub fn index_page(&mut self, page: &Page) -> Result<()> {
         // First, remove any existing document with this page_id
         self.remove_page(page.id)?;
@@ -217,6 +304,57 @@ impl SearchIndex {
         self.writer.commit()?;
 
         Ok(())
+    }
+
+    /// Index a page with file content (for Jupyter, Markdown, etc.)
+    pub fn index_page_with_content(&mut self, page: &Page, file_content: &str) -> Result<()> {
+        // First, remove any existing document with this page_id
+        self.remove_page(page.id)?;
+
+        let content = match page.page_type {
+            PageType::Jupyter => Self::extract_text_from_jupyter(file_content),
+            PageType::Markdown => file_content.to_string(),
+            PageType::Calendar => Self::extract_text_from_calendar(file_content),
+            _ => String::new(),
+        };
+
+        let tags = page.tags.join(" ");
+
+        self.writer.add_document(doc!(
+            self.fields.page_id => page.id.to_string(),
+            self.fields.notebook_id => page.notebook_id.to_string(),
+            self.fields.title => page.title.clone(),
+            self.fields.content => content,
+            self.fields.tags => tags
+        ))?;
+
+        self.writer.commit()?;
+
+        Ok(())
+    }
+
+    /// Extract text from calendar (ICS) content
+    fn extract_text_from_calendar(ics_content: &str) -> String {
+        let mut text_parts: Vec<String> = Vec::new();
+
+        // Simple extraction of SUMMARY and DESCRIPTION from ICS
+        for line in ics_content.lines() {
+            let line = line.trim();
+            if line.starts_with("SUMMARY:") {
+                text_parts.push(line[8..].to_string());
+            } else if line.starts_with("DESCRIPTION:") {
+                // Handle escaped characters in ICS
+                let desc = line[12..]
+                    .replace("\\n", " ")
+                    .replace("\\,", ",")
+                    .replace("\\;", ";");
+                text_parts.push(desc);
+            } else if line.starts_with("LOCATION:") {
+                text_parts.push(line[9..].to_string());
+            }
+        }
+
+        text_parts.join(" ")
     }
 
     /// Remove a page from the index

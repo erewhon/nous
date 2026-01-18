@@ -1571,3 +1571,55 @@ export async function deleteFilePage(
 ): Promise<void> {
   return invoke<void>("delete_file_page", { notebookId, pageId });
 }
+
+// ===== Jupyter Cell Execution =====
+
+/**
+ * Output from executing a Jupyter cell
+ */
+export interface JupyterCellOutput {
+  success: boolean;
+  outputs: JupyterOutputItem[];
+  executionCount: number | null;
+}
+
+/**
+ * A single output item from Jupyter cell execution
+ */
+export interface JupyterOutputItem {
+  outputType: "stream" | "execute_result" | "display_data" | "error";
+  name?: "stdout" | "stderr";
+  text?: string | string[];
+  data?: Record<string, string | string[]>;
+  metadata?: Record<string, unknown>;
+  executionCount?: number | null;
+  ename?: string;
+  evalue?: string;
+  traceback?: string[];
+}
+
+/**
+ * Information about the Python execution environment
+ */
+export interface PythonEnvironmentInfo {
+  available: boolean;
+  pythonVersion: string;
+  packages: string[];
+}
+
+/**
+ * Execute a Jupyter notebook code cell
+ */
+export async function executeJupyterCell(
+  code: string,
+  cellIndex: number
+): Promise<JupyterCellOutput> {
+  return invoke<JupyterCellOutput>("execute_jupyter_cell", { code, cellIndex });
+}
+
+/**
+ * Check if Python execution is available
+ */
+export async function checkPythonExecutionAvailable(): Promise<PythonEnvironmentInfo> {
+  return invoke<PythonEnvironmentInfo>("check_python_execution_available");
+}

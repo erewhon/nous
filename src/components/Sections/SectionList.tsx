@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { Section } from "../../types/page";
+import { useThemeStore } from "../../stores/themeStore";
 import { SectionSettingsDialog } from "./SectionSettingsDialog";
 
 interface SectionListProps {
@@ -27,6 +28,8 @@ export function SectionList({
 }: SectionListProps) {
   const [editingSection, setEditingSection] = useState<Section | null>(null);
   const [isCreating, setIsCreating] = useState(false);
+  const autoHidePanels = useThemeStore((state) => state.autoHidePanels);
+  const setAutoHidePanels = useThemeStore((state) => state.setAutoHidePanels);
 
   const handleCreateSection = async (name: string, color?: string) => {
     const section = await onCreateSection(name, color);
@@ -62,26 +65,36 @@ export function SectionList({
         >
           Sections
         </span>
-        <button
-          onClick={() => setIsCreating(true)}
-          className="flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
-          style={{ color: "var(--color-text-muted)" }}
-          title="Add section"
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setAutoHidePanels(!autoHidePanels)}
+            className="flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
+            style={{ color: autoHidePanels ? "var(--color-accent)" : "var(--color-text-muted)" }}
+            title={autoHidePanels ? "Disable auto-hide panels" : "Enable auto-hide panels"}
           >
-            <path d="M12 5v14M5 12h14" />
-          </svg>
-        </button>
+            <IconPanelClose />
+          </button>
+          <button
+            onClick={() => setIsCreating(true)}
+            className="flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
+            style={{ color: "var(--color-text-muted)" }}
+            title="Add section"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+          </button>
+        </div>
       </div>
 
       {/* Section list */}
@@ -246,5 +259,25 @@ export function SectionList({
         }
       />
     </div>
+  );
+}
+
+function IconPanelClose() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <path d="M9 3v18" />
+      <path d="M16 15l-3-3 3-3" />
+    </svg>
   );
 }

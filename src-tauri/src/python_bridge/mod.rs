@@ -285,6 +285,32 @@ pub struct TranscriptionResult {
     pub transcription_time: f64,
 }
 
+// ===== Jupyter Execution Types =====
+
+/// Result from executing a Jupyter notebook code cell
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct JupyterCellOutput {
+    /// Whether execution succeeded without errors
+    pub success: bool,
+    /// Cell outputs in Jupyter format (stream, execute_result, display_data, error)
+    pub outputs: serde_json::Value,
+    /// Execution count for the cell
+    pub execution_count: Option<usize>,
+}
+
+/// Information about the Python execution environment
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PythonEnvironmentInfo {
+    /// Whether Python execution is available
+    pub available: bool,
+    /// Python version string
+    pub python_version: String,
+    /// List of available packages
+    pub packages: Vec<String>,
+}
+
 /// Python AI bridge for calling Python functions
 pub struct PythonAI {
     katt_py_path: PathBuf,
@@ -1752,6 +1778,83 @@ impl PythonAI {
             let extensions: Vec<String> = result.extract()?;
 
             Ok(extensions)
+        })
+    }
+
+    // ===== Jupyter Cell Execution =====
+
+    /// Execute a Jupyter notebook code cell
+    pub fn execute_jupyter_cell(&self, code: String, cell_index: usize) -> Result<JupyterCellOutput> {
+        Python::attach(|py| {
+            self.setup_python_path(py)?;
+
+            let jupyter_module = py.import("katt_ai.jupyter_execute")?;
+            let execute_fn = jupyter_module.getattr("execute_cell")?;
+
+            let result = execute_fn.call1((code, cell_index))?;
+            let result_dict: HashMap<String, Py<PyAny>> = result.extract()?;
+
+            let success = result_dict
+                .get("success")
+                .and_then(|v| v.extract::<bool>(py).ok())
+                .unwrap_or(false);
+
+            let execution_count = result_dict
+                .get("execution_count")
+                .and_then(|v| v.extract::<i64>(py).ok())
+                .map(|v| v as usize);
+
+            // Extract outputs as JSON
+            let outputs = result_dict
+                .get("outputs")
+                .map(|v| {
+                    let json_module = py.import("json").ok();
+                    if let Some(json_mod) = json_module {
+                        if let Ok(dumps) = json_mod.getattr("dumps") {
+                            if let Ok(json_str) = dumps.call1((v,)) {
+                                if let Ok(s) = json_str.extract::<String>() {
+                                    return serde_json::from_str(&s).unwrap_or(serde_json::Value::Array(vec![]));
+                                }
+                            }
+                        }
+                    }
+                    serde_json::Value::Array(vec![])
+                })
+                .unwrap_or(serde_json::Value::Array(vec![]));
+
+            Ok(JupyterCellOutput {
+                success,
+                outputs,
+                execution_count,
+            })
+        })
+    }
+
+    /// Check if Python execution is available
+    pub fn check_python_available(&self) -> Result<PythonEnvironmentInfo> {
+        Python::attach(|py| {
+            self.setup_python_path(py)?;
+
+            let jupyter_module = py.import("katt_ai.jupyter_execute")?;
+            let check_fn = jupyter_module.getattr("check_python_available")?;
+
+            let result = check_fn.call0()?;
+            let result_dict: HashMap<String, Py<PyAny>> = result.extract()?;
+
+            Ok(PythonEnvironmentInfo {
+                available: result_dict
+                    .get("available")
+                    .and_then(|v| v.extract::<bool>(py).ok())
+                    .unwrap_or(false),
+                python_version: result_dict
+                    .get("python_version")
+                    .and_then(|v| v.extract::<String>(py).ok())
+                    .unwrap_or_default(),
+                packages: result_dict
+                    .get("packages")
+                    .and_then(|v| v.extract::<Vec<String>>(py).ok())
+                    .unwrap_or_default(),
+            })
         })
     }
 }

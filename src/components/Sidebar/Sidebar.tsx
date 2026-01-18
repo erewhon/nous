@@ -2,6 +2,7 @@ import { useNotebookStore } from "../../stores/notebookStore";
 import { useActionStore } from "../../stores/actionStore";
 import { useInboxStore } from "../../stores/inboxStore";
 import { useFlashcardStore } from "../../stores/flashcardStore";
+import { useThemeStore } from "../../stores/themeStore";
 import { NotebookList } from "../NotebookList/NotebookList";
 import { LibrarySwitcher } from "../Library";
 
@@ -16,6 +17,8 @@ export function Sidebar({ width = 256 }: SidebarProps) {
   const openActionLibrary = useActionStore((state) => state.openActionLibrary);
   const { summary, openQuickCapture, openInboxPanel } = useInboxStore();
   const { togglePanel: toggleFlashcards, stats: flashcardStats } = useFlashcardStore();
+  const autoHidePanels = useThemeStore((state) => state.autoHidePanels);
+  const setAutoHidePanels = useThemeStore((state) => state.setAutoHidePanels);
 
   return (
     <aside
@@ -55,6 +58,14 @@ export function Sidebar({ width = 256 }: SidebarProps) {
           </span>
         </div>
         <div className="flex items-center gap-1">
+          <button
+            onClick={() => setAutoHidePanels(!autoHidePanels)}
+            className="flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
+            style={{ color: autoHidePanels ? "var(--color-accent)" : "var(--color-text-muted)" }}
+            title={autoHidePanels ? "Disable auto-hide panels" : "Enable auto-hide panels"}
+          >
+            <IconPanelLeftClose />
+          </button>
           <button
             onClick={() => {
               window.dispatchEvent(new CustomEvent("open-backup-dialog"));
@@ -417,6 +428,26 @@ function IconArchive() {
       <rect x="2" y="4" width="20" height="5" rx="2" />
       <path d="M4 9v9a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9" />
       <path d="M10 13h4" />
+    </svg>
+  );
+}
+
+function IconPanelLeftClose() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <path d="M9 3v18" />
+      <path d="M16 15l-3-3 3-3" />
     </svg>
   );
 }

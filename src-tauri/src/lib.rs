@@ -357,6 +357,8 @@ pub fn run() {
             commands::check_linked_file_modified,
             commands::get_supported_page_extensions,
             commands::delete_file_page,
+            commands::execute_jupyter_cell,
+            commands::check_python_execution_available,
             // Library commands
             commands::list_libraries,
             commands::get_library,

@@ -80,6 +80,7 @@ export function ThemeSettings() {
     settings,
     resolvedMode,
     uiMode,
+    autoHidePanels,
     setMode,
     setColorScheme,
     setFontFamily,
@@ -88,6 +89,7 @@ export function ThemeSettings() {
     setFontSize,
     setLineHeight,
     setUIMode,
+    setAutoHidePanels,
   } = useThemeStore();
 
   return (
@@ -148,6 +150,68 @@ export function ThemeSettings() {
           ))}
         </div>
       </div>
+
+      {/* Panel Behavior */}
+      {uiMode === "classic" && (
+        <div>
+          <label
+            className="mb-3 block text-sm font-medium"
+            style={{ color: "var(--color-text-primary)" }}
+          >
+            Panel Behavior
+          </label>
+          <div
+            className="rounded-lg border p-4"
+            style={{
+              borderColor: "var(--color-border)",
+              backgroundColor: "var(--color-bg-secondary)",
+            }}
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <span
+                  className="block text-sm font-medium"
+                  style={{ color: "var(--color-text-primary)" }}
+                >
+                  Auto-hide Panels
+                </span>
+                <span
+                  className="block text-xs"
+                  style={{ color: "var(--color-text-muted)" }}
+                >
+                  All panels slide out together and appear on hover
+                </span>
+              </div>
+              <button
+                onClick={() => setAutoHidePanels(!autoHidePanels)}
+                className="relative h-6 w-11 rounded-full transition-colors"
+                style={{
+                  backgroundColor: autoHidePanels
+                    ? "var(--color-accent)"
+                    : "var(--color-bg-tertiary)",
+                }}
+              >
+                <span
+                  className="absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform"
+                  style={{
+                    transform: autoHidePanels
+                      ? "translateX(20px)"
+                      : "translateX(2px)",
+                  }}
+                />
+              </button>
+            </div>
+            {autoHidePanels && (
+              <p
+                className="mt-3 text-xs"
+                style={{ color: "var(--color-text-muted)" }}
+              >
+                Tip: Press <kbd className="rounded bg-[--color-bg-tertiary] px-1.5 py-0.5 font-mono text-[10px]">Ctrl+\</kbd> or <kbd className="rounded bg-[--color-bg-tertiary] px-1.5 py-0.5 font-mono text-[10px]">Cmd+\</kbd> to toggle panels
+              </p>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Theme Mode */}
       <div>

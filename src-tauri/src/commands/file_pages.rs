@@ -89,9 +89,22 @@ pub fn import_file_as_page(
 
     let file_type = format!("{:?}", page.page_type).to_lowercase();
 
-    // Index the page in search
+    // Index the page in search with file content for text-based pages
     if let Ok(mut search_index) = state.search_index.lock() {
-        if let Err(e) = search_index.index_page(&page) {
+        let index_result = match page.page_type {
+            PageType::Jupyter | PageType::Markdown | PageType::Calendar => {
+                // Read file content for indexing
+                match storage.read_native_file_content(&page) {
+                    Ok(content) => search_index.index_page_with_content(&page, &content),
+                    Err(e) => {
+                        log::warn!("Failed to read file content for indexing: {}", e);
+                        search_index.index_page(&page) // Fallback to basic indexing
+                    }
+                }
+            }
+            _ => search_index.index_page(&page),
+        };
+        if let Err(e) = index_result {
             log::warn!("Failed to index imported page: {}", e);
         }
     }
@@ -174,9 +187,9 @@ pub fn update_file_content(
             message: format!("Page not found: {}", e),
         })?;
 
-    // Only allow writing text-based files
+    // Only allow writing text-based files (Jupyter is JSON, also writable)
     match page.page_type {
-        PageType::Markdown | PageType::Calendar => {}
+        PageType::Markdown | PageType::Calendar | PageType::Jupyter => {}
         _ => {
             return Err(CommandError {
                 message: format!("Cannot write content for page type: {:?}", page.page_type),
@@ -197,9 +210,9 @@ pub fn update_file_content(
         message: format!("Failed to update page metadata: {}", e),
     })?;
 
-    // Update search index
+    // Update search index with file content
     if let Ok(mut search_index) = state.search_index.lock() {
-        if let Err(e) = search_index.index_page(&page) {
+        if let Err(e) = search_index.index_page_with_content(&page, &content) {
             log::warn!("Failed to re-index page: {}", e);
         }
     }
@@ -315,5 +328,39 @@ pub fn delete_file_page(
         .delete_file_page(notebook_uuid, page_uuid)
         .map_err(|e| CommandError {
             message: format!("Failed to delete file page: {}", e),
+        })
+}
+
+/// Execute a Jupyter notebook code cell
+#[tauri::command]
+pub fn execute_jupyter_cell(
+    state: State<AppState>,
+    code: String,
+    cell_index: usize,
+) -> CommandResult<crate::python_bridge::JupyterCellOutput> {
+    let python_ai = state.python_ai.lock().map_err(|e| CommandError {
+        message: format!("Failed to acquire Python bridge lock: {}", e),
+    })?;
+
+    python_ai
+        .execute_jupyter_cell(code, cell_index)
+        .map_err(|e| CommandError {
+            message: format!("Failed to execute cell: {}", e),
+        })
+}
+
+/// Check if Python execution environment is available
+#[tauri::command]
+pub fn check_python_execution_available(
+    state: State<AppState>,
+) -> CommandResult<crate::python_bridge::PythonEnvironmentInfo> {
+    let python_ai = state.python_ai.lock().map_err(|e| CommandError {
+        message: format!("Failed to acquire Python bridge lock: {}", e),
+    })?;
+
+    python_ai
+        .check_python_available()
+        .map_err(|e| CommandError {
+            message: format!("Failed to check Python environment: {}", e),
         })
 }
