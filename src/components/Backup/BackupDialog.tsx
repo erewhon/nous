@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { save, open } from "@tauri-apps/plugin-dialog";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
   exportNotebookZip,
   importNotebookZip,
@@ -17,12 +18,15 @@ import {
   importScrivenerProject,
   previewOrgmode,
   importOrgmode,
+  previewJoplinImport,
+  importJoplin,
   type BackupInfo,
   type NotionImportPreview,
   type ObsidianImportPreview,
   type EvernoteImportPreview,
   type ScrivenerImportPreview,
   type OrgmodeImportPreview,
+  type JoplinImportPreview,
 } from "../../utils/api";
 import { useNotebookStore } from "../../stores/notebookStore";
 import { useToastStore } from "../../stores/toastStore";
@@ -33,7 +37,7 @@ interface BackupDialogProps {
   onClose: () => void;
 }
 
-type ImportTab = "export" | "import" | "notion" | "obsidian" | "evernote" | "scrivener" | "orgmode" | "backups";
+type ImportTab = "export" | "import" | "notion" | "obsidian" | "evernote" | "scrivener" | "orgmode" | "joplin" | "backups";
 
 export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
   const [activeTab, setActiveTab] = useState<ImportTab>("export");
@@ -67,6 +71,18 @@ export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
   const [orgmodeSourcePath, setOrgmodeSourcePath] = useState<string | null>(null);
   const [orgmodeNotebookName, setOrgmodeNotebookName] = useState("");
 
+  // Joplin import state
+  const [joplinPreview, setJoplinPreview] = useState<JoplinImportPreview | null>(null);
+  const [joplinSourcePath, setJoplinSourcePath] = useState<string | null>(null);
+  const [joplinNotebookName, setJoplinNotebookName] = useState("");
+
+  // Import progress state
+  const [importProgress, setImportProgress] = useState<{
+    current: number;
+    total: number;
+    message: string;
+  } | null>(null);
+
   const { notebooks, loadNotebooks } = useNotebookStore();
   const toast = useToastStore();
 
@@ -75,6 +91,31 @@ export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
       loadBackups();
     }
   }, [isOpen, activeTab]);
+
+  // Listen for import progress events
+  useEffect(() => {
+    let unlisten: UnlistenFn | null = null;
+
+    const setupListener = async () => {
+      unlisten = await listen<{ current: number; total: number; message: string }>(
+        "import-progress",
+        (event) => {
+          setImportProgress(event.payload);
+        }
+      );
+    };
+
+    if (isOpen) {
+      setupListener();
+    }
+
+    return () => {
+      if (unlisten) {
+        unlisten();
+      }
+      setImportProgress(null);
+    };
+  }, [isOpen]);
 
   const loadBackups = async () => {
     try {
@@ -255,6 +296,7 @@ export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
     try {
       setError(null);
       setSuccess(null);
+      setImportProgress(null);
       setIsLoading(true);
 
       const notebook = await importNotionExport(
@@ -272,6 +314,7 @@ export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
       setError(`Notion import failed: ${err}`);
     } finally {
       setIsLoading(false);
+      setImportProgress(null);
     }
   };
 
@@ -315,6 +358,7 @@ export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
     try {
       setError(null);
       setSuccess(null);
+      setImportProgress(null);
       setIsLoading(true);
 
       const notebook = await importObsidianVault(
@@ -331,6 +375,7 @@ export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
       setError(`Obsidian import failed: ${err}`);
     } finally {
       setIsLoading(false);
+      setImportProgress(null);
     }
   };
 
@@ -374,6 +419,7 @@ export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
     try {
       setError(null);
       setSuccess(null);
+      setImportProgress(null);
       setIsLoading(true);
 
       const notebook = await importEvernoteEnex(
@@ -390,6 +436,7 @@ export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
       setError(`Evernote import failed: ${err}`);
     } finally {
       setIsLoading(false);
+      setImportProgress(null);
     }
   };
 
@@ -433,6 +480,7 @@ export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
     try {
       setError(null);
       setSuccess(null);
+      setImportProgress(null);
       setIsLoading(true);
 
       const notebook = await importScrivenerProject(
@@ -449,6 +497,7 @@ export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
       setError(`Scrivener import failed: ${err}`);
     } finally {
       setIsLoading(false);
+      setImportProgress(null);
     }
   };
 
@@ -519,6 +568,7 @@ export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
     try {
       setError(null);
       setSuccess(null);
+      setImportProgress(null);
       setIsLoading(true);
 
       const notebook = await importOrgmode(
@@ -535,6 +585,7 @@ export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
       setError(`Org-mode import failed: ${err}`);
     } finally {
       setIsLoading(false);
+      setImportProgress(null);
     }
   };
 
@@ -542,6 +593,93 @@ export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
     setOrgmodePreview(null);
     setOrgmodeSourcePath(null);
     setOrgmodeNotebookName("");
+    setError(null);
+  };
+
+  // Joplin Import handlers
+  const handleJoplinSelectFile = async () => {
+    try {
+      setError(null);
+      setSuccess(null);
+      setJoplinPreview(null);
+      setJoplinSourcePath(null);
+
+      const path = await open({
+        multiple: false,
+        filters: [{ name: "Joplin Export", extensions: ["jex", "tar"] }],
+      });
+
+      if (!path) return;
+
+      setIsLoading(true);
+      const preview = await previewJoplinImport(path);
+      setJoplinPreview(preview);
+      setJoplinSourcePath(path);
+      setJoplinNotebookName(preview.suggestedName);
+    } catch (err) {
+      setError(`Failed to read Joplin export: ${err}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleJoplinSelectFolder = async () => {
+    try {
+      setError(null);
+      setSuccess(null);
+      setJoplinPreview(null);
+      setJoplinSourcePath(null);
+
+      const path = await open({
+        directory: true,
+        multiple: false,
+      });
+
+      if (!path) return;
+
+      setIsLoading(true);
+      const preview = await previewJoplinImport(path);
+      setJoplinPreview(preview);
+      setJoplinSourcePath(path);
+      setJoplinNotebookName(preview.suggestedName);
+    } catch (err) {
+      setError(`Failed to read Joplin RAW export: ${err}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleJoplinImport = async () => {
+    if (!joplinSourcePath) return;
+
+    try {
+      setError(null);
+      setSuccess(null);
+      setImportProgress(null);
+      setIsLoading(true);
+
+      const notebook = await importJoplin(
+        joplinSourcePath,
+        joplinNotebookName || undefined
+      );
+      await loadNotebooks();
+      setSuccess(`Imported "${notebook.name}" from Joplin successfully`);
+
+      setJoplinPreview(null);
+      setJoplinSourcePath(null);
+      setJoplinNotebookName("");
+    } catch (err) {
+      setError(`Joplin import failed: ${err}`);
+    } finally {
+      setIsLoading(false);
+      setImportProgress(null);
+    }
+  };
+
+  const handleJoplinCancel = () => {
+    setJoplinPreview(null);
+    setJoplinSourcePath(null);
+    setJoplinNotebookName("");
     setError(null);
   };
 
@@ -590,6 +728,7 @@ export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
               { id: "evernote" as const, label: "Evernote", icon: <IconEvernote /> },
               { id: "scrivener" as const, label: "Scrivener", icon: <IconScrivener /> },
               { id: "orgmode" as const, label: "Org-mode", icon: <IconOrgmode /> },
+              { id: "joplin" as const, label: "Joplin", icon: <IconJoplin /> },
               { id: "backups" as const, label: "Auto-Backups", icon: <IconArchive /> },
             ].map((tab) => (
               <button
@@ -632,6 +771,7 @@ export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
               {activeTab === "evernote" && "Import from Evernote"}
               {activeTab === "scrivener" && "Import from Scrivener"}
               {activeTab === "orgmode" && "Import from Org-mode"}
+              {activeTab === "joplin" && "Import from Joplin"}
               {activeTab === "backups" && "Auto-Backups"}
             </h3>
             <button
@@ -643,9 +783,9 @@ export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
             </button>
           </div>
 
-          {/* Status Messages */}
-          {(error || success) && (
-            <div className="px-6 pt-4">
+          {/* Status Messages and Progress */}
+          {(error || success || importProgress) && (
+            <div className="px-6 pt-4 space-y-2">
               {error && (
                 <div
                   className="rounded-lg p-3 text-sm"
@@ -666,6 +806,41 @@ export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
                   }}
                 >
                   {success}
+                </div>
+              )}
+              {importProgress && (
+                <div
+                  className="rounded-lg p-3"
+                  style={{
+                    backgroundColor: "var(--color-bg-secondary)",
+                  }}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <span
+                      className="text-sm"
+                      style={{ color: "var(--color-text-secondary)" }}
+                    >
+                      {importProgress.message}
+                    </span>
+                    <span
+                      className="text-sm font-medium"
+                      style={{ color: "var(--color-text-primary)" }}
+                    >
+                      {importProgress.current} / {importProgress.total}
+                    </span>
+                  </div>
+                  <div
+                    className="h-2 rounded-full overflow-hidden"
+                    style={{ backgroundColor: "var(--color-bg-tertiary)" }}
+                  >
+                    <div
+                      className="h-full rounded-full transition-all duration-150"
+                      style={{
+                        backgroundColor: "var(--color-accent)",
+                        width: `${importProgress.total > 0 ? (importProgress.current / importProgress.total) * 100 : 0}%`,
+                      }}
+                    />
+                  </div>
                 </div>
               )}
             </div>
@@ -738,6 +913,18 @@ export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
                 onImport={handleOrgmodeImport}
                 onCancel={handleOrgmodeCancel}
                 onNameChange={setOrgmodeNotebookName}
+              />
+            )}
+            {activeTab === "joplin" && (
+              <JoplinImportTab
+                isLoading={isLoading}
+                preview={joplinPreview}
+                notebookName={joplinNotebookName}
+                onSelectFile={handleJoplinSelectFile}
+                onSelectFolder={handleJoplinSelectFolder}
+                onImport={handleJoplinImport}
+                onCancel={handleJoplinCancel}
+                onNameChange={setJoplinNotebookName}
               />
             )}
             {activeTab === "backups" && (
@@ -2317,6 +2504,262 @@ function OrgmodeImportTab({
   );
 }
 
+// Joplin Import Tab
+function JoplinImportTab({
+  isLoading,
+  preview,
+  notebookName,
+  onSelectFile,
+  onSelectFolder,
+  onImport,
+  onCancel,
+  onNameChange,
+}: {
+  isLoading: boolean;
+  preview: JoplinImportPreview | null;
+  notebookName: string;
+  onSelectFile: () => void;
+  onSelectFolder: () => void;
+  onImport: () => void;
+  onCancel: () => void;
+  onNameChange: (name: string) => void;
+}) {
+  if (!preview) {
+    return (
+      <div className="space-y-6">
+        <p
+          className="text-sm"
+          style={{ color: "var(--color-text-muted)" }}
+        >
+          Import notes from a Joplin export. You can select a JEX archive (.jex) or a RAW export folder.
+        </p>
+
+        <div
+          className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed p-12"
+          style={{ borderColor: "var(--color-border)" }}
+        >
+          <div
+            className="mb-4 rounded-full p-4"
+            style={{ backgroundColor: "var(--color-bg-tertiary)" }}
+          >
+            <IconJoplin size={32} />
+          </div>
+          <h4
+            className="mb-2 text-lg font-medium"
+            style={{ color: "var(--color-text-primary)" }}
+          >
+            Import from Joplin
+          </h4>
+          <p
+            className="mb-6 text-center text-sm"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            Select a .jex file or RAW export folder
+          </p>
+          <div className="flex gap-3">
+            <button
+              onClick={onSelectFile}
+              disabled={isLoading}
+              className="rounded-lg px-6 py-2.5 text-sm font-medium transition-colors"
+              style={{
+                backgroundColor: "var(--color-accent)",
+                color: "white",
+                opacity: isLoading ? 0.5 : 1,
+              }}
+            >
+              {isLoading ? "Loading..." : "Choose JEX File"}
+            </button>
+            <button
+              onClick={onSelectFolder}
+              disabled={isLoading}
+              className="rounded-lg px-6 py-2.5 text-sm font-medium transition-colors"
+              style={{
+                backgroundColor: "var(--color-bg-tertiary)",
+                color: "var(--color-text-secondary)",
+                opacity: isLoading ? 0.5 : 1,
+              }}
+            >
+              RAW Folder
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <p
+        className="text-sm"
+        style={{ color: "var(--color-text-muted)" }}
+      >
+        Review the import preview and confirm.
+      </p>
+
+      <div
+        className="grid grid-cols-4 gap-4 rounded-lg border p-4"
+        style={{
+          borderColor: "var(--color-border)",
+          backgroundColor: "var(--color-bg-secondary)",
+        }}
+      >
+        <div>
+          <div
+            className="text-2xl font-bold"
+            style={{ color: "var(--color-accent)" }}
+          >
+            {preview.noteCount}
+          </div>
+          <div
+            className="text-sm"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            Notes
+          </div>
+        </div>
+        <div>
+          <div
+            className="text-2xl font-bold"
+            style={{ color: "var(--color-accent)" }}
+          >
+            {preview.folderCount}
+          </div>
+          <div
+            className="text-sm"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            Folders
+          </div>
+        </div>
+        <div>
+          <div
+            className="text-2xl font-bold"
+            style={{ color: "var(--color-accent)" }}
+          >
+            {preview.tagCount}
+          </div>
+          <div
+            className="text-sm"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            Tags
+          </div>
+        </div>
+        <div>
+          <div
+            className="text-2xl font-bold"
+            style={{ color: "var(--color-accent)" }}
+          >
+            {preview.resourceCount}
+          </div>
+          <div
+            className="text-sm"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            Attachments
+          </div>
+        </div>
+      </div>
+
+      {preview.notes.length > 0 && (
+        <div>
+          <h4
+            className="mb-2 text-sm font-medium"
+            style={{ color: "var(--color-text-primary)" }}
+          >
+            Sample Notes
+          </h4>
+          <div
+            className="max-h-32 space-y-1 overflow-y-auto rounded-lg border p-2"
+            style={{
+              borderColor: "var(--color-border)",
+              backgroundColor: "var(--color-bg-secondary)",
+            }}
+          >
+            {preview.notes.map((note, i) => (
+              <div
+                key={i}
+                className="flex items-center gap-2 text-sm"
+                style={{ color: "var(--color-text-secondary)" }}
+              >
+                <span>{note.isTodo ? "☑️" : note.hasAttachments ? "📎" : "📄"}</span>
+                <span className="truncate">{note.title}</span>
+                {note.folderPath && (
+                  <span className="text-xs opacity-60">in {note.folderPath}</span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {preview.warnings.length > 0 && (
+        <div
+          className="rounded-lg p-3 text-sm"
+          style={{
+            backgroundColor: "rgba(234, 179, 8, 0.1)",
+            color: "var(--color-warning)",
+          }}
+        >
+          <strong>Warnings:</strong>
+          <ul className="mt-1 list-disc pl-4">
+            {preview.warnings.map((w, i) => (
+              <li key={i}>{w}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <div>
+        <label
+          className="mb-2 block text-sm font-medium"
+          style={{ color: "var(--color-text-primary)" }}
+        >
+          Notebook Name
+        </label>
+        <input
+          type="text"
+          value={notebookName}
+          onChange={(e) => onNameChange(e.target.value)}
+          className="w-full rounded-lg border px-4 py-2 text-sm"
+          style={{
+            borderColor: "var(--color-border)",
+            backgroundColor: "var(--color-bg-secondary)",
+            color: "var(--color-text-primary)",
+          }}
+          placeholder="Enter notebook name"
+        />
+      </div>
+
+      <div className="flex justify-end gap-3">
+        <button
+          onClick={onCancel}
+          disabled={isLoading}
+          className="rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+          style={{
+            backgroundColor: "var(--color-bg-tertiary)",
+            color: "var(--color-text-secondary)",
+          }}
+        >
+          Cancel
+        </button>
+        <button
+          onClick={onImport}
+          disabled={isLoading}
+          className="rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+          style={{
+            backgroundColor: "var(--color-accent)",
+            color: "white",
+            opacity: isLoading ? 0.5 : 1,
+          }}
+        >
+          {isLoading ? "Importing..." : "Import Notebook"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function IconOrgmode({ size = 16 }: { size?: number }) {
   return (
     <svg
@@ -2332,6 +2775,26 @@ function IconOrgmode({ size = 16 }: { size?: number }) {
     >
       <circle cx="12" cy="12" r="10" />
       <path d="M12 6v6l4 2" />
+    </svg>
+  );
+}
+
+function IconJoplin({ size = 16 }: { size?: number }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+      <polyline points="14 2 14 8 20 8" />
+      <line x1="9" y1="15" x2="15" y2="15" />
     </svg>
   );
 }

@@ -646,6 +646,7 @@ fn import_org_file(content: &str, notebook_id: Uuid, fallback_title: &str) -> Pa
         },
         tags,
         folder_id: None,
+        parent_page_id: None,
         section_id: None,
         is_archived: false,
         is_cover: false,

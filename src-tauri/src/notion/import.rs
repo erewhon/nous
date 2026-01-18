@@ -14,7 +14,7 @@ use uuid::Uuid;
 use zip::ZipArchive;
 
 use crate::markdown::import_markdown_to_page;
-use crate::storage::{Notebook, NotebookType, Page, StorageError};
+use crate::storage::{Folder, Notebook, NotebookType, Page, StorageError};
 
 type Result<T> = std::result::Result<T, StorageError>;
 
@@ -62,8 +62,10 @@ struct NotionPageInfo {
     notion_id: Option<String>,
     /// Markdown content
     content: String,
-    /// Parent folder path for tag generation
+    /// Parent folder path for tag generation (raw path)
     parent_path: Option<String>,
+    /// Clean folder path without Notion UUIDs (e.g., "Projects/Work")
+    clean_folder_path: Option<String>,
     /// Associated image paths in the ZIP
     images: Vec<(String, String)>, // (original_ref, zip_path)
     /// Whether this came from a database CSV
@@ -126,6 +128,79 @@ fn extract_parent_tags(path: &Path) -> Vec<String> {
     }
 
     tags
+}
+
+/// Build a clean folder path from a file path, removing Notion UUIDs
+/// "Projects abc123/Work def456/notes.md" -> "Projects/Work"
+fn build_clean_folder_path(file_path: &Path) -> Option<String> {
+    let parent = file_path.parent()?;
+    let mut parts: Vec<String> = Vec::new();
+
+    for component in parent.components() {
+        if let std::path::Component::Normal(name) = component {
+            let name_str = name.to_string_lossy();
+            let clean_name = clean_page_title(&name_str);
+            if !clean_name.is_empty() {
+                parts.push(clean_name);
+            }
+        }
+    }
+
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join("/"))
+    }
+}
+
+/// Internal structure for tracking folder hierarchy
+struct NotionFolderInfo {
+    /// Clean folder path (e.g., "Projects/Work")
+    path: String,
+    /// Clean folder name (e.g., "Work")
+    name: String,
+    /// Parent folder path (e.g., "Projects"), None if root level
+    parent_path: Option<String>,
+}
+
+/// Build folder hierarchy from a set of folder paths
+fn build_folder_hierarchy(paths: &std::collections::HashSet<String>) -> Vec<NotionFolderInfo> {
+    let mut folders: Vec<NotionFolderInfo> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    // Sort paths by depth (shorter paths first) to ensure parents are created before children
+    let mut sorted_paths: Vec<&String> = paths.iter().collect();
+    sorted_paths.sort_by(|a, b| {
+        let depth_a = a.matches('/').count();
+        let depth_b = b.matches('/').count();
+        depth_a.cmp(&depth_b)
+    });
+
+    for path in sorted_paths {
+        // Also ensure all parent paths are included
+        let parts: Vec<&str> = path.split('/').collect();
+        for i in 0..parts.len() {
+            let current_path = parts[0..=i].join("/");
+            if !seen.contains(&current_path) {
+                seen.insert(current_path.clone());
+
+                let name = parts[i].to_string();
+                let parent_path = if i > 0 {
+                    Some(parts[0..i].join("/"))
+                } else {
+                    None
+                };
+
+                folders.push(NotionFolderInfo {
+                    path: current_path,
+                    name,
+                    parent_path,
+                });
+            }
+        }
+    }
+
+    folders
 }
 
 /// Convert Notion internal links to wiki-links
@@ -222,12 +297,16 @@ fn parse_database_csv(
             .parent()
             .map(|p| p.to_string_lossy().to_string());
 
+        // Get clean folder path for folder hierarchy
+        let clean_folder_path = build_clean_folder_path(database_path);
+
         pages.push(NotionPageInfo {
             original_path: database_path.to_path_buf(),
             clean_title: title,
             notion_id: None,
             content,
             parent_path,
+            clean_folder_path,
             images: Vec::new(),
             is_database_row: true,
             database_name: Some(database_name.to_string()),
@@ -454,12 +533,16 @@ pub fn import_notion_zip(
         let parent_path = path.parent()
             .map(|p| p.to_string_lossy().to_string());
 
+        // Get clean folder path for folder hierarchy
+        let clean_folder_path = build_clean_folder_path(path);
+
         page_infos.push(NotionPageInfo {
             original_path: path.to_path_buf(),
             clean_title,
             notion_id,
             content,
             parent_path,
+            clean_folder_path,
             images,
             is_database_row: false,
             database_name: None,
@@ -540,6 +623,39 @@ pub fn import_notion_zip(
     let notebook_json = serde_json::to_string_pretty(&notebook)?;
     fs::write(notebook_dir.join("notebook.json"), notebook_json)?;
 
+    // Create folders from page hierarchy
+    // Collect unique folder paths from all pages
+    let mut folder_paths: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for info in &page_infos {
+        if let Some(ref path) = info.clean_folder_path {
+            folder_paths.insert(path.clone());
+        }
+    }
+
+    // Build folder hierarchy and create Katt folders
+    let folder_hierarchy = build_folder_hierarchy(&folder_paths);
+    let mut path_to_folder_id: HashMap<String, Uuid> = HashMap::new();
+    let mut katt_folders: Vec<Folder> = Vec::new();
+
+    for folder_info in folder_hierarchy {
+        let parent_id = folder_info
+            .parent_path
+            .as_ref()
+            .and_then(|p| path_to_folder_id.get(p).copied());
+
+        let mut folder = Folder::new(notebook_id, folder_info.name, parent_id);
+        folder.position = katt_folders.len() as i32;
+
+        path_to_folder_id.insert(folder_info.path, folder.id);
+        katt_folders.push(folder);
+    }
+
+    // Save folders.json if there are any folders
+    if !katt_folders.is_empty() {
+        let folders_json = serde_json::to_string_pretty(&katt_folders)?;
+        fs::write(notebook_dir.join("folders.json"), folders_json)?;
+    }
+
     // Copy assets to notebook assets folder
     let assets_dir = notebook_dir.join("assets");
     let mut asset_path_mapping: HashMap<String, String> = HashMap::new();
@@ -615,6 +731,13 @@ pub fn import_notion_zip(
         let mut page = import_markdown_to_page(&content, notebook_id, &info.clean_title);
         page.tags = tags;
 
+        // Set folder_id if the page was in a folder
+        if let Some(ref folder_path) = info.clean_folder_path {
+            if let Some(&folder_id) = path_to_folder_id.get(folder_path) {
+                page.folder_id = Some(folder_id);
+            }
+        }
+
         // Save page
         let page_path = notebook_dir.join("pages").join(format!("{}.json", page.id));
         let page_json = serde_json::to_string_pretty(&page)?;
@@ -622,6 +745,360 @@ pub fn import_notion_zip(
 
         pages.push(page);
     }
+
+    Ok((notebook, pages))
+}
+
+/// Import a Notion export ZIP as a new notebook with progress reporting
+pub fn import_notion_zip_with_progress<F>(
+    zip_path: &Path,
+    notebooks_dir: &Path,
+    notebook_name: Option<String>,
+    progress: F,
+) -> Result<(Notebook, Vec<Page>)>
+where
+    F: Fn(usize, usize, &str),
+{
+    progress(0, 100, "Opening ZIP file...");
+
+    let file = File::open(zip_path)?;
+    let mut archive = ZipArchive::new(file)?;
+
+    progress(5, 100, "Scanning files...");
+
+    // First pass: build title mapping and collect page info
+    let mut title_mapping: HashMap<String, String> = HashMap::new();
+    let mut page_infos: Vec<NotionPageInfo> = Vec::new();
+    let mut asset_files: HashMap<String, Vec<u8>> = HashMap::new();
+    let mut suggested_name = String::new();
+
+    // Collect all file info first
+    let mut md_files: Vec<(usize, String)> = Vec::new();
+    let mut csv_files: Vec<(usize, String)> = Vec::new();
+    let mut image_files: Vec<(usize, String)> = Vec::new();
+
+    for i in 0..archive.len() {
+        let file = archive.by_index(i)?;
+        let name = file.name().to_string();
+        drop(file);
+
+        if name.ends_with('/') {
+            continue;
+        }
+
+        let path = Path::new(&name);
+        let extension = path.extension()
+            .map(|e| e.to_string_lossy().to_lowercase());
+
+        if suggested_name.is_empty() {
+            if let Some(first) = path.components().next() {
+                if let std::path::Component::Normal(n) = first {
+                    suggested_name = clean_page_title(&n.to_string_lossy());
+                }
+            }
+        }
+
+        match extension.as_deref() {
+            Some("md") => md_files.push((i, name)),
+            Some("csv") => csv_files.push((i, name)),
+            Some("png") | Some("jpg") | Some("jpeg") | Some("gif") | Some("webp") | Some("svg") => {
+                image_files.push((i, name));
+            }
+            _ => {}
+        }
+    }
+
+    progress(10, 100, "Processing markdown files...");
+
+    // Process markdown files and build title mapping
+    let total_md = md_files.len();
+    for (file_idx, (idx, name)) in md_files.iter().enumerate() {
+        if file_idx % 10 == 0 {
+            progress(
+                10 + (file_idx * 10) / total_md.max(1),
+                100,
+                &format!("Reading pages ({}/{})", file_idx + 1, total_md),
+            );
+        }
+
+        let path = Path::new(name);
+        let filename = path.file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+
+        let clean_title = clean_page_title(&filename);
+        let notion_id = extract_notion_id(&filename);
+
+        title_mapping.insert(filename.clone(), clean_title.clone());
+        title_mapping.insert(name.clone(), clean_title.clone());
+
+        let mut file = archive.by_index(*idx)?;
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes)?;
+        drop(file);
+
+        let content = String::from_utf8(bytes)
+            .unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).to_string());
+
+        let images = find_associated_images(path, &image_files);
+
+        let parent_path = path.parent()
+            .map(|p| p.to_string_lossy().to_string());
+
+        // Get clean folder path for folder hierarchy
+        let clean_folder_path = build_clean_folder_path(path);
+
+        page_infos.push(NotionPageInfo {
+            original_path: path.to_path_buf(),
+            clean_title,
+            notion_id,
+            content,
+            parent_path,
+            clean_folder_path,
+            images,
+            is_database_row: false,
+            database_name: None,
+        });
+    }
+
+    progress(20, 100, "Processing databases...");
+
+    // Process CSV database files
+    let total_csv = csv_files.len();
+    for (file_idx, (idx, name)) in csv_files.iter().enumerate() {
+        if total_csv > 0 {
+            progress(
+                20 + (file_idx * 5) / total_csv.max(1),
+                100,
+                &format!("Reading databases ({}/{})", file_idx + 1, total_csv),
+            );
+        }
+
+        let path = Path::new(name);
+        let db_name = path.file_stem()
+            .map(|n| clean_page_title(&n.to_string_lossy()))
+            .unwrap_or_else(|| "Database".to_string());
+
+        let mut file = archive.by_index(*idx)?;
+        let mut content = String::new();
+        if file.read_to_string(&mut content).is_ok() {
+            let db_pages = parse_database_csv(&content, &db_name, path);
+
+            for page in &db_pages {
+                title_mapping.insert(
+                    format!("{}.md", page.clean_title),
+                    page.clean_title.clone(),
+                );
+            }
+
+            page_infos.extend(db_pages);
+        }
+    }
+
+    progress(25, 100, "Reading assets...");
+
+    // Read all image files into memory
+    let total_images = image_files.len();
+    for (file_idx, (idx, name)) in image_files.iter().enumerate() {
+        if file_idx % 20 == 0 {
+            progress(
+                25 + (file_idx * 15) / total_images.max(1),
+                100,
+                &format!("Reading assets ({}/{})", file_idx + 1, total_images),
+            );
+        }
+
+        let mut file = archive.by_index(*idx)?;
+        let mut bytes = Vec::new();
+        if file.read_to_end(&mut bytes).is_ok() {
+            asset_files.insert(name.clone(), bytes);
+        }
+    }
+
+    progress(40, 100, "Creating notebook...");
+
+    // Create the notebook
+    let notebook_id = Uuid::new_v4();
+    let notebook_name = notebook_name.unwrap_or_else(|| {
+        if suggested_name.is_empty() {
+            zip_path
+                .file_stem()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_else(|| "Imported Notebook".to_string())
+        } else {
+            suggested_name.clone()
+        }
+    });
+
+    let now = Utc::now();
+    let notebook = Notebook {
+        id: notebook_id,
+        name: notebook_name,
+        notebook_type: NotebookType::Standard,
+        icon: Some("📥".to_string()),
+        color: None,
+        sections_enabled: false,
+        archived: false,
+        system_prompt: None,
+        system_prompt_mode: crate::storage::SystemPromptMode::default(),
+        ai_provider: None,
+        ai_model: None,
+        sync_config: None,
+        created_at: now,
+        updated_at: now,
+    };
+
+    let notebook_dir = notebooks_dir.join(notebook_id.to_string());
+    fs::create_dir_all(&notebook_dir)?;
+    fs::create_dir_all(notebook_dir.join("pages"))?;
+    fs::create_dir_all(notebook_dir.join("assets"))?;
+
+    let notebook_json = serde_json::to_string_pretty(&notebook)?;
+    fs::write(notebook_dir.join("notebook.json"), notebook_json)?;
+
+    progress(42, 100, "Creating folders...");
+
+    // Create folders from page hierarchy
+    // Collect unique folder paths from all pages
+    let mut folder_paths: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for info in &page_infos {
+        if let Some(ref path) = info.clean_folder_path {
+            folder_paths.insert(path.clone());
+        }
+    }
+
+    // Build folder hierarchy and create Katt folders
+    let folder_hierarchy = build_folder_hierarchy(&folder_paths);
+    let mut path_to_folder_id: HashMap<String, Uuid> = HashMap::new();
+    let mut katt_folders: Vec<Folder> = Vec::new();
+
+    for folder_info in folder_hierarchy {
+        let parent_id = folder_info
+            .parent_path
+            .as_ref()
+            .and_then(|p| path_to_folder_id.get(p).copied());
+
+        let mut folder = Folder::new(notebook_id, folder_info.name, parent_id);
+        folder.position = katt_folders.len() as i32;
+
+        path_to_folder_id.insert(folder_info.path, folder.id);
+        katt_folders.push(folder);
+    }
+
+    // Save folders.json if there are any folders
+    if !katt_folders.is_empty() {
+        let folders_json = serde_json::to_string_pretty(&katt_folders)?;
+        fs::write(notebook_dir.join("folders.json"), folders_json)?;
+    }
+
+    progress(45, 100, "Copying assets...");
+
+    // Copy assets to notebook assets folder
+    let assets_dir = notebook_dir.join("assets");
+    let mut asset_path_mapping: HashMap<String, String> = HashMap::new();
+    let total_assets = asset_files.len();
+
+    for (asset_idx, (original_path, bytes)) in asset_files.iter().enumerate() {
+        if asset_idx % 20 == 0 {
+            progress(
+                45 + (asset_idx * 15) / total_assets.max(1),
+                100,
+                &format!("Copying assets ({}/{})", asset_idx + 1, total_assets),
+            );
+        }
+
+        let filename = Path::new(original_path)
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| format!("{}.png", Uuid::new_v4()));
+
+        let mut target_filename = filename.clone();
+        let mut counter = 1;
+        while assets_dir.join(&target_filename).exists() {
+            let stem = Path::new(&filename)
+                .file_stem()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_default();
+            let ext = Path::new(&filename)
+                .extension()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_else(|| "png".to_string());
+            target_filename = format!("{}_{}.{}", stem, counter, ext);
+            counter += 1;
+        }
+
+        let target_path = assets_dir.join(&target_filename);
+        fs::write(&target_path, bytes)?;
+
+        asset_path_mapping.insert(
+            original_path.clone(),
+            format!("asset://{}/{}", notebook_id, target_filename),
+        );
+    }
+
+    progress(60, 100, "Importing pages...");
+
+    // Process pages
+    let mut pages: Vec<Page> = Vec::new();
+    let total_pages = page_infos.len();
+
+    for (page_idx, info) in page_infos.into_iter().enumerate() {
+        if page_idx % 5 == 0 {
+            progress(
+                60 + (page_idx * 40) / total_pages.max(1),
+                100,
+                &format!("Importing pages ({}/{})", page_idx + 1, total_pages),
+            );
+        }
+
+        // Convert internal links to wiki-links
+        let mut content = convert_links_to_wikilinks(&info.content, &title_mapping);
+
+        // Update image references
+        for (original_ref, zip_path) in &info.images {
+            if let Some(new_url) = asset_path_mapping.get(zip_path) {
+                content = content.replace(original_ref, new_url);
+                let encoded = urlencoding::encode(original_ref);
+                content = content.replace(&encoded.to_string(), new_url);
+            }
+        }
+
+        // Get tags from parent path
+        let mut tags = extract_parent_tags(&info.original_path);
+
+        // Add database name as tag if from database
+        if let Some(db_name) = &info.database_name {
+            let db_tag = db_name
+                .to_lowercase()
+                .replace(' ', "-")
+                .chars()
+                .filter(|c| c.is_alphanumeric() || *c == '-')
+                .collect::<String>();
+            if !db_tag.is_empty() && !tags.contains(&db_tag) {
+                tags.push(db_tag);
+            }
+        }
+
+        // Import markdown content to page
+        let mut page = import_markdown_to_page(&content, notebook_id, &info.clean_title);
+        page.tags = tags;
+
+        // Set folder_id if the page was in a folder
+        if let Some(ref folder_path) = info.clean_folder_path {
+            if let Some(&folder_id) = path_to_folder_id.get(folder_path) {
+                page.folder_id = Some(folder_id);
+            }
+        }
+
+        // Save page
+        let page_path = notebook_dir.join("pages").join(format!("{}.json", page.id));
+        let page_json = serde_json::to_string_pretty(&page)?;
+        fs::write(page_path, page_json)?;
+
+        pages.push(page);
+    }
+
+    progress(100, 100, "Import complete");
 
     Ok((notebook, pages))
 }

@@ -251,6 +251,9 @@ pub struct Page {
     /// Folder this page belongs to, None means root level
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub folder_id: Option<Uuid>,
+    /// Parent page for nested pages, None means root level or direct folder child
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub parent_page_id: Option<Uuid>,
     /// Section this page belongs to (when not in a folder)
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub section_id: Option<Uuid>,
@@ -286,6 +289,7 @@ impl Page {
             content: EditorData::default(),
             tags: Vec::new(),
             folder_id: None,
+            parent_page_id: None,
             section_id: None,
             is_archived: false,
             is_cover: false,

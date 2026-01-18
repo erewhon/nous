@@ -158,18 +158,49 @@ export class CodeBlockTool implements BlockTool {
 
     this.textarea.addEventListener("blur", () => {
       this.updateHighlight();
+      // Switch to preview mode if there's code
+      if (this.data.code.trim()) {
+        this.showPreview();
+      }
     });
 
     // Preview element for highlighted code
     this.previewElement = document.createElement("pre");
     this.previewElement.classList.add("code-block-preview");
-    this.previewElement.style.display = "none";
+
+    // Click on preview to edit
+    this.previewElement.addEventListener("click", () => {
+      this.showTextarea();
+    });
 
     this.wrapper.appendChild(languageWrapper);
     this.wrapper.appendChild(this.textarea);
     this.wrapper.appendChild(this.previewElement);
 
+    // Initialize: show preview if we have code, otherwise show textarea
+    if (this.data.code.trim()) {
+      this.updateHighlight();
+      this.showPreview();
+    } else {
+      this.showTextarea();
+    }
+
     return this.wrapper;
+  }
+
+  private showPreview(): void {
+    if (this.textarea && this.previewElement) {
+      this.textarea.style.display = "none";
+      this.previewElement.style.display = "block";
+    }
+  }
+
+  private showTextarea(): void {
+    if (this.textarea && this.previewElement) {
+      this.previewElement.style.display = "none";
+      this.textarea.style.display = "block";
+      this.textarea.focus();
+    }
   }
 
   private updateHighlight(): void {

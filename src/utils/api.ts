@@ -66,9 +66,10 @@ export async function createPage(
   notebookId: string,
   title: string,
   folderId?: string,
+  parentPageId?: string,
   sectionId?: string
 ): Promise<Page> {
-  return invoke<Page>("create_page", { notebookId, title, folderId, sectionId });
+  return invoke<Page>("create_page", { notebookId, title, folderId, parentPageId, sectionId });
 }
 
 export async function updatePage(
@@ -85,6 +86,15 @@ export async function deletePage(
   pageId: string
 ): Promise<void> {
   return invoke("delete_page", { notebookId, pageId });
+}
+
+export async function movePageToParent(
+  notebookId: string,
+  pageId: string,
+  parentPageId?: string,
+  position?: number
+): Promise<Page> {
+  return invoke<Page>("move_page_to_parent", { notebookId, pageId, parentPageId, position });
 }
 
 // ===== Folder API =====
@@ -764,6 +774,41 @@ export async function importOrgmode(
   notebookName?: string
 ): Promise<Notebook> {
   return invoke<Notebook>("import_orgmode_cmd", { sourcePath, notebookName });
+}
+
+// ===== Joplin Import API =====
+
+export interface JoplinNotePreview {
+  title: string;
+  folderPath: string | null;
+  tags: string[];
+  hasAttachments: boolean;
+  isTodo: boolean;
+  created: string | null;
+}
+
+export interface JoplinImportPreview {
+  noteCount: number;
+  folderCount: number;
+  tagCount: number;
+  resourceCount: number;
+  notes: JoplinNotePreview[];
+  suggestedName: string;
+  warnings: string[];
+  isJexArchive: boolean;
+}
+
+export async function previewJoplinImport(
+  path: string
+): Promise<JoplinImportPreview> {
+  return invoke<JoplinImportPreview>("preview_joplin_import_cmd", { path });
+}
+
+export async function importJoplin(
+  path: string,
+  notebookName?: string
+): Promise<Notebook> {
+  return invoke<Notebook>("import_joplin_cmd", { path, notebookName });
 }
 
 // ===== Actions API =====

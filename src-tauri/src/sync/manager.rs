@@ -587,6 +587,7 @@ impl SyncManager {
             content,
             tags: vec![],
             folder_id: None,
+            parent_page_id: None,
             section_id: None,
             is_archived: false,
             is_cover: false,

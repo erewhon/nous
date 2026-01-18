@@ -1,5 +1,34 @@
 /* Editor.js Styling for Katt */
 
+/* Tab bar styles */
+.tab-bar {
+  min-height: 36px;
+  flex-shrink: 0;
+}
+
+.tab-bar::-webkit-scrollbar {
+  height: 4px;
+}
+
+.tab-bar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.tab-bar::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 2px;
+}
+
+.tab-item {
+  min-width: 0;
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.tab-item:hover .tab-close-btn {
+  opacity: 1;
+}
+
 .block-editor {
   min-height: 300px;
 }
@@ -137,6 +166,41 @@ h4.ce-header {
 /* Marker (highlight) */
 .cdx-marker {
   background-color: rgba(122, 162, 247, 0.3);
+}
+
+/* Multi-color Highlighter */
+.cdx-highlighter {
+  border-radius: 2px;
+  padding: 0.1em 0;
+}
+
+.cdx-highlighter--yellow {
+  background-color: rgba(250, 204, 21, 0.4);
+}
+
+.cdx-highlighter--green {
+  background-color: rgba(74, 222, 128, 0.4);
+}
+
+.cdx-highlighter--blue {
+  background-color: rgba(96, 165, 250, 0.4);
+}
+
+.cdx-highlighter--pink {
+  background-color: rgba(244, 114, 182, 0.4);
+}
+
+.cdx-highlighter--orange {
+  background-color: rgba(251, 146, 60, 0.4);
+}
+
+.cdx-highlighter--purple {
+  background-color: rgba(192, 132, 252, 0.4);
+}
+
+/* Highlighter tool button indicator */
+.highlighter-tool {
+  position: relative;
 }
 
 /* Delimiter */
@@ -499,6 +563,30 @@ wiki-link.broken,
 .code-block-textarea:focus {
   outline: none;
   border-color: var(--color-accent);
+}
+
+.code-block-preview {
+  background-color: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 1rem;
+  padding-top: 2.5rem;
+  min-height: 100px;
+  margin: 0;
+  overflow-x: auto;
+  cursor: text;
+}
+
+.code-block-preview:hover {
+  border-color: var(--color-accent);
+}
+
+.code-block-preview code {
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  white-space: pre;
+  display: block;
 }
 
 /* Highlight.js token colors */

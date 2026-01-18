@@ -125,7 +125,7 @@ export function FolderTree({
   hasCoverPage = false,
   onViewCover,
 }: FolderTreeProps) {
-  const { createPage, movePageToFolder } = usePageStore();
+  const { createPage, createSubpage, movePageToFolder, movePageToParent } = usePageStore();
   const {
     expandedFolderIds,
     toggleFolderExpanded,
@@ -144,6 +144,20 @@ export function FolderTree({
   const [overFolderId, setOverFolderId] = useState<string | null>(null);
   const [overSectionId, setOverSectionId] = useState<string | null>(null);
   const [showSectionDropZones, setShowSectionDropZones] = useState(false);
+  const [expandedPageIds, setExpandedPageIds] = useState<Set<string>>(new Set());
+
+  // Toggle page expansion for nested pages
+  const togglePageExpanded = useCallback((pageId: string) => {
+    setExpandedPageIds((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(pageId)) {
+        newSet.delete(pageId);
+      } else {
+        newSet.add(pageId);
+      }
+      return newSet;
+    });
+  }, []);
 
   // Configure DnD sensors
   const sensors = useSensors(
@@ -173,11 +187,21 @@ export function FolderTree({
     return folders.filter((f) => f.sectionId === selectedSectionId);
   }, [folders, sectionsEnabled, selectedSectionId]);
 
-  // Get pages for a specific folder
+  // Get top-level pages for a specific folder (pages without a parent page)
   const getPagesForFolder = useCallback(
     (folderId: string | null) => {
       return visiblePages
-        .filter((p) => (p.folderId ?? null) === folderId)
+        .filter((p) => (p.folderId ?? null) === folderId && !p.parentPageId)
+        .sort((a, b) => a.position - b.position);
+    },
+    [visiblePages]
+  );
+
+  // Get child pages for a specific parent page
+  const getChildPagesForParent = useCallback(
+    (parentPageId: string) => {
+      return visiblePages
+        .filter((p) => p.parentPageId === parentPageId)
         .sort((a, b) => a.position - b.position);
     },
     [visiblePages]
@@ -203,9 +227,23 @@ export function FolderTree({
     (folderId?: string) => {
       // Pass the current section if sections are enabled and a section is selected
       const sectionId = sectionsEnabled && selectedSectionId ? selectedSectionId : undefined;
-      createPage(notebookId, "Untitled", folderId, sectionId);
+      createPage(notebookId, "Untitled", folderId, undefined, sectionId);
     },
     [notebookId, createPage, sectionsEnabled, selectedSectionId]
+  );
+
+  // Handle creating a subpage
+  const handleCreateSubpage = useCallback(
+    async (parentPageId: string) => {
+      await createSubpage(notebookId, parentPageId, "Untitled");
+      // Expand the parent page to show the new subpage
+      setExpandedPageIds((prev) => {
+        const newSet = new Set(prev);
+        newSet.add(parentPageId);
+        return newSet;
+      });
+    },
+    [notebookId, createSubpage]
   );
 
   // Handle creating a new folder
@@ -257,7 +295,7 @@ export function FolderTree({
 
   const handleDragOver = useCallback(
     (event: DragOverEvent) => {
-      const { over } = event;
+      const { active, over } = event;
       if (over) {
         const overId = over.id as string;
         const overData = over.data.current;
@@ -267,6 +305,24 @@ export function FolderTree({
           setOverSectionId(overData.section?.id ?? "unsorted");
           setOverFolderId(null);
           return;
+        }
+
+        // Check if we're over a page drop zone (for nesting)
+        if (overData?.type === "page") {
+          const targetPage = overData.page;
+          // Don't allow dropping on self or own children
+          const activeId = active.id as string;
+          if (targetPage.id !== activeId && targetPage.parentPageId !== activeId) {
+            setOverFolderId(null);
+            setOverSectionId(null);
+            // Expand the page when hovering to show children
+            setExpandedPageIds((prev) => {
+              const newSet = new Set(prev);
+              newSet.add(targetPage.id);
+              return newSet;
+            });
+            return;
+          }
         }
 
         // Check if we're over a folder
@@ -289,6 +345,24 @@ export function FolderTree({
       }
     },
     [visibleFolders, setFolderExpanded]
+  );
+
+  // Helper to check if a page is a descendant of another
+  const isDescendant = useCallback(
+    (potentialDescendantId: string, ancestorId: string): boolean => {
+      let currentId: string | null | undefined = potentialDescendantId;
+      const visited = new Set<string>();
+      while (currentId) {
+        if (visited.has(currentId)) break; // Prevent infinite loops
+        visited.add(currentId);
+        const currentPage = pages.find((p) => p.id === currentId);
+        if (!currentPage) break;
+        if (currentPage.parentPageId === ancestorId) return true;
+        currentId = currentPage.parentPageId;
+      }
+      return false;
+    },
+    [pages]
   );
 
   const handleDragEnd = useCallback(
@@ -338,32 +412,48 @@ export function FolderTree({
         return;
       }
 
+      // Check if dropped on a page (for nesting)
+      if (overData?.type === "page") {
+        const targetPage = overData.page;
+        // Don't allow dropping on self or own descendants
+        if (targetPage.id !== pageId && !isDescendant(targetPage.id, pageId)) {
+          // Only move if parent is different
+          if (page.parentPageId !== targetPage.id) {
+            await movePageToParent(notebookId, pageId, targetPage.id);
+          }
+        }
+        return;
+      }
+
       // Determine target folder
       let targetFolderId: string | undefined = undefined;
 
       if (overId === "root") {
-        // Moving to root (no folder)
+        // Moving to root (no folder, no parent)
         targetFolderId = undefined;
+        // If page had a parent, remove it
+        if (page.parentPageId) {
+          await movePageToParent(notebookId, pageId, undefined);
+          return;
+        }
       } else {
         // Check if over is a folder
         const folder = visibleFolders.find((f) => f.id === overId);
         if (folder) {
           targetFolderId = folder.id;
-        } else {
-          // Might be over another page - find its folder
-          const overPage = pages.find((p) => p.id === overId);
-          if (overPage) {
-            targetFolderId = overPage.folderId ?? undefined;
+          // If page had a parent, remove the parent relationship when moving to folder
+          if (page.parentPageId) {
+            await movePageToParent(notebookId, pageId, undefined);
           }
         }
       }
 
-      // Only move if the target folder is different
-      if ((page.folderId ?? undefined) !== targetFolderId) {
+      // Only move to folder if the target folder is different
+      if ((page.folderId ?? undefined) !== targetFolderId && !page.parentPageId) {
         await movePageToFolder(notebookId, pageId, targetFolderId);
       }
     },
-    [pages, visibleFolders, notebookId, movePageToFolder, onMovePageToSection, onMoveFolderToSection]
+    [pages, visibleFolders, notebookId, movePageToFolder, movePageToParent, onMovePageToSection, onMoveFolderToSection, isDescendant]
   );
 
   // Render a folder recursively
@@ -385,9 +475,13 @@ export function FolderTree({
           onToggleExpand={toggleFolderExpanded}
           onSelectPage={onSelectPage}
           onCreatePage={handleCreatePage}
+          onCreateSubpage={handleCreateSubpage}
           onRenameFolder={handleRenameFolder}
           onDeleteFolder={handleDeleteFolder}
           renderFolder={renderFolder}
+          getChildPages={getChildPagesForParent}
+          expandedPageIds={expandedPageIds}
+          onTogglePageExpand={togglePageExpanded}
           sections={sectionsEnabled ? sections : undefined}
           onMoveToSection={onMovePageToSection}
           onMoveFolderToSection={onMoveFolderToSection}
@@ -400,9 +494,13 @@ export function FolderTree({
       overFolderId,
       getPagesForFolder,
       getChildFolders,
+      getChildPagesForParent,
+      expandedPageIds,
+      togglePageExpanded,
       toggleFolderExpanded,
       onSelectPage,
       handleCreatePage,
+      handleCreateSubpage,
       handleRenameFolder,
       handleDeleteFolder,
       sectionsEnabled,
@@ -633,7 +731,7 @@ export function FolderTree({
         )}
 
         {/* Tree content */}
-        <div className="flex-1 overflow-y-auto px-2 pb-4">
+        <div className="flex-1 overflow-y-auto px-2 pb-4 text-left">
           {visibleFolders.length === 0 && visiblePages.length === 0 ? (
             <div
               className="flex h-28 flex-col items-center justify-center gap-2 rounded-xl border border-dashed p-4 text-center mx-2"
@@ -650,7 +748,7 @@ export function FolderTree({
               </span>
             </div>
           ) : (
-            <ul>
+            <ul className="w-full">
               {/* Root-level folders */}
               {rootFolders.map((folder) => renderFolder(folder, 0))}
 
@@ -662,8 +760,14 @@ export function FolderTree({
                   isSelected={selectedPageId === page.id}
                   depth={-1}
                   onSelect={() => onSelectPage(page.id)}
+                  onSelectPage={onSelectPage}
+                  onCreateSubpage={handleCreateSubpage}
                   sections={sectionsEnabled ? sections : undefined}
                   onMoveToSection={onMovePageToSection}
+                  getChildPages={getChildPagesForParent}
+                  expandedPageIds={expandedPageIds}
+                  onTogglePageExpand={togglePageExpanded}
+                  selectedPageId={selectedPageId}
                 />
               ))}
             </ul>

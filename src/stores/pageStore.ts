@@ -21,7 +21,13 @@ interface PageActions {
     notebookId: string,
     title: string,
     folderId?: string,
+    parentPageId?: string,
     sectionId?: string
+  ) => Promise<Page | null>;
+  createSubpage: (
+    notebookId: string,
+    parentPageId: string,
+    title: string
   ) => Promise<Page | null>;
   updatePage: (
     notebookId: string,
@@ -44,6 +50,12 @@ interface PageActions {
     folderId?: string,
     position?: number
   ) => Promise<void>;
+  movePageToParent: (
+    notebookId: string,
+    pageId: string,
+    parentPageId?: string,
+    position?: number
+  ) => Promise<void>;
   archivePage: (notebookId: string, pageId: string) => Promise<void>;
   unarchivePage: (
     notebookId: string,
@@ -64,13 +76,16 @@ interface PageActions {
   // Selection
   selectPage: (id: string | null) => void;
 
+  // Utilities
+  getChildPages: (parentPageId: string) => Page[];
+
   // Error handling
   clearError: () => void;
 }
 
 type PageStore = PageState & PageActions;
 
-export const usePageStore = create<PageStore>((set) => ({
+export const usePageStore = create<PageStore>((set, get) => ({
   // Initial state
   pages: [],
   selectedPageId: null,
@@ -96,10 +111,10 @@ export const usePageStore = create<PageStore>((set) => ({
     set({ pages: [], selectedPageId: null });
   },
 
-  createPage: async (notebookId, title, folderId, sectionId) => {
+  createPage: async (notebookId, title, folderId, parentPageId, sectionId) => {
     set({ error: null });
     try {
-      const page = await api.createPage(notebookId, title, folderId, sectionId);
+      const page = await api.createPage(notebookId, title, folderId, parentPageId, sectionId);
       set((state) => ({
         pages: [page, ...state.pages],
         selectedPageId: page.id,
@@ -108,6 +123,29 @@ export const usePageStore = create<PageStore>((set) => ({
     } catch (err) {
       set({
         error: err instanceof Error ? err.message : "Failed to create page",
+      });
+      return null;
+    }
+  },
+
+  createSubpage: async (notebookId, parentPageId, title) => {
+    set({ error: null });
+    try {
+      // Get parent page to inherit its section and folder
+      const state = usePageStore.getState();
+      const parentPage = state.pages.find((p) => p.id === parentPageId);
+      const sectionId = parentPage?.sectionId ?? undefined;
+      const folderId = parentPage?.folderId ?? undefined;
+
+      const page = await api.createPage(notebookId, title, folderId, parentPageId, sectionId);
+      set((state) => ({
+        pages: [page, ...state.pages],
+        selectedPageId: page.id,
+      }));
+      return page;
+    } catch (err) {
+      set({
+        error: err instanceof Error ? err.message : "Failed to create subpage",
       });
       return null;
     }
@@ -212,6 +250,26 @@ export const usePageStore = create<PageStore>((set) => ({
     }
   },
 
+  movePageToParent: async (notebookId, pageId, parentPageId, position) => {
+    set({ error: null });
+    try {
+      const page = await api.movePageToParent(
+        notebookId,
+        pageId,
+        parentPageId,
+        position
+      );
+      set((state) => ({
+        pages: state.pages.map((p) => (p.id === pageId ? page : p)),
+      }));
+    } catch (err) {
+      set({
+        error:
+          err instanceof Error ? err.message : "Failed to move page",
+      });
+    }
+  },
+
   archivePage: async (notebookId, pageId) => {
     set({ error: null });
     try {
@@ -301,6 +359,13 @@ export const usePageStore = create<PageStore>((set) => ({
         });
       }
     }
+  },
+
+  getChildPages: (parentPageId) => {
+    const { pages } = get();
+    return pages
+      .filter((p) => p.parentPageId === parentPageId)
+      .sort((a, b) => a.position - b.position);
   },
 
   clearError: () => {

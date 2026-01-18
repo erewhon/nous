@@ -8,16 +8,20 @@ import { useLinkStore } from "../../stores/linkStore";
 import { usePDFStore } from "../../stores/pdfStore";
 import { useVideoStore } from "../../stores/videoStore";
 import { useDrawingStore } from "../../stores/drawingStore";
+import { useTabStore } from "../../stores/tabStore";
+import { useThemeStore } from "../../stores/themeStore";
 import { FolderTree } from "./FolderTree";
 import { BlockEditor } from "./BlockEditor";
 import { PageHeader } from "./PageHeader";
 import { BacklinksPanel } from "./BacklinksPanel";
 import { SimilarPagesPanel } from "./SimilarPagesPanel";
+import { TabBar } from "./TabBar";
 import { CoverPage } from "../CoverPage";
 import { SectionList } from "../Sections";
 import { PDFFullScreen } from "../PDF";
 import { VideoFullScreen } from "../Video";
 import { DrawingFullScreen, PageAnnotationOverlay } from "../Drawing";
+import { ResizeHandle } from "../Layout/ResizeHandle";
 import type { EditorData, Page } from "../../types/page";
 import * as api from "../../utils/api";
 import { calculatePageStats, type PageStats } from "../../utils/pageStats";
@@ -43,8 +47,31 @@ export function EditorArea() {
   const { viewerState, closeViewer } = usePDFStore();
   const { viewerState: videoViewerState } = useVideoStore();
   const { annotationState } = useDrawingStore();
+  const {
+    openTabs,
+    openTab,
+    closeTab,
+    updateTabTitle,
+  } = useTabStore();
+  const panelWidths = useThemeStore((state) => state.panelWidths);
+  const setPanelWidth = useThemeStore((state) => state.setPanelWidth);
   const [isSaving, setIsSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
+
+  // Panel resize handlers
+  const handleSectionsResize = useCallback(
+    (delta: number) => {
+      setPanelWidth("sections", panelWidths.sections + delta);
+    },
+    [panelWidths.sections, setPanelWidth]
+  );
+
+  const handleFolderTreeResize = useCallback(
+    (delta: number) => {
+      setPanelWidth("folderTree", panelWidths.folderTree + delta);
+    },
+    [panelWidths.folderTree, setPanelWidth]
+  );
 
   // Cover page state
   const [coverPage, setCoverPage] = useState<Page | null>(null);
@@ -103,6 +130,41 @@ export function EditorArea() {
       buildLinksFromPages(notebookPages);
     }
   }, [notebookPages, buildLinksFromPages]);
+
+  // Open page as tab when selected
+  useEffect(() => {
+    if (selectedPageId && selectedNotebookId) {
+      const page = pages.find((p) => p.id === selectedPageId);
+      if (page) {
+        openTab(page.id, page.notebookId, page.title);
+      }
+    }
+  }, [selectedPageId, selectedNotebookId, pages, openTab]);
+
+  // Sync tab title when page title changes
+  useEffect(() => {
+    if (selectedPage) {
+      updateTabTitle(selectedPage.id, selectedPage.title);
+    }
+  }, [selectedPage?.title, selectedPage?.id, updateTabTitle]);
+
+  // Handle tab selection (switch to page)
+  const handleTabSelect = useCallback(
+    (pageId: string) => {
+      selectPage(pageId);
+    },
+    [selectPage]
+  );
+
+  // Close tabs for deleted pages
+  useEffect(() => {
+    const pageIds = new Set(pages.map((p) => p.id));
+    openTabs.forEach((tab) => {
+      if (!pageIds.has(tab.pageId)) {
+        closeTab(tab.pageId);
+      }
+    });
+  }, [pages, openTabs, closeTab]);
 
   // Convert page content to Editor.js format
   // IMPORTANT: Only depend on page ID and pageDataVersion, not content directly.
@@ -413,29 +475,34 @@ export function EditorArea() {
     <div className="flex h-full">
       {/* Sections panel - shown when sections are enabled */}
       {selectedNotebook.sectionsEnabled && (
-        <div
-          className="w-48 flex-shrink-0 border-r"
-          style={{
-            backgroundColor: "var(--color-bg-secondary)",
-            borderColor: "var(--color-border)",
-          }}
-        >
-          <SectionList
-            sections={sections}
-            selectedSectionId={selectedSectionId}
-            onSelectSection={selectSection}
-            onCreateSection={(name, color) => createSection(selectedNotebook.id, name, color)}
-            onUpdateSection={(sectionId, updates) => updateSection(selectedNotebook.id, sectionId, updates)}
-            onDeleteSection={(sectionId, moveItemsTo) => deleteSection(selectedNotebook.id, sectionId, moveItemsTo)}
-            unassignedPagesCount={unassignedPagesCount}
-          />
-        </div>
+        <>
+          <div
+            className="flex-shrink-0 border-r"
+            style={{
+              width: `${panelWidths.sections}px`,
+              backgroundColor: "var(--color-bg-secondary)",
+              borderColor: "var(--color-border)",
+            }}
+          >
+            <SectionList
+              sections={sections}
+              selectedSectionId={selectedSectionId}
+              onSelectSection={selectSection}
+              onCreateSection={(name, color) => createSection(selectedNotebook.id, name, color)}
+              onUpdateSection={(sectionId, updates) => updateSection(selectedNotebook.id, sectionId, updates)}
+              onDeleteSection={(sectionId, moveItemsTo) => deleteSection(selectedNotebook.id, sectionId, moveItemsTo)}
+              unassignedPagesCount={unassignedPagesCount}
+            />
+          </div>
+          <ResizeHandle direction="horizontal" onResize={handleSectionsResize} />
+        </>
       )}
 
       {/* Page list panel with folder tree */}
       <div
-        className="w-64 flex-shrink-0 border-r"
+        className="flex-shrink-0 border-r"
         style={{
+          width: `${panelWidths.folderTree}px`,
           backgroundColor: "var(--color-bg-secondary)",
           borderColor: "var(--color-border)",
         }}
@@ -459,12 +526,18 @@ export function EditorArea() {
           onViewCover={() => setShowCover(true)}
         />
       </div>
+      <ResizeHandle direction="horizontal" onResize={handleFolderTreeResize} />
 
       {/* Editor panel */}
       <div
         className="flex flex-1 flex-col overflow-hidden"
         style={{ backgroundColor: "var(--color-bg-primary)" }}
       >
+        {/* Tab bar - always shown if tabs are open */}
+        {openTabs.length > 0 && (
+          <TabBar onTabSelect={handleTabSelect} />
+        )}
+
         {selectedPage ? (
           <>
             <PageHeader

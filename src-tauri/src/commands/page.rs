@@ -51,6 +51,7 @@ pub fn create_page(
     notebook_id: String,
     title: String,
     folder_id: Option<String>,
+    parent_page_id: Option<String>,
     section_id: Option<String>,
 ) -> CommandResult<Page> {
     let storage = state.storage.lock().unwrap();
@@ -61,6 +62,13 @@ pub fn create_page(
         .map(|id| {
             Uuid::parse_str(&id).map_err(|e| CommandError {
                 message: format!("Invalid folder ID: {}", e),
+            })
+        })
+        .transpose()?;
+    let parent_pg_id = parent_page_id
+        .map(|id| {
+            Uuid::parse_str(&id).map_err(|e| CommandError {
+                message: format!("Invalid parent page ID: {}", e),
             })
         })
         .transpose()?;
@@ -77,6 +85,12 @@ pub fn create_page(
     // If folder_id specified, move page to that folder
     if fld_id.is_some() {
         page = storage.move_page_to_folder(nb_id, page.id, fld_id, None)?;
+    }
+
+    // If parent_page_id specified, set the parent page
+    if parent_pg_id.is_some() {
+        page.parent_page_id = parent_pg_id;
+        storage.update_page(&page)?;
     }
 
     // If section_id specified, set the section
@@ -213,4 +227,70 @@ pub fn delete_page(
     }
 
     Ok(())
+}
+
+/// Move a page to be a child of another page (nested pages)
+#[tauri::command]
+pub fn move_page_to_parent(
+    state: State<AppState>,
+    notebook_id: String,
+    page_id: String,
+    parent_page_id: Option<String>,
+    position: Option<i32>,
+) -> CommandResult<Page> {
+    let storage = state.storage.lock().unwrap();
+    let nb_id = Uuid::parse_str(&notebook_id).map_err(|e| CommandError {
+        message: format!("Invalid notebook ID: {}", e),
+    })?;
+    let pg_id = Uuid::parse_str(&page_id).map_err(|e| CommandError {
+        message: format!("Invalid page ID: {}", e),
+    })?;
+    let parent_pg_id = parent_page_id
+        .map(|id| {
+            Uuid::parse_str(&id).map_err(|e| CommandError {
+                message: format!("Invalid parent page ID: {}", e),
+            })
+        })
+        .transpose()?;
+
+    let mut page = storage.get_page(nb_id, pg_id)?;
+
+    // Prevent circular reference - can't make a page its own parent
+    if let Some(parent_id) = parent_pg_id {
+        if parent_id == pg_id {
+            return Err(CommandError {
+                message: "Cannot make a page its own parent".to_string(),
+            });
+        }
+
+        // Check for circular reference by walking up the parent chain
+        let mut current_parent = Some(parent_id);
+        while let Some(check_id) = current_parent {
+            if check_id == pg_id {
+                return Err(CommandError {
+                    message: "Cannot create circular parent reference".to_string(),
+                });
+            }
+            let parent_page = storage.get_page(nb_id, check_id)?;
+            current_parent = parent_page.parent_page_id;
+        }
+    }
+
+    // Update parent page reference
+    page.parent_page_id = parent_pg_id;
+
+    // If moving to a parent page, clear folder_id (nested pages don't belong to folders directly)
+    if parent_pg_id.is_some() {
+        page.folder_id = None;
+    }
+
+    // Update position if specified
+    if let Some(pos) = position {
+        page.position = pos;
+    }
+
+    page.updated_at = chrono::Utc::now();
+    storage.update_page(&page)?;
+
+    Ok(page)
 }

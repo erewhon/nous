@@ -2,14 +2,23 @@
 
 use std::path::Path;
 
-use tauri::State;
+use serde::Serialize;
+use tauri::{AppHandle, Emitter, State};
 
-use crate::notion::{import_notion_zip, preview_notion_import, NotionImportPreview};
+use crate::notion::{import_notion_zip_with_progress, preview_notion_import, NotionImportPreview};
 use crate::storage::Notebook;
 use crate::AppState;
 
 /// Error type for command results
 type CommandResult<T> = Result<T, String>;
+
+/// Progress event payload
+#[derive(Clone, Serialize)]
+struct ImportProgress {
+    current: usize,
+    total: usize,
+    message: String,
+}
 
 /// Preview a Notion export ZIP file
 ///
@@ -30,6 +39,7 @@ pub fn preview_notion_export(zip_path: String) -> CommandResult<NotionImportPrev
 /// Converts all markdown files and databases in the ZIP to a new Katt notebook.
 #[tauri::command]
 pub fn import_notion_export(
+    app: AppHandle,
     state: State<AppState>,
     zip_path: String,
     notebook_name: Option<String>,
@@ -43,13 +53,36 @@ pub fn import_notion_export(
     let storage = state.storage.lock().map_err(|e| e.to_string())?;
     let notebooks_dir = storage.notebooks_base_dir();
 
-    // Import the notebook
+    // Create progress callback
+    let app_clone = app.clone();
+    let progress_callback = move |current: usize, total: usize, message: &str| {
+        let _ = app_clone.emit(
+            "import-progress",
+            ImportProgress {
+                current,
+                total,
+                message: message.to_string(),
+            },
+        );
+    };
+
+    // Import the notebook with progress reporting
     let (notebook, pages) =
-        import_notion_zip(path, &notebooks_dir, notebook_name).map_err(|e| e.to_string())?;
+        import_notion_zip_with_progress(path, &notebooks_dir, notebook_name, progress_callback)
+            .map_err(|e| e.to_string())?;
 
     // Index all pages in search
+    let total_pages = pages.len();
     let mut search_index = state.search_index.lock().map_err(|e| e.to_string())?;
-    for page in &pages {
+    for (i, page) in pages.iter().enumerate() {
+        let _ = app.emit(
+            "import-progress",
+            ImportProgress {
+                current: i + 1,
+                total: total_pages,
+                message: "Indexing pages...".to_string(),
+            },
+        );
         search_index.index_page(page).map_err(|e| e.to_string())?;
     }
 

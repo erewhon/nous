@@ -5,7 +5,11 @@ import { useFlashcardStore } from "../../stores/flashcardStore";
 import { NotebookList } from "../NotebookList/NotebookList";
 import { LibrarySwitcher } from "../Library";
 
-export function Sidebar() {
+interface SidebarProps {
+  width?: number;
+}
+
+export function Sidebar({ width = 256 }: SidebarProps) {
   const { selectedNotebookId, createNotebook, getVisibleNotebooks, showArchived, toggleShowArchived, getArchivedNotebooks } = useNotebookStore();
   const visibleNotebooks = getVisibleNotebooks();
   const archivedCount = getArchivedNotebooks().length;
@@ -15,8 +19,9 @@ export function Sidebar() {
 
   return (
     <aside
-      className="flex h-full w-64 flex-col border-r"
+      className="flex h-full flex-shrink-0 flex-col border-r"
       style={{
+        width: `${width}px`,
         backgroundColor: "var(--color-bg-sidebar)",
         borderColor: "var(--color-border)",
       }}
@@ -49,26 +54,52 @@ export function Sidebar() {
             Katt
           </span>
         </div>
-        <button
-          onClick={() => createNotebook("New Notebook")}
-          className="flex h-7 w-7 items-center justify-center rounded-md transition-colors"
-          style={{ color: "var(--color-text-muted)" }}
-          title="Create notebook"
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => {
+              window.dispatchEvent(new CustomEvent("open-backup-dialog"));
+            }}
+            className="flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
+            style={{ color: "var(--color-text-muted)" }}
+            title="Import notebook"
           >
-            <path d="M12 5v14M5 12h14" />
-          </svg>
-        </button>
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+          </button>
+          <button
+            onClick={() => createNotebook("New Notebook")}
+            className="flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
+            style={{ color: "var(--color-text-muted)" }}
+            title="Create notebook"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+          </button>
+        </div>
       </div>
 
       {/* Search */}

@@ -5,6 +5,7 @@ import { usePageStore } from "../../stores/pageStore";
 import { useFolderStore } from "../../stores/folderStore";
 import { useSectionStore } from "../../stores/sectionStore";
 import { useLinkStore } from "../../stores/linkStore";
+import { useThemeStore } from "../../stores/themeStore";
 import { NotebookOverview, NotebookDropdown } from "../NotebookOverview";
 import { FolderTree } from "../Editor/FolderTree";
 import { BlockEditor } from "../Editor/BlockEditor";
@@ -13,6 +14,7 @@ import { BacklinksPanel } from "../Editor/BacklinksPanel";
 import { SimilarPagesPanel } from "../Editor/SimilarPagesPanel";
 import { CoverPage } from "../CoverPage";
 import { SectionList } from "../Sections";
+import { ResizeHandle } from "./ResizeHandle";
 import type { EditorData, Page } from "../../types/page";
 import * as api from "../../utils/api";
 import { calculatePageStats, type PageStats } from "../../utils/pageStats";
@@ -33,8 +35,25 @@ export function OverviewLayout() {
     deleteSection,
   } = useSectionStore();
   const { updatePageLinks, buildLinksFromPages } = useLinkStore();
+  const panelWidths = useThemeStore((state) => state.panelWidths);
+  const setPanelWidth = useThemeStore((state) => state.setPanelWidth);
   const [isSaving, setIsSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
+
+  // Panel resize handlers
+  const handleSectionsResize = useCallback(
+    (delta: number) => {
+      setPanelWidth("sections", panelWidths.sections + delta);
+    },
+    [panelWidths.sections, setPanelWidth]
+  );
+
+  const handleFolderTreeResize = useCallback(
+    (delta: number) => {
+      setPanelWidth("folderTree", panelWidths.folderTree + delta);
+    },
+    [panelWidths.folderTree, setPanelWidth]
+  );
 
   // Cover page state
   const [coverPage, setCoverPage] = useState<Page | null>(null);
@@ -340,28 +359,33 @@ export function OverviewLayout() {
       <div className="flex flex-1 overflow-hidden">
         {/* Sections panel - shown when sections are enabled */}
         {selectedNotebook.sectionsEnabled && (
-          <div
-            className="w-48 flex-shrink-0 border-r"
-            style={{
-              backgroundColor: "var(--color-bg-secondary)",
-              borderColor: "var(--color-border)",
-            }}
-          >
-            <SectionList
-              sections={sections}
-              selectedSectionId={selectedSectionId}
-              onSelectSection={selectSection}
-              onCreateSection={(name, color) => createSection(selectedNotebook.id, name, color)}
-              onUpdateSection={(sectionId, updates) => updateSection(selectedNotebook.id, sectionId, updates)}
-              onDeleteSection={(sectionId, moveItemsTo) => deleteSection(selectedNotebook.id, sectionId, moveItemsTo)}
-            />
-          </div>
+          <>
+            <div
+              className="flex-shrink-0 border-r"
+              style={{
+                width: `${panelWidths.sections}px`,
+                backgroundColor: "var(--color-bg-secondary)",
+                borderColor: "var(--color-border)",
+              }}
+            >
+              <SectionList
+                sections={sections}
+                selectedSectionId={selectedSectionId}
+                onSelectSection={selectSection}
+                onCreateSection={(name, color) => createSection(selectedNotebook.id, name, color)}
+                onUpdateSection={(sectionId, updates) => updateSection(selectedNotebook.id, sectionId, updates)}
+                onDeleteSection={(sectionId, moveItemsTo) => deleteSection(selectedNotebook.id, sectionId, moveItemsTo)}
+              />
+            </div>
+            <ResizeHandle direction="horizontal" onResize={handleSectionsResize} />
+          </>
         )}
 
         {/* Page list panel with folder tree */}
         <div
-          className="w-64 flex-shrink-0 border-r"
+          className="flex-shrink-0 border-r"
           style={{
+            width: `${panelWidths.folderTree}px`,
             backgroundColor: "var(--color-bg-secondary)",
             borderColor: "var(--color-border)",
           }}
@@ -384,6 +408,7 @@ export function OverviewLayout() {
             onViewCover={() => setShowCover(true)}
           />
         </div>
+        <ResizeHandle direction="horizontal" onResize={handleFolderTreeResize} />
 
         {/* Editor panel */}
         <div

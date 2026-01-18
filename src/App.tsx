@@ -35,6 +35,14 @@ function App() {
   }, [applyTheme]);
 
   const [showCommandPalette, setShowCommandPalette] = useState(false);
+  const [showBackup, setShowBackup] = useState(false);
+
+  // Listen for custom event to open backup dialog
+  useEffect(() => {
+    const handleOpenBackup = () => setShowBackup(true);
+    window.addEventListener("open-backup-dialog", handleOpenBackup);
+    return () => window.removeEventListener("open-backup-dialog", handleOpenBackup);
+  }, []);
   const [showGraph, setShowGraph] = useState(false);
   const [showWebResearch, setShowWebResearch] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -42,7 +50,6 @@ function App() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showTemplateDialog, setShowTemplateDialog] = useState(false);
   const [showTagManager, setShowTagManager] = useState(false);
-  const [showBackup, setShowBackup] = useState(false);
 
   const { selectedNotebookId, createNotebook } = useNotebookStore();
   const {

@@ -9,6 +9,30 @@ export type UIMode = "classic" | "overview";
 export type NotebookSortOption = "name-asc" | "name-desc" | "updated" | "created" | "pages";
 export type EditorKeymap = "standard" | "vim" | "emacs";
 
+export interface PanelWidths {
+  sidebar: number;      // Default 256px
+  sections: number;     // Default 192px
+  folderTree: number;   // Default 256px
+}
+
+const DEFAULT_PANEL_WIDTHS: PanelWidths = {
+  sidebar: 256,
+  sections: 192,
+  folderTree: 256,
+};
+
+const MIN_PANEL_WIDTHS: PanelWidths = {
+  sidebar: 180,
+  sections: 140,
+  folderTree: 180,
+};
+
+const MAX_PANEL_WIDTHS: PanelWidths = {
+  sidebar: 400,
+  sections: 300,
+  folderTree: 400,
+};
+
 interface ThemeSettings {
   mode: ThemeMode;
   colorScheme: ColorScheme;
@@ -25,6 +49,7 @@ interface ThemeState {
   showPageStats: boolean;
   uiMode: UIMode;
   notebookSortBy: NotebookSortOption;
+  panelWidths: PanelWidths;
   setMode: (mode: ThemeMode) => void;
   setColorScheme: (scheme: ColorScheme) => void;
   setFontFamily: (font: FontFamily) => void;
@@ -35,6 +60,7 @@ interface ThemeState {
   togglePageStats: () => void;
   setUIMode: (mode: UIMode) => void;
   setNotebookSortBy: (sort: NotebookSortOption) => void;
+  setPanelWidth: (panel: keyof PanelWidths, width: number) => void;
   applyTheme: () => void;
 }
 
@@ -322,6 +348,7 @@ export const useThemeStore = create<ThemeState>()(
       showPageStats: true,
       uiMode: "classic" as UIMode,
       notebookSortBy: "name-asc" as NotebookSortOption,
+      panelWidths: DEFAULT_PANEL_WIDTHS,
 
       setMode: (mode) => {
         set((state) => ({
@@ -384,6 +411,15 @@ export const useThemeStore = create<ThemeState>()(
         set({ notebookSortBy: sort });
       },
 
+      setPanelWidth: (panel, width) => {
+        const min = MIN_PANEL_WIDTHS[panel];
+        const max = MAX_PANEL_WIDTHS[panel];
+        const clampedWidth = Math.min(max, Math.max(min, width));
+        set((state) => ({
+          panelWidths: { ...state.panelWidths, [panel]: clampedWidth },
+        }));
+      },
+
       applyTheme: () => {
         const { settings, resolvedMode } = get();
         const root = document.documentElement;
@@ -419,7 +455,7 @@ export const useThemeStore = create<ThemeState>()(
     }),
     {
       name: "katt-theme",
-      partialize: (state) => ({ settings: state.settings, showPageStats: state.showPageStats, uiMode: state.uiMode, notebookSortBy: state.notebookSortBy }),
+      partialize: (state) => ({ settings: state.settings, showPageStats: state.showPageStats, uiMode: state.uiMode, notebookSortBy: state.notebookSortBy, panelWidths: state.panelWidths }),
       onRehydrateStorage: () => (state) => {
         if (state) {
           // Resolve system theme on rehydration
@@ -427,6 +463,13 @@ export const useThemeStore = create<ThemeState>()(
             state.resolvedMode = getSystemTheme();
           } else {
             state.resolvedMode = state.settings.mode;
+          }
+          // Migration: ensure panelWidths exists with defaults
+          if (!state.panelWidths) {
+            state.panelWidths = DEFAULT_PANEL_WIDTHS;
+          } else {
+            // Ensure all panel widths exist (in case new panels are added)
+            state.panelWidths = { ...DEFAULT_PANEL_WIDTHS, ...state.panelWidths };
           }
           // Apply theme after rehydration
           setTimeout(() => state.applyTheme(), 0);

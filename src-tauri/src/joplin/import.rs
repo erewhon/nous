@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::markdown::import_markdown_to_page;
-use crate::storage::{Notebook, NotebookType, Page, StorageError};
+use crate::storage::{Folder, Notebook, NotebookType, Page, StorageError};
 
 type Result<T> = std::result::Result<T, StorageError>;
 
@@ -89,12 +89,24 @@ pub struct JoplinNotePreview {
     pub created: Option<String>,
 }
 
+/// Joplin icon structure (for folder/note icons)
+#[derive(Debug, Clone, Deserialize)]
+struct JoplinIcon {
+    emoji: Option<String>,
+    #[allow(dead_code)]
+    name: Option<String>,
+    #[serde(rename = "type")]
+    #[allow(dead_code)]
+    icon_type: Option<i32>,
+}
+
 /// Internal structure for parsed Joplin metadata
 #[derive(Debug, Clone, Default)]
 struct JoplinMetadata {
     id: String,
     parent_id: Option<String>,
     title: Option<String>,
+    icon: Option<String>, // Emoji icon for folder/note
     created_time: Option<i64>,
     updated_time: Option<i64>,
     is_todo: bool,
@@ -119,6 +131,7 @@ struct JoplinFolder {
     #[allow(dead_code)]
     id: String,
     title: String,
+    icon: Option<String>, // Emoji icon
     parent_id: Option<String>,
 }
 
@@ -229,6 +242,18 @@ fn parse_joplin_metadata(content: &str) -> (String, JoplinMetadata) {
                         metadata.file_extension = Some(value.to_string());
                     }
                 }
+                "icon" => {
+                    // Icon is stored as JSON: {"emoji":"🕰️","name":"mantelpiece clock","type":1}
+                    if !value.is_empty() {
+                        if let Ok(icon) = serde_json::from_str::<JoplinIcon>(value) {
+                            if let Some(emoji) = icon.emoji {
+                                if !emoji.is_empty() {
+                                    metadata.icon = Some(emoji);
+                                }
+                            }
+                        }
+                    }
+                }
                 _ => {}
             }
         }
@@ -237,16 +262,35 @@ fn parse_joplin_metadata(content: &str) -> (String, JoplinMetadata) {
     (body, metadata)
 }
 
-/// Extract title from the first line of markdown (if it's a heading)
+/// Extract title from the first line of markdown
+/// Checks for: markdown heading, or just uses first non-empty line
 fn extract_title_from_markdown(content: &str) -> Option<String> {
     let first_line = content.lines().next()?;
     let trimmed = first_line.trim();
+
+    if trimmed.is_empty() {
+        // Skip empty first line, try second line
+        let second_line = content.lines().nth(1)?;
+        let trimmed2 = second_line.trim();
+        if trimmed2.is_empty() {
+            return None;
+        }
+        // Check for markdown heading
+        if trimmed2.starts_with("# ") {
+            return Some(trimmed2[2..].trim().to_string());
+        }
+        // Use first non-empty line as title (truncate if too long)
+        let title = trimmed2.chars().take(100).collect::<String>();
+        return Some(title);
+    }
 
     // Check for markdown heading
     if trimmed.starts_with("# ") {
         Some(trimmed[2..].trim().to_string())
     } else {
-        None
+        // Use first non-empty line as title (truncate if too long)
+        let title = trimmed.chars().take(100).collect::<String>();
+        Some(title)
     }
 }
 
@@ -291,7 +335,12 @@ fn build_folder_path(
         seen.insert(id.clone());
 
         if let Some(folder) = folders.get(&id) {
-            path_parts.push(folder.title.clone());
+            // Include emoji in folder path if available
+            let folder_name = match &folder.icon {
+                Some(emoji) if !emoji.is_empty() => format!("{} {}", emoji, folder.title),
+                _ => folder.title.clone(),
+            };
+            path_parts.push(folder_name);
             current_id = folder.parent_id.clone();
         } else {
             break;
@@ -304,6 +353,33 @@ fn build_folder_path(
         path_parts.reverse();
         Some(path_parts.join("/"))
     }
+}
+
+/// Get the depth of a folder in the hierarchy (0 = root level)
+fn get_folder_depth(folder_id: &str, folders: &HashMap<String, JoplinFolder>) -> usize {
+    let mut depth = 0;
+    let mut current_id = Some(folder_id.to_string());
+    let mut seen = std::collections::HashSet::new();
+
+    while let Some(id) = current_id {
+        if seen.contains(&id) {
+            break;
+        }
+        seen.insert(id.clone());
+
+        if let Some(folder) = folders.get(&id) {
+            if folder.parent_id.is_some() {
+                depth += 1;
+                current_id = folder.parent_id.clone();
+            } else {
+                break;
+            }
+        } else {
+            break;
+        }
+    }
+
+    depth
 }
 
 /// Read items from a JEX archive (tar file)
@@ -328,9 +404,14 @@ fn read_jex_archive(jex_path: &Path) -> Result<(Vec<JoplinItem>, HashMap<String,
             .map(|e| e.to_string_lossy().to_lowercase());
 
         if extension.as_deref() == Some("md") {
-            // Read markdown content
-            let mut content = String::new();
-            entry.read_to_string(&mut content)?;
+            // Read markdown content as bytes first, then convert to string
+            // This handles potential UTF-8 encoding issues with emojis
+            let mut bytes = Vec::new();
+            entry.read_to_end(&mut bytes)?;
+
+            // Try to parse as UTF-8, fall back to lossy conversion
+            let content = String::from_utf8(bytes)
+                .unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned());
 
             let (body, metadata) = parse_joplin_metadata(&content);
 
@@ -376,8 +457,12 @@ fn read_raw_directory(dir_path: &Path) -> Result<(Vec<JoplinItem>, HashMap<Strin
                 .map(|e| e.to_string_lossy().to_lowercase());
 
             if extension.as_deref() == Some("md") {
-                // Read markdown content
-                let content = fs::read_to_string(&path)?;
+                // Read markdown content as bytes first, then convert to string
+                // This handles potential UTF-8 encoding issues with emojis
+                let bytes = fs::read(&path)?;
+                let content = String::from_utf8(bytes)
+                    .unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).into_owned());
+
                 let (body, metadata) = parse_joplin_metadata(&content);
 
                 items.push(JoplinItem {
@@ -469,6 +554,7 @@ pub fn preview_joplin_import(path: &Path) -> Result<JoplinImportPreview> {
                     JoplinFolder {
                         id: item.metadata.id.clone(),
                         title,
+                        icon: item.metadata.icon.clone(),
                         parent_id: item.metadata.parent_id.clone(),
                     },
                 );
@@ -628,6 +714,7 @@ pub fn import_joplin(
                     JoplinFolder {
                         id: item.metadata.id.clone(),
                         title,
+                        icon: item.metadata.icon.clone(),
                         parent_id: item.metadata.parent_id.clone(),
                     },
                 );
@@ -717,6 +804,45 @@ pub fn import_joplin(
     // Write notebook.json
     let notebook_json = serde_json::to_string_pretty(&notebook)?;
     fs::write(notebook_dir.join("notebook.json"), notebook_json)?;
+
+    // Create Katt folders from Joplin folders
+    // We need to handle folder hierarchy - create parent folders first
+    let mut joplin_to_katt_folder: HashMap<String, Uuid> = HashMap::new();
+    let mut katt_folders: Vec<Folder> = Vec::new();
+
+    // Sort folders by depth (no parent first, then single parent, etc.)
+    // This ensures parents are created before children
+    let mut sorted_joplin_folders: Vec<&JoplinFolder> = folders.values().collect();
+    sorted_joplin_folders.sort_by(|a, b| {
+        let depth_a = get_folder_depth(&a.id, &folders);
+        let depth_b = get_folder_depth(&b.id, &folders);
+        depth_a.cmp(&depth_b)
+    });
+
+    for joplin_folder in sorted_joplin_folders {
+        let parent_uuid = joplin_folder
+            .parent_id
+            .as_ref()
+            .and_then(|pid| joplin_to_katt_folder.get(pid).copied());
+
+        // Build folder name with emoji prefix if available
+        let folder_name = match &joplin_folder.icon {
+            Some(emoji) if !emoji.is_empty() => format!("{} {}", emoji, joplin_folder.title),
+            _ => joplin_folder.title.clone(),
+        };
+
+        let mut katt_folder = Folder::new(notebook_id, folder_name, parent_uuid);
+        katt_folder.position = katt_folders.len() as i32;
+
+        joplin_to_katt_folder.insert(joplin_folder.id.clone(), katt_folder.id);
+        katt_folders.push(katt_folder);
+    }
+
+    // Save folders to folders.json
+    if !katt_folders.is_empty() {
+        let folders_json = serde_json::to_string_pretty(&katt_folders)?;
+        fs::write(notebook_dir.join("folders.json"), folders_json)?;
+    }
 
     // Copy resources/assets
     let assets_dir = notebook_dir.join("assets");
@@ -847,6 +973,13 @@ pub fn import_joplin(
         // Import markdown content to page
         let mut page = import_markdown_to_page(&content, notebook_id, &title);
 
+        // Set folder_id if the note was in a Joplin folder
+        if let Some(joplin_parent_id) = &note.metadata.parent_id {
+            if let Some(&katt_folder_id) = joplin_to_katt_folder.get(joplin_parent_id) {
+                page.folder_id = Some(katt_folder_id);
+            }
+        }
+
         // Override tags
         page.tags = page_tags;
 
@@ -867,6 +1000,344 @@ pub fn import_joplin(
 
         pages.push(page);
     }
+
+    Ok((notebook, pages))
+}
+
+/// Import a Joplin export as a new notebook with progress reporting
+pub fn import_joplin_with_progress<F>(
+    path: &Path,
+    notebooks_dir: &Path,
+    notebook_name: Option<String>,
+    progress: F,
+) -> Result<(Notebook, Vec<Page>)>
+where
+    F: Fn(usize, usize, &str),
+{
+    if !path.exists() {
+        return Err(StorageError::Io(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "Joplin export not found",
+        )));
+    }
+
+    progress(0, 100, "Reading export file...");
+
+    let is_jex = is_jex_archive(path);
+
+    let (items, resource_data) = if is_jex {
+        read_jex_archive(path)?
+    } else if path.is_dir() {
+        read_raw_directory(path)?
+    } else {
+        return Err(StorageError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "Path must be a JEX archive or RAW export directory",
+        )));
+    };
+
+    progress(10, 100, "Processing items...");
+
+    // Categorize items
+    let mut folders: HashMap<String, JoplinFolder> = HashMap::new();
+    let mut tags: HashMap<String, JoplinTag> = HashMap::new();
+    let mut note_tag_map: HashMap<String, Vec<String>> = HashMap::new();
+    let mut resource_metadata: HashMap<String, JoplinMetadata> = HashMap::new();
+    let mut notes: Vec<JoplinItem> = Vec::new();
+
+    for item in items {
+        match item.metadata.item_type {
+            Some(JoplinType::Note) => {
+                notes.push(item);
+            }
+            Some(JoplinType::Folder) => {
+                let title = item
+                    .metadata
+                    .title
+                    .clone()
+                    .or_else(|| extract_title_from_markdown(&item.content))
+                    .unwrap_or_else(|| "Untitled Folder".to_string());
+
+                folders.insert(
+                    item.metadata.id.clone(),
+                    JoplinFolder {
+                        id: item.metadata.id.clone(),
+                        title,
+                        icon: item.metadata.icon.clone(),
+                        parent_id: item.metadata.parent_id.clone(),
+                    },
+                );
+            }
+            Some(JoplinType::Tag) => {
+                let title = item
+                    .metadata
+                    .title
+                    .clone()
+                    .or_else(|| extract_title_from_markdown(&item.content))
+                    .unwrap_or_else(|| "Untitled Tag".to_string());
+
+                tags.insert(
+                    item.metadata.id.clone(),
+                    JoplinTag {
+                        id: item.metadata.id.clone(),
+                        title,
+                    },
+                );
+            }
+            Some(JoplinType::Resource) => {
+                resource_metadata.insert(item.metadata.id.clone(), item.metadata);
+            }
+            Some(JoplinType::NoteTag) => {
+                if let Some(note_id) = item.metadata.parent_id.clone() {
+                    let (_, note_tag_meta) = parse_joplin_metadata(&item.content);
+                    if let Some(tag_id) = note_tag_meta.parent_id {
+                        note_tag_map.entry(note_id).or_default().push(tag_id);
+                    }
+                }
+            }
+            None => {}
+        }
+    }
+
+    progress(20, 100, "Creating notebook...");
+
+    // Create the notebook
+    let notebook_id = Uuid::new_v4();
+    let notebook_name = notebook_name.unwrap_or_else(|| {
+        if folders.len() == 1 {
+            folders
+                .values()
+                .next()
+                .map(|f| f.title.clone())
+                .unwrap_or_else(|| "Imported from Joplin".to_string())
+        } else {
+            path.file_stem()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_else(|| "Imported from Joplin".to_string())
+        }
+    });
+
+    let now = Utc::now();
+    let notebook = Notebook {
+        id: notebook_id,
+        name: notebook_name,
+        notebook_type: NotebookType::Standard,
+        icon: Some("📔".to_string()),
+        color: None,
+        sections_enabled: false,
+        archived: false,
+        system_prompt: None,
+        system_prompt_mode: crate::storage::SystemPromptMode::default(),
+        ai_provider: None,
+        ai_model: None,
+        sync_config: None,
+        created_at: now,
+        updated_at: now,
+    };
+
+    let notebook_dir = notebooks_dir.join(notebook_id.to_string());
+    fs::create_dir_all(&notebook_dir)?;
+    fs::create_dir_all(notebook_dir.join("pages"))?;
+    fs::create_dir_all(notebook_dir.join("assets"))?;
+
+    let notebook_json = serde_json::to_string_pretty(&notebook)?;
+    fs::write(notebook_dir.join("notebook.json"), notebook_json)?;
+
+    progress(25, 100, "Creating folders...");
+
+    // Create Katt folders from Joplin folders
+    let mut joplin_to_katt_folder: HashMap<String, Uuid> = HashMap::new();
+    let mut katt_folders: Vec<Folder> = Vec::new();
+
+    let mut sorted_joplin_folders: Vec<&JoplinFolder> = folders.values().collect();
+    sorted_joplin_folders.sort_by(|a, b| {
+        let depth_a = get_folder_depth(&a.id, &folders);
+        let depth_b = get_folder_depth(&b.id, &folders);
+        depth_a.cmp(&depth_b)
+    });
+
+    for joplin_folder in sorted_joplin_folders {
+        let parent_uuid = joplin_folder
+            .parent_id
+            .as_ref()
+            .and_then(|pid| joplin_to_katt_folder.get(pid).copied());
+
+        let folder_name = match &joplin_folder.icon {
+            Some(emoji) if !emoji.is_empty() => format!("{} {}", emoji, joplin_folder.title),
+            _ => joplin_folder.title.clone(),
+        };
+
+        let mut katt_folder = Folder::new(notebook_id, folder_name, parent_uuid);
+        katt_folder.position = katt_folders.len() as i32;
+
+        joplin_to_katt_folder.insert(joplin_folder.id.clone(), katt_folder.id);
+        katt_folders.push(katt_folder);
+    }
+
+    if !katt_folders.is_empty() {
+        let folders_json = serde_json::to_string_pretty(&katt_folders)?;
+        fs::write(notebook_dir.join("folders.json"), folders_json)?;
+    }
+
+    // Copy resources/assets
+    let assets_dir = notebook_dir.join("assets");
+    let mut resource_mapping: HashMap<String, String> = HashMap::new();
+    let total_resources = resource_data.len();
+
+    for (i, (resource_id, data)) in resource_data.iter().enumerate() {
+        if i % 10 == 0 || i == total_resources - 1 {
+            progress(
+                30 + (i * 20) / total_resources.max(1),
+                100,
+                &format!("Copying assets ({}/{})", i + 1, total_resources),
+            );
+        }
+
+        if data.is_empty() {
+            continue;
+        }
+
+        let (filename, extension) = if let Some(meta) = resource_metadata.get(resource_id) {
+            let ext = meta
+                .file_extension
+                .clone()
+                .or_else(|| {
+                    meta.mime.as_ref().and_then(|m| match m.as_str() {
+                        "image/png" => Some("png".to_string()),
+                        "image/jpeg" => Some("jpg".to_string()),
+                        "image/gif" => Some("gif".to_string()),
+                        "image/webp" => Some("webp".to_string()),
+                        "application/pdf" => Some("pdf".to_string()),
+                        _ => None,
+                    })
+                })
+                .unwrap_or_else(|| "bin".to_string());
+
+            let name = meta
+                .filename
+                .clone()
+                .unwrap_or_else(|| format!("{}.{}", resource_id, ext));
+
+            (name, ext)
+        } else {
+            let ext = guess_extension_from_data(data);
+            (format!("{}.{}", resource_id, ext), ext)
+        };
+
+        let mut target_filename = filename.clone();
+        let mut counter = 1;
+        while assets_dir.join(&target_filename).exists() {
+            let stem = Path::new(&filename)
+                .file_stem()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_default();
+            target_filename = format!("{}_{}.{}", stem, counter, extension);
+            counter += 1;
+        }
+
+        let target_path = assets_dir.join(&target_filename);
+        fs::write(&target_path, data)?;
+
+        let asset_url = format!("asset://{}/{}", notebook_id, target_filename);
+        resource_mapping.insert(resource_id.clone(), asset_url);
+    }
+
+    // Process notes
+    let mut pages: Vec<Page> = Vec::new();
+    let total_notes = notes.len();
+
+    for (i, note) in notes.into_iter().enumerate() {
+        if i % 5 == 0 || i == total_notes - 1 {
+            progress(
+                50 + (i * 50) / total_notes.max(1),
+                100,
+                &format!("Importing notes ({}/{})", i + 1, total_notes),
+            );
+        }
+
+        let title = note
+            .metadata
+            .title
+            .clone()
+            .or_else(|| extract_title_from_markdown(&note.content))
+            .unwrap_or_else(|| "Untitled".to_string());
+
+        let content = convert_resource_references(&note.content, &resource_mapping);
+
+        let mut page_tags: Vec<String> = Vec::new();
+
+        if let Some(parent_id) = &note.metadata.parent_id {
+            if let Some(folder_path) = build_folder_path(parent_id, &folders) {
+                for part in folder_path.split('/') {
+                    let tag = part
+                        .to_lowercase()
+                        .replace(' ', "-")
+                        .chars()
+                        .filter(|c| c.is_alphanumeric() || *c == '-')
+                        .collect::<String>();
+                    if !tag.is_empty() && !page_tags.contains(&tag) {
+                        page_tags.push(tag);
+                    }
+                }
+            }
+        }
+
+        if let Some(tag_ids) = note_tag_map.get(&note.metadata.id) {
+            for tag_id in tag_ids {
+                if let Some(tag) = tags.get(tag_id) {
+                    let tag_name = tag
+                        .title
+                        .to_lowercase()
+                        .replace(' ', "-")
+                        .chars()
+                        .filter(|c| c.is_alphanumeric() || *c == '-')
+                        .collect::<String>();
+                    if !tag_name.is_empty() && !page_tags.contains(&tag_name) {
+                        page_tags.push(tag_name);
+                    }
+                }
+            }
+        }
+
+        if note.metadata.is_todo {
+            if note.metadata.todo_completed {
+                if !page_tags.contains(&"completed".to_string()) {
+                    page_tags.push("completed".to_string());
+                }
+            } else {
+                if !page_tags.contains(&"todo".to_string()) {
+                    page_tags.push("todo".to_string());
+                }
+            }
+        }
+
+        let mut page = import_markdown_to_page(&content, notebook_id, &title);
+
+        if let Some(joplin_parent_id) = &note.metadata.parent_id {
+            if let Some(&katt_folder_id) = joplin_to_katt_folder.get(joplin_parent_id) {
+                page.folder_id = Some(katt_folder_id);
+            }
+        }
+
+        page.tags = page_tags;
+
+        if let Some(ts) = note.metadata.created_time.and_then(parse_joplin_timestamp) {
+            page.created_at = ts;
+        }
+        if let Some(ts) = note.metadata.updated_time.and_then(parse_joplin_timestamp) {
+            page.updated_at = ts;
+        }
+
+        let page_path = notebook_dir
+            .join("pages")
+            .join(format!("{}.json", page.id));
+        let page_json = serde_json::to_string_pretty(&page)?;
+        fs::write(page_path, page_json)?;
+
+        pages.push(page);
+    }
+
+    progress(100, 100, "Import complete");
 
     Ok((notebook, pages))
 }
@@ -926,12 +1397,24 @@ type_: 1"#;
 
     #[test]
     fn test_extract_title_from_markdown() {
+        // Standard markdown heading
         assert_eq!(
             extract_title_from_markdown("# My Title\n\nContent"),
             Some("My Title".to_string())
         );
+        // Plain text first line (no heading) - use as title
         assert_eq!(
-            extract_title_from_markdown("No heading here"),
+            extract_title_from_markdown("My Plain Title\n\nContent"),
+            Some("My Plain Title".to_string())
+        );
+        // Empty first line, heading on second line
+        assert_eq!(
+            extract_title_from_markdown("\n# My Title\n\nContent"),
+            Some("My Title".to_string())
+        );
+        // Empty content
+        assert_eq!(
+            extract_title_from_markdown(""),
             None
         );
     }
@@ -974,3 +1457,4 @@ type_: 1"#;
         assert_eq!(guess_extension_from_data(&[0x00, 0x01, 0x02]), "bin");
     }
 }
+

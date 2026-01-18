@@ -161,6 +161,7 @@ pub fn run() {
             commands::create_page,
             commands::update_page,
             commands::delete_page,
+            commands::move_page_to_parent,
             // Search commands
             commands::search_pages,
             commands::fuzzy_search_pages,

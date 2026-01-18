@@ -36,6 +36,7 @@ pub fn import_markdown_to_page(markdown: &str, notebook_id: Uuid, fallback_title
         },
         tags: frontmatter.tags,
         folder_id: None,
+        parent_page_id: None,
         section_id: None,
         is_archived: false,
         is_cover: false,

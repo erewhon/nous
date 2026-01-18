@@ -13,6 +13,7 @@ import { WikiLinkTool } from "./WikiLinkTool";
 import { CodeBlockTool } from "./CodeBlockTool";
 import { CalloutTool } from "./CalloutTool";
 import { FlashcardTool } from "./FlashcardTool";
+import { HighlighterTool } from "./HighlighterTool";
 import { PDFTool } from "./PDFTool";
 import { VideoTool } from "./VideoTool";
 import { DrawingTool } from "./DrawingTool";
@@ -84,6 +85,7 @@ export function useEditor({
           inlineToolbar: true,
         },
         marker: Marker,
+        highlighter: HighlighterTool,
         inlineCode: InlineCode,
         delimiter: Delimiter as unknown as ToolConstructable,
         table: {

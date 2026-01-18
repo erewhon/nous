@@ -66,6 +66,7 @@ export const PageSchema = z.object({
   content: EditorDataSchema,
   tags: z.array(z.string()),
   folderId: z.string().uuid().nullable().optional(),
+  parentPageId: z.string().uuid().nullable().optional(), // For nested pages
   sectionId: z.string().uuid().nullable().optional(),
   isArchived: z.boolean().default(false),
   isCover: z.boolean().default(false),

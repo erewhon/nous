@@ -13,9 +13,13 @@ interface FolderTreeItemProps {
   onToggleExpand: (folderId: string) => void;
   onSelectPage: (pageId: string) => void;
   onCreatePage: (folderId?: string) => void;
+  onCreateSubpage?: (parentPageId: string) => void;
   onRenameFolder: (folderId: string, newName: string) => void;
   onDeleteFolder: (folderId: string) => void;
   renderFolder: (folder: Folder, depth: number) => React.ReactNode;
+  getChildPages?: (parentPageId: string) => Page[];
+  expandedPageIds?: Set<string>;
+  onTogglePageExpand?: (pageId: string) => void;
   sections?: Section[];
   onMoveToSection?: (pageId: string, sectionId: string | null) => void;
   onMoveFolderToSection?: (folderId: string, sectionId: string | null) => void;
@@ -32,9 +36,13 @@ export const FolderTreeItem = memo(function FolderTreeItem({
   onToggleExpand,
   onSelectPage,
   onCreatePage,
+  onCreateSubpage,
   onRenameFolder,
   onDeleteFolder,
   renderFolder,
+  getChildPages,
+  expandedPageIds,
+  onTogglePageExpand,
   sections,
   onMoveToSection,
   onMoveFolderToSection,
@@ -143,7 +151,7 @@ export const FolderTreeItem = memo(function FolderTreeItem({
     >
       {/* Folder row */}
       <div
-        className="group flex items-center gap-1 rounded-lg py-1.5 transition-all cursor-pointer"
+        className="group flex min-w-0 items-center gap-1 rounded-lg py-1.5 transition-all cursor-pointer"
         style={{
           paddingLeft: `${paddingLeft}px`,
           paddingRight: "8px",
@@ -347,11 +355,11 @@ export const FolderTreeItem = memo(function FolderTreeItem({
 
       {/* Children (expanded) */}
       {isExpanded && hasChildren && (
-        <ul>
+        <ul className="w-full">
           {/* Child folders */}
           {childFolders.map((childFolder) => renderFolder(childFolder, depth + 1))}
 
-          {/* Pages in folder - use draggable version */}
+          {/* Pages in folder - use draggable version with nested support */}
           {pages.map((page) => (
             <DraggablePageItem
               key={page.id}
@@ -359,8 +367,14 @@ export const FolderTreeItem = memo(function FolderTreeItem({
               isSelected={selectedPageId === page.id}
               depth={depth + 1}
               onSelect={() => onSelectPage(page.id)}
+              onSelectPage={onSelectPage}
+              onCreateSubpage={onCreateSubpage}
               sections={sections}
               onMoveToSection={onMoveToSection}
+              getChildPages={getChildPages}
+              expandedPageIds={expandedPageIds}
+              onTogglePageExpand={onTogglePageExpand}
+              selectedPageId={selectedPageId}
             />
           ))}
         </ul>
@@ -442,7 +456,7 @@ const PageItem = memo(function PageItem({ page, isSelected, depth, onSelect }: P
     <li>
       <button
         onClick={onSelect}
-        className="flex w-full items-center gap-2 rounded-lg py-1.5 text-left transition-all"
+        className="flex w-full min-w-0 items-center gap-2 rounded-lg py-1.5 text-left transition-all"
         style={{
           paddingLeft: `${paddingLeft}px`,
           paddingRight: "8px",
@@ -490,32 +504,73 @@ const PageItem = memo(function PageItem({ page, isSelected, depth, onSelect }: P
   );
 });
 
-// Draggable page item
+// Draggable page item with nested pages support
 interface DraggablePageItemProps {
   page: Page;
   isSelected: boolean;
   depth: number;
+  isDropTarget?: boolean;
   onSelect: () => void;
+  onSelectPage?: (pageId: string) => void; // For recursive child selection
+  onCreateSubpage?: (parentPageId: string) => void;
   sections?: Section[];
   onMoveToSection?: (pageId: string, sectionId: string | null) => void;
+  getChildPages?: (parentPageId: string) => Page[];
+  expandedPageIds?: Set<string>;
+  onTogglePageExpand?: (pageId: string) => void;
+  selectedPageId?: string | null;
 }
 
 const DraggablePageItem = memo(function DraggablePageItem({
   page,
   isSelected,
   depth,
+  isDropTarget = false,
   onSelect,
+  onSelectPage,
+  onCreateSubpage,
   sections,
   onMoveToSection,
+  getChildPages,
+  expandedPageIds,
+  onTogglePageExpand,
+  selectedPageId,
 }: DraggablePageItemProps) {
   const [showContextMenu, setShowContextMenu] = useState(false);
   const [contextMenuPos, setContextMenuPos] = useState({ x: 0, y: 0 });
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+
+  // Make page draggable
+  const {
+    attributes,
+    listeners,
+    setNodeRef: setDraggableRef,
+    transform,
+    isDragging,
+  } = useDraggable({
     id: page.id,
     data: { type: "page", page },
   });
 
+  // Make page a drop target for nesting
+  const { setNodeRef: setDroppableRef, isOver } = useDroppable({
+    id: `page-drop-${page.id}`,
+    data: { type: "page", page },
+  });
+
+  // Combine refs
+  const combinedRef = useCallback(
+    (node: HTMLLIElement | null) => {
+      setDraggableRef(node);
+      setDroppableRef(node);
+    },
+    [setDraggableRef, setDroppableRef]
+  );
+
   const paddingLeft = 12 + (depth + 1) * 16;
+  const childPages = getChildPages ? getChildPages(page.id) : [];
+  const hasChildren = childPages.length > 0;
+  const isExpanded = expandedPageIds?.has(page.id) ?? false;
+  const showDropHighlight = isDropTarget || isOver;
 
   const style = transform
     ? {
@@ -524,12 +579,10 @@ const DraggablePageItem = memo(function DraggablePageItem({
     : undefined;
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
-    if (sections && sections.length > 0 && onMoveToSection) {
-      e.preventDefault();
-      setContextMenuPos({ x: e.clientX, y: e.clientY });
-      setShowContextMenu(true);
-    }
-  }, [sections, onMoveToSection]);
+    e.preventDefault();
+    setContextMenuPos({ x: e.clientX, y: e.clientY });
+    setShowContextMenu(true);
+  }, []);
 
   const handleMoveToSection = useCallback((sectionId: string | null) => {
     if (onMoveToSection) {
@@ -538,67 +591,151 @@ const DraggablePageItem = memo(function DraggablePageItem({
     setShowContextMenu(false);
   }, [onMoveToSection, page.id]);
 
+  const handleCreateSubpage = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (onCreateSubpage) {
+      onCreateSubpage(page.id);
+    }
+    setShowContextMenu(false);
+  }, [onCreateSubpage, page.id]);
+
+  const handleToggleExpand = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    onTogglePageExpand?.(page.id);
+  }, [onTogglePageExpand, page.id]);
+
   return (
     <>
       <li
-        ref={setNodeRef}
+        ref={combinedRef}
         style={style}
         {...listeners}
         {...attributes}
         className={isDragging ? "opacity-50" : ""}
         onContextMenu={handleContextMenu}
       >
-        <button
-          onClick={onSelect}
-          className="flex w-full items-center gap-2 rounded-lg py-1.5 text-left transition-all cursor-grab active:cursor-grabbing"
+        <div
+          className="flex w-full min-w-0 items-center gap-1 rounded-lg py-1.5 text-left transition-all"
           style={{
             paddingLeft: `${paddingLeft}px`,
             paddingRight: "8px",
-            backgroundColor: isSelected ? "var(--color-bg-tertiary)" : "transparent",
+            backgroundColor: showDropHighlight
+              ? "rgba(139, 92, 246, 0.15)"
+              : isSelected
+              ? "var(--color-bg-tertiary)"
+              : "transparent",
+            border: showDropHighlight
+              ? "1px dashed var(--color-accent)"
+              : "1px solid transparent",
             color: isSelected
               ? "var(--color-text-primary)"
               : "var(--color-text-secondary)",
           }}
         >
-          {/* Drag handle indicator */}
-          <span
-            className="flex h-5 w-5 flex-shrink-0 items-center justify-center"
-            style={{
-              color: isSelected ? "var(--color-accent)" : "var(--color-text-muted)",
-            }}
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
+          {/* Expand/collapse toggle for pages with children */}
+          {hasChildren ? (
+            <button
+              onClick={handleToggleExpand}
+              className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded hover:bg-[var(--color-bg-tertiary)]"
+              style={{ color: "var(--color-text-muted)" }}
             >
-              <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
-              <polyline points="14,2 14,8 20,8" />
-            </svg>
-          </span>
-          <span className="flex-1 min-w-0 truncate text-sm">{page.title}</span>
-          {page.isArchived && (
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                style={{
+                  transform: isExpanded ? "rotate(90deg)" : "rotate(0deg)",
+                  transition: "transform 0.15s ease",
+                }}
+              >
+                <polyline points="9,18 15,12 9,6" />
+              </svg>
+            </button>
+          ) : (
+            <span className="w-5" />
+          )}
+
+          {/* Page button */}
+          <button
+            onClick={onSelect}
+            className="flex flex-1 min-w-0 items-center gap-2 text-left cursor-grab active:cursor-grabbing"
+          >
             <span
-              className="flex-shrink-0 rounded px-1 py-0.5 text-xs"
+              className="flex h-5 w-5 flex-shrink-0 items-center justify-center"
               style={{
-                backgroundColor: "rgba(255, 193, 7, 0.15)",
-                color: "rgb(255, 193, 7)",
+                color: isSelected ? "var(--color-accent)" : "var(--color-text-muted)",
               }}
             >
-              Archived
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+                <polyline points="14,2 14,8 20,8" />
+              </svg>
             </span>
-          )}
-        </button>
+            <span className="flex-1 min-w-0 truncate text-sm">{page.title}</span>
+            {hasChildren && (
+              <span
+                className="flex-shrink-0 text-xs"
+                style={{ color: "var(--color-text-muted)" }}
+              >
+                {childPages.length}
+              </span>
+            )}
+            {page.isArchived && (
+              <span
+                className="flex-shrink-0 rounded px-1 py-0.5 text-xs"
+                style={{
+                  backgroundColor: "rgba(255, 193, 7, 0.15)",
+                  color: "rgb(255, 193, 7)",
+                }}
+              >
+                Archived
+              </span>
+            )}
+          </button>
+        </div>
+
+        {/* Child pages */}
+        {hasChildren && isExpanded && onSelectPage && (
+          <ul className="w-full">
+            {childPages.map((childPage) => (
+              <DraggablePageItem
+                key={childPage.id}
+                page={childPage}
+                isSelected={selectedPageId === childPage.id}
+                depth={depth + 1}
+                onSelect={() => onSelectPage(childPage.id)}
+                onSelectPage={onSelectPage}
+                onCreateSubpage={onCreateSubpage}
+                sections={sections}
+                onMoveToSection={onMoveToSection}
+                getChildPages={getChildPages}
+                expandedPageIds={expandedPageIds}
+                onTogglePageExpand={onTogglePageExpand}
+                selectedPageId={selectedPageId}
+              />
+            ))}
+          </ul>
+        )}
       </li>
 
-      {/* Context menu for moving to section */}
-      {showContextMenu && sections && (
+      {/* Context menu */}
+      {showContextMenu && (
         <div
           className="fixed z-50 min-w-40 rounded-lg border py-1 shadow-lg"
           style={{
@@ -610,47 +747,82 @@ const DraggablePageItem = memo(function DraggablePageItem({
           onClick={(e) => e.stopPropagation()}
           onMouseLeave={() => setShowContextMenu(false)}
         >
-          <div
-            className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wider"
-            style={{ color: "var(--color-text-muted)" }}
-          >
-            Move to Section
-          </div>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              handleMoveToSection(null);
-            }}
-            className="flex w-full items-center gap-2 px-3 py-1.5 text-sm transition-colors hover:bg-[var(--color-bg-tertiary)]"
-            style={{
-              color: page.sectionId === null ? "var(--color-accent)" : "var(--color-text-primary)",
-            }}
-          >
-            <span
-              className="h-2 w-2 rounded-full"
-              style={{ backgroundColor: "var(--color-text-muted)" }}
-            />
-            No Section
-          </button>
-          {sections.map((section) => (
+          {/* Create Subpage option */}
+          {onCreateSubpage && (
             <button
-              key={section.id}
-              onClick={(e) => {
-                e.stopPropagation();
-                handleMoveToSection(section.id);
-              }}
+              onClick={handleCreateSubpage}
               className="flex w-full items-center gap-2 px-3 py-1.5 text-sm transition-colors hover:bg-[var(--color-bg-tertiary)]"
-              style={{
-                color: page.sectionId === section.id ? "var(--color-accent)" : "var(--color-text-primary)",
-              }}
+              style={{ color: "var(--color-text-primary)" }}
             >
-              <span
-                className="h-2 w-2 rounded-full"
-                style={{ backgroundColor: section.color || "var(--color-accent)" }}
-              />
-              {section.name}
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+              Create Subpage
             </button>
-          ))}
+          )}
+
+          {/* Section options */}
+          {sections && sections.length > 0 && onMoveToSection && (
+            <>
+              {onCreateSubpage && (
+                <div
+                  className="my-1 border-t"
+                  style={{ borderColor: "var(--color-border)" }}
+                />
+              )}
+              <div
+                className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wider"
+                style={{ color: "var(--color-text-muted)" }}
+              >
+                Move to Section
+              </div>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleMoveToSection(null);
+                }}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-sm transition-colors hover:bg-[var(--color-bg-tertiary)]"
+                style={{
+                  color: page.sectionId === null ? "var(--color-accent)" : "var(--color-text-primary)",
+                }}
+              >
+                <span
+                  className="h-2 w-2 rounded-full"
+                  style={{ backgroundColor: "var(--color-text-muted)" }}
+                />
+                No Section
+              </button>
+              {sections.map((section) => (
+                <button
+                  key={section.id}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleMoveToSection(section.id);
+                  }}
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-sm transition-colors hover:bg-[var(--color-bg-tertiary)]"
+                  style={{
+                    color: page.sectionId === section.id ? "var(--color-accent)" : "var(--color-text-primary)",
+                  }}
+                >
+                  <span
+                    className="h-2 w-2 rounded-full"
+                    style={{ backgroundColor: section.color || "var(--color-accent)" }}
+                  />
+                  {section.name}
+                </button>
+              ))}
+            </>
+          )}
         </div>
       )}
     </>

@@ -156,6 +156,7 @@ pub fn sync_from_external_editor(
         content: imported_page.content,
         tags: imported_page.tags,
         folder_id: existing_page.folder_id,
+        parent_page_id: existing_page.parent_page_id,
         section_id: existing_page.section_id,
         is_archived: existing_page.is_archived,
         is_cover: existing_page.is_cover,
