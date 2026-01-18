@@ -104,7 +104,7 @@ interface FolderTreeProps {
   pages: Page[];
   folders: Folder[];
   selectedPageId: string | null;
-  onSelectPage: (pageId: string) => void;
+  onSelectPage: (pageId: string, openInNewPane?: boolean) => void;
   // Section filtering (controlled by parent)
   sectionsEnabled?: boolean;
   selectedSectionId?: string | null;
@@ -895,7 +895,7 @@ export function FolderTree({
                   page={page}
                   isSelected={selectedPageId === page.id}
                   depth={-1}
-                  onSelect={() => onSelectPage(page.id)}
+                  onSelect={(openInNewPane) => onSelectPage(page.id, openInNewPane)}
                   onSelectPage={onSelectPage}
                   onCreateSubpage={handleCreateSubpage}
                   sections={sectionsEnabled ? sections : undefined}

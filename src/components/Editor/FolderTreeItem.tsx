@@ -11,7 +11,7 @@ interface FolderTreeItemProps {
   depth: number;
   isDropTarget?: boolean;
   onToggleExpand: (folderId: string) => void;
-  onSelectPage: (pageId: string) => void;
+  onSelectPage: (pageId: string, openInNewPane?: boolean) => void;
   onCreatePage: (folderId?: string) => void;
   onCreateSubpage?: (parentPageId: string) => void;
   onRenameFolder: (folderId: string, newName: string) => void;
@@ -366,7 +366,7 @@ export const FolderTreeItem = memo(function FolderTreeItem({
               page={page}
               isSelected={selectedPageId === page.id}
               depth={depth + 1}
-              onSelect={() => onSelectPage(page.id)}
+              onSelect={(openInNewPane) => onSelectPage(page.id, openInNewPane)}
               onSelectPage={onSelectPage}
               onCreateSubpage={onCreateSubpage}
               sections={sections}
@@ -446,16 +446,22 @@ interface PageItemProps {
   page: Page;
   isSelected: boolean;
   depth: number;
-  onSelect: () => void;
+  onSelect: (openInNewPane?: boolean) => void;
 }
 
 const PageItem = memo(function PageItem({ page, isSelected, depth, onSelect }: PageItemProps) {
   const paddingLeft = 12 + (depth + 1) * 16;
 
+  const handleClick = (e: React.MouseEvent) => {
+    // Cmd+click (Mac) or Ctrl+click (Windows/Linux) opens in new pane
+    const openInNewPane = e.metaKey || e.ctrlKey;
+    onSelect(openInNewPane);
+  };
+
   return (
     <li>
       <button
-        onClick={onSelect}
+        onClick={handleClick}
         className="flex w-full min-w-0 items-center gap-2 rounded-lg py-1.5 text-left transition-all"
         style={{
           paddingLeft: `${paddingLeft}px`,
@@ -510,8 +516,8 @@ interface DraggablePageItemProps {
   isSelected: boolean;
   depth: number;
   isDropTarget?: boolean;
-  onSelect: () => void;
-  onSelectPage?: (pageId: string) => void; // For recursive child selection
+  onSelect: (openInNewPane?: boolean) => void;
+  onSelectPage?: (pageId: string, openInNewPane?: boolean) => void; // For recursive child selection
   onCreateSubpage?: (parentPageId: string) => void;
   sections?: Section[];
   onMoveToSection?: (pageId: string, sectionId: string | null) => void;
@@ -663,7 +669,10 @@ const DraggablePageItem = memo(function DraggablePageItem({
 
           {/* Page button */}
           <button
-            onClick={onSelect}
+            onClick={(e) => {
+              const openInNewPane = e.metaKey || e.ctrlKey;
+              onSelect(openInNewPane);
+            }}
             className="flex flex-1 min-w-0 items-center gap-2 text-left cursor-grab active:cursor-grabbing"
           >
             <span
@@ -719,7 +728,7 @@ const DraggablePageItem = memo(function DraggablePageItem({
                 page={childPage}
                 isSelected={selectedPageId === childPage.id}
                 depth={depth + 1}
-                onSelect={() => onSelectPage(childPage.id)}
+                onSelect={(openInNewPane) => onSelectPage(childPage.id, openInNewPane)}
                 onSelectPage={onSelectPage}
                 onCreateSubpage={onCreateSubpage}
                 sections={sections}

@@ -11,16 +11,8 @@ import { useDrawingStore } from "../../stores/drawingStore";
 import { useTabStore } from "../../stores/tabStore";
 import { useThemeStore } from "../../stores/themeStore";
 import { FolderTree } from "./FolderTree";
-import { BlockEditor } from "./BlockEditor";
-import { PageHeader } from "./PageHeader";
-import { MarkdownEditor } from "../Markdown";
-import { PDFPageViewer, PDFFullScreen } from "../PDF";
-import { JupyterViewer } from "../Jupyter";
-import { EpubReader } from "../Epub";
-import { CalendarViewer } from "../Calendar";
-import { BacklinksPanel } from "./BacklinksPanel";
-import { SimilarPagesPanel } from "./SimilarPagesPanel";
-import { TabBar } from "./TabBar";
+import { EditorPaneContent } from "./EditorPaneContent";
+import { PDFFullScreen } from "../PDF";
 import { CoverPage } from "../CoverPage";
 import { SectionList } from "../Sections";
 import { VideoFullScreen } from "../Video";
@@ -28,14 +20,27 @@ import { DrawingFullScreen, PageAnnotationOverlay } from "../Drawing";
 import { ResizeHandle } from "../Layout/ResizeHandle";
 import type { EditorData, Page } from "../../types/page";
 import * as api from "../../utils/api";
-import { calculatePageStats, type PageStats } from "../../utils/pageStats";
 import { downloadTranscript } from "../../utils/videoApi";
 import "./editor-styles.css";
 
 export function EditorArea() {
   const { selectedNotebookId, notebooks } = useNotebookStore();
-  const { pages, selectedPageId, selectPage, updatePageContent, loadPages, createPage, movePageToSection, reorderPages, pageDataVersion } =
-    usePageStore();
+  const {
+    pages,
+    selectedPageId,
+    selectPage,
+    openPageInNewPane,
+    updatePageContent,
+    loadPages,
+    createPage,
+    movePageToSection,
+    reorderPages,
+    panes,
+    activePaneId,
+    setActivePane,
+    closePane,
+    splitPane,
+  } = usePageStore();
   const { folders, loadFolders, showArchived, updateFolder } = useFolderStore();
   const {
     sections,
@@ -47,7 +52,7 @@ export function EditorArea() {
     updateSection,
     deleteSection,
   } = useSectionStore();
-  const { updatePageLinks, buildLinksFromPages } = useLinkStore();
+  const { buildLinksFromPages } = useLinkStore();
   const { viewerState, closeViewer } = usePDFStore();
   const { viewerState: videoViewerState } = useVideoStore();
   const { annotationState } = useDrawingStore();
@@ -62,8 +67,6 @@ export function EditorArea() {
   const autoHidePanels = useThemeStore((state) => state.autoHidePanels);
   const panelsHovered = useThemeStore((state) => state.panelsHovered);
   const setPanelsHovered = useThemeStore((state) => state.setPanelsHovered);
-  const [isSaving, setIsSaving] = useState(false);
-  const [lastSaved, setLastSaved] = useState<Date | null>(null);
 
   // Auto-hide panel state
   const [panelsTransitioning, setPanelsTransitioning] = useState(false);
@@ -185,12 +188,16 @@ export function EditorArea() {
     }
   }, [selectedPage?.title, selectedPage?.id, updateTabTitle]);
 
-  // Handle tab selection (switch to page)
-  const handleTabSelect = useCallback(
-    (pageId: string) => {
-      selectPage(pageId);
+  // Handle page selection with optional new pane
+  const handleSelectPage = useCallback(
+    (pageId: string, openInNewPane?: boolean) => {
+      if (openInNewPane) {
+        openPageInNewPane(pageId);
+      } else {
+        selectPage(pageId);
+      }
     },
-    [selectPage]
+    [selectPage, openPageInNewPane]
   );
 
   // Close tabs for deleted pages
@@ -202,185 +209,6 @@ export function EditorArea() {
       }
     });
   }, [pages, openTabs, closeTab]);
-
-  // Convert page content to Editor.js format
-  // IMPORTANT: Only depend on page ID and pageDataVersion, not content directly.
-  // Content changes happen during saves and we don't want to re-render the editor
-  // (which would lose pending changes). pageDataVersion is incremented when fresh
-  // data is fetched on page switch, ensuring we get updated content.
-  // The key={selectedPage.id} on BlockEditor handles remounting on page switch.
-  const editorData: OutputData | undefined = useMemo(() => {
-    if (!selectedPage?.content) return undefined;
-    return {
-      time: selectedPage.content.time,
-      version: selectedPage.content.version,
-      blocks: selectedPage.content.blocks.map((block) => ({
-        id: block.id,
-        type: block.type,
-        data: block.data as Record<string, unknown>,
-      })),
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedPage?.id, pageDataVersion]);
-
-  // Calculate page statistics
-  const pageStats: PageStats | null = useMemo(() => {
-    if (!selectedPage?.content?.blocks?.length) return null;
-    return calculatePageStats(selectedPage.content.blocks);
-  }, [selectedPage?.content?.blocks]);
-
-  // Handle auto-save (debounced, no git commit)
-  // Minimizes state updates to avoid stealing focus from the editor
-  const handleSave = useCallback(
-    async (data: OutputData) => {
-      if (!selectedNotebookId || !selectedPageId || !selectedPage) return;
-
-      const editorData: EditorData = {
-        time: data.time,
-        version: data.version,
-        blocks: data.blocks.map((block) => ({
-          id: block.id ?? crypto.randomUUID(),
-          type: block.type,
-          data: block.data as Record<string, unknown>,
-        })),
-      };
-
-      // Auto-save without git commit - don't update React state to avoid focus loss
-      await updatePageContent(selectedNotebookId, selectedPageId, editorData, false);
-
-      // Defer non-critical updates to avoid interfering with editor focus
-      requestAnimationFrame(() => {
-        updatePageLinks({
-          ...selectedPage,
-          content: editorData,
-        });
-        setLastSaved(new Date());
-      });
-    },
-    [
-      selectedNotebookId,
-      selectedPageId,
-      selectedPage,
-      updatePageContent,
-      updatePageLinks,
-    ]
-  );
-
-  // Handle explicit save (Ctrl+S, with git commit)
-  const handleExplicitSave = useCallback(
-    async (data: OutputData) => {
-      if (!selectedNotebookId || !selectedPageId || !selectedPage) return;
-
-      setIsSaving(true);
-      try {
-        const editorData: EditorData = {
-          time: data.time,
-          version: data.version,
-          blocks: data.blocks.map((block) => ({
-            id: block.id ?? crypto.randomUUID(),
-            type: block.type,
-            data: block.data as Record<string, unknown>,
-          })),
-        };
-
-        // Explicit save with git commit
-        await updatePageContent(selectedNotebookId, selectedPageId, editorData, true);
-
-        // Update links after save
-        updatePageLinks({
-          ...selectedPage,
-          content: editorData,
-        });
-
-        setLastSaved(new Date());
-      } finally {
-        setIsSaving(false);
-      }
-    },
-    [
-      selectedNotebookId,
-      selectedPageId,
-      selectedPage,
-      updatePageContent,
-      updatePageLinks,
-    ]
-  );
-
-  // Handle wiki link clicks - navigate to page by title, or create if doesn't exist
-  // Supports path syntax like [[Parent/Child]] and prioritizes child pages of current page
-  const handleLinkClick = useCallback(
-    async (pageTitle: string) => {
-      let targetPage: Page | undefined;
-
-      // Check if the link contains a path separator (e.g., "Parent/Child")
-      if (pageTitle.includes("/")) {
-        const pathParts = pageTitle.split("/").map((p) => p.trim());
-
-        // Navigate through the path to find the target page
-        let currentParent: Page | undefined;
-        for (let i = 0; i < pathParts.length; i++) {
-          const part = pathParts[i];
-          const parentId = currentParent?.id;
-
-          const found = notebookPages.find((p) => {
-            const titleMatch = p.title.toLowerCase() === part.toLowerCase();
-            if (i === 0) {
-              // First part: look for root-level pages (no parent)
-              return titleMatch && !p.parentPageId;
-            }
-            // Subsequent parts: must be child of current parent
-            return titleMatch && p.parentPageId === parentId;
-          });
-
-          if (!found) {
-            // Path doesn't exist - break and we'll create the final page
-            break;
-          }
-          currentParent = found;
-        }
-
-        // If we traversed the full path, currentParent is our target
-        if (currentParent && currentParent.title.toLowerCase() === pathParts[pathParts.length - 1].toLowerCase()) {
-          targetPage = currentParent;
-        }
-      } else {
-        // Simple title link - prioritize child pages of current page
-        if (selectedPage) {
-          // First, check direct children of the current page
-          targetPage = notebookPages.find(
-            (p) =>
-              p.title.toLowerCase() === pageTitle.toLowerCase() &&
-              p.parentPageId === selectedPage.id
-          );
-        }
-
-        // If not found as child, search all pages in notebook
-        if (!targetPage) {
-          targetPage = notebookPages.find(
-            (p) => p.title.toLowerCase() === pageTitle.toLowerCase()
-          );
-        }
-      }
-
-      if (targetPage) {
-        selectPage(targetPage.id);
-        return;
-      }
-
-      // Page doesn't exist - create it
-      if (selectedNotebookId) {
-        // If path syntax was used, just create with the last part as title
-        const titleToCreate = pageTitle.includes("/")
-          ? pageTitle.split("/").pop()?.trim() || pageTitle
-          : pageTitle;
-        await createPage(selectedNotebookId, titleToCreate);
-        // After creation, the new page should be selected automatically by createPage
-        // and pages will be updated, so we need to find and select it
-        // The createPage action sets selectedPageId to the new page
-      }
-    },
-    [notebookPages, selectPage, selectedNotebookId, createPage, selectedPage]
-  );
 
   // Handle cover page save (auto-save, no git commit)
   const handleCoverSave = useCallback(
@@ -618,7 +446,7 @@ export function EditorArea() {
               pages={notebookPages}
               folders={folders}
               selectedPageId={selectedPageId}
-              onSelectPage={selectPage}
+              onSelectPage={handleSelectPage}
               sectionsEnabled={selectedNotebook.sectionsEnabled}
               selectedSectionId={selectedSectionId}
               sections={sections}
@@ -639,132 +467,25 @@ export function EditorArea() {
         <ResizeHandle direction="horizontal" onResize={handleFolderTreeResize} />
       )}
 
-      {/* Editor panel */}
+      {/* Editor panel - multi-pane support */}
       <div
-        className="flex flex-1 flex-col overflow-hidden"
+        className="flex flex-1 overflow-hidden"
         style={{ backgroundColor: "var(--color-bg-primary)" }}
       >
-        {/* Tab bar - always shown if tabs are open */}
-        {openTabs.length > 0 && (
-          <TabBar onTabSelect={handleTabSelect} />
-        )}
-
-        {selectedPage ? (
-          <>
-            <PageHeader
-              page={selectedPage}
-              isSaving={isSaving}
-              lastSaved={lastSaved}
-              stats={pageStats}
-              pageText={pageStats?.text}
-            />
-            <div className="flex-1 overflow-y-auto px-16 py-10">
-              <div
-                className="mx-auto"
-                style={{ maxWidth: "var(--editor-max-width)" }}
-              >
-                {/* Conditional rendering based on page type */}
-                {selectedPage.pageType === "markdown" && (
-                  <MarkdownEditor
-                    key={selectedPage.id}
-                    page={selectedPage}
-                    notebookId={selectedNotebook.id}
-                    className="min-h-[calc(100vh-300px)]"
-                  />
-                )}
-                {selectedPage.pageType === "pdf" && (
-                  <PDFPageViewer
-                    key={selectedPage.id}
-                    page={selectedPage}
-                    notebookId={selectedNotebook.id}
-                    className="min-h-[calc(100vh-300px)]"
-                  />
-                )}
-                {selectedPage.pageType === "jupyter" && (
-                  <JupyterViewer
-                    key={selectedPage.id}
-                    page={selectedPage}
-                    notebookId={selectedNotebook.id}
-                    className="min-h-[calc(100vh-300px)]"
-                  />
-                )}
-                {selectedPage.pageType === "epub" && (
-                  <EpubReader
-                    key={selectedPage.id}
-                    page={selectedPage}
-                    notebookId={selectedNotebook.id}
-                    className="min-h-[calc(100vh-300px)]"
-                  />
-                )}
-                {selectedPage.pageType === "calendar" && (
-                  <CalendarViewer
-                    key={selectedPage.id}
-                    page={selectedPage}
-                    notebookId={selectedNotebook.id}
-                    className="min-h-[calc(100vh-300px)]"
-                  />
-                )}
-                {(selectedPage.pageType === "standard" || !selectedPage.pageType) && (
-                  <BlockEditor
-                    key={selectedPage.id}
-                    initialData={editorData}
-                    onSave={handleSave}
-                    onExplicitSave={handleExplicitSave}
-                    onLinkClick={handleLinkClick}
-                    notebookId={selectedNotebook.id}
-                    pages={notebookPages.map((p) => ({ id: p.id, title: p.title }))}
-                    className="min-h-[calc(100vh-300px)]"
-                  />
-                )}
-
-                {/* Backlinks panel - only for standard pages */}
-                {(selectedPage.pageType === "standard" || !selectedPage.pageType) && (
-                  <BacklinksPanel
-                    pageTitle={selectedPage.title}
-                    notebookId={selectedNotebook.id}
-                  />
-                )}
-
-                {/* Similar Pages panel (AI-powered) - only for standard pages */}
-                {(selectedPage.pageType === "standard" || !selectedPage.pageType) && (
-                  <SimilarPagesPanel
-                    page={selectedPage}
-                    notebookId={selectedNotebook.id}
-                    allPages={notebookPages}
-                  />
-                )}
-              </div>
-            </div>
-          </>
-        ) : (
-          <div className="flex h-full items-center justify-center">
-            <div className="text-center max-w-sm px-8">
-              <div
-                className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-xl"
-                style={{ backgroundColor: "var(--color-bg-tertiary)" }}
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="32"
-                  height="32"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  style={{ color: "var(--color-text-muted)" }}
-                >
-                  <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
-                  <polyline points="14,2 14,8 20,8" />
-                </svg>
-              </div>
-              <p style={{ color: "var(--color-text-secondary)" }}>
-                Select a page from the sidebar or create a new one
-              </p>
-            </div>
-          </div>
-        )}
+        {panes.map((pane) => (
+          <EditorPaneContent
+            key={pane.id}
+            pane={pane}
+            notebookId={selectedNotebook.id}
+            notebookPages={notebookPages}
+            isActive={pane.id === activePaneId}
+            onActivate={() => setActivePane(pane.id)}
+            onClose={() => closePane(pane.id)}
+            onSplit={() => splitPane(pane.id, "horizontal")}
+            canClose={panes.length > 1}
+            showPaneControls={panes.length > 1}
+          />
+        ))}
       </div>
 
       {/* PDF Full Screen Viewer */}

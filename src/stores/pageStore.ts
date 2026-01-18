@@ -1,9 +1,20 @@
 import { create } from "zustand";
+import { persist } from "zustand/middleware";
 import type { Page, EditorData } from "../types/page";
 import * as api from "../utils/api";
 
+// Editor pane for split view support
+export interface EditorPane {
+  id: string;
+  pageId: string | null;
+}
+
 interface PageState {
   pages: Page[];
+  // Multi-pane support
+  panes: EditorPane[];
+  activePaneId: string | null;
+  // Legacy support - computed from active pane
   selectedPageId: string | null;
   isLoading: boolean;
   error: string | null;
@@ -76,8 +87,17 @@ interface PageActions {
   // Selection
   selectPage: (id: string | null) => void;
 
+  // Pane management
+  openPageInNewPane: (pageId: string | null) => void;
+  openPageInPane: (paneId: string, pageId: string | null) => void;
+  closePane: (paneId: string) => void;
+  setActivePane: (paneId: string) => void;
+  splitPane: (paneId: string, direction: "horizontal" | "vertical") => void;
+
   // Utilities
   getChildPages: (parentPageId: string) => Page[];
+  getActivePane: () => EditorPane | null;
+  getPaneById: (paneId: string) => EditorPane | null;
 
   // Error handling
   clearError: () => void;
@@ -85,9 +105,21 @@ interface PageActions {
 
 type PageStore = PageState & PageActions;
 
-export const usePageStore = create<PageStore>((set, get) => ({
+// Generate unique pane ID
+function generatePaneId(): string {
+  return `pane-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+}
+
+// Default pane
+const DEFAULT_PANE: EditorPane = { id: "pane-main", pageId: null };
+
+export const usePageStore = create<PageStore>()(
+  persist(
+    (set, get) => ({
   // Initial state
   pages: [],
+  panes: [DEFAULT_PANE],
+  activePaneId: "pane-main",
   selectedPageId: null,
   isLoading: false,
   error: null,
@@ -339,26 +371,137 @@ export const usePageStore = create<PageStore>((set, get) => ({
   },
 
   selectPage: (id) => {
-    set({ selectedPageId: id });
+    const state = get();
+    const activePaneId = state.activePaneId || state.panes[0]?.id;
+
+    if (activePaneId) {
+      // Update the active pane's pageId
+      set((state) => ({
+        selectedPageId: id,
+        panes: state.panes.map((p) =>
+          p.id === activePaneId ? { ...p, pageId: id } : p
+        ),
+      }));
+    } else {
+      set({ selectedPageId: id });
+    }
+
     // When selecting a page, fetch fresh data from backend
-    // This ensures we have the latest content even if it was saved
-    // without updating the local store (to prevent focus loss during editing)
     if (id) {
-      const state = usePageStore.getState();
       const page = state.pages.find((p) => p.id === id);
       if (page) {
-        // Fetch fresh page data in the background
         api.getPage(page.notebookId, id).then((freshPage) => {
           set((state) => ({
             pages: state.pages.map((p) => (p.id === id ? freshPage : p)),
-            // Increment version to force memo recomputation in EditorArea
             pageDataVersion: state.pageDataVersion + 1,
           }));
         }).catch(() => {
-          // Silently ignore errors - we still have the cached version
+          // Silently ignore errors
         });
       }
     }
+  },
+
+  // Pane management
+  openPageInNewPane: (pageId) => {
+    const newPane: EditorPane = { id: generatePaneId(), pageId };
+    set((state) => ({
+      panes: [...state.panes, newPane],
+      activePaneId: newPane.id,
+      selectedPageId: pageId,
+    }));
+
+    // Fetch fresh data if opening a page
+    if (pageId) {
+      const state = get();
+      const page = state.pages.find((p) => p.id === pageId);
+      if (page) {
+        api.getPage(page.notebookId, pageId).then((freshPage) => {
+          set((state) => ({
+            pages: state.pages.map((p) => (p.id === pageId ? freshPage : p)),
+            pageDataVersion: state.pageDataVersion + 1,
+          }));
+        }).catch(() => {});
+      }
+    }
+  },
+
+  openPageInPane: (paneId, pageId) => {
+    set((state) => ({
+      panes: state.panes.map((p) =>
+        p.id === paneId ? { ...p, pageId } : p
+      ),
+      activePaneId: paneId,
+      selectedPageId: pageId,
+    }));
+
+    // Fetch fresh data if opening a page
+    if (pageId) {
+      const state = get();
+      const page = state.pages.find((p) => p.id === pageId);
+      if (page) {
+        api.getPage(page.notebookId, pageId).then((freshPage) => {
+          set((state) => ({
+            pages: state.pages.map((p) => (p.id === pageId ? freshPage : p)),
+            pageDataVersion: state.pageDataVersion + 1,
+          }));
+        }).catch(() => {});
+      }
+    }
+  },
+
+  closePane: (paneId) => {
+    const state = get();
+    // Don't close the last pane
+    if (state.panes.length <= 1) return;
+
+    const paneIndex = state.panes.findIndex((p) => p.id === paneId);
+    const newPanes = state.panes.filter((p) => p.id !== paneId);
+
+    // If closing the active pane, activate an adjacent one
+    let newActivePaneId = state.activePaneId;
+    let newSelectedPageId = state.selectedPageId;
+
+    if (state.activePaneId === paneId) {
+      const newActivePane = newPanes[Math.min(paneIndex, newPanes.length - 1)];
+      newActivePaneId = newActivePane?.id || null;
+      newSelectedPageId = newActivePane?.pageId || null;
+    }
+
+    set({
+      panes: newPanes,
+      activePaneId: newActivePaneId,
+      selectedPageId: newSelectedPageId,
+    });
+  },
+
+  setActivePane: (paneId) => {
+    const state = get();
+    const pane = state.panes.find((p) => p.id === paneId);
+    if (pane) {
+      set({
+        activePaneId: paneId,
+        selectedPageId: pane.pageId,
+      });
+    }
+  },
+
+  splitPane: (paneId, _direction) => {
+    const state = get();
+    const sourcePaneIndex = state.panes.findIndex((p) => p.id === paneId);
+    if (sourcePaneIndex === -1) return;
+
+    const sourcePane = state.panes[sourcePaneIndex];
+    const newPane: EditorPane = { id: generatePaneId(), pageId: sourcePane.pageId };
+
+    // Insert the new pane after the source pane
+    const newPanes = [...state.panes];
+    newPanes.splice(sourcePaneIndex + 1, 0, newPane);
+
+    set({
+      panes: newPanes,
+      activePaneId: newPane.id,
+    });
   },
 
   getChildPages: (parentPageId) => {
@@ -368,7 +511,38 @@ export const usePageStore = create<PageStore>((set, get) => ({
       .sort((a, b) => a.position - b.position);
   },
 
+  getActivePane: () => {
+    const state = get();
+    return state.panes.find((p) => p.id === state.activePaneId) || null;
+  },
+
+  getPaneById: (paneId) => {
+    const state = get();
+    return state.panes.find((p) => p.id === paneId) || null;
+  },
+
   clearError: () => {
     set({ error: null });
   },
-}));
+    }),
+    {
+      name: "katt-pages",
+      partialize: (state) => ({
+        panes: state.panes,
+        activePaneId: state.activePaneId,
+      }),
+      onRehydrateStorage: () => (state) => {
+        if (state) {
+          // Ensure at least one pane exists
+          if (!state.panes || state.panes.length === 0) {
+            state.panes = [DEFAULT_PANE];
+            state.activePaneId = "pane-main";
+          }
+          // Set selectedPageId from active pane
+          const activePane = state.panes.find((p) => p.id === state.activePaneId);
+          state.selectedPageId = activePane?.pageId || null;
+        }
+      },
+    }
+  )
+);
