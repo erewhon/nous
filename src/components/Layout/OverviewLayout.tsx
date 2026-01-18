@@ -21,7 +21,7 @@ import { calculatePageStats, type PageStats } from "../../utils/pageStats";
 
 export function OverviewLayout() {
   const { notebooks, selectedNotebookId, selectNotebook, createNotebook } = useNotebookStore();
-  const { pages, selectedPageId, selectPage, updatePageContent, loadPages, createPage, movePageToSection } =
+  const { pages, selectedPageId, selectPage, updatePageContent, loadPages, createPage, movePageToSection, reorderPages } =
     usePageStore();
   const { folders, loadFolders, showArchived, updateFolder } = useFolderStore();
   const {
@@ -406,6 +406,7 @@ export function OverviewLayout() {
             }}
             hasCoverPage={coverPage !== null}
             onViewCover={() => setShowCover(true)}
+            onReorderPages={(folderId, pageIds) => reorderPages(selectedNotebook.id, folderId, pageIds)}
           />
         </div>
         <ResizeHandle direction="horizontal" onResize={handleFolderTreeResize} />

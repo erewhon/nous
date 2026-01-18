@@ -158,6 +158,7 @@ export class WikiLinkTool implements InlineTool {
 
   /**
    * Mark wiki links as broken if their target page doesn't exist
+   * Handles both simple titles and path syntax (e.g., "Parent/Child")
    */
   static markBrokenLinks(
     container: HTMLElement,
@@ -168,7 +169,18 @@ export class WikiLinkTool implements InlineTool {
 
     links.forEach((link) => {
       const title = link.getAttribute("data-page-title");
-      const exists = title && titlesLower.includes(title.toLowerCase());
+      if (!title) {
+        link.classList.add("broken");
+        return;
+      }
+
+      // For path syntax, check if the final part exists
+      // (full path validation would require page hierarchy data)
+      const titleToCheck = title.includes("/")
+        ? title.split("/").pop()?.trim() || title
+        : title;
+
+      const exists = titlesLower.includes(titleToCheck.toLowerCase());
       link.classList.toggle("broken", !exists);
     });
   }

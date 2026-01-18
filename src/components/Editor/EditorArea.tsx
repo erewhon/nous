@@ -30,7 +30,7 @@ import "./editor-styles.css";
 
 export function EditorArea() {
   const { selectedNotebookId, notebooks } = useNotebookStore();
-  const { pages, selectedPageId, selectPage, updatePageContent, loadPages, createPage, movePageToSection, pageDataVersion } =
+  const { pages, selectedPageId, selectPage, updatePageContent, loadPages, createPage, movePageToSection, reorderPages, pageDataVersion } =
     usePageStore();
   const { folders, loadFolders, showArchived, updateFolder } = useFolderStore();
   const {
@@ -270,11 +270,60 @@ export function EditorArea() {
   );
 
   // Handle wiki link clicks - navigate to page by title, or create if doesn't exist
+  // Supports path syntax like [[Parent/Child]] and prioritizes child pages of current page
   const handleLinkClick = useCallback(
     async (pageTitle: string) => {
-      let targetPage = notebookPages.find(
-        (p) => p.title.toLowerCase() === pageTitle.toLowerCase()
-      );
+      let targetPage: Page | undefined;
+
+      // Check if the link contains a path separator (e.g., "Parent/Child")
+      if (pageTitle.includes("/")) {
+        const pathParts = pageTitle.split("/").map((p) => p.trim());
+
+        // Navigate through the path to find the target page
+        let currentParent: Page | undefined;
+        for (let i = 0; i < pathParts.length; i++) {
+          const part = pathParts[i];
+          const parentId = currentParent?.id;
+
+          const found = notebookPages.find((p) => {
+            const titleMatch = p.title.toLowerCase() === part.toLowerCase();
+            if (i === 0) {
+              // First part: look for root-level pages (no parent)
+              return titleMatch && !p.parentPageId;
+            }
+            // Subsequent parts: must be child of current parent
+            return titleMatch && p.parentPageId === parentId;
+          });
+
+          if (!found) {
+            // Path doesn't exist - break and we'll create the final page
+            break;
+          }
+          currentParent = found;
+        }
+
+        // If we traversed the full path, currentParent is our target
+        if (currentParent && currentParent.title.toLowerCase() === pathParts[pathParts.length - 1].toLowerCase()) {
+          targetPage = currentParent;
+        }
+      } else {
+        // Simple title link - prioritize child pages of current page
+        if (selectedPage) {
+          // First, check direct children of the current page
+          targetPage = notebookPages.find(
+            (p) =>
+              p.title.toLowerCase() === pageTitle.toLowerCase() &&
+              p.parentPageId === selectedPage.id
+          );
+        }
+
+        // If not found as child, search all pages in notebook
+        if (!targetPage) {
+          targetPage = notebookPages.find(
+            (p) => p.title.toLowerCase() === pageTitle.toLowerCase()
+          );
+        }
+      }
 
       if (targetPage) {
         selectPage(targetPage.id);
@@ -283,13 +332,17 @@ export function EditorArea() {
 
       // Page doesn't exist - create it
       if (selectedNotebookId) {
-        await createPage(selectedNotebookId, pageTitle);
+        // If path syntax was used, just create with the last part as title
+        const titleToCreate = pageTitle.includes("/")
+          ? pageTitle.split("/").pop()?.trim() || pageTitle
+          : pageTitle;
+        await createPage(selectedNotebookId, titleToCreate);
         // After creation, the new page should be selected automatically by createPage
         // and pages will be updated, so we need to find and select it
         // The createPage action sets selectedPageId to the new page
       }
     },
-    [notebookPages, selectPage, selectedNotebookId, createPage]
+    [notebookPages, selectPage, selectedNotebookId, createPage, selectedPage]
   );
 
   // Handle cover page save (auto-save, no git commit)
@@ -524,6 +577,7 @@ export function EditorArea() {
           }}
           hasCoverPage={coverPage !== null}
           onViewCover={() => setShowCover(true)}
+          onReorderPages={(folderId, pageIds) => reorderPages(selectedNotebook.id, folderId, pageIds)}
         />
       </div>
       <ResizeHandle direction="horizontal" onResize={handleFolderTreeResize} />

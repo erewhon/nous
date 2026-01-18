@@ -14,7 +14,7 @@ use uuid::Uuid;
 use zip::ZipArchive;
 
 use crate::markdown::import_markdown_to_page;
-use crate::storage::{Folder, Notebook, NotebookType, Page, StorageError};
+use crate::storage::{Notebook, NotebookType, Page, StorageError};
 
 type Result<T> = std::result::Result<T, StorageError>;
 
@@ -56,32 +56,32 @@ pub struct NotionPagePreview {
 struct NotionPageInfo {
     /// Original path in the ZIP
     original_path: PathBuf,
-    /// Cleaned page title
+    /// Cleaned page title (from H1 header or filename)
     clean_title: String,
-    /// The Notion UUID suffix (e.g., "abc123def456")
+    /// The Notion UUID suffix from the filename (e.g., "abc123def456")
     notion_id: Option<String>,
-    /// Markdown content
+    /// Markdown content (with H1 header removed if title was extracted from it)
     content: String,
-    /// Parent folder path for tag generation (raw path)
-    parent_path: Option<String>,
-    /// Clean folder path without Notion UUIDs (e.g., "Projects/Work")
-    clean_folder_path: Option<String>,
+    /// Folder path where this page's children would be located (for building hierarchy)
+    children_folder_path: Option<String>,
     /// Associated image paths in the ZIP
     images: Vec<(String, String)>, // (original_ref, zip_path)
-    /// Whether this came from a database CSV
-    is_database_row: bool,
-    /// Database name if from CSV
-    database_name: Option<String>,
+    /// Whether this is a database (CSV converted to table)
+    is_database: bool,
 }
 
 /// Regex pattern for Notion UUID suffix in filenames
-/// Matches patterns like "Page Name abc123def456.md" or "Page Name abc123def456"
+/// Matches patterns like:
+/// - "Page Name abc123def456.md"
+/// - "Page Name abc123def456"
+/// - "Database abc123def456.csv"
 fn notion_id_regex() -> Regex {
-    Regex::new(r"\s+([a-f0-9]{32})(?:\.md)?$").unwrap()
+    Regex::new(r"\s+([a-f0-9]{32})(?:_all)?(?:\.(?:md|csv))?$").unwrap()
 }
 
 /// Extract the Notion UUID from a filename
 /// "Page Name abc123def456.md" -> Some("abc123def456")
+/// "Database abc123def456.csv" -> Some("abc123def456")
 fn extract_notion_id(filename: &str) -> Option<String> {
     let re = notion_id_regex();
     re.captures(filename)
@@ -91,25 +91,24 @@ fn extract_notion_id(filename: &str) -> Option<String> {
 
 /// Clean a page title by removing the Notion UUID suffix
 /// "Page Name abc123def456.md" -> "Page Name"
+/// "Database abc123def456.csv" -> "Database"
 fn clean_page_title(filename: &str) -> String {
-    let name = filename
-        .trim_end_matches(".md")
-        .trim_end_matches(".csv");
-
     let re = notion_id_regex();
-    re.replace(name, "").trim().to_string()
+    re.replace(filename, "").trim().to_string()
 }
 
-/// Extract parent folder path as tags
-/// "Projects/Work/Meeting Notes.md" -> ["projects", "work"]
+/// Extract parent page path as tags (skipping the root export directory)
+/// "Export Name/Projects abc123/Work def456/Meeting Notes.md" -> ["projects", "work"]
 fn extract_parent_tags(path: &Path) -> Vec<String> {
     let mut tags = Vec::new();
 
     if let Some(parent) = path.parent() {
-        for component in parent.components() {
+        let components: Vec<_> = parent.components().collect();
+        // Skip the first component (root export directory)
+        for component in components.iter().skip(1) {
             if let std::path::Component::Normal(name) = component {
                 let name_str = name.to_string_lossy();
-                // Clean Notion UUID from folder names too
+                // Clean Notion UUID from directory names
                 let clean_name = clean_page_title(&name_str);
                 if !clean_name.is_empty() {
                     // Convert to lowercase kebab-case for tags
@@ -130,77 +129,144 @@ fn extract_parent_tags(path: &Path) -> Vec<String> {
     tags
 }
 
-/// Build a clean folder path from a file path, removing Notion UUIDs
-/// "Projects abc123/Work def456/notes.md" -> "Projects/Work"
-fn build_clean_folder_path(file_path: &Path) -> Option<String> {
-    let parent = file_path.parent()?;
-    let mut parts: Vec<String> = Vec::new();
+/// Extract title from markdown H1 header and return (title, content_without_h1)
+/// If no H1 found, returns None for title
+fn extract_title_from_markdown(content: &str) -> (Option<String>, String) {
+    let lines: Vec<&str> = content.lines().collect();
 
-    for component in parent.components() {
-        if let std::path::Component::Normal(name) = component {
-            let name_str = name.to_string_lossy();
-            let clean_name = clean_page_title(&name_str);
-            if !clean_name.is_empty() {
-                parts.push(clean_name);
-            }
+    // Find the first non-empty line that's an H1
+    for (i, line) in lines.iter().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        if trimmed.starts_with("# ") {
+            let title = trimmed[2..].trim().to_string();
+            // Remove the H1 line from content
+            let remaining: Vec<&str> = lines.iter()
+                .enumerate()
+                .filter(|(idx, _)| *idx != i)
+                .map(|(_, line)| *line)
+                .collect();
+            let new_content = remaining.join("\n").trim_start().to_string();
+            return (Some(title), new_content);
+        } else {
+            // First non-empty line is not H1, stop looking
+            break;
         }
     }
 
-    if parts.is_empty() {
-        None
+    (None, content.to_string())
+}
+
+/// Get the folder path that would contain this page's children
+/// For a page at "Export-UUID/Obsolete Grab Bag abc123.md",
+/// its children would be in "Export-UUID/Obsolete Grab Bag"
+fn get_children_folder_path(md_path: &Path) -> Option<String> {
+    let parent_dir = md_path.parent()?;
+    let stem = md_path.file_stem()?.to_string_lossy();
+    let clean_name = clean_page_title(&stem);
+
+    if clean_name.is_empty() {
+        return None;
+    }
+
+    let folder_path = parent_dir.join(&clean_name);
+    Some(folder_path.to_string_lossy().to_string())
+}
+
+/// Get the parent folder path for a file (used to look up the parent page)
+/// For a file at "Export-UUID/Obsolete Grab Bag/Waffle abc123.md",
+/// returns "Export-UUID/Obsolete Grab Bag"
+fn get_parent_folder_path(path: &Path) -> Option<String> {
+    let parent = path.parent()?;
+    let components: Vec<_> = parent.components().collect();
+
+    // Need at least 2 components to have a parent page (root + parent folder)
+    if components.len() < 2 {
+        return None;
+    }
+
+    Some(parent.to_string_lossy().to_string())
+}
+
+/// Get the depth of a page in the hierarchy (0 = root level after export dir)
+fn get_page_depth(path: &Path) -> usize {
+    let components: Vec<_> = path.parent()
+        .map(|p| p.components().collect())
+        .unwrap_or_default();
+    // Subtract 1 for the root export directory
+    components.len().saturating_sub(1)
+}
+
+/// Format a cell value for markdown table
+/// If the column is "Tags", format individual tags with inline code
+fn format_cell_value(value: &str, header: &str) -> String {
+    let cleaned = value
+        .replace('|', "\\|")  // Escape pipes in content
+        .replace('\n', " ");  // Replace newlines
+
+    // Check if this is a Tags column (case insensitive)
+    if header.eq_ignore_ascii_case("tags") && !cleaned.is_empty() {
+        // Split by comma and format each tag with inline code
+        cleaned
+            .split(',')
+            .map(|tag| tag.trim())
+            .filter(|tag| !tag.is_empty())
+            .map(|tag| format!("`{}`", tag))
+            .collect::<Vec<_>>()
+            .join(" ")
     } else {
-        Some(parts.join("/"))
+        cleaned
     }
 }
 
-/// Internal structure for tracking folder hierarchy
-struct NotionFolderInfo {
-    /// Clean folder path (e.g., "Projects/Work")
-    path: String,
-    /// Clean folder name (e.g., "Work")
-    name: String,
-    /// Parent folder path (e.g., "Projects"), None if root level
-    parent_path: Option<String>,
-}
+/// Convert CSV content to a markdown table
+fn csv_to_markdown_table(csv_content: &str, database_name: &str) -> String {
+    let mut output = format!("# {}\n\n", database_name);
 
-/// Build folder hierarchy from a set of folder paths
-fn build_folder_hierarchy(paths: &std::collections::HashSet<String>) -> Vec<NotionFolderInfo> {
-    let mut folders: Vec<NotionFolderInfo> = Vec::new();
-    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut reader = csv::ReaderBuilder::new()
+        .has_headers(true)
+        .flexible(true)
+        .from_reader(csv_content.as_bytes());
 
-    // Sort paths by depth (shorter paths first) to ensure parents are created before children
-    let mut sorted_paths: Vec<&String> = paths.iter().collect();
-    sorted_paths.sort_by(|a, b| {
-        let depth_a = a.matches('/').count();
-        let depth_b = b.matches('/').count();
-        depth_a.cmp(&depth_b)
-    });
+    let headers: Vec<String> = match reader.headers() {
+        Ok(h) => h.iter().map(|s| s.to_string()).collect(),
+        Err(_) => return output,
+    };
 
-    for path in sorted_paths {
-        // Also ensure all parent paths are included
-        let parts: Vec<&str> = path.split('/').collect();
-        for i in 0..parts.len() {
-            let current_path = parts[0..=i].join("/");
-            if !seen.contains(&current_path) {
-                seen.insert(current_path.clone());
+    if headers.is_empty() {
+        return output;
+    }
 
-                let name = parts[i].to_string();
-                let parent_path = if i > 0 {
-                    Some(parts[0..i].join("/"))
-                } else {
-                    None
-                };
+    // Build markdown table header
+    output.push_str("| ");
+    output.push_str(&headers.join(" | "));
+    output.push_str(" |\n");
 
-                folders.push(NotionFolderInfo {
-                    path: current_path,
-                    name,
-                    parent_path,
-                });
-            }
+    // Separator row
+    output.push_str("| ");
+    output.push_str(&headers.iter().map(|_| "---").collect::<Vec<_>>().join(" | "));
+    output.push_str(" |\n");
+
+    // Data rows
+    for result in reader.records() {
+        if let Ok(record) = result {
+            output.push_str("| ");
+            let cells: Vec<String> = (0..headers.len())
+                .map(|i| {
+                    let value = record.get(i).unwrap_or("");
+                    let header = headers.get(i).map(|s| s.as_str()).unwrap_or("");
+                    format_cell_value(value, header)
+                })
+                .collect();
+            output.push_str(&cells.join(" | "));
+            output.push_str(" |\n");
         }
     }
 
-    folders
+    output
 }
 
 /// Convert Notion internal links to wiki-links
@@ -240,80 +306,33 @@ fn convert_links_to_wikilinks(markdown: &str, title_mapping: &HashMap<String, St
     }).to_string()
 }
 
-/// Parse a CSV database file and return page info for each row
+/// Parse a CSV database file and return a single page info with a table
 fn parse_database_csv(
-    content: &str,
+    csv_content: &str,
     database_name: &str,
     database_path: &Path,
-) -> Vec<NotionPageInfo> {
-    let mut pages = Vec::new();
-    let mut reader = csv::ReaderBuilder::new()
-        .has_headers(true)
-        .flexible(true)
-        .from_reader(content.as_bytes());
+) -> Option<NotionPageInfo> {
+    // Convert CSV to markdown table
+    let content = csv_to_markdown_table(csv_content, database_name);
 
-    let headers: Vec<String> = match reader.headers() {
-        Ok(h) => h.iter().map(|s| s.to_string()).collect(),
-        Err(_) => return pages,
-    };
+    // Extract notion ID from the database filename
+    let filename = database_path.file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let notion_id = extract_notion_id(&filename);
 
-    // Find the "Name" or first column as the title column
-    let title_col = headers.iter().position(|h| {
-        let lower = h.to_lowercase();
-        lower == "name" || lower == "title" || lower == "page"
-    }).unwrap_or(0);
+    // Database pages can also have children (though rare)
+    let children_folder_path = get_children_folder_path(database_path);
 
-    for (row_idx, result) in reader.records().enumerate() {
-        let record = match result {
-            Ok(r) => r,
-            Err(_) => continue,
-        };
-
-        // Get title from the title column
-        let title = record.get(title_col)
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| format!("{} - Row {}", database_name, row_idx + 1));
-
-        // Build markdown content from all columns
-        let mut content = format!("# {}\n\n", title);
-
-        // Add properties as a table or list
-        content.push_str("## Properties\n\n");
-        for (i, header) in headers.iter().enumerate() {
-            if i == title_col {
-                continue; // Skip title column
-            }
-            if let Some(value) = record.get(i) {
-                let value = value.trim();
-                if !value.is_empty() {
-                    content.push_str(&format!("- **{}**: {}\n", header, value));
-                }
-            }
-        }
-
-        // Get parent path for tags
-        let parent_path = database_path
-            .parent()
-            .map(|p| p.to_string_lossy().to_string());
-
-        // Get clean folder path for folder hierarchy
-        let clean_folder_path = build_clean_folder_path(database_path);
-
-        pages.push(NotionPageInfo {
-            original_path: database_path.to_path_buf(),
-            clean_title: title,
-            notion_id: None,
-            content,
-            parent_path,
-            clean_folder_path,
-            images: Vec::new(),
-            is_database_row: true,
-            database_name: Some(database_name.to_string()),
-        });
-    }
-
-    pages
+    Some(NotionPageInfo {
+        original_path: database_path.to_path_buf(),
+        clean_title: database_name.to_string(),
+        notion_id,
+        content,
+        children_folder_path,
+        images: Vec::new(),
+        is_database: true,
+    })
 }
 
 /// Preview a Notion export ZIP without importing
@@ -382,8 +401,12 @@ pub fn preview_notion_import(zip_path: &Path) -> Result<NotionImportPreview> {
                 }
             }
             Some("csv") => {
-                database_count += 1;
-                csv_indices.push((i, name.clone(), path.to_path_buf()));
+                // Skip _all CSV files - use the regular CSV files
+                // Some Notion exports don't have _all versions
+                if !name.contains("_all.csv") {
+                    database_count += 1;
+                    csv_indices.push((i, name.clone(), path.to_path_buf()));
+                }
             }
             Some("png") | Some("jpg") | Some("jpeg") | Some("gif") | Some("webp") | Some("svg") => {
                 asset_count += 1;
@@ -495,7 +518,13 @@ pub fn import_notion_zip(
 
         match extension.as_deref() {
             Some("md") => md_files.push((i, name)),
-            Some("csv") => csv_files.push((i, name)),
+            Some("csv") => {
+                // Skip _all CSV files - use the regular CSV files
+                // Some Notion exports don't have _all versions
+                if !name.contains("_all.csv") {
+                    csv_files.push((i, name));
+                }
+            }
             Some("png") | Some("jpg") | Some("jpeg") | Some("gif") | Some("webp") | Some("svg") => {
                 image_files.push((i, name));
             }
@@ -510,13 +539,8 @@ pub fn import_notion_zip(
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_default();
 
-        let clean_title = clean_page_title(&filename);
         let notion_id = extract_notion_id(&filename);
-
-        title_mapping.insert(filename.clone(), clean_title.clone());
-
-        // Also map the full path
-        title_mapping.insert(name.clone(), clean_title.clone());
+        let filename_title = clean_page_title(&filename);
 
         // Read content as bytes first, then convert
         let mut file = archive.by_index(*idx)?;
@@ -524,32 +548,35 @@ pub fn import_notion_zip(
         file.read_to_end(&mut bytes)?;
         drop(file); // Release borrow
 
-        let content = String::from_utf8(bytes)
+        let raw_content = String::from_utf8(bytes)
             .unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).to_string());
+
+        // Extract title from H1 header, fall back to filename
+        let (h1_title, content) = extract_title_from_markdown(&raw_content);
+        let clean_title = h1_title.unwrap_or(filename_title.clone());
+
+        // Build title mapping for link conversion
+        title_mapping.insert(filename.clone(), clean_title.clone());
+        title_mapping.insert(name.clone(), clean_title.clone());
 
         // Find associated images
         let images = find_associated_images(path, &image_files);
 
-        let parent_path = path.parent()
-            .map(|p| p.to_string_lossy().to_string());
-
-        // Get clean folder path for folder hierarchy
-        let clean_folder_path = build_clean_folder_path(path);
+        // Get the folder path where this page's children would be located
+        let children_folder_path = get_children_folder_path(path);
 
         page_infos.push(NotionPageInfo {
             original_path: path.to_path_buf(),
             clean_title,
             notion_id,
             content,
-            parent_path,
-            clean_folder_path,
+            children_folder_path,
             images,
-            is_database_row: false,
-            database_name: None,
+            is_database: false,
         });
     }
 
-    // Process CSV database files
+    // Process CSV database files (convert to pages with tables)
     for (idx, name) in &csv_files {
         let path = Path::new(name);
         let db_name = path.file_stem()
@@ -557,19 +584,16 @@ pub fn import_notion_zip(
             .unwrap_or_else(|| "Database".to_string());
 
         let mut file = archive.by_index(*idx)?;
-        let mut content = String::new();
-        if file.read_to_string(&mut content).is_ok() {
-            let db_pages = parse_database_csv(&content, &db_name, path);
-
-            // Add to title mapping
-            for page in &db_pages {
+        let mut csv_content = String::new();
+        if file.read_to_string(&mut csv_content).is_ok() {
+            if let Some(db_page) = parse_database_csv(&csv_content, &db_name, path) {
+                // Add to title mapping
                 title_mapping.insert(
-                    format!("{}.md", page.clean_title),
-                    page.clean_title.clone(),
+                    format!("{}.csv", db_page.clean_title),
+                    db_page.clean_title.clone(),
                 );
+                page_infos.push(db_page);
             }
-
-            page_infos.extend(db_pages);
         }
     }
 
@@ -623,39 +647,6 @@ pub fn import_notion_zip(
     let notebook_json = serde_json::to_string_pretty(&notebook)?;
     fs::write(notebook_dir.join("notebook.json"), notebook_json)?;
 
-    // Create folders from page hierarchy
-    // Collect unique folder paths from all pages
-    let mut folder_paths: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for info in &page_infos {
-        if let Some(ref path) = info.clean_folder_path {
-            folder_paths.insert(path.clone());
-        }
-    }
-
-    // Build folder hierarchy and create Katt folders
-    let folder_hierarchy = build_folder_hierarchy(&folder_paths);
-    let mut path_to_folder_id: HashMap<String, Uuid> = HashMap::new();
-    let mut katt_folders: Vec<Folder> = Vec::new();
-
-    for folder_info in folder_hierarchy {
-        let parent_id = folder_info
-            .parent_path
-            .as_ref()
-            .and_then(|p| path_to_folder_id.get(p).copied());
-
-        let mut folder = Folder::new(notebook_id, folder_info.name, parent_id);
-        folder.position = katt_folders.len() as i32;
-
-        path_to_folder_id.insert(folder_info.path, folder.id);
-        katt_folders.push(folder);
-    }
-
-    // Save folders.json if there are any folders
-    if !katt_folders.is_empty() {
-        let folders_json = serde_json::to_string_pretty(&katt_folders)?;
-        fs::write(notebook_dir.join("folders.json"), folders_json)?;
-    }
-
     // Copy assets to notebook assets folder
     let assets_dir = notebook_dir.join("assets");
     let mut asset_path_mapping: HashMap<String, String> = HashMap::new();
@@ -692,8 +683,25 @@ pub fn import_notion_zip(
         );
     }
 
-    // Process pages
+    // Sort pages by depth (parent pages first) to ensure parents are created before children
+    page_infos.sort_by(|a, b| {
+        let depth_a = get_page_depth(&a.original_path);
+        let depth_b = get_page_depth(&b.original_path);
+        depth_a.cmp(&depth_b)
+    });
+
+    // Build a map of folder_path -> notion_id for looking up parent pages
+    // This maps the folder that would contain children to the notion_id of the parent page
+    let mut folder_to_notion_id: HashMap<String, String> = HashMap::new();
+    for info in &page_infos {
+        if let (Some(ref folder_path), Some(ref notion_id)) = (&info.children_folder_path, &info.notion_id) {
+            folder_to_notion_id.insert(folder_path.clone(), notion_id.clone());
+        }
+    }
+
+    // Process pages and build notion_id -> page.id mapping
     let mut pages: Vec<Page> = Vec::new();
+    let mut notion_to_katt_id: HashMap<String, Uuid> = HashMap::new();
 
     for info in page_infos {
         // Convert internal links to wiki-links
@@ -711,31 +719,30 @@ pub fn import_notion_zip(
             }
         }
 
-        // Get tags from parent path
+        // Get tags from parent path (skip root export directory)
         let mut tags = extract_parent_tags(&info.original_path);
 
-        // Add database name as tag if from database
-        if let Some(db_name) = &info.database_name {
-            let db_tag = db_name
-                .to_lowercase()
-                .replace(' ', "-")
-                .chars()
-                .filter(|c| c.is_alphanumeric() || *c == '-')
-                .collect::<String>();
-            if !db_tag.is_empty() && !tags.contains(&db_tag) {
-                tags.push(db_tag);
-            }
+        // Add "database" tag if this is a database
+        if info.is_database && !tags.contains(&"database".to_string()) {
+            tags.push("database".to_string());
         }
 
         // Import markdown content to page
         let mut page = import_markdown_to_page(&content, notebook_id, &info.clean_title);
         page.tags = tags;
 
-        // Set folder_id if the page was in a folder
-        if let Some(ref folder_path) = info.clean_folder_path {
-            if let Some(&folder_id) = path_to_folder_id.get(folder_path) {
-                page.folder_id = Some(folder_id);
+        // Set parent_page_id based on the folder -> notion_id -> katt_id mapping
+        if let Some(parent_folder) = get_parent_folder_path(&info.original_path) {
+            if let Some(parent_notion_id) = folder_to_notion_id.get(&parent_folder) {
+                if let Some(&parent_page_id) = notion_to_katt_id.get(parent_notion_id) {
+                    page.parent_page_id = Some(parent_page_id);
+                }
             }
+        }
+
+        // Track this page's notion_id for child pages
+        if let Some(ref notion_id) = info.notion_id {
+            notion_to_katt_id.insert(notion_id.clone(), page.id);
         }
 
         // Save page
@@ -800,7 +807,13 @@ where
 
         match extension.as_deref() {
             Some("md") => md_files.push((i, name)),
-            Some("csv") => csv_files.push((i, name)),
+            Some("csv") => {
+                // Skip _all CSV files - use the regular CSV files
+                // Some Notion exports don't have _all versions
+                if !name.contains("_all.csv") {
+                    csv_files.push((i, name));
+                }
+            }
             Some("png") | Some("jpg") | Some("jpeg") | Some("gif") | Some("webp") | Some("svg") => {
                 image_files.push((i, name));
             }
@@ -826,44 +839,44 @@ where
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_default();
 
-        let clean_title = clean_page_title(&filename);
         let notion_id = extract_notion_id(&filename);
-
-        title_mapping.insert(filename.clone(), clean_title.clone());
-        title_mapping.insert(name.clone(), clean_title.clone());
+        let filename_title = clean_page_title(&filename);
 
         let mut file = archive.by_index(*idx)?;
         let mut bytes = Vec::new();
         file.read_to_end(&mut bytes)?;
         drop(file);
 
-        let content = String::from_utf8(bytes)
+        let raw_content = String::from_utf8(bytes)
             .unwrap_or_else(|e| String::from_utf8_lossy(e.as_bytes()).to_string());
+
+        // Extract title from H1 header, fall back to filename
+        let (h1_title, content) = extract_title_from_markdown(&raw_content);
+        let clean_title = h1_title.unwrap_or(filename_title.clone());
+
+        // Build title mapping for link conversion
+        title_mapping.insert(filename.clone(), clean_title.clone());
+        title_mapping.insert(name.clone(), clean_title.clone());
 
         let images = find_associated_images(path, &image_files);
 
-        let parent_path = path.parent()
-            .map(|p| p.to_string_lossy().to_string());
-
-        // Get clean folder path for folder hierarchy
-        let clean_folder_path = build_clean_folder_path(path);
+        // Get the folder path where this page's children would be located
+        let children_folder_path = get_children_folder_path(path);
 
         page_infos.push(NotionPageInfo {
             original_path: path.to_path_buf(),
             clean_title,
             notion_id,
             content,
-            parent_path,
-            clean_folder_path,
+            children_folder_path,
             images,
-            is_database_row: false,
-            database_name: None,
+            is_database: false,
         });
     }
 
     progress(20, 100, "Processing databases...");
 
-    // Process CSV database files
+    // Process CSV database files (convert to pages with tables)
     let total_csv = csv_files.len();
     for (file_idx, (idx, name)) in csv_files.iter().enumerate() {
         if total_csv > 0 {
@@ -880,18 +893,15 @@ where
             .unwrap_or_else(|| "Database".to_string());
 
         let mut file = archive.by_index(*idx)?;
-        let mut content = String::new();
-        if file.read_to_string(&mut content).is_ok() {
-            let db_pages = parse_database_csv(&content, &db_name, path);
-
-            for page in &db_pages {
+        let mut csv_content = String::new();
+        if file.read_to_string(&mut csv_content).is_ok() {
+            if let Some(db_page) = parse_database_csv(&csv_content, &db_name, path) {
                 title_mapping.insert(
-                    format!("{}.md", page.clean_title),
-                    page.clean_title.clone(),
+                    format!("{}.csv", db_page.clean_title),
+                    db_page.clean_title.clone(),
                 );
+                page_infos.push(db_page);
             }
-
-            page_infos.extend(db_pages);
         }
     }
 
@@ -956,41 +966,6 @@ where
     let notebook_json = serde_json::to_string_pretty(&notebook)?;
     fs::write(notebook_dir.join("notebook.json"), notebook_json)?;
 
-    progress(42, 100, "Creating folders...");
-
-    // Create folders from page hierarchy
-    // Collect unique folder paths from all pages
-    let mut folder_paths: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for info in &page_infos {
-        if let Some(ref path) = info.clean_folder_path {
-            folder_paths.insert(path.clone());
-        }
-    }
-
-    // Build folder hierarchy and create Katt folders
-    let folder_hierarchy = build_folder_hierarchy(&folder_paths);
-    let mut path_to_folder_id: HashMap<String, Uuid> = HashMap::new();
-    let mut katt_folders: Vec<Folder> = Vec::new();
-
-    for folder_info in folder_hierarchy {
-        let parent_id = folder_info
-            .parent_path
-            .as_ref()
-            .and_then(|p| path_to_folder_id.get(p).copied());
-
-        let mut folder = Folder::new(notebook_id, folder_info.name, parent_id);
-        folder.position = katt_folders.len() as i32;
-
-        path_to_folder_id.insert(folder_info.path, folder.id);
-        katt_folders.push(folder);
-    }
-
-    // Save folders.json if there are any folders
-    if !katt_folders.is_empty() {
-        let folders_json = serde_json::to_string_pretty(&katt_folders)?;
-        fs::write(notebook_dir.join("folders.json"), folders_json)?;
-    }
-
     progress(45, 100, "Copying assets...");
 
     // Copy assets to notebook assets folder
@@ -1036,16 +1011,34 @@ where
         );
     }
 
-    progress(60, 100, "Importing pages...");
+    progress(60, 100, "Sorting pages...");
 
-    // Process pages
+    // Sort pages by depth (parent pages first) to ensure parents are created before children
+    page_infos.sort_by(|a, b| {
+        let depth_a = get_page_depth(&a.original_path);
+        let depth_b = get_page_depth(&b.original_path);
+        depth_a.cmp(&depth_b)
+    });
+
+    // Build a map of folder_path -> notion_id for looking up parent pages
+    let mut folder_to_notion_id: HashMap<String, String> = HashMap::new();
+    for info in &page_infos {
+        if let (Some(ref folder_path), Some(ref notion_id)) = (&info.children_folder_path, &info.notion_id) {
+            folder_to_notion_id.insert(folder_path.clone(), notion_id.clone());
+        }
+    }
+
+    progress(62, 100, "Importing pages...");
+
+    // Process pages and build notion_id -> page.id mapping
     let mut pages: Vec<Page> = Vec::new();
+    let mut notion_to_katt_id: HashMap<String, Uuid> = HashMap::new();
     let total_pages = page_infos.len();
 
     for (page_idx, info) in page_infos.into_iter().enumerate() {
         if page_idx % 5 == 0 {
             progress(
-                60 + (page_idx * 40) / total_pages.max(1),
+                62 + (page_idx * 38) / total_pages.max(1),
                 100,
                 &format!("Importing pages ({}/{})", page_idx + 1, total_pages),
             );
@@ -1063,31 +1056,30 @@ where
             }
         }
 
-        // Get tags from parent path
+        // Get tags from parent path (skip root export directory)
         let mut tags = extract_parent_tags(&info.original_path);
 
-        // Add database name as tag if from database
-        if let Some(db_name) = &info.database_name {
-            let db_tag = db_name
-                .to_lowercase()
-                .replace(' ', "-")
-                .chars()
-                .filter(|c| c.is_alphanumeric() || *c == '-')
-                .collect::<String>();
-            if !db_tag.is_empty() && !tags.contains(&db_tag) {
-                tags.push(db_tag);
-            }
+        // Add "database" tag if this is a database
+        if info.is_database && !tags.contains(&"database".to_string()) {
+            tags.push("database".to_string());
         }
 
         // Import markdown content to page
         let mut page = import_markdown_to_page(&content, notebook_id, &info.clean_title);
         page.tags = tags;
 
-        // Set folder_id if the page was in a folder
-        if let Some(ref folder_path) = info.clean_folder_path {
-            if let Some(&folder_id) = path_to_folder_id.get(folder_path) {
-                page.folder_id = Some(folder_id);
+        // Set parent_page_id based on the folder -> notion_id -> katt_id mapping
+        if let Some(parent_folder) = get_parent_folder_path(&info.original_path) {
+            if let Some(parent_notion_id) = folder_to_notion_id.get(&parent_folder) {
+                if let Some(&parent_page_id) = notion_to_katt_id.get(parent_notion_id) {
+                    page.parent_page_id = Some(parent_page_id);
+                }
             }
+        }
+
+        // Track this page's notion_id for child pages
+        if let Some(ref notion_id) = info.notion_id {
+            notion_to_katt_id.insert(notion_id.clone(), page.id);
         }
 
         // Save page
@@ -1149,12 +1141,28 @@ fn find_associated_images(md_path: &Path, image_files: &[(usize, String)]) -> Ve
 mod tests {
     use super::*;
 
+    // Use real 32-character Notion UUIDs in tests
+    const TEST_UUID_1: &str = "abc123def456789012345678901234ab";
+    const TEST_UUID_2: &str = "def456789012345678901234abcdef01";
+
     #[test]
     fn test_extract_notion_id() {
+        // Standard .md file
         assert_eq!(
-            extract_notion_id("Page Name abc123def456789012345678901234.md"),
-            Some("abc123def456789012345678901234".to_string())
+            extract_notion_id(&format!("Page Name {}.md", TEST_UUID_1)),
+            Some(TEST_UUID_1.to_string())
         );
+        // CSV database file
+        assert_eq!(
+            extract_notion_id(&format!("Database {}.csv", TEST_UUID_1)),
+            Some(TEST_UUID_1.to_string())
+        );
+        // CSV with _all suffix (still matches for backwards compat)
+        assert_eq!(
+            extract_notion_id(&format!("Database {}_all.csv", TEST_UUID_1)),
+            Some(TEST_UUID_1.to_string())
+        );
+        // File without UUID
         assert_eq!(
             extract_notion_id("Simple Page.md"),
             None
@@ -1163,24 +1171,43 @@ mod tests {
 
     #[test]
     fn test_clean_page_title() {
+        // Standard .md file
         assert_eq!(
-            clean_page_title("Page Name abc123def456789012345678901234.md"),
+            clean_page_title(&format!("Page Name {}.md", TEST_UUID_1)),
             "Page Name"
         );
+        // CSV database
+        assert_eq!(
+            clean_page_title(&format!("Database {}.csv", TEST_UUID_1)),
+            "Database"
+        );
+        // CSV with _all suffix (still cleans properly)
+        assert_eq!(
+            clean_page_title(&format!("Database {}_all.csv", TEST_UUID_1)),
+            "Database"
+        );
+        // Simple file without UUID
         assert_eq!(
             clean_page_title("Simple Page.md"),
-            "Simple Page"
+            "Simple Page.md"  // No UUID to strip, keeps extension
         );
+        // Folder name without extension
         assert_eq!(
-            clean_page_title("Database abc123def456789012345678901234.csv"),
-            "Database"
+            clean_page_title(&format!("Folder Name {}", TEST_UUID_1)),
+            "Folder Name"
         );
     }
 
     #[test]
     fn test_extract_parent_tags() {
-        let path = Path::new("Projects/Work abc123/Meeting Notes def456.md");
+        // Path with proper 32-char UUIDs
+        let path_str = format!(
+            "Export-root/Projects {}/Work {}/Meeting Notes {}.md",
+            TEST_UUID_1, TEST_UUID_2, TEST_UUID_1
+        );
+        let path = Path::new(&path_str);
         let tags = extract_parent_tags(path);
+        // First component (Export-root) is skipped
         assert!(tags.contains(&"projects".to_string()));
         assert!(tags.contains(&"work".to_string()));
     }
@@ -1188,11 +1215,51 @@ mod tests {
     #[test]
     fn test_convert_links_to_wikilinks() {
         let mut mapping = HashMap::new();
-        mapping.insert("Other Page abc123.md".to_string(), "Other Page".to_string());
+        mapping.insert(
+            format!("Other Page {}.md", TEST_UUID_1),
+            "Other Page".to_string(),
+        );
 
-        let markdown = "See [Other Page](Other%20Page%20abc123.md) for details.";
+        let markdown = &format!(
+            "See [Other Page](Other%20Page%20{}.md) for details.",
+            TEST_UUID_1
+        );
         let result = convert_links_to_wikilinks(markdown, &mapping);
 
         assert_eq!(result, "See [[Other Page]] for details.");
+    }
+
+    #[test]
+    fn test_format_cell_value_tags() {
+        // Tags column should format values as inline code
+        assert_eq!(
+            format_cell_value("tag1, tag2, tag3", "Tags"),
+            "`tag1` `tag2` `tag3`"
+        );
+        // Case insensitive header matching
+        assert_eq!(
+            format_cell_value("foo, bar", "TAGS"),
+            "`foo` `bar`"
+        );
+        // Single tag
+        assert_eq!(
+            format_cell_value("solo", "tags"),
+            "`solo`"
+        );
+        // Empty value
+        assert_eq!(
+            format_cell_value("", "Tags"),
+            ""
+        );
+        // Non-tags column should not be modified
+        assert_eq!(
+            format_cell_value("tag1, tag2", "Name"),
+            "tag1, tag2"
+        );
+        // Handles pipes in content
+        assert_eq!(
+            format_cell_value("has|pipe", "Name"),
+            "has\\|pipe"
+        );
     }
 }

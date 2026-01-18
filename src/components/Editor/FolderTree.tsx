@@ -12,6 +12,7 @@ import {
   type DragEndEvent,
   type DragOverEvent,
 } from "@dnd-kit/core";
+import { arrayMove } from "@dnd-kit/sortable";
 import type { Folder, Page, Section } from "../../types/page";
 import { useFolderStore } from "../../stores/folderStore";
 import { usePageStore } from "../../stores/pageStore";
@@ -109,6 +110,8 @@ interface FolderTreeProps {
   // Cover page props
   hasCoverPage?: boolean;
   onViewCover?: () => void;
+  // Page reordering
+  onReorderPages?: (folderId: string | null, pageIds: string[]) => void;
 }
 
 export function FolderTree({
@@ -124,6 +127,7 @@ export function FolderTree({
   onMoveFolderToSection,
   hasCoverPage = false,
   onViewCover,
+  onReorderPages,
 }: FolderTreeProps) {
   const { createPage, createSubpage, movePageToFolder, movePageToParent } = usePageStore();
   const {
@@ -412,11 +416,42 @@ export function FolderTree({
         return;
       }
 
-      // Check if dropped on a page (for nesting)
+      // Check if dropped on a page
+      // This could be for nesting OR reordering depending on context
       if (overData?.type === "page") {
-        const targetPage = overData.page;
-        // Don't allow dropping on self or own descendants
-        if (targetPage.id !== pageId && !isDescendant(targetPage.id, pageId)) {
+        const targetPage = overData.page as Page;
+
+        // Don't allow dropping on self
+        if (targetPage.id === pageId) return;
+
+        // Check if both pages are in the same folder/root AND same parent level
+        const sameFolder = (page.folderId ?? null) === (targetPage.folderId ?? null);
+        const sameParent = (page.parentPageId ?? null) === (targetPage.parentPageId ?? null);
+
+        // If they're in the same folder and same parent level, this is a reorder operation
+        if (sameFolder && sameParent && onReorderPages) {
+          // Get all pages at this level (same folder, same parent)
+          const pagesAtLevel = visiblePages
+            .filter((p) =>
+              (p.folderId ?? null) === (page.folderId ?? null) &&
+              (p.parentPageId ?? null) === (page.parentPageId ?? null)
+            )
+            .sort((a, b) => a.position - b.position);
+
+          const oldIndex = pagesAtLevel.findIndex((p) => p.id === pageId);
+          const newIndex = pagesAtLevel.findIndex((p) => p.id === targetPage.id);
+
+          if (oldIndex !== -1 && newIndex !== -1 && oldIndex !== newIndex) {
+            const reorderedPages = arrayMove(pagesAtLevel, oldIndex, newIndex);
+            const pageIds = reorderedPages.map((p) => p.id);
+            onReorderPages(page.folderId ?? null, pageIds);
+          }
+          return;
+        }
+
+        // Otherwise, treat as nesting (dropping page onto another to make it a child)
+        // Don't allow dropping on own descendants
+        if (!isDescendant(targetPage.id, pageId)) {
           // Only move if parent is different
           if (page.parentPageId !== targetPage.id) {
             await movePageToParent(notebookId, pageId, targetPage.id);
@@ -453,7 +488,7 @@ export function FolderTree({
         await movePageToFolder(notebookId, pageId, targetFolderId);
       }
     },
-    [pages, visibleFolders, notebookId, movePageToFolder, movePageToParent, onMovePageToSection, onMoveFolderToSection, isDescendant]
+    [pages, visiblePages, visibleFolders, notebookId, movePageToFolder, movePageToParent, onMovePageToSection, onMoveFolderToSection, isDescendant, onReorderPages]
   );
 
   // Render a folder recursively

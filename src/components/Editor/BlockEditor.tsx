@@ -6,6 +6,7 @@ import { useEmacsMode } from "./useEmacsMode";
 import { VimModeIndicator } from "./VimModeIndicator";
 import { WikiLinkAutocomplete } from "./WikiLinkAutocomplete";
 import { WikiLinkTool } from "./WikiLinkTool";
+import { LinkPreview } from "./LinkPreview";
 import { useThemeStore } from "../../stores/themeStore";
 
 interface BlockEditorProps {
@@ -190,6 +191,8 @@ export function BlockEditor({
           onInsertLink={handleInsertLink}
         />
       )}
+      {/* Link preview tooltip for external URLs */}
+      <LinkPreview containerRef={containerRef} />
       {isVimModeEnabled && (
         <div className="pointer-events-none fixed bottom-4 left-4 z-50">
           <VimModeIndicator mode={vimMode} pendingKeys={pendingKeys} />

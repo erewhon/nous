@@ -1,12 +1,12 @@
 //! Tauri commands for Notion import
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 
 use crate::notion::{import_notion_zip_with_progress, preview_notion_import, NotionImportPreview};
-use crate::storage::Notebook;
+use crate::storage::{Notebook, Page};
 use crate::AppState;
 
 /// Error type for command results
@@ -37,43 +37,55 @@ pub fn preview_notion_export(zip_path: String) -> CommandResult<NotionImportPrev
 /// Import a Notion export ZIP as a new notebook
 ///
 /// Converts all markdown files and databases in the ZIP to a new Katt notebook.
+/// This command runs asynchronously to allow progress events to be delivered.
 #[tauri::command]
-pub fn import_notion_export(
+pub async fn import_notion_export(
     app: AppHandle,
-    state: State<AppState>,
+    state: State<'_, AppState>,
     zip_path: String,
     notebook_name: Option<String>,
 ) -> CommandResult<Notebook> {
-    let path = Path::new(&zip_path);
+    let path = PathBuf::from(&zip_path);
 
     if !path.exists() {
         return Err("File not found".to_string());
     }
 
-    let storage = state.storage.lock().map_err(|e| e.to_string())?;
-    let notebooks_dir = storage.notebooks_base_dir();
-
-    // Create progress callback
-    let app_clone = app.clone();
-    let progress_callback = move |current: usize, total: usize, message: &str| {
-        let _ = app_clone.emit(
-            "import-progress",
-            ImportProgress {
-                current,
-                total,
-                message: message.to_string(),
-            },
-        );
+    // Get notebooks_dir and release the lock immediately
+    let notebooks_dir = {
+        let storage = state.storage.lock().map_err(|e| e.to_string())?;
+        storage.notebooks_base_dir()
     };
 
-    // Import the notebook with progress reporting
-    let (notebook, pages) =
-        import_notion_zip_with_progress(path, &notebooks_dir, notebook_name, progress_callback)
-            .map_err(|e| e.to_string())?;
+    // Clone the app handle for the blocking task
+    let app_for_import = app.clone();
+
+    // Run the import in a blocking task to avoid blocking the async runtime
+    let import_result: Result<(Notebook, Vec<Page>), String> = tokio::task::spawn_blocking(move || {
+        // Create progress callback that emits events directly
+        // app.emit() is synchronous and thread-safe
+        let progress_callback = move |current: usize, total: usize, message: &str| {
+            let _ = app_for_import.emit(
+                "import-progress",
+                ImportProgress {
+                    current,
+                    total,
+                    message: message.to_string(),
+                },
+            );
+        };
+
+        // Import the notebook with progress reporting
+        import_notion_zip_with_progress(&path, &notebooks_dir, notebook_name, progress_callback)
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| format!("Import task failed: {}", e))?;
+
+    let (notebook, pages) = import_result?;
 
     // Index all pages in search
     let total_pages = pages.len();
-    let mut search_index = state.search_index.lock().map_err(|e| e.to_string())?;
     for (i, page) in pages.iter().enumerate() {
         let _ = app.emit(
             "import-progress",
@@ -83,6 +95,11 @@ pub fn import_notion_export(
                 message: "Indexing pages...".to_string(),
             },
         );
+
+        // Small yield to allow events to be processed
+        tokio::task::yield_now().await;
+
+        let mut search_index = state.search_index.lock().map_err(|e| e.to_string())?;
         search_index.index_page(page).map_err(|e| e.to_string())?;
     }
 

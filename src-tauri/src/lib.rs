@@ -187,6 +187,7 @@ pub fn run() {
             commands::web_search,
             commands::scrape_url,
             commands::summarize_research,
+            commands::fetch_link_metadata,
             // Tag management commands
             commands::get_all_tags,
             commands::get_notebook_tags,
