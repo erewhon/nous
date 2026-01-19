@@ -105,6 +105,7 @@ interface FolderTreeProps {
   folders: Folder[];
   selectedPageId: string | null;
   onSelectPage: (pageId: string, openInNewPane?: boolean) => void;
+  onOpenInNewPane?: (pageId: string) => void;
   // Section filtering (controlled by parent)
   sectionsEnabled?: boolean;
   selectedSectionId?: string | null;
@@ -124,6 +125,7 @@ export function FolderTree({
   folders,
   selectedPageId,
   onSelectPage,
+  onOpenInNewPane,
   sectionsEnabled = false,
   selectedSectionId = null,
   sections = [],
@@ -571,6 +573,7 @@ export function FolderTree({
           isDropTarget={overFolderId === folder.id}
           onToggleExpand={toggleFolderExpanded}
           onSelectPage={onSelectPage}
+          onOpenInNewPane={onOpenInNewPane}
           onCreatePage={handleCreatePage}
           onCreateSubpage={handleCreateSubpage}
           onRenameFolder={handleRenameFolder}
@@ -596,6 +599,7 @@ export function FolderTree({
       togglePageExpanded,
       toggleFolderExpanded,
       onSelectPage,
+      onOpenInNewPane,
       handleCreatePage,
       handleCreateSubpage,
       handleRenameFolder,
@@ -897,6 +901,7 @@ export function FolderTree({
                   depth={-1}
                   onSelect={(openInNewPane) => onSelectPage(page.id, openInNewPane)}
                   onSelectPage={onSelectPage}
+                  onOpenInNewPane={onOpenInNewPane}
                   onCreateSubpage={handleCreateSubpage}
                   sections={sectionsEnabled ? sections : undefined}
                   onMoveToSection={onMovePageToSection}

@@ -447,6 +447,7 @@ export function EditorArea() {
               folders={folders}
               selectedPageId={selectedPageId}
               onSelectPage={handleSelectPage}
+              onOpenInNewPane={openPageInNewPane}
               sectionsEnabled={selectedNotebook.sectionsEnabled}
               selectedSectionId={selectedSectionId}
               sections={sections}

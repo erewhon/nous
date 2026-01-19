@@ -3,10 +3,18 @@ import { persist } from "zustand/middleware";
 import type { Page, EditorData } from "../types/page";
 import * as api from "../utils/api";
 
+// Tab within a pane
+export interface PaneTab {
+  pageId: string;
+  title: string;
+  isPinned: boolean;
+}
+
 // Editor pane for split view support
 export interface EditorPane {
   id: string;
   pageId: string | null;
+  tabs: PaneTab[];
 }
 
 interface PageState {
@@ -94,6 +102,16 @@ interface PageActions {
   setActivePane: (paneId: string) => void;
   splitPane: (paneId: string, direction: "horizontal" | "vertical") => void;
 
+  // Pane tab management
+  openTabInPane: (paneId: string, pageId: string, title: string) => void;
+  closeTabInPane: (paneId: string, pageId: string) => void;
+  closeOtherTabsInPane: (paneId: string, keepPageId: string) => void;
+  closeAllTabsInPane: (paneId: string) => void;
+  pinTabInPane: (paneId: string, pageId: string) => void;
+  unpinTabInPane: (paneId: string, pageId: string) => void;
+  updateTabTitleInPane: (paneId: string, pageId: string, title: string) => void;
+  selectTabInPane: (paneId: string, pageId: string) => void;
+
   // Utilities
   getChildPages: (parentPageId: string) => Page[];
   getActivePane: () => EditorPane | null;
@@ -111,7 +129,7 @@ function generatePaneId(): string {
 }
 
 // Default pane
-const DEFAULT_PANE: EditorPane = { id: "pane-main", pageId: null };
+const DEFAULT_PANE: EditorPane = { id: "pane-main", pageId: null, tabs: [] };
 
 export const usePageStore = create<PageStore>()(
   persist(
@@ -404,7 +422,10 @@ export const usePageStore = create<PageStore>()(
 
   // Pane management
   openPageInNewPane: (pageId) => {
-    const newPane: EditorPane = { id: generatePaneId(), pageId };
+    const state = get();
+    const page = pageId ? state.pages.find((p) => p.id === pageId) : null;
+    const tabs: PaneTab[] = page ? [{ pageId: page.id, title: page.title, isPinned: false }] : [];
+    const newPane: EditorPane = { id: generatePaneId(), pageId, tabs };
     set((state) => ({
       panes: [...state.panes, newPane],
       activePaneId: newPane.id,
@@ -412,41 +433,44 @@ export const usePageStore = create<PageStore>()(
     }));
 
     // Fetch fresh data if opening a page
-    if (pageId) {
-      const state = get();
-      const page = state.pages.find((p) => p.id === pageId);
-      if (page) {
-        api.getPage(page.notebookId, pageId).then((freshPage) => {
-          set((state) => ({
-            pages: state.pages.map((p) => (p.id === pageId ? freshPage : p)),
-            pageDataVersion: state.pageDataVersion + 1,
-          }));
-        }).catch(() => {});
-      }
+    if (pageId && page) {
+      api.getPage(page.notebookId, pageId).then((freshPage) => {
+        set((state) => ({
+          pages: state.pages.map((p) => (p.id === pageId ? freshPage : p)),
+          pageDataVersion: state.pageDataVersion + 1,
+        }));
+      }).catch(() => {});
     }
   },
 
   openPageInPane: (paneId, pageId) => {
+    const state = get();
+    const page = pageId ? state.pages.find((p) => p.id === pageId) : null;
+
     set((state) => ({
-      panes: state.panes.map((p) =>
-        p.id === paneId ? { ...p, pageId } : p
-      ),
+      panes: state.panes.map((pane) => {
+        if (pane.id !== paneId) return pane;
+
+        // Add to tabs if not already present
+        let newTabs = pane.tabs;
+        if (pageId && page && !pane.tabs.find((t) => t.pageId === pageId)) {
+          newTabs = [...pane.tabs, { pageId, title: page.title, isPinned: false }];
+        }
+
+        return { ...pane, pageId, tabs: newTabs };
+      }),
       activePaneId: paneId,
       selectedPageId: pageId,
     }));
 
     // Fetch fresh data if opening a page
-    if (pageId) {
-      const state = get();
-      const page = state.pages.find((p) => p.id === pageId);
-      if (page) {
-        api.getPage(page.notebookId, pageId).then((freshPage) => {
-          set((state) => ({
-            pages: state.pages.map((p) => (p.id === pageId ? freshPage : p)),
-            pageDataVersion: state.pageDataVersion + 1,
-          }));
-        }).catch(() => {});
-      }
+    if (pageId && page) {
+      api.getPage(page.notebookId, pageId).then((freshPage) => {
+        set((state) => ({
+          pages: state.pages.map((p) => (p.id === pageId ? freshPage : p)),
+          pageDataVersion: state.pageDataVersion + 1,
+        }));
+      }).catch(() => {});
     }
   },
 
@@ -492,7 +516,10 @@ export const usePageStore = create<PageStore>()(
     if (sourcePaneIndex === -1) return;
 
     const sourcePane = state.panes[sourcePaneIndex];
-    const newPane: EditorPane = { id: generatePaneId(), pageId: sourcePane.pageId };
+    // Copy current page as a single tab in new pane
+    const currentTab = sourcePane.tabs.find((t) => t.pageId === sourcePane.pageId);
+    const tabs: PaneTab[] = currentTab ? [{ ...currentTab }] : [];
+    const newPane: EditorPane = { id: generatePaneId(), pageId: sourcePane.pageId, tabs };
 
     // Insert the new pane after the source pane
     const newPanes = [...state.panes];
@@ -502,6 +529,157 @@ export const usePageStore = create<PageStore>()(
       panes: newPanes,
       activePaneId: newPane.id,
     });
+  },
+
+  // Pane tab management
+  openTabInPane: (paneId, pageId, title) => {
+    set((state) => ({
+      panes: state.panes.map((pane) => {
+        if (pane.id !== paneId) return pane;
+
+        // Check if tab already exists
+        if (pane.tabs.find((t) => t.pageId === pageId)) {
+          return { ...pane, pageId }; // Just switch to it
+        }
+
+        // Add new tab
+        return {
+          ...pane,
+          pageId,
+          tabs: [...pane.tabs, { pageId, title, isPinned: false }],
+        };
+      }),
+    }));
+  },
+
+  closeTabInPane: (paneId, pageId) => {
+    set((state) => ({
+      panes: state.panes.map((pane) => {
+        if (pane.id !== paneId) return pane;
+
+        const tabIndex = pane.tabs.findIndex((t) => t.pageId === pageId);
+        if (tabIndex === -1) return pane;
+
+        const newTabs = pane.tabs.filter((t) => t.pageId !== pageId);
+
+        // Determine new active page if we're closing the active one
+        let newPageId = pane.pageId;
+        if (pane.pageId === pageId) {
+          if (newTabs.length === 0) {
+            newPageId = null;
+          } else if (tabIndex >= newTabs.length) {
+            // Closed last tab, activate the new last tab
+            newPageId = newTabs[newTabs.length - 1].pageId;
+          } else {
+            // Activate the tab that took its place
+            newPageId = newTabs[tabIndex].pageId;
+          }
+        }
+
+        return { ...pane, pageId: newPageId, tabs: newTabs };
+      }),
+    }));
+  },
+
+  closeOtherTabsInPane: (paneId, keepPageId) => {
+    set((state) => ({
+      panes: state.panes.map((pane) => {
+        if (pane.id !== paneId) return pane;
+
+        // Keep pinned tabs and the specified tab
+        const newTabs = pane.tabs.filter((t) => t.pageId === keepPageId || t.isPinned);
+
+        return { ...pane, pageId: keepPageId, tabs: newTabs };
+      }),
+    }));
+  },
+
+  closeAllTabsInPane: (paneId) => {
+    set((state) => ({
+      panes: state.panes.map((pane) => {
+        if (pane.id !== paneId) return pane;
+
+        // Keep only pinned tabs
+        const pinnedTabs = pane.tabs.filter((t) => t.isPinned);
+        const newPageId = pinnedTabs.length > 0 ? pinnedTabs[0].pageId : null;
+
+        return { ...pane, pageId: newPageId, tabs: pinnedTabs };
+      }),
+    }));
+  },
+
+  pinTabInPane: (paneId, pageId) => {
+    set((state) => ({
+      panes: state.panes.map((pane) => {
+        if (pane.id !== paneId) return pane;
+
+        const tabs = [...pane.tabs];
+        const tabIndex = tabs.findIndex((t) => t.pageId === pageId);
+        if (tabIndex === -1) return pane;
+
+        // Pin the tab
+        tabs[tabIndex] = { ...tabs[tabIndex], isPinned: true };
+
+        // Move pinned tab to the front (after other pinned tabs)
+        const pinnedCount = tabs.filter((t) => t.isPinned && t.pageId !== pageId).length;
+        const [tab] = tabs.splice(tabIndex, 1);
+        tabs.splice(pinnedCount, 0, tab);
+
+        return { ...pane, tabs };
+      }),
+    }));
+  },
+
+  unpinTabInPane: (paneId, pageId) => {
+    set((state) => ({
+      panes: state.panes.map((pane) => {
+        if (pane.id !== paneId) return pane;
+
+        return {
+          ...pane,
+          tabs: pane.tabs.map((t) =>
+            t.pageId === pageId ? { ...t, isPinned: false } : t
+          ),
+        };
+      }),
+    }));
+  },
+
+  updateTabTitleInPane: (paneId, pageId, title) => {
+    set((state) => ({
+      panes: state.panes.map((pane) => {
+        if (pane.id !== paneId) return pane;
+
+        return {
+          ...pane,
+          tabs: pane.tabs.map((t) =>
+            t.pageId === pageId ? { ...t, title } : t
+          ),
+        };
+      }),
+    }));
+  },
+
+  selectTabInPane: (paneId, pageId) => {
+    const state = get();
+    const page = state.pages.find((p) => p.id === pageId);
+
+    set((state) => ({
+      panes: state.panes.map((pane) =>
+        pane.id === paneId ? { ...pane, pageId } : pane
+      ),
+      selectedPageId: state.activePaneId === paneId ? pageId : state.selectedPageId,
+    }));
+
+    // Fetch fresh data
+    if (page) {
+      api.getPage(page.notebookId, pageId).then((freshPage) => {
+        set((state) => ({
+          pages: state.pages.map((p) => (p.id === pageId ? freshPage : p)),
+          pageDataVersion: state.pageDataVersion + 1,
+        }));
+      }).catch(() => {});
+    }
   },
 
   getChildPages: (parentPageId) => {
@@ -538,6 +716,11 @@ export const usePageStore = create<PageStore>()(
             state.panes = [DEFAULT_PANE];
             state.activePaneId = "pane-main";
           }
+          // Ensure each pane has a tabs array
+          state.panes = state.panes.map((pane) => ({
+            ...pane,
+            tabs: pane.tabs || [],
+          }));
           // Set selectedPageId from active pane
           const activePane = state.panes.find((p) => p.id === state.activePaneId);
           state.selectedPageId = activePane?.pageId || null;

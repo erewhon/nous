@@ -12,6 +12,7 @@ interface FolderTreeItemProps {
   isDropTarget?: boolean;
   onToggleExpand: (folderId: string) => void;
   onSelectPage: (pageId: string, openInNewPane?: boolean) => void;
+  onOpenInNewPane?: (pageId: string) => void;
   onCreatePage: (folderId?: string) => void;
   onCreateSubpage?: (parentPageId: string) => void;
   onRenameFolder: (folderId: string, newName: string) => void;
@@ -35,6 +36,7 @@ export const FolderTreeItem = memo(function FolderTreeItem({
   isDropTarget = false,
   onToggleExpand,
   onSelectPage,
+  onOpenInNewPane,
   onCreatePage,
   onCreateSubpage,
   onRenameFolder,
@@ -368,6 +370,7 @@ export const FolderTreeItem = memo(function FolderTreeItem({
               depth={depth + 1}
               onSelect={(openInNewPane) => onSelectPage(page.id, openInNewPane)}
               onSelectPage={onSelectPage}
+              onOpenInNewPane={onOpenInNewPane}
               onCreateSubpage={onCreateSubpage}
               sections={sections}
               onMoveToSection={onMoveToSection}
@@ -518,6 +521,7 @@ interface DraggablePageItemProps {
   isDropTarget?: boolean;
   onSelect: (openInNewPane?: boolean) => void;
   onSelectPage?: (pageId: string, openInNewPane?: boolean) => void; // For recursive child selection
+  onOpenInNewPane?: (pageId: string) => void; // Open page in a new split pane
   onCreateSubpage?: (parentPageId: string) => void;
   sections?: Section[];
   onMoveToSection?: (pageId: string, sectionId: string | null) => void;
@@ -534,6 +538,7 @@ const DraggablePageItem = memo(function DraggablePageItem({
   isDropTarget = false,
   onSelect,
   onSelectPage,
+  onOpenInNewPane,
   onCreateSubpage,
   sections,
   onMoveToSection,
@@ -604,6 +609,14 @@ const DraggablePageItem = memo(function DraggablePageItem({
     }
     setShowContextMenu(false);
   }, [onCreateSubpage, page.id]);
+
+  const handleOpenInNewPane = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (onOpenInNewPane) {
+      onOpenInNewPane(page.id);
+    }
+    setShowContextMenu(false);
+  }, [onOpenInNewPane, page.id]);
 
   const handleToggleExpand = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
@@ -730,6 +743,7 @@ const DraggablePageItem = memo(function DraggablePageItem({
                 depth={depth + 1}
                 onSelect={(openInNewPane) => onSelectPage(childPage.id, openInNewPane)}
                 onSelectPage={onSelectPage}
+                onOpenInNewPane={onOpenInNewPane}
                 onCreateSubpage={onCreateSubpage}
                 sections={sections}
                 onMoveToSection={onMoveToSection}
@@ -756,10 +770,10 @@ const DraggablePageItem = memo(function DraggablePageItem({
           onClick={(e) => e.stopPropagation()}
           onMouseLeave={() => setShowContextMenu(false)}
         >
-          {/* Create Subpage option */}
-          {onCreateSubpage && (
+          {/* Open in Split Pane option */}
+          {onOpenInNewPane && (
             <button
-              onClick={handleCreateSubpage}
+              onClick={handleOpenInNewPane}
               className="flex w-full items-center gap-2 px-3 py-1.5 text-sm transition-colors hover:bg-[var(--color-bg-tertiary)]"
               style={{ color: "var(--color-text-primary)" }}
             >
@@ -774,16 +788,49 @@ const DraggablePageItem = memo(function DraggablePageItem({
                 strokeLinecap="round"
                 strokeLinejoin="round"
               >
-                <path d="M12 5v14M5 12h14" />
+                <rect x="3" y="3" width="18" height="18" rx="2" />
+                <line x1="12" y1="3" x2="12" y2="21" />
               </svg>
-              Create Subpage
+              Open in Split Pane
             </button>
+          )}
+
+          {/* Create Subpage option */}
+          {onCreateSubpage && (
+            <>
+              {onOpenInNewPane && (
+                <div
+                  className="my-1 border-t"
+                  style={{ borderColor: "var(--color-border)" }}
+                />
+              )}
+              <button
+                onClick={handleCreateSubpage}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-sm transition-colors hover:bg-[var(--color-bg-tertiary)]"
+                style={{ color: "var(--color-text-primary)" }}
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+                Create Subpage
+              </button>
+            </>
           )}
 
           {/* Section options */}
           {sections && sections.length > 0 && onMoveToSection && (
             <>
-              {onCreateSubpage && (
+              {(onCreateSubpage || onOpenInNewPane) && (
                 <div
                   className="my-1 border-t"
                   style={{ borderColor: "var(--color-border)" }}

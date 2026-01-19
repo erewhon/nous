@@ -1,9 +1,10 @@
-import { useMemo, useCallback, useState } from "react";
+import { useMemo, useCallback, useState, useEffect } from "react";
 import type { OutputData } from "@editorjs/editorjs";
 import { usePageStore, type EditorPane } from "../../stores/pageStore";
 import { useLinkStore } from "../../stores/linkStore";
 import { BlockEditor } from "./BlockEditor";
 import { PageHeader } from "./PageHeader";
+import { PaneTabBar } from "./PaneTabBar";
 import { MarkdownEditor } from "../Markdown";
 import { PDFPageViewer } from "../PDF";
 import { JupyterViewer } from "../Jupyter";
@@ -37,12 +38,29 @@ export function EditorPaneContent({
   canClose,
   showPaneControls,
 }: EditorPaneContentProps) {
-  const { pages, updatePageContent, createPage, pageDataVersion } = usePageStore();
+  const { pages, updatePageContent, createPage, pageDataVersion, openTabInPane, updateTabTitleInPane } = usePageStore();
   const { updatePageLinks } = useLinkStore();
   const [isSaving, setIsSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
 
   const selectedPage = pages.find((p) => p.id === pane.pageId);
+
+  // Ensure current page is in tabs
+  useEffect(() => {
+    if (selectedPage && !pane.tabs.find((t) => t.pageId === selectedPage.id)) {
+      openTabInPane(pane.id, selectedPage.id, selectedPage.title);
+    }
+  }, [selectedPage, pane.id, pane.tabs, openTabInPane]);
+
+  // Update tab title when page title changes
+  useEffect(() => {
+    if (selectedPage) {
+      const tab = pane.tabs.find((t) => t.pageId === selectedPage.id);
+      if (tab && tab.title !== selectedPage.title) {
+        updateTabTitleInPane(pane.id, selectedPage.id, selectedPage.title);
+      }
+    }
+  }, [selectedPage?.title, selectedPage?.id, pane.id, pane.tabs, updateTabTitleInPane]);
 
   // Convert page content to Editor.js format
   const editorData: OutputData | undefined = useMemo(() => {
@@ -207,6 +225,13 @@ export function EditorPaneContent({
           </div>
         </div>
       )}
+
+      {/* Tab bar for this pane */}
+      <PaneTabBar
+        paneId={pane.id}
+        tabs={pane.tabs}
+        activePageId={pane.pageId}
+      />
 
       {selectedPage ? (
         <>
