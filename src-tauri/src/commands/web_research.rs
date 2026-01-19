@@ -269,3 +269,124 @@ pub fn summarize_research(
             message: format!("Research summarization error: {}", e),
         })
 }
+
+/// URL content for embedding
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UrlContent {
+    pub title: String,
+    pub description: String,
+    pub content: String,
+    pub url: String,
+    pub site_name: Option<String>,
+    pub favicon: Option<String>,
+}
+
+/// Extract main text content from HTML
+fn extract_text_content(html: &str) -> String {
+    // Remove script and style tags
+    let script_re = Regex::new(r"(?is)<script[^>]*>.*?</script>").unwrap();
+    let style_re = Regex::new(r"(?is)<style[^>]*>.*?</style>").unwrap();
+    let nav_re = Regex::new(r"(?is)<nav[^>]*>.*?</nav>").unwrap();
+    let header_re = Regex::new(r"(?is)<header[^>]*>.*?</header>").unwrap();
+    let footer_re = Regex::new(r"(?is)<footer[^>]*>.*?</footer>").unwrap();
+
+    let mut text = html.to_string();
+    text = script_re.replace_all(&text, "").to_string();
+    text = style_re.replace_all(&text, "").to_string();
+    text = nav_re.replace_all(&text, "").to_string();
+    text = header_re.replace_all(&text, "").to_string();
+    text = footer_re.replace_all(&text, "").to_string();
+
+    // Remove all HTML tags
+    let tag_re = Regex::new(r"<[^>]+>").unwrap();
+    text = tag_re.replace_all(&text, " ").to_string();
+
+    // Decode HTML entities
+    text = html_escape::decode_html_entities(&text).to_string();
+
+    // Normalize whitespace
+    let whitespace_re = Regex::new(r"\s+").unwrap();
+    text = whitespace_re.replace_all(&text, " ").to_string();
+
+    text.trim().to_string()
+}
+
+/// Fetch full content from a URL for embedding
+#[tauri::command]
+pub async fn fetch_url_content(url: String) -> Result<UrlContent, CommandError> {
+    // Create a client with timeout
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .user_agent("Mozilla/5.0 (compatible; Katt/1.0)")
+        .build()
+        .map_err(|e| CommandError {
+            message: format!("Failed to create HTTP client: {}", e),
+        })?;
+
+    // Fetch the page
+    let response = client.get(&url).send().await.map_err(|e| CommandError {
+        message: format!("Failed to fetch URL: {}", e),
+    })?;
+
+    // Check content type
+    let content_type = response
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+
+    if !content_type.contains("text/html") {
+        return Err(CommandError {
+            message: "URL does not return HTML content".to_string(),
+        });
+    }
+
+    // Get the final URL (after redirects)
+    let final_url = response.url().to_string();
+
+    // Read body
+    let body = response
+        .text()
+        .await
+        .map_err(|e| CommandError {
+            message: format!("Failed to read response: {}", e),
+        })?;
+
+    // Extract metadata from head (first 50KB)
+    let html_head = if body.len() > 50_000 {
+        &body[..50_000]
+    } else {
+        &body
+    };
+
+    let title = extract_meta_content(html_head, "og:title")
+        .or_else(|| extract_meta_content(html_head, "twitter:title"))
+        .or_else(|| extract_title(html_head))
+        .unwrap_or_else(|| "Untitled".to_string());
+
+    let description = extract_meta_content(html_head, "og:description")
+        .or_else(|| extract_meta_content(html_head, "twitter:description"))
+        .or_else(|| extract_meta_content(html_head, "description"))
+        .unwrap_or_default();
+
+    let site_name = extract_meta_content(html_head, "og:site_name");
+    let favicon = extract_favicon(html_head, &final_url);
+
+    // Extract main text content (limit to reasonable size)
+    let content = extract_text_content(&body);
+    let content = if content.len() > 10_000 {
+        content[..10_000].to_string() + "..."
+    } else {
+        content
+    };
+
+    Ok(UrlContent {
+        title,
+        description,
+        content,
+        url: final_url,
+        site_name,
+        favicon,
+    })
+}

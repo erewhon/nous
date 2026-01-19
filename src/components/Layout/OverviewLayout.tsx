@@ -8,26 +8,30 @@ import { useLinkStore } from "../../stores/linkStore";
 import { useThemeStore } from "../../stores/themeStore";
 import { NotebookOverview, NotebookDropdown } from "../NotebookOverview";
 import { FolderTree } from "../Editor/FolderTree";
-import { BlockEditor } from "../Editor/BlockEditor";
-import { PageHeader } from "../Editor/PageHeader";
-import { BacklinksPanel } from "../Editor/BacklinksPanel";
-import { SimilarPagesPanel } from "../Editor/SimilarPagesPanel";
-import { MarkdownEditor } from "../Markdown";
-import { PDFPageViewer } from "../PDF";
-import { JupyterViewer } from "../Jupyter";
-import { EpubReader } from "../Epub";
-import { CalendarViewer } from "../Calendar";
+import { EditorPaneContent } from "../Editor/EditorPaneContent";
 import { CoverPage } from "../CoverPage";
 import { SectionList } from "../Sections";
 import { ResizeHandle } from "./ResizeHandle";
 import type { EditorData, Page } from "../../types/page";
 import * as api from "../../utils/api";
-import { calculatePageStats, type PageStats } from "../../utils/pageStats";
 
 export function OverviewLayout() {
   const { notebooks, selectedNotebookId, selectNotebook, createNotebook } = useNotebookStore();
-  const { pages, selectedPageId, selectPage, updatePageContent, loadPages, createPage, movePageToSection, reorderPages } =
-    usePageStore();
+  const {
+    pages,
+    selectedPageId,
+    selectPage,
+    openPageInNewPane,
+    updatePageContent,
+    loadPages,
+    movePageToSection,
+    reorderPages,
+    panes,
+    activePaneId,
+    setActivePane,
+    closePane,
+    splitPane,
+  } = usePageStore();
   const { folders, loadFolders, showArchived, updateFolder } = useFolderStore();
   const {
     sections,
@@ -39,11 +43,9 @@ export function OverviewLayout() {
     updateSection,
     deleteSection,
   } = useSectionStore();
-  const { updatePageLinks, buildLinksFromPages } = useLinkStore();
+  const { buildLinksFromPages } = useLinkStore();
   const panelWidths = useThemeStore((state) => state.panelWidths);
   const setPanelWidth = useThemeStore((state) => state.setPanelWidth);
-  const [isSaving, setIsSaving] = useState(false);
-  const [lastSaved, setLastSaved] = useState<Date | null>(null);
 
   // Panel resize handlers
   const handleSectionsResize = useCallback(
@@ -103,7 +105,6 @@ export function OverviewLayout() {
     () => pages.filter((p) => p.notebookId === selectedNotebookId),
     [pages, selectedNotebookId]
   );
-  const selectedPage = pages.find((p) => p.id === selectedPageId);
 
   // Build links when pages change
   useEffect(() => {
@@ -112,76 +113,16 @@ export function OverviewLayout() {
     }
   }, [notebookPages, buildLinksFromPages]);
 
-  // Convert page content to Editor.js format
-  const editorData: OutputData | undefined = useMemo(() => {
-    if (!selectedPage?.content) return undefined;
-    return {
-      time: selectedPage.content.time,
-      version: selectedPage.content.version,
-      blocks: selectedPage.content.blocks.map((block) => ({
-        id: block.id,
-        type: block.type,
-        data: block.data as Record<string, unknown>,
-      })),
-    };
-  }, [selectedPage?.id, selectedPage?.content]);
-
-  // Calculate page statistics
-  const pageStats: PageStats | null = useMemo(() => {
-    if (!selectedPage?.content?.blocks?.length) return null;
-    return calculatePageStats(selectedPage.content.blocks);
-  }, [selectedPage?.content?.blocks]);
-
-  // Handle save
-  const handleSave = useCallback(
-    async (data: OutputData) => {
-      if (!selectedNotebookId || !selectedPageId || !selectedPage) return;
-
-      setIsSaving(true);
-      try {
-        const editorData: EditorData = {
-          time: data.time,
-          version: data.version,
-          blocks: data.blocks.map((block) => ({
-            id: block.id ?? crypto.randomUUID(),
-            type: block.type,
-            data: block.data as Record<string, unknown>,
-          })),
-        };
-
-        await updatePageContent(selectedNotebookId, selectedPageId, editorData, false);
-
-        // Update links after save
-        updatePageLinks({
-          ...selectedPage,
-          content: editorData,
-        });
-
-        setLastSaved(new Date());
-      } finally {
-        setIsSaving(false);
+  // Handle page selection with optional new pane
+  const handleSelectPage = useCallback(
+    (pageId: string, openInNewPane?: boolean) => {
+      if (openInNewPane) {
+        openPageInNewPane(pageId);
+      } else {
+        selectPage(pageId);
       }
     },
-    [selectedNotebookId, selectedPageId, selectedPage, updatePageContent, updatePageLinks]
-  );
-
-  // Handle wiki link clicks
-  const handleLinkClick = useCallback(
-    async (pageTitle: string) => {
-      let targetPage = notebookPages.find(
-        (p) => p.title.toLowerCase() === pageTitle.toLowerCase()
-      );
-
-      if (targetPage) {
-        selectPage(targetPage.id);
-        return;
-      }
-
-      if (selectedNotebookId) {
-        await createPage(selectedNotebookId, pageTitle);
-      }
-    },
-    [notebookPages, selectPage, selectedNotebookId, createPage]
+    [selectPage, openPageInNewPane]
   );
 
   // Handle cover page save
@@ -400,7 +341,8 @@ export function OverviewLayout() {
             pages={notebookPages}
             folders={folders}
             selectedPageId={selectedPageId}
-            onSelectPage={selectPage}
+            onSelectPage={handleSelectPage}
+            onOpenInNewPane={openPageInNewPane}
             sectionsEnabled={selectedNotebook.sectionsEnabled}
             selectedSectionId={selectedSectionId}
             sections={sections}
@@ -416,125 +358,25 @@ export function OverviewLayout() {
         </div>
         <ResizeHandle direction="horizontal" onResize={handleFolderTreeResize} />
 
-        {/* Editor panel */}
+        {/* Editor panel - multi-pane support */}
         <div
-          className="flex flex-1 flex-col overflow-hidden"
+          className="flex flex-1 overflow-hidden"
           style={{ backgroundColor: "var(--color-bg-primary)" }}
         >
-          {selectedPage ? (
-            <>
-              <PageHeader
-                page={selectedPage}
-                isSaving={isSaving}
-                lastSaved={lastSaved}
-                stats={pageStats}
-              />
-              <div className="flex-1 overflow-y-auto px-16 py-10">
-                <div
-                  className="mx-auto"
-                  style={{ maxWidth: "var(--editor-max-width)" }}
-                >
-                  {/* Conditional rendering based on page type */}
-                  {selectedPage.pageType === "markdown" && (
-                    <MarkdownEditor
-                      key={selectedPage.id}
-                      page={selectedPage}
-                      notebookId={selectedNotebook.id}
-                      className="min-h-[calc(100vh-300px)]"
-                    />
-                  )}
-                  {selectedPage.pageType === "pdf" && (
-                    <PDFPageViewer
-                      key={selectedPage.id}
-                      page={selectedPage}
-                      notebookId={selectedNotebook.id}
-                      className="min-h-[calc(100vh-300px)]"
-                    />
-                  )}
-                  {selectedPage.pageType === "jupyter" && (
-                    <JupyterViewer
-                      key={selectedPage.id}
-                      page={selectedPage}
-                      notebookId={selectedNotebook.id}
-                      className="min-h-[calc(100vh-300px)]"
-                    />
-                  )}
-                  {selectedPage.pageType === "epub" && (
-                    <EpubReader
-                      key={selectedPage.id}
-                      page={selectedPage}
-                      notebookId={selectedNotebook.id}
-                      className="min-h-[calc(100vh-300px)]"
-                    />
-                  )}
-                  {selectedPage.pageType === "calendar" && (
-                    <CalendarViewer
-                      key={selectedPage.id}
-                      page={selectedPage}
-                      notebookId={selectedNotebook.id}
-                      className="min-h-[calc(100vh-300px)]"
-                    />
-                  )}
-                  {(selectedPage.pageType === "standard" || !selectedPage.pageType) && (
-                    <BlockEditor
-                      key={selectedPage.id}
-                      initialData={editorData}
-                      onSave={handleSave}
-                      onLinkClick={handleLinkClick}
-                      notebookId={selectedNotebook.id}
-                      pages={notebookPages.map((p) => ({ id: p.id, title: p.title }))}
-                      className="min-h-[calc(100vh-300px)]"
-                    />
-                  )}
-
-                  {/* Backlinks panel - only for standard pages */}
-                  {(selectedPage.pageType === "standard" || !selectedPage.pageType) && (
-                    <BacklinksPanel
-                      pageTitle={selectedPage.title}
-                      notebookId={selectedNotebook.id}
-                    />
-                  )}
-
-                  {/* Similar Pages panel - only for standard pages */}
-                  {(selectedPage.pageType === "standard" || !selectedPage.pageType) && (
-                    <SimilarPagesPanel
-                      page={selectedPage}
-                      notebookId={selectedNotebook.id}
-                      allPages={notebookPages}
-                    />
-                  )}
-                </div>
-              </div>
-            </>
-          ) : (
-            <div className="flex h-full items-center justify-center">
-              <div className="text-center max-w-sm px-8">
-                <div
-                  className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-xl"
-                  style={{ backgroundColor: "var(--color-bg-tertiary)" }}
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    width="32"
-                    height="32"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    style={{ color: "var(--color-text-muted)" }}
-                  >
-                    <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
-                    <polyline points="14,2 14,8 20,8" />
-                  </svg>
-                </div>
-                <p style={{ color: "var(--color-text-secondary)" }}>
-                  Select a page from the sidebar or create a new one
-                </p>
-              </div>
-            </div>
-          )}
+          {panes.map((pane) => (
+            <EditorPaneContent
+              key={pane.id}
+              pane={pane}
+              notebookId={selectedNotebook.id}
+              notebookPages={notebookPages}
+              isActive={pane.id === activePaneId}
+              onActivate={() => setActivePane(pane.id)}
+              onClose={() => closePane(pane.id)}
+              onSplit={() => splitPane(pane.id, "horizontal")}
+              canClose={panes.length > 1}
+              showPaneControls={panes.length > 1}
+            />
+          ))}
         </div>
       </div>
     </div>

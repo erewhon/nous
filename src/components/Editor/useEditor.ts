@@ -17,6 +17,7 @@ import { HighlighterTool } from "./HighlighterTool";
 import { PDFTool } from "./PDFTool";
 import { VideoTool } from "./VideoTool";
 import { DrawingTool } from "./DrawingTool";
+import { EmbedTool } from "./EmbedTool";
 import { createImageUploader } from "./imageUploader";
 
 interface UseEditorOptions {
@@ -28,6 +29,7 @@ interface UseEditorOptions {
   readOnly?: boolean;
   placeholder?: string;
   notebookId?: string;
+  pages?: Array<{ id: string; title: string }>;
 }
 
 export function useEditor({
@@ -39,6 +41,7 @@ export function useEditor({
   readOnly = false,
   placeholder = "Start writing or press '/' for commands...",
   notebookId,
+  pages,
 }: UseEditorOptions) {
   const editorRef = useRef<EditorJS | null>(null);
   const isReady = useRef(false);
@@ -137,6 +140,14 @@ export function useEditor({
                 class: DrawingTool as unknown as ToolConstructable,
                 config: {
                   notebookId,
+                },
+              },
+              embed: {
+                class: EmbedTool as unknown as ToolConstructable,
+                config: {
+                  notebookId,
+                  pages,
+                  onPageClick: onLinkClick,
                 },
               },
             }

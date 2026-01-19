@@ -169,6 +169,7 @@ pub fn run() {
             // Page commands
             commands::list_pages,
             commands::get_page,
+            commands::get_page_content,
             commands::create_page,
             commands::update_page,
             commands::delete_page,
@@ -199,6 +200,7 @@ pub fn run() {
             commands::scrape_url,
             commands::summarize_research,
             commands::fetch_link_metadata,
+            commands::fetch_url_content,
             // Tag management commands
             commands::get_all_tags,
             commands::get_notebook_tags,

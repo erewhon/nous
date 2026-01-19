@@ -69,6 +69,7 @@ export function BlockEditor({
     onLinkClick,
     readOnly,
     notebookId,
+    pages,
   });
 
   // VI keybindings mode

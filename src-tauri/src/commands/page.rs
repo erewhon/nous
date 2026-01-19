@@ -294,3 +294,38 @@ pub fn move_page_to_parent(
 
     Ok(page)
 }
+
+/// Page content structure for embedding
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PageContent {
+    pub id: String,
+    pub title: String,
+    pub blocks: Vec<crate::storage::EditorBlock>,
+    pub page_type: Option<String>,
+}
+
+/// Get page content for embedding
+#[tauri::command]
+pub fn get_page_content(
+    state: State<AppState>,
+    notebook_id: String,
+    page_id: String,
+) -> CommandResult<PageContent> {
+    let storage = state.storage.lock().unwrap();
+    let nb_id = Uuid::parse_str(&notebook_id).map_err(|e| CommandError {
+        message: format!("Invalid notebook ID: {}", e),
+    })?;
+    let pg_id = Uuid::parse_str(&page_id).map_err(|e| CommandError {
+        message: format!("Invalid page ID: {}", e),
+    })?;
+
+    let page = storage.get_page(nb_id, pg_id)?;
+
+    Ok(PageContent {
+        id: page.id.to_string(),
+        title: page.title,
+        blocks: page.content.blocks,
+        page_type: Some(format!("{:?}", page.page_type).to_lowercase()),
+    })
+}
