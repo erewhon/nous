@@ -48,7 +48,7 @@ pub fn get_page(
     storage.get_page(nb_id, pg_id).map_err(Into::into)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn create_page(
     state: State<AppState>,
     notebook_id: String,
@@ -119,7 +119,7 @@ pub fn create_page(
     Ok(page)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 pub fn update_page(
     state: State<AppState>,
     notebook_id: String,
@@ -172,7 +172,7 @@ pub fn update_page(
         });
     }
     // Set page_type if provided
-    if let Some(pt) = page_type {
+    if let Some(pt) = page_type.clone() {
         page.page_type = match pt.as_str() {
             "markdown" => crate::storage::PageType::Markdown,
             "pdf" => crate::storage::PageType::Pdf,
@@ -184,8 +184,30 @@ pub fn update_page(
         };
     }
     // Set file_extension if provided
-    if let Some(ext) = file_extension {
-        page.file_extension = if ext.is_empty() { None } else { Some(ext) };
+    if let Some(ext) = file_extension.clone() {
+        page.file_extension = if ext.is_empty() { None } else { Some(ext.clone()) };
+
+        // If this is a file-based page type and source_file is not set, create it
+        if page.source_file.is_none() && !ext.is_empty() {
+            let is_file_based = matches!(
+                page.page_type,
+                crate::storage::PageType::Markdown
+                    | crate::storage::PageType::Calendar
+                    | crate::storage::PageType::Chat
+                    | crate::storage::PageType::Jupyter
+            );
+            if is_file_based {
+                // Set source_file to files/{page_id}.{ext}
+                page.source_file = Some(format!("files/{}.{}", pg_id, ext));
+                page.storage_mode = Some(crate::storage::FileStorageMode::Embedded);
+
+                // Create the files directory if it doesn't exist
+                let files_dir = storage.get_notebook_path(nb_id).join("files");
+                if !files_dir.exists() {
+                    let _ = std::fs::create_dir_all(&files_dir);
+                }
+            }
+        }
     }
     page.updated_at = chrono::Utc::now();
 

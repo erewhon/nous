@@ -439,6 +439,55 @@ Already implemented with Tantivy, may need refinement:
 
 ---
 
+## AI Chat Pages
+
+### 30. Chat Page Type (Complete)
+- [x] New page type for AI conversations (.chat extension)
+- [x] Cell-based interface (like Jupyter notebooks for AI)
+  - [x] Prompt cells with editable textarea and Run button
+  - [x] Response cells with markdown rendering
+  - [x] Markdown cells for notes/context
+- [x] Streaming responses with real-time display
+- [x] Conversation context (previous cells inform new prompts)
+- [x] Cell management (add, delete, move up/down)
+- [x] Chat settings (model, system prompt, context limit)
+- [x] Extended thinking display (collapsible)
+- [x] Response stats (elapsed time, tokens, model)
+- [x] Keyboard shortcut (Shift+Enter to run prompt)
+- [x] Auto-save with debouncing
+- [x] Page type dropdown in sidebar (Standard, AI Chat, Markdown, Calendar)
+- [x] Distinct icons for each page type in sidebar
+
+### 31. Chat Page Enhancements (Next)
+- [ ] **Code Execution** - Run code blocks in responses via Jupyter kernel
+  - Connect to existing Jupyter kernel infrastructure
+  - Execute code cells inline with output display
+  - Support multiple languages (Python, JavaScript, etc.)
+- [ ] **Regenerate Response** - Re-run a prompt to get alternative responses
+  - Button on response cells to regenerate
+  - Option to keep or replace existing response
+- [ ] **Conversation Branching** - Fork conversation at any point
+  - Create branch from any prompt cell
+  - Explore alternative conversation paths
+  - Visual indicator for branch points
+- [ ] **Template Variables** - Use placeholders in prompts
+  - `{{selection}}` - current text selection
+  - `{{page_content}}` - content of current/referenced page
+  - `{{date}}`, `{{time}}` - timestamps
+  - Variable picker UI
+- [ ] **Export Chat** - Convert chat to other formats
+  - Export to markdown file
+  - Export to standard page (block-based)
+  - Export to PDF
+- [ ] **Jupyter AI Integration** - Add AI cells to Jupyter notebooks
+  - AI prompt/response cells in .ipynb files
+  - Seamless mixing of code and AI cells
+- [ ] **Cell Collapsing** - Collapse/expand cells for better overview
+- [ ] **Search in Chat** - Find text within chat conversation
+- [ ] **Drag-and-Drop Reorder** - Drag cells to reorder
+
+---
+
 ## Technical Debt & Polish
 
 - [x] Add comprehensive error handling for file operations

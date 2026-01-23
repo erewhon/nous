@@ -87,7 +87,22 @@ export async function updatePage(
   },
   commit?: boolean // Whether to create a git commit (default: false, use true for explicit saves)
 ): Promise<Page> {
-  return invoke<Page>("update_page", { notebookId, pageId, ...updates, commit });
+  // Tauri automatically converts camelCase to snake_case for command parameters
+  const params: Record<string, unknown> = {
+    notebookId,
+    pageId,
+    commit,
+  };
+  if (updates.title !== undefined) params.title = updates.title;
+  if (updates.content !== undefined) params.content = updates.content;
+  if (updates.tags !== undefined) params.tags = updates.tags;
+  if (updates.systemPrompt !== undefined) params.systemPrompt = updates.systemPrompt;
+  if (updates.systemPromptMode !== undefined) params.systemPromptMode = updates.systemPromptMode;
+  if (updates.sectionId !== undefined) params.sectionId = updates.sectionId;
+  if (updates.pageType !== undefined) params.pageType = updates.pageType;
+  if (updates.fileExtension !== undefined) params.fileExtension = updates.fileExtension;
+
+  return invoke<Page>("update_page", params);
 }
 
 export async function deletePage(

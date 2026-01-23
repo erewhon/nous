@@ -220,21 +220,28 @@ export function FolderTree({
   );
 
   // Filter pages based on archive visibility and section
+  // Note: selectedSectionId can be:
+  //   - undefined: show all pages (no section filter)
+  //   - null: show only unsorted pages (sectionId === null)
+  //   - string: show pages in that specific section
   const visiblePages = useMemo(() => {
     let filtered = showArchived ? pages : pages.filter((p) => !p.isArchived);
-    // Filter by section if a section is selected
-    if (sectionsEnabled && selectedSectionId !== null) {
-      filtered = filtered.filter((p) => p.sectionId === selectedSectionId);
+    // Filter by section if sections are enabled
+    if (sectionsEnabled && selectedSectionId !== undefined) {
+      // null means "unsorted" - show pages with no section
+      // string means a specific section
+      filtered = filtered.filter((p) => (p.sectionId ?? null) === selectedSectionId);
     }
     return filtered;
   }, [pages, showArchived, sectionsEnabled, selectedSectionId]);
 
   // Filter folders by section
   const visibleFolders = useMemo(() => {
-    if (!sectionsEnabled || selectedSectionId === null) {
+    if (!sectionsEnabled || selectedSectionId === undefined) {
       return folders;
     }
-    return folders.filter((f) => f.sectionId === selectedSectionId);
+    // null means "unsorted" - show folders with no section
+    return folders.filter((f) => (f.sectionId ?? null) === selectedSectionId);
   }, [folders, sectionsEnabled, selectedSectionId]);
 
   // Get top-level pages for a specific folder (pages without a parent page)
@@ -283,12 +290,18 @@ export function FolderTree({
   // Handle creating a chat page
   const handleCreateChatPage = useCallback(async () => {
     try {
-      // Create a new page
+      // Create a new page using the store (adds to local state and selects it)
       const title = "New Chat";
       const sectionId = sectionsEnabled && selectedSectionId ? selectedSectionId : undefined;
-      const pageData = await api.createPage(notebookId, title, undefined, undefined, sectionId);
+      const pageData = await createPage(notebookId, title, undefined, undefined, sectionId);
+      if (!pageData) {
+        console.error("Failed to create chat page");
+        return;
+      }
       // Update the page to have .chat extension which will set pageType to chat
-      await api.updatePage(notebookId, pageData.id, {
+      // Use the store's updatePage to keep local state in sync
+      const { updatePage: storeUpdatePage } = usePageStore.getState();
+      await storeUpdatePage(notebookId, pageData.id, {
         fileExtension: "chat",
         pageType: "chat",
       });
@@ -309,39 +322,47 @@ export function FolderTree({
         },
       }, null, 2);
       await api.updateFileContent(notebookId, pageData.id, defaultContent);
-      await loadPages(notebookId);
     } catch (err) {
       console.error("Failed to create chat page:", err);
     }
-  }, [notebookId, sectionsEnabled, selectedSectionId, loadPages]);
+  }, [notebookId, sectionsEnabled, selectedSectionId, createPage]);
 
   // Handle creating a markdown page
   const handleCreateMarkdownPage = useCallback(async () => {
     try {
       const title = "New Document";
       const sectionId = sectionsEnabled && selectedSectionId ? selectedSectionId : undefined;
-      const pageData = await api.createPage(notebookId, title, undefined, undefined, sectionId);
+      const pageData = await createPage(notebookId, title, undefined, undefined, sectionId);
+      if (!pageData) {
+        console.error("Failed to create markdown page");
+        return;
+      }
       // Update the page to have .md extension which will set pageType to markdown
-      await api.updatePage(notebookId, pageData.id, {
+      const { updatePage: storeUpdatePage } = usePageStore.getState();
+      await storeUpdatePage(notebookId, pageData.id, {
         fileExtension: "md",
         pageType: "markdown",
       });
       // Initialize with empty markdown content
       await api.updateFileContent(notebookId, pageData.id, `# ${title}\n\n`);
-      await loadPages(notebookId);
     } catch (err) {
       console.error("Failed to create markdown page:", err);
     }
-  }, [notebookId, sectionsEnabled, selectedSectionId, loadPages]);
+  }, [notebookId, sectionsEnabled, selectedSectionId, createPage]);
 
   // Handle creating a calendar page
   const handleCreateCalendarPage = useCallback(async () => {
     try {
       const title = "New Calendar";
       const sectionId = sectionsEnabled && selectedSectionId ? selectedSectionId : undefined;
-      const pageData = await api.createPage(notebookId, title, undefined, undefined, sectionId);
+      const pageData = await createPage(notebookId, title, undefined, undefined, sectionId);
+      if (!pageData) {
+        console.error("Failed to create calendar page");
+        return;
+      }
       // Update the page to have .ics extension which will set pageType to calendar
-      await api.updatePage(notebookId, pageData.id, {
+      const { updatePage: storeUpdatePage } = usePageStore.getState();
+      await storeUpdatePage(notebookId, pageData.id, {
         fileExtension: "ics",
         pageType: "calendar",
       });
@@ -354,11 +375,10 @@ METHOD:PUBLISH
 X-WR-CALNAME:${title}
 END:VCALENDAR`;
       await api.updateFileContent(notebookId, pageData.id, icsContent);
-      await loadPages(notebookId);
     } catch (err) {
       console.error("Failed to create calendar page:", err);
     }
-  }, [notebookId, sectionsEnabled, selectedSectionId, loadPages]);
+  }, [notebookId, sectionsEnabled, selectedSectionId, createPage]);
 
   // Handle opening file picker for import
   const handleImportFile = useCallback(async () => {
@@ -1192,8 +1212,10 @@ END:VCALENDAR`;
                 className="text-xs"
                 style={{ color: "var(--color-text-muted)" }}
               >
-                {sectionsEnabled && selectedSectionId !== null
-                  ? "No pages in this section"
+                {sectionsEnabled && selectedSectionId !== undefined
+                  ? selectedSectionId === null
+                    ? "No unsorted pages"
+                    : "No pages in this section"
                   : "No pages yet"}
               </span>
             </div>

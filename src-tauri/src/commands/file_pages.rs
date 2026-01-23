@@ -112,8 +112,8 @@ pub fn import_file_as_page(
     Ok(ImportFileResult { page, file_type })
 }
 
-/// Get the content of a text-based file page (markdown, calendar)
-#[tauri::command]
+/// Get the content of a text-based file page (markdown, calendar, chat)
+#[tauri::command(rename_all = "camelCase")]
 pub fn get_file_content(
     state: State<AppState>,
     notebook_id: String,
@@ -137,9 +137,9 @@ pub fn get_file_content(
             message: format!("Page not found: {}", e),
         })?;
 
-    // Only allow reading text-based files (Jupyter is JSON, so also text-based)
+    // Only allow reading text-based files (Jupyter and Chat are JSON, so also text-based)
     match page.page_type {
-        PageType::Markdown | PageType::Calendar | PageType::Jupyter => {}
+        PageType::Markdown | PageType::Calendar | PageType::Jupyter | PageType::Chat => {}
         _ => {
             return Err(CommandError {
                 message: format!(
@@ -161,8 +161,8 @@ pub fn get_file_content(
     })
 }
 
-/// Update the content of a text-based file page (markdown, calendar)
-#[tauri::command]
+/// Update the content of a text-based file page (markdown, calendar, chat)
+#[tauri::command(rename_all = "camelCase")]
 pub fn update_file_content(
     state: State<AppState>,
     notebook_id: String,
@@ -187,9 +187,9 @@ pub fn update_file_content(
             message: format!("Page not found: {}", e),
         })?;
 
-    // Only allow writing text-based files (Jupyter is JSON, also writable)
+    // Only allow writing text-based files (Jupyter and Chat are JSON, also writable)
     match page.page_type {
-        PageType::Markdown | PageType::Calendar | PageType::Jupyter => {}
+        PageType::Markdown | PageType::Calendar | PageType::Jupyter | PageType::Chat => {}
         _ => {
             return Err(CommandError {
                 message: format!("Cannot write content for page type: {:?}", page.page_type),
