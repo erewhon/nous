@@ -2,7 +2,6 @@ import { useEffect, useRef, useCallback } from "react";
 import EditorJS, { type OutputData, type ToolConstructable } from "@editorjs/editorjs";
 import Header from "@editorjs/header";
 import List from "@editorjs/list";
-import Checklist from "@editorjs/checklist";
 import Quote from "@editorjs/quote";
 import Marker from "@editorjs/marker";
 import InlineCode from "@editorjs/inline-code";
@@ -12,6 +11,7 @@ import Image from "@editorjs/image";
 import { WikiLinkTool } from "./WikiLinkTool";
 import { CodeBlockTool } from "./CodeBlockTool";
 import { CalloutTool } from "./CalloutTool";
+import { ChecklistTool } from "./ChecklistTool";
 import { FlashcardTool } from "./FlashcardTool";
 import { HighlighterTool } from "./HighlighterTool";
 import { PDFTool } from "./PDFTool";
@@ -70,8 +70,11 @@ export function useEditor({
         },
       },
       checklist: {
-        class: Checklist as unknown as ToolConstructable,
+        class: ChecklistTool as unknown as ToolConstructable,
         inlineToolbar: true,
+        config: {
+          placeholder: "Add item",
+        },
       },
       code: {
         class: CodeBlockTool as unknown as ToolConstructable,

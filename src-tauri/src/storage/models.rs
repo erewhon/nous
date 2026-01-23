@@ -223,6 +223,9 @@ pub struct Notebook {
     /// Sync configuration for this notebook
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sync_config: Option<SyncConfig>,
+    /// Position for ordering notebooks
+    #[serde(default)]
+    pub position: i32,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -243,6 +246,7 @@ impl Notebook {
             ai_provider: None,
             ai_model: None,
             sync_config: None,
+            position: 0,
             created_at: now,
             updated_at: now,
         }

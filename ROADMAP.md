@@ -304,6 +304,17 @@ Already implemented with Tantivy, may need refinement:
   - Detect external file changes with polling
   - Sync changes back with one-click import
   - Session management (end session, cleanup old sessions)
+- [ ] Zen editing mode
+  - Distraction-free writing environment
+  - Hide sidebar, toolbar, and UI chrome
+  - Centered, focused content area
+  - Optional typewriter scrolling (keep cursor vertically centered)
+  - Keyboard shortcut to toggle (e.g., Cmd+Shift+Z)
+- [ ] Undo / Redo enhancements
+  - Multi-level undo/redo with history stack
+  - Undo history panel (view and jump to previous states)
+  - Persistent undo across sessions (optional)
+  - Keyboard shortcuts: Cmd+Z (undo), Cmd+Shift+Z (redo)
 
 ### 21. Import from Other Apps
 - [ ] OneNote notebook import

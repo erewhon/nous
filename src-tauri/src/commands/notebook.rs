@@ -128,3 +128,22 @@ pub fn delete_notebook(state: State<AppState>, notebook_id: String) -> CommandRe
     })?;
     storage.delete_notebook(id).map_err(Into::into)
 }
+
+#[tauri::command]
+pub fn reorder_notebooks(
+    state: State<AppState>,
+    notebook_ids: Vec<String>,
+) -> CommandResult<()> {
+    let storage = state.storage.lock().unwrap();
+    let ids: Result<Vec<Uuid>, _> = notebook_ids
+        .iter()
+        .map(|id| {
+            Uuid::parse_str(id).map_err(|e| CommandError {
+                message: format!("Invalid notebook ID: {}", e),
+            })
+        })
+        .collect();
+
+    let notebook_ids = ids?;
+    storage.reorder_notebooks(&notebook_ids).map_err(Into::into)
+}

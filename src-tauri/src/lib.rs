@@ -166,6 +166,7 @@ pub fn run() {
             commands::create_notebook,
             commands::update_notebook,
             commands::delete_notebook,
+            commands::reorder_notebooks,
             // Page commands
             commands::list_pages,
             commands::get_page,

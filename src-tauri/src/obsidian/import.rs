@@ -341,6 +341,7 @@ pub fn import_obsidian_vault(
         ai_provider: None,
         ai_model: None,
         sync_config: None,
+        position: 0,
         created_at: now,
         updated_at: now,
     };

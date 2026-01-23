@@ -143,8 +143,13 @@ impl FileStorage {
             }
         }
 
-        // Sort by updated_at descending
-        notebooks.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        // Sort by position first, then by updated_at descending for equal positions
+        notebooks.sort_by(|a, b| {
+            match a.position.cmp(&b.position) {
+                std::cmp::Ordering::Equal => b.updated_at.cmp(&a.updated_at),
+                other => other,
+            }
+        });
 
         Ok(notebooks)
     }
@@ -198,6 +203,18 @@ impl FileStorage {
         }
 
         fs::remove_dir_all(&notebook_dir)?;
+        Ok(())
+    }
+
+    pub fn reorder_notebooks(&self, notebook_ids: &[Uuid]) -> Result<()> {
+        // Update positions based on the order in notebook_ids
+        for (position, notebook_id) in notebook_ids.iter().enumerate() {
+            let mut notebook = self.get_notebook(*notebook_id)?;
+            notebook.position = position as i32;
+            notebook.updated_at = chrono::Utc::now();
+            self.update_notebook(&notebook)?;
+        }
+
         Ok(())
     }
 

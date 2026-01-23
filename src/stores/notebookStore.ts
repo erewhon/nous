@@ -21,6 +21,9 @@ interface NotebookActions {
   archiveNotebook: (id: string) => Promise<void>;
   unarchiveNotebook: (id: string) => Promise<void>;
 
+  // Reordering
+  reorderNotebooks: (notebookIds: string[]) => Promise<void>;
+
   // Selection
   selectNotebook: (id: string | null) => void;
 
@@ -138,6 +141,31 @@ export const useNotebookStore = create<NotebookStore>((set, get) => ({
       set({
         error:
           err instanceof Error ? err.message : "Failed to unarchive notebook",
+      });
+    }
+  },
+
+  reorderNotebooks: async (notebookIds) => {
+    set({ error: null });
+    try {
+      await api.reorderNotebooks(notebookIds);
+      // Update local state with new positions
+      set((state) => {
+        const updatedNotebooks = state.notebooks.map((n) => {
+          const idx = notebookIds.indexOf(n.id);
+          if (idx !== -1) {
+            return { ...n, position: idx };
+          }
+          return n;
+        });
+        // Sort by position
+        updatedNotebooks.sort((a, b) => a.position - b.position);
+        return { notebooks: updatedNotebooks };
+      });
+    } catch (err) {
+      set({
+        error:
+          err instanceof Error ? err.message : "Failed to reorder notebooks",
       });
     }
   },

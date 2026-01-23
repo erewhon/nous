@@ -459,6 +459,7 @@ pub fn import_evernote_enex(
         ai_provider: None,
         ai_model: None,
         sync_config: None,
+        position: 0,
         created_at: now,
         updated_at: now,
     };

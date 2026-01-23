@@ -1,7 +1,6 @@
 import type {
   BlockTool,
   BlockToolConstructorOptions,
-  API,
 } from "@editorjs/editorjs";
 
 interface ChecklistItem {
@@ -18,7 +17,6 @@ interface ChecklistConfig {
 }
 
 export class ChecklistTool implements BlockTool {
-  private api: API;
   private data: ChecklistData;
   private config: ChecklistConfig;
   private wrapper: HTMLDivElement | null = null;
@@ -84,10 +82,8 @@ export class ChecklistTool implements BlockTool {
   constructor({
     data,
     config,
-    api,
     readOnly,
   }: BlockToolConstructorOptions<ChecklistData, ChecklistConfig>) {
-    this.api = api;
     this.config = config || {};
     this.readOnly = readOnly || false;
     this.data = {
@@ -158,7 +154,9 @@ export class ChecklistTool implements BlockTool {
     }
 
     if (!this.readOnly) {
-      checkbox.addEventListener("click", () => {
+      checkbox.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
         this.toggleItem(itemEl, index);
       });
     }
@@ -195,9 +193,11 @@ export class ChecklistTool implements BlockTool {
     const checkbox = itemEl.querySelector(".cdx-checklist__item-checkbox");
     checkbox?.classList.toggle("cdx-checklist__item-checkbox--checked", isChecked);
 
-    // Move checked items to the bottom
+    // Move checked items to the bottom with a small delay for visual feedback
     if (isChecked) {
-      this.moveCheckedToBottom();
+      setTimeout(() => {
+        this.moveCheckedToBottom();
+      }, 150);
     }
   }
 
@@ -380,7 +380,7 @@ export class ChecklistTool implements BlockTool {
     this.placeholder.classList.add("cdx-checklist__item-placeholder");
   }
 
-  private handleDragEnd(e: DragEvent, itemEl: HTMLElement): void {
+  private handleDragEnd(_e: DragEvent, itemEl: HTMLElement): void {
     itemEl.classList.remove("cdx-checklist__item--dragging");
     itemEl.draggable = false;
 
@@ -408,7 +408,7 @@ export class ChecklistTool implements BlockTool {
     itemEl.classList.add("cdx-checklist__item--drag-over");
   }
 
-  private handleDragLeave(e: DragEvent, itemEl: HTMLElement): void {
+  private handleDragLeave(_e: DragEvent, itemEl: HTMLElement): void {
     itemEl.classList.remove("cdx-checklist__item--drag-over");
   }
 

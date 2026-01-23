@@ -6,7 +6,7 @@ export type ColorScheme = "default" | "catppuccin" | "nord" | "dracula" | "tufte
 export type FontFamily = "system" | "inter" | "jetbrains-mono" | "fira-code";
 export type EditorWidth = "narrow" | "medium" | "wide" | "full";
 export type UIMode = "classic" | "overview";
-export type NotebookSortOption = "name-asc" | "name-desc" | "updated" | "created" | "pages";
+export type NotebookSortOption = "position" | "name-asc" | "name-desc" | "updated" | "created" | "pages";
 export type PageSortOption = "position" | "name-asc" | "name-desc" | "updated" | "created";
 export type EditorKeymap = "standard" | "vim" | "emacs";
 

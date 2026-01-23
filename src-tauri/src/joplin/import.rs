@@ -791,6 +791,7 @@ pub fn import_joplin(
         ai_provider: None,
         ai_model: None,
         sync_config: None,
+        position: 0,
         created_at: now,
         updated_at: now,
     };
@@ -1131,6 +1132,7 @@ where
         ai_provider: None,
         ai_model: None,
         sync_config: None,
+        position: 0,
         created_at: now,
         updated_at: now,
     };

@@ -1,10 +1,28 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import type { Notebook } from "../../types/notebook";
 import { useNotebookStore } from "../../stores/notebookStore";
 import { useThemeStore, type NotebookSortOption } from "../../stores/themeStore";
 import { NotebookSettingsDialog } from "../NotebookSettings";
 
 const SORT_OPTIONS: { value: NotebookSortOption; label: string }[] = [
+  { value: "position", label: "Manual" },
   { value: "name-asc", label: "Name (A-Z)" },
   { value: "name-desc", label: "Name (Z-A)" },
   { value: "updated", label: "Recently updated" },
@@ -16,20 +34,168 @@ interface NotebookListProps {
   selectedNotebookId: string | null;
 }
 
+interface SortableNotebookItemProps {
+  notebook: Notebook;
+  isSelected: boolean;
+  isHovered: boolean;
+  isDraggable: boolean;
+  onSelect: () => void;
+  onHoverStart: () => void;
+  onHoverEnd: () => void;
+  onOpenSettings: () => void;
+}
+
+function SortableNotebookItem({
+  notebook,
+  isSelected,
+  isHovered,
+  isDraggable,
+  onSelect,
+  onHoverStart,
+  onHoverEnd,
+  onOpenSettings,
+}: SortableNotebookItemProps) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: notebook.id, disabled: !isDraggable });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+
+  return (
+    <li
+      ref={setNodeRef}
+      style={style}
+      onMouseEnter={onHoverStart}
+      onMouseLeave={onHoverEnd}
+    >
+      <div
+        className="relative flex w-full items-center gap-3 rounded-lg text-left transition-all p-3"
+        style={{
+          backgroundColor: isSelected ? "var(--color-bg-tertiary)" : "transparent",
+          color: isSelected ? "var(--color-text-primary)" : "var(--color-text-secondary)",
+          borderLeft: `3px solid ${
+            isSelected
+              ? notebook.color || "var(--color-accent)"
+              : notebook.color
+                ? `${notebook.color}40`
+                : "transparent"
+          }`,
+        }}
+      >
+        {/* Drag handle - only show when in manual sort mode */}
+        {isDraggable && (
+          <button
+            {...attributes}
+            {...listeners}
+            className="flex h-6 w-4 cursor-grab items-center justify-center rounded opacity-0 group-hover:opacity-100 hover:bg-[--color-bg-tertiary] transition-opacity"
+            style={{
+              color: "var(--color-text-muted)",
+              opacity: isHovered || isDragging ? 1 : 0,
+            }}
+            title="Drag to reorder"
+          >
+            <IconGrip />
+          </button>
+        )}
+        <button
+          onClick={onSelect}
+          className="flex flex-1 items-center gap-3 text-left"
+        >
+          <div
+            className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg"
+            style={{
+              backgroundColor: notebook.color
+                ? notebook.color
+                : isSelected
+                  ? "var(--color-accent)"
+                  : "var(--color-bg-tertiary)",
+              color: notebook.color || isSelected ? "white" : "var(--color-text-muted)",
+            }}
+          >
+            <NotebookIcon type={notebook.type} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1.5">
+              <span className="block truncate font-medium">{notebook.name}</span>
+              {notebook.archived && (
+                <span
+                  title="Archived"
+                  className="flex h-4 w-4 items-center justify-center"
+                  style={{ color: "var(--color-text-muted)" }}
+                >
+                  <IconArchive />
+                </span>
+              )}
+              {notebook.systemPrompt && (
+                <span
+                  title="Has custom AI prompt"
+                  className="flex h-4 w-4 items-center justify-center"
+                  style={{ color: "var(--color-accent)" }}
+                >
+                  <IconPrompt />
+                </span>
+              )}
+            </div>
+            <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>
+              {notebook.type === "zettelkasten" ? "Zettelkasten" : "Notebook"}
+            </span>
+          </div>
+        </button>
+        {/* Settings button - visible on hover */}
+        {(isHovered || isSelected) && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenSettings();
+            }}
+            className="flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-secondary]"
+            style={{ color: "var(--color-text-muted)" }}
+            title="Notebook settings"
+          >
+            <IconSettings />
+          </button>
+        )}
+      </div>
+    </li>
+  );
+}
+
 export function NotebookList({
   notebooks,
   selectedNotebookId,
 }: NotebookListProps) {
-  const { selectNotebook } = useNotebookStore();
+  const { selectNotebook, reorderNotebooks } = useNotebookStore();
   const { notebookSortBy: sortBy, setNotebookSortBy: setSortBy } = useThemeStore();
   const [settingsNotebook, setSettingsNotebook] = useState<Notebook | null>(null);
   const [hoveredNotebookId, setHoveredNotebookId] = useState<string | null>(null);
   const [showSortMenu, setShowSortMenu] = useState(false);
 
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8,
+      },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+
   // Sort notebooks based on selected option
   const sortedNotebooks = useMemo(() => {
     return [...notebooks].sort((a, b) => {
       switch (sortBy) {
+        case "position":
+          return a.position - b.position;
         case "name-asc":
           return a.name.localeCompare(b.name);
         case "name-desc":
@@ -43,6 +209,24 @@ export function NotebookList({
       }
     });
   }, [notebooks, sortBy]);
+
+  const handleDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      const { active, over } = event;
+
+      if (over && active.id !== over.id) {
+        const oldIndex = sortedNotebooks.findIndex((n) => n.id === active.id);
+        const newIndex = sortedNotebooks.findIndex((n) => n.id === over.id);
+
+        const newOrder = arrayMove(sortedNotebooks, oldIndex, newIndex);
+        const notebookIds = newOrder.map((n) => n.id);
+        reorderNotebooks(notebookIds);
+      }
+    },
+    [sortedNotebooks, reorderNotebooks]
+  );
+
+  const isDraggable = sortBy === "position";
 
   if (notebooks.length === 0) {
     return (
@@ -106,93 +290,32 @@ export function NotebookList({
         </div>
       </div>
 
-      <ul className="space-y-1">
-        {sortedNotebooks.map((notebook) => {
-          const isSelected = selectedNotebookId === notebook.id;
-          const isHovered = hoveredNotebookId === notebook.id;
-          return (
-            <li
-              key={notebook.id}
-              onMouseEnter={() => setHoveredNotebookId(notebook.id)}
-              onMouseLeave={() => setHoveredNotebookId(null)}
-            >
-              <div
-                className="relative flex w-full items-center gap-3 rounded-lg text-left transition-all p-3"
-                style={{
-                  backgroundColor: isSelected ? "var(--color-bg-tertiary)" : "transparent",
-                  color: isSelected ? "var(--color-text-primary)" : "var(--color-text-secondary)",
-                  borderLeft: `3px solid ${
-                    isSelected
-                      ? notebook.color || "var(--color-accent)"
-                      : notebook.color
-                        ? `${notebook.color}40`
-                        : "transparent"
-                  }`,
-                }}
-              >
-                <button
-                  onClick={() => selectNotebook(notebook.id)}
-                  className="flex flex-1 items-center gap-3 text-left"
-                >
-                  <div
-                    className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg"
-                    style={{
-                      backgroundColor: notebook.color
-                        ? notebook.color
-                        : isSelected
-                          ? "var(--color-accent)"
-                          : "var(--color-bg-tertiary)",
-                      color: notebook.color || isSelected ? "white" : "var(--color-text-muted)",
-                    }}
-                  >
-                    <NotebookIcon type={notebook.type} />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-1.5">
-                      <span className="block truncate font-medium">{notebook.name}</span>
-                      {notebook.archived && (
-                        <span
-                          title="Archived"
-                          className="flex h-4 w-4 items-center justify-center"
-                          style={{ color: "var(--color-text-muted)" }}
-                        >
-                          <IconArchive />
-                        </span>
-                      )}
-                      {notebook.systemPrompt && (
-                        <span
-                          title="Has custom AI prompt"
-                          className="flex h-4 w-4 items-center justify-center"
-                          style={{ color: "var(--color-accent)" }}
-                        >
-                          <IconPrompt />
-                        </span>
-                      )}
-                    </div>
-                    <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>
-                      {notebook.type === "zettelkasten" ? "Zettelkasten" : "Notebook"}
-                    </span>
-                  </div>
-                </button>
-                {/* Settings button - visible on hover */}
-                {(isHovered || isSelected) && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setSettingsNotebook(notebook);
-                    }}
-                    className="flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-secondary]"
-                    style={{ color: "var(--color-text-muted)" }}
-                    title="Notebook settings"
-                  >
-                    <IconSettings />
-                  </button>
-                )}
-              </div>
-            </li>
-          );
-        })}
-      </ul>
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragEnd={handleDragEnd}
+      >
+        <SortableContext
+          items={sortedNotebooks.map((n) => n.id)}
+          strategy={verticalListSortingStrategy}
+        >
+          <ul className="space-y-1">
+            {sortedNotebooks.map((notebook) => (
+              <SortableNotebookItem
+                key={notebook.id}
+                notebook={notebook}
+                isSelected={selectedNotebookId === notebook.id}
+                isHovered={hoveredNotebookId === notebook.id}
+                isDraggable={isDraggable}
+                onSelect={() => selectNotebook(notebook.id)}
+                onHoverStart={() => setHoveredNotebookId(notebook.id)}
+                onHoverEnd={() => setHoveredNotebookId(null)}
+                onOpenSettings={() => setSettingsNotebook(notebook)}
+              />
+            ))}
+          </ul>
+        </SortableContext>
+      </DndContext>
 
       {/* Notebook Settings Dialog */}
       <NotebookSettingsDialog
@@ -201,6 +324,25 @@ export function NotebookList({
         onClose={() => setSettingsNotebook(null)}
       />
     </>
+  );
+}
+
+function IconGrip() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="12"
+      height="12"
+      viewBox="0 0 12 12"
+      fill="currentColor"
+    >
+      <circle cx="3" cy="2" r="1.5" />
+      <circle cx="9" cy="2" r="1.5" />
+      <circle cx="3" cy="6" r="1.5" />
+      <circle cx="9" cy="6" r="1.5" />
+      <circle cx="3" cy="10" r="1.5" />
+      <circle cx="9" cy="10" r="1.5" />
+    </svg>
   );
 }
 

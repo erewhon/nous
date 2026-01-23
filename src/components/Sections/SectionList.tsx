@@ -1,4 +1,21 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import type { Section } from "../../types/page";
 import { useThemeStore } from "../../stores/themeStore";
 import { SectionSettingsDialog } from "./SectionSettingsDialog";
@@ -13,8 +30,109 @@ interface SectionListProps {
     updates: { name?: string; color?: string | null }
   ) => Promise<void>;
   onDeleteSection: (sectionId: string, moveItemsTo?: string) => Promise<void>;
+  onReorderSections?: (sectionIds: string[]) => Promise<void>;
   // Count of pages that don't have a section assigned
   unassignedPagesCount?: number;
+}
+
+interface SortableSectionItemProps {
+  section: Section;
+  isSelected: boolean;
+  onSelect: () => void;
+  onEdit: () => void;
+}
+
+function SortableSectionItem({
+  section,
+  isSelected,
+  onSelect,
+  onEdit,
+}: SortableSectionItemProps) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: section.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
+
+  return (
+    <li ref={setNodeRef} style={style}>
+      <button
+        onClick={onSelect}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          onEdit();
+        }}
+        className="group flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-all"
+        style={{
+          backgroundColor: isSelected
+            ? section.color
+              ? `${section.color}15`
+              : "var(--color-bg-tertiary)"
+            : "transparent",
+          color: isSelected
+            ? "var(--color-text-primary)"
+            : "var(--color-text-secondary)",
+          borderLeft: isSelected
+            ? `3px solid ${section.color || "var(--color-accent)"}`
+            : "3px solid transparent",
+        }}
+        title="Right-click to edit"
+      >
+        {/* Drag handle */}
+        <span
+          {...attributes}
+          {...listeners}
+          className="flex h-4 w-3 cursor-grab items-center justify-center rounded opacity-0 group-hover:opacity-100 transition-opacity"
+          style={{ color: "var(--color-text-muted)" }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <IconGrip />
+        </span>
+        {/* Color indicator */}
+        <span
+          className="h-3 w-3 flex-shrink-0 rounded-full"
+          style={{
+            backgroundColor: section.color || "var(--color-text-muted)",
+          }}
+        />
+        <span className="flex-1 truncate">{section.name}</span>
+        {/* Edit button on hover */}
+        <span
+          className="opacity-0 group-hover:opacity-100 transition-opacity"
+          onClick={(e) => {
+            e.stopPropagation();
+            onEdit();
+          }}
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            <circle cx="12" cy="12" r="1" />
+            <circle cx="12" cy="5" r="1" />
+            <circle cx="12" cy="19" r="1" />
+          </svg>
+        </span>
+      </button>
+    </li>
+  );
 }
 
 export function SectionList({
@@ -24,12 +142,24 @@ export function SectionList({
   onCreateSection,
   onUpdateSection,
   onDeleteSection,
+  onReorderSections,
   unassignedPagesCount = 0,
 }: SectionListProps) {
   const [editingSection, setEditingSection] = useState<Section | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const autoHidePanels = useThemeStore((state) => state.autoHidePanels);
   const setAutoHidePanels = useThemeStore((state) => state.setAutoHidePanels);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8,
+      },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
 
   const handleCreateSection = async (name: string, color?: string) => {
     const section = await onCreateSection(name, color);
@@ -54,6 +184,22 @@ export function SectionList({
       onSelectSection(null);
     }
   };
+
+  const handleDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      const { active, over } = event;
+
+      if (over && active.id !== over.id && onReorderSections) {
+        const oldIndex = sections.findIndex((s) => s.id === active.id);
+        const newIndex = sections.findIndex((s) => s.id === over.id);
+
+        const newOrder = arrayMove(sections, oldIndex, newIndex);
+        const sectionIds = newOrder.map((s) => s.id);
+        onReorderSections(sectionIds);
+      }
+    },
+    [sections, onReorderSections]
+  );
 
   return (
     <div className="flex h-full flex-col">
@@ -149,70 +295,27 @@ export function SectionList({
             </li>
           )}
 
-          {/* Individual sections */}
-          {sections.map((section) => {
-            const isSelected = selectedSectionId === section.id;
-            return (
-              <li key={section.id}>
-                <button
-                  onClick={() => onSelectSection(section.id)}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    setEditingSection(section);
-                  }}
-                  className="group flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-all"
-                  style={{
-                    backgroundColor: isSelected
-                      ? section.color
-                        ? `${section.color}15`
-                        : "var(--color-bg-tertiary)"
-                      : "transparent",
-                    color: isSelected
-                      ? "var(--color-text-primary)"
-                      : "var(--color-text-secondary)",
-                    borderLeft: isSelected
-                      ? `3px solid ${section.color || "var(--color-accent)"}`
-                      : "3px solid transparent",
-                  }}
-                  title="Right-click to edit"
-                >
-                  {/* Color indicator */}
-                  <span
-                    className="h-3 w-3 flex-shrink-0 rounded-full"
-                    style={{
-                      backgroundColor: section.color || "var(--color-text-muted)",
-                    }}
-                  />
-                  <span className="flex-1 truncate">{section.name}</span>
-                  {/* Edit button on hover */}
-                  <span
-                    className="opacity-0 group-hover:opacity-100 transition-opacity"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setEditingSection(section);
-                    }}
-                  >
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      width="12"
-                      height="12"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      style={{ color: "var(--color-text-muted)" }}
-                    >
-                      <circle cx="12" cy="12" r="1" />
-                      <circle cx="12" cy="5" r="1" />
-                      <circle cx="12" cy="19" r="1" />
-                    </svg>
-                  </span>
-                </button>
-              </li>
-            );
-          })}
+          {/* Individual sections with drag-and-drop */}
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleDragEnd}
+          >
+            <SortableContext
+              items={sections.map((s) => s.id)}
+              strategy={verticalListSortingStrategy}
+            >
+              {sections.map((section) => (
+                <SortableSectionItem
+                  key={section.id}
+                  section={section}
+                  isSelected={selectedSectionId === section.id}
+                  onSelect={() => onSelectSection(section.id)}
+                  onEdit={() => setEditingSection(section)}
+                />
+              ))}
+            </SortableContext>
+          </DndContext>
         </ul>
 
         {/* Empty state */}
@@ -259,6 +362,25 @@ export function SectionList({
         }
       />
     </div>
+  );
+}
+
+function IconGrip() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="8"
+      height="10"
+      viewBox="0 0 8 10"
+      fill="currentColor"
+    >
+      <circle cx="2" cy="1.5" r="1" />
+      <circle cx="6" cy="1.5" r="1" />
+      <circle cx="2" cy="5" r="1" />
+      <circle cx="6" cy="5" r="1" />
+      <circle cx="2" cy="8.5" r="1" />
+      <circle cx="6" cy="8.5" r="1" />
+    </svg>
   );
 }
 

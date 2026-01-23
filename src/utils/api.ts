@@ -46,6 +46,10 @@ export async function deleteNotebook(notebookId: string): Promise<void> {
   return invoke("delete_notebook", { notebookId });
 }
 
+export async function reorderNotebooks(notebookIds: string[]): Promise<void> {
+  return invoke("reorder_notebooks", { notebookIds });
+}
+
 // ===== Page API =====
 
 export async function listPages(

@@ -53,6 +53,7 @@ export function EditorArea() {
     createSection,
     updateSection,
     deleteSection,
+    reorderSections,
   } = useSectionStore();
   const { buildLinksFromPages } = useLinkStore();
   const { viewerState, closeViewer } = usePDFStore();
@@ -414,6 +415,7 @@ export function EditorArea() {
                   onCreateSection={(name, color) => createSection(selectedNotebook.id, name, color)}
                   onUpdateSection={(sectionId, updates) => updateSection(selectedNotebook.id, sectionId, updates)}
                   onDeleteSection={(sectionId, moveItemsTo) => deleteSection(selectedNotebook.id, sectionId, moveItemsTo)}
+                  onReorderSections={(sectionIds) => reorderSections(selectedNotebook.id, sectionIds)}
                   unassignedPagesCount={unassignedPagesCount}
                 />
               </div>

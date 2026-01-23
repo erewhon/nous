@@ -16,6 +16,10 @@ interface VimState {
   count: number;
   lastCommand: string;
   register: string; // For yank/paste
+  lastFindChar: string; // For f/F/t/T repeat with ; and ,
+  lastFindDirection: "forward" | "backward";
+  lastFindType: "to" | "find"; // t/T vs f/F
+  visualAnchor: number | null; // Start position for visual mode
 }
 
 /**
@@ -23,23 +27,56 @@ interface VimState {
  *
  * Supported commands:
  *
- * Normal Mode:
- * - h, j, k, l: Navigation (left, down, up, right)
- * - w, b, e: Word movement (next word, prev word, end of word)
- * - 0, $: Line start/end
+ * Normal Mode Navigation:
+ * - h, j, k, l: Basic movement (left, down, up, right)
+ * - w, W: Word/WORD forward
+ * - b, B: Word/WORD backward
+ * - e, E: End of word/WORD
+ * - 0, ^: Line start / first non-blank
+ * - $: Line end
  * - gg, G: Document start/end
- * - i, a, A, I: Enter insert mode (at cursor, after cursor, end of line, start of line)
+ * - H, M, L: High/Middle/Low of visible blocks
+ * - f{char}, F{char}: Find character forward/backward
+ * - t{char}, T{char}: To character forward/backward (before char)
+ * - ;, ,: Repeat last f/F/t/T forward/backward
+ * - n, N: Repeat last search forward/backward (placeholder)
+ *
+ * Normal Mode Editing:
+ * - i, a: Insert at cursor / after cursor
+ * - I, A: Insert at line start / line end
  * - o, O: Open line below/above
+ * - r{char}: Replace single character
+ * - R: Replace mode (continuous replace)
+ * - x, X: Delete char under/before cursor
+ * - s, S: Substitute char/line
+ * - D, C: Delete/Change to end of line
  * - dd: Delete current block
- * - yy: Yank (copy) current block
+ * - cc: Change current block
+ * - yy, Y: Yank current block
  * - p, P: Paste after/before
+ * - J: Join lines
  * - u: Undo
  * - Ctrl+r: Redo
- * - /: Focus search (opens command palette)
- * - Escape: Exit insert mode
+ * - ~: Toggle case of character
+ * - .: Repeat last command (placeholder)
+ *
+ * Visual Mode:
+ * - v: Enter visual mode
+ * - V: Enter visual line mode
+ * - Escape: Exit visual mode
+ * - d, x: Delete selection
+ * - y: Yank selection
+ * - c, s: Change selection
  *
  * Insert Mode:
  * - Escape, Ctrl+[, jj: Exit to normal mode
+ * - Ctrl+w: Delete word backward
+ * - Ctrl+u: Delete to line start
+ *
+ * Other:
+ * - /: Focus search
+ * - ZZ: Save and close (placeholder)
+ * - ZQ: Close without saving (placeholder)
  */
 export function useVimMode({
   enabled,
@@ -53,6 +90,10 @@ export function useVimMode({
     count: 0,
     lastCommand: "",
     register: "",
+    lastFindChar: "",
+    lastFindDirection: "forward",
+    lastFindType: "find",
+    visualAnchor: null,
   });
 
   const stateRef = useRef(vimState);
@@ -79,6 +120,156 @@ export function useVimMode({
     }
     return 0;
   }, [editorRef, containerRef]);
+
+  // Check if cursor is inside a checklist/list block and get list info
+  // Supports both custom ChecklistTool (.cdx-checklist__item) and
+  // built-in List tool (.cdx-list__item, .cdx-nested-list__item)
+  const getChecklistInfo = useCallback((): {
+    isInChecklist: boolean;
+    checklistContainer: HTMLElement | null;
+    currentItemIndex: number;
+    items: HTMLElement[];
+    itemSelector: string;
+    textSelector: string;
+  } => {
+    const selection = window.getSelection();
+    if (!selection || !selection.anchorNode) {
+      return { isInChecklist: false, checklistContainer: null, currentItemIndex: -1, items: [], itemSelector: "", textSelector: "" };
+    }
+
+    // Find if we're in a list/checklist item by looking for known item classes
+    // Use closest() for more reliable detection from text nodes
+    let element: HTMLElement | null = null;
+    if (selection.anchorNode instanceof HTMLElement) {
+      element = selection.anchorNode;
+    } else if (selection.anchorNode.parentElement) {
+      element = selection.anchorNode.parentElement;
+    }
+
+    if (!element) {
+      return { isInChecklist: false, checklistContainer: null, currentItemIndex: -1, items: [], itemSelector: "", textSelector: "" };
+    }
+
+    // Try to find list item using closest() - more reliable than walking
+    let listItem: HTMLElement | null = null;
+    let itemSelector = "";
+    let textSelector = "";
+
+    // Custom ChecklistTool
+    listItem = element.closest(".cdx-checklist__item");
+    if (listItem) {
+      itemSelector = ".cdx-checklist__item";
+      textSelector = ".cdx-checklist__item-text";
+    }
+
+    // Built-in List tool
+    if (!listItem) {
+      listItem = element.closest(".cdx-list__item");
+      if (listItem) {
+        itemSelector = ".cdx-list__item";
+        textSelector = ".cdx-list__item-content";
+      }
+    }
+
+    // Nested list tool
+    if (!listItem) {
+      listItem = element.closest(".cdx-nested-list__item");
+      if (listItem) {
+        itemSelector = ".cdx-nested-list__item";
+        textSelector = ".cdx-nested-list__item-content";
+      }
+    }
+
+    if (!listItem || !itemSelector) {
+      return { isInChecklist: false, checklistContainer: null, currentItemIndex: -1, items: [], itemSelector: "", textSelector: "" };
+    }
+
+    // Get sibling items (items at the same level)
+    const parentContainer = listItem.parentElement;
+    if (!parentContainer) {
+      return { isInChecklist: false, checklistContainer: null, currentItemIndex: -1, items: [], itemSelector: "", textSelector: "" };
+    }
+
+    // Get all sibling items of the same type - use children filtering which is more reliable
+    const items = Array.from(parentContainer.children).filter(
+      (el) => el.classList.contains(itemSelector.slice(1)) // Remove leading "."
+    ) as HTMLElement[];
+
+    if (items.length === 0) {
+      return { isInChecklist: false, checklistContainer: null, currentItemIndex: -1, items: [], itemSelector: "", textSelector: "" };
+    }
+
+    const currentItemIndex = items.indexOf(listItem);
+
+    return { isInChecklist: true, checklistContainer: parentContainer, currentItemIndex, items, itemSelector, textSelector };
+  }, []);
+
+  // Focus a specific checklist/list item
+  const focusChecklistItem = useCallback((items: HTMLElement[], index: number, textSelector?: string) => {
+    if (index < 0 || index >= items.length) return;
+
+    const item = items[index];
+    // Try multiple possible text element selectors
+    const selectors = textSelector
+      ? [textSelector, "[contenteditable='true']"]
+      : [".cdx-checklist__item-text", ".cdx-list__item-content", ".cdx-nested-list__item-content", "[contenteditable='true']"];
+
+    let textEl: HTMLElement | null = null;
+    for (const sel of selectors) {
+      textEl = item.querySelector(sel) as HTMLElement;
+      if (textEl) break;
+    }
+
+    if (textEl) {
+      textEl.focus();
+      // Place cursor at end
+      const range = document.createRange();
+      const selection = window.getSelection();
+      range.selectNodeContents(textEl);
+      range.collapse(false);
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+    }
+  }, []);
+
+  // Delete a specific checklist/list item (returns true if item was deleted)
+  const deleteChecklistItem = useCallback((
+    checklistContainer: HTMLElement,
+    items: HTMLElement[],
+    itemIndex: number,
+    itemSelector: string,
+    textSelector: string
+  ): boolean => {
+    if (items.length <= 1) {
+      // Don't delete the last item - delete the whole block instead
+      return false;
+    }
+
+    const itemToDelete = items[itemIndex];
+
+    // Save item text to register before deleting
+    const textEl = itemToDelete.querySelector(textSelector) || itemToDelete.querySelector("[contenteditable='true']");
+    const itemText = textEl?.textContent || "";
+    setVimState((s) => ({
+      ...s,
+      register: itemText,
+    }));
+
+    // Remove the item from DOM
+    itemToDelete.remove();
+
+    // Focus the previous item, or the first item if we deleted the first one
+    const newIndex = itemIndex > 0 ? itemIndex - 1 : 0;
+    const remainingItems = Array.from(
+      checklistContainer.querySelectorAll(`:scope > ${itemSelector}`)
+    ) as HTMLElement[];
+
+    if (remainingItems.length > 0) {
+      setTimeout(() => focusChecklistItem(remainingItems, newIndex, textSelector), 0);
+    }
+
+    return true;
+  }, [focusChecklistItem]);
 
   // Focus a block by index
   const focusBlock = useCallback(
@@ -133,6 +324,93 @@ export function useVimMode({
 
     selection.removeAllRanges();
     selection.addRange(range);
+  }, []);
+
+  // Move by WORD (whitespace delimited)
+  const moveByWORD = useCallback((direction: "forward" | "backward" | "end") => {
+    const selection = window.getSelection();
+    if (!selection || !selection.anchorNode) return;
+
+    const text = selection.anchorNode.textContent || "";
+    const range = selection.getRangeAt(0);
+    let pos = range.startOffset;
+
+    if (direction === "forward") {
+      // Find next WORD boundary (whitespace separated)
+      const remaining = text.slice(pos);
+      const match = remaining.match(/^\s*\S+/);
+      if (match) {
+        pos += match[0].length;
+        // Position at start of next WORD
+        const afterMatch = text.slice(pos).match(/^\s*/);
+        if (afterMatch && afterMatch[0].length > 0) {
+          pos += afterMatch[0].length;
+        }
+      } else {
+        pos = text.length;
+      }
+    } else if (direction === "backward") {
+      // Find previous WORD boundary
+      const before = text.slice(0, pos);
+      const match = before.match(/\S+\s*$/);
+      if (match) {
+        pos -= match[0].length;
+      } else {
+        pos = 0;
+      }
+    } else if (direction === "end") {
+      // Move to end of current/next WORD
+      const remaining = text.slice(pos);
+      // Skip current word if at start, then find end of next word
+      const match = remaining.match(/^\s*\S+/);
+      if (match) {
+        pos += match[0].length - 1; // -1 to be on last char
+        if (pos < range.startOffset) pos = range.startOffset; // Don't go backward
+      }
+    }
+
+    range.setStart(range.startContainer, Math.max(0, Math.min(pos, text.length)));
+    range.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  }, []);
+
+  // Find character in line (f/F/t/T commands)
+  const findChar = useCallback((
+    char: string,
+    direction: "forward" | "backward",
+    type: "find" | "to"
+  ): boolean => {
+    const selection = window.getSelection();
+    if (!selection || !selection.anchorNode) return false;
+
+    const text = selection.anchorNode.textContent || "";
+    const range = selection.getRangeAt(0);
+    const pos = range.startOffset;
+    let targetPos = -1;
+
+    if (direction === "forward") {
+      const searchStart = pos + 1;
+      const idx = text.indexOf(char, searchStart);
+      if (idx !== -1) {
+        targetPos = type === "to" ? idx - 1 : idx;
+      }
+    } else {
+      const searchText = text.slice(0, pos);
+      const idx = searchText.lastIndexOf(char);
+      if (idx !== -1) {
+        targetPos = type === "to" ? idx + 1 : idx;
+      }
+    }
+
+    if (targetPos >= 0 && targetPos <= text.length) {
+      range.setStart(range.startContainer, targetPos);
+      range.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      return true;
+    }
+    return false;
   }, []);
 
   // Move by word
@@ -201,12 +479,74 @@ export function useVimMode({
 
   // Exit to normal mode
   const enterNormalMode = useCallback(() => {
-    setVimState((s) => ({ ...s, mode: "normal", pendingKeys: "" }));
+    setVimState((s) => ({ ...s, mode: "normal", pendingKeys: "", visualAnchor: null }));
     onModeChange?.("normal");
+
+    // Clear any selection
+    const selection = window.getSelection();
+    if (selection && !selection.isCollapsed) {
+      selection.collapseToEnd();
+    }
 
     // Move cursor back one position (vim behavior)
     moveCursor("left");
   }, [onModeChange, moveCursor]);
+
+  // Enter visual mode
+  const enterVisualMode = useCallback((lineMode: boolean = false) => {
+    const selection = window.getSelection();
+    if (!selection || !selection.anchorNode) return;
+
+    const range = selection.getRangeAt(0);
+    const anchor = range.startOffset;
+
+    if (lineMode) {
+      // Select entire line/block content
+      const editableEl = selection.anchorNode.parentElement?.closest('[contenteditable="true"]');
+      if (editableEl) {
+        const textNode = editableEl.firstChild;
+        if (textNode) {
+          range.selectNodeContents(textNode);
+          selection.removeAllRanges();
+          selection.addRange(range);
+        }
+      }
+    }
+
+    setVimState((s) => ({ ...s, mode: "visual", pendingKeys: "", visualAnchor: anchor }));
+    onModeChange?.("visual");
+  }, [onModeChange]);
+
+  // Toggle case of character under cursor
+  const toggleCase = useCallback(() => {
+    const selection = window.getSelection();
+    if (!selection || !selection.anchorNode) return;
+
+    const text = selection.anchorNode.textContent || "";
+    const range = selection.getRangeAt(0);
+    const pos = range.startOffset;
+
+    if (pos < text.length) {
+      const char = text[pos];
+      const newChar = char === char.toLowerCase() ? char.toUpperCase() : char.toLowerCase();
+      if (char !== newChar) {
+        // Replace the character
+        const newText = text.slice(0, pos) + newChar + text.slice(pos + 1);
+        selection.anchorNode.textContent = newText;
+        // Move cursor right
+        range.setStart(selection.anchorNode, pos + 1);
+        range.collapse(true);
+        selection.removeAllRanges();
+        selection.addRange(range);
+      } else {
+        // Still move cursor right
+        range.setStart(selection.anchorNode, pos + 1);
+        range.collapse(true);
+        selection.removeAllRanges();
+        selection.addRange(range);
+      }
+    }
+  }, []);
 
   // Delete current block
   const deleteBlock = useCallback(async () => {
@@ -292,9 +632,25 @@ export function useVimMode({
         return true;
       }
 
-      // dd - delete line/block
+      // dd - delete line/block (or checklist/list item if in one)
       if (fullKey === "dd") {
-        deleteBlock();
+        const checklistInfoDD = getChecklistInfo();
+        if (checklistInfoDD.isInChecklist && checklistInfoDD.checklistContainer) {
+          // Delete just the current checklist/list item
+          const deleted = deleteChecklistItem(
+            checklistInfoDD.checklistContainer,
+            checklistInfoDD.items,
+            checklistInfoDD.currentItemIndex,
+            checklistInfoDD.itemSelector,
+            checklistInfoDD.textSelector
+          );
+          if (!deleted) {
+            // Only one item left, delete the whole block
+            deleteBlock();
+          }
+        } else {
+          deleteBlock();
+        }
         setVimState((s) => ({ ...s, pendingKeys: "" }));
         return true;
       }
@@ -306,14 +662,124 @@ export function useVimMode({
         return true;
       }
 
-      // If we have a pending 'g' or 'd' or 'y', wait for next key
-      if (key === "g" || key === "d" || key === "y") {
+      // cc - change line/block (delete and enter insert mode)
+      if (fullKey === "cc") {
+        deleteBlock();
+        enterInsertMode("cursor");
+        setVimState((s) => ({ ...s, pendingKeys: "" }));
+        return true;
+      }
+
+      // ZZ - save and close (placeholder - just clear pending)
+      if (fullKey === "ZZ") {
+        // Could trigger save here if we had access to save function
+        setVimState((s) => ({ ...s, pendingKeys: "" }));
+        return true;
+      }
+
+      // ZQ - close without saving (placeholder)
+      if (fullKey === "ZQ") {
+        setVimState((s) => ({ ...s, pendingKeys: "" }));
+        return true;
+      }
+
+      // f{char} - find character forward
+      if (pending === "f" && key.length === 1) {
+        const found = findChar(key, "forward", "find");
+        if (found) {
+          setVimState((s) => ({
+            ...s,
+            pendingKeys: "",
+            lastFindChar: key,
+            lastFindDirection: "forward",
+            lastFindType: "find",
+          }));
+        } else {
+          setVimState((s) => ({ ...s, pendingKeys: "" }));
+        }
+        return true;
+      }
+
+      // F{char} - find character backward
+      if (pending === "F" && key.length === 1) {
+        const found = findChar(key, "backward", "find");
+        if (found) {
+          setVimState((s) => ({
+            ...s,
+            pendingKeys: "",
+            lastFindChar: key,
+            lastFindDirection: "backward",
+            lastFindType: "find",
+          }));
+        } else {
+          setVimState((s) => ({ ...s, pendingKeys: "" }));
+        }
+        return true;
+      }
+
+      // t{char} - to character forward (before char)
+      if (pending === "t" && key.length === 1) {
+        const found = findChar(key, "forward", "to");
+        if (found) {
+          setVimState((s) => ({
+            ...s,
+            pendingKeys: "",
+            lastFindChar: key,
+            lastFindDirection: "forward",
+            lastFindType: "to",
+          }));
+        } else {
+          setVimState((s) => ({ ...s, pendingKeys: "" }));
+        }
+        return true;
+      }
+
+      // T{char} - to character backward (after char)
+      if (pending === "T" && key.length === 1) {
+        const found = findChar(key, "backward", "to");
+        if (found) {
+          setVimState((s) => ({
+            ...s,
+            pendingKeys: "",
+            lastFindChar: key,
+            lastFindDirection: "backward",
+            lastFindType: "to",
+          }));
+        } else {
+          setVimState((s) => ({ ...s, pendingKeys: "" }));
+        }
+        return true;
+      }
+
+      // r{char} - replace single character
+      if (pending === "r" && key.length === 1 && key !== "Escape") {
+        const selection = window.getSelection();
+        if (selection && selection.anchorNode) {
+          const text = selection.anchorNode.textContent || "";
+          const range = selection.getRangeAt(0);
+          const pos = range.startOffset;
+          if (pos < text.length) {
+            const newText = text.slice(0, pos) + key + text.slice(pos + 1);
+            selection.anchorNode.textContent = newText;
+            // Keep cursor at same position
+            range.setStart(selection.anchorNode, pos);
+            range.collapse(true);
+            selection.removeAllRanges();
+            selection.addRange(range);
+          }
+        }
+        setVimState((s) => ({ ...s, pendingKeys: "" }));
+        return true;
+      }
+
+      // If we have a pending 'g', 'd', 'y', 'c', 'f', 'F', 't', 'T', 'r', or 'Z', wait for next key
+      if (["g", "d", "y", "c", "f", "F", "t", "T", "r", "Z"].includes(key)) {
         setVimState((s) => ({ ...s, pendingKeys: s.pendingKeys + key }));
         return true;
       }
 
-      // Clear pending if it doesn't form a valid command
-      if (pending && !["g", "d", "y"].includes(pending)) {
+      // Clear pending if it doesn't form a valid command start
+      if (pending && !["g", "d", "y", "c", "f", "F", "t", "T", "r", "Z"].includes(pending)) {
         setVimState((s) => ({ ...s, pendingKeys: "" }));
       }
 
@@ -327,22 +793,53 @@ export function useVimMode({
           moveCursor("right");
           return true;
         case "j": {
-          const currentIndex = getCurrentBlockIndex();
-          const blocks = containerRef.current?.querySelectorAll(".ce-block");
-          if (blocks && currentIndex < blocks.length - 1) {
-            focusBlock(currentIndex + 1);
+          // Check if we're in a checklist/list first
+          const checklistInfoJ = getChecklistInfo();
+          if (checklistInfoJ.isInChecklist) {
+            // Move to next checklist item within the block
+            if (checklistInfoJ.currentItemIndex < checklistInfoJ.items.length - 1) {
+              focusChecklistItem(checklistInfoJ.items, checklistInfoJ.currentItemIndex + 1, checklistInfoJ.textSelector);
+            } else {
+              // At last checklist item, move to next block
+              const currentIndex = getCurrentBlockIndex();
+              const blocks = containerRef.current?.querySelectorAll(".ce-block");
+              if (blocks && currentIndex < blocks.length - 1) {
+                focusBlock(currentIndex + 1);
+              }
+            }
+          } else {
+            const currentIndex = getCurrentBlockIndex();
+            const blocks = containerRef.current?.querySelectorAll(".ce-block");
+            if (blocks && currentIndex < blocks.length - 1) {
+              focusBlock(currentIndex + 1);
+            }
           }
           return true;
         }
         case "k": {
-          const currentIndex = getCurrentBlockIndex();
-          if (currentIndex > 0) {
-            focusBlock(currentIndex - 1);
+          // Check if we're in a checklist/list first
+          const checklistInfoK = getChecklistInfo();
+          if (checklistInfoK.isInChecklist) {
+            // Move to previous checklist item within the block
+            if (checklistInfoK.currentItemIndex > 0) {
+              focusChecklistItem(checklistInfoK.items, checklistInfoK.currentItemIndex - 1, checklistInfoK.textSelector);
+            } else {
+              // At first checklist item, move to previous block
+              const currentIndex = getCurrentBlockIndex();
+              if (currentIndex > 0) {
+                focusBlock(currentIndex - 1);
+              }
+            }
+          } else {
+            const currentIndex = getCurrentBlockIndex();
+            if (currentIndex > 0) {
+              focusBlock(currentIndex - 1);
+            }
           }
           return true;
         }
 
-        // Word movement
+        // Word movement (lowercase - word boundaries)
         case "w":
           moveByWord("forward");
           return true;
@@ -353,16 +850,66 @@ export function useVimMode({
           moveByWord("forward");
           return true;
 
+        // WORD movement (uppercase - whitespace boundaries)
+        case "W":
+          moveByWORD("forward");
+          return true;
+        case "B":
+          moveByWORD("backward");
+          return true;
+        case "E":
+          moveByWORD("end");
+          return true;
+
         // Line movement
         case "0":
           moveCursor("start");
           return true;
+        case "^": {
+          // Move to first non-blank character
+          const selection = window.getSelection();
+          if (selection && selection.anchorNode) {
+            const text = selection.anchorNode.textContent || "";
+            const range = selection.getRangeAt(0);
+            const match = text.match(/^\s*/);
+            const firstNonBlank = match ? match[0].length : 0;
+            range.setStart(range.startContainer, firstNonBlank);
+            range.collapse(true);
+            selection.removeAllRanges();
+            selection.addRange(range);
+          }
+          return true;
+        }
         case "$":
           moveCursor("end");
           return true;
 
         // Document movement
         case "G": {
+          const blocks = containerRef.current?.querySelectorAll(".ce-block");
+          if (blocks && blocks.length > 0) {
+            focusBlock(blocks.length - 1);
+          }
+          return true;
+        }
+
+        // Screen position movement (H/M/L - adapted for block editor)
+        case "H": {
+          // High - go to first visible block (or just first block)
+          focusBlock(0);
+          return true;
+        }
+        case "M": {
+          // Middle - go to middle block
+          const blocks = containerRef.current?.querySelectorAll(".ce-block");
+          if (blocks && blocks.length > 0) {
+            const middleIndex = Math.floor(blocks.length / 2);
+            focusBlock(middleIndex);
+          }
+          return true;
+        }
+        case "L": {
+          // Low - go to last block
           const blocks = containerRef.current?.querySelectorAll(".ce-block");
           if (blocks && blocks.length > 0) {
             focusBlock(blocks.length - 1);
@@ -464,6 +1011,74 @@ export function useVimMode({
           return true;
         }
 
+        // Delete character before cursor (X)
+        case "X": {
+          const selection = window.getSelection();
+          if (selection && selection.anchorNode) {
+            const range = selection.getRangeAt(0);
+            if (range.startOffset > 0) {
+              range.setStart(range.startContainer, range.startOffset - 1);
+              range.deleteContents();
+            }
+          }
+          return true;
+        }
+
+        // Yank line (Y - same as yy)
+        case "Y":
+          yankBlock();
+          return true;
+
+        // Replace mode (R) - continuous replace
+        case "R":
+          // Enter a replace-like mode - for simplicity, just enter insert mode
+          // True replace mode would need special handling
+          enterInsertMode("cursor");
+          return true;
+
+        // Visual mode
+        case "v":
+          enterVisualMode(false);
+          return true;
+
+        case "V":
+          enterVisualMode(true);
+          return true;
+
+        // Toggle case (~)
+        case "~":
+          toggleCase();
+          return true;
+
+        // Repeat last f/F/t/T forward (;)
+        case ";": {
+          const state = stateRef.current;
+          if (state.lastFindChar) {
+            findChar(state.lastFindChar, state.lastFindDirection, state.lastFindType);
+          }
+          return true;
+        }
+
+        // Repeat last f/F/t/T backward (,)
+        case ",": {
+          const state = stateRef.current;
+          if (state.lastFindChar) {
+            const reverseDir = state.lastFindDirection === "forward" ? "backward" : "forward";
+            findChar(state.lastFindChar, reverseDir, state.lastFindType);
+          }
+          return true;
+        }
+
+        // Repeat last search forward (n) - placeholder
+        case "n":
+          // Would need search state to implement properly
+          return true;
+
+        // Repeat last search backward (N) - placeholder
+        case "N":
+          // Would need search state to implement properly
+          return true;
+
         // Undo/Redo
         case "u":
           document.execCommand("undo");
@@ -523,15 +1138,171 @@ export function useVimMode({
     },
     [
       containerRef,
+      editorRef,
       focusBlock,
       getCurrentBlockIndex,
+      getChecklistInfo,
+      focusChecklistItem,
+      deleteChecklistItem,
       moveCursor,
       moveByWord,
+      moveByWORD,
+      findChar,
       enterInsertMode,
+      enterVisualMode,
+      toggleCase,
       deleteBlock,
       yankBlock,
       pasteBlock,
     ]
+  );
+
+  // Handle visual mode key
+  const handleVisualModeKey = useCallback(
+    (e: KeyboardEvent): boolean => {
+      const key = e.key;
+      const selection = window.getSelection();
+
+      switch (key) {
+        case "Escape":
+          enterNormalMode();
+          return true;
+
+        // Navigation keys extend selection in visual mode
+        case "h":
+        case "l":
+        case "j":
+        case "k":
+        case "w":
+        case "b":
+        case "e":
+        case "0":
+        case "$":
+        case "G":
+        case "gg": {
+          // In visual mode, navigation should extend selection
+          // For simplicity, we'll just modify the selection
+          const sel = window.getSelection();
+          if (sel && sel.anchorNode && sel.focusNode) {
+            const text = sel.focusNode.textContent || "";
+            let newPos = sel.focusOffset;
+
+            if (key === "h" && newPos > 0) newPos--;
+            else if (key === "l" && newPos < text.length) newPos++;
+            else if (key === "w") {
+              const remaining = text.slice(newPos);
+              const match = remaining.match(/^\s*\S+/);
+              if (match) newPos += match[0].length;
+            } else if (key === "b") {
+              const before = text.slice(0, newPos);
+              const match = before.match(/\S+\s*$/);
+              if (match) newPos -= match[0].length;
+            } else if (key === "e") {
+              const remaining = text.slice(newPos);
+              const match = remaining.match(/^\s*\S+/);
+              if (match) newPos += match[0].length;
+            } else if (key === "0") {
+              newPos = 0;
+            } else if (key === "$") {
+              newPos = text.length;
+            }
+
+            // Extend selection to new position
+            sel.extend(sel.focusNode, Math.max(0, Math.min(newPos, text.length)));
+          }
+          return true;
+        }
+
+        // Delete selection
+        case "d":
+        case "x": {
+          if (selection && !selection.isCollapsed) {
+            const range = selection.getRangeAt(0);
+            // Save deleted text to register
+            setVimState((s) => ({
+              ...s,
+              register: range.toString(),
+            }));
+            range.deleteContents();
+          }
+          enterNormalMode();
+          return true;
+        }
+
+        // Yank selection
+        case "y": {
+          if (selection && !selection.isCollapsed) {
+            const text = selection.toString();
+            setVimState((s) => ({
+              ...s,
+              register: text,
+            }));
+            // Also copy to clipboard
+            navigator.clipboard.writeText(text).catch(() => {});
+          }
+          enterNormalMode();
+          return true;
+        }
+
+        // Change selection (delete and enter insert mode)
+        case "c":
+        case "s": {
+          if (selection && !selection.isCollapsed) {
+            const range = selection.getRangeAt(0);
+            setVimState((s) => ({
+              ...s,
+              register: range.toString(),
+            }));
+            range.deleteContents();
+          }
+          enterInsertMode("cursor");
+          return true;
+        }
+
+        // Toggle case of selection
+        case "~": {
+          if (selection && !selection.isCollapsed) {
+            const range = selection.getRangeAt(0);
+            const text = range.toString();
+            const toggled = text.split("").map((char) =>
+              char === char.toLowerCase() ? char.toUpperCase() : char.toLowerCase()
+            ).join("");
+            range.deleteContents();
+            range.insertNode(document.createTextNode(toggled));
+          }
+          enterNormalMode();
+          return true;
+        }
+
+        // Enter insert mode at start of selection
+        case "I": {
+          if (selection && !selection.isCollapsed) {
+            selection.collapseToStart();
+          }
+          enterInsertMode("cursor");
+          return true;
+        }
+
+        // Enter insert mode at end of selection
+        case "A": {
+          if (selection && !selection.isCollapsed) {
+            selection.collapseToEnd();
+          }
+          enterInsertMode("cursor");
+          return true;
+        }
+
+        default:
+          // Block other single characters in visual mode
+          if (key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+            return true;
+          }
+          break;
+      }
+
+      return false;
+    },
+    [enterNormalMode, enterInsertMode]
   );
 
   // Handle insert mode key
@@ -558,6 +1329,34 @@ export function useVimMode({
         setVimState((s) => ({ ...s, pendingKeys: "j" }));
         // Let the j be typed, will be removed if followed by another j
         return false;
+      }
+
+      // Ctrl+w - delete word backward
+      if (e.ctrlKey && key === "w") {
+        const selection = window.getSelection();
+        if (selection && selection.anchorNode) {
+          const text = selection.anchorNode.textContent || "";
+          const range = selection.getRangeAt(0);
+          const pos = range.startOffset;
+          const before = text.slice(0, pos);
+          const match = before.match(/\S+\s*$/) || before.match(/\s+$/);
+          if (match) {
+            range.setStart(range.startContainer, pos - match[0].length);
+            range.deleteContents();
+          }
+        }
+        return true;
+      }
+
+      // Ctrl+u - delete to line start
+      if (e.ctrlKey && key === "u") {
+        const selection = window.getSelection();
+        if (selection && selection.anchorNode) {
+          const range = selection.getRangeAt(0);
+          range.setStart(range.startContainer, 0);
+          range.deleteContents();
+        }
+        return true;
       }
 
       // Clear pending on any other key
@@ -591,6 +1390,8 @@ export function useVimMode({
         handled = handleNormalModeKey(e);
       } else if (state.mode === "insert") {
         handled = handleInsertModeKey(e);
+      } else if (state.mode === "visual") {
+        handled = handleVisualModeKey(e);
       }
 
       if (handled) {
@@ -605,7 +1406,7 @@ export function useVimMode({
     return () => {
       document.removeEventListener("keydown", handleKeyDown, true);
     };
-  }, [enabled, containerRef, handleNormalModeKey, handleInsertModeKey]);
+  }, [enabled, containerRef, handleNormalModeKey, handleInsertModeKey, handleVisualModeKey]);
 
   // Reset to normal mode when editor loses focus
   useEffect(() => {
@@ -640,5 +1441,6 @@ export function useVimMode({
     pendingKeys: vimState.pendingKeys,
     enterNormalMode,
     enterInsertMode,
+    enterVisualMode,
   };
 }

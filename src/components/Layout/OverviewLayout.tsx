@@ -43,6 +43,7 @@ export function OverviewLayout() {
     createSection,
     updateSection,
     deleteSection,
+    reorderSections,
   } = useSectionStore();
   const { buildLinksFromPages } = useLinkStore();
   const panelWidths = useThemeStore((state) => state.panelWidths);
@@ -333,6 +334,7 @@ export function OverviewLayout() {
                 onCreateSection={(name, color) => createSection(selectedNotebook.id, name, color)}
                 onUpdateSection={(sectionId, updates) => updateSection(selectedNotebook.id, sectionId, updates)}
                 onDeleteSection={(sectionId, moveItemsTo) => deleteSection(selectedNotebook.id, sectionId, moveItemsTo)}
+                onReorderSections={(sectionIds) => reorderSections(selectedNotebook.id, sectionIds)}
               />
             </div>
             <ResizeHandle direction="horizontal" onResize={handleSectionsResize} />

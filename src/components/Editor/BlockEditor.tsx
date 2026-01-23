@@ -4,6 +4,7 @@ import { useEditor } from "./useEditor";
 import { useVimMode, type VimMode } from "./useVimMode";
 import { useEmacsMode } from "./useEmacsMode";
 import { useBlockDragHandles } from "./useBlockDragHandles";
+import { useChecklistEnhancer } from "./useChecklistEnhancer";
 import { VimModeIndicator } from "./VimModeIndicator";
 import { WikiLinkAutocomplete } from "./WikiLinkAutocomplete";
 import { WikiLinkTool } from "./WikiLinkTool";
@@ -94,6 +95,9 @@ export function BlockEditor({
     editorRef: editor,
     enabled: !readOnly,
   });
+
+  // Checklist enhancements (drag handles and auto-sort)
+  useChecklistEnhancer(editor, holderId);
 
   // Cleanup timeout on unmount
   useEffect(() => {
