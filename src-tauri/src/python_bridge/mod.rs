@@ -311,6 +311,61 @@ pub struct PythonEnvironmentInfo {
     pub packages: Vec<String>,
 }
 
+// ===== MCP (Model Context Protocol) Types =====
+
+/// Configuration for a single MCP server
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MCPServerConfig {
+    pub name: String,
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub env: HashMap<String, String>,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_timeout")]
+    pub timeout_seconds: i64,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_timeout() -> i64 {
+    30
+}
+
+/// Configuration for all MCP servers in a library
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct MCPServersConfig {
+    #[serde(default)]
+    pub servers: Vec<MCPServerConfig>,
+}
+
+/// Tool definition from an MCP server
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MCPTool {
+    pub server_name: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub input_schema: serde_json::Value,
+}
+
+/// Result from calling an MCP tool
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MCPToolResult {
+    pub server_name: String,
+    pub tool_name: String,
+    pub success: bool,
+    pub content: Option<serde_json::Value>,
+    pub error: Option<String>,
+}
+
 /// Python AI bridge for calling Python functions
 pub struct PythonAI {
     katt_py_path: PathBuf,
@@ -667,6 +722,7 @@ impl PythonAI {
         current_notebook_id: Option<String>,
         config: AIConfig,
         system_prompt: Option<String>,
+        library_path: Option<String>,
     ) -> Result<mpsc::Receiver<StreamEvent>> {
         let (tx, rx) = mpsc::channel();
         let katt_py_path = self.katt_py_path.clone();
@@ -906,6 +962,10 @@ impl PythonAI {
 
                 if let Some(prompt) = system_prompt {
                     kwargs.set_item("system_prompt", prompt)?;
+                }
+
+                if let Some(lib_path) = library_path {
+                    kwargs.set_item("library_path", lib_path)?;
                 }
 
                 // Call the streaming function - this will block until complete
@@ -1855,6 +1915,211 @@ impl PythonAI {
                     .and_then(|v| v.extract::<Vec<String>>(py).ok())
                     .unwrap_or_default(),
             })
+        })
+    }
+
+    // ===== MCP Server Management Methods =====
+
+    /// Load MCP server configuration for a library
+    pub fn mcp_load_config(&self, library_path: &str) -> Result<MCPServersConfig> {
+        Python::attach(|py| {
+            self.setup_python_path(py)?;
+
+            let mcp_module = py.import("katt_ai.mcp_client")?;
+            let load_fn = mcp_module.getattr("mcp_load_config_sync")?;
+
+            let result = load_fn.call1((library_path,))?;
+            let result_dict: HashMap<String, Py<PyAny>> = result.extract()?;
+
+            let servers_list = result_dict
+                .get("servers")
+                .map(|v| v.extract::<Vec<HashMap<String, Py<PyAny>>>>(py).unwrap_or_default())
+                .unwrap_or_default();
+
+            let servers: Vec<MCPServerConfig> = servers_list
+                .into_iter()
+                .map(|s| MCPServerConfig {
+                    name: s.get("name").and_then(|v| v.extract::<String>(py).ok()).unwrap_or_default(),
+                    command: s.get("command").and_then(|v| v.extract::<String>(py).ok()).unwrap_or_default(),
+                    args: s.get("args").and_then(|v| v.extract::<Vec<String>>(py).ok()).unwrap_or_default(),
+                    env: s.get("env").and_then(|v| v.extract::<HashMap<String, String>>(py).ok()).unwrap_or_default(),
+                    enabled: s.get("enabled").and_then(|v| v.extract::<bool>(py).ok()).unwrap_or(true),
+                    timeout_seconds: s.get("timeout_seconds").and_then(|v| v.extract::<i64>(py).ok()).unwrap_or(30),
+                })
+                .collect();
+
+            Ok(MCPServersConfig { servers })
+        })
+    }
+
+    /// Save MCP server configuration for a library
+    pub fn mcp_save_config(&self, library_path: &str, config: MCPServersConfig) -> Result<()> {
+        Python::attach(|py| {
+            self.setup_python_path(py)?;
+
+            let mcp_module = py.import("katt_ai.mcp_client")?;
+            let save_fn = mcp_module.getattr("mcp_save_config_sync")?;
+
+            // Convert config to Python dict
+            let config_dict = PyDict::new(py);
+            let servers_list = PyList::empty(py);
+
+            for server in &config.servers {
+                let server_dict = PyDict::new(py);
+                server_dict.set_item("name", &server.name)?;
+                server_dict.set_item("command", &server.command)?;
+                server_dict.set_item("args", &server.args)?;
+
+                let env_dict = PyDict::new(py);
+                for (k, v) in &server.env {
+                    env_dict.set_item(k, v)?;
+                }
+                server_dict.set_item("env", env_dict)?;
+                server_dict.set_item("enabled", server.enabled)?;
+                server_dict.set_item("timeout_seconds", server.timeout_seconds)?;
+
+                servers_list.append(server_dict)?;
+            }
+            config_dict.set_item("servers", servers_list)?;
+
+            save_fn.call1((library_path, config_dict))?;
+            Ok(())
+        })
+    }
+
+    /// Start all enabled MCP servers for a library
+    pub fn mcp_start_servers(&self, library_path: &str) -> Result<Vec<String>> {
+        Python::attach(|py| {
+            self.setup_python_path(py)?;
+
+            let mcp_module = py.import("katt_ai.mcp_client")?;
+            let start_fn = mcp_module.getattr("mcp_start_servers_sync")?;
+
+            let result = start_fn.call1((library_path,))?;
+            let started: Vec<String> = result.extract()?;
+
+            Ok(started)
+        })
+    }
+
+    /// Stop all MCP servers for a library
+    pub fn mcp_stop_servers(&self, library_path: &str) -> Result<()> {
+        Python::attach(|py| {
+            self.setup_python_path(py)?;
+
+            let mcp_module = py.import("katt_ai.mcp_client")?;
+            let stop_fn = mcp_module.getattr("mcp_stop_servers_sync")?;
+
+            stop_fn.call1((library_path,))?;
+            Ok(())
+        })
+    }
+
+    /// Get all tools from running MCP servers
+    pub fn mcp_get_tools(&self, library_path: &str) -> Result<Vec<MCPTool>> {
+        Python::attach(|py| {
+            self.setup_python_path(py)?;
+
+            let mcp_module = py.import("katt_ai.mcp_client")?;
+            let get_tools_fn = mcp_module.getattr("mcp_get_tools_sync")?;
+
+            let result = get_tools_fn.call1((library_path,))?;
+            let tools_list: Vec<HashMap<String, Py<PyAny>>> = result.extract()?;
+
+            let tools: Vec<MCPTool> = tools_list
+                .into_iter()
+                .map(|t| {
+                    let input_schema = t.get("input_schema")
+                        .map(|v| {
+                            let json_module = py.import("json").ok();
+                            if let Some(json_mod) = json_module {
+                                if let Ok(dumps) = json_mod.getattr("dumps") {
+                                    if let Ok(json_str) = dumps.call1((v,)) {
+                                        if let Ok(s) = json_str.extract::<String>() {
+                                            return serde_json::from_str(&s).unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
+                                        }
+                                    }
+                                }
+                            }
+                            serde_json::Value::Object(serde_json::Map::new())
+                        })
+                        .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
+
+                    MCPTool {
+                        server_name: t.get("server_name").and_then(|v| v.extract::<String>(py).ok()).unwrap_or_default(),
+                        name: t.get("name").and_then(|v| v.extract::<String>(py).ok()).unwrap_or_default(),
+                        description: t.get("description").and_then(|v| v.extract::<String>(py).ok()),
+                        input_schema,
+                    }
+                })
+                .collect();
+
+            Ok(tools)
+        })
+    }
+
+    /// Call a tool on an MCP server
+    pub fn mcp_call_tool(
+        &self,
+        library_path: &str,
+        server_name: &str,
+        tool_name: &str,
+        arguments: serde_json::Value,
+    ) -> Result<MCPToolResult> {
+        Python::attach(|py| {
+            self.setup_python_path(py)?;
+
+            let mcp_module = py.import("katt_ai.mcp_client")?;
+            let call_fn = mcp_module.getattr("mcp_call_tool_sync")?;
+
+            // Convert arguments to Python dict
+            let json_module = py.import("json")?;
+            let loads = json_module.getattr("loads")?;
+            let args_str = serde_json::to_string(&arguments).unwrap_or_else(|_| "{}".to_string());
+            let py_args = loads.call1((args_str,))?;
+
+            let result = call_fn.call1((library_path, server_name, tool_name, py_args))?;
+            let result_dict: HashMap<String, Py<PyAny>> = result.extract()?;
+
+            let content = result_dict.get("content")
+                .map(|v| {
+                    let json_mod = py.import("json").ok();
+                    if let Some(jm) = json_mod {
+                        if let Ok(dumps) = jm.getattr("dumps") {
+                            if let Ok(json_str) = dumps.call1((v,)) {
+                                if let Ok(s) = json_str.extract::<String>() {
+                                    return serde_json::from_str(&s).ok();
+                                }
+                            }
+                        }
+                    }
+                    // Fallback: try to extract as string
+                    v.extract::<String>(py).ok().map(|s| serde_json::Value::String(s))
+                })
+                .flatten();
+
+            Ok(MCPToolResult {
+                server_name: result_dict.get("server_name").and_then(|v| v.extract::<String>(py).ok()).unwrap_or_default(),
+                tool_name: result_dict.get("tool_name").and_then(|v| v.extract::<String>(py).ok()).unwrap_or_default(),
+                success: result_dict.get("success").and_then(|v| v.extract::<bool>(py).ok()).unwrap_or(false),
+                content,
+                error: result_dict.get("error").and_then(|v| v.extract::<String>(py).ok()),
+            })
+        })
+    }
+
+    /// Get list of running MCP server names
+    pub fn mcp_get_running_servers(&self, library_path: &str) -> Result<Vec<String>> {
+        Python::attach(|py| {
+            self.setup_python_path(py)?;
+
+            let mcp_module = py.import("katt_ai.mcp_client")?;
+            let get_fn = mcp_module.getattr("mcp_get_running_servers_sync")?;
+
+            let result = get_fn.call1((library_path,))?;
+            let servers: Vec<String> = result.extract()?;
+
+            Ok(servers)
         })
     }
 }

@@ -240,6 +240,17 @@ pub async fn ai_chat_stream(
         max_tokens,
     };
 
+    // Get current library path for MCP server access
+    let library_path = {
+        let library_storage = state.library_storage.lock().map_err(|e| CommandError {
+            message: format!("Failed to acquire library storage lock: {}", e),
+        })?;
+        library_storage
+            .get_current()
+            .ok()
+            .map(|lib| lib.path.to_string_lossy().to_string())
+    };
+
     // Get the event receiver from the Python bridge
     let rx = {
         let python_ai = python_ai.lock().map_err(|e| CommandError {
@@ -255,6 +266,7 @@ pub async fn ai_chat_stream(
                 current_notebook_id,
                 config,
                 system_prompt,
+                library_path,
             )
             .map_err(|e| CommandError {
                 message: format!("AI streaming error: {}", e),

@@ -1,7 +1,7 @@
 """Pydantic models for Katt AI operations."""
 
 from enum import Enum
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -127,3 +127,44 @@ class ResearchSummary(BaseModel):
     key_points: list[str] = Field(default_factory=list)
     sources: list[SourceRef] = Field(default_factory=list)
     suggested_tags: list[str] = Field(default_factory=list)
+
+
+# ===== MCP (Model Context Protocol) Models =====
+
+
+class MCPServerConfig(BaseModel):
+    """Configuration for a single MCP server."""
+
+    name: str = Field(description="Unique name for this server")
+    command: str = Field(description="Command to spawn the server (e.g., 'npx', 'python')")
+    args: list[str] = Field(default_factory=list, description="Arguments for the command")
+    env: dict[str, str] = Field(default_factory=dict, description="Environment variables")
+    enabled: bool = Field(default=True, description="Whether this server is enabled")
+    timeout_seconds: int = Field(default=30, ge=1, description="Connection timeout in seconds")
+
+
+class MCPServersConfig(BaseModel):
+    """Configuration for all MCP servers in a library."""
+
+    servers: list[MCPServerConfig] = Field(default_factory=list)
+
+
+class MCPTool(BaseModel):
+    """Tool definition from an MCP server."""
+
+    server_name: str = Field(description="Name of the server providing this tool")
+    name: str = Field(description="Tool name")
+    description: str | None = Field(default=None, description="Tool description")
+    input_schema: dict[str, Any] = Field(
+        default_factory=dict, description="JSON Schema for tool input"
+    )
+
+
+class MCPToolResult(BaseModel):
+    """Result from calling an MCP tool."""
+
+    server_name: str
+    tool_name: str
+    success: bool
+    content: Any = None
+    error: str | None = None

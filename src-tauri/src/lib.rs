@@ -378,6 +378,14 @@ pub fn run() {
             commands::validate_library_path,
             commands::pick_library_folder,
             commands::move_notebook_to_library,
+            // MCP server commands
+            commands::mcp_load_config,
+            commands::mcp_save_config,
+            commands::mcp_start_servers,
+            commands::mcp_stop_servers,
+            commands::mcp_get_tools,
+            commands::mcp_get_running_servers,
+            commands::mcp_call_tool,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

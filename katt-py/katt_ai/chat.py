@@ -8,12 +8,55 @@ from typing import Any, Generator
 from katt_ai.models import (
     ChatMessage,
     ChatResponse,
+    MCPTool,
     PageContext,
     ProviderConfig,
     ProviderType,
 )
 from katt_ai.providers import get_provider
 from katt_ai.browser_automation import BROWSER_USE_AVAILABLE
+
+# MCP tool namespace prefix
+MCP_TOOL_PREFIX = "mcp:"
+
+
+def is_mcp_tool(tool_name: str) -> bool:
+    """Check if a tool name refers to an MCP tool."""
+    return tool_name.startswith(MCP_TOOL_PREFIX)
+
+
+def parse_mcp_tool_name(namespaced_name: str) -> tuple[str, str]:
+    """Parse 'mcp:server:tool' -> (server_name, tool_name)."""
+    if not is_mcp_tool(namespaced_name):
+        raise ValueError(f"Not an MCP tool: {namespaced_name}")
+    parts = namespaced_name[len(MCP_TOOL_PREFIX):].split(":", 1)
+    if len(parts) != 2:
+        raise ValueError(f"Invalid MCP tool name format: {namespaced_name}")
+    return parts[0], parts[1]
+
+
+def format_mcp_tool_name(server_name: str, tool_name: str) -> str:
+    """Format server and tool names into namespaced format."""
+    return f"{MCP_TOOL_PREFIX}{server_name}:{tool_name}"
+
+
+def convert_mcp_tools_to_openai_format(mcp_tools: list[MCPTool]) -> list[dict]:
+    """Convert MCP tools to OpenAI function calling format."""
+    tools = []
+    for tool in mcp_tools:
+        namespaced_name = format_mcp_tool_name(tool.server_name, tool.name)
+        tools.append({
+            "type": "function",
+            "function": {
+                "name": namespaced_name,
+                "description": tool.description or f"MCP tool: {tool.name} from {tool.server_name}",
+                "parameters": tool.input_schema if tool.input_schema else {
+                    "type": "object",
+                    "properties": {},
+                },
+            },
+        })
+    return tools
 
 
 def _split_into_chunks(text: str, chunk_size: int = 20) -> Generator[str, None, None]:
@@ -972,6 +1015,7 @@ async def chat_with_tools_stream(
     temperature: float = 0.7,
     max_tokens: int = 4096,
     system_prompt: str | None = None,
+    library_path: str | None = None,
 ) -> dict[str, Any]:
     """Chat with AI using tools, streaming the response via callback.
 
@@ -980,6 +1024,10 @@ async def chat_with_tools_stream(
     - {"type": "thinking", "content": "..."} - Thinking content (Anthropic)
     - {"type": "action", "tool": "...", "arguments": {...}, "tool_call_id": "..."} - Tool action
     - {"type": "done", "model": "...", "tokens_used": N} - Completion
+
+    Args:
+        library_path: Path to the library for MCP server access. If provided, MCP tools
+                      will be loaded and made available to the AI.
 
     Returns the final complete response dict.
     """
@@ -993,6 +1041,23 @@ async def chat_with_tools_stream(
         temperature=temperature,
         max_tokens=max_tokens,
     )
+
+    # Load MCP tools if library_path is provided
+    mcp_tools: list[MCPTool] = []
+    mcp_manager = None
+    if library_path:
+        try:
+            from katt_ai.mcp_client import get_manager
+            mcp_manager = get_manager(library_path)
+            mcp_tools = await mcp_manager.get_all_tools()
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"Failed to load MCP tools: {e}")
+
+    # Merge NOTEBOOK_TOOLS with MCP tools
+    all_tools = list(NOTEBOOK_TOOLS)
+    if mcp_tools:
+        all_tools.extend(convert_mcp_tools_to_openai_format(mcp_tools))
 
     # Build system prompt - use custom prompt if provided, otherwise use default
     if system_prompt:
@@ -1055,7 +1120,7 @@ async def chat_with_tools_stream(
         response = await client.chat.completions.create(
             model=config.model,
             messages=oai_messages,
-            tools=NOTEBOOK_TOOLS,
+            tools=all_tools,
             tool_choice="auto",
             temperature=config.temperature,
             max_tokens=config.max_tokens,
@@ -1099,7 +1164,18 @@ async def chat_with_tools_stream(
                 # Emit action event
                 callback({"type": "action", **action})
 
-                if func_name == "create_notebook":
+                # Handle MCP tools differently - they execute and return results
+                if is_mcp_tool(func_name):
+                    if mcp_manager:
+                        server_name, tool_name = parse_mcp_tool_name(func_name)
+                        mcp_result = await mcp_manager.call_tool(server_name, tool_name, func_args)
+                        if mcp_result.success:
+                            result = str(mcp_result.content) if mcp_result.content else "Tool executed successfully"
+                        else:
+                            result = f"Tool error: {mcp_result.error}"
+                    else:
+                        result = "MCP server not available"
+                elif func_name == "create_notebook":
                     result = f"Created notebook: {func_args.get('name')}"
                 elif func_name == "create_page":
                     result = f"Created page: {func_args.get('title')} in {func_args.get('notebook_name')}"
@@ -1123,7 +1199,7 @@ async def chat_with_tools_stream(
             response = await client.chat.completions.create(
                 model=config.model,
                 messages=oai_messages,
-                tools=NOTEBOOK_TOOLS,
+                tools=all_tools,
                 tool_choice="auto",
                 temperature=config.temperature,
                 max_tokens=config.max_tokens,
@@ -1151,7 +1227,7 @@ async def chat_with_tools_stream(
                 "description": t["function"]["description"],
                 "input_schema": t["function"]["parameters"]
             }
-            for t in NOTEBOOK_TOOLS
+            for t in all_tools
         ]
 
         ant_messages: list[dict[str, Any]] = []
@@ -1190,7 +1266,18 @@ async def chat_with_tools_stream(
                     actions.append(action)
                     callback({"type": "action", **action})
 
-                    if func_name == "create_notebook":
+                    # Handle MCP tools differently - they execute and return results
+                    if is_mcp_tool(func_name):
+                        if mcp_manager:
+                            server_name, tool_name = parse_mcp_tool_name(func_name)
+                            mcp_result = await mcp_manager.call_tool(server_name, tool_name, func_args)
+                            if mcp_result.success:
+                                result = str(mcp_result.content) if mcp_result.content else "Tool executed successfully"
+                            else:
+                                result = f"Tool error: {mcp_result.error}"
+                        else:
+                            result = "MCP server not available"
+                    elif func_name == "create_notebook":
                         result = f"Created notebook: {func_args.get('name')}"
                     elif func_name == "create_page":
                         result = f"Created page: {func_args.get('title')} in {func_args.get('notebook_name')}"
@@ -1286,6 +1373,7 @@ def chat_with_tools_stream_sync(
     temperature: float = 0.7,
     max_tokens: int = 4096,
     system_prompt: str | None = None,
+    library_path: str | None = None,
 ) -> dict[str, Any]:
     """Synchronous wrapper for streaming chat with callback.
 
@@ -1307,6 +1395,7 @@ def chat_with_tools_stream_sync(
                 temperature,
                 max_tokens,
                 system_prompt,
+                library_path,
             )
         )
     except Exception as e:

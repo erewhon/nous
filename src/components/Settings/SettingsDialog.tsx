@@ -3,16 +3,17 @@ import { useAIStore, DEFAULT_SYSTEM_PROMPT } from "../../stores/aiStore";
 import { useWebResearchStore } from "../../stores/webResearchStore";
 import { ThemeSettings } from "./ThemeSettings";
 import { KeybindingsSettings } from "./KeybindingsSettings";
+import { MCPServersSettings } from "./MCPServersSettings";
 import { LibrarySettingsPanel } from "../Library";
 import type { ProviderType, ProviderConfig } from "../../types/ai";
 
 interface SettingsDialogProps {
   isOpen: boolean;
   onClose: () => void;
-  initialTab?: "ai" | "web-research" | "theme" | "system-prompt" | "libraries" | "keybindings";
+  initialTab?: "ai" | "web-research" | "theme" | "system-prompt" | "libraries" | "keybindings" | "mcp";
 }
 
-type TabId = "ai" | "web-research" | "theme" | "system-prompt" | "libraries" | "keybindings";
+type TabId = "ai" | "web-research" | "theme" | "system-prompt" | "libraries" | "keybindings" | "mcp";
 
 const TABS: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: "theme", label: "Appearance", icon: <IconPalette /> },
@@ -20,6 +21,7 @@ const TABS: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: "libraries", label: "Libraries", icon: <IconLibrary /> },
   { id: "ai", label: "AI Providers", icon: <IconSparkles /> },
   { id: "system-prompt", label: "System Prompt", icon: <IconPrompt /> },
+  { id: "mcp", label: "MCP Servers", icon: <IconPlug /> },
   { id: "web-research", label: "Web Research", icon: <IconGlobe /> },
 ];
 
@@ -132,6 +134,7 @@ export function SettingsDialog({ isOpen, onClose, initialTab = "theme" }: Settin
             {activeTab === "libraries" && <LibrarySettingsPanel />}
             {activeTab === "ai" && <AISettingsContent />}
             {activeTab === "system-prompt" && <SystemPromptSettingsContent />}
+            {activeTab === "mcp" && <MCPServersSettings />}
             {activeTab === "web-research" && <WebResearchSettingsContent />}
           </div>
         </div>
@@ -1298,6 +1301,27 @@ function IconKeyboard() {
       <path d="M14 12h.01" />
       <path d="M18 12h.01" />
       <path d="M8 16h8" />
+    </svg>
+  );
+}
+
+function IconPlug() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M12 22v-5" />
+      <path d="M9 8V2" />
+      <path d="M15 8V2" />
+      <path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z" />
     </svg>
   );
 }
