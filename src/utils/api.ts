@@ -75,7 +75,16 @@ export async function createPage(
 export async function updatePage(
   notebookId: string,
   pageId: string,
-  updates: { title?: string; content?: EditorData; tags?: string[]; systemPrompt?: string; systemPromptMode?: string; sectionId?: string | null },
+  updates: {
+    title?: string;
+    content?: EditorData;
+    tags?: string[];
+    systemPrompt?: string;
+    systemPromptMode?: string;
+    sectionId?: string | null;
+    pageType?: "standard" | "markdown" | "pdf" | "jupyter" | "epub" | "calendar" | "chat";
+    fileExtension?: string | null;
+  },
   commit?: boolean // Whether to create a git commit (default: false, use true for explicit saves)
 ): Promise<Page> {
   return invoke<Page>("update_page", { notebookId, pageId, ...updates, commit });

@@ -10,6 +10,7 @@ import { PDFPageViewer } from "../PDF";
 import { JupyterViewer } from "../Jupyter";
 import { EpubReader } from "../Epub";
 import { CalendarViewer } from "../Calendar";
+import { ChatEditor } from "../Chat";
 import { BacklinksPanel } from "./BacklinksPanel";
 import { SimilarPagesPanel } from "./SimilarPagesPanel";
 import type { EditorData, Page } from "../../types/page";
@@ -287,6 +288,14 @@ export function EditorPaneContent({
               )}
               {selectedPage.pageType === "calendar" && (
                 <CalendarViewer
+                  key={selectedPage.id}
+                  page={selectedPage}
+                  notebookId={notebookId}
+                  className="min-h-[calc(100vh-300px)]"
+                />
+              )}
+              {selectedPage.pageType === "chat" && (
+                <ChatEditor
                   key={selectedPage.id}
                   page={selectedPage}
                   notebookId={notebookId}

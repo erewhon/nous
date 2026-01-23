@@ -130,6 +130,8 @@ pub fn update_page(
     system_prompt: Option<String>,
     system_prompt_mode: Option<String>,
     section_id: Option<Option<String>>,
+    page_type: Option<String>,
+    file_extension: Option<String>,
     #[allow(unused_variables)]
     commit: Option<bool>, // Whether to create a git commit (default: false)
 ) -> CommandResult<Page> {
@@ -168,6 +170,22 @@ pub fn update_page(
         page.section_id = sect_id.map(|id| {
             Uuid::parse_str(&id).expect("Invalid section ID")
         });
+    }
+    // Set page_type if provided
+    if let Some(pt) = page_type {
+        page.page_type = match pt.as_str() {
+            "markdown" => crate::storage::PageType::Markdown,
+            "pdf" => crate::storage::PageType::Pdf,
+            "jupyter" => crate::storage::PageType::Jupyter,
+            "epub" => crate::storage::PageType::Epub,
+            "calendar" => crate::storage::PageType::Calendar,
+            "chat" => crate::storage::PageType::Chat,
+            _ => crate::storage::PageType::Standard,
+        };
+    }
+    // Set file_extension if provided
+    if let Some(ext) = file_extension {
+        page.file_extension = if ext.is_empty() { None } else { Some(ext) };
     }
     page.updated_at = chrono::Utc::now();
 

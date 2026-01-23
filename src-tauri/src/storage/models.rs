@@ -63,6 +63,8 @@ pub enum PageType {
     Epub,
     /// Calendar file (.ics)
     Calendar,
+    /// AI Chat conversation page (.chat)
+    Chat,
 }
 
 impl Default for PageType {

@@ -1183,6 +1183,7 @@ impl FileStorage {
             "ipynb" => Some(PageType::Jupyter),
             "epub" => Some(PageType::Epub),
             "ics" | "ical" => Some(PageType::Calendar),
+            "chat" => Some(PageType::Chat),
             _ => None,
         }
     }

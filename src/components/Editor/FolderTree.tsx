@@ -166,6 +166,7 @@ export function FolderTree({
 
   const [isCreatingFolder, setIsCreatingFolder] = useState(false);
   const [showPageSortMenu, setShowPageSortMenu] = useState(false);
+  const [showNewPageMenu, setShowNewPageMenu] = useState(false);
 
   // Helper function to sort pages based on current sort option
   const sortPages = useCallback((pagesToSort: Page[]) => {
@@ -278,6 +279,86 @@ export function FolderTree({
     },
     [notebookId, createPage, sectionsEnabled, selectedSectionId]
   );
+
+  // Handle creating a chat page
+  const handleCreateChatPage = useCallback(async () => {
+    try {
+      // Create a new page
+      const title = "New Chat";
+      const sectionId = sectionsEnabled && selectedSectionId ? selectedSectionId : undefined;
+      const pageData = await api.createPage(notebookId, title, undefined, undefined, sectionId);
+      // Update the page to have .chat extension which will set pageType to chat
+      await api.updatePage(notebookId, pageData.id, {
+        fileExtension: "chat",
+        pageType: "chat",
+      });
+      // Initialize the chat content
+      const defaultContent = JSON.stringify({
+        version: 1,
+        cells: [{
+          id: crypto.randomUUID(),
+          type: "prompt",
+          content: "",
+          status: "idle",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        }],
+        settings: {
+          includePageContext: false,
+          maxContextCells: 10,
+        },
+      }, null, 2);
+      await api.updateFileContent(notebookId, pageData.id, defaultContent);
+      await loadPages(notebookId);
+    } catch (err) {
+      console.error("Failed to create chat page:", err);
+    }
+  }, [notebookId, sectionsEnabled, selectedSectionId, loadPages]);
+
+  // Handle creating a markdown page
+  const handleCreateMarkdownPage = useCallback(async () => {
+    try {
+      const title = "New Document";
+      const sectionId = sectionsEnabled && selectedSectionId ? selectedSectionId : undefined;
+      const pageData = await api.createPage(notebookId, title, undefined, undefined, sectionId);
+      // Update the page to have .md extension which will set pageType to markdown
+      await api.updatePage(notebookId, pageData.id, {
+        fileExtension: "md",
+        pageType: "markdown",
+      });
+      // Initialize with empty markdown content
+      await api.updateFileContent(notebookId, pageData.id, `# ${title}\n\n`);
+      await loadPages(notebookId);
+    } catch (err) {
+      console.error("Failed to create markdown page:", err);
+    }
+  }, [notebookId, sectionsEnabled, selectedSectionId, loadPages]);
+
+  // Handle creating a calendar page
+  const handleCreateCalendarPage = useCallback(async () => {
+    try {
+      const title = "New Calendar";
+      const sectionId = sectionsEnabled && selectedSectionId ? selectedSectionId : undefined;
+      const pageData = await api.createPage(notebookId, title, undefined, undefined, sectionId);
+      // Update the page to have .ics extension which will set pageType to calendar
+      await api.updatePage(notebookId, pageData.id, {
+        fileExtension: "ics",
+        pageType: "calendar",
+      });
+      // Initialize with empty iCalendar content
+      const icsContent = `BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Katt//Katt Calendar//EN
+CALSCALE:GREGORIAN
+METHOD:PUBLISH
+X-WR-CALNAME:${title}
+END:VCALENDAR`;
+      await api.updateFileContent(notebookId, pageData.id, icsContent);
+      await loadPages(notebookId);
+    } catch (err) {
+      console.error("Failed to create calendar page:", err);
+    }
+  }, [notebookId, sectionsEnabled, selectedSectionId, loadPages]);
 
   // Handle opening file picker for import
   const handleImportFile = useCallback(async () => {
@@ -824,27 +905,167 @@ export function FolderTree({
                 <line x1="9" y1="14" x2="15" y2="14" />
               </svg>
             </button>
-            {/* Create page button */}
-            <button
-              onClick={() => handleCreatePage()}
-              className="flex h-7 w-7 items-center justify-center rounded-lg transition-all"
-              style={{ color: "var(--color-text-muted)" }}
-              title="Create page"
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="16"
-                height="16"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
+            {/* Create page button with dropdown */}
+            <div className="relative">
+              <button
+                onClick={() => setShowNewPageMenu(!showNewPageMenu)}
+                className="flex h-7 w-7 items-center justify-center rounded-lg transition-all"
+                style={{ color: "var(--color-text-muted)" }}
+                title="Create page"
               >
-                <path d="M12 5v14M5 12h14" />
-              </svg>
-            </button>
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+              </button>
+              {showNewPageMenu && (
+                <div
+                  className="absolute right-0 top-full z-50 mt-1 min-w-40 rounded-lg border py-1 shadow-lg"
+                  style={{
+                    backgroundColor: "var(--color-bg-secondary)",
+                    borderColor: "var(--color-border)",
+                  }}
+                  onMouseLeave={() => setShowNewPageMenu(false)}
+                >
+                  <button
+                    onClick={() => {
+                      handleCreatePage();
+                      setShowNewPageMenu(false);
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors hover:bg-[--color-bg-tertiary]"
+                    style={{ color: "var(--color-text-primary)" }}
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+                      <polyline points="14 2 14 8 20 8" />
+                    </svg>
+                    Standard Page
+                  </button>
+                  <button
+                    onClick={() => {
+                      handleCreateChatPage();
+                      setShowNewPageMenu(false);
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors hover:bg-[--color-bg-tertiary]"
+                    style={{ color: "var(--color-text-primary)" }}
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z" />
+                    </svg>
+                    AI Chat Page
+                  </button>
+                  <button
+                    onClick={() => {
+                      handleCreateMarkdownPage();
+                      setShowNewPageMenu(false);
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors hover:bg-[--color-bg-tertiary]"
+                    style={{ color: "var(--color-text-primary)" }}
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+                      <polyline points="14 2 14 8 20 8" />
+                      <path d="M9 15v-3l2 2 2-2v3" />
+                    </svg>
+                    Markdown Page
+                  </button>
+                  <button
+                    onClick={() => {
+                      handleCreateCalendarPage();
+                      setShowNewPageMenu(false);
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors hover:bg-[--color-bg-tertiary]"
+                    style={{ color: "var(--color-text-primary)" }}
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+                      <line x1="16" y1="2" x2="16" y2="6" />
+                      <line x1="8" y1="2" x2="8" y2="6" />
+                      <line x1="3" y1="10" x2="21" y2="10" />
+                    </svg>
+                    Calendar Page
+                  </button>
+                  <div
+                    className="my-1 mx-2 border-t"
+                    style={{ borderColor: "var(--color-border)" }}
+                  />
+                  <button
+                    onClick={() => {
+                      handleImportFile();
+                      setShowNewPageMenu(false);
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors hover:bg-[--color-bg-tertiary]"
+                    style={{ color: "var(--color-text-muted)" }}
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                      <polyline points="17 8 12 3 7 8" />
+                      <line x1="12" y1="3" x2="12" y2="15" />
+                    </svg>
+                    Import File...
+                  </button>
+                </div>
+              )}
+            </div>
             {/* Import file button */}
             <button
               onClick={handleImportFile}

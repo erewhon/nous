@@ -33,6 +33,7 @@ export const PageTypeSchema = z.enum([
   "jupyter", // Jupyter notebook (.ipynb)
   "epub", // E-book (.epub)
   "calendar", // Calendar file (.ics)
+  "chat", // AI Chat conversation page (.chat)
 ]);
 export type PageType = z.infer<typeof PageTypeSchema>;
 

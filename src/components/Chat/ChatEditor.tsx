@@ -1,0 +1,1031 @@
+import { useState, useEffect, useCallback, useRef } from "react";
+import ReactMarkdown from "react-markdown";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import type { Page } from "../../types/page";
+import type { StreamEvent, ChatMessage } from "../../types/ai";
+import {
+  type ChatCell,
+  type ChatPageContent,
+  type ChatSettings,
+  createChatCell,
+  createDefaultChatContent,
+  buildConversationHistory,
+} from "../../types/chat";
+import * as api from "../../utils/api";
+import { useAIStore } from "../../stores/aiStore";
+import { useNotebookStore } from "../../stores/notebookStore";
+
+interface ChatEditorProps {
+  page: Page;
+  notebookId: string;
+  className?: string;
+}
+
+export function ChatEditor({ page, notebookId, className = "" }: ChatEditorProps) {
+  const [content, setContent] = useState<ChatPageContent | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [lastSaved, setLastSaved] = useState<Date | null>(null);
+  const [runningCellId, setRunningCellId] = useState<string | null>(null);
+  const [expandedThinking, setExpandedThinking] = useState<Set<string>>(new Set());
+  const [showSettings, setShowSettings] = useState(false);
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const { settings, getActiveProviderType, getActiveApiKey } = useAIStore();
+  const { notebooks, selectedNotebookId } = useNotebookStore();
+  const currentNotebook = notebooks.find((n) => n.id === selectedNotebookId);
+
+  // Load chat content
+  useEffect(() => {
+    const loadContent = async () => {
+      setIsLoading(true);
+      setError(null);
+      try {
+        const result = await api.getFileContent(notebookId, page.id);
+        if (result.content) {
+          const parsed = JSON.parse(result.content) as ChatPageContent;
+          setContent(parsed);
+        } else {
+          // Create default content for new chat page
+          setContent(createDefaultChatContent());
+        }
+      } catch (err) {
+        // If file doesn't exist or is empty, create default content
+        if (String(err).includes("not found") || String(err).includes("empty")) {
+          setContent(createDefaultChatContent());
+        } else {
+          setError(err instanceof Error ? err.message : "Failed to load content");
+          console.error("Failed to load chat content:", err);
+        }
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadContent();
+  }, [notebookId, page.id]);
+
+  // Auto-save with debounce
+  const saveContent = useCallback(
+    async (newContent: ChatPageContent) => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+
+      saveTimeoutRef.current = setTimeout(async () => {
+        setIsSaving(true);
+        try {
+          await api.updateFileContent(notebookId, page.id, JSON.stringify(newContent, null, 2));
+          setLastSaved(new Date());
+        } catch (err) {
+          console.error("Failed to save chat:", err);
+        } finally {
+          setIsSaving(false);
+        }
+      }, 1000);
+    },
+    [notebookId, page.id]
+  );
+
+  // Update content and trigger save
+  const updateContent = useCallback(
+    (updater: (prev: ChatPageContent) => ChatPageContent) => {
+      setContent((prev) => {
+        if (!prev) return prev;
+        const updated = updater(prev);
+        saveContent(updated);
+        return updated;
+      });
+    },
+    [saveContent]
+  );
+
+  // Update a specific cell
+  const updateCell = useCallback(
+    (cellId: string, updates: Partial<ChatCell>) => {
+      updateContent((prev) => ({
+        ...prev,
+        cells: prev.cells.map((cell) =>
+          cell.id === cellId ? { ...cell, ...updates, updatedAt: new Date().toISOString() } : cell
+        ),
+      }));
+    },
+    [updateContent]
+  );
+
+  // Add a new cell
+  const addCell = useCallback(
+    (type: "prompt" | "markdown", afterCellId?: string) => {
+      const newCell = createChatCell(type);
+      updateContent((prev) => {
+        const idx = afterCellId ? prev.cells.findIndex((c) => c.id === afterCellId) : prev.cells.length - 1;
+        const newCells = [...prev.cells];
+        newCells.splice(idx + 1, 0, newCell);
+        return { ...prev, cells: newCells };
+      });
+      return newCell.id;
+    },
+    [updateContent]
+  );
+
+  // Delete a cell
+  const deleteCell = useCallback(
+    (cellId: string) => {
+      updateContent((prev) => ({
+        ...prev,
+        cells: prev.cells.filter((c) => c.id !== cellId),
+      }));
+    },
+    [updateContent]
+  );
+
+  // Move cell up or down
+  const moveCell = useCallback(
+    (cellId: string, direction: "up" | "down") => {
+      updateContent((prev) => {
+        const idx = prev.cells.findIndex((c) => c.id === cellId);
+        if (idx === -1) return prev;
+        if (direction === "up" && idx === 0) return prev;
+        if (direction === "down" && idx === prev.cells.length - 1) return prev;
+
+        const newCells = [...prev.cells];
+        const swapIdx = direction === "up" ? idx - 1 : idx + 1;
+        [newCells[idx], newCells[swapIdx]] = [newCells[swapIdx], newCells[idx]];
+        return { ...prev, cells: newCells };
+      });
+    },
+    [updateContent]
+  );
+
+  // Scroll to bottom
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [content?.cells.length, runningCellId]);
+
+  // Execute a prompt cell
+  const executePrompt = useCallback(
+    async (promptCellId: string) => {
+      if (!content || runningCellId) return;
+
+      const promptCell = content.cells.find((c) => c.id === promptCellId);
+      if (!promptCell || promptCell.type !== "prompt" || !promptCell.content.trim()) return;
+
+      const promptIndex = content.cells.findIndex((c) => c.id === promptCellId);
+
+      // Create or find existing response cell
+      let responseCellId: string;
+      const existingResponseIndex = content.cells.findIndex(
+        (c, i) => i > promptIndex && c.type === "response" && c.parentPromptId === promptCellId
+      );
+
+      if (existingResponseIndex !== -1) {
+        responseCellId = content.cells[existingResponseIndex].id;
+        // Reset existing response cell
+        updateCell(responseCellId, {
+          content: "",
+          status: "running",
+          error: undefined,
+          thinking: undefined,
+          stats: undefined,
+        });
+      } else {
+        // Create new response cell
+        const responseCell = createChatCell("response");
+        responseCell.parentPromptId = promptCellId;
+        responseCell.status = "running";
+        responseCellId = responseCell.id;
+
+        updateContent((prev) => {
+          const newCells = [...prev.cells];
+          newCells.splice(promptIndex + 1, 0, responseCell);
+          return { ...prev, cells: newCells };
+        });
+      }
+
+      // Update prompt cell status
+      updateCell(promptCellId, { status: "running" });
+      setRunningCellId(responseCellId);
+
+      const startTime = Date.now();
+      let accumulatedContent = "";
+      let accumulatedThinking = "";
+      let responseModel = "";
+      let tokensUsed = 0;
+      let unlisten: UnlistenFn | null = null;
+
+      try {
+        // Set up event listener for streaming
+        unlisten = await listen<StreamEvent>("ai-stream", (event) => {
+          const data = event.payload;
+
+          switch (data.type) {
+            case "chunk":
+              accumulatedContent += data.content;
+              updateCell(responseCellId, { content: accumulatedContent });
+              break;
+
+            case "thinking":
+              accumulatedThinking += data.content;
+              updateCell(responseCellId, { thinking: accumulatedThinking });
+              break;
+
+            case "done":
+              responseModel = data.model;
+              tokensUsed = data.tokensUsed;
+              break;
+
+            case "error":
+              console.error("Stream error:", data.message);
+              updateCell(responseCellId, {
+                content: `Error: ${data.message}`,
+                status: "error",
+                error: data.message,
+              });
+              break;
+          }
+        });
+
+        // Build conversation history
+        const history = buildConversationHistory(
+          content.cells,
+          promptIndex,
+          content.settings.maxContextCells
+        );
+
+        // Get model configuration
+        const model = promptCell.model || content.settings.defaultModel || settings.defaultModel;
+        const systemPrompt =
+          promptCell.systemPrompt || content.settings.defaultSystemPrompt || currentNotebook?.systemPrompt;
+
+        // Make API call
+        await api.aiChatStream(promptCell.content, {
+          conversationHistory: history as ChatMessage[],
+          providerType: getActiveProviderType(),
+          apiKey: getActiveApiKey() || undefined,
+          model: model || undefined,
+          temperature: settings.temperature,
+          maxTokens: settings.maxTokens,
+          systemPrompt: systemPrompt,
+        });
+
+        const elapsedMs = Date.now() - startTime;
+        const tokensPerSecond =
+          tokensUsed && elapsedMs > 0 ? Math.round((tokensUsed / elapsedMs) * 1000) : undefined;
+
+        // Update cells with final status
+        updateCell(promptCellId, { status: "complete" });
+        updateCell(responseCellId, {
+          content: accumulatedContent,
+          status: "complete",
+          thinking: accumulatedThinking || undefined,
+          stats: {
+            elapsedMs,
+            tokensUsed: tokensUsed || undefined,
+            tokensPerSecond,
+            model: responseModel || model || "unknown",
+          },
+        });
+      } catch (error) {
+        console.error("AI chat error:", error);
+        updateCell(promptCellId, { status: "error", error: String(error) });
+        updateCell(responseCellId, {
+          status: "error",
+          error: error instanceof Error ? error.message : "Failed to get response",
+        });
+      } finally {
+        if (unlisten) {
+          unlisten();
+        }
+        setRunningCellId(null);
+      }
+    },
+    [
+      content,
+      runningCellId,
+      updateCell,
+      updateContent,
+      settings,
+      currentNotebook,
+      getActiveProviderType,
+      getActiveApiKey,
+    ]
+  );
+
+  // Toggle thinking expansion
+  const toggleThinking = (cellId: string) => {
+    setExpandedThinking((prev) => {
+      const next = new Set(prev);
+      if (next.has(cellId)) {
+        next.delete(cellId);
+      } else {
+        next.add(cellId);
+      }
+      return next;
+    });
+  };
+
+  // Update settings
+  const updateSettings = useCallback(
+    (updates: Partial<ChatSettings>) => {
+      updateContent((prev) => ({
+        ...prev,
+        settings: { ...prev.settings, ...updates },
+      }));
+    },
+    [updateContent]
+  );
+
+  // Cleanup
+  useEffect(() => {
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  if (isLoading) {
+    return (
+      <div className={`flex items-center justify-center h-64 ${className}`}>
+        <div className="text-center">
+          <div
+            className="animate-spin rounded-full h-8 w-8 border-b-2 mx-auto mb-2"
+            style={{ borderColor: "var(--color-accent)" }}
+          />
+          <p className="text-sm" style={{ color: "var(--color-text-muted)" }}>
+            Loading chat...
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className={`flex items-center justify-center h-64 ${className}`}>
+        <div className="text-center" style={{ color: "var(--color-error)" }}>
+          <p className="font-medium">Failed to load content</p>
+          <p className="text-sm">{error}</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!content) return null;
+
+  return (
+    <div className={`flex flex-col h-full ${className}`}>
+      {/* Header bar */}
+      <div
+        className="flex items-center justify-between px-4 py-2 border-b"
+        style={{
+          borderColor: "var(--color-border)",
+          backgroundColor: "var(--color-bg-secondary)",
+        }}
+      >
+        <div className="flex items-center space-x-4">
+          <span
+            className="text-xs font-medium uppercase tracking-wide"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            AI Chat
+          </span>
+          <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>
+            {content.cells.length} cell{content.cells.length !== 1 ? "s" : ""}
+          </span>
+        </div>
+        <div className="flex items-center space-x-2 text-xs" style={{ color: "var(--color-text-muted)" }}>
+          {isSaving && <span className="animate-pulse">Saving...</span>}
+          {lastSaved && !isSaving && <span>Saved at {lastSaved.toLocaleTimeString()}</span>}
+          <button
+            onClick={() => setShowSettings(!showSettings)}
+            className="p-1.5 rounded-lg transition-colors hover:bg-[--color-bg-tertiary]"
+            title="Chat settings"
+          >
+            <IconSettings />
+          </button>
+        </div>
+      </div>
+
+      {/* Settings panel */}
+      {showSettings && (
+        <ChatSettingsPanel
+          settings={content.settings}
+          onUpdate={updateSettings}
+          onClose={() => setShowSettings(false)}
+        />
+      )}
+
+      {/* Cells */}
+      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        {content.cells.map((cell, index) => (
+          <CellRenderer
+            key={cell.id}
+            cell={cell}
+            index={index}
+            isRunning={runningCellId === cell.id}
+            isExpanded={expandedThinking.has(cell.id)}
+            onUpdateContent={(newContent) => updateCell(cell.id, { content: newContent })}
+            onExecute={() => executePrompt(cell.id)}
+            onDelete={() => deleteCell(cell.id)}
+            onMoveUp={() => moveCell(cell.id, "up")}
+            onMoveDown={() => moveCell(cell.id, "down")}
+            onToggleThinking={() => toggleThinking(cell.id)}
+            onAddCellAfter={(type) => addCell(type, cell.id)}
+            canMoveUp={index > 0}
+            canMoveDown={index < content.cells.length - 1}
+            canDelete={content.cells.length > 1}
+          />
+        ))}
+        <div ref={messagesEndRef} />
+
+        {/* Add cell button */}
+        <div className="flex justify-center pt-2">
+          <AddCellButton onAdd={addCell} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Cell renderer component
+interface CellRendererProps {
+  cell: ChatCell;
+  index: number;
+  isRunning: boolean;
+  isExpanded: boolean;
+  onUpdateContent: (content: string) => void;
+  onExecute: () => void;
+  onDelete: () => void;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+  onToggleThinking: () => void;
+  onAddCellAfter: (type: "prompt" | "markdown") => void;
+  canMoveUp: boolean;
+  canMoveDown: boolean;
+  canDelete: boolean;
+}
+
+function CellRenderer({
+  cell,
+  isRunning,
+  isExpanded,
+  onUpdateContent,
+  onExecute,
+  onDelete,
+  onMoveUp,
+  onMoveDown,
+  onToggleThinking,
+  canMoveUp,
+  canMoveDown,
+  canDelete,
+}: CellRendererProps) {
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Auto-resize textarea
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "auto";
+      textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
+    }
+  }, [cell.content]);
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && (e.shiftKey || e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      if (cell.type === "prompt") {
+        onExecute();
+      }
+    }
+  };
+
+  const getBorderColor = () => {
+    if (cell.type === "prompt") return "var(--color-accent)";
+    if (cell.type === "response") return "var(--color-success, #22c55e)";
+    return "var(--color-text-muted)";
+  };
+
+  return (
+    <div
+      className={`rounded-xl border overflow-hidden transition-opacity ${isRunning ? "opacity-80" : ""}`}
+      style={{
+        borderColor: "var(--color-border)",
+        borderLeftWidth: "3px",
+        borderLeftColor: getBorderColor(),
+        backgroundColor: cell.type === "response" ? "var(--color-bg-secondary)" : "var(--color-bg-primary)",
+      }}
+    >
+      {/* Cell header */}
+      <div
+        className="flex items-center justify-between px-3 py-2 border-b"
+        style={{
+          borderColor: "var(--color-border)",
+          backgroundColor: "var(--color-bg-tertiary)",
+        }}
+      >
+        <div className="flex items-center gap-2">
+          <span
+            className="text-xs font-medium uppercase"
+            style={{ color: cell.type === "prompt" ? "var(--color-accent)" : "var(--color-text-muted)" }}
+          >
+            {cell.type}
+          </span>
+          {cell.status === "running" && (
+            <span className="flex items-center gap-1 text-xs" style={{ color: "var(--color-accent)" }}>
+              <span className="animate-pulse">Running...</span>
+            </span>
+          )}
+          {cell.status === "error" && (
+            <span className="text-xs" style={{ color: "var(--color-error)" }}>
+              Error
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-1">
+          {/* Cell actions */}
+          {cell.type === "prompt" && (
+            <button
+              onClick={onExecute}
+              disabled={isRunning || !cell.content.trim()}
+              className="flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors disabled:opacity-50"
+              style={{
+                backgroundColor: "var(--color-accent)",
+                color: "white",
+              }}
+              title="Run (Shift+Enter)"
+            >
+              <IconPlay />
+              Run
+            </button>
+          )}
+          {cell.type === "response" && cell.thinking && (
+            <button
+              onClick={onToggleThinking}
+              className="p-1 rounded transition-colors hover:bg-[--color-bg-elevated]"
+              style={{ color: "var(--color-accent)" }}
+              title="Show thinking"
+            >
+              <IconBrain />
+            </button>
+          )}
+          <button
+            onClick={onMoveUp}
+            disabled={!canMoveUp}
+            className="p-1 rounded transition-colors hover:bg-[--color-bg-elevated] disabled:opacity-30"
+            style={{ color: "var(--color-text-muted)" }}
+            title="Move up"
+          >
+            <IconChevronUp />
+          </button>
+          <button
+            onClick={onMoveDown}
+            disabled={!canMoveDown}
+            className="p-1 rounded transition-colors hover:bg-[--color-bg-elevated] disabled:opacity-30"
+            style={{ color: "var(--color-text-muted)" }}
+            title="Move down"
+          >
+            <IconChevronDown />
+          </button>
+          {canDelete && (
+            <button
+              onClick={onDelete}
+              className="p-1 rounded transition-colors hover:bg-[--color-bg-elevated]"
+              style={{ color: "var(--color-text-muted)" }}
+              title="Delete cell"
+            >
+              <IconTrash />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Thinking section */}
+      {cell.thinking && isExpanded && (
+        <div
+          className="px-3 py-2 text-xs border-b"
+          style={{
+            backgroundColor: "rgba(139, 92, 246, 0.05)",
+            borderColor: "var(--color-border)",
+            color: "var(--color-text-secondary)",
+          }}
+        >
+          <pre className="whitespace-pre-wrap font-mono">{cell.thinking}</pre>
+        </div>
+      )}
+
+      {/* Cell content */}
+      <div className="p-3">
+        {cell.type === "response" ? (
+          <div className="prose prose-sm max-w-none" style={{ color: "var(--color-text-primary)" }}>
+            {isRunning && !cell.content ? (
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1">
+                  <div
+                    className="h-2 w-2 animate-bounce rounded-full"
+                    style={{ backgroundColor: "var(--color-accent)" }}
+                  />
+                  <div
+                    className="h-2 w-2 animate-bounce rounded-full"
+                    style={{ backgroundColor: "var(--color-accent)", animationDelay: "0.1s" }}
+                  />
+                  <div
+                    className="h-2 w-2 animate-bounce rounded-full"
+                    style={{ backgroundColor: "var(--color-accent)", animationDelay: "0.2s" }}
+                  />
+                </div>
+              </div>
+            ) : (
+              <ReactMarkdown
+                components={{
+                  p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+                  ul: ({ children }) => <ul className="mb-2 ml-4 list-disc">{children}</ul>,
+                  ol: ({ children }) => <ol className="mb-2 ml-4 list-decimal">{children}</ol>,
+                  code: ({ children, className }) => {
+                    const isBlock = className?.includes("language-");
+                    if (isBlock) {
+                      return (
+                        <pre
+                          className="my-2 overflow-x-auto rounded-lg p-3 text-xs"
+                          style={{ backgroundColor: "var(--color-bg-tertiary)" }}
+                        >
+                          <code>{children}</code>
+                        </pre>
+                      );
+                    }
+                    return (
+                      <code
+                        className="rounded px-1 py-0.5 text-xs"
+                        style={{ backgroundColor: "var(--color-bg-tertiary)" }}
+                      >
+                        {children}
+                      </code>
+                    );
+                  },
+                }}
+              >
+                {cell.content}
+              </ReactMarkdown>
+            )}
+          </div>
+        ) : (
+          <textarea
+            ref={textareaRef}
+            value={cell.content}
+            onChange={(e) => onUpdateContent(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder={cell.type === "prompt" ? "Enter your prompt..." : "Enter markdown notes..."}
+            className="w-full resize-none bg-transparent outline-none text-sm"
+            style={{
+              color: "var(--color-text-primary)",
+              minHeight: "60px",
+            }}
+          />
+        )}
+      </div>
+
+      {/* Stats footer for response cells */}
+      {cell.type === "response" && cell.stats && cell.status === "complete" && (
+        <div
+          className="flex items-center gap-3 px-3 py-2 border-t text-xs"
+          style={{
+            borderColor: "var(--color-border)",
+            color: "var(--color-text-muted)",
+          }}
+        >
+          <span>{(cell.stats.elapsedMs / 1000).toFixed(1)}s</span>
+          {cell.stats.tokensUsed && <span>{cell.stats.tokensUsed} tokens</span>}
+          {cell.stats.tokensPerSecond && <span>{cell.stats.tokensPerSecond} tok/s</span>}
+          <span
+            className="rounded-full px-2 py-0.5"
+            style={{ backgroundColor: "var(--color-bg-tertiary)" }}
+          >
+            {cell.stats.model}
+          </span>
+          <button
+            onClick={() => navigator.clipboard.writeText(cell.content)}
+            className="ml-auto p-1 rounded hover:bg-[--color-bg-tertiary]"
+            title="Copy to clipboard"
+          >
+            <IconCopy />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Add cell button
+interface AddCellButtonProps {
+  onAdd: (type: "prompt" | "markdown", afterCellId?: string) => void;
+}
+
+function AddCellButton({ onAdd }: AddCellButtonProps) {
+  const [showMenu, setShowMenu] = useState(false);
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setShowMenu(!showMenu)}
+        className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm transition-colors"
+        style={{
+          backgroundColor: "var(--color-bg-secondary)",
+          color: "var(--color-text-secondary)",
+          border: "1px dashed var(--color-border)",
+        }}
+      >
+        <IconPlus />
+        Add Cell
+      </button>
+      {showMenu && (
+        <div
+          className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 rounded-lg border shadow-lg overflow-hidden"
+          style={{
+            backgroundColor: "var(--color-bg-secondary)",
+            borderColor: "var(--color-border)",
+          }}
+        >
+          <button
+            onClick={() => {
+              onAdd("prompt");
+              setShowMenu(false);
+            }}
+            className="flex items-center gap-2 w-full px-4 py-2 text-sm transition-colors hover:bg-[--color-bg-tertiary]"
+            style={{ color: "var(--color-text-primary)" }}
+          >
+            <span style={{ color: "var(--color-accent)" }}>Prompt</span>
+          </button>
+          <button
+            onClick={() => {
+              onAdd("markdown");
+              setShowMenu(false);
+            }}
+            className="flex items-center gap-2 w-full px-4 py-2 text-sm transition-colors hover:bg-[--color-bg-tertiary]"
+            style={{ color: "var(--color-text-primary)" }}
+          >
+            <span style={{ color: "var(--color-text-muted)" }}>Markdown</span>
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Settings panel
+interface ChatSettingsPanelProps {
+  settings: ChatSettings;
+  onUpdate: (updates: Partial<ChatSettings>) => void;
+  onClose: () => void;
+}
+
+function ChatSettingsPanel({ settings, onUpdate, onClose }: ChatSettingsPanelProps) {
+  const { getEnabledModels } = useAIStore();
+  const enabledModels = getEnabledModels();
+
+  return (
+    <div
+      className="border-b px-4 py-3"
+      style={{
+        borderColor: "var(--color-border)",
+        backgroundColor: "var(--color-bg-secondary)",
+      }}
+    >
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-medium" style={{ color: "var(--color-text-primary)" }}>
+          Chat Settings
+        </h3>
+        <button
+          onClick={onClose}
+          className="p-1 rounded hover:bg-[--color-bg-tertiary]"
+          style={{ color: "var(--color-text-muted)" }}
+        >
+          <IconX />
+        </button>
+      </div>
+
+      <div className="space-y-3">
+        {/* Default model */}
+        <div>
+          <label className="block text-xs mb-1" style={{ color: "var(--color-text-muted)" }}>
+            Default Model
+          </label>
+          <select
+            value={settings.defaultModel || ""}
+            onChange={(e) => onUpdate({ defaultModel: e.target.value || undefined })}
+            className="w-full rounded-lg border px-3 py-1.5 text-sm outline-none"
+            style={{
+              backgroundColor: "var(--color-bg-primary)",
+              borderColor: "var(--color-border)",
+              color: "var(--color-text-primary)",
+            }}
+          >
+            <option value="">Use default</option>
+            {enabledModels.map(({ provider, model }) => (
+              <option key={`${provider}-${model.id}`} value={model.id}>
+                {provider}: {model.name}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* System prompt */}
+        <div>
+          <label className="block text-xs mb-1" style={{ color: "var(--color-text-muted)" }}>
+            System Prompt
+          </label>
+          <textarea
+            value={settings.defaultSystemPrompt || ""}
+            onChange={(e) => onUpdate({ defaultSystemPrompt: e.target.value || undefined })}
+            placeholder="Optional system prompt for all prompts in this chat..."
+            rows={2}
+            className="w-full rounded-lg border px-3 py-1.5 text-sm outline-none resize-none"
+            style={{
+              backgroundColor: "var(--color-bg-primary)",
+              borderColor: "var(--color-border)",
+              color: "var(--color-text-primary)",
+            }}
+          />
+        </div>
+
+        {/* Max context cells */}
+        <div>
+          <label className="block text-xs mb-1" style={{ color: "var(--color-text-muted)" }}>
+            Max Context Cells: {settings.maxContextCells}
+          </label>
+          <input
+            type="range"
+            min="1"
+            max="20"
+            value={settings.maxContextCells}
+            onChange={(e) => onUpdate({ maxContextCells: parseInt(e.target.value) })}
+            className="w-full"
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Icons
+function IconSettings() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
+function IconPlay() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      stroke="none"
+    >
+      <polygon points="5 3 19 12 5 21 5 3" />
+    </svg>
+  );
+}
+
+function IconBrain() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z" />
+      <path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z" />
+    </svg>
+  );
+}
+
+function IconChevronUp() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="m18 15-6-6-6 6" />
+    </svg>
+  );
+}
+
+function IconChevronDown() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="m6 9 6 6 6-6" />
+    </svg>
+  );
+}
+
+function IconTrash() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2" />
+    </svg>
+  );
+}
+
+function IconPlus() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M12 5v14M5 12h14" />
+    </svg>
+  );
+}
+
+function IconCopy() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+    </svg>
+  );
+}
+
+function IconX() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M18 6L6 18M6 6l12 12" />
+    </svg>
+  );
+}
