@@ -17,6 +17,7 @@ interface KeyboardShortcuts {
   onQuickCapture?: () => void;
   onInbox?: () => void;
   onFlashcards?: () => void;
+  onZenMode?: () => void;
 }
 
 // Map action names to callback property names
@@ -36,6 +37,7 @@ const ACTION_TO_CALLBACK: Record<KeybindingAction, keyof KeyboardShortcuts> = {
   quickCapture: "onQuickCapture",
   inbox: "onInbox",
   flashcards: "onFlashcards",
+  zenMode: "onZenMode",
 };
 
 export function useKeyboardShortcuts(callbacks: KeyboardShortcuts) {

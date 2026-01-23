@@ -12,6 +12,7 @@ export function Layout() {
   const autoHidePanels = useThemeStore((state) => state.autoHidePanels);
   const panelsHovered = useThemeStore((state) => state.panelsHovered);
   const setPanelsHovered = useThemeStore((state) => state.setPanelsHovered);
+  const zenMode = useThemeStore((state) => state.zenMode);
 
   const [sidebarTransitioning, setSidebarTransitioning] = useState(false);
   const hideTimeoutRef = useRef<number | null>(null);
@@ -97,15 +98,15 @@ export function Layout() {
     );
   }
 
-  // Calculate sidebar visibility
-  const sidebarVisible = !autoHidePanels || panelsHovered;
+  // Calculate sidebar visibility (hidden in zen mode)
+  const sidebarVisible = !zenMode && (!autoHidePanels || panelsHovered);
   const sidebarWidth = sidebarVisible ? panelWidths.sidebar : 0;
 
   // Classic mode: sidebar + editor
   return (
     <div className="flex h-screen w-screen overflow-hidden relative">
-      {/* Hover zone for auto-hide (only when panels are hidden) */}
-      {autoHidePanels && !panelsHovered && (
+      {/* Hover zone for auto-hide (only when panels are hidden, not in zen mode) */}
+      {autoHidePanels && !panelsHovered && !zenMode && (
         <div
           className="absolute left-0 top-0 h-full z-50"
           style={{

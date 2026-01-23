@@ -17,7 +17,8 @@ export type KeybindingAction =
   | "actions"
   | "quickCapture"
   | "inbox"
-  | "flashcards";
+  | "flashcards"
+  | "zenMode";
 
 // Keybinding definition
 export interface Keybinding {
@@ -137,6 +138,13 @@ export const DEFAULT_KEYBINDINGS: Keybinding[] = [
     label: "Flashcards",
     description: "Open flashcards",
     key: "f",
+    modifiers: { ctrl: true, shift: true, alt: false },
+  },
+  {
+    action: "zenMode",
+    label: "Zen Mode",
+    description: "Toggle distraction-free writing mode",
+    key: "z",
     modifiers: { ctrl: true, shift: true, alt: false },
   },
 ];

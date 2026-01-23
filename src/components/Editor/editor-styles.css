@@ -2881,6 +2881,52 @@ wiki-link.broken,
   position: relative;
 }
 
+/* ========================================
+   Zen Mode Styles
+   ======================================== */
+
+/* Transition for entering/exiting zen mode */
+.zen-transition {
+  transition: all 0.3s ease-in-out;
+}
+
+/* Zen mode editor container - centered content */
+.zen-editor-container {
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+/* Zen mode scroll container */
+.zen-editor-scroll {
+  scroll-behavior: smooth;
+}
+
+/* Zen mode header - minimal, centered */
+.zen-header {
+  min-height: 60px;
+  transition: background-color 0.2s ease;
+}
+
+.zen-header:hover {
+  background-color: var(--color-bg-secondary);
+}
+
+/* Exit button appears on hover */
+.zen-exit-btn {
+  opacity: 0;
+  transition: opacity 0.2s ease, background-color 0.15s ease;
+}
+
+.zen-header:hover .zen-exit-btn,
+.group:hover .zen-exit-btn {
+  opacity: 1;
+}
+
+.zen-exit-btn:hover {
+  background-color: var(--color-bg-elevated) !important;
+  color: var(--color-text-primary) !important;
+}
+
 /* Columns Block Styles */
 .columns-block {
   margin: 1rem 0;

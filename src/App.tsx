@@ -30,6 +30,7 @@ function App() {
 
   // Apply theme on mount
   const applyTheme = useThemeStore((state) => state.applyTheme);
+  const toggleZenMode = useThemeStore((state) => state.toggleZenMode);
   useEffect(() => {
     applyTheme();
   }, [applyTheme]);
@@ -148,6 +149,7 @@ function App() {
     onQuickCapture: openQuickCapture,
     onInbox: openInboxPanel,
     onFlashcards: toggleFlashcardPanel,
+    onZenMode: toggleZenMode,
   });
 
   return (

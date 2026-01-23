@@ -64,6 +64,7 @@ export function EditorArea() {
   const autoHidePanels = useThemeStore((state) => state.autoHidePanels);
   const panelsHovered = useThemeStore((state) => state.panelsHovered);
   const setPanelsHovered = useThemeStore((state) => state.setPanelsHovered);
+  const zenMode = useThemeStore((state) => state.zenMode);
 
   // Auto-hide panel state
   const [panelsTransitioning, setPanelsTransitioning] = useState(false);
@@ -391,8 +392,8 @@ export function EditorArea() {
 
   return (
     <div className="flex h-full">
-      {/* Sections panel - shown when sections are enabled */}
-      {selectedNotebook.sectionsEnabled && (
+      {/* Sections panel - shown when sections are enabled, hidden in zen mode */}
+      {selectedNotebook.sectionsEnabled && !zenMode && (
         <>
           <div
             className="flex-shrink-0 border-r overflow-hidden"
@@ -427,59 +428,63 @@ export function EditorArea() {
         </>
       )}
 
-      {/* Page list panel with folder tree */}
-      <div
-        className="flex-shrink-0 border-r overflow-hidden"
-        style={{
-          width: autoHidePanels && !panelsHovered ? 0 : `${panelWidths.folderTree}px`,
-          backgroundColor: "var(--color-bg-secondary)",
-          borderColor: "var(--color-border)",
-          transition: autoHidePanels ? "width 0.2s ease-in-out" : "none",
-        }}
-        onMouseEnter={handlePanelsMouseEnter}
-        onMouseLeave={handlePanelsMouseLeave}
-        onTransitionEnd={() => setPanelsTransitioning(false)}
-      >
-        {((!autoHidePanels || panelsHovered) || panelsTransitioning) && (
-          <div style={{ width: `${panelWidths.folderTree}px` }}>
-            <FolderTree
-              notebookId={selectedNotebook.id}
-              pages={notebookPages}
-              folders={folders}
-              selectedPageId={selectedPageId}
-              onSelectPage={handleSelectPage}
-              onOpenInTab={handleOpenInTab}
-              onOpenInNewPane={openPageInNewPane}
-              sectionsEnabled={selectedNotebook.sectionsEnabled}
-              selectedSectionId={selectedSectionId}
-              sections={sections}
-              onMovePageToSection={(pageId, sectionId) => movePageToSection(selectedNotebook.id, pageId, sectionId)}
-              onMoveFolderToSection={async (folderId, sectionId) => {
-                await updateFolder(selectedNotebook.id, folderId, { sectionId });
-                // Reload pages since folder section change also updates page sections
-                await loadPages(selectedNotebook.id, showArchived);
-              }}
-              hasCoverPage={coverPage !== null}
-              onViewCover={() => setShowCover(true)}
-              onReorderPages={(folderId, pageIds) => reorderPages(selectedNotebook.id, folderId, pageIds)}
-              onMoveToNotebook={(pageId, pageTitle) => {
-                setMovePageTarget({ pageId, pageTitle });
-                setMovePageDialogOpen(true);
-              }}
-            />
+      {/* Page list panel with folder tree - hidden in zen mode */}
+      {!zenMode && (
+        <>
+          <div
+            className="flex-shrink-0 border-r overflow-hidden"
+            style={{
+              width: autoHidePanels && !panelsHovered ? 0 : `${panelWidths.folderTree}px`,
+              backgroundColor: "var(--color-bg-secondary)",
+              borderColor: "var(--color-border)",
+              transition: autoHidePanels ? "width 0.2s ease-in-out" : "none",
+            }}
+            onMouseEnter={handlePanelsMouseEnter}
+            onMouseLeave={handlePanelsMouseLeave}
+            onTransitionEnd={() => setPanelsTransitioning(false)}
+          >
+            {((!autoHidePanels || panelsHovered) || panelsTransitioning) && (
+              <div style={{ width: `${panelWidths.folderTree}px` }}>
+                <FolderTree
+                  notebookId={selectedNotebook.id}
+                  pages={notebookPages}
+                  folders={folders}
+                  selectedPageId={selectedPageId}
+                  onSelectPage={handleSelectPage}
+                  onOpenInTab={handleOpenInTab}
+                  onOpenInNewPane={openPageInNewPane}
+                  sectionsEnabled={selectedNotebook.sectionsEnabled}
+                  selectedSectionId={selectedSectionId}
+                  sections={sections}
+                  onMovePageToSection={(pageId, sectionId) => movePageToSection(selectedNotebook.id, pageId, sectionId)}
+                  onMoveFolderToSection={async (folderId, sectionId) => {
+                    await updateFolder(selectedNotebook.id, folderId, { sectionId });
+                    // Reload pages since folder section change also updates page sections
+                    await loadPages(selectedNotebook.id, showArchived);
+                  }}
+                  hasCoverPage={coverPage !== null}
+                  onViewCover={() => setShowCover(true)}
+                  onReorderPages={(folderId, pageIds) => reorderPages(selectedNotebook.id, folderId, pageIds)}
+                  onMoveToNotebook={(pageId, pageTitle) => {
+                    setMovePageTarget({ pageId, pageTitle });
+                    setMovePageDialogOpen(true);
+                  }}
+                />
+              </div>
+            )}
           </div>
-        )}
-      </div>
-      {!autoHidePanels && (
-        <ResizeHandle direction="horizontal" onResize={handleFolderTreeResize} />
+          {!autoHidePanels && (
+            <ResizeHandle direction="horizontal" onResize={handleFolderTreeResize} />
+          )}
+        </>
       )}
 
-      {/* Editor panel - multi-pane support */}
+      {/* Editor panel - multi-pane support (only active pane shown in zen mode) */}
       <div
         className="flex flex-1 overflow-hidden"
         style={{ backgroundColor: "var(--color-bg-primary)" }}
       >
-        {panes.map((pane) => (
+        {(zenMode ? panes.filter(pane => pane.id === activePaneId) : panes).map((pane) => (
           <EditorPaneContent
             key={pane.id}
             pane={pane}
@@ -489,8 +494,9 @@ export function EditorArea() {
             onActivate={() => setActivePane(pane.id)}
             onClose={() => closePane(pane.id)}
             onSplit={() => splitPane(pane.id, "horizontal")}
-            canClose={panes.length > 1}
-            showPaneControls={panes.length > 1}
+            canClose={panes.length > 1 && !zenMode}
+            showPaneControls={panes.length > 1 && !zenMode}
+            zenMode={zenMode}
           />
         ))}
       </div>

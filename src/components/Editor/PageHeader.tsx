@@ -32,9 +32,12 @@ interface PageHeaderProps {
   lastSaved: Date | null;
   stats?: PageStats | null;
   pageText?: string; // Plain text content for writing assistance
+  zenMode?: boolean;
+  onExitZenMode?: () => void;
+  onEnterZenMode?: () => void;
 }
 
-export function PageHeader({ page, isSaving, lastSaved, stats, pageText = "" }: PageHeaderProps) {
+export function PageHeader({ page, isSaving, lastSaved, stats, pageText = "", zenMode = false, onExitZenMode, onEnterZenMode }: PageHeaderProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [title, setTitle] = useState(page.title);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -275,6 +278,95 @@ export function PageHeader({ page, isSaving, lastSaved, stats, pageText = "" }: 
     });
   };
 
+  // Zen Mode: Minimal header with centered title and exit button on hover
+  if (zenMode) {
+    return (
+      <div
+        className="zen-header group relative flex items-center justify-center px-8 py-4"
+        style={{ borderColor: "var(--color-border)" }}
+      >
+        <h1
+          className="text-xl font-semibold text-center"
+          style={{ color: "var(--color-text-primary)" }}
+        >
+          {page.title || "Untitled"}
+        </h1>
+
+        {/* Save indicator - small and unobtrusive */}
+        <div
+          className="absolute right-16 flex items-center gap-2 text-sm"
+          style={{ color: "var(--color-text-muted)" }}
+        >
+          {isSaving ? (
+            <svg
+              className="h-4 w-4 animate-spin"
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+            >
+              <circle
+                className="opacity-25"
+                cx="12"
+                cy="12"
+                r="10"
+                stroke="currentColor"
+                strokeWidth="4"
+              />
+              <path
+                className="opacity-75"
+                fill="currentColor"
+                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+              />
+            </svg>
+          ) : lastSaved ? (
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              style={{ color: "var(--color-success)" }}
+            >
+              <path d="M20 6L9 17l-5-5" />
+            </svg>
+          ) : null}
+        </div>
+
+        {/* Exit button - appears on hover */}
+        {onExitZenMode && (
+          <button
+            onClick={onExitZenMode}
+            className="zen-exit-btn absolute right-4 rounded-lg p-2 transition-all opacity-0 group-hover:opacity-100"
+            style={{
+              backgroundColor: "var(--color-bg-tertiary)",
+              color: "var(--color-text-muted)",
+            }}
+            title="Exit Zen Mode (Esc)"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div
       className="border-b px-16 py-5"
@@ -380,6 +472,34 @@ export function PageHeader({ page, isSaving, lastSaved, stats, pageText = "" }: 
             <path d="M12 5v14M5 12h14" />
           </svg>
           Use Template
+        </button>
+      )}
+
+      {/* Zen Mode button */}
+      {onEnterZenMode && (
+        <button
+          onClick={onEnterZenMode}
+          className="ml-4 rounded-lg p-2 transition-colors hover:opacity-80"
+          style={{ backgroundColor: "var(--color-bg-tertiary)" }}
+          title="Enter Zen Mode (Ctrl+Shift+Z)"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            <path d="M8 3H5a2 2 0 0 0-2 2v3" />
+            <path d="M21 8V5a2 2 0 0 0-2-2h-3" />
+            <path d="M3 16v3a2 2 0 0 0 2 2h3" />
+            <path d="M16 21h3a2 2 0 0 0 2-2v-3" />
+          </svg>
         </button>
       )}
 

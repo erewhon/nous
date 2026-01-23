@@ -1,7 +1,9 @@
-import { useMemo, useCallback, useState, useEffect } from "react";
+import { useMemo, useCallback, useState, useEffect, useRef } from "react";
 import type { OutputData } from "@editorjs/editorjs";
 import { usePageStore, type EditorPane } from "../../stores/pageStore";
 import { useLinkStore } from "../../stores/linkStore";
+import { useThemeStore } from "../../stores/themeStore";
+import { useTypewriterScroll } from "../../hooks/useTypewriterScroll";
 import { BlockEditor } from "./BlockEditor";
 import { PageHeader } from "./PageHeader";
 import { PaneTabBar } from "./PaneTabBar";
@@ -26,6 +28,7 @@ interface EditorPaneContentProps {
   onSplit?: () => void;
   canClose: boolean;
   showPaneControls: boolean;
+  zenMode?: boolean;
 }
 
 export function EditorPaneContent({
@@ -38,13 +41,46 @@ export function EditorPaneContent({
   onSplit,
   canClose,
   showPaneControls,
+  zenMode = false,
 }: EditorPaneContentProps) {
   const { pages, updatePageContent, createPage, pageDataVersion, openTabInPane, closeTabInPane, updateTabTitleInPane } = usePageStore();
   const { updatePageLinks } = useLinkStore();
+  const setZenMode = useThemeStore((state) => state.setZenMode);
+  const zenModeSettings = useThemeStore((state) => state.zenModeSettings);
   const [isSaving, setIsSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
+  const editorScrollRef = useRef<HTMLDivElement>(null);
 
   const selectedPage = pages.find((p) => p.id === pane.pageId);
+
+  // Typewriter scrolling for zen mode
+  const isStandardPage = selectedPage?.pageType === "standard" || !selectedPage?.pageType;
+  useTypewriterScroll({
+    enabled: zenMode && zenModeSettings.typewriterScrolling && isStandardPage,
+    containerRef: editorScrollRef,
+    offset: 0.4,
+  });
+
+  // Handle ESC key to exit zen mode
+  useEffect(() => {
+    if (!zenMode) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Only exit zen mode if no modal/menu is open
+      // Check for common modal elements
+      const hasOpenModal = document.querySelector('[role="dialog"]') ||
+        document.querySelector('[data-radix-portal]') ||
+        document.querySelector('.command-palette-backdrop');
+
+      if (e.key === "Escape" && !hasOpenModal) {
+        e.preventDefault();
+        setZenMode(false);
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [zenMode, setZenMode]);
 
   // Ensure current page is in tabs - replace non-pinned tab for "one page at a time" behavior
   useEffect(() => {
@@ -232,12 +268,14 @@ export function EditorPaneContent({
         </div>
       )}
 
-      {/* Tab bar for this pane */}
-      <PaneTabBar
-        paneId={pane.id}
-        tabs={pane.tabs}
-        activePageId={pane.pageId}
-      />
+      {/* Tab bar for this pane - hidden in zen mode */}
+      {!zenMode && (
+        <PaneTabBar
+          paneId={pane.id}
+          tabs={pane.tabs}
+          activePageId={pane.pageId}
+        />
+      )}
 
       {selectedPage ? (
         <>
@@ -245,13 +283,20 @@ export function EditorPaneContent({
             page={selectedPage}
             isSaving={isSaving}
             lastSaved={lastSaved}
-            stats={pageStats}
+            stats={zenMode ? null : pageStats}
             pageText={pageStats?.text}
+            zenMode={zenMode}
+            onExitZenMode={() => setZenMode(false)}
+            onEnterZenMode={() => setZenMode(true)}
           />
-          <div className="flex-1 overflow-y-auto px-8 py-6">
+          <div
+            ref={editorScrollRef}
+            className={`flex-1 overflow-y-auto ${zenMode ? 'zen-editor-scroll' : 'px-8 py-6'}`}
+            style={zenMode ? { padding: '4rem 2rem' } : undefined}
+          >
             <div
-              className="mx-auto"
-              style={{ maxWidth: "var(--editor-max-width)" }}
+              className={`mx-auto ${zenMode ? 'zen-editor-container' : ''}`}
+              style={{ maxWidth: zenMode ? '720px' : 'var(--editor-max-width)' }}
             >
               {/* Conditional rendering based on page type */}
               {selectedPage.pageType === "markdown" && (

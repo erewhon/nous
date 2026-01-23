@@ -81,6 +81,7 @@ export function ThemeSettings() {
     resolvedMode,
     uiMode,
     autoHidePanels,
+    zenModeSettings,
     setMode,
     setColorScheme,
     setFontFamily,
@@ -90,6 +91,7 @@ export function ThemeSettings() {
     setLineHeight,
     setUIMode,
     setAutoHidePanels,
+    setZenModeSettings,
   } = useThemeStore();
 
   return (
@@ -212,6 +214,76 @@ export function ThemeSettings() {
           </div>
         </div>
       )}
+
+      {/* Zen Mode Settings */}
+      <div>
+        <label
+          className="mb-3 block text-sm font-medium"
+          style={{ color: "var(--color-text-primary)" }}
+        >
+          Zen Mode
+        </label>
+        <div
+          className="rounded-lg border p-4 space-y-4"
+          style={{
+            borderColor: "var(--color-border)",
+            backgroundColor: "var(--color-bg-secondary)",
+          }}
+        >
+          <p
+            className="text-xs"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            Distraction-free writing mode that hides all UI chrome. Press{" "}
+            <kbd className="rounded bg-[--color-bg-tertiary] px-1.5 py-0.5 font-mono text-[10px]">
+              Ctrl+Shift+Z
+            </kbd>{" "}
+            or{" "}
+            <kbd className="rounded bg-[--color-bg-tertiary] px-1.5 py-0.5 font-mono text-[10px]">
+              Cmd+Shift+Z
+            </kbd>{" "}
+            to toggle, or press <kbd className="rounded bg-[--color-bg-tertiary] px-1.5 py-0.5 font-mono text-[10px]">Esc</kbd> to exit.
+          </p>
+          <div className="flex items-center justify-between">
+            <div>
+              <span
+                className="block text-sm font-medium"
+                style={{ color: "var(--color-text-primary)" }}
+              >
+                Typewriter Scrolling
+              </span>
+              <span
+                className="block text-xs"
+                style={{ color: "var(--color-text-muted)" }}
+              >
+                Keep the cursor vertically centered while typing
+              </span>
+            </div>
+            <button
+              onClick={() =>
+                setZenModeSettings({
+                  typewriterScrolling: !zenModeSettings.typewriterScrolling,
+                })
+              }
+              className="relative h-6 w-11 rounded-full transition-colors"
+              style={{
+                backgroundColor: zenModeSettings.typewriterScrolling
+                  ? "var(--color-accent)"
+                  : "var(--color-bg-tertiary)",
+              }}
+            >
+              <span
+                className="absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform"
+                style={{
+                  transform: zenModeSettings.typewriterScrolling
+                    ? "translateX(20px)"
+                    : "translateX(2px)",
+                }}
+              />
+            </button>
+          </div>
+        </div>
+      </div>
 
       {/* Theme Mode */}
       <div>
