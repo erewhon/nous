@@ -246,7 +246,7 @@ pub async fn ai_chat_stream(
             message: format!("Failed to acquire library storage lock: {}", e),
         })?;
         library_storage
-            .get_current()
+            .get_current_library()
             .ok()
             .map(|lib| lib.path.to_string_lossy().to_string())
     };

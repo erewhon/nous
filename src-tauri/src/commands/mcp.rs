@@ -2,7 +2,7 @@
 
 use tauri::State;
 
-use crate::python_bridge::{MCPServerConfig, MCPServersConfig, MCPTool, MCPToolResult};
+use crate::python_bridge::{MCPServersConfig, MCPTool, MCPToolResult};
 use crate::AppState;
 
 use super::notebook::CommandError;
@@ -18,7 +18,7 @@ pub fn mcp_load_config(state: State<AppState>) -> Result<MCPServersConfig, Comma
         message: format!("Failed to acquire library storage lock: {}", e),
     })?;
 
-    let current_library = library_storage.get_current().map_err(|e| CommandError {
+    let current_library = library_storage.get_current_library().map_err(|e| CommandError {
         message: format!("Failed to get current library: {}", e),
     })?;
 
@@ -43,7 +43,7 @@ pub fn mcp_save_config(
         message: format!("Failed to acquire library storage lock: {}", e),
     })?;
 
-    let current_library = library_storage.get_current().map_err(|e| CommandError {
+    let current_library = library_storage.get_current_library().map_err(|e| CommandError {
         message: format!("Failed to get current library: {}", e),
     })?;
 
@@ -65,7 +65,7 @@ pub fn mcp_start_servers(state: State<AppState>) -> Result<Vec<String>, CommandE
         message: format!("Failed to acquire library storage lock: {}", e),
     })?;
 
-    let current_library = library_storage.get_current().map_err(|e| CommandError {
+    let current_library = library_storage.get_current_library().map_err(|e| CommandError {
         message: format!("Failed to get current library: {}", e),
     })?;
 
@@ -87,7 +87,7 @@ pub fn mcp_stop_servers(state: State<AppState>) -> Result<(), CommandError> {
         message: format!("Failed to acquire library storage lock: {}", e),
     })?;
 
-    let current_library = library_storage.get_current().map_err(|e| CommandError {
+    let current_library = library_storage.get_current_library().map_err(|e| CommandError {
         message: format!("Failed to get current library: {}", e),
     })?;
 
@@ -109,7 +109,7 @@ pub fn mcp_get_tools(state: State<AppState>) -> Result<Vec<MCPTool>, CommandErro
         message: format!("Failed to acquire library storage lock: {}", e),
     })?;
 
-    let current_library = library_storage.get_current().map_err(|e| CommandError {
+    let current_library = library_storage.get_current_library().map_err(|e| CommandError {
         message: format!("Failed to get current library: {}", e),
     })?;
 
@@ -131,7 +131,7 @@ pub fn mcp_get_running_servers(state: State<AppState>) -> Result<Vec<String>, Co
         message: format!("Failed to acquire library storage lock: {}", e),
     })?;
 
-    let current_library = library_storage.get_current().map_err(|e| CommandError {
+    let current_library = library_storage.get_current_library().map_err(|e| CommandError {
         message: format!("Failed to get current library: {}", e),
     })?;
 
@@ -158,7 +158,7 @@ pub fn mcp_call_tool(
         message: format!("Failed to acquire library storage lock: {}", e),
     })?;
 
-    let current_library = library_storage.get_current().map_err(|e| CommandError {
+    let current_library = library_storage.get_current_library().map_err(|e| CommandError {
         message: format!("Failed to get current library: {}", e),
     })?;
 

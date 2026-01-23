@@ -223,15 +223,17 @@ class MCPServerManager:
             await self.stop_server(name)
 
     async def start_all_enabled(self) -> list[str]:
-        """Start all enabled servers from config. Returns list of successfully started server names."""
+        """Start all enabled servers from config.
+
+        Returns list of successfully started server names.
+        """
         if not self._config:
             await self.load_config()
 
         started = []
         for server_config in self._config.servers:
-            if server_config.enabled:
-                if await self.start_server(server_config):
-                    started.append(server_config.name)
+            if server_config.enabled and await self.start_server(server_config):
+                started.append(server_config.name)
 
         return started
 
