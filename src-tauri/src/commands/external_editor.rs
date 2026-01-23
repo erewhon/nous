@@ -169,6 +169,7 @@ pub fn sync_from_external_editor(
         storage_mode: existing_page.storage_mode,
         file_extension: existing_page.file_extension,
         last_file_sync: existing_page.last_file_sync,
+        deleted_at: existing_page.deleted_at,
         created_at: existing_page.created_at,
         updated_at: chrono::Utc::now(),
     };

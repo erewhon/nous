@@ -5,6 +5,8 @@ import type { SyncMode, AuthType } from "../../types/sync";
 import { useNotebookStore } from "../../stores/notebookStore";
 import { useAIStore } from "../../stores/aiStore";
 import { useSyncStore } from "../../stores/syncStore";
+import { useLibraryStore } from "../../stores/libraryStore";
+import { MoveNotebookDialog } from "../Move/MoveNotebookDialog";
 import {
   gitIsEnabled,
   gitInit,
@@ -57,8 +59,9 @@ export function NotebookSettingsDialog({
   notebook,
   onClose,
 }: NotebookSettingsDialogProps) {
-  const { updateNotebook, deleteNotebook, archiveNotebook, unarchiveNotebook } = useNotebookStore();
+  const { updateNotebook, deleteNotebook, archiveNotebook, unarchiveNotebook, loadNotebooks } = useNotebookStore();
   const { settings: appAISettings, getActiveProviderType, getActiveModel } = useAIStore();
+  const { currentLibrary } = useLibraryStore();
   const [name, setName] = useState("");
   const [color, setColor] = useState<string | undefined>(undefined);
   const [sectionsEnabled, setSectionsEnabled] = useState(false);
@@ -69,6 +72,7 @@ export function NotebookSettingsDialog({
   const [useAppDefault, setUseAppDefault] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showMoveDialog, setShowMoveDialog] = useState(false);
   const nameInputRef = useRef<HTMLInputElement>(null);
 
   // Git state
@@ -1382,6 +1386,13 @@ export function NotebookSettingsDialog({
         >
           <div className="flex items-center gap-2">
             <button
+              onClick={() => setShowMoveDialog(true)}
+              className="rounded-lg px-3 py-2 text-sm font-medium transition-colors hover:bg-[--color-bg-tertiary]"
+              style={{ color: "var(--color-text-secondary)" }}
+            >
+              Move to Library
+            </button>
+            <button
               onClick={async () => {
                 if (!notebook) return;
                 if (notebook.archived) {
@@ -1494,6 +1505,21 @@ export function NotebookSettingsDialog({
           onResolved={() => {
             setIsMerging(false);
             loadGitStatus();
+          }}
+        />
+      )}
+
+      {/* Move to Library Dialog */}
+      {notebook && currentLibrary && (
+        <MoveNotebookDialog
+          isOpen={showMoveDialog}
+          onClose={() => setShowMoveDialog(false)}
+          notebookId={notebook.id}
+          notebookName={notebook.name}
+          currentLibraryId={currentLibrary.id}
+          onMoved={() => {
+            loadNotebooks();
+            onClose();
           }}
         />
       )}

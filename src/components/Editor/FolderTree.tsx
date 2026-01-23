@@ -17,10 +17,18 @@ import { open } from "@tauri-apps/plugin-dialog";
 import type { Folder, Page, Section, FileStorageMode } from "../../types/page";
 import { useFolderStore } from "../../stores/folderStore";
 import { usePageStore } from "../../stores/pageStore";
-import { useThemeStore } from "../../stores/themeStore";
+import { useThemeStore, type PageSortOption } from "../../stores/themeStore";
 import * as api from "../../utils/api";
 import { FolderTreeItem, DraggablePageItem } from "./FolderTreeItem";
 import { FileImportDialog } from "../Import/FileImportDialog";
+
+const PAGE_SORT_OPTIONS: { value: PageSortOption; label: string }[] = [
+  { value: "position", label: "Manual" },
+  { value: "name-asc", label: "Name (A-Z)" },
+  { value: "name-desc", label: "Name (Z-A)" },
+  { value: "updated", label: "Recently updated" },
+  { value: "created", label: "Recently created" },
+];
 
 // Droppable section component for drag-and-drop to sections
 function DroppableSection({
@@ -105,6 +113,7 @@ interface FolderTreeProps {
   folders: Folder[];
   selectedPageId: string | null;
   onSelectPage: (pageId: string, openInNewPane?: boolean) => void;
+  onOpenInTab?: (pageId: string, pageTitle: string) => void;
   onOpenInNewPane?: (pageId: string) => void;
   // Section filtering (controlled by parent)
   sectionsEnabled?: boolean;
@@ -117,6 +126,8 @@ interface FolderTreeProps {
   onViewCover?: () => void;
   // Page reordering
   onReorderPages?: (folderId: string | null, pageIds: string[]) => void;
+  // Move page to notebook
+  onMoveToNotebook?: (pageId: string, pageTitle: string) => void;
 }
 
 export function FolderTree({
@@ -125,6 +136,7 @@ export function FolderTree({
   folders,
   selectedPageId,
   onSelectPage,
+  onOpenInTab,
   onOpenInNewPane,
   sectionsEnabled = false,
   selectedSectionId = null,
@@ -134,6 +146,7 @@ export function FolderTree({
   hasCoverPage = false,
   onViewCover,
   onReorderPages,
+  onMoveToNotebook,
 }: FolderTreeProps) {
   const { createPage, createSubpage, movePageToFolder, movePageToParent, loadPages } = usePageStore();
   const {
@@ -148,8 +161,30 @@ export function FolderTree({
   } = useFolderStore();
   const autoHidePanels = useThemeStore((state) => state.autoHidePanels);
   const setAutoHidePanels = useThemeStore((state) => state.setAutoHidePanels);
+  const pageSortBy = useThemeStore((state) => state.pageSortBy);
+  const setPageSortBy = useThemeStore((state) => state.setPageSortBy);
 
   const [isCreatingFolder, setIsCreatingFolder] = useState(false);
+  const [showPageSortMenu, setShowPageSortMenu] = useState(false);
+
+  // Helper function to sort pages based on current sort option
+  const sortPages = useCallback((pagesToSort: Page[]) => {
+    return [...pagesToSort].sort((a, b) => {
+      switch (pageSortBy) {
+        case "name-asc":
+          return a.title.localeCompare(b.title);
+        case "name-desc":
+          return b.title.localeCompare(a.title);
+        case "updated":
+          return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+        case "created":
+          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        case "position":
+        default:
+          return a.position - b.position;
+      }
+    });
+  }, [pageSortBy]);
   const [newFolderName, setNewFolderName] = useState("");
   const [activePageId, setActivePageId] = useState<string | null>(null);
   const [activeFolderId, setActiveFolderId] = useState<string | null>(null);
@@ -204,21 +239,19 @@ export function FolderTree({
   // Get top-level pages for a specific folder (pages without a parent page)
   const getPagesForFolder = useCallback(
     (folderId: string | null) => {
-      return visiblePages
-        .filter((p) => (p.folderId ?? null) === folderId && !p.parentPageId)
-        .sort((a, b) => a.position - b.position);
+      const filtered = visiblePages.filter((p) => (p.folderId ?? null) === folderId && !p.parentPageId);
+      return sortPages(filtered);
     },
-    [visiblePages]
+    [visiblePages, sortPages]
   );
 
   // Get child pages for a specific parent page
   const getChildPagesForParent = useCallback(
     (parentPageId: string) => {
-      return visiblePages
-        .filter((p) => p.parentPageId === parentPageId)
-        .sort((a, b) => a.position - b.position);
+      const filtered = visiblePages.filter((p) => p.parentPageId === parentPageId);
+      return sortPages(filtered);
     },
-    [visiblePages]
+    [visiblePages, sortPages]
   );
 
   // Get child folders for a parent
@@ -340,6 +373,18 @@ export function FolderTree({
       await deleteFolderApi(notebookId, folderId);
     },
     [notebookId, deleteFolderApi]
+  );
+
+  // Handle deleting a page (moves to trash)
+  const handleDeletePage = useCallback(
+    async (pageId: string, pageTitle: string) => {
+      const confirmed = window.confirm(`Move "${pageTitle}" to trash? You can restore it within 30 days.`);
+      if (confirmed) {
+        await api.deletePage(notebookId, pageId);
+        await loadPages(notebookId);
+      }
+    },
+    [notebookId, loadPages]
   );
 
   // DnD handlers
@@ -573,9 +618,11 @@ export function FolderTree({
           isDropTarget={overFolderId === folder.id}
           onToggleExpand={toggleFolderExpanded}
           onSelectPage={onSelectPage}
+          onOpenInTab={onOpenInTab}
           onOpenInNewPane={onOpenInNewPane}
           onCreatePage={handleCreatePage}
           onCreateSubpage={handleCreateSubpage}
+          onDeletePage={handleDeletePage}
           onRenameFolder={handleRenameFolder}
           onDeleteFolder={handleDeleteFolder}
           renderFolder={renderFolder}
@@ -585,6 +632,7 @@ export function FolderTree({
           sections={sectionsEnabled ? sections : undefined}
           onMoveToSection={onMovePageToSection}
           onMoveFolderToSection={onMoveFolderToSection}
+          onMoveToNotebook={onMoveToNotebook}
         />
       );
     },
@@ -599,15 +647,18 @@ export function FolderTree({
       togglePageExpanded,
       toggleFolderExpanded,
       onSelectPage,
+      onOpenInTab,
       onOpenInNewPane,
       handleCreatePage,
       handleCreateSubpage,
+      handleDeletePage,
       handleRenameFolder,
       handleDeleteFolder,
       sectionsEnabled,
       sections,
       onMovePageToSection,
       onMoveFolderToSection,
+      onMoveToNotebook,
     ]
   );
 
@@ -647,6 +698,44 @@ export function FolderTree({
             Pages
           </span>
           <div className="flex items-center gap-1">
+            {/* Sort pages button */}
+            <div className="relative">
+              <button
+                onClick={() => setShowPageSortMenu(!showPageSortMenu)}
+                className="flex h-7 w-7 items-center justify-center rounded-lg transition-all"
+                style={{ color: pageSortBy !== "position" ? "var(--color-accent)" : "var(--color-text-muted)" }}
+                title={`Sort: ${PAGE_SORT_OPTIONS.find(o => o.value === pageSortBy)?.label}`}
+              >
+                <IconSort />
+              </button>
+              {showPageSortMenu && (
+                <div
+                  className="absolute right-0 top-full z-50 mt-1 min-w-36 rounded-lg border py-1 shadow-lg"
+                  style={{
+                    backgroundColor: "var(--color-bg-secondary)",
+                    borderColor: "var(--color-border)",
+                  }}
+                  onMouseLeave={() => setShowPageSortMenu(false)}
+                >
+                  {PAGE_SORT_OPTIONS.map((option) => (
+                    <button
+                      key={option.value}
+                      onClick={() => {
+                        setPageSortBy(option.value);
+                        setShowPageSortMenu(false);
+                      }}
+                      className="flex w-full items-center justify-between px-3 py-1.5 text-left text-xs transition-colors hover:bg-[--color-bg-tertiary]"
+                      style={{
+                        color: pageSortBy === option.value ? "var(--color-accent)" : "var(--color-text-primary)",
+                      }}
+                    >
+                      {option.label}
+                      {pageSortBy === option.value && <span className="text-[--color-accent]">✓</span>}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
             {/* Auto-hide toggle */}
             <button
               onClick={() => setAutoHidePanels(!autoHidePanels)}
@@ -901,10 +990,13 @@ export function FolderTree({
                   depth={-1}
                   onSelect={(openInNewPane) => onSelectPage(page.id, openInNewPane)}
                   onSelectPage={onSelectPage}
+                  onOpenInTab={onOpenInTab}
                   onOpenInNewPane={onOpenInNewPane}
                   onCreateSubpage={handleCreateSubpage}
+                  onDeletePage={handleDeletePage}
                   sections={sectionsEnabled ? sections : undefined}
                   onMoveToSection={onMovePageToSection}
+                  onMoveToNotebook={onMoveToNotebook}
                   getChildPages={getChildPagesForParent}
                   expandedPageIds={expandedPageIds}
                   onTogglePageExpand={togglePageExpanded}
@@ -977,6 +1069,28 @@ function IconPanelClose() {
       <rect x="3" y="3" width="18" height="18" rx="2" />
       <path d="M9 3v18" />
       <path d="M16 15l-3-3 3-3" />
+    </svg>
+  );
+}
+
+function IconSort() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M11 5h10" />
+      <path d="M11 9h7" />
+      <path d="M11 13h4" />
+      <path d="M3 17l3 3 3-3" />
+      <path d="M6 18V4" />
     </svg>
   );
 }

@@ -1,11 +1,13 @@
 use std::fs;
 use std::path::PathBuf;
 
+use chrono::Utc;
 use thiserror::Error;
 use uuid::Uuid;
 
 use super::models::{
-    FileStorageMode, Folder, FolderType, Notebook, NotebookType, Page, PageType, Section,
+    EditorBlock, EditorData, FileStorageMode, Folder, FolderType, Notebook, NotebookType, Page,
+    PageType, Section,
 };
 
 #[derive(Error, Debug)]
@@ -300,7 +302,20 @@ impl FileStorage {
         Ok(())
     }
 
+    /// Soft delete a page by moving it to trash (sets deleted_at timestamp)
     pub fn delete_page(&self, notebook_id: Uuid, page_id: Uuid) -> Result<()> {
+        let mut page = self.get_page(notebook_id, page_id)?;
+
+        // Set deleted_at timestamp
+        page.deleted_at = Some(Utc::now());
+        page.updated_at = Utc::now();
+
+        self.update_page(&page)?;
+        Ok(())
+    }
+
+    /// Permanently delete a page from disk (no recovery possible)
+    pub fn permanent_delete_page(&self, notebook_id: Uuid, page_id: Uuid) -> Result<()> {
         let page_path = self.page_path(notebook_id, page_id);
 
         if !page_path.exists() {
@@ -309,6 +324,211 @@ impl FileStorage {
 
         fs::remove_file(&page_path)?;
         Ok(())
+    }
+
+    /// Restore a page from trash
+    pub fn restore_page(&self, notebook_id: Uuid, page_id: Uuid) -> Result<Page> {
+        let mut page = self.get_page(notebook_id, page_id)?;
+
+        if page.deleted_at.is_none() {
+            return Err(StorageError::InvalidOperation("Page is not in trash".into()));
+        }
+
+        // Clear deleted_at to restore
+        page.deleted_at = None;
+        page.updated_at = Utc::now();
+
+        self.update_page(&page)?;
+        Ok(page)
+    }
+
+    /// List all pages in trash for a notebook
+    pub fn list_trash(&self, notebook_id: Uuid) -> Result<Vec<Page>> {
+        let pages = self.list_pages(notebook_id)?;
+        Ok(pages.into_iter().filter(|p| p.deleted_at.is_some()).collect())
+    }
+
+    /// Purge pages that have been in trash for more than the specified days
+    pub fn purge_old_trash(&self, notebook_id: Uuid, days: i64) -> Result<usize> {
+        let cutoff = Utc::now() - chrono::Duration::days(days);
+        let trash_pages = self.list_trash(notebook_id)?;
+
+        let mut deleted_count = 0;
+        for page in trash_pages {
+            if let Some(deleted_at) = page.deleted_at {
+                if deleted_at < cutoff {
+                    self.permanent_delete_page(notebook_id, page.id)?;
+                    deleted_count += 1;
+                }
+            }
+        }
+
+        Ok(deleted_count)
+    }
+
+    /// Move a page from one notebook to another
+    /// Handles copying assets (images, embedded files) to the target notebook
+    pub fn move_page_to_notebook(
+        &self,
+        source_notebook_id: Uuid,
+        page_id: Uuid,
+        target_notebook_id: Uuid,
+        target_folder_id: Option<Uuid>,
+    ) -> Result<Page> {
+        // Verify source page exists
+        let mut page = self.get_page(source_notebook_id, page_id)?;
+
+        // Verify target notebook exists
+        if !self.notebook_dir(target_notebook_id).exists() {
+            return Err(StorageError::NotebookNotFound(target_notebook_id));
+        }
+
+        // Get asset paths from page content
+        let asset_refs = self.extract_asset_references(&page.content);
+
+        // Copy assets to target notebook
+        let source_assets_dir = self.notebook_assets_dir(source_notebook_id);
+        let target_assets_dir = self.notebook_assets_dir(target_notebook_id);
+
+        // Ensure target assets directories exist
+        let target_images_dir = target_assets_dir.join("images");
+        fs::create_dir_all(&target_images_dir)?;
+
+        let target_embedded_dir = target_assets_dir.join("embedded");
+        fs::create_dir_all(&target_embedded_dir)?;
+
+        for asset_ref in &asset_refs {
+            let source_path = source_assets_dir.join(asset_ref);
+            let target_path = target_assets_dir.join(asset_ref);
+
+            if source_path.exists() {
+                // Ensure parent directory exists
+                if let Some(parent) = target_path.parent() {
+                    fs::create_dir_all(parent)?;
+                }
+                fs::copy(&source_path, &target_path)?;
+            }
+        }
+
+        // Handle non-standard pages (markdown, pdf, etc.) that have source files
+        if let Some(ref source_file) = page.source_file {
+            if page.storage_mode == Some(FileStorageMode::Embedded) {
+                // Copy embedded source file
+                let source_path = source_assets_dir.join("embedded").join(source_file);
+                let target_path = target_embedded_dir.join(source_file);
+                if source_path.exists() {
+                    fs::copy(&source_path, &target_path)?;
+                }
+            }
+        }
+
+        // Update page metadata
+        page.notebook_id = target_notebook_id;
+        page.folder_id = target_folder_id;
+        page.parent_page_id = None; // Clear parent page since it won't exist in new notebook
+        page.section_id = None; // Clear section since it won't exist in new notebook
+        page.updated_at = chrono::Utc::now();
+
+        // Save page in target notebook
+        let target_page_path = self.page_path(target_notebook_id, page.id);
+        let content = serde_json::to_string_pretty(&page)?;
+        fs::write(&target_page_path, content)?;
+
+        // Delete original page file
+        let source_page_path = self.page_path(source_notebook_id, page_id);
+        fs::remove_file(&source_page_path)?;
+
+        // Optionally clean up original assets (only if no other pages reference them)
+        // For now, we leave them - they'll be cleaned up by any future garbage collection
+
+        Ok(page)
+    }
+
+    /// Extract asset file references from page content
+    fn extract_asset_references(&self, content: &EditorData) -> Vec<String> {
+        let mut refs = Vec::new();
+
+        for block in &content.blocks {
+            // Image blocks
+            if block.block_type == "image" {
+                if let Some(file_obj) = block.data.get("file") {
+                    if let Some(url) = file_obj.get("url").and_then(|u| u.as_str()) {
+                        // Extract relative path from URL (e.g., "asset://localhost/assets/images/xxx.png")
+                        if let Some(path) = self.extract_asset_path(url) {
+                            refs.push(path);
+                        }
+                    }
+                }
+            }
+
+            // PDF tool
+            if block.block_type == "pdf" {
+                if let Some(file_path) = block.data.get("filePath").and_then(|p| p.as_str()) {
+                    if let Some(path) = self.extract_asset_path(file_path) {
+                        refs.push(path);
+                    }
+                }
+            }
+
+            // Video tool
+            if block.block_type == "video" {
+                if let Some(file_path) = block.data.get("filePath").and_then(|p| p.as_str()) {
+                    if let Some(path) = self.extract_asset_path(file_path) {
+                        refs.push(path);
+                    }
+                }
+            }
+
+            // Drawing tool
+            if block.block_type == "drawing" {
+                if let Some(file_path) = block.data.get("filePath").and_then(|p| p.as_str()) {
+                    if let Some(path) = self.extract_asset_path(file_path) {
+                        refs.push(path);
+                    }
+                }
+            }
+
+            // Recursively handle columns (nested blocks)
+            if block.block_type == "columns" {
+                if let Some(column_data) = block.data.get("columnData").and_then(|d| d.as_array()) {
+                    for column in column_data {
+                        if let Some(blocks) = column.get("blocks").and_then(|b| b.as_array()) {
+                            for nested_block in blocks {
+                                if let Ok(nested) = serde_json::from_value::<EditorBlock>(nested_block.clone()) {
+                                    let nested_content = EditorData {
+                                        time: None,
+                                        version: None,
+                                        blocks: vec![nested],
+                                    };
+                                    refs.extend(self.extract_asset_references(&nested_content));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        refs
+    }
+
+    /// Extract relative asset path from URL or file path
+    fn extract_asset_path(&self, url: &str) -> Option<String> {
+        // Handle asset:// protocol URLs
+        if url.starts_with("asset://") {
+            // asset://localhost/notebooks/{notebook-id}/assets/images/xxx.png
+            // or asset://localhost/assets/images/xxx.png (older format)
+            if let Some(pos) = url.find("/assets/") {
+                return Some(url[pos + 1..].to_string()); // "assets/images/xxx.png"
+            }
+        }
+
+        // Handle relative paths
+        if url.starts_with("assets/") {
+            return Some(url.to_string());
+        }
+
+        None
     }
 
     // ===== Tag Operations =====
@@ -1039,6 +1259,7 @@ impl FileStorage {
             storage_mode: Some(storage_mode),
             file_extension: Some(ext.to_lowercase()),
             last_file_sync: Some(now),
+            deleted_at: None,
             created_at: now,
             updated_at: now,
         };

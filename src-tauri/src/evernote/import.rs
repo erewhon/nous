@@ -563,6 +563,7 @@ pub fn import_evernote_enex(
             storage_mode: None,
             file_extension: None,
             last_file_sync: None,
+            deleted_at: None,
             created_at: note.created.unwrap_or(now),
             updated_at: note.updated.unwrap_or(now),
         };

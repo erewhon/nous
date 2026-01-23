@@ -21,6 +21,9 @@ pub fn list_pages(
     })?;
     let mut pages = storage.list_pages(id)?;
 
+    // Always exclude deleted pages (use list_trash for those)
+    pages.retain(|p| p.deleted_at.is_none());
+
     // Filter archived pages unless explicitly requested
     if !include_archived.unwrap_or(false) {
         pages.retain(|p| !p.is_archived);
@@ -190,6 +193,7 @@ pub fn update_page(
     Ok(page)
 }
 
+/// Move a page to trash (soft delete)
 #[tauri::command]
 pub fn delete_page(
     state: State<AppState>,
@@ -212,6 +216,46 @@ pub fn delete_page(
 
     storage.delete_page(nb_id, pg_id)?;
 
+    // Remove from search index (page is in trash)
+    if let Ok(mut search_index) = state.search_index.lock() {
+        let _ = search_index.remove_page(pg_id);
+    }
+
+    // Auto-commit if git is enabled for this notebook
+    let notebook_path = storage.get_notebook_path(nb_id);
+    if git::is_git_repo(&notebook_path) {
+        let commit_message = format!("Move to trash: {}", page_title);
+        if let Err(e) = git::commit_all(&notebook_path, &commit_message) {
+            log::warn!("Failed to auto-commit page deletion: {}", e);
+        }
+    }
+
+    Ok(())
+}
+
+/// Permanently delete a page (no recovery possible)
+#[tauri::command]
+pub fn permanent_delete_page(
+    state: State<AppState>,
+    notebook_id: String,
+    page_id: String,
+) -> CommandResult<()> {
+    let storage = state.storage.lock().unwrap();
+    let nb_id = Uuid::parse_str(&notebook_id).map_err(|e| CommandError {
+        message: format!("Invalid notebook ID: {}", e),
+    })?;
+    let pg_id = Uuid::parse_str(&page_id).map_err(|e| CommandError {
+        message: format!("Invalid page ID: {}", e),
+    })?;
+
+    // Get page title for commit message before deleting
+    let page_title = storage
+        .get_page(nb_id, pg_id)
+        .map(|p| p.title)
+        .unwrap_or_else(|_| "Unknown".to_string());
+
+    storage.permanent_delete_page(nb_id, pg_id)?;
+
     // Remove from search index
     if let Ok(mut search_index) = state.search_index.lock() {
         let _ = search_index.remove_page(pg_id);
@@ -220,13 +264,139 @@ pub fn delete_page(
     // Auto-commit if git is enabled for this notebook
     let notebook_path = storage.get_notebook_path(nb_id);
     if git::is_git_repo(&notebook_path) {
-        let commit_message = format!("Delete page: {}", page_title);
+        let commit_message = format!("Permanently delete: {}", page_title);
         if let Err(e) = git::commit_all(&notebook_path, &commit_message) {
             log::warn!("Failed to auto-commit page deletion: {}", e);
         }
     }
 
     Ok(())
+}
+
+/// Restore a page from trash
+#[tauri::command]
+pub fn restore_page(
+    state: State<AppState>,
+    notebook_id: String,
+    page_id: String,
+) -> CommandResult<Page> {
+    let storage = state.storage.lock().unwrap();
+    let nb_id = Uuid::parse_str(&notebook_id).map_err(|e| CommandError {
+        message: format!("Invalid notebook ID: {}", e),
+    })?;
+    let pg_id = Uuid::parse_str(&page_id).map_err(|e| CommandError {
+        message: format!("Invalid page ID: {}", e),
+    })?;
+
+    let page = storage.restore_page(nb_id, pg_id)?;
+
+    // Re-add to search index
+    if let Ok(mut search_index) = state.search_index.lock() {
+        let _ = search_index.index_page(&page);
+    }
+
+    // Auto-commit if git is enabled for this notebook
+    let notebook_path = storage.get_notebook_path(nb_id);
+    if git::is_git_repo(&notebook_path) {
+        let commit_message = format!("Restore from trash: {}", page.title);
+        if let Err(e) = git::commit_all(&notebook_path, &commit_message) {
+            log::warn!("Failed to auto-commit page restoration: {}", e);
+        }
+    }
+
+    Ok(page)
+}
+
+/// List all pages in trash for a notebook
+#[tauri::command]
+pub fn list_trash(
+    state: State<AppState>,
+    notebook_id: String,
+) -> CommandResult<Vec<Page>> {
+    let storage = state.storage.lock().unwrap();
+    let nb_id = Uuid::parse_str(&notebook_id).map_err(|e| CommandError {
+        message: format!("Invalid notebook ID: {}", e),
+    })?;
+
+    storage.list_trash(nb_id).map_err(Into::into)
+}
+
+/// Purge pages that have been in trash for more than the specified days (default: 30)
+#[tauri::command]
+pub fn purge_old_trash(
+    state: State<AppState>,
+    notebook_id: String,
+    days: Option<i64>,
+) -> CommandResult<usize> {
+    let storage = state.storage.lock().unwrap();
+    let nb_id = Uuid::parse_str(&notebook_id).map_err(|e| CommandError {
+        message: format!("Invalid notebook ID: {}", e),
+    })?;
+
+    let retention_days = days.unwrap_or(30);
+    storage.purge_old_trash(nb_id, retention_days).map_err(Into::into)
+}
+
+/// Move a page from one notebook to another
+#[tauri::command]
+pub fn move_page_to_notebook(
+    state: State<AppState>,
+    source_notebook_id: String,
+    page_id: String,
+    target_notebook_id: String,
+    target_folder_id: Option<String>,
+) -> CommandResult<Page> {
+    let storage = state.storage.lock().unwrap();
+    let source_nb_id = Uuid::parse_str(&source_notebook_id).map_err(|e| CommandError {
+        message: format!("Invalid source notebook ID: {}", e),
+    })?;
+    let pg_id = Uuid::parse_str(&page_id).map_err(|e| CommandError {
+        message: format!("Invalid page ID: {}", e),
+    })?;
+    let target_nb_id = Uuid::parse_str(&target_notebook_id).map_err(|e| CommandError {
+        message: format!("Invalid target notebook ID: {}", e),
+    })?;
+    let target_folder = target_folder_id
+        .map(|id| {
+            Uuid::parse_str(&id).map_err(|e| CommandError {
+                message: format!("Invalid target folder ID: {}", e),
+            })
+        })
+        .transpose()?;
+
+    // Get page title for commit messages
+    let page_title = storage
+        .get_page(source_nb_id, pg_id)
+        .map(|p| p.title.clone())
+        .unwrap_or_else(|_| "Unknown".to_string());
+
+    // Move the page
+    let moved_page = storage.move_page_to_notebook(source_nb_id, pg_id, target_nb_id, target_folder)?;
+
+    // Update search index - remove from old, add to new
+    if let Ok(mut search_index) = state.search_index.lock() {
+        let _ = search_index.remove_page(pg_id);
+        let _ = search_index.index_page(&moved_page);
+    }
+
+    // Auto-commit in both notebooks if git is enabled
+    let source_path = storage.get_notebook_path(source_nb_id);
+    if git::is_git_repo(&source_path) {
+        let commit_message = format!("Move page '{}' to another notebook", page_title);
+        if let Err(e) = git::commit_all(&source_path, &commit_message) {
+            log::warn!("Failed to auto-commit page move from source: {}", e);
+        }
+    }
+
+    let target_path = storage.get_notebook_path(target_nb_id);
+    if git::is_git_repo(&target_path) {
+        let commit_message = format!("Receive page '{}' from another notebook", page_title);
+        if let Err(e) = git::commit_all(&target_path, &commit_message) {
+            log::warn!("Failed to auto-commit page move to target: {}", e);
+        }
+    }
+
+    Ok(moved_page)
 }
 
 /// Move a page to be a child of another page (nested pages)

@@ -12,9 +12,11 @@ interface FolderTreeItemProps {
   isDropTarget?: boolean;
   onToggleExpand: (folderId: string) => void;
   onSelectPage: (pageId: string, openInNewPane?: boolean) => void;
+  onOpenInTab?: (pageId: string, pageTitle: string) => void;
   onOpenInNewPane?: (pageId: string) => void;
   onCreatePage: (folderId?: string) => void;
   onCreateSubpage?: (parentPageId: string) => void;
+  onDeletePage?: (pageId: string, pageTitle: string) => void;
   onRenameFolder: (folderId: string, newName: string) => void;
   onDeleteFolder: (folderId: string) => void;
   renderFolder: (folder: Folder, depth: number) => React.ReactNode;
@@ -24,6 +26,7 @@ interface FolderTreeItemProps {
   sections?: Section[];
   onMoveToSection?: (pageId: string, sectionId: string | null) => void;
   onMoveFolderToSection?: (folderId: string, sectionId: string | null) => void;
+  onMoveToNotebook?: (pageId: string, pageTitle: string) => void;
 }
 
 export const FolderTreeItem = memo(function FolderTreeItem({
@@ -36,9 +39,11 @@ export const FolderTreeItem = memo(function FolderTreeItem({
   isDropTarget = false,
   onToggleExpand,
   onSelectPage,
+  onOpenInTab,
   onOpenInNewPane,
   onCreatePage,
   onCreateSubpage,
+  onDeletePage,
   onRenameFolder,
   onDeleteFolder,
   renderFolder,
@@ -48,6 +53,7 @@ export const FolderTreeItem = memo(function FolderTreeItem({
   sections,
   onMoveToSection,
   onMoveFolderToSection,
+  onMoveToNotebook,
 }: FolderTreeItemProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState(folder.name);
@@ -370,10 +376,13 @@ export const FolderTreeItem = memo(function FolderTreeItem({
               depth={depth + 1}
               onSelect={(openInNewPane) => onSelectPage(page.id, openInNewPane)}
               onSelectPage={onSelectPage}
+              onOpenInTab={onOpenInTab}
               onOpenInNewPane={onOpenInNewPane}
               onCreateSubpage={onCreateSubpage}
+              onDeletePage={onDeletePage}
               sections={sections}
               onMoveToSection={onMoveToSection}
+              onMoveToNotebook={onMoveToNotebook}
               getChildPages={getChildPages}
               expandedPageIds={expandedPageIds}
               onTogglePageExpand={onTogglePageExpand}
@@ -521,10 +530,13 @@ interface DraggablePageItemProps {
   isDropTarget?: boolean;
   onSelect: (openInNewPane?: boolean) => void;
   onSelectPage?: (pageId: string, openInNewPane?: boolean) => void; // For recursive child selection
+  onOpenInTab?: (pageId: string, pageTitle: string) => void; // Open page in a new tab
   onOpenInNewPane?: (pageId: string) => void; // Open page in a new split pane
   onCreateSubpage?: (parentPageId: string) => void;
+  onDeletePage?: (pageId: string, pageTitle: string) => void; // Delete the page
   sections?: Section[];
   onMoveToSection?: (pageId: string, sectionId: string | null) => void;
+  onMoveToNotebook?: (pageId: string, pageTitle: string) => void; // Move page to another notebook
   getChildPages?: (parentPageId: string) => Page[];
   expandedPageIds?: Set<string>;
   onTogglePageExpand?: (pageId: string) => void;
@@ -538,10 +550,13 @@ const DraggablePageItem = memo(function DraggablePageItem({
   isDropTarget = false,
   onSelect,
   onSelectPage,
+  onOpenInTab,
   onOpenInNewPane,
   onCreateSubpage,
+  onDeletePage,
   sections,
   onMoveToSection,
+  onMoveToNotebook,
   getChildPages,
   expandedPageIds,
   onTogglePageExpand,
@@ -609,6 +624,14 @@ const DraggablePageItem = memo(function DraggablePageItem({
     }
     setShowContextMenu(false);
   }, [onCreateSubpage, page.id]);
+
+  const handleOpenInTab = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (onOpenInTab) {
+      onOpenInTab(page.id, page.title);
+    }
+    setShowContextMenu(false);
+  }, [onOpenInTab, page.id, page.title]);
 
   const handleOpenInNewPane = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
@@ -743,10 +766,13 @@ const DraggablePageItem = memo(function DraggablePageItem({
                 depth={depth + 1}
                 onSelect={(openInNewPane) => onSelectPage(childPage.id, openInNewPane)}
                 onSelectPage={onSelectPage}
+                onOpenInTab={onOpenInTab}
                 onOpenInNewPane={onOpenInNewPane}
                 onCreateSubpage={onCreateSubpage}
+                onDeletePage={onDeletePage}
                 sections={sections}
                 onMoveToSection={onMoveToSection}
+                onMoveToNotebook={onMoveToNotebook}
                 getChildPages={getChildPages}
                 expandedPageIds={expandedPageIds}
                 onTogglePageExpand={onTogglePageExpand}
@@ -770,6 +796,30 @@ const DraggablePageItem = memo(function DraggablePageItem({
           onClick={(e) => e.stopPropagation()}
           onMouseLeave={() => setShowContextMenu(false)}
         >
+          {/* Open in Tab option */}
+          {onOpenInTab && (
+            <button
+              onClick={handleOpenInTab}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-sm transition-colors hover:bg-[var(--color-bg-tertiary)]"
+              style={{ color: "var(--color-text-primary)" }}
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+              Open in Tab
+            </button>
+          )}
+
           {/* Open in Split Pane option */}
           {onOpenInNewPane && (
             <button
@@ -877,6 +927,75 @@ const DraggablePageItem = memo(function DraggablePageItem({
                   {section.name}
                 </button>
               ))}
+            </>
+          )}
+
+          {/* Move to Notebook option */}
+          {onMoveToNotebook && (
+            <>
+              <div
+                className="my-1 border-t"
+                style={{ borderColor: "var(--color-border)" }}
+              />
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowContextMenu(false);
+                  onMoveToNotebook(page.id, page.title);
+                }}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-sm transition-colors hover:bg-[var(--color-bg-tertiary)]"
+                style={{ color: "var(--color-text-primary)" }}
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M12 3v12M9 9l3-3 3 3" />
+                  <path d="M4 11v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" />
+                </svg>
+                Move to Notebook...
+              </button>
+            </>
+          )}
+
+          {/* Delete page option */}
+          {onDeletePage && (
+            <>
+              <div
+                className="my-1 border-t"
+                style={{ borderColor: "var(--color-border)" }}
+              />
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowContextMenu(false);
+                  onDeletePage(page.id, page.title);
+                }}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-sm transition-colors hover:bg-red-500/10"
+                style={{ color: "var(--color-error, #ef4444)" }}
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+                </svg>
+                Delete
+              </button>
             </>
           )}
         </div>

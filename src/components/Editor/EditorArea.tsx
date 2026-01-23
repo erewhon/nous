@@ -18,6 +18,7 @@ import { SectionList } from "../Sections";
 import { VideoFullScreen } from "../Video";
 import { DrawingFullScreen, PageAnnotationOverlay } from "../Drawing";
 import { ResizeHandle } from "../Layout/ResizeHandle";
+import { MovePageDialog } from "../Move/MovePageDialog";
 import type { EditorData, Page } from "../../types/page";
 import * as api from "../../utils/api";
 import { downloadTranscript } from "../../utils/videoApi";
@@ -30,6 +31,7 @@ export function EditorArea() {
     selectedPageId,
     selectPage,
     openPageInNewPane,
+    openTabInPane,
     updatePageContent,
     loadPages,
     createPage,
@@ -117,6 +119,10 @@ export function EditorArea() {
   const [coverPage, setCoverPage] = useState<Page | null>(null);
   const [showCover, setShowCover] = useState(false);
 
+  // Move page dialog state
+  const [movePageDialogOpen, setMovePageDialogOpen] = useState(false);
+  const [movePageTarget, setMovePageTarget] = useState<{ pageId: string; pageTitle: string } | null>(null);
+
   const selectedNotebook = notebooks.find((n) => n.id === selectedNotebookId);
 
   // Load pages, folders, and sections when notebook selection changes
@@ -171,15 +177,21 @@ export function EditorArea() {
     }
   }, [notebookPages, buildLinksFromPages]);
 
-  // Open page as tab when selected
+  // Sync tab with selected page (when page is already open in a tab)
   useEffect(() => {
     if (selectedPageId && selectedNotebookId) {
       const page = pages.find((p) => p.id === selectedPageId);
       if (page) {
-        openTab(page.id, page.notebookId, page.title);
+        // Check if page is already open as a tab
+        const isAlreadyOpen = openTabs.some((t) => t.pageId === selectedPageId);
+        if (isAlreadyOpen) {
+          // Just activate the existing tab
+          openTab(page.id, page.notebookId, page.title);
+        }
+        // If not already open, handleSelectPage will handle opening it
       }
     }
-  }, [selectedPageId, selectedNotebookId, pages, openTab]);
+  }, [selectedPageId, selectedNotebookId, pages, openTab, openTabs]);
 
   // Sync tab title when page title changes
   useEffect(() => {
@@ -189,15 +201,44 @@ export function EditorArea() {
   }, [selectedPage?.title, selectedPage?.id, updateTabTitle]);
 
   // Handle page selection with optional new pane
+  // Default behavior: replace the current non-pinned tab (one page at a time)
   const handleSelectPage = useCallback(
     (pageId: string, openInNewPane?: boolean) => {
       if (openInNewPane) {
         openPageInNewPane(pageId);
       } else {
+        // Find the page to get its title
+        const page = pages.find((p) => p.id === pageId);
+        if (!page) return;
+
+        // Check if this page is already open as a tab
+        const isAlreadyOpen = openTabs.some((t) => t.pageId === pageId);
+
+        if (!isAlreadyOpen) {
+          // Close current non-pinned tab to implement "one page at a time" behavior
+          const currentNonPinnedTab = openTabs.find((t) => !t.isPinned);
+          if (currentNonPinnedTab) {
+            closeTab(currentNonPinnedTab.pageId);
+          }
+          // Open the new page as a tab
+          openTab(pageId, page.notebookId, page.title);
+        }
+
         selectPage(pageId);
       }
     },
-    [selectPage, openPageInNewPane]
+    [selectPage, openPageInNewPane, pages, openTabs, closeTab, openTab]
+  );
+
+  // Handle opening a page in a new tab within the active pane
+  const handleOpenInTab = useCallback(
+    (pageId: string, pageTitle: string) => {
+      const paneId = activePaneId || panes[0]?.id;
+      if (paneId) {
+        openTabInPane(paneId, pageId, pageTitle);
+      }
+    },
+    [activePaneId, panes, openTabInPane]
   );
 
   // Close tabs for deleted pages
@@ -447,6 +488,7 @@ export function EditorArea() {
               folders={folders}
               selectedPageId={selectedPageId}
               onSelectPage={handleSelectPage}
+              onOpenInTab={handleOpenInTab}
               onOpenInNewPane={openPageInNewPane}
               sectionsEnabled={selectedNotebook.sectionsEnabled}
               selectedSectionId={selectedSectionId}
@@ -460,6 +502,10 @@ export function EditorArea() {
               hasCoverPage={coverPage !== null}
               onViewCover={() => setShowCover(true)}
               onReorderPages={(folderId, pageIds) => reorderPages(selectedNotebook.id, folderId, pageIds)}
+              onMoveToNotebook={(pageId, pageTitle) => {
+                setMovePageTarget({ pageId, pageTitle });
+                setMovePageDialogOpen(true);
+              }}
             />
           </div>
         )}
@@ -503,6 +549,24 @@ export function EditorArea() {
         <PageAnnotationOverlay
           pageId={annotationState.pageId}
           notebookId={annotationState.notebookId}
+        />
+      )}
+
+      {/* Move Page Dialog */}
+      {selectedNotebook && movePageTarget && (
+        <MovePageDialog
+          isOpen={movePageDialogOpen}
+          onClose={() => {
+            setMovePageDialogOpen(false);
+            setMovePageTarget(null);
+          }}
+          pageId={movePageTarget.pageId}
+          pageTitle={movePageTarget.pageTitle}
+          currentNotebookId={selectedNotebook.id}
+          onMoved={() => {
+            // Reload pages after moving
+            loadPages(selectedNotebook.id, showArchived);
+          }}
         />
       )}
     </div>

@@ -659,6 +659,7 @@ fn import_org_file(content: &str, notebook_id: Uuid, fallback_title: &str) -> Pa
         storage_mode: None,
         file_extension: None,
         last_file_sync: None,
+        deleted_at: None,
         created_at,
         updated_at: now,
     }

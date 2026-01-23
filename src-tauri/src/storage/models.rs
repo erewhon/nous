@@ -324,6 +324,9 @@ pub struct Page {
     /// Last sync time for linked files (to detect external changes)
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub last_file_sync: Option<DateTime<Utc>>,
+    /// When the page was moved to trash (None = not deleted)
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub deleted_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -351,6 +354,7 @@ impl Page {
             storage_mode: None,
             file_extension: None,
             last_file_sync: None,
+            deleted_at: None,
             created_at: now,
             updated_at: now,
         }

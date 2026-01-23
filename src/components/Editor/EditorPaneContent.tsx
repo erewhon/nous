@@ -38,19 +38,24 @@ export function EditorPaneContent({
   canClose,
   showPaneControls,
 }: EditorPaneContentProps) {
-  const { pages, updatePageContent, createPage, pageDataVersion, openTabInPane, updateTabTitleInPane } = usePageStore();
+  const { pages, updatePageContent, createPage, pageDataVersion, openTabInPane, closeTabInPane, updateTabTitleInPane } = usePageStore();
   const { updatePageLinks } = useLinkStore();
   const [isSaving, setIsSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
 
   const selectedPage = pages.find((p) => p.id === pane.pageId);
 
-  // Ensure current page is in tabs
+  // Ensure current page is in tabs - replace non-pinned tab for "one page at a time" behavior
   useEffect(() => {
     if (selectedPage && !pane.tabs.find((t) => t.pageId === selectedPage.id)) {
+      // Close the current non-pinned tab before opening new one (single-page mode)
+      const currentNonPinnedTab = pane.tabs.find((t) => !t.isPinned);
+      if (currentNonPinnedTab) {
+        closeTabInPane(pane.id, currentNonPinnedTab.pageId);
+      }
       openTabInPane(pane.id, selectedPage.id, selectedPage.title);
     }
-  }, [selectedPage, pane.id, pane.tabs, openTabInPane]);
+  }, [selectedPage, pane.id, pane.tabs, openTabInPane, closeTabInPane]);
 
   // Update tab title when page title changes
   useEffect(() => {

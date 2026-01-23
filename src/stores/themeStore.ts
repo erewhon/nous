@@ -7,6 +7,7 @@ export type FontFamily = "system" | "inter" | "jetbrains-mono" | "fira-code";
 export type EditorWidth = "narrow" | "medium" | "wide" | "full";
 export type UIMode = "classic" | "overview";
 export type NotebookSortOption = "name-asc" | "name-desc" | "updated" | "created" | "pages";
+export type PageSortOption = "position" | "name-asc" | "name-desc" | "updated" | "created";
 export type EditorKeymap = "standard" | "vim" | "emacs";
 
 export interface PanelWidths {
@@ -52,6 +53,7 @@ interface ThemeState {
   showPageStats: boolean;
   uiMode: UIMode;
   notebookSortBy: NotebookSortOption;
+  pageSortBy: PageSortOption;
   panelWidths: PanelWidths;
   autoHidePanels: boolean;  // Auto-hide all panels together
   panelsHovered: boolean;   // Track hover state for auto-hide (all panels as one)
@@ -65,6 +67,7 @@ interface ThemeState {
   togglePageStats: () => void;
   setUIMode: (mode: UIMode) => void;
   setNotebookSortBy: (sort: NotebookSortOption) => void;
+  setPageSortBy: (sort: PageSortOption) => void;
   setPanelWidth: (panel: keyof PanelWidths, width: number) => void;
   setAutoHidePanels: (enabled: boolean) => void;
   setPanelsHovered: (hovered: boolean) => void;
@@ -355,6 +358,7 @@ export const useThemeStore = create<ThemeState>()(
       showPageStats: true,
       uiMode: "classic" as UIMode,
       notebookSortBy: "name-asc" as NotebookSortOption,
+      pageSortBy: "position" as PageSortOption,
       panelWidths: DEFAULT_PANEL_WIDTHS,
       autoHidePanels: false,
       panelsHovered: false,
@@ -419,6 +423,9 @@ export const useThemeStore = create<ThemeState>()(
       setNotebookSortBy: (sort) => {
         set({ notebookSortBy: sort });
       },
+      setPageSortBy: (sort) => {
+        set({ pageSortBy: sort });
+      },
 
       setPanelWidth: (panel, width) => {
         const min = MIN_PANEL_WIDTHS[panel];
@@ -476,7 +483,7 @@ export const useThemeStore = create<ThemeState>()(
     }),
     {
       name: "katt-theme",
-      partialize: (state) => ({ settings: state.settings, showPageStats: state.showPageStats, uiMode: state.uiMode, notebookSortBy: state.notebookSortBy, panelWidths: state.panelWidths, autoHidePanels: state.autoHidePanels }),
+      partialize: (state) => ({ settings: state.settings, showPageStats: state.showPageStats, uiMode: state.uiMode, notebookSortBy: state.notebookSortBy, pageSortBy: state.pageSortBy, panelWidths: state.panelWidths, autoHidePanels: state.autoHidePanels }),
       onRehydrateStorage: () => (state) => {
         if (state) {
           // Resolve system theme on rehydration

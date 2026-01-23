@@ -339,6 +339,75 @@ impl LibraryStorage {
         fs::write(self.libraries_file(), content)?;
         Ok(())
     }
+
+    /// Move a notebook from one library to another
+    /// Returns the new notebook path in the target library
+    pub fn move_notebook_to_library(
+        &self,
+        notebook_id: Uuid,
+        source_library_id: Uuid,
+        target_library_id: Uuid,
+    ) -> Result<PathBuf, LibraryError> {
+        // Get both libraries
+        let source_lib = self.get_library(source_library_id)?;
+        let target_lib = self.get_library(target_library_id)?;
+
+        // Paths
+        let source_notebook_path = source_lib.notebooks_path().join(notebook_id.to_string());
+        let target_notebook_path = target_lib.notebooks_path().join(notebook_id.to_string());
+
+        // Verify source notebook exists
+        if !source_notebook_path.exists() {
+            return Err(LibraryError::InvalidPath(format!(
+                "Notebook {} not found in source library",
+                notebook_id
+            )));
+        }
+
+        // Verify target notebook doesn't already exist
+        if target_notebook_path.exists() {
+            return Err(LibraryError::PathAlreadyExists(format!(
+                "Notebook {} already exists in target library",
+                notebook_id
+            )));
+        }
+
+        // Ensure target notebooks directory exists
+        fs::create_dir_all(target_lib.notebooks_path())?;
+
+        // Copy notebook directory recursively
+        copy_dir_recursive(&source_notebook_path, &target_notebook_path)?;
+
+        // Remove source notebook directory
+        fs::remove_dir_all(&source_notebook_path)?;
+
+        log::info!(
+            "Moved notebook {} from library {} to library {}",
+            notebook_id,
+            source_lib.name,
+            target_lib.name
+        );
+
+        Ok(target_notebook_path)
+    }
+}
+
+/// Copy directory recursively
+fn copy_dir_recursive(src: &PathBuf, dst: &PathBuf) -> Result<(), std::io::Error> {
+    fs::create_dir_all(dst)?;
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let ty = entry.file_type()?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+
+        if ty.is_dir() {
+            copy_dir_recursive(&src_path, &dst_path)?;
+        } else {
+            fs::copy(&src_path, &dst_path)?;
+        }
+    }
+    Ok(())
 }
 
 /// Calculate directory size recursively

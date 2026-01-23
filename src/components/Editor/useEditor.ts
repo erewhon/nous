@@ -18,6 +18,7 @@ import { PDFTool } from "./PDFTool";
 import { VideoTool } from "./VideoTool";
 import { DrawingTool } from "./DrawingTool";
 import { EmbedTool } from "./EmbedTool";
+import { ColumnsTool } from "./ColumnsTool";
 import { createImageUploader } from "./imageUploader";
 
 interface UseEditorOptions {
@@ -52,113 +53,129 @@ export function useEditor({
       return;
     }
 
+    // Build base tools config (used by main editor and columns)
+    const baseTools: Record<string, unknown> = {
+      header: {
+        class: Header as unknown as ToolConstructable,
+        config: {
+          levels: [1, 2, 3, 4],
+          defaultLevel: 2,
+        },
+      },
+      list: {
+        class: List as unknown as ToolConstructable,
+        inlineToolbar: true,
+        config: {
+          defaultStyle: "unordered",
+        },
+      },
+      checklist: {
+        class: Checklist as unknown as ToolConstructable,
+        inlineToolbar: true,
+      },
+      code: {
+        class: CodeBlockTool as unknown as ToolConstructable,
+        config: {
+          placeholder: "Enter code here...",
+        },
+      },
+      quote: {
+        class: Quote as unknown as ToolConstructable,
+        inlineToolbar: true,
+      },
+      marker: Marker,
+      highlighter: HighlighterTool,
+      inlineCode: InlineCode,
+      delimiter: Delimiter as unknown as ToolConstructable,
+      table: {
+        class: Table as unknown as ToolConstructable,
+        inlineToolbar: true,
+        config: {
+          rows: 2,
+          cols: 3,
+          withHeadings: true,
+        },
+      },
+      callout: {
+        class: CalloutTool as unknown as ToolConstructable,
+        inlineToolbar: true,
+        config: {
+          titlePlaceholder: "Callout title (optional)",
+          contentPlaceholder: "Type callout content...",
+        },
+      },
+      flashcard: {
+        class: FlashcardTool as unknown as ToolConstructable,
+        config: {
+          frontPlaceholder: "Enter question...",
+          backPlaceholder: "Enter answer...",
+        },
+      },
+      ...(notebookId
+        ? {
+            image: {
+              class: Image as unknown as ToolConstructable,
+              config: {
+                uploader: createImageUploader({ notebookId }),
+                captionPlaceholder: "Image caption",
+              },
+            },
+            pdf: {
+              class: PDFTool as unknown as ToolConstructable,
+              config: {
+                notebookId,
+              },
+            },
+            video: {
+              class: VideoTool as unknown as ToolConstructable,
+              config: {
+                notebookId,
+              },
+            },
+            drawing: {
+              class: DrawingTool as unknown as ToolConstructable,
+              config: {
+                notebookId,
+              },
+            },
+            embed: {
+              class: EmbedTool as unknown as ToolConstructable,
+              config: {
+                notebookId,
+                pages,
+                onPageClick: onLinkClick,
+              },
+            },
+          }
+        : {}),
+      wikiLink: {
+        class: WikiLinkTool,
+        config: {
+          onLinkClick: onLinkClick,
+        },
+      },
+    };
+
+    // Full tools config including columns (columns use baseTools for nested editors)
+    const tools: Record<string, unknown> = {
+      ...baseTools,
+      columns: {
+        class: ColumnsTool as unknown as ToolConstructable,
+        config: {
+          placeholder: "Type or drop content here...",
+          tools: baseTools, // Pass tools config for nested editors
+        },
+      },
+    };
+
     const editor = new EditorJS({
       holder: holderId,
       data: initialData,
       readOnly,
       placeholder,
       autofocus: true,
-      tools: {
-        header: {
-          class: Header as unknown as ToolConstructable,
-          config: {
-            levels: [1, 2, 3, 4],
-            defaultLevel: 2,
-          },
-        },
-        list: {
-          class: List as unknown as ToolConstructable,
-          inlineToolbar: true,
-          config: {
-            defaultStyle: "unordered",
-          },
-        },
-        checklist: {
-          class: Checklist as unknown as ToolConstructable,
-          inlineToolbar: true,
-        },
-        code: {
-          class: CodeBlockTool as unknown as ToolConstructable,
-          config: {
-            placeholder: "Enter code here...",
-          },
-        },
-        quote: {
-          class: Quote as unknown as ToolConstructable,
-          inlineToolbar: true,
-        },
-        marker: Marker,
-        highlighter: HighlighterTool,
-        inlineCode: InlineCode,
-        delimiter: Delimiter as unknown as ToolConstructable,
-        table: {
-          class: Table as unknown as ToolConstructable,
-          inlineToolbar: true,
-          config: {
-            rows: 2,
-            cols: 3,
-            withHeadings: true,
-          },
-        },
-        callout: {
-          class: CalloutTool as unknown as ToolConstructable,
-          inlineToolbar: true,
-          config: {
-            titlePlaceholder: "Callout title (optional)",
-            contentPlaceholder: "Type callout content...",
-          },
-        },
-        flashcard: {
-          class: FlashcardTool as unknown as ToolConstructable,
-          config: {
-            frontPlaceholder: "Enter question...",
-            backPlaceholder: "Enter answer...",
-          },
-        },
-        ...(notebookId
-          ? {
-              image: {
-                class: Image as unknown as ToolConstructable,
-                config: {
-                  uploader: createImageUploader({ notebookId }),
-                  captionPlaceholder: "Image caption",
-                },
-              },
-              pdf: {
-                class: PDFTool as unknown as ToolConstructable,
-                config: {
-                  notebookId,
-                },
-              },
-              video: {
-                class: VideoTool as unknown as ToolConstructable,
-                config: {
-                  notebookId,
-                },
-              },
-              drawing: {
-                class: DrawingTool as unknown as ToolConstructable,
-                config: {
-                  notebookId,
-                },
-              },
-              embed: {
-                class: EmbedTool as unknown as ToolConstructable,
-                config: {
-                  notebookId,
-                  pages,
-                  onPageClick: onLinkClick,
-                },
-              },
-            }
-          : {}),
-        wikiLink: {
-          class: WikiLinkTool,
-          config: {
-            onLinkClick: onLinkClick,
-          },
-        },
-      },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      tools: tools as any,
       onChange: async () => {
         if (onChange && editorRef.current && isReady.current) {
           const data = await editorRef.current.save();

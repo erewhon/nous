@@ -173,7 +173,12 @@ pub fn run() {
             commands::create_page,
             commands::update_page,
             commands::delete_page,
+            commands::permanent_delete_page,
+            commands::restore_page,
+            commands::list_trash,
+            commands::purge_old_trash,
             commands::move_page_to_parent,
+            commands::move_page_to_notebook,
             // Search commands
             commands::search_pages,
             commands::fuzzy_search_pages,
@@ -372,6 +377,7 @@ pub fn run() {
             commands::get_library_stats,
             commands::validate_library_path,
             commands::pick_library_folder,
+            commands::move_notebook_to_library,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

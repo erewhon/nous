@@ -88,6 +88,31 @@ export async function deletePage(
   return invoke("delete_page", { notebookId, pageId });
 }
 
+export async function permanentDeletePage(
+  notebookId: string,
+  pageId: string
+): Promise<void> {
+  return invoke("permanent_delete_page", { notebookId, pageId });
+}
+
+export async function restorePage(
+  notebookId: string,
+  pageId: string
+): Promise<Page> {
+  return invoke<Page>("restore_page", { notebookId, pageId });
+}
+
+export async function listTrash(notebookId: string): Promise<Page[]> {
+  return invoke<Page[]>("list_trash", { notebookId });
+}
+
+export async function purgeOldTrash(
+  notebookId: string,
+  days?: number
+): Promise<number> {
+  return invoke<number>("purge_old_trash", { notebookId, days });
+}
+
 export async function movePageToParent(
   notebookId: string,
   pageId: string,
@@ -95,6 +120,15 @@ export async function movePageToParent(
   position?: number
 ): Promise<Page> {
   return invoke<Page>("move_page_to_parent", { notebookId, pageId, parentPageId, position });
+}
+
+export async function movePageToNotebook(
+  sourceNotebookId: string,
+  pageId: string,
+  targetNotebookId: string,
+  targetFolderId?: string
+): Promise<Page> {
+  return invoke<Page>("move_page_to_notebook", { sourceNotebookId, pageId, targetNotebookId, targetFolderId });
 }
 
 // ===== Folder API =====
@@ -1480,6 +1514,17 @@ export async function validateLibraryPath(path: string): Promise<boolean> {
  */
 export async function pickLibraryFolder(): Promise<string | null> {
   return invoke<string | null>("pick_library_folder");
+}
+
+/**
+ * Move a notebook from one library to another
+ */
+export async function moveNotebookToLibrary(
+  notebookId: string,
+  sourceLibraryId: string,
+  targetLibraryId: string
+): Promise<string> {
+  return invoke<string>("move_notebook_to_library", { notebookId, sourceLibraryId, targetLibraryId });
 }
 
 // ===== File-Based Page API =====

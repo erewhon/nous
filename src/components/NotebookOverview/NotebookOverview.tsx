@@ -4,6 +4,9 @@ import type { Page } from "../../types/page";
 import { NotebookCard } from "./NotebookCard";
 import { NotebookSettingsDialog } from "../NotebookSettings";
 import { useThemeStore, type NotebookSortOption } from "../../stores/themeStore";
+import { useActionStore } from "../../stores/actionStore";
+import { useInboxStore } from "../../stores/inboxStore";
+import { useFlashcardStore } from "../../stores/flashcardStore";
 import * as api from "../../utils/api";
 
 const SORT_OPTIONS: { value: NotebookSortOption; label: string }[] = [
@@ -42,6 +45,11 @@ export function NotebookOverview({
   // Get persisted sort preference from store
   const { notebookSortBy: sortBy, setNotebookSortBy: setSortBy } = useThemeStore();
 
+  // Tool button stores
+  const openActionLibrary = useActionStore((state) => state.openActionLibrary);
+  const { summary, openQuickCapture, openInboxPanel } = useInboxStore();
+  const { togglePanel: toggleFlashcards, stats: flashcardStats } = useFlashcardStore();
+
   // Close sort menu when clicking outside
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -56,6 +64,9 @@ export function NotebookOverview({
   // Filter and sort notebooks
   const filteredNotebooks = useMemo(() => {
     let result = notebooksWithMeta;
+
+    // Filter out archived notebooks
+    result = result.filter(({ notebook }) => !notebook.archived);
 
     // Filter by search query
     if (searchQuery.trim()) {
@@ -523,6 +534,181 @@ export function NotebookOverview({
         notebook={settingsNotebook}
         onClose={() => setSettingsNotebook(null)}
       />
+
+      {/* Footer tool buttons - fixed at bottom left */}
+      <div
+        className="fixed bottom-4 left-4 flex items-center gap-1 rounded-xl border px-2 py-1.5 shadow-lg"
+        style={{
+          backgroundColor: "var(--color-bg-secondary)",
+          borderColor: "var(--color-border)",
+        }}
+      >
+        {/* Quick Capture */}
+        <button
+          onClick={openQuickCapture}
+          className="flex h-9 w-9 items-center justify-center rounded-lg transition-colors hover:bg-[--color-bg-tertiary]"
+          style={{ color: "var(--color-text-muted)" }}
+          title="Quick Capture (⌘⇧C)"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+        </button>
+        {/* Inbox */}
+        <button
+          onClick={openInboxPanel}
+          className="relative flex h-9 w-9 items-center justify-center rounded-lg transition-colors hover:bg-[--color-bg-tertiary]"
+          style={{ color: "var(--color-text-muted)" }}
+          title="Inbox (⌘⇧I)"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <polyline points="22 12 16 12 14 15 10 15 8 12 2 12" />
+            <path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
+          </svg>
+          {summary && summary.unprocessed_count > 0 && (
+            <span
+              className="absolute right-0.5 top-0.5 flex h-4 w-4 items-center justify-center rounded-full text-[10px] font-bold text-white"
+              style={{ backgroundColor: "var(--color-accent)" }}
+            >
+              {summary.unprocessed_count > 9 ? "9+" : summary.unprocessed_count}
+            </span>
+          )}
+        </button>
+        {/* AI Chat */}
+        <button
+          onClick={() => {
+            window.dispatchEvent(
+              new KeyboardEvent("keydown", {
+                key: "A",
+                metaKey: true,
+                shiftKey: true,
+                bubbles: true,
+              })
+            );
+          }}
+          className="flex h-9 w-9 items-center justify-center rounded-lg transition-colors hover:bg-[--color-bg-tertiary]"
+          style={{ color: "var(--color-text-muted)" }}
+          title="AI Chat (⌘⇧A)"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z" />
+          </svg>
+        </button>
+        {/* Actions */}
+        <button
+          onClick={openActionLibrary}
+          className="flex h-9 w-9 items-center justify-center rounded-lg transition-colors hover:bg-[--color-bg-tertiary]"
+          style={{ color: "var(--color-text-muted)" }}
+          title="Actions (⌘⇧X)"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+          </svg>
+        </button>
+        {/* Flashcards */}
+        <button
+          onClick={toggleFlashcards}
+          className="relative flex h-9 w-9 items-center justify-center rounded-lg transition-colors hover:bg-[--color-bg-tertiary]"
+          style={{ color: "var(--color-text-muted)" }}
+          title="Flashcards (⌘⇧F)"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <rect x="2" y="4" width="20" height="16" rx="2" />
+            <line x1="2" y1="12" x2="22" y2="12" />
+          </svg>
+          {flashcardStats && flashcardStats.dueCards > 0 && (
+            <span
+              className="absolute right-0.5 top-0.5 flex h-4 w-4 items-center justify-center rounded-full text-[10px] font-bold text-white"
+              style={{ backgroundColor: "var(--color-accent)" }}
+            >
+              {flashcardStats.dueCards > 9 ? "9+" : flashcardStats.dueCards}
+            </span>
+          )}
+        </button>
+        {/* Graph View */}
+        <button
+          onClick={() => {
+            window.dispatchEvent(
+              new KeyboardEvent("keydown", {
+                key: "g",
+                metaKey: true,
+                bubbles: true,
+              })
+            );
+          }}
+          className="flex h-9 w-9 items-center justify-center rounded-lg transition-colors hover:bg-[--color-bg-tertiary]"
+          style={{ color: "var(--color-text-muted)" }}
+          title="Graph View (⌘G)"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <circle cx="12" cy="12" r="3" />
+            <circle cx="19" cy="5" r="2" />
+            <circle cx="5" cy="19" r="2" />
+            <line x1="14.5" y1="9.5" x2="17.5" y2="6.5" />
+            <line x1="9.5" y1="14.5" x2="6.5" y2="17.5" />
+          </svg>
+        </button>
+      </div>
     </div>
   );
 }

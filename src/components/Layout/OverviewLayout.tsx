@@ -22,6 +22,7 @@ export function OverviewLayout() {
     selectedPageId,
     selectPage,
     openPageInNewPane,
+    openTabInPane,
     updatePageContent,
     loadPages,
     movePageToSection,
@@ -123,6 +124,17 @@ export function OverviewLayout() {
       }
     },
     [selectPage, openPageInNewPane]
+  );
+
+  // Handle opening a page in a new tab within the active pane
+  const handleOpenInTab = useCallback(
+    (pageId: string, pageTitle: string) => {
+      const paneId = activePaneId || panes[0]?.id;
+      if (paneId) {
+        openTabInPane(paneId, pageId, pageTitle);
+      }
+    },
+    [activePaneId, panes, openTabInPane]
   );
 
   // Handle cover page save
@@ -342,6 +354,7 @@ export function OverviewLayout() {
             folders={folders}
             selectedPageId={selectedPageId}
             onSelectPage={handleSelectPage}
+            onOpenInTab={handleOpenInTab}
             onOpenInNewPane={openPageInNewPane}
             sectionsEnabled={selectedNotebook.sectionsEnabled}
             selectedSectionId={selectedSectionId}

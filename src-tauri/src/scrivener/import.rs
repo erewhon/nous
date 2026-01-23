@@ -624,6 +624,7 @@ pub fn import_scrivener_project(
             storage_mode: None,
             file_extension: None,
             last_file_sync: None,
+            deleted_at: None,
             created_at: now,
             updated_at: now,
         };

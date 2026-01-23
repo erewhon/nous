@@ -49,6 +49,7 @@ pub fn import_markdown_to_page(markdown: &str, notebook_id: Uuid, fallback_title
         storage_mode: None,
         file_extension: None,
         last_file_sync: None,
+        deleted_at: None,
         created_at: frontmatter.created.unwrap_or(now),
         updated_at: frontmatter.updated.unwrap_or(now),
     }

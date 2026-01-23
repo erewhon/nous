@@ -213,3 +213,44 @@ pub async fn pick_library_folder(app: tauri::AppHandle) -> CommandResult<Option<
 
     Ok(folder.map(|p| p.to_string()))
 }
+
+/// Move a notebook from one library to another
+#[tauri::command]
+pub fn move_notebook_to_library(
+    state: State<AppState>,
+    notebook_id: String,
+    source_library_id: String,
+    target_library_id: String,
+) -> CommandResult<String> {
+    let nb_id = Uuid::parse_str(&notebook_id)
+        .map_err(|_| LibraryCommandError::new("Invalid notebook ID"))?;
+    let source_lib_id = Uuid::parse_str(&source_library_id)
+        .map_err(|_| LibraryCommandError::new("Invalid source library ID"))?;
+    let target_lib_id = Uuid::parse_str(&target_library_id)
+        .map_err(|_| LibraryCommandError::new("Invalid target library ID"))?;
+
+    // Move the notebook
+    let new_path = {
+        let storage = state
+            .library_storage
+            .lock()
+            .map_err(|e| LibraryCommandError::new(&format!("Lock error: {}", e)))?;
+
+        storage.move_notebook_to_library(nb_id, source_lib_id, target_lib_id)?
+    };
+
+    // Note: Search index handling:
+    // - The notebook pages are no longer in the source library, so if we're viewing
+    //   the source library, searches won't find them (file not found during search)
+    // - When the target library is switched to, its search index will be used
+    // - A full re-index may be needed for the target library to include the moved notebook
+
+    log::info!(
+        "Moved notebook {} from library {} to library {}",
+        notebook_id,
+        source_library_id,
+        target_library_id
+    );
+
+    Ok(new_path.to_string_lossy().to_string())
+}

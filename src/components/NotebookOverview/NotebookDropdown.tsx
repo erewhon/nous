@@ -145,9 +145,9 @@ export function NotebookDropdown({
             style={{ backgroundColor: "var(--color-border)" }}
           />
 
-          {/* Notebook list */}
+          {/* Notebook list (excludes archived) */}
           <div className="max-h-64 overflow-y-auto py-1">
-            {notebooks.map((notebook) => {
+            {notebooks.filter((n) => !n.archived).map((notebook) => {
               const isSelected = notebook.id === selectedNotebook?.id;
               const notebookColor = notebook.color || "var(--color-accent)";
               return (

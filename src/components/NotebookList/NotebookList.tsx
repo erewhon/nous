@@ -1,7 +1,15 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import type { Notebook } from "../../types/notebook";
 import { useNotebookStore } from "../../stores/notebookStore";
+import { useThemeStore, type NotebookSortOption } from "../../stores/themeStore";
 import { NotebookSettingsDialog } from "../NotebookSettings";
+
+const SORT_OPTIONS: { value: NotebookSortOption; label: string }[] = [
+  { value: "name-asc", label: "Name (A-Z)" },
+  { value: "name-desc", label: "Name (Z-A)" },
+  { value: "updated", label: "Recently updated" },
+  { value: "created", label: "Recently created" },
+];
 
 interface NotebookListProps {
   notebooks: Notebook[];
@@ -13,8 +21,28 @@ export function NotebookList({
   selectedNotebookId,
 }: NotebookListProps) {
   const { selectNotebook } = useNotebookStore();
+  const { notebookSortBy: sortBy, setNotebookSortBy: setSortBy } = useThemeStore();
   const [settingsNotebook, setSettingsNotebook] = useState<Notebook | null>(null);
   const [hoveredNotebookId, setHoveredNotebookId] = useState<string | null>(null);
+  const [showSortMenu, setShowSortMenu] = useState(false);
+
+  // Sort notebooks based on selected option
+  const sortedNotebooks = useMemo(() => {
+    return [...notebooks].sort((a, b) => {
+      switch (sortBy) {
+        case "name-asc":
+          return a.name.localeCompare(b.name);
+        case "name-desc":
+          return b.name.localeCompare(a.name);
+        case "updated":
+          return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+        case "created":
+          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        default:
+          return 0;
+      }
+    });
+  }, [notebooks, sortBy]);
 
   if (notebooks.length === 0) {
     return (
@@ -35,8 +63,51 @@ export function NotebookList({
 
   return (
     <>
+      {/* Sort button */}
+      <div className="mb-2 flex justify-end px-1">
+        <div className="relative">
+          <button
+            onClick={() => setShowSortMenu(!showSortMenu)}
+            className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors hover:bg-[--color-bg-tertiary]"
+            style={{ color: "var(--color-text-muted)" }}
+            title="Sort notebooks"
+          >
+            <IconSort />
+            <span>{SORT_OPTIONS.find((o) => o.value === sortBy)?.label}</span>
+          </button>
+
+          {showSortMenu && (
+            <div
+              className="absolute right-0 top-full z-50 mt-1 min-w-36 rounded-lg border py-1 shadow-lg"
+              style={{
+                backgroundColor: "var(--color-bg-secondary)",
+                borderColor: "var(--color-border)",
+              }}
+              onMouseLeave={() => setShowSortMenu(false)}
+            >
+              {SORT_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  onClick={() => {
+                    setSortBy(option.value);
+                    setShowSortMenu(false);
+                  }}
+                  className="flex w-full items-center justify-between px-3 py-1.5 text-left text-xs transition-colors hover:bg-[--color-bg-tertiary]"
+                  style={{
+                    color: sortBy === option.value ? "var(--color-accent)" : "var(--color-text-primary)",
+                  }}
+                >
+                  {option.label}
+                  {sortBy === option.value && <span className="text-[--color-accent]">✓</span>}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
       <ul className="space-y-1">
-        {notebooks.map((notebook) => {
+        {sortedNotebooks.map((notebook) => {
           const isSelected = selectedNotebookId === notebook.id;
           const isHovered = hoveredNotebookId === notebook.id;
           return (
@@ -187,6 +258,28 @@ function IconArchive() {
       <rect x="2" y="4" width="20" height="5" rx="2" />
       <path d="M4 9v9a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9" />
       <path d="M10 13h4" />
+    </svg>
+  );
+}
+
+function IconSort() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M11 5h10" />
+      <path d="M11 9h7" />
+      <path d="M11 13h4" />
+      <path d="M3 17l3 3 3-3" />
+      <path d="M6 18V4" />
     </svg>
   );
 }

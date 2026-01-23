@@ -3,6 +3,7 @@ import type { OutputData } from "@editorjs/editorjs";
 import { useEditor } from "./useEditor";
 import { useVimMode, type VimMode } from "./useVimMode";
 import { useEmacsMode } from "./useEmacsMode";
+import { useBlockDragHandles } from "./useBlockDragHandles";
 import { VimModeIndicator } from "./VimModeIndicator";
 import { WikiLinkAutocomplete } from "./WikiLinkAutocomplete";
 import { WikiLinkTool } from "./WikiLinkTool";
@@ -85,6 +86,13 @@ export function BlockEditor({
     enabled: isEmacsModeEnabled,
     editorRef: editor,
     containerRef: containerRef as React.RefObject<HTMLElement>,
+  });
+
+  // Block drag handles for drag-and-drop into columns
+  useBlockDragHandles({
+    containerRef: containerRef as React.RefObject<HTMLElement>,
+    editorRef: editor,
+    enabled: !readOnly,
   });
 
   // Cleanup timeout on unmount
