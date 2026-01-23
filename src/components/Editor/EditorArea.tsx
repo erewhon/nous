@@ -8,7 +8,6 @@ import { useLinkStore } from "../../stores/linkStore";
 import { usePDFStore } from "../../stores/pdfStore";
 import { useVideoStore } from "../../stores/videoStore";
 import { useDrawingStore } from "../../stores/drawingStore";
-import { useTabStore } from "../../stores/tabStore";
 import { useThemeStore } from "../../stores/themeStore";
 import { FolderTree } from "./FolderTree";
 import { EditorPaneContent } from "./EditorPaneContent";
@@ -32,6 +31,7 @@ export function EditorArea() {
     selectPage,
     openPageInNewPane,
     openTabInPane,
+    closeAllTabsInPane,
     updatePageContent,
     loadPages,
     createPage,
@@ -58,12 +58,6 @@ export function EditorArea() {
   const { viewerState, closeViewer } = usePDFStore();
   const { viewerState: videoViewerState } = useVideoStore();
   const { annotationState } = useDrawingStore();
-  const {
-    openTabs,
-    openTab,
-    closeTab,
-    updateTabTitle,
-  } = useTabStore();
   const panelWidths = useThemeStore((state) => state.panelWidths);
   const setPanelWidth = useThemeStore((state) => state.setPanelWidth);
   const autoHidePanels = useThemeStore((state) => state.autoHidePanels);
@@ -157,12 +151,25 @@ export function EditorArea() {
     }
   }, [selectedNotebookId]);
 
+  // Track previous section ID to detect actual section changes
+  const prevSectionIdRef = useRef(selectedSectionId);
+
+  // Clear non-pinned tabs when switching sections
+  useEffect(() => {
+    if (prevSectionIdRef.current !== selectedSectionId) {
+      // Clear tabs in all panes when section changes
+      panes.forEach((pane) => {
+        closeAllTabsInPane(pane.id);
+      });
+      prevSectionIdRef.current = selectedSectionId;
+    }
+  }, [selectedSectionId, closeAllTabsInPane, panes]);
+
   // Memoize filtered pages to prevent infinite re-renders
   const notebookPages = useMemo(
     () => pages.filter((p) => p.notebookId === selectedNotebookId),
     [pages, selectedNotebookId]
   );
-  const selectedPage = pages.find((p) => p.id === selectedPageId);
 
   // Count pages without a section assigned (for hiding "All" in section list)
   const unassignedPagesCount = useMemo(
@@ -177,57 +184,17 @@ export function EditorArea() {
     }
   }, [notebookPages, buildLinksFromPages]);
 
-  // Sync tab with selected page (when page is already open in a tab)
-  useEffect(() => {
-    if (selectedPageId && selectedNotebookId) {
-      const page = pages.find((p) => p.id === selectedPageId);
-      if (page) {
-        // Check if page is already open as a tab
-        const isAlreadyOpen = openTabs.some((t) => t.pageId === selectedPageId);
-        if (isAlreadyOpen) {
-          // Just activate the existing tab
-          openTab(page.id, page.notebookId, page.title);
-        }
-        // If not already open, handleSelectPage will handle opening it
-      }
-    }
-  }, [selectedPageId, selectedNotebookId, pages, openTab, openTabs]);
-
-  // Sync tab title when page title changes
-  useEffect(() => {
-    if (selectedPage) {
-      updateTabTitle(selectedPage.id, selectedPage.title);
-    }
-  }, [selectedPage?.title, selectedPage?.id, updateTabTitle]);
-
   // Handle page selection with optional new pane
-  // Default behavior: replace the current non-pinned tab (one page at a time)
   const handleSelectPage = useCallback(
     (pageId: string, openInNewPane?: boolean) => {
       if (openInNewPane) {
         openPageInNewPane(pageId);
       } else {
-        // Find the page to get its title
-        const page = pages.find((p) => p.id === pageId);
-        if (!page) return;
-
-        // Check if this page is already open as a tab
-        const isAlreadyOpen = openTabs.some((t) => t.pageId === pageId);
-
-        if (!isAlreadyOpen) {
-          // Close current non-pinned tab to implement "one page at a time" behavior
-          const currentNonPinnedTab = openTabs.find((t) => !t.isPinned);
-          if (currentNonPinnedTab) {
-            closeTab(currentNonPinnedTab.pageId);
-          }
-          // Open the new page as a tab
-          openTab(pageId, page.notebookId, page.title);
-        }
-
+        // Tab replacement is handled in EditorPaneContent
         selectPage(pageId);
       }
     },
-    [selectPage, openPageInNewPane, pages, openTabs, closeTab, openTab]
+    [selectPage, openPageInNewPane]
   );
 
   // Handle opening a page in a new tab within the active pane
@@ -241,15 +208,6 @@ export function EditorArea() {
     [activePaneId, panes, openTabInPane]
   );
 
-  // Close tabs for deleted pages
-  useEffect(() => {
-    const pageIds = new Set(pages.map((p) => p.id));
-    openTabs.forEach((tab) => {
-      if (!pageIds.has(tab.pageId)) {
-        closeTab(tab.pageId);
-      }
-    });
-  }, [pages, openTabs, closeTab]);
 
   // Handle cover page save (auto-save, no git commit)
   const handleCoverSave = useCallback(

@@ -2,19 +2,21 @@ import { useState } from "react";
 import { useAIStore, DEFAULT_SYSTEM_PROMPT } from "../../stores/aiStore";
 import { useWebResearchStore } from "../../stores/webResearchStore";
 import { ThemeSettings } from "./ThemeSettings";
+import { KeybindingsSettings } from "./KeybindingsSettings";
 import { LibrarySettingsPanel } from "../Library";
 import type { ProviderType, ProviderConfig } from "../../types/ai";
 
 interface SettingsDialogProps {
   isOpen: boolean;
   onClose: () => void;
-  initialTab?: "ai" | "web-research" | "theme" | "system-prompt" | "libraries";
+  initialTab?: "ai" | "web-research" | "theme" | "system-prompt" | "libraries" | "keybindings";
 }
 
-type TabId = "ai" | "web-research" | "theme" | "system-prompt" | "libraries";
+type TabId = "ai" | "web-research" | "theme" | "system-prompt" | "libraries" | "keybindings";
 
 const TABS: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: "theme", label: "Appearance", icon: <IconPalette /> },
+  { id: "keybindings", label: "Keyboard Shortcuts", icon: <IconKeyboard /> },
   { id: "libraries", label: "Libraries", icon: <IconLibrary /> },
   { id: "ai", label: "AI Providers", icon: <IconSparkles /> },
   { id: "system-prompt", label: "System Prompt", icon: <IconPrompt /> },
@@ -126,6 +128,7 @@ export function SettingsDialog({ isOpen, onClose, initialTab = "theme" }: Settin
           {/* Tab Content */}
           <div className="flex-1 overflow-y-auto p-6">
             {activeTab === "theme" && <ThemeSettings />}
+            {activeTab === "keybindings" && <KeybindingsSettings />}
             {activeTab === "libraries" && <LibrarySettingsPanel />}
             {activeTab === "ai" && <AISettingsContent />}
             {activeTab === "system-prompt" && <SystemPromptSettingsContent />}
@@ -1268,6 +1271,33 @@ function IconChevronRight() {
       strokeLinejoin="round"
     >
       <polyline points="9 18 15 12 9 6" />
+    </svg>
+  );
+}
+
+function IconKeyboard() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="2" y="4" width="20" height="16" rx="2" />
+      <path d="M6 8h.01" />
+      <path d="M10 8h.01" />
+      <path d="M14 8h.01" />
+      <path d="M18 8h.01" />
+      <path d="M6 12h.01" />
+      <path d="M10 12h.01" />
+      <path d="M14 12h.01" />
+      <path d="M18 12h.01" />
+      <path d="M8 16h8" />
     </svg>
   );
 }

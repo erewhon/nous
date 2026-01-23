@@ -1,4 +1,5 @@
 import { useEffect, useCallback } from "react";
+import { useKeybindingsStore, type KeybindingAction } from "../stores/keybindingsStore";
 
 interface KeyboardShortcuts {
   onCommandPalette?: () => void;
@@ -18,133 +19,61 @@ interface KeyboardShortcuts {
   onFlashcards?: () => void;
 }
 
-export function useKeyboardShortcuts({
-  onCommandPalette,
-  onNewPage,
-  onNewNotebook,
-  onGraph,
-  onAI,
-  onWebResearch,
-  onSettings,
-  onExportPage,
-  onDuplicatePage,
-  onDeletePage,
-  onTagManager,
-  onActions,
-  onQuickCapture,
-  onInbox,
-  onFlashcards,
-}: KeyboardShortcuts) {
+// Map action names to callback property names
+const ACTION_TO_CALLBACK: Record<KeybindingAction, keyof KeyboardShortcuts> = {
+  commandPalette: "onCommandPalette",
+  newPage: "onNewPage",
+  newNotebook: "onNewNotebook",
+  graph: "onGraph",
+  aiChat: "onAI",
+  webResearch: "onWebResearch",
+  settings: "onSettings",
+  exportPage: "onExportPage",
+  duplicatePage: "onDuplicatePage",
+  deletePage: "onDeletePage",
+  tagManager: "onTagManager",
+  actions: "onActions",
+  quickCapture: "onQuickCapture",
+  inbox: "onInbox",
+  flashcards: "onFlashcards",
+};
+
+export function useKeyboardShortcuts(callbacks: KeyboardShortcuts) {
+  const keybindings = useKeybindingsStore((state) => state.keybindings);
+
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
       const isMod = e.metaKey || e.ctrlKey;
 
-      // Command Palette: Cmd+K / Ctrl+K
-      if (isMod && e.key === "k") {
-        e.preventDefault();
-        onCommandPalette?.();
-        return;
-      }
+      // Only process if at least the mod key is pressed
+      if (!isMod) return;
 
-      // New Page: Cmd+N / Ctrl+N
-      if (isMod && e.key === "n" && !e.shiftKey) {
-        e.preventDefault();
-        onNewPage?.();
-        return;
-      }
+      // Get the pressed key (normalize to lowercase for comparison)
+      const pressedKey = e.key.length === 1 ? e.key.toLowerCase() : e.key;
 
-      // New Notebook: Cmd+Shift+N / Ctrl+Shift+N
-      if (isMod && e.key === "N" && e.shiftKey) {
-        e.preventDefault();
-        onNewNotebook?.();
-        return;
-      }
+      // Check each keybinding
+      for (const keybinding of keybindings) {
+        const matchesMod = keybinding.modifiers.ctrl === isMod;
+        const matchesShift = keybinding.modifiers.shift === e.shiftKey;
+        const matchesAlt = keybinding.modifiers.alt === e.altKey;
+        const matchesKey = keybinding.key.toLowerCase() === pressedKey;
 
-      // Graph View: Cmd+G / Ctrl+G
-      if (isMod && e.key === "g") {
-        e.preventDefault();
-        onGraph?.();
-        return;
-      }
+        if (matchesMod && matchesShift && matchesAlt && matchesKey) {
+          e.preventDefault();
 
-      // AI Chat: Cmd+Shift+A / Ctrl+Shift+A
-      if (isMod && e.shiftKey && (e.key === "a" || e.key === "A")) {
-        e.preventDefault();
-        onAI?.();
-        return;
-      }
+          // Get the callback for this action
+          const callbackName = ACTION_TO_CALLBACK[keybinding.action];
+          const callback = callbacks[callbackName];
 
-      // Web Research: Cmd+Shift+W / Ctrl+Shift+W
-      if (isMod && e.shiftKey && (e.key === "w" || e.key === "W")) {
-        e.preventDefault();
-        onWebResearch?.();
-        return;
-      }
+          if (callback) {
+            callback();
+          }
 
-      // Settings: Cmd+, / Ctrl+,
-      if (isMod && e.key === ",") {
-        e.preventDefault();
-        onSettings?.();
-        return;
-      }
-
-      // Export Page: Cmd+E / Ctrl+E
-      if (isMod && e.key === "e" && !e.shiftKey) {
-        e.preventDefault();
-        onExportPage?.();
-        return;
-      }
-
-      // Duplicate Page: Cmd+D / Ctrl+D
-      if (isMod && e.key === "d" && !e.shiftKey) {
-        e.preventDefault();
-        onDuplicatePage?.();
-        return;
-      }
-
-      // Delete Page: Cmd+Backspace / Ctrl+Backspace
-      if (isMod && e.key === "Backspace" && !e.shiftKey) {
-        e.preventDefault();
-        onDeletePage?.();
-        return;
-      }
-
-      // Tag Manager: Cmd+T / Ctrl+T
-      if (isMod && e.key === "t" && !e.shiftKey) {
-        e.preventDefault();
-        onTagManager?.();
-        return;
-      }
-
-      // Actions Library: Cmd+Shift+X / Ctrl+Shift+X
-      if (isMod && e.shiftKey && (e.key === "x" || e.key === "X")) {
-        e.preventDefault();
-        onActions?.();
-        return;
-      }
-
-      // Quick Capture: Cmd+Shift+C / Ctrl+Shift+C
-      if (isMod && e.shiftKey && (e.key === "c" || e.key === "C")) {
-        e.preventDefault();
-        onQuickCapture?.();
-        return;
-      }
-
-      // Inbox: Cmd+Shift+I / Ctrl+Shift+I
-      if (isMod && e.shiftKey && (e.key === "i" || e.key === "I")) {
-        e.preventDefault();
-        onInbox?.();
-        return;
-      }
-
-      // Flashcards: Cmd+Shift+F / Ctrl+Shift+F
-      if (isMod && e.shiftKey && (e.key === "f" || e.key === "F")) {
-        e.preventDefault();
-        onFlashcards?.();
-        return;
+          return;
+        }
       }
     },
-    [onCommandPalette, onNewPage, onNewNotebook, onGraph, onAI, onWebResearch, onSettings, onExportPage, onDuplicatePage, onDeletePage, onTagManager, onActions, onQuickCapture, onInbox, onFlashcards]
+    [keybindings, callbacks]
   );
 
   useEffect(() => {

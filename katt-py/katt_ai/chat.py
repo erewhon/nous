@@ -13,6 +13,7 @@ from katt_ai.models import (
     ProviderType,
 )
 from katt_ai.providers import get_provider
+from katt_ai.browser_automation import BROWSER_USE_AVAILABLE
 
 
 def _split_into_chunks(text: str, chunk_size: int = 20) -> Generator[str, None, None]:
@@ -155,29 +156,35 @@ NOTEBOOK_TOOLS = [
             }
         }
     },
-    {
-        "type": "function",
-        "function": {
-            "name": "browse_web",
-            "description": "Use an AI-controlled browser to interact with websites. Use this when you need to: navigate dynamic/JavaScript-heavy pages, fill forms, click buttons, log in to sites, or extract data that requires browser interaction. The browser will autonomously complete the task you describe.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "task": {
-                        "type": "string",
-                        "description": "Detailed description of what to do in the browser. Be specific about: the website to visit, actions to take, and what information to extract. Example: 'Go to github.com/browser-use/browser-use and extract the number of stars and the latest release version'"
-                    },
-                    "capture_screenshot": {
-                        "type": "boolean",
-                        "description": "Whether to capture a screenshot of the final page state",
-                        "default": False
-                    }
+]
+
+# Browser tool - only included if browser-use is installed
+BROWSER_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "browse_web",
+        "description": "Use an AI-controlled browser to interact with websites. Use this when you need to: navigate dynamic/JavaScript-heavy pages, fill forms, click buttons, log in to sites, or extract data that requires browser interaction. The browser will autonomously complete the task you describe.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "task": {
+                    "type": "string",
+                    "description": "Detailed description of what to do in the browser. Be specific about: the website to visit, actions to take, and what information to extract. Example: 'Go to github.com/browser-use/browser-use and extract the number of stars and the latest release version'"
                 },
-                "required": ["task"]
-            }
+                "capture_screenshot": {
+                    "type": "boolean",
+                    "description": "Whether to capture a screenshot of the final page state",
+                    "default": False
+                }
+            },
+            "required": ["task"]
         }
     }
-]
+}
+
+# Add browser tool only if browser-use is available
+if BROWSER_USE_AVAILABLE:
+    NOTEBOOK_TOOLS.append(BROWSER_TOOL)
 
 
 async def chat(

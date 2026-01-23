@@ -79,7 +79,7 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
     getActiveApiKey,
     getEnabledModels,
   } = useAIStore();
-  const { selectedPageId, pages, loadPages } = usePageStore();
+  const { selectedPageId, pages, loadPages, updatePageContent, createPage, createSubpage } = usePageStore();
   const { notebooks, selectedNotebookId, loadNotebooks } = useNotebookStore();
   const { sections } = useSectionStore();
 
@@ -270,6 +270,222 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
       .filter(Boolean)
       .join("\n");
   }, []);
+
+  // Convert inline markdown to HTML for Editor.js
+  const convertInlineMarkdown = useCallback((text: string): string => {
+    let result = text;
+
+    // Bold: **text** or __text__
+    result = result.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
+    result = result.replace(/__(.+?)__/g, "<b>$1</b>");
+
+    // Italic: *text* or _text_ (but not inside words)
+    result = result.replace(/(?<!\w)\*([^*]+?)\*(?!\w)/g, "<i>$1</i>");
+    result = result.replace(/(?<!\w)_([^_]+?)_(?!\w)/g, "<i>$1</i>");
+
+    // Inline code: `code`
+    result = result.replace(/`([^`]+?)`/g, "<code>$1</code>");
+
+    // Links: [text](url)
+    result = result.replace(/\[([^\]]+?)\]\(([^)]+?)\)/g, '<a href="$2">$1</a>');
+
+    // Strikethrough: ~~text~~
+    result = result.replace(/~~(.+?)~~/g, "<s>$1</s>");
+
+    return result;
+  }, []);
+
+  // Convert markdown text to Editor.js blocks
+  const markdownToBlocks = useCallback((markdown: string): Array<{ id: string; type: string; data: Record<string, unknown> }> => {
+    const blocks: Array<{ id: string; type: string; data: Record<string, unknown> }> = [];
+    const lines = markdown.split("\n");
+    let i = 0;
+
+    while (i < lines.length) {
+      const line = lines[i];
+
+      // Skip empty lines
+      if (!line.trim()) {
+        i++;
+        continue;
+      }
+
+      // Headers
+      const headerMatch = line.match(/^(#{1,6})\s+(.+)$/);
+      if (headerMatch) {
+        const level = Math.min(headerMatch[1].length, 6);
+        blocks.push({
+          id: crypto.randomUUID(),
+          type: "header",
+          data: { text: convertInlineMarkdown(headerMatch[2]), level },
+        });
+        i++;
+        continue;
+      }
+
+      // Unordered list (collect consecutive items)
+      if (line.match(/^[-*+]\s+/)) {
+        const items: string[] = [];
+        while (i < lines.length && lines[i].match(/^[-*+]\s+/)) {
+          items.push(convertInlineMarkdown(lines[i].replace(/^[-*+]\s+/, "")));
+          i++;
+        }
+        blocks.push({
+          id: crypto.randomUUID(),
+          type: "list",
+          data: { style: "unordered", items },
+        });
+        continue;
+      }
+
+      // Ordered list (collect consecutive items)
+      if (line.match(/^\d+\.\s+/)) {
+        const items: string[] = [];
+        while (i < lines.length && lines[i].match(/^\d+\.\s+/)) {
+          items.push(convertInlineMarkdown(lines[i].replace(/^\d+\.\s+/, "")));
+          i++;
+        }
+        blocks.push({
+          id: crypto.randomUUID(),
+          type: "list",
+          data: { style: "ordered", items },
+        });
+        continue;
+      }
+
+      // Code block
+      if (line.startsWith("```")) {
+        const lang = line.slice(3).trim();
+        const codeLines: string[] = [];
+        i++;
+        while (i < lines.length && !lines[i].startsWith("```")) {
+          codeLines.push(lines[i]);
+          i++;
+        }
+        blocks.push({
+          id: crypto.randomUUID(),
+          type: "code",
+          data: { code: codeLines.join("\n"), language: lang || "plaintext" },
+        });
+        i++; // Skip closing ```
+        continue;
+      }
+
+      // Blockquote (collect consecutive lines)
+      if (line.startsWith("> ")) {
+        const quoteLines: string[] = [];
+        while (i < lines.length && lines[i].startsWith("> ")) {
+          quoteLines.push(lines[i].slice(2));
+          i++;
+        }
+        blocks.push({
+          id: crypto.randomUUID(),
+          type: "quote",
+          data: { text: convertInlineMarkdown(quoteLines.join("\n")), caption: "" },
+        });
+        continue;
+      }
+
+      // Regular paragraph - convert inline markdown to HTML
+      blocks.push({
+        id: crypto.randomUUID(),
+        type: "paragraph",
+        data: { text: convertInlineMarkdown(line) },
+      });
+      i++;
+    }
+
+    return blocks;
+  }, [convertInlineMarkdown]);
+
+  // Append AI response to the current page
+  const handleAppendToPage = useCallback(async (content: string) => {
+    if (!currentPage || !selectedNotebookId) return;
+
+    // Convert markdown to blocks
+    const newBlocks = markdownToBlocks(content);
+
+    // Get existing blocks and append new ones
+    const existingBlocks = currentPage.content?.blocks || [];
+    const updatedContent: EditorData = {
+      time: Date.now(),
+      version: "2.28.2",
+      blocks: [...existingBlocks, ...newBlocks],
+    };
+
+    await updatePageContent(selectedNotebookId, currentPage.id, updatedContent);
+
+    // Reload pages to refresh the view
+    await loadPages(selectedNotebookId);
+
+    setCreatedItems(prev => [...prev, { type: "info", name: `Appended to "${currentPage.title}"` }]);
+  }, [currentPage, selectedNotebookId, markdownToBlocks, updatePageContent, loadPages]);
+
+  // Create a new page with the AI response
+  const handleCreateNewPage = useCallback(async (content: string) => {
+    if (!selectedNotebookId) return;
+
+    // Generate a title from the first line or heading
+    const firstLine = content.split("\n").find(l => l.trim());
+    let title = "AI Response";
+    if (firstLine) {
+      // Remove markdown header syntax if present
+      title = firstLine.replace(/^#+\s*/, "").slice(0, 50);
+      if (title.length === 50) title += "...";
+    }
+
+    // Create the page
+    const newPage = await createPage(selectedNotebookId, title);
+    if (!newPage) return;
+
+    // Convert markdown to blocks and update the page
+    const blocks = markdownToBlocks(content);
+    const pageContent: EditorData = {
+      time: Date.now(),
+      version: "2.28.2",
+      blocks,
+    };
+
+    await updatePageContent(selectedNotebookId, newPage.id, pageContent);
+
+    // Reload pages
+    await loadPages(selectedNotebookId);
+
+    setCreatedItems(prev => [...prev, { type: "page", name: title }]);
+  }, [selectedNotebookId, markdownToBlocks, createPage, updatePageContent, loadPages]);
+
+  // Create a subpage under the current page with the AI response
+  const handleCreateSubpage = useCallback(async (content: string) => {
+    if (!selectedNotebookId || !currentPage) return;
+
+    // Generate a title from the first line or heading
+    const firstLine = content.split("\n").find(l => l.trim());
+    let title = "AI Response";
+    if (firstLine) {
+      // Remove markdown header syntax if present
+      title = firstLine.replace(/^#+\s*/, "").slice(0, 50);
+      if (title.length === 50) title += "...";
+    }
+
+    // Create the subpage
+    const newPage = await createSubpage(selectedNotebookId, currentPage.id, title);
+    if (!newPage) return;
+
+    // Convert markdown to blocks and update the page
+    const blocks = markdownToBlocks(content);
+    const pageContent: EditorData = {
+      time: Date.now(),
+      version: "2.28.2",
+      blocks,
+    };
+
+    await updatePageContent(selectedNotebookId, newPage.id, pageContent);
+
+    // Reload pages
+    await loadPages(selectedNotebookId);
+
+    setCreatedItems(prev => [...prev, { type: "page", name: `${title} (subpage of ${currentPage.title})` }]);
+  }, [selectedNotebookId, currentPage, markdownToBlocks, createSubpage, updatePageContent, loadPages]);
 
   // Execute AI actions (create notebooks/pages)
   const executeActions = useCallback(async (actions: AIAction[]): Promise<CreatedItem[]> => {
@@ -1152,6 +1368,121 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
                           {msg.stats.model}
                         </span>
                       )}
+                    </div>
+                  )}
+                  {/* Action buttons for assistant messages */}
+                  {msg.role === "assistant" && msg.content && (
+                    <div className="mt-3 flex items-center gap-2">
+                      {currentPage && selectedNotebookId && (
+                        <button
+                          onClick={() => handleAppendToPage(msg.content)}
+                          className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs transition-colors hover:opacity-80"
+                          style={{
+                            backgroundColor: "var(--color-bg-tertiary)",
+                            color: "var(--color-text-secondary)",
+                          }}
+                          title={`Append to "${currentPage.title}"`}
+                        >
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            width="12"
+                            height="12"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          >
+                            <path d="M12 5v14M5 12h14" />
+                          </svg>
+                          Append to Page
+                        </button>
+                      )}
+                      {selectedNotebookId && (
+                        <button
+                          onClick={() => handleCreateNewPage(msg.content)}
+                          className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs transition-colors hover:opacity-80"
+                          style={{
+                            backgroundColor: "var(--color-bg-tertiary)",
+                            color: "var(--color-text-secondary)",
+                          }}
+                          title="Create new page with this content"
+                        >
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            width="12"
+                            height="12"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          >
+                            <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+                            <polyline points="14 2 14 8 20 8" />
+                            <line x1="12" y1="18" x2="12" y2="12" />
+                            <line x1="9" y1="15" x2="15" y2="15" />
+                          </svg>
+                          New Page
+                        </button>
+                      )}
+                      {currentPage && selectedNotebookId && (
+                        <button
+                          onClick={() => handleCreateSubpage(msg.content)}
+                          className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs transition-colors hover:opacity-80"
+                          style={{
+                            backgroundColor: "var(--color-bg-tertiary)",
+                            color: "var(--color-text-secondary)",
+                          }}
+                          title={`Create subpage under "${currentPage.title}"`}
+                        >
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            width="12"
+                            height="12"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          >
+                            <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+                            <polyline points="14 2 14 8 20 8" />
+                            <path d="M9 15h6" />
+                            <path d="M12 18v-6" />
+                            <path d="M9 9l3 3 3-3" />
+                          </svg>
+                          Subpage
+                        </button>
+                      )}
+                      <button
+                        onClick={() => navigator.clipboard.writeText(msg.content)}
+                        className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs transition-colors hover:opacity-80"
+                        style={{
+                          backgroundColor: "var(--color-bg-tertiary)",
+                          color: "var(--color-text-secondary)",
+                        }}
+                        title="Copy to clipboard"
+                      >
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          width="12"
+                          height="12"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
+                          <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                        </svg>
+                        Copy
+                      </button>
                     </div>
                   )}
                 </div>
