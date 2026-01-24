@@ -147,7 +147,17 @@ export const usePageStore = create<PageStore>()(
   loadPages: async (notebookId, includeArchived) => {
     set({ isLoading: true, error: null });
     try {
-      const pages = await api.listPages(notebookId, includeArchived);
+      const loadedPages = await api.listPages(notebookId, includeArchived);
+      // Deduplicate pages by ID (keep first occurrence)
+      const seen = new Set<string>();
+      const pages = loadedPages.filter((p) => {
+        if (seen.has(p.id)) {
+          console.warn('[pageStore] Duplicate page ID from API:', p.id, p.title);
+          return false;
+        }
+        seen.add(p.id);
+        return true;
+      });
       set({ pages, isLoading: false });
     } catch (err) {
       set({
@@ -166,7 +176,8 @@ export const usePageStore = create<PageStore>()(
     try {
       const page = await api.createPage(notebookId, title, folderId, parentPageId, sectionId);
       set((state) => ({
-        pages: [page, ...state.pages],
+        // Filter out any existing page with same ID before adding (prevents duplicates)
+        pages: [page, ...state.pages.filter(p => p.id !== page.id)],
         selectedPageId: page.id,
       }));
       return page;
@@ -189,7 +200,8 @@ export const usePageStore = create<PageStore>()(
 
       const page = await api.createPage(notebookId, title, folderId, parentPageId, sectionId);
       set((state) => ({
-        pages: [page, ...state.pages],
+        // Filter out any existing page with same ID before adding (prevents duplicates)
+        pages: [page, ...state.pages.filter(p => p.id !== page.id)],
         selectedPageId: page.id,
       }));
       return page;
@@ -269,7 +281,8 @@ export const usePageStore = create<PageStore>()(
       }
 
       set((state) => ({
-        pages: [newPage, ...state.pages],
+        // Filter out any existing page with same ID before adding (prevents duplicates)
+        pages: [newPage, ...state.pages.filter(p => p.id !== newPage.id)],
         selectedPageId: newPage.id,
       }));
     } catch (err) {

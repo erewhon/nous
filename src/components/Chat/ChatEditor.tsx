@@ -20,8 +20,8 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import type { Page } from "../../types/page";
-import type { StreamEvent, ChatMessage } from "../../types/ai";
+import type { Page, EditorData } from "../../types/page";
+import type { StreamEvent, ChatMessage, AIAction, CreateNotebookArgs, CreatePageArgs } from "../../types/ai";
 import {
   type ChatCell,
   type ChatPageContent,
@@ -33,8 +33,23 @@ import {
   getCellsForBranch,
 } from "../../types/chat";
 import * as api from "../../utils/api";
+import {
+  createNotebook as apiCreateNotebook,
+  createPage as apiCreatePage,
+  updatePage as apiUpdatePage,
+  runBrowserTask,
+} from "../../utils/api";
 import { useAIStore } from "../../stores/aiStore";
 import { useNotebookStore } from "../../stores/notebookStore";
+import { usePageStore } from "../../stores/pageStore";
+
+// Track created items to show in UI
+interface CreatedItem {
+  type: "notebook" | "page" | "action" | "info" | "browser";
+  name: string;
+  notebookName?: string;
+  browserResult?: string;
+}
 
 interface ChatEditorProps {
   page: Page;
@@ -62,8 +77,11 @@ export function ChatEditor({ page, notebookId, className = "" }: ChatEditorProps
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  const { settings, getActiveProviderType, getActiveApiKey } = useAIStore();
-  const { notebooks, selectedNotebookId } = useNotebookStore();
+  const [createdItems, setCreatedItems] = useState<CreatedItem[]>([]);
+
+  const { settings, getActiveProviderType, getActiveApiKey, getActiveModel } = useAIStore();
+  const { notebooks, selectedNotebookId, loadNotebooks } = useNotebookStore();
+  const { loadPages } = usePageStore();
   const currentNotebook = notebooks.find((n) => n.id === selectedNotebookId);
 
   // Load chat content
@@ -220,6 +238,150 @@ export function ChatEditor({ page, notebookId, className = "" }: ChatEditorProps
     [page.title]
   );
 
+  // Execute AI actions (create notebooks/pages)
+  const executeActions = useCallback(async (actions: AIAction[]): Promise<CreatedItem[]> => {
+    const created: CreatedItem[] = [];
+    let needsNotebookRefresh = false;
+    let notebooksSnapshot = [...notebooks];
+
+    for (const action of actions) {
+      try {
+        if (action.tool === "create_notebook") {
+          const args = action.arguments as unknown as CreateNotebookArgs;
+          const newNotebook = await apiCreateNotebook(args.name);
+          notebooksSnapshot.push(newNotebook);
+          needsNotebookRefresh = true;
+          created.push({ type: "notebook", name: args.name });
+        } else if (action.tool === "run_action") {
+          const args = action.arguments as unknown as { action_name: string; variables?: Record<string, string> };
+          try {
+            const result = await api.runActionByName(args.action_name, {
+              variables: args.variables,
+              currentNotebookId: selectedNotebookId || undefined,
+            });
+            created.push({
+              type: "action",
+              name: args.action_name,
+              notebookName: `${result.stepsCompleted} steps completed`,
+            });
+            if (selectedNotebookId) {
+              await loadPages(selectedNotebookId);
+            }
+          } catch (error) {
+            console.error(`Failed to run action ${args.action_name}:`, error);
+          }
+        } else if (action.tool === "list_actions") {
+          created.push({
+            type: "info",
+            name: "Listed available actions",
+          });
+        } else if (action.tool === "browse_web") {
+          const args = action.arguments as unknown as { task: string; capture_screenshot?: boolean };
+          try {
+            const activeApiKey = getActiveApiKey();
+            if (!activeApiKey) {
+              created.push({
+                type: "browser",
+                name: "Browser task",
+                browserResult: "Error: No API key configured for AI provider",
+              });
+              continue;
+            }
+            const result = await runBrowserTask(
+              args.task,
+              getActiveProviderType(),
+              activeApiKey,
+              getActiveModel(),
+              args.capture_screenshot ?? false
+            );
+            if (result.success) {
+              created.push({
+                type: "browser",
+                name: "Browser task completed",
+                browserResult: result.content,
+              });
+            } else {
+              created.push({
+                type: "browser",
+                name: "Browser task failed",
+                browserResult: result.error || "Unknown error",
+              });
+            }
+          } catch (error) {
+            console.error("Browser automation error:", error);
+            created.push({
+              type: "browser",
+              name: "Browser task error",
+              browserResult: String(error),
+            });
+          }
+        } else if (action.tool === "create_page") {
+          const args = action.arguments as unknown as CreatePageArgs;
+
+          let targetNotebookId = selectedNotebookId;
+          let targetNotebookName = currentNotebook?.name || "current notebook";
+
+          if (args.notebook_name !== "current") {
+            const targetNotebook = notebooksSnapshot.find(
+              (n) => n.name.toLowerCase() === args.notebook_name.toLowerCase()
+            );
+            if (targetNotebook) {
+              targetNotebookId = targetNotebook.id;
+              targetNotebookName = targetNotebook.name;
+            } else {
+              const newNotebook = await apiCreateNotebook(args.notebook_name);
+              notebooksSnapshot.push(newNotebook);
+              needsNotebookRefresh = true;
+              targetNotebookId = newNotebook.id;
+              targetNotebookName = newNotebook.name;
+              created.push({ type: "notebook", name: args.notebook_name });
+            }
+          }
+
+          if (!targetNotebookId) {
+            console.error("No target notebook found for page creation");
+            continue;
+          }
+
+          const newPage = await apiCreatePage(targetNotebookId, args.title);
+
+          const editorData: EditorData = {
+            time: Date.now(),
+            version: "2.28.2",
+            blocks: args.content_blocks.map((block) => ({
+              id: crypto.randomUUID(),
+              type: block.type,
+              data: block.data as Record<string, unknown>,
+            })),
+          };
+
+          const updates: { content: EditorData; tags?: string[] } = { content: editorData };
+          if (args.tags && args.tags.length > 0) {
+            updates.tags = args.tags;
+          }
+          await apiUpdatePage(targetNotebookId, newPage.id, updates);
+
+          created.push({
+            type: "page",
+            name: args.title,
+            notebookName: targetNotebookName,
+          });
+        }
+      } catch (error) {
+        console.error(`Failed to execute action ${action.tool}:`, error);
+      }
+    }
+
+    if (needsNotebookRefresh) {
+      await loadNotebooks();
+    }
+    if (selectedNotebookId && created.some(c => c.type === "page")) {
+      await loadPages(selectedNotebookId);
+    }
+
+    return created;
+  }, [selectedNotebookId, currentNotebook, notebooks, loadNotebooks, loadPages, getActiveApiKey, getActiveProviderType, getActiveModel]);
+
   // Execute a prompt cell
   const executePrompt = useCallback(
     async (promptCellId: string) => {
@@ -271,6 +433,7 @@ export function ChatEditor({ page, notebookId, className = "" }: ChatEditorProps
       let responseModel = "";
       let tokensUsed = 0;
       let unlisten: UnlistenFn | null = null;
+      const pendingActions: AIAction[] = [];
 
       try {
         // Set up event listener for streaming
@@ -286,6 +449,15 @@ export function ChatEditor({ page, notebookId, className = "" }: ChatEditorProps
             case "thinking":
               accumulatedThinking += data.content;
               updateCell(responseCellId, { thinking: accumulatedThinking });
+              break;
+
+            case "action":
+              // Collect actions to execute after stream completes
+              pendingActions.push({
+                tool: data.tool,
+                arguments: data.arguments,
+                toolCallId: data.toolCallId,
+              });
               break;
 
             case "done":
@@ -335,6 +507,12 @@ export function ChatEditor({ page, notebookId, className = "" }: ChatEditorProps
           systemPrompt: systemPrompt,
         });
 
+        // Execute any pending actions (create pages, notebooks, etc.)
+        if (pendingActions.length > 0) {
+          const created = await executeActions(pendingActions);
+          setCreatedItems(created);
+        }
+
         const elapsedMs = Date.now() - startTime;
         const tokensPerSecond =
           tokensUsed && elapsedMs > 0 ? Math.round((tokensUsed / elapsedMs) * 1000) : undefined;
@@ -376,6 +554,7 @@ export function ChatEditor({ page, notebookId, className = "" }: ChatEditorProps
       getActiveProviderType,
       getActiveApiKey,
       processTemplateVariables,
+      executeActions,
     ]
   );
 
@@ -824,6 +1003,40 @@ export function ChatEditor({ page, notebookId, className = "" }: ChatEditorProps
           onUpdate={updateSettings}
           onClose={() => setShowSettings(false)}
         />
+      )}
+
+      {/* Created Items Notification */}
+      {createdItems.length > 0 && (
+        <div
+          className="mx-4 mt-4 rounded-lg border p-3"
+          style={{
+            backgroundColor: "rgba(34, 197, 94, 0.1)",
+            borderColor: "var(--color-success, #22c55e)",
+          }}
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span style={{ color: "var(--color-success, #22c55e)" }}>Created {createdItems.length} item{createdItems.length !== 1 ? "s" : ""}</span>
+              <span className="text-sm" style={{ color: "var(--color-text-muted)" }}>
+                {createdItems.map((item, i) => (
+                  <span key={i}>
+                    {i > 0 && ", "}
+                    {item.type === "page" ? `Page: ${item.name}` :
+                     item.type === "notebook" ? `Notebook: ${item.name}` :
+                     item.type === "action" ? `Action: ${item.name}` : item.name}
+                  </span>
+                ))}
+              </span>
+            </div>
+            <button
+              onClick={() => setCreatedItems([])}
+              className="p-1 rounded hover:bg-[--color-bg-tertiary]"
+              style={{ color: "var(--color-text-muted)" }}
+            >
+              <IconX />
+            </button>
+          </div>
+        </div>
       )}
 
       {/* Cells */}

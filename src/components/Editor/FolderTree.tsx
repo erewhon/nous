@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -232,7 +232,17 @@ export function FolderTree({
       // string means a specific section
       filtered = filtered.filter((p) => (p.sectionId ?? null) === selectedSectionId);
     }
-    return filtered;
+    // Deduplicate by ID (defensive - shouldn't happen but prevents React key errors)
+    const seen = new Set<string>();
+    const deduplicated = filtered.filter((p) => {
+      if (seen.has(p.id)) {
+        console.warn('[FolderTree] Duplicate page filtered out:', p.id, p.title);
+        return false;
+      }
+      seen.add(p.id);
+      return true;
+    });
+    return deduplicated;
   }, [pages, showArchived, sectionsEnabled, selectedSectionId]);
 
   // Filter folders by section
@@ -247,8 +257,27 @@ export function FolderTree({
   // Get top-level pages for a specific folder (pages without a parent page)
   const getPagesForFolder = useCallback(
     (folderId: string | null) => {
-      const filtered = visiblePages.filter((p) => (p.folderId ?? null) === folderId && !p.parentPageId);
-      return sortPages(filtered);
+      const filtered = visiblePages.filter((p) => {
+        const folderMatch = (p.folderId ?? null) === folderId;
+        // Use a simple truthy check - if parentPageId has any value, it's a child page
+        const noParent = !p.parentPageId;
+
+        // Safety check: if this page has parentPageId but passed the noParent check, something is wrong
+        if (p.parentPageId && noParent) {
+          console.error('[getPagesForFolder] CRITICAL BUG - page has parentPageId but noParent is true:', {
+            id: p.id,
+            title: p.title,
+            parentPageId: p.parentPageId,
+            parentPageIdType: typeof p.parentPageId,
+            parentPageIdValue: JSON.stringify(p.parentPageId),
+            noParent,
+          });
+        }
+
+        return folderMatch && noParent;
+      });
+      const sorted = sortPages(filtered);
+      return sorted;
     },
     [visiblePages, sortPages]
   );
@@ -256,8 +285,18 @@ export function FolderTree({
   // Get child pages for a specific parent page
   const getChildPagesForParent = useCallback(
     (parentPageId: string) => {
-      const filtered = visiblePages.filter((p) => p.parentPageId === parentPageId);
-      return sortPages(filtered);
+      // Only return pages that have this specific parentPageId (non-empty string)
+      const filtered = visiblePages.filter((p) =>
+        p.parentPageId && p.parentPageId === parentPageId
+      );
+      const sorted = sortPages(filtered);
+      // Debug: Check for duplicates
+      const ids = sorted.map(p => p.id);
+      const duplicates = ids.filter((id, i) => ids.indexOf(id) !== i);
+      if (duplicates.length > 0) {
+        console.error('[FolderTree] Duplicate IDs in getChildPagesForParent:', duplicates, 'parentPageId:', parentPageId);
+      }
+      return sorted;
     },
     [visiblePages, sortPages]
   );
@@ -767,6 +806,19 @@ END:VCALENDAR`;
   const rootFolders = getChildFolders(null);
   const rootPages = getPagesForFolder(null);
 
+  // Debug: Check for pages that incorrectly appear in rootPages
+  useEffect(() => {
+    // Check if any page with parentPageId is in rootPages (should never happen)
+    const badPages = rootPages.filter(p => p.parentPageId);
+    if (badPages.length > 0) {
+      console.error('[FolderTree] BUG: Pages with parentPageId found in rootPages:', badPages.map(p => ({
+        id: p.id,
+        title: p.title,
+        parentPageId: p.parentPageId,
+      })));
+    }
+  }, [rootPages]);
+
   // Count archived pages
   const archivedCount = pages.filter((p) => p.isArchived).length;
 
@@ -1227,7 +1279,7 @@ END:VCALENDAR`;
               {/* Root-level pages (no folder) - use draggable version */}
               {rootPages.map((page) => (
                 <DraggablePageItem
-                  key={page.id}
+                  key={`root-${page.id}`}
                   page={page}
                   isSelected={selectedPageId === page.id}
                   depth={-1}

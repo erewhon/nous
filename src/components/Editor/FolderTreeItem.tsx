@@ -370,7 +370,7 @@ export const FolderTreeItem = memo(function FolderTreeItem({
           {/* Pages in folder - use draggable version with nested support */}
           {pages.map((page) => (
             <DraggablePageItem
-              key={page.id}
+              key={`folder-${folder.id}-${page.id}`}
               page={page}
               isSelected={selectedPageId === page.id}
               depth={depth + 1}
@@ -863,7 +863,7 @@ const DraggablePageItem = memo(function DraggablePageItem({
           <ul className="w-full">
             {childPages.map((childPage) => (
               <DraggablePageItem
-                key={childPage.id}
+                key={`child-${page.id}-${childPage.id}`}
                 page={childPage}
                 isSelected={selectedPageId === childPage.id}
                 depth={depth + 1}

@@ -382,21 +382,28 @@ async def chat_with_tools(
     # Build messages
     messages: list[dict[str, Any]] = []
 
+    # Strong tool usage instructions - always appended
+    tool_instructions = """
+CRITICAL TOOL USAGE INSTRUCTIONS:
+You have tools available: create_page, create_notebook, run_action, list_actions.
+
+When the user asks you to "create", "write", "make", "generate", or "save" ANY content (code, notes, documentation, etc.):
+1. You MUST use the create_page tool to actually create the page
+2. Do NOT just write the content in your response - actually CALL the create_page tool
+3. The create_page tool takes: notebook_name ("current" for selected notebook), title, content_blocks (array), and optional tags
+4. After calling create_page, provide a brief summary of what you created
+
+Example: If user says "Create a Python function that calculates factorial" - you should call create_page with the code, NOT just write the code in your response.
+"""
+
     # Build system prompt - use custom prompt if provided, otherwise use default
     if system_prompt:
         system_parts = [system_prompt]
-        # Add tool usage instructions even with custom prompt
-        system_parts.append(
-            "\nYou have the ability to create notebooks, pages, and run custom actions for the user. "
-            "When asked to create content or run workflows, use the available tools."
-        )
+        system_parts.append(tool_instructions)
     else:
         system_parts = [
             "You are a helpful AI assistant integrated into a personal notebook application called Katt.",
-            "You have the ability to create notebooks, pages, and run custom actions for the user.",
-            "When the user asks to create content, organize notes, or set up a system (like Agile Results, GTD, etc.), use the available tools.",
-            "When the user mentions running their 'daily goals', 'weekly review', or any workflow, use the run_action tool.",
-            "Create well-structured content with appropriate headings, lists, and organization.",
+            tool_instructions,
         ]
 
     if available_notebooks:
@@ -546,6 +553,7 @@ async def chat_with_tools(
             system=system_message,
             messages=ant_messages,
             tools=anthropic_tools,
+            tool_choice={"type": "auto"},
             max_tokens=config.max_tokens,
         )
 
@@ -603,6 +611,7 @@ async def chat_with_tools(
                 system=system_message,
                 messages=ant_messages,
                 tools=anthropic_tools,
+                tool_choice={"type": "auto"},
                 max_tokens=config.max_tokens,
             )
 
@@ -1059,21 +1068,28 @@ async def chat_with_tools_stream(
     if mcp_tools:
         all_tools.extend(convert_mcp_tools_to_openai_format(mcp_tools))
 
+    # Strong tool usage instructions - always appended
+    tool_instructions = """
+CRITICAL TOOL USAGE INSTRUCTIONS:
+You have tools available: create_page, create_notebook, run_action, list_actions.
+
+When the user asks you to "create", "write", "make", "generate", or "save" ANY content (code, notes, documentation, etc.):
+1. You MUST use the create_page tool to actually create the page
+2. Do NOT just write the content in your response - actually CALL the create_page tool
+3. The create_page tool takes: notebook_name ("current" for selected notebook), title, content_blocks (array), and optional tags
+4. After calling create_page, provide a brief summary of what you created
+
+Example: If user says "Create a Python function that calculates factorial" - you should call create_page with the code, NOT just write the code in your response.
+"""
+
     # Build system prompt - use custom prompt if provided, otherwise use default
     if system_prompt:
         system_parts = [system_prompt]
-        # Add tool usage instructions even with custom prompt
-        system_parts.append(
-            "\nYou have the ability to create notebooks, pages, and run custom actions for the user. "
-            "When asked to create content or run workflows, use the available tools."
-        )
+        system_parts.append(tool_instructions)
     else:
         system_parts = [
             "You are a helpful AI assistant integrated into a personal notebook application called Katt.",
-            "You have the ability to create notebooks, pages, and run custom actions for the user.",
-            "When the user asks to create content, organize notes, or set up a system (like Agile Results, GTD, etc.), use the available tools.",
-            "When the user mentions running their 'daily goals', 'weekly review', or any workflow, use the run_action tool.",
-            "Create well-structured content with appropriate headings, lists, and organization.",
+            tool_instructions,
         ]
 
     if available_notebooks:
@@ -1219,6 +1235,9 @@ async def chat_with_tools_stream(
                 _emit_chunks_with_delay(callback, "chunk", response_content)
 
     elif provider_type == "anthropic":
+        import logging
+        logger = logging.getLogger(__name__)
+
         client = AsyncAnthropic(api_key=api_key)
 
         anthropic_tools = [
@@ -1230,22 +1249,35 @@ async def chat_with_tools_stream(
             for t in all_tools
         ]
 
+        logger.info(f"[Anthropic] Making request with {len(anthropic_tools)} tools")
+        logger.info(f"[Anthropic] Tool names: {[t['name'] for t in anthropic_tools]}")
+
         ant_messages: list[dict[str, Any]] = []
         if conversation_history:
             ant_messages.extend(conversation_history)
         ant_messages.append({"role": "user", "content": user_message})
 
         # First, handle tool calls (non-streaming)
+        # Use tool_choice=auto to let model decide, but ensure tools are available
         response = await client.messages.create(
             model=config.model,
             system=system_message,
             messages=ant_messages,
             tools=anthropic_tools,
+            tool_choice={"type": "auto"},
             max_tokens=config.max_tokens,
         )
 
         response_model = response.model
         tokens_used = response.usage.input_tokens + response.usage.output_tokens
+
+        # Log response details for debugging
+        logger.info(f"[Anthropic] Response stop_reason: {response.stop_reason}")
+        logger.info(f"[Anthropic] Response content blocks: {len(response.content)}")
+        for i, block in enumerate(response.content):
+            logger.info(f"[Anthropic] Block {i}: type={block.type}")
+            if block.type == "tool_use":
+                logger.info(f"[Anthropic] Tool use detected: {block.name}")
 
         # Process tool use
         while response.stop_reason == "tool_use":
@@ -1304,6 +1336,7 @@ async def chat_with_tools_stream(
                 system=system_message,
                 messages=ant_messages,
                 tools=anthropic_tools,
+                tool_choice={"type": "auto"},
                 max_tokens=config.max_tokens,
             )
 
