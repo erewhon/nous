@@ -13,6 +13,7 @@ import { BackupDialog } from "./components/Backup";
 import { ActionLibrary, ActionEditor } from "./components/Actions";
 import { QuickCapture, InboxPanel } from "./components/Inbox";
 import { FlashcardPanel } from "./components/Flashcards";
+import { GoalsPanel, GoalsDashboard } from "./components/Goals";
 import { ToastContainer } from "./components/Toast";
 import { useAppInit } from "./hooks/useAppInit";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
@@ -261,6 +262,12 @@ function App() {
 
       {/* Flashcard Panel */}
       <FlashcardPanel />
+
+      {/* Goals Panel */}
+      <GoalsPanel />
+
+      {/* Goals Dashboard */}
+      <GoalsDashboard />
 
       {/* Toast Notifications */}
       <ToastContainer />

@@ -8,6 +8,7 @@ mod evernote;
 mod external_editor;
 mod flashcards;
 mod git;
+mod goals;
 mod inbox;
 mod joplin;
 mod library;
@@ -24,6 +25,7 @@ pub mod sync;
 use actions::{ActionExecutor, ActionScheduler, ActionStorage};
 use external_editor::ExternalEditorManager;
 use flashcards::FlashcardStorage;
+use goals::GoalsStorage;
 use inbox::InboxStorage;
 use library::LibraryStorage;
 use python_bridge::PythonAI;
@@ -41,6 +43,7 @@ pub struct AppState {
     pub action_scheduler: Mutex<ActionScheduler>,
     pub inbox_storage: Mutex<InboxStorage>,
     pub flashcard_storage: Mutex<FlashcardStorage>,
+    pub goals_storage: Mutex<GoalsStorage>,
     pub sync_manager: Arc<tokio::sync::Mutex<SyncManager>>,
     pub external_editor: Mutex<ExternalEditorManager>,
 }
@@ -94,6 +97,10 @@ pub fn run() {
     // Initialize flashcard storage
     let flashcard_storage = FlashcardStorage::new(data_dir.join("notebooks"));
 
+    // Initialize goals storage
+    let goals_storage = GoalsStorage::new(data_dir.clone())
+        .expect("Failed to initialize goals storage");
+
     // Initialize sync manager
     let sync_manager = SyncManager::new(data_dir.clone());
     let sync_manager_arc = Arc::new(tokio::sync::Mutex::new(sync_manager));
@@ -133,6 +140,7 @@ pub fn run() {
         action_scheduler: Mutex::new(action_scheduler),
         inbox_storage: Mutex::new(inbox_storage),
         flashcard_storage: Mutex::new(flashcard_storage),
+        goals_storage: Mutex::new(goals_storage),
         sync_manager: sync_manager_arc,
         external_editor: Mutex::new(external_editor),
     };
@@ -282,6 +290,20 @@ pub fn run() {
             commands::inbox_apply_actions,
             commands::inbox_delete,
             commands::inbox_clear_processed,
+            // Goals commands
+            commands::list_goals,
+            commands::list_active_goals,
+            commands::get_goal,
+            commands::create_goal,
+            commands::update_goal,
+            commands::archive_goal,
+            commands::delete_goal,
+            commands::get_goal_stats,
+            commands::record_goal_progress,
+            commands::get_goal_progress,
+            commands::check_auto_goals,
+            commands::get_goals_summary,
+            commands::toggle_goal_today,
             // Git commands
             commands::git_is_enabled,
             commands::git_init,

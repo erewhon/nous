@@ -980,6 +980,14 @@ import type {
   ApplyActionsRequest,
   ApplyActionsResult,
 } from "../types/inbox";
+import type {
+  Goal,
+  GoalProgress,
+  GoalStats,
+  GoalsSummary,
+  CreateGoalRequest,
+  UpdateGoalRequest,
+} from "../types/goals";
 
 export async function inboxCapture(request: CaptureRequest): Promise<InboxItem> {
   return invoke<InboxItem>("inbox_capture", { request });
@@ -1719,4 +1727,105 @@ export async function closeLibraryWindow(libraryId: string): Promise<void> {
  */
 export async function isLibraryWindowOpen(libraryId: string): Promise<boolean> {
   return invoke<boolean>("is_library_window_open", { libraryId });
+}
+
+// ===== Goals API =====
+
+/**
+ * List all goals (including archived)
+ */
+export async function listGoals(): Promise<Goal[]> {
+  return invoke<Goal[]>("list_goals");
+}
+
+/**
+ * List active (non-archived) goals
+ */
+export async function listActiveGoals(): Promise<Goal[]> {
+  return invoke<Goal[]>("list_active_goals");
+}
+
+/**
+ * Get a goal by ID
+ */
+export async function getGoal(id: string): Promise<Goal> {
+  return invoke<Goal>("get_goal", { id });
+}
+
+/**
+ * Create a new goal
+ */
+export async function createGoal(request: CreateGoalRequest): Promise<Goal> {
+  return invoke<Goal>("create_goal", { request });
+}
+
+/**
+ * Update an existing goal
+ */
+export async function updateGoal(id: string, updates: UpdateGoalRequest): Promise<Goal> {
+  return invoke<Goal>("update_goal", { id, updates });
+}
+
+/**
+ * Archive a goal
+ */
+export async function archiveGoal(id: string): Promise<Goal> {
+  return invoke<Goal>("archive_goal", { id });
+}
+
+/**
+ * Delete a goal
+ */
+export async function deleteGoal(id: string): Promise<void> {
+  return invoke("delete_goal", { id });
+}
+
+/**
+ * Get statistics for a goal
+ */
+export async function getGoalStats(id: string): Promise<GoalStats> {
+  return invoke<GoalStats>("get_goal_stats", { id });
+}
+
+/**
+ * Record progress for a goal
+ */
+export async function recordGoalProgress(
+  goalId: string,
+  date: string,
+  completed: boolean
+): Promise<GoalProgress> {
+  return invoke<GoalProgress>("record_goal_progress", { goalId, date, completed });
+}
+
+/**
+ * Get progress for a goal within a date range
+ */
+export async function getGoalProgress(
+  goalId: string,
+  startDate: string,
+  endDate: string
+): Promise<GoalProgress[]> {
+  return invoke<GoalProgress[]>("get_goal_progress", { goalId, startDate, endDate });
+}
+
+/**
+ * Check auto-detected goals for today
+ */
+export async function checkAutoGoals(): Promise<GoalProgress[]> {
+  return invoke<GoalProgress[]>("check_auto_goals");
+}
+
+/**
+ * Get goals summary
+ */
+export async function getGoalsSummary(): Promise<GoalsSummary> {
+  return invoke<GoalsSummary>("get_goals_summary");
+}
+
+/**
+ * Toggle goal completion for today
+ */
+export async function toggleGoalToday(goalId: string): Promise<GoalProgress> {
+  return invoke<GoalProgress>("toggle_goal_today", { goalId });
 }

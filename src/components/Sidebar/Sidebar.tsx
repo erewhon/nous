@@ -2,6 +2,7 @@ import { useNotebookStore } from "../../stores/notebookStore";
 import { useActionStore } from "../../stores/actionStore";
 import { useInboxStore } from "../../stores/inboxStore";
 import { useFlashcardStore } from "../../stores/flashcardStore";
+import { useGoalsStore } from "../../stores/goalsStore";
 import { useThemeStore } from "../../stores/themeStore";
 import { NotebookList } from "../NotebookList/NotebookList";
 import { LibrarySwitcher } from "../Library";
@@ -17,6 +18,7 @@ export function Sidebar({ width = 256 }: SidebarProps) {
   const openActionLibrary = useActionStore((state) => state.openActionLibrary);
   const { summary, openQuickCapture, openInboxPanel } = useInboxStore();
   const { togglePanel: toggleFlashcards, stats: flashcardStats } = useFlashcardStore();
+  const { summary: goalsSummary, togglePanel: toggleGoals } = useGoalsStore();
   const autoHidePanels = useThemeStore((state) => state.autoHidePanels);
   const setAutoHidePanels = useThemeStore((state) => state.setAutoHidePanels);
 
@@ -193,7 +195,7 @@ export function Sidebar({ width = 256 }: SidebarProps) {
         style={{ borderColor: "var(--color-border)" }}
       >
         {/* Tool buttons - arranged in a grid */}
-        <div className="grid grid-cols-7 gap-1">
+        <div className="grid grid-cols-8 gap-1">
           {/* Quick Capture */}
           <button
             onClick={openQuickCapture}
@@ -323,6 +325,41 @@ export function Sidebar({ width = 256 }: SidebarProps) {
                 style={{ backgroundColor: "var(--color-accent)" }}
               >
                 {flashcardStats.dueCards > 9 ? "9+" : flashcardStats.dueCards}
+              </span>
+            )}
+          </button>
+          {/* Goals */}
+          <button
+            onClick={toggleGoals}
+            className="relative flex h-8 w-full items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
+            style={{ color: "var(--color-text-muted)" }}
+            title="Goals"
+          >
+            {goalsSummary && goalsSummary.highestStreak > 0 ? (
+              <span className="text-sm">🔥</span>
+            ) : (
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="15"
+                height="15"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <circle cx="12" cy="12" r="10" />
+                <circle cx="12" cy="12" r="6" />
+                <circle cx="12" cy="12" r="2" />
+              </svg>
+            )}
+            {goalsSummary && goalsSummary.highestStreak > 0 && (
+              <span
+                className="absolute right-0.5 top-0.5 flex h-3.5 min-w-[14px] items-center justify-center rounded-full px-0.5 text-[9px] font-bold"
+                style={{ backgroundColor: "rgba(239, 68, 68, 0.2)", color: "#ef4444" }}
+              >
+                {goalsSummary.highestStreak}
               </span>
             )}
           </button>
