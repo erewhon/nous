@@ -175,11 +175,28 @@ export const usePageStore = create<PageStore>()(
     set({ error: null });
     try {
       const page = await api.createPage(notebookId, title, folderId, parentPageId, sectionId);
-      set((state) => ({
+      const state = get();
+      const activePaneId = state.activePaneId || state.panes[0]?.id;
+
+      set((state) => {
         // Filter out any existing page with same ID before adding (prevents duplicates)
-        pages: [page, ...state.pages.filter(p => p.id !== page.id)],
-        selectedPageId: page.id,
-      }));
+        const pages = [page, ...state.pages.filter(p => p.id !== page.id)];
+
+        // Open the page in the active pane
+        const panes = state.panes.map((pane) => {
+          if (pane.id !== activePaneId) return pane;
+
+          // Add to tabs
+          const newTabs = [...pane.tabs, { pageId: page.id, title: page.title, isPinned: false }];
+          return { ...pane, pageId: page.id, tabs: newTabs };
+        });
+
+        return {
+          pages,
+          panes,
+          selectedPageId: page.id,
+        };
+      });
       return page;
     } catch (err) {
       set({
@@ -197,13 +214,28 @@ export const usePageStore = create<PageStore>()(
       const parentPage = state.pages.find((p) => p.id === parentPageId);
       const sectionId = parentPage?.sectionId ?? undefined;
       const folderId = parentPage?.folderId ?? undefined;
+      const activePaneId = state.activePaneId || state.panes[0]?.id;
 
       const page = await api.createPage(notebookId, title, folderId, parentPageId, sectionId);
-      set((state) => ({
+      set((state) => {
         // Filter out any existing page with same ID before adding (prevents duplicates)
-        pages: [page, ...state.pages.filter(p => p.id !== page.id)],
-        selectedPageId: page.id,
-      }));
+        const pages = [page, ...state.pages.filter(p => p.id !== page.id)];
+
+        // Open the page in the active pane
+        const panes = state.panes.map((pane) => {
+          if (pane.id !== activePaneId) return pane;
+
+          // Add to tabs
+          const newTabs = [...pane.tabs, { pageId: page.id, title: page.title, isPinned: false }];
+          return { ...pane, pageId: page.id, tabs: newTabs };
+        });
+
+        return {
+          pages,
+          panes,
+          selectedPageId: page.id,
+        };
+      });
       return page;
     } catch (err) {
       set({
@@ -267,6 +299,7 @@ export const usePageStore = create<PageStore>()(
       if (!sourcePage) {
         throw new Error("Page not found");
       }
+      const activePaneId = state.activePaneId || state.panes[0]?.id;
 
       // Create new page with "(Copy)" suffix
       const newTitle = `${sourcePage.title} (Copy)`;
@@ -280,11 +313,25 @@ export const usePageStore = create<PageStore>()(
         newPage.content = sourcePage.content;
       }
 
-      set((state) => ({
+      set((state) => {
         // Filter out any existing page with same ID before adding (prevents duplicates)
-        pages: [newPage, ...state.pages.filter(p => p.id !== newPage.id)],
-        selectedPageId: newPage.id,
-      }));
+        const pages = [newPage, ...state.pages.filter(p => p.id !== newPage.id)];
+
+        // Open the page in the active pane
+        const panes = state.panes.map((pane) => {
+          if (pane.id !== activePaneId) return pane;
+
+          // Add to tabs
+          const newTabs = [...pane.tabs, { pageId: newPage.id, title: newPage.title, isPinned: false }];
+          return { ...pane, pageId: newPage.id, tabs: newTabs };
+        });
+
+        return {
+          pages,
+          panes,
+          selectedPageId: newPage.id,
+        };
+      });
     } catch (err) {
       set({
         error: err instanceof Error ? err.message : "Failed to duplicate page",

@@ -4,7 +4,7 @@ use std::path::Path;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 
-use chrono::{DateTime, NaiveDate, TimeZone, Utc};
+use chrono::{DateTime, Local, NaiveDate, TimeZone, Utc};
 use git2::Repository;
 use quick_xml::events::Event;
 use quick_xml::Reader;
@@ -113,13 +113,17 @@ impl GoalDetector {
             StorageError::InvalidOperation(format!("Failed to push head: {}", e))
         })?;
 
-        // Count commits on the given date
-        let date_start = Utc
-            .from_utc_datetime(&date.and_hms_opt(0, 0, 0).unwrap())
-            .timestamp();
-        let date_end = Utc
-            .from_utc_datetime(&date.and_hms_opt(23, 59, 59).unwrap())
-            .timestamp();
+        // Count commits on the given date (using local timezone boundaries)
+        let date_start = Local
+            .from_local_datetime(&date.and_hms_opt(0, 0, 0).unwrap())
+            .single()
+            .map(|dt| dt.timestamp())
+            .unwrap_or(0);
+        let date_end = Local
+            .from_local_datetime(&date.and_hms_opt(23, 59, 59).unwrap())
+            .single()
+            .map(|dt| dt.timestamp())
+            .unwrap_or(i64::MAX);
 
         let mut count = 0;
 
@@ -229,8 +233,17 @@ impl GoalDetector {
             StorageError::InvalidOperation(format!("Failed to lock storage: {}", e))
         })?;
 
-        let date_start = Utc.from_utc_datetime(&date.and_hms_opt(0, 0, 0).unwrap());
-        let date_end = Utc.from_utc_datetime(&date.and_hms_opt(23, 59, 59).unwrap());
+        // Use local timezone boundaries for the calendar day
+        let date_start = Local
+            .from_local_datetime(&date.and_hms_opt(0, 0, 0).unwrap())
+            .single()
+            .map(|dt| dt.with_timezone(&Utc))
+            .unwrap_or_else(|| Utc::now());
+        let date_end = Local
+            .from_local_datetime(&date.and_hms_opt(23, 59, 59).unwrap())
+            .single()
+            .map(|dt| dt.with_timezone(&Utc))
+            .unwrap_or_else(|| Utc::now());
 
         let mut count = 0;
 
@@ -291,8 +304,17 @@ impl GoalDetector {
             StorageError::InvalidOperation(format!("Failed to lock storage: {}", e))
         })?;
 
-        let date_start = Utc.from_utc_datetime(&date.and_hms_opt(0, 0, 0).unwrap());
-        let date_end = Utc.from_utc_datetime(&date.and_hms_opt(23, 59, 59).unwrap());
+        // Use local timezone boundaries for the calendar day
+        let date_start = Local
+            .from_local_datetime(&date.and_hms_opt(0, 0, 0).unwrap())
+            .single()
+            .map(|dt| dt.with_timezone(&Utc))
+            .unwrap_or_else(|| Utc::now());
+        let date_end = Local
+            .from_local_datetime(&date.and_hms_opt(23, 59, 59).unwrap())
+            .single()
+            .map(|dt| dt.with_timezone(&Utc))
+            .unwrap_or_else(|| Utc::now());
 
         let mut count = 0;
 
@@ -376,25 +398,49 @@ impl GoalDetector {
             StorageError::InvalidOperation(format!("Failed to read YouTube feed: {}", e))
         })?;
 
-        // Determine the date range based on frequency
+        // Determine the date range based on frequency (using local timezone boundaries)
         let (date_start, date_end) = match frequency {
             Frequency::Daily => {
-                let start = Utc.from_utc_datetime(&date.and_hms_opt(0, 0, 0).unwrap());
-                let end = Utc.from_utc_datetime(&date.and_hms_opt(23, 59, 59).unwrap());
+                let start = Local
+                    .from_local_datetime(&date.and_hms_opt(0, 0, 0).unwrap())
+                    .single()
+                    .map(|dt| dt.with_timezone(&Utc))
+                    .unwrap_or_else(|| Utc::now());
+                let end = Local
+                    .from_local_datetime(&date.and_hms_opt(23, 59, 59).unwrap())
+                    .single()
+                    .map(|dt| dt.with_timezone(&Utc))
+                    .unwrap_or_else(|| Utc::now());
                 (start, end)
             }
             Frequency::Weekly => {
                 // Check the past 7 days from the given date
                 let week_start = date - chrono::Duration::days(6);
-                let start = Utc.from_utc_datetime(&week_start.and_hms_opt(0, 0, 0).unwrap());
-                let end = Utc.from_utc_datetime(&date.and_hms_opt(23, 59, 59).unwrap());
+                let start = Local
+                    .from_local_datetime(&week_start.and_hms_opt(0, 0, 0).unwrap())
+                    .single()
+                    .map(|dt| dt.with_timezone(&Utc))
+                    .unwrap_or_else(|| Utc::now());
+                let end = Local
+                    .from_local_datetime(&date.and_hms_opt(23, 59, 59).unwrap())
+                    .single()
+                    .map(|dt| dt.with_timezone(&Utc))
+                    .unwrap_or_else(|| Utc::now());
                 (start, end)
             }
             Frequency::Monthly => {
                 // Check the past 30 days from the given date
                 let month_start = date - chrono::Duration::days(29);
-                let start = Utc.from_utc_datetime(&month_start.and_hms_opt(0, 0, 0).unwrap());
-                let end = Utc.from_utc_datetime(&date.and_hms_opt(23, 59, 59).unwrap());
+                let start = Local
+                    .from_local_datetime(&month_start.and_hms_opt(0, 0, 0).unwrap())
+                    .single()
+                    .map(|dt| dt.with_timezone(&Utc))
+                    .unwrap_or_else(|| Utc::now());
+                let end = Local
+                    .from_local_datetime(&date.and_hms_opt(23, 59, 59).unwrap())
+                    .single()
+                    .map(|dt| dt.with_timezone(&Utc))
+                    .unwrap_or_else(|| Utc::now());
                 (start, end)
             }
         };
@@ -469,7 +515,7 @@ impl GoalDetector {
         &self,
         goals: &[Goal],
     ) -> Result<Vec<GoalProgress>> {
-        let today = Utc::now().date_naive();
+        let today = Local::now().date_naive();
         let mut results = Vec::new();
 
         for goal in goals {

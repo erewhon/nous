@@ -3,7 +3,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-use chrono::{Datelike, Duration, NaiveDate, Utc};
+use chrono::{Datelike, Duration, Local, NaiveDate, Utc};
 use uuid::Uuid;
 
 use super::models::*;
@@ -239,7 +239,7 @@ impl GoalsStorage {
             return Ok(GoalStats::empty(goal_id));
         }
 
-        let today = Utc::now().date_naive();
+        let today = Local::now().date_naive();
 
         // Calculate current streak
         let current_streak = self.calculate_current_streak(&goal, &progress, today);
@@ -446,7 +446,7 @@ impl GoalsStorage {
     /// Get summary of all goals
     pub fn get_summary(&self) -> Result<GoalsSummary> {
         let goals = self.list_active_goals()?;
-        let today = Utc::now().date_naive();
+        let today = Local::now().date_naive();
 
         let active_goals = goals.len();
         let mut completed_today = 0;

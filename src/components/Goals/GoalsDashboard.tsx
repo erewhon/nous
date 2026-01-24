@@ -353,7 +353,11 @@ export function GoalsDashboard() {
 
                     {/* Calendar */}
                     <div className="mt-4">
-                      <StreakCalendar goalId={goal.id} loadProgress={loadProgress} />
+                      <StreakCalendar
+                        goalId={goal.id}
+                        frequency={goal.frequency}
+                        loadProgress={loadProgress}
+                      />
                     </div>
                   </div>
                 );

@@ -1,11 +1,11 @@
 //! Tauri commands for goals and streak tracking
 
-use chrono::NaiveDate;
+use chrono::{Duration, NaiveDate};
 use tauri::State;
 use uuid::Uuid;
 
 use crate::goals::{
-    CreateGoalRequest, Goal, GoalDetector, GoalProgress, GoalStats, GoalsSummary,
+    CreateGoalRequest, Goal, GoalDetector, GoalProgress, GoalStats, GoalsSummary, TrackingType,
     UpdateGoalRequest,
 };
 use crate::AppState;
@@ -95,6 +95,7 @@ pub fn record_goal_progress(
 }
 
 /// Get progress for a goal within a date range
+/// For auto-tracked goals, this will also detect and backfill any missing progress
 #[tauri::command]
 pub fn get_goal_progress(
     state: State<AppState>,
@@ -108,10 +109,52 @@ pub fn get_goal_progress(
     let end = NaiveDate::parse_from_str(&end_date, "%Y-%m-%d")
         .map_err(|e| format!("Invalid end date: {}", e))?;
 
-    let goals = state.goals_storage.lock().map_err(|e| e.to_string())?;
-    goals
-        .get_progress_range(goal_id, start, end)
-        .map_err(|e| e.to_string())
+    // Get the goal to check if it's auto-tracked
+    let goal = {
+        let goals = state.goals_storage.lock().map_err(|e| e.to_string())?;
+        goals.get_goal(goal_id).map_err(|e| e.to_string())?
+    };
+
+    // For auto-tracked goals, detect and backfill missing progress
+    if goal.tracking_type == TrackingType::Auto && goal.auto_detect.is_some() {
+        let existing_progress = {
+            let goals = state.goals_storage.lock().map_err(|e| e.to_string())?;
+            goals
+                .get_progress_range(goal_id, start, end)
+                .map_err(|e| e.to_string())?
+        };
+
+        // Find dates that don't have progress entries
+        let existing_dates: std::collections::HashSet<NaiveDate> =
+            existing_progress.iter().map(|p| p.date).collect();
+
+        let detector = GoalDetector::new(state.storage.clone());
+        let goals_storage = state.goals_storage.lock().map_err(|e| e.to_string())?;
+
+        // Check each date in the range
+        let mut current_date = start;
+        while current_date <= end {
+            if !existing_dates.contains(&current_date) {
+                // Detect progress for this date
+                if let Ok(Some(progress)) = detector.check_goal_completion(&goal, current_date) {
+                    if let Err(e) = goals_storage.record_progress(progress) {
+                        log::warn!("Failed to save backfilled progress: {}", e);
+                    }
+                }
+            }
+            current_date = current_date + Duration::days(1);
+        }
+
+        // Return the updated progress
+        goals_storage
+            .get_progress_range(goal_id, start, end)
+            .map_err(|e| e.to_string())
+    } else {
+        let goals = state.goals_storage.lock().map_err(|e| e.to_string())?;
+        goals
+            .get_progress_range(goal_id, start, end)
+            .map_err(|e| e.to_string())
+    }
 }
 
 /// Check auto-detected goals for today
