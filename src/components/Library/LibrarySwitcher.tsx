@@ -6,6 +6,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useLibraryStore } from "../../stores/libraryStore";
+import { openLibraryWindow } from "../../utils/api";
 import type { Library } from "../../types/library";
 
 interface LibrarySwitcherProps {
@@ -55,6 +56,16 @@ export function LibrarySwitcher({ onManageLibraries }: LibrarySwitcherProps) {
     }
   };
 
+  const handleOpenInNewWindow = async (library: Library, e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent triggering library switch
+    try {
+      await openLibraryWindow(library.id);
+      setIsOpen(false);
+    } catch (error) {
+      console.error("Failed to open library in new window:", error);
+    }
+  };
+
   if (!currentLibrary) {
     return null;
   }
@@ -95,21 +106,57 @@ export function LibrarySwitcher({ onManageLibraries }: LibrarySwitcherProps) {
         >
           <div className="py-1">
             {libraries.map((library) => (
-              <button
+              <div
                 key={library.id}
-                onClick={() => handleSwitchLibrary(library)}
-                disabled={isSwitching}
-                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-[--color-bg-tertiary]"
-                style={{
-                  color:
-                    library.id === currentLibrary?.id
-                      ? "var(--color-accent)"
-                      : "var(--color-text-primary)",
-                }}
+                className="group flex w-full items-center gap-2 px-3 py-2 text-sm transition-colors hover:bg-[--color-bg-tertiary]"
               >
-                <span className="text-base">{library.icon || "📚"}</span>
-                <span className="flex-1 truncate">{library.name}</span>
-                {library.id === currentLibrary?.id && (
+                <button
+                  onClick={() => handleSwitchLibrary(library)}
+                  disabled={isSwitching}
+                  className="flex flex-1 items-center gap-2 text-left"
+                  style={{
+                    color:
+                      library.id === currentLibrary?.id
+                        ? "var(--color-accent)"
+                        : "var(--color-text-primary)",
+                  }}
+                >
+                  <span className="text-base">{library.icon || "📚"}</span>
+                  <span className="flex-1 truncate">{library.name}</span>
+                  {library.id === currentLibrary?.id && (
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                  )}
+                  {library.isDefault && library.id !== currentLibrary?.id && (
+                    <span
+                      className="text-xs px-1.5 py-0.5 rounded"
+                      style={{
+                        backgroundColor: "var(--color-bg-tertiary)",
+                        color: "var(--color-text-muted)",
+                      }}
+                    >
+                      Default
+                    </span>
+                  )}
+                </button>
+                {/* Open in New Window button */}
+                <button
+                  onClick={(e) => handleOpenInNewWindow(library, e)}
+                  className="opacity-0 group-hover:opacity-100 p-1 rounded transition-all hover:bg-[--color-bg-secondary]"
+                  style={{ color: "var(--color-text-muted)" }}
+                  title="Open in new window"
+                >
                   <svg
                     xmlns="http://www.w3.org/2000/svg"
                     width="14"
@@ -121,21 +168,12 @@ export function LibrarySwitcher({ onManageLibraries }: LibrarySwitcherProps) {
                     strokeLinecap="round"
                     strokeLinejoin="round"
                   >
-                    <polyline points="20 6 9 17 4 12" />
+                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                    <polyline points="15 3 21 3 21 9" />
+                    <line x1="10" y1="14" x2="21" y2="3" />
                   </svg>
-                )}
-                {library.isDefault && library.id !== currentLibrary?.id && (
-                  <span
-                    className="text-xs px-1.5 py-0.5 rounded"
-                    style={{
-                      backgroundColor: "var(--color-bg-tertiary)",
-                      color: "var(--color-text-muted)",
-                    }}
-                  >
-                    Default
-                  </span>
-                )}
-              </button>
+                </button>
+              </div>
             ))}
           </div>
 

@@ -387,6 +387,10 @@ pub fn run() {
             commands::mcp_get_tools,
             commands::mcp_get_running_servers,
             commands::mcp_call_tool,
+            // Window commands
+            commands::open_library_window,
+            commands::close_library_window,
+            commands::is_library_window_open,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

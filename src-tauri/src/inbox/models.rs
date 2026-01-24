@@ -34,7 +34,7 @@ impl InboxItem {
             content,
             tags: Vec::new(),
             captured_at: Utc::now(),
-            source: CaptureSource::Manual,
+            source: CaptureSource::QuickCapture,
             classification: None,
             is_processed: false,
         }
@@ -53,16 +53,18 @@ impl InboxItem {
 
 /// How the inbox item was captured
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[serde(tag = "type", rename_all = "camelCase")]
 pub enum CaptureSource {
-    /// Captured via keyboard shortcut
-    Hotkey,
-    /// Captured via toolbar button
-    Button,
-    /// Captured via API/command
-    Api,
-    /// Manual entry
-    Manual,
+    /// Captured via quick capture dialog
+    QuickCapture,
+    /// Captured via web clipper
+    WebClipper { url: String },
+    /// Captured from email
+    Email { from: String },
+    /// Captured via API
+    Api { source: String },
+    /// Imported from another format
+    Import { format: String },
 }
 
 /// AI classification result for an inbox item

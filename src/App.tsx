@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Layout } from "./components/Layout/Layout";
 import { CommandPalette } from "./components/CommandPalette/CommandPalette";
 import { GraphView } from "./components/Graph/GraphView";
@@ -22,11 +23,15 @@ import { useActionStore } from "./stores/actionStore";
 import { useInboxStore } from "./stores/inboxStore";
 import { useAIStore } from "./stores/aiStore";
 import { useFlashcardStore } from "./stores/flashcardStore";
+import { useWindowLibrary } from "./contexts/WindowContext";
 import { exportPageToFile } from "./utils/api";
 import { save } from "@tauri-apps/plugin-dialog";
 
 function App() {
   useAppInit();
+
+  // Get window library context
+  const { library, isSecondaryWindow } = useWindowLibrary();
 
   // Apply theme on mount
   const applyTheme = useThemeStore((state) => state.applyTheme);
@@ -34,6 +39,14 @@ function App() {
   useEffect(() => {
     applyTheme();
   }, [applyTheme]);
+
+  // Set window title based on library
+  useEffect(() => {
+    if (library) {
+      const title = isSecondaryWindow ? `Katt - ${library.name}` : "Katt";
+      getCurrentWindow().setTitle(title).catch(console.error);
+    }
+  }, [library, isSecondaryWindow]);
 
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [showBackup, setShowBackup] = useState(false);

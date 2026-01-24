@@ -27,6 +27,7 @@ mod sync;
 mod tags;
 mod video;
 mod web_research;
+mod window;
 
 pub use actions::*;
 pub use ai::*;
@@ -57,3 +58,4 @@ pub use sync::*;
 pub use tags::*;
 pub use video::*;
 pub use web_research::*;
+pub use window::*;

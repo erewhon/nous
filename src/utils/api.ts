@@ -1696,3 +1696,27 @@ export async function executeJupyterCell(
 export async function checkPythonExecutionAvailable(): Promise<PythonEnvironmentInfo> {
   return invoke<PythonEnvironmentInfo>("check_python_execution_available");
 }
+
+// ===== Window API =====
+
+/**
+ * Open a library in a new window
+ * If the library is already open in a window, focuses that window instead
+ */
+export async function openLibraryWindow(libraryId: string): Promise<string> {
+  return invoke<string>("open_library_window", { libraryId });
+}
+
+/**
+ * Close a library window
+ */
+export async function closeLibraryWindow(libraryId: string): Promise<void> {
+  return invoke("close_library_window", { libraryId });
+}
+
+/**
+ * Check if a library window is currently open
+ */
+export async function isLibraryWindowOpen(libraryId: string): Promise<boolean> {
+  return invoke<boolean>("is_library_window_open", { libraryId });
+}
