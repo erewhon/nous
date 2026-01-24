@@ -5,9 +5,10 @@ import { ScheduleEditor } from "./ScheduleEditor";
 interface TriggerEditorProps {
   triggers: ActionTrigger[];
   onChange: (triggers: ActionTrigger[]) => void;
+  viewOnly?: boolean;
 }
 
-export function TriggerEditor({ triggers, onChange }: TriggerEditorProps) {
+export function TriggerEditor({ triggers, onChange, viewOnly = false }: TriggerEditorProps) {
   const hasManual = triggers.some((t) => t.type === "manual");
   const hasAiChat = triggers.some((t) => t.type === "aiChat");
   const hasScheduled = triggers.some((t) => t.type === "scheduled");
@@ -53,57 +54,60 @@ export function TriggerEditor({ triggers, onChange }: TriggerEditorProps) {
             trigger={trigger}
             onRemove={() => removeTrigger(index)}
             onUpdate={(updated) => updateTrigger(index, updated)}
+            viewOnly={viewOnly}
           />
         ))}
       </div>
 
-      {/* Add trigger buttons */}
-      <div className="flex flex-wrap gap-2">
-        {!hasManual && (
-          <button
-            onClick={() => addTrigger("manual")}
-            className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm transition-colors hover:opacity-80"
-            style={{
-              backgroundColor: "var(--color-bg-tertiary)",
-              color: "var(--color-text-secondary)",
-            }}
-          >
-            <IconPlus />
-            <IconClick />
-            Manual
-          </button>
-        )}
-        {!hasAiChat && (
-          <button
-            onClick={() => addTrigger("aiChat")}
-            className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm transition-colors hover:opacity-80"
-            style={{
-              backgroundColor: "var(--color-bg-tertiary)",
-              color: "var(--color-text-secondary)",
-            }}
-          >
-            <IconPlus />
-            <IconMessage />
-            AI Chat
-          </button>
-        )}
-        {!hasScheduled && (
-          <button
-            onClick={() => addTrigger("scheduled")}
-            className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm transition-colors hover:opacity-80"
-            style={{
-              backgroundColor: "var(--color-bg-tertiary)",
-              color: "var(--color-text-secondary)",
-            }}
-          >
-            <IconPlus />
-            <IconClock />
-            Scheduled
-          </button>
-        )}
-      </div>
+      {/* Add trigger buttons - hidden in view-only mode */}
+      {!viewOnly && (
+        <div className="flex flex-wrap gap-2">
+          {!hasManual && (
+            <button
+              onClick={() => addTrigger("manual")}
+              className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm transition-colors hover:opacity-80"
+              style={{
+                backgroundColor: "var(--color-bg-tertiary)",
+                color: "var(--color-text-secondary)",
+              }}
+            >
+              <IconPlus />
+              <IconClick />
+              Manual
+            </button>
+          )}
+          {!hasAiChat && (
+            <button
+              onClick={() => addTrigger("aiChat")}
+              className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm transition-colors hover:opacity-80"
+              style={{
+                backgroundColor: "var(--color-bg-tertiary)",
+                color: "var(--color-text-secondary)",
+              }}
+            >
+              <IconPlus />
+              <IconMessage />
+              AI Chat
+            </button>
+          )}
+          {!hasScheduled && (
+            <button
+              onClick={() => addTrigger("scheduled")}
+              className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm transition-colors hover:opacity-80"
+              style={{
+                backgroundColor: "var(--color-bg-tertiary)",
+                color: "var(--color-text-secondary)",
+              }}
+            >
+              <IconPlus />
+              <IconClock />
+              Scheduled
+            </button>
+          )}
+        </div>
+      )}
 
-      {triggers.length === 0 && (
+      {triggers.length === 0 && !viewOnly && (
         <div
           className="rounded-lg border border-dashed p-4 text-center text-sm"
           style={{
@@ -122,9 +126,10 @@ interface TriggerCardProps {
   trigger: ActionTrigger;
   onRemove: () => void;
   onUpdate: (trigger: ActionTrigger) => void;
+  viewOnly?: boolean;
 }
 
-function TriggerCard({ trigger, onRemove, onUpdate }: TriggerCardProps) {
+function TriggerCard({ trigger, onRemove, onUpdate, viewOnly = false }: TriggerCardProps) {
   const [keywordsInput, setKeywordsInput] = useState(
     trigger.type === "aiChat" ? trigger.keywords.join(", ") : ""
   );
@@ -229,13 +234,15 @@ function TriggerCard({ trigger, onRemove, onUpdate }: TriggerCardProps) {
             </>
           )}
         </div>
-        <button
-          onClick={onRemove}
-          className="rounded-lg p-1.5 text-red-400 transition-colors hover:bg-red-500/10"
-          title="Remove trigger"
-        >
-          <IconClose />
-        </button>
+        {!viewOnly && (
+          <button
+            onClick={onRemove}
+            className="rounded-lg p-1.5 text-red-400 transition-colors hover:bg-red-500/10"
+            title="Remove trigger"
+          >
+            <IconClose />
+          </button>
+        )}
       </div>
 
       {/* Trigger-specific content */}
@@ -253,19 +260,22 @@ function TriggerCard({ trigger, onRemove, onUpdate }: TriggerCardProps) {
             onChange={(e) => setKeywordsInput(e.target.value)}
             onBlur={handleKeywordsBlur}
             placeholder="e.g., daily goals, start my day, morning routine"
-            className="w-full rounded-lg border px-3 py-2 text-sm outline-none transition-colors focus:border-[--color-accent]"
+            disabled={viewOnly}
+            className="w-full rounded-lg border px-3 py-2 text-sm outline-none transition-colors focus:border-[--color-accent] disabled:cursor-not-allowed disabled:opacity-70"
             style={{
               backgroundColor: "var(--color-bg-tertiary)",
               borderColor: "var(--color-border)",
               color: "var(--color-text-primary)",
             }}
           />
-          <p
-            className="text-xs"
-            style={{ color: "var(--color-text-muted)" }}
-          >
-            The AI will suggest running this action when these phrases are mentioned
-          </p>
+          {!viewOnly && (
+            <p
+              className="text-xs"
+              style={{ color: "var(--color-text-muted)" }}
+            >
+              The AI will suggest running this action when these phrases are mentioned
+            </p>
+          )}
         </div>
       )}
 
@@ -273,6 +283,7 @@ function TriggerCard({ trigger, onRemove, onUpdate }: TriggerCardProps) {
         <ScheduleEditor
           schedule={trigger.schedule}
           onChange={handleScheduleChange}
+          viewOnly={viewOnly}
         />
       )}
     </div>

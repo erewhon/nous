@@ -28,6 +28,7 @@ interface ActionState {
   showActionLibrary: boolean;
   showActionEditor: boolean;
   editingActionId: string | null;
+  viewOnlyMode: boolean;
 }
 
 interface ActionActions {
@@ -72,11 +73,14 @@ interface ActionActions {
   // Enable/disable
   setEnabled: (actionId: string, enabled: boolean) => Promise<Action>;
 
+  // Duplicate
+  duplicateAction: (actionId: string) => Promise<Action>;
+
   // UI state
   selectAction: (action: Action | null) => void;
   openActionLibrary: () => void;
   closeActionLibrary: () => void;
-  openActionEditor: (actionId?: string) => void;
+  openActionEditor: (actionId?: string, viewOnly?: boolean) => void;
   closeActionEditor: () => void;
   clearError: () => void;
 }
@@ -93,6 +97,7 @@ export const useActionStore = create<ActionStore>()((set, get) => ({
   showActionLibrary: false,
   showActionEditor: false,
   editingActionId: null,
+  viewOnlyMode: false,
 
   // Data fetching
   loadActions: async () => {
@@ -254,6 +259,40 @@ export const useActionStore = create<ActionStore>()((set, get) => ({
     }
   },
 
+  // Duplicate
+  duplicateAction: async (actionId) => {
+    const { actions } = get();
+    const sourceAction = actions.find((a) => a.id === actionId);
+    if (!sourceAction) {
+      throw new Error("Action not found");
+    }
+
+    set({ isLoading: true, error: null });
+    try {
+      // Create a new action with copied properties
+      const newAction = await createAction(
+        `Copy of ${sourceAction.name}`,
+        sourceAction.description,
+        {
+          category: "custom", // Duplicated actions always go to custom category
+          triggers: sourceAction.triggers.map((t) => ({ ...t })),
+          steps: sourceAction.steps.map((s) => ({ ...s })),
+        }
+      );
+      set((state) => ({
+        actions: [...state.actions, newAction],
+        isLoading: false,
+      }));
+      return newAction;
+    } catch (error) {
+      set({
+        error: error instanceof Error ? error.message : "Failed to duplicate action",
+        isLoading: false,
+      });
+      throw error;
+    }
+  },
+
   // UI state
   selectAction: (action) => {
     set({ selectedAction: action });
@@ -267,15 +306,16 @@ export const useActionStore = create<ActionStore>()((set, get) => ({
     set({ showActionLibrary: false, selectedAction: null });
   },
 
-  openActionEditor: (actionId) => {
+  openActionEditor: (actionId, viewOnly = false) => {
     set({
       showActionEditor: true,
       editingActionId: actionId || null,
+      viewOnlyMode: viewOnly,
     });
   },
 
   closeActionEditor: () => {
-    set({ showActionEditor: false, editingActionId: null });
+    set({ showActionEditor: false, editingActionId: null, viewOnlyMode: false });
   },
 
   clearError: () => {

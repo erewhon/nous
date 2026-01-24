@@ -5,9 +5,10 @@ import { STEP_TYPES } from "../../types/action";
 interface StepBuilderProps {
   steps: ActionStep[];
   onChange: (steps: ActionStep[]) => void;
+  viewOnly?: boolean;
 }
 
-export function StepBuilder({ steps, onChange }: StepBuilderProps) {
+export function StepBuilder({ steps, onChange, viewOnly = false }: StepBuilderProps) {
   const [expandedStep, setExpandedStep] = useState<number | null>(null);
 
   const addStep = (type: ActionStep["type"]) => {
@@ -63,11 +64,12 @@ export function StepBuilder({ steps, onChange }: StepBuilderProps) {
             onMoveDown={() => moveStep(index, "down")}
             canMoveUp={index > 0}
             canMoveDown={index < steps.length - 1}
+            viewOnly={viewOnly}
           />
         ))}
       </div>
 
-      {steps.length === 0 && (
+      {steps.length === 0 && !viewOnly && (
         <div
           className="rounded-lg border border-dashed p-6 text-center"
           style={{ borderColor: "var(--color-border)" }}
@@ -82,49 +84,51 @@ export function StepBuilder({ steps, onChange }: StepBuilderProps) {
         </div>
       )}
 
-      {/* Add step section */}
-      <div>
-        <h4
-          className="mb-3 text-sm font-medium"
-          style={{ color: "var(--color-text-secondary)" }}
-        >
-          Add Step
-        </h4>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-          {STEP_TYPES.map((stepType) => (
-            <button
-              key={stepType.type}
-              onClick={() => addStep(stepType.type)}
-              className="flex items-start gap-2 rounded-lg border p-2.5 text-left text-sm transition-colors hover:border-[--color-accent]/50"
-              style={{
-                backgroundColor: "var(--color-bg-secondary)",
-                borderColor: "var(--color-border)",
-              }}
-            >
-              <div
-                className="mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded"
-                style={{ backgroundColor: "var(--color-bg-tertiary)" }}
+      {/* Add step section - hidden in view-only mode */}
+      {!viewOnly && (
+        <div>
+          <h4
+            className="mb-3 text-sm font-medium"
+            style={{ color: "var(--color-text-secondary)" }}
+          >
+            Add Step
+          </h4>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            {STEP_TYPES.map((stepType) => (
+              <button
+                key={stepType.type}
+                onClick={() => addStep(stepType.type)}
+                className="flex items-start gap-2 rounded-lg border p-2.5 text-left text-sm transition-colors hover:border-[--color-accent]/50"
+                style={{
+                  backgroundColor: "var(--color-bg-secondary)",
+                  borderColor: "var(--color-border)",
+                }}
               >
-                <StepIcon type={stepType.type} />
-              </div>
-              <div className="min-w-0">
                 <div
-                  className="font-medium"
-                  style={{ color: "var(--color-text-primary)" }}
+                  className="mt-0.5 flex h-6 w-6 flex-shrink-0 items-center justify-center rounded"
+                  style={{ backgroundColor: "var(--color-bg-tertiary)" }}
                 >
-                  {stepType.name}
+                  <StepIcon type={stepType.type} />
                 </div>
-                <div
-                  className="text-xs leading-tight"
-                  style={{ color: "var(--color-text-muted)" }}
-                >
-                  {stepType.description}
+                <div className="min-w-0">
+                  <div
+                    className="font-medium"
+                    style={{ color: "var(--color-text-primary)" }}
+                  >
+                    {stepType.name}
+                  </div>
+                  <div
+                    className="text-xs leading-tight"
+                    style={{ color: "var(--color-text-muted)" }}
+                  >
+                    {stepType.description}
+                  </div>
                 </div>
-              </div>
-            </button>
-          ))}
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
@@ -140,6 +144,7 @@ interface StepCardProps {
   onMoveDown: () => void;
   canMoveUp: boolean;
   canMoveDown: boolean;
+  viewOnly?: boolean;
 }
 
 function StepCard({
@@ -153,6 +158,7 @@ function StepCard({
   onMoveDown,
   canMoveUp,
   canMoveDown,
+  viewOnly = false,
 }: StepCardProps) {
   const stepInfo = STEP_TYPES.find((s) => s.type === step.type);
 
@@ -199,29 +205,33 @@ function StepCard({
           </div>
         </div>
         <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-          <button
-            onClick={onMoveUp}
-            disabled={!canMoveUp}
-            className="rounded p-1 transition-colors hover:bg-[--color-bg-tertiary] disabled:opacity-30"
-            title="Move up"
-          >
-            <IconChevronUp />
-          </button>
-          <button
-            onClick={onMoveDown}
-            disabled={!canMoveDown}
-            className="rounded p-1 transition-colors hover:bg-[--color-bg-tertiary] disabled:opacity-30"
-            title="Move down"
-          >
-            <IconChevronDown />
-          </button>
-          <button
-            onClick={onRemove}
-            className="rounded p-1 text-red-400 transition-colors hover:bg-red-500/10"
-            title="Remove step"
-          >
-            <IconTrash />
-          </button>
+          {!viewOnly && (
+            <>
+              <button
+                onClick={onMoveUp}
+                disabled={!canMoveUp}
+                className="rounded p-1 transition-colors hover:bg-[--color-bg-tertiary] disabled:opacity-30"
+                title="Move up"
+              >
+                <IconChevronUp />
+              </button>
+              <button
+                onClick={onMoveDown}
+                disabled={!canMoveDown}
+                className="rounded p-1 transition-colors hover:bg-[--color-bg-tertiary] disabled:opacity-30"
+                title="Move down"
+              >
+                <IconChevronDown />
+              </button>
+              <button
+                onClick={onRemove}
+                className="rounded p-1 text-red-400 transition-colors hover:bg-red-500/10"
+                title="Remove step"
+              >
+                <IconTrash />
+              </button>
+            </>
+          )}
           <IconChevron isExpanded={isExpanded} />
         </div>
       </div>
@@ -232,7 +242,7 @@ function StepCard({
           className="border-t p-4"
           style={{ borderColor: "var(--color-border)" }}
         >
-          <StepEditor step={step} onUpdate={onUpdate} />
+          <StepEditor step={step} onUpdate={onUpdate} viewOnly={viewOnly} />
         </div>
       )}
     </div>
@@ -242,9 +252,22 @@ function StepCard({
 interface StepEditorProps {
   step: ActionStep;
   onUpdate: (step: ActionStep) => void;
+  viewOnly?: boolean;
 }
 
-function StepEditor({ step, onUpdate }: StepEditorProps) {
+function StepEditor({ step, onUpdate, viewOnly = false }: StepEditorProps) {
+  // In view-only mode, show a read-only summary of the step configuration
+  if (viewOnly) {
+    return (
+      <div
+        className="text-sm space-y-2"
+        style={{ color: "var(--color-text-muted)" }}
+      >
+        <StepConfigSummary step={step} />
+      </div>
+    );
+  }
+
   switch (step.type) {
     case "createPageFromTemplate":
       return (
@@ -312,6 +335,72 @@ function StepEditor({ step, onUpdate }: StepEditorProps) {
           Configuration for this step type is not yet available.
         </div>
       );
+  }
+}
+
+// Helper to format notebook target
+function formatNotebookTarget(target: { type: string; name?: string; id?: string }): string {
+  if (target.type === "current") return "Current notebook";
+  if (target.type === "byName" && "name" in target) return `Notebook: ${target.name}`;
+  if (target.type === "byId" && "id" in target) return `Notebook ID: ${target.id}`;
+  return "Unknown target";
+}
+
+// Read-only summary of step configuration
+function StepConfigSummary({ step }: { step: ActionStep }) {
+  switch (step.type) {
+    case "createPageFromTemplate":
+      return (
+        <div className="space-y-1">
+          <div><span className="font-medium">Template:</span> {step.templateId || "Not set"}</div>
+          <div><span className="font-medium">Title:</span> {step.titleTemplate}</div>
+          <div><span className="font-medium">Target:</span> {formatNotebookTarget(step.notebookTarget)}</div>
+          {step.tags.length > 0 && <div><span className="font-medium">Tags:</span> {step.tags.join(", ")}</div>}
+        </div>
+      );
+    case "createNotebook":
+      return <div><span className="font-medium">Name:</span> {step.name}</div>;
+    case "createFolder":
+      return (
+        <div className="space-y-1">
+          <div><span className="font-medium">Name:</span> {step.name}</div>
+          <div><span className="font-medium">Target:</span> {formatNotebookTarget(step.notebookTarget)}</div>
+        </div>
+      );
+    case "archivePages":
+      return (
+        <div className="space-y-1">
+          {step.selector.titlePattern && <div><span className="font-medium">Title pattern:</span> {step.selector.titlePattern}</div>}
+          {step.selector.withTags.length > 0 && <div><span className="font-medium">With tags:</span> {step.selector.withTags.join(", ")}</div>}
+          {step.selector.createdWithinDays && <div><span className="font-medium">Created within:</span> {step.selector.createdWithinDays} days</div>}
+        </div>
+      );
+    case "manageTags":
+      return (
+        <div className="space-y-1">
+          {step.addTags.length > 0 && <div><span className="font-medium">Add tags:</span> {step.addTags.join(", ")}</div>}
+          {step.removeTags.length > 0 && <div><span className="font-medium">Remove tags:</span> {step.removeTags.join(", ")}</div>}
+        </div>
+      );
+    case "delay":
+      return <div><span className="font-medium">Duration:</span> {step.seconds} seconds</div>;
+    case "carryForwardItems":
+      return (
+        <div className="space-y-1">
+          <div><span className="font-medium">Title:</span> {step.titleTemplate}</div>
+          <div><span className="font-medium">Destination:</span> {formatNotebookTarget(step.destination)}</div>
+        </div>
+      );
+    case "aiSummarize":
+      return (
+        <div className="space-y-1">
+          <div><span className="font-medium">Style:</span> {step.summaryStyle}</div>
+          <div><span className="font-medium">Output:</span> {step.outputTarget.type === "result" ? "Variable" : step.outputTarget.type === "newPage" ? `New page: ${step.outputTarget.titleTemplate}` : "Prepend to page"}</div>
+          {step.customPrompt && <div><span className="font-medium">Custom prompt:</span> {step.customPrompt}</div>}
+        </div>
+      );
+    default:
+      return <div>Step configuration details not available</div>;
   }
 }
 

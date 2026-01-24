@@ -22,7 +22,7 @@ export function ActionEditor({
   onClose,
   editingActionId,
 }: ActionEditorProps) {
-  const { actions, createAction, updateAction } = useActionStore();
+  const { actions, createAction, updateAction, viewOnlyMode } = useActionStore();
 
   const [currentStep, setCurrentStep] = useState<EditorStep>("basics");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -129,16 +129,21 @@ export function ActionEditor({
               className="text-lg font-semibold"
               style={{ color: "var(--color-text-primary)" }}
             >
-              {editingActionId ? "Edit Action" : "Create Action"}
+              {viewOnlyMode ? "View Action" : editingActionId ? "Edit Action" : "Create Action"}
             </h2>
             <p
               className="text-sm"
               style={{ color: "var(--color-text-muted)" }}
             >
-              {currentStep === "basics" && "Set up basic information"}
-              {currentStep === "triggers" && "Configure when to run"}
-              {currentStep === "steps" && "Define what the action does"}
-              {currentStep === "review" && "Review and save"}
+              {viewOnlyMode
+                ? "This is a built-in action and cannot be edited"
+                : currentStep === "basics"
+                  ? "Set up basic information"
+                  : currentStep === "triggers"
+                    ? "Configure when to run"
+                    : currentStep === "steps"
+                      ? "Define what the action does"
+                      : "Review and save"}
             </p>
           </div>
           <button
@@ -208,14 +213,15 @@ export function ActionEditor({
                   className="mb-1.5 block text-sm font-medium"
                   style={{ color: "var(--color-text-secondary)" }}
                 >
-                  Name *
+                  Name {!viewOnlyMode && "*"}
                 </label>
                 <input
                   type="text"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="e.g., Daily Goals Setup"
-                  className="w-full rounded-lg border px-3 py-2 text-sm outline-none transition-colors focus:border-[--color-accent]"
+                  disabled={viewOnlyMode}
+                  className="w-full rounded-lg border px-3 py-2 text-sm outline-none transition-colors focus:border-[--color-accent] disabled:cursor-not-allowed disabled:opacity-70"
                   style={{
                     backgroundColor: "var(--color-bg-secondary)",
                     borderColor: "var(--color-border)",
@@ -236,7 +242,8 @@ export function ActionEditor({
                   onChange={(e) => setDescription(e.target.value)}
                   placeholder="What does this action do?"
                   rows={3}
-                  className="w-full resize-none rounded-lg border px-3 py-2 text-sm outline-none transition-colors focus:border-[--color-accent]"
+                  disabled={viewOnlyMode}
+                  className="w-full resize-none rounded-lg border px-3 py-2 text-sm outline-none transition-colors focus:border-[--color-accent] disabled:cursor-not-allowed disabled:opacity-70"
                   style={{
                     backgroundColor: "var(--color-bg-secondary)",
                     borderColor: "var(--color-border)",
@@ -256,12 +263,15 @@ export function ActionEditor({
                   {ACTION_CATEGORIES.map((cat) => (
                     <button
                       key={cat.id}
-                      onClick={() => setCategory(cat.id)}
+                      onClick={() => !viewOnlyMode && setCategory(cat.id)}
+                      disabled={viewOnlyMode}
                       className={`rounded-lg border p-3 text-left transition-colors ${
                         category === cat.id
                           ? "border-[--color-accent]"
-                          : "hover:border-[--color-accent]/50"
-                      }`}
+                          : viewOnlyMode
+                            ? ""
+                            : "hover:border-[--color-accent]/50"
+                      } ${viewOnlyMode ? "cursor-not-allowed opacity-70" : ""}`}
                       style={{
                         backgroundColor: "var(--color-bg-secondary)",
                         borderColor:
@@ -291,12 +301,12 @@ export function ActionEditor({
 
           {/* Triggers step */}
           {currentStep === "triggers" && (
-            <TriggerEditor triggers={triggers} onChange={setTriggers} />
+            <TriggerEditor triggers={triggers} onChange={setTriggers} viewOnly={viewOnlyMode} />
           )}
 
           {/* Steps step */}
           {currentStep === "steps" && (
-            <StepBuilder steps={steps} onChange={setSteps} />
+            <StepBuilder steps={steps} onChange={setSteps} viewOnly={viewOnlyMode} />
           )}
 
           {/* Review step */}
@@ -388,40 +398,75 @@ export function ActionEditor({
           className="flex items-center justify-between border-t px-6 py-4"
           style={{ borderColor: "var(--color-border)" }}
         >
-          <button
-            onClick={handleBack}
-            disabled={currentStep === "basics"}
-            className="rounded-lg px-4 py-2 text-sm font-medium transition-colors hover:opacity-80 disabled:invisible"
-            style={{
-              backgroundColor: "var(--color-bg-tertiary)",
-              color: "var(--color-text-secondary)",
-            }}
-          >
-            Back
-          </button>
-
-          {currentStep !== "review" ? (
-            <button
-              onClick={handleNext}
-              disabled={!canProceed}
-              className="rounded-lg px-4 py-2 text-sm font-medium text-white transition-colors hover:opacity-90 disabled:opacity-50"
-              style={{ backgroundColor: "var(--color-accent)" }}
-            >
-              Next
-            </button>
+          {viewOnlyMode ? (
+            <>
+              <button
+                onClick={handleBack}
+                disabled={currentStep === "basics"}
+                className="rounded-lg px-4 py-2 text-sm font-medium transition-colors hover:opacity-80 disabled:invisible"
+                style={{
+                  backgroundColor: "var(--color-bg-tertiary)",
+                  color: "var(--color-text-secondary)",
+                }}
+              >
+                Back
+              </button>
+              {currentStep !== "review" ? (
+                <button
+                  onClick={handleNext}
+                  className="rounded-lg px-4 py-2 text-sm font-medium text-white transition-colors hover:opacity-90"
+                  style={{ backgroundColor: "var(--color-accent)" }}
+                >
+                  Next
+                </button>
+              ) : (
+                <button
+                  onClick={onClose}
+                  className="rounded-lg px-4 py-2 text-sm font-medium text-white transition-colors hover:opacity-90"
+                  style={{ backgroundColor: "var(--color-accent)" }}
+                >
+                  Close
+                </button>
+              )}
+            </>
           ) : (
-            <button
-              onClick={handleSubmit}
-              disabled={isSubmitting || !isBasicsValid}
-              className="rounded-lg px-4 py-2 text-sm font-medium text-white transition-colors hover:opacity-90 disabled:opacity-50"
-              style={{ backgroundColor: "var(--color-accent)" }}
-            >
-              {isSubmitting
-                ? "Saving..."
-                : editingActionId
-                  ? "Save Changes"
-                  : "Create Action"}
-            </button>
+            <>
+              <button
+                onClick={handleBack}
+                disabled={currentStep === "basics"}
+                className="rounded-lg px-4 py-2 text-sm font-medium transition-colors hover:opacity-80 disabled:invisible"
+                style={{
+                  backgroundColor: "var(--color-bg-tertiary)",
+                  color: "var(--color-text-secondary)",
+                }}
+              >
+                Back
+              </button>
+
+              {currentStep !== "review" ? (
+                <button
+                  onClick={handleNext}
+                  disabled={!canProceed}
+                  className="rounded-lg px-4 py-2 text-sm font-medium text-white transition-colors hover:opacity-90 disabled:opacity-50"
+                  style={{ backgroundColor: "var(--color-accent)" }}
+                >
+                  Next
+                </button>
+              ) : (
+                <button
+                  onClick={handleSubmit}
+                  disabled={isSubmitting || !isBasicsValid}
+                  className="rounded-lg px-4 py-2 text-sm font-medium text-white transition-colors hover:opacity-90 disabled:opacity-50"
+                  style={{ backgroundColor: "var(--color-accent)" }}
+                >
+                  {isSubmitting
+                    ? "Saving..."
+                    : editingActionId
+                      ? "Save Changes"
+                      : "Create Action"}
+                </button>
+              )}
+            </>
           )}
         </div>
       </div>

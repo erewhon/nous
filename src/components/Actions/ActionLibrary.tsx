@@ -24,6 +24,7 @@ export function ActionLibrary({
     deleteAction,
     setEnabled,
     openActionEditor,
+    duplicateAction,
     clearError,
   } = useActionStore();
 
@@ -64,6 +65,19 @@ export function ActionLibrary({
   const handleCreateNew = () => {
     openActionEditor();
     onClose();
+  };
+
+  const handleViewDetails = (actionId: string) => {
+    openActionEditor(actionId, true);
+    onClose();
+  };
+
+  const handleDuplicate = async (actionId: string) => {
+    try {
+      await duplicateAction(actionId);
+    } catch (error) {
+      console.error("Failed to duplicate action:", error);
+    }
   };
 
   // Filter actions
@@ -287,6 +301,8 @@ export function ActionLibrary({
                         onEdit={handleEdit}
                         onDelete={handleDelete}
                         onToggleEnabled={handleToggleEnabled}
+                        onViewDetails={handleViewDetails}
+                        onDuplicate={handleDuplicate}
                         isRunning={runningActionId === action.id}
                       />
                     ))}

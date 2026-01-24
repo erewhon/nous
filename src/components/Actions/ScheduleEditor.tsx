@@ -3,6 +3,7 @@ import type { Schedule } from "../../types/action";
 interface ScheduleEditorProps {
   schedule: Schedule;
   onChange: (schedule: Schedule) => void;
+  viewOnly?: boolean;
 }
 
 const DAYS_OF_WEEK = [
@@ -15,7 +16,7 @@ const DAYS_OF_WEEK = [
   { id: "sunday", label: "Sun" },
 ];
 
-export function ScheduleEditor({ schedule, onChange }: ScheduleEditorProps) {
+export function ScheduleEditor({ schedule, onChange, viewOnly = false }: ScheduleEditorProps) {
   const handleTypeChange = (type: Schedule["type"]) => {
     if (type === "daily") {
       onChange({
@@ -80,10 +81,11 @@ export function ScheduleEditor({ schedule, onChange }: ScheduleEditorProps) {
           {(["daily", "weekly", "monthly"] as const).map((type) => (
             <button
               key={type}
-              onClick={() => handleTypeChange(type)}
+              onClick={() => !viewOnly && handleTypeChange(type)}
+              disabled={viewOnly}
               className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
                 schedule.type === type ? "text-white" : ""
-              }`}
+              } ${viewOnly ? "cursor-not-allowed opacity-70" : ""}`}
               style={{
                 backgroundColor:
                   schedule.type === type
@@ -113,7 +115,8 @@ export function ScheduleEditor({ schedule, onChange }: ScheduleEditorProps) {
           type="time"
           value={schedule.time}
           onChange={(e) => handleTimeChange(e.target.value)}
-          className="rounded-lg border px-3 py-2 text-sm outline-none transition-colors focus:border-[--color-accent]"
+          disabled={viewOnly}
+          className="rounded-lg border px-3 py-2 text-sm outline-none transition-colors focus:border-[--color-accent] disabled:cursor-not-allowed disabled:opacity-70"
           style={{
             backgroundColor: "var(--color-bg-tertiary)",
             borderColor: "var(--color-border)",
@@ -125,15 +128,16 @@ export function ScheduleEditor({ schedule, onChange }: ScheduleEditorProps) {
       {/* Daily-specific options */}
       {schedule.type === "daily" && (
         <div>
-          <label className="flex items-center gap-2 cursor-pointer">
+          <label className={`flex items-center gap-2 ${viewOnly ? "cursor-not-allowed" : "cursor-pointer"}`}>
             <input
               type="checkbox"
               checked={schedule.skipWeekends}
               onChange={(e) => handleSkipWeekendsChange(e.target.checked)}
-              className="h-4 w-4 rounded border-gray-300 accent-[--color-accent]"
+              disabled={viewOnly}
+              className="h-4 w-4 rounded border-gray-300 accent-[--color-accent] disabled:opacity-70"
             />
             <span
-              className="text-sm"
+              className={`text-sm ${viewOnly ? "opacity-70" : ""}`}
               style={{ color: "var(--color-text-secondary)" }}
             >
               Skip weekends
@@ -155,10 +159,11 @@ export function ScheduleEditor({ schedule, onChange }: ScheduleEditorProps) {
             {DAYS_OF_WEEK.map((day) => (
               <button
                 key={day.id}
-                onClick={() => handleDaysChange(day.id)}
+                onClick={() => !viewOnly && handleDaysChange(day.id)}
+                disabled={viewOnly}
                 className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
                   schedule.days.includes(day.id) ? "text-white" : ""
-                }`}
+                } ${viewOnly ? "cursor-not-allowed opacity-70" : ""}`}
                 style={{
                   backgroundColor: schedule.days.includes(day.id)
                     ? "var(--color-accent)"
@@ -187,7 +192,8 @@ export function ScheduleEditor({ schedule, onChange }: ScheduleEditorProps) {
           <select
             value={schedule.dayOfMonth}
             onChange={(e) => handleDayOfMonthChange(parseInt(e.target.value))}
-            className="rounded-lg border px-3 py-2 text-sm outline-none transition-colors focus:border-[--color-accent]"
+            disabled={viewOnly}
+            className="rounded-lg border px-3 py-2 text-sm outline-none transition-colors focus:border-[--color-accent] disabled:cursor-not-allowed disabled:opacity-70"
             style={{
               backgroundColor: "var(--color-bg-tertiary)",
               borderColor: "var(--color-border)",

@@ -9,6 +9,8 @@ interface ActionCardProps {
   onEdit: (actionId: string) => void;
   onDelete: (actionId: string) => void;
   onToggleEnabled: (actionId: string, enabled: boolean) => void;
+  onViewDetails?: (actionId: string) => void;
+  onDuplicate?: (actionId: string) => void;
   isRunning?: boolean;
 }
 
@@ -18,6 +20,8 @@ export const ActionCard = memo(function ActionCard({
   onEdit,
   onDelete,
   onToggleEnabled,
+  onViewDetails,
+  onDuplicate,
   isRunning = false,
 }: ActionCardProps) {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -48,6 +52,14 @@ export const ActionCard = memo(function ActionCard({
   const handleEdit = useCallback(() => {
     onEdit(action.id);
   }, [onEdit, action.id]);
+
+  const handleViewDetails = useCallback(() => {
+    onViewDetails?.(action.id);
+  }, [onViewDetails, action.id]);
+
+  const handleDuplicate = useCallback(() => {
+    onDuplicate?.(action.id);
+  }, [onDuplicate, action.id]);
 
   const getTriggerBadges = () => {
     const badges: { label: string; icon: ReactElement }[] = [];
@@ -274,7 +286,26 @@ export const ActionCard = memo(function ActionCard({
           )}
         </button>
 
-        {!action.isBuiltIn && (
+        {action.isBuiltIn ? (
+          <>
+            <button
+              onClick={handleViewDetails}
+              className="rounded-lg p-2 transition-colors hover:opacity-80"
+              style={{ backgroundColor: "var(--color-bg-tertiary)" }}
+              title="View details"
+            >
+              <IconEye className="h-4 w-4" />
+            </button>
+            <button
+              onClick={handleDuplicate}
+              className="rounded-lg p-2 transition-colors hover:opacity-80"
+              style={{ backgroundColor: "var(--color-bg-tertiary)" }}
+              title="Duplicate as custom action"
+            >
+              <IconCopy className="h-4 w-4" />
+            </button>
+          </>
+        ) : (
           <>
             <button
               onClick={handleEdit}
@@ -552,6 +583,48 @@ function IconTrash({ className = "" }: { className?: string }) {
       <path d="M3 6h18" />
       <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
       <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+    </svg>
+  );
+}
+
+function IconEye({ className = "" }: { className?: string }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      style={{ color: "var(--color-text-muted)" }}
+    >
+      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
+function IconCopy({ className = "" }: { className?: string }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      style={{ color: "var(--color-text-muted)" }}
+    >
+      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
     </svg>
   );
 }
