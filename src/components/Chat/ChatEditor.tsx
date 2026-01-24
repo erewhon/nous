@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { save } from "@tauri-apps/plugin-dialog";
@@ -27,8 +27,10 @@ import {
   type ChatPageContent,
   type ChatSettings,
   createChatCell,
+  createBranch,
   createDefaultChatContent,
   buildConversationHistory,
+  getCellsForBranch,
 } from "../../types/chat";
 import * as api from "../../utils/api";
 import { useAIStore } from "../../stores/aiStore";
@@ -53,8 +55,10 @@ export function ChatEditor({ page, notebookId, className = "" }: ChatEditorProps
   const [showSearch, setShowSearch] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [showExportMenu, setShowExportMenu] = useState(false);
+  const [showBranchSelector, setShowBranchSelector] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const exportMenuRef = useRef<HTMLDivElement>(null);
+  const branchSelectorRef = useRef<HTMLDivElement>(null);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -140,10 +144,12 @@ export function ChatEditor({ page, notebookId, className = "" }: ChatEditorProps
     [updateContent]
   );
 
-  // Add a new cell
+  // Add a new cell (in current branch)
   const addCell = useCallback(
     (type: "prompt" | "markdown", afterCellId?: string) => {
-      const newCell = createChatCell(type);
+      if (!content) return "";
+      const currentBranch = content.currentBranch || "main";
+      const newCell = createChatCell(type, "", currentBranch);
       updateContent((prev) => {
         const idx = afterCellId ? prev.cells.findIndex((c) => c.id === afterCellId) : prev.cells.length - 1;
         const newCells = [...prev.cells];
@@ -152,7 +158,7 @@ export function ChatEditor({ page, notebookId, className = "" }: ChatEditorProps
       });
       return newCell.id;
     },
-    [updateContent]
+    [content, updateContent]
   );
 
   // Delete a cell
@@ -241,8 +247,9 @@ export function ChatEditor({ page, notebookId, className = "" }: ChatEditorProps
           stats: undefined,
         });
       } else {
-        // Create new response cell
-        const responseCell = createChatCell("response");
+        // Create new response cell in same branch as prompt
+        const promptBranch = promptCell.branchId || "main";
+        const responseCell = createChatCell("response", "", promptBranch);
         responseCell.parentPromptId = promptCellId;
         responseCell.status = "running";
         responseCellId = responseCell.id;
@@ -297,10 +304,15 @@ export function ChatEditor({ page, notebookId, className = "" }: ChatEditorProps
           }
         });
 
-        // Build conversation history
-        const history = buildConversationHistory(
+        // Build conversation history using visible cells for current branch
+        const branchCells = getCellsForBranch(
           content.cells,
-          promptIndex,
+          content.branches || [],
+          content.currentBranch || "main"
+        );
+        const history = buildConversationHistory(
+          branchCells,
+          promptCellId,
           content.settings.maxContextCells
         );
 
@@ -393,17 +405,61 @@ export function ChatEditor({ page, notebookId, className = "" }: ChatEditorProps
     });
   };
 
-  // Collapse all cells
-  const collapseAll = useCallback(() => {
-    if (content) {
-      setCollapsedCells(new Set(content.cells.map((c) => c.id)));
-    }
+  // Get visible cells for current branch
+  const visibleCells = useMemo(() => {
+    if (!content) return [];
+    return getCellsForBranch(content.cells, content.branches || [], content.currentBranch || "main");
   }, [content]);
+
+  // Collapse all visible cells
+  const collapseAll = useCallback(() => {
+    if (visibleCells.length > 0) {
+      setCollapsedCells(new Set(visibleCells.map((c) => c.id)));
+    }
+  }, [visibleCells]);
 
   // Expand all cells
   const expandAll = useCallback(() => {
     setCollapsedCells(new Set());
   }, []);
+
+  // Switch to a different branch
+  const switchBranch = useCallback(
+    (branchId: string) => {
+      updateContent((prev) => ({
+        ...prev,
+        currentBranch: branchId,
+      }));
+    },
+    [updateContent]
+  );
+
+  // Create a new branch from a cell
+  const createBranchFromCell = useCallback(
+    (cellId: string, branchName?: string) => {
+      if (!content) return;
+
+      const cell = content.cells.find((c) => c.id === cellId);
+      if (!cell || cell.type !== "prompt") return;
+
+      const currentBranch = content.currentBranch || "main";
+      const branchCount = content.branches?.length || 0;
+      const name = branchName || `Branch ${branchCount + 1}`;
+
+      const newBranch = createBranch(name, currentBranch, cellId);
+
+      // Create a copy of the prompt cell for the new branch
+      const newPromptCell = createChatCell("prompt", cell.content, newBranch.id);
+
+      updateContent((prev) => ({
+        ...prev,
+        branches: [...(prev.branches || []), newBranch],
+        cells: [...prev.cells, newPromptCell],
+        currentBranch: newBranch.id,
+      }));
+    },
+    [content, updateContent]
+  );
 
   // Drag-and-drop sensors
   const sensors = useSensors(
@@ -525,6 +581,20 @@ export function ChatEditor({ page, notebookId, className = "" }: ChatEditorProps
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [showExportMenu]);
 
+  // Close branch selector on click outside
+  useEffect(() => {
+    if (!showBranchSelector) return;
+
+    const handleClickOutside = (e: MouseEvent) => {
+      if (branchSelectorRef.current && !branchSelectorRef.current.contains(e.target as Node)) {
+        setShowBranchSelector(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showBranchSelector]);
+
   // Cleanup
   useEffect(() => {
     return () => {
@@ -581,8 +651,76 @@ export function ChatEditor({ page, notebookId, className = "" }: ChatEditorProps
             AI Chat
           </span>
           <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>
-            {content.cells.length} cell{content.cells.length !== 1 ? "s" : ""}
+            {visibleCells.length} cell{visibleCells.length !== 1 ? "s" : ""}
           </span>
+          {/* Branch selector */}
+          {(content.branches?.length || 0) > 0 && (
+            <div className="relative" ref={branchSelectorRef}>
+              <button
+                onClick={() => setShowBranchSelector(!showBranchSelector)}
+                className={`flex items-center gap-1.5 px-2 py-1 rounded-lg text-xs transition-colors hover:bg-[--color-bg-tertiary] ${showBranchSelector ? "bg-[--color-bg-tertiary]" : ""}`}
+                style={{ color: "var(--color-text-secondary)" }}
+              >
+                <IconBranch />
+                <span className="font-medium">
+                  {content.currentBranch === "main"
+                    ? "main"
+                    : content.branches?.find((b) => b.id === content.currentBranch)?.name || "main"}
+                </span>
+                <IconChevronDown />
+              </button>
+              {showBranchSelector && (
+                <div
+                  className="absolute left-0 top-full mt-1 z-50 rounded-lg border shadow-lg overflow-hidden min-w-[180px]"
+                  style={{
+                    backgroundColor: "var(--color-bg-secondary)",
+                    borderColor: "var(--color-border)",
+                  }}
+                >
+                  <div
+                    className="px-3 py-2 border-b text-xs font-medium"
+                    style={{
+                      borderColor: "var(--color-border)",
+                      color: "var(--color-text-muted)",
+                    }}
+                  >
+                    Switch Branch
+                  </div>
+                  {/* Main branch */}
+                  <button
+                    onClick={() => {
+                      switchBranch("main");
+                      setShowBranchSelector(false);
+                    }}
+                    className={`flex items-center gap-2 w-full px-3 py-2 text-sm text-left transition-colors hover:bg-[--color-bg-tertiary] ${content.currentBranch === "main" ? "bg-[--color-bg-tertiary]" : ""}`}
+                    style={{ color: "var(--color-text-primary)" }}
+                  >
+                    <span className="flex-1">main</span>
+                    {content.currentBranch === "main" && (
+                      <span style={{ color: "var(--color-accent)" }}>✓</span>
+                    )}
+                  </button>
+                  {/* Other branches */}
+                  {content.branches?.map((branch) => (
+                    <button
+                      key={branch.id}
+                      onClick={() => {
+                        switchBranch(branch.id);
+                        setShowBranchSelector(false);
+                      }}
+                      className={`flex items-center gap-2 w-full px-3 py-2 text-sm text-left transition-colors hover:bg-[--color-bg-tertiary] ${content.currentBranch === branch.id ? "bg-[--color-bg-tertiary]" : ""}`}
+                      style={{ color: "var(--color-text-primary)" }}
+                    >
+                      <span className="flex-1">{branch.name}</span>
+                      {content.currentBranch === branch.id && (
+                        <span style={{ color: "var(--color-accent)" }}>✓</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
         <div className="flex items-center space-x-2 text-xs" style={{ color: "var(--color-text-muted)" }}>
           {isSaving && <span className="animate-pulse">Saving...</span>}
@@ -696,10 +834,10 @@ export function ChatEditor({ page, notebookId, className = "" }: ChatEditorProps
           onDragEnd={handleDragEnd}
         >
           <SortableContext
-            items={content.cells.map((c) => c.id)}
+            items={visibleCells.map((c) => c.id)}
             strategy={verticalListSortingStrategy}
           >
-            {content.cells.map((cell, index) => (
+            {visibleCells.map((cell, index) => (
               <SortableCellRenderer
                 key={cell.id}
                 cell={cell}
@@ -716,6 +854,7 @@ export function ChatEditor({ page, notebookId, className = "" }: ChatEditorProps
                     ? () => executePrompt(cell.parentPromptId!)
                     : undefined
                 }
+                onBranch={cell.type === "prompt" ? () => createBranchFromCell(cell.id) : undefined}
                 onDelete={() => deleteCell(cell.id)}
                 onMoveUp={() => moveCell(cell.id, "up")}
                 onMoveDown={() => moveCell(cell.id, "down")}
@@ -723,8 +862,8 @@ export function ChatEditor({ page, notebookId, className = "" }: ChatEditorProps
                 onToggleCollapse={() => toggleCollapse(cell.id)}
                 onAddCellAfter={(type) => addCell(type, cell.id)}
                 canMoveUp={index > 0}
-                canMoveDown={index < content.cells.length - 1}
-                canDelete={content.cells.length > 1}
+                canMoveDown={index < visibleCells.length - 1}
+                canDelete={visibleCells.length > 1}
               />
             ))}
           </SortableContext>
@@ -759,6 +898,7 @@ interface SortableCellRendererProps {
   onUpdateContent: (content: string) => void;
   onExecute: () => void;
   onRegenerate?: () => void;
+  onBranch?: () => void;
   onDelete: () => void;
   onMoveUp: () => void;
   onMoveDown: () => void;
@@ -810,6 +950,7 @@ interface CellRendererProps {
   onUpdateContent: (content: string) => void;
   onExecute: () => void;
   onRegenerate?: () => void;
+  onBranch?: () => void;
   onDelete: () => void;
   onMoveUp: () => void;
   onMoveDown: () => void;
@@ -836,6 +977,7 @@ function CellRenderer({
   onUpdateContent,
   onExecute,
   onRegenerate,
+  onBranch,
   onDelete,
   onMoveUp,
   onMoveDown,
@@ -1077,6 +1219,16 @@ function CellRenderer({
             >
               <IconPlay />
               Run
+            </button>
+          )}
+          {cell.type === "prompt" && onBranch && (
+            <button
+              onClick={onBranch}
+              className="p-1 rounded transition-colors hover:bg-[--color-bg-elevated]"
+              style={{ color: "var(--color-text-muted)" }}
+              title="Create branch from this prompt"
+            >
+              <IconBranch />
             </button>
           )}
           {cell.type === "response" && cell.thinking && (
@@ -1856,6 +2008,26 @@ function IconVariable() {
       <path d="M16 3s4 3 4 9-4 9-4 9" />
       <line x1="15" y1="9" x2="9" y2="15" />
       <line x1="9" y1="9" x2="15" y2="15" />
+    </svg>
+  );
+}
+
+function IconBranch() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="18" cy="18" r="3" />
+      <circle cx="6" cy="6" r="3" />
+      <path d="M6 21V9a9 9 0 0 0 9 9" />
     </svg>
   );
 }

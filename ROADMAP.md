@@ -480,10 +480,11 @@ Already implemented with Tantivy, may need refinement:
 - [x] **Regenerate Response** - Re-run a prompt to get alternative responses
   - Button on response cells to regenerate
   - Retry button on error responses
-- [ ] **Conversation Branching** - Fork conversation at any point
-  - Create branch from any prompt cell
-  - Explore alternative conversation paths
-  - Visual indicator for branch points
+- [x] **Conversation Branching** - Fork conversation at any point
+  - Branch button on prompt cells to create new branch
+  - Branch selector dropdown in header to switch between branches
+  - Each branch maintains its own conversation path
+  - Context history follows branch lineage correctly
 - [x] **Template Variables** - Use placeholders in prompts
   - `{{selection}}` - current text selection
   - `{{page_title}}` - title of current page
