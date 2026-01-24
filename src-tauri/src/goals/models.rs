@@ -29,6 +29,7 @@ pub enum AutoDetectType {
     JjCommit,
     PageEdit,
     PageCreate,
+    YoutubePublish,
 }
 
 /// Scope for auto-detection
@@ -66,6 +67,9 @@ pub struct AutoDetectConfig {
     /// Commits are aggregated across all repos
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub repo_paths: Vec<String>,
+    /// YouTube channel ID (for youtube_publish type)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub youtube_channel_id: Option<String>,
     /// Minimum count to mark as completed (default: 1)
     /// For multiple repos, this is the total across all repos
     pub threshold: Option<u32>,

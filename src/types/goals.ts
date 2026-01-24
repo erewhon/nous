@@ -9,7 +9,7 @@ export const TrackingTypeSchema = z.enum(["auto", "manual"]);
 export type TrackingType = z.infer<typeof TrackingTypeSchema>;
 
 // Type of auto-detection
-export const AutoDetectTypeSchema = z.enum(["git_commit", "jj_commit", "page_edit", "page_create"]);
+export const AutoDetectTypeSchema = z.enum(["git_commit", "jj_commit", "page_edit", "page_create", "youtube_publish"]);
 export type AutoDetectType = z.infer<typeof AutoDetectTypeSchema>;
 
 // Scope for auto-detection
@@ -27,6 +27,7 @@ export const AutoDetectConfigSchema = z.object({
   scope: AutoDetectScopeSchema,
   repoPath: z.string().optional(), // Legacy single repo (for backwards compatibility)
   repoPaths: z.array(z.string()).optional().default([]), // Multiple repos (commits aggregated)
+  youtubeChannelId: z.string().optional(), // YouTube channel ID for youtube_publish type
   threshold: z.number().optional(),
 });
 export type AutoDetectConfig = z.infer<typeof AutoDetectConfigSchema>;

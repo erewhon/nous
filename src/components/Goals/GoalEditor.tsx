@@ -27,6 +27,7 @@ export function GoalEditor() {
   const [sections, setSections] = useState<Section[]>([]);
   const [repoPaths, setRepoPaths] = useState<string[]>([]);
   const [newRepoPath, setNewRepoPath] = useState("");
+  const [youtubeChannelId, setYoutubeChannelId] = useState("");
   const [threshold, setThreshold] = useState(1);
   const [reminderEnabled, setReminderEnabled] = useState(false);
   const [reminderTime, setReminderTime] = useState("09:00");
@@ -79,6 +80,7 @@ export function GoalEditor() {
             : [];
         setRepoPaths(paths);
         setNewRepoPath("");
+        setYoutubeChannelId(editingGoal.autoDetect.youtubeChannelId || "");
         setThreshold(editingGoal.autoDetect.threshold || 1);
       }
       if (editingGoal.reminder) {
@@ -98,6 +100,7 @@ export function GoalEditor() {
       setSections([]);
       setRepoPaths([]);
       setNewRepoPath("");
+      setYoutubeChannelId("");
       setThreshold(1);
       setReminderEnabled(false);
       setReminderTime("09:00");
@@ -138,6 +141,7 @@ export function GoalEditor() {
                 type: autoDetectType,
                 scope,
                 repoPaths: (autoDetectType === "git_commit" || autoDetectType === "jj_commit") ? repoPaths : [],
+                youtubeChannelId: autoDetectType === "youtube_publish" ? youtubeChannelId : undefined,
                 threshold: threshold > 1 ? threshold : undefined,
               }
             : undefined,
@@ -378,8 +382,38 @@ export function GoalEditor() {
                     <option value="page_create">Page creates</option>
                     <option value="git_commit">Git commits</option>
                     <option value="jj_commit">Jujutsu (jj) commits</option>
+                    <option value="youtube_publish">YouTube video/livestream</option>
                   </select>
                 </div>
+
+                {autoDetectType === "youtube_publish" && (
+                  <div>
+                    <label
+                      className="block text-xs font-medium mb-1"
+                      style={{ color: "var(--color-text-muted)" }}
+                    >
+                      YouTube Channel ID
+                    </label>
+                    <input
+                      type="text"
+                      value={youtubeChannelId}
+                      onChange={(e) => setYoutubeChannelId(e.target.value)}
+                      placeholder="UCxxxxxxxxxxxxxxxx"
+                      className="w-full rounded-lg border px-3 py-2 text-sm focus:outline-none"
+                      style={{
+                        backgroundColor: "var(--color-bg-secondary)",
+                        borderColor: "var(--color-border)",
+                        color: "var(--color-text-primary)",
+                      }}
+                    />
+                    <p
+                      className="mt-1 text-xs"
+                      style={{ color: "var(--color-text-muted)" }}
+                    >
+                      Find your channel ID in YouTube Studio under Settings &gt; Channel &gt; Basic info
+                    </p>
+                  </div>
+                )}
 
                 {(autoDetectType === "git_commit" || autoDetectType === "jj_commit") && (
                   <div>
@@ -473,7 +507,7 @@ export function GoalEditor() {
                   </div>
                 )}
 
-                {autoDetectType !== "git_commit" && autoDetectType !== "jj_commit" && (
+                {autoDetectType !== "git_commit" && autoDetectType !== "jj_commit" && autoDetectType !== "youtube_publish" && (
                   <>
                     <div>
                       <label

@@ -4,8 +4,10 @@ use std::path::Path;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 
-use chrono::{NaiveDate, TimeZone, Utc};
+use chrono::{DateTime, NaiveDate, TimeZone, Utc};
 use git2::Repository;
+use quick_xml::events::Event;
+use quick_xml::Reader;
 use uuid::Uuid;
 
 use super::models::*;
@@ -54,6 +56,12 @@ impl GoalDetector {
             AutoDetectType::PageCreate => {
                 let (_, count) = self.detect_page_creates(&auto_detect.scope, date)?;
                 count
+            }
+            AutoDetectType::YoutubePublish => {
+                let Some(ref channel_id) = auto_detect.youtube_channel_id else {
+                    return Ok(None);
+                };
+                self.detect_youtube_publishes(channel_id, date, goal.frequency.clone())?
             }
         };
 
@@ -335,6 +343,125 @@ impl GoalDetector {
         }
 
         Ok((count > 0, count))
+    }
+
+    /// Detect YouTube video/livestream publishes within a time period
+    fn detect_youtube_publishes(
+        &self,
+        channel_id: &str,
+        date: NaiveDate,
+        frequency: Frequency,
+    ) -> Result<u32> {
+        // Build the RSS feed URL
+        let feed_url = format!(
+            "https://www.youtube.com/feeds/videos.xml?channel_id={}",
+            channel_id
+        );
+
+        // Fetch the RSS feed
+        let response = reqwest::blocking::get(&feed_url).map_err(|e| {
+            StorageError::InvalidOperation(format!("Failed to fetch YouTube feed: {}", e))
+        })?;
+
+        if !response.status().is_success() {
+            log::warn!(
+                "YouTube feed request failed with status {} for channel {}",
+                response.status(),
+                channel_id
+            );
+            return Ok(0);
+        }
+
+        let body = response.text().map_err(|e| {
+            StorageError::InvalidOperation(format!("Failed to read YouTube feed: {}", e))
+        })?;
+
+        // Determine the date range based on frequency
+        let (date_start, date_end) = match frequency {
+            Frequency::Daily => {
+                let start = Utc.from_utc_datetime(&date.and_hms_opt(0, 0, 0).unwrap());
+                let end = Utc.from_utc_datetime(&date.and_hms_opt(23, 59, 59).unwrap());
+                (start, end)
+            }
+            Frequency::Weekly => {
+                // Check the past 7 days from the given date
+                let week_start = date - chrono::Duration::days(6);
+                let start = Utc.from_utc_datetime(&week_start.and_hms_opt(0, 0, 0).unwrap());
+                let end = Utc.from_utc_datetime(&date.and_hms_opt(23, 59, 59).unwrap());
+                (start, end)
+            }
+            Frequency::Monthly => {
+                // Check the past 30 days from the given date
+                let month_start = date - chrono::Duration::days(29);
+                let start = Utc.from_utc_datetime(&month_start.and_hms_opt(0, 0, 0).unwrap());
+                let end = Utc.from_utc_datetime(&date.and_hms_opt(23, 59, 59).unwrap());
+                (start, end)
+            }
+        };
+
+        // Parse the RSS feed and count videos published in the date range
+        let count = self.parse_youtube_feed(&body, date_start, date_end);
+
+        Ok(count)
+    }
+
+    /// Parse YouTube RSS feed and count videos published in the given date range
+    fn parse_youtube_feed(
+        &self,
+        xml: &str,
+        date_start: DateTime<Utc>,
+        date_end: DateTime<Utc>,
+    ) -> u32 {
+        let mut reader = Reader::from_str(xml);
+        reader.config_mut().trim_text(true);
+
+        let mut count = 0;
+        let mut in_entry = false;
+        let mut in_published = false;
+        let mut buf = Vec::new();
+
+        loop {
+            match reader.read_event_into(&mut buf) {
+                Ok(Event::Start(ref e)) => {
+                    let name = e.name();
+                    if name.as_ref() == b"entry" {
+                        in_entry = true;
+                    } else if in_entry && name.as_ref() == b"published" {
+                        in_published = true;
+                    }
+                }
+                Ok(Event::End(ref e)) => {
+                    let name = e.name();
+                    if name.as_ref() == b"entry" {
+                        in_entry = false;
+                    } else if name.as_ref() == b"published" {
+                        in_published = false;
+                    }
+                }
+                Ok(Event::Text(ref e)) => {
+                    if in_published {
+                        if let Ok(text) = e.unescape() {
+                            // Parse the published date (ISO 8601 format)
+                            if let Ok(published) = DateTime::parse_from_rfc3339(&text) {
+                                let published_utc = published.with_timezone(&Utc);
+                                if published_utc >= date_start && published_utc <= date_end {
+                                    count += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+                Ok(Event::Eof) => break,
+                Err(e) => {
+                    log::warn!("Error parsing YouTube feed: {}", e);
+                    break;
+                }
+                _ => {}
+            }
+            buf.clear();
+        }
+
+        count
     }
 
     /// Check all auto-detected goals for today
