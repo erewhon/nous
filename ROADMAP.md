@@ -477,28 +477,38 @@ Already implemented with Tantivy, may need refinement:
   - Connect to existing Jupyter kernel infrastructure
   - Execute code cells inline with output display
   - Support multiple languages (Python, JavaScript, etc.)
-- [ ] **Regenerate Response** - Re-run a prompt to get alternative responses
+- [x] **Regenerate Response** - Re-run a prompt to get alternative responses
   - Button on response cells to regenerate
-  - Option to keep or replace existing response
+  - Retry button on error responses
 - [ ] **Conversation Branching** - Fork conversation at any point
   - Create branch from any prompt cell
   - Explore alternative conversation paths
   - Visual indicator for branch points
-- [ ] **Template Variables** - Use placeholders in prompts
+- [x] **Template Variables** - Use placeholders in prompts
   - `{{selection}}` - current text selection
-  - `{{page_content}}` - content of current/referenced page
-  - `{{date}}`, `{{time}}` - timestamps
-  - Variable picker UI
-- [ ] **Export Chat** - Convert chat to other formats
-  - Export to markdown file
-  - Export to standard page (block-based)
-  - Export to PDF
+  - `{{page_title}}` - title of current page
+  - `{{date}}`, `{{time}}`, `{{datetime}}` - timestamps
+  - Variable picker dropdown in prompt cell header
+- [x] **Export Chat** - Convert chat to other formats
+  - Save as Markdown file (.md)
+  - Copy as Markdown to clipboard
+  - Export dropdown in header
 - [ ] **Jupyter AI Integration** - Add AI cells to Jupyter notebooks
   - AI prompt/response cells in .ipynb files
   - Seamless mixing of code and AI cells
-- [ ] **Cell Collapsing** - Collapse/expand cells for better overview
-- [ ] **Search in Chat** - Find text within chat conversation
-- [ ] **Drag-and-Drop Reorder** - Drag cells to reorder
+- [x] **Cell Collapsing** - Collapse/expand cells for better overview
+  - Per-cell collapse toggle button
+  - Truncated preview when collapsed
+  - Collapse all / Expand all buttons in header
+- [x] **Search in Chat** - Find text within chat conversation
+  - Search bar toggle in header
+  - Real-time match highlighting
+  - Match count display
+  - Visual highlight on matching cells
+- [x] **Drag-and-Drop Reorder** - Drag cells to reorder
+  - Uses @dnd-kit library
+  - Drag handle appears on hover
+  - Smooth animations during drag
 
 ---
 

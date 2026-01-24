@@ -1,6 +1,25 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { save } from "@tauri-apps/plugin-dialog";
+import { writeTextFile } from "@tauri-apps/plugin-fs";
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import type { Page } from "../../types/page";
 import type { StreamEvent, ChatMessage } from "../../types/ai";
 import {
@@ -29,7 +48,13 @@ export function ChatEditor({ page, notebookId, className = "" }: ChatEditorProps
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [runningCellId, setRunningCellId] = useState<string | null>(null);
   const [expandedThinking, setExpandedThinking] = useState<Set<string>>(new Set());
+  const [collapsedCells, setCollapsedCells] = useState<Set<string>>(new Set());
   const [showSettings, setShowSettings] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [showExportMenu, setShowExportMenu] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const exportMenuRef = useRef<HTMLDivElement>(null);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -164,6 +189,31 @@ export function ChatEditor({ page, notebookId, className = "" }: ChatEditorProps
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [content?.cells.length, runningCellId]);
 
+  // Template variables definition
+  const templateVariables = [
+    { name: "date", description: "Current date", example: "January 23, 2026" },
+    { name: "time", description: "Current time", example: "3:45 PM" },
+    { name: "datetime", description: "Date and time", example: "1/23/2026, 3:45:00 PM" },
+    { name: "page_title", description: "This page's title", example: page.title },
+    { name: "selection", description: "Selected text", example: "(selected text)" },
+  ];
+
+  // Process template variables in text
+  const processTemplateVariables = useCallback(
+    (text: string): string => {
+      const now = new Date();
+      const selection = window.getSelection()?.toString() || "";
+
+      return text
+        .replace(/\{\{date\}\}/gi, now.toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" }))
+        .replace(/\{\{time\}\}/gi, now.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }))
+        .replace(/\{\{datetime\}\}/gi, now.toLocaleString())
+        .replace(/\{\{page_title\}\}/gi, page.title)
+        .replace(/\{\{selection\}\}/gi, selection);
+    },
+    [page.title]
+  );
+
   // Execute a prompt cell
   const executePrompt = useCallback(
     async (promptCellId: string) => {
@@ -259,8 +309,11 @@ export function ChatEditor({ page, notebookId, className = "" }: ChatEditorProps
         const systemPrompt =
           promptCell.systemPrompt || content.settings.defaultSystemPrompt || currentNotebook?.systemPrompt;
 
+        // Process template variables in the prompt
+        const processedPrompt = processTemplateVariables(promptCell.content);
+
         // Make API call
-        await api.aiChatStream(promptCell.content, {
+        await api.aiChatStream(processedPrompt, {
           conversationHistory: history as ChatMessage[],
           providerType: getActiveProviderType(),
           apiKey: getActiveApiKey() || undefined,
@@ -310,6 +363,7 @@ export function ChatEditor({ page, notebookId, className = "" }: ChatEditorProps
       currentNotebook,
       getActiveProviderType,
       getActiveApiKey,
+      processTemplateVariables,
     ]
   );
 
@@ -326,6 +380,126 @@ export function ChatEditor({ page, notebookId, className = "" }: ChatEditorProps
     });
   };
 
+  // Toggle cell collapse
+  const toggleCollapse = (cellId: string) => {
+    setCollapsedCells((prev) => {
+      const next = new Set(prev);
+      if (next.has(cellId)) {
+        next.delete(cellId);
+      } else {
+        next.add(cellId);
+      }
+      return next;
+    });
+  };
+
+  // Collapse all cells
+  const collapseAll = useCallback(() => {
+    if (content) {
+      setCollapsedCells(new Set(content.cells.map((c) => c.id)));
+    }
+  }, [content]);
+
+  // Expand all cells
+  const expandAll = useCallback(() => {
+    setCollapsedCells(new Set());
+  }, []);
+
+  // Drag-and-drop sensors
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8,
+      },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+
+  // Handle drag end for cell reordering
+  const handleDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      const { active, over } = event;
+
+      if (over && active.id !== over.id && content) {
+        const oldIndex = content.cells.findIndex((c) => c.id === active.id);
+        const newIndex = content.cells.findIndex((c) => c.id === over.id);
+
+        if (oldIndex !== -1 && newIndex !== -1) {
+          updateContent((prev) => ({
+            ...prev,
+            cells: arrayMove(prev.cells, oldIndex, newIndex),
+          }));
+        }
+      }
+    },
+    [content, updateContent]
+  );
+
+  // Convert chat content to markdown
+  const chatToMarkdown = useCallback((): string => {
+    if (!content) return "";
+
+    const lines: string[] = [];
+    lines.push(`# ${page.title}`);
+    lines.push("");
+    lines.push(`*Exported from AI Chat on ${new Date().toLocaleString()}*`);
+    lines.push("");
+    lines.push("---");
+    lines.push("");
+
+    for (const cell of content.cells) {
+      if (cell.type === "prompt") {
+        lines.push("## User");
+        lines.push("");
+        lines.push(cell.content);
+        lines.push("");
+      } else if (cell.type === "response") {
+        lines.push("## Assistant");
+        if (cell.stats?.model) {
+          lines.push(`*Model: ${cell.stats.model}*`);
+        }
+        lines.push("");
+        lines.push(cell.content);
+        lines.push("");
+      } else if (cell.type === "markdown") {
+        lines.push(cell.content);
+        lines.push("");
+      }
+    }
+
+    return lines.join("\n");
+  }, [content, page.title]);
+
+  // Export to markdown file
+  const exportToMarkdown = useCallback(async () => {
+    const markdown = chatToMarkdown();
+    const defaultName = `${page.title.replace(/[^a-zA-Z0-9]/g, "_")}.md`;
+
+    try {
+      const filePath = await save({
+        defaultPath: defaultName,
+        filters: [{ name: "Markdown", extensions: ["md"] }],
+      });
+
+      if (filePath) {
+        await writeTextFile(filePath, markdown);
+      }
+    } catch (err) {
+      console.error("Failed to export chat:", err);
+    }
+
+    setShowExportMenu(false);
+  }, [chatToMarkdown, page.title]);
+
+  // Copy to clipboard as markdown
+  const copyAsMarkdown = useCallback(async () => {
+    const markdown = chatToMarkdown();
+    await navigator.clipboard.writeText(markdown);
+    setShowExportMenu(false);
+  }, [chatToMarkdown]);
+
   // Update settings
   const updateSettings = useCallback(
     (updates: Partial<ChatSettings>) => {
@@ -336,6 +510,20 @@ export function ChatEditor({ page, notebookId, className = "" }: ChatEditorProps
     },
     [updateContent]
   );
+
+  // Close export menu on click outside
+  useEffect(() => {
+    if (!showExportMenu) return;
+
+    const handleClickOutside = (e: MouseEvent) => {
+      if (exportMenuRef.current && !exportMenuRef.current.contains(e.target as Node)) {
+        setShowExportMenu(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showExportMenu]);
 
   // Cleanup
   useEffect(() => {
@@ -400,6 +588,68 @@ export function ChatEditor({ page, notebookId, className = "" }: ChatEditorProps
           {isSaving && <span className="animate-pulse">Saving...</span>}
           {lastSaved && !isSaving && <span>Saved at {lastSaved.toLocaleTimeString()}</span>}
           <button
+            onClick={collapseAll}
+            className="p-1.5 rounded-lg transition-colors hover:bg-[--color-bg-tertiary]"
+            title="Collapse all cells"
+          >
+            <IconCollapseAll />
+          </button>
+          <button
+            onClick={expandAll}
+            className="p-1.5 rounded-lg transition-colors hover:bg-[--color-bg-tertiary]"
+            title="Expand all cells"
+          >
+            <IconExpandAll />
+          </button>
+          <button
+            onClick={() => {
+              setShowSearch(!showSearch);
+              if (!showSearch) {
+                setTimeout(() => searchInputRef.current?.focus(), 0);
+              }
+            }}
+            className={`p-1.5 rounded-lg transition-colors hover:bg-[--color-bg-tertiary] ${showSearch ? "bg-[--color-bg-tertiary]" : ""}`}
+            title="Search in chat (Cmd+F)"
+          >
+            <IconSearch />
+          </button>
+          {/* Export dropdown */}
+          <div className="relative" ref={exportMenuRef}>
+            <button
+              onClick={() => setShowExportMenu(!showExportMenu)}
+              className={`p-1.5 rounded-lg transition-colors hover:bg-[--color-bg-tertiary] ${showExportMenu ? "bg-[--color-bg-tertiary]" : ""}`}
+              title="Export chat"
+            >
+              <IconExport />
+            </button>
+            {showExportMenu && (
+              <div
+                className="absolute right-0 top-full mt-1 z-50 rounded-lg border shadow-lg overflow-hidden min-w-[160px]"
+                style={{
+                  backgroundColor: "var(--color-bg-secondary)",
+                  borderColor: "var(--color-border)",
+                }}
+              >
+                <button
+                  onClick={exportToMarkdown}
+                  className="flex items-center gap-2 w-full px-3 py-2 text-sm text-left transition-colors hover:bg-[--color-bg-tertiary]"
+                  style={{ color: "var(--color-text-primary)" }}
+                >
+                  <IconDownload />
+                  Save as Markdown
+                </button>
+                <button
+                  onClick={copyAsMarkdown}
+                  className="flex items-center gap-2 w-full px-3 py-2 text-sm text-left transition-colors hover:bg-[--color-bg-tertiary]"
+                  style={{ color: "var(--color-text-primary)" }}
+                >
+                  <IconCopy />
+                  Copy as Markdown
+                </button>
+              </div>
+            )}
+          </div>
+          <button
             onClick={() => setShowSettings(!showSettings)}
             className="p-1.5 rounded-lg transition-colors hover:bg-[--color-bg-tertiary]"
             title="Chat settings"
@@ -408,6 +658,26 @@ export function ChatEditor({ page, notebookId, className = "" }: ChatEditorProps
           </button>
         </div>
       </div>
+
+      {/* Search bar */}
+      {showSearch && (
+        <SearchBar
+          query={searchQuery}
+          onQueryChange={setSearchQuery}
+          onClose={() => {
+            setShowSearch(false);
+            setSearchQuery("");
+          }}
+          matchCount={
+            searchQuery.trim()
+              ? content.cells.filter((c) =>
+                  c.content.toLowerCase().includes(searchQuery.toLowerCase())
+                ).length
+              : 0
+          }
+          inputRef={searchInputRef}
+        />
+      )}
 
       {/* Settings panel */}
       {showSettings && (
@@ -420,25 +690,45 @@ export function ChatEditor({ page, notebookId, className = "" }: ChatEditorProps
 
       {/* Cells */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {content.cells.map((cell, index) => (
-          <CellRenderer
-            key={cell.id}
-            cell={cell}
-            index={index}
-            isRunning={runningCellId === cell.id}
-            isExpanded={expandedThinking.has(cell.id)}
-            onUpdateContent={(newContent) => updateCell(cell.id, { content: newContent })}
-            onExecute={() => executePrompt(cell.id)}
-            onDelete={() => deleteCell(cell.id)}
-            onMoveUp={() => moveCell(cell.id, "up")}
-            onMoveDown={() => moveCell(cell.id, "down")}
-            onToggleThinking={() => toggleThinking(cell.id)}
-            onAddCellAfter={(type) => addCell(type, cell.id)}
-            canMoveUp={index > 0}
-            canMoveDown={index < content.cells.length - 1}
-            canDelete={content.cells.length > 1}
-          />
-        ))}
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragEnd={handleDragEnd}
+        >
+          <SortableContext
+            items={content.cells.map((c) => c.id)}
+            strategy={verticalListSortingStrategy}
+          >
+            {content.cells.map((cell, index) => (
+              <SortableCellRenderer
+                key={cell.id}
+                cell={cell}
+                index={index}
+                isRunning={runningCellId === cell.id}
+                isExpanded={expandedThinking.has(cell.id)}
+                isCollapsed={collapsedCells.has(cell.id)}
+                searchQuery={searchQuery}
+                templateVariables={cell.type === "prompt" ? templateVariables : undefined}
+                onUpdateContent={(newContent) => updateCell(cell.id, { content: newContent })}
+                onExecute={() => executePrompt(cell.id)}
+                onRegenerate={
+                  cell.type === "response" && cell.parentPromptId
+                    ? () => executePrompt(cell.parentPromptId!)
+                    : undefined
+                }
+                onDelete={() => deleteCell(cell.id)}
+                onMoveUp={() => moveCell(cell.id, "up")}
+                onMoveDown={() => moveCell(cell.id, "down")}
+                onToggleThinking={() => toggleThinking(cell.id)}
+                onToggleCollapse={() => toggleCollapse(cell.id)}
+                onAddCellAfter={(type) => addCell(type, cell.id)}
+                canMoveUp={index > 0}
+                canMoveDown={index < content.cells.length - 1}
+                canDelete={content.cells.length > 1}
+              />
+            ))}
+          </SortableContext>
+        </DndContext>
         <div ref={messagesEndRef} />
 
         {/* Add cell button */}
@@ -450,39 +740,115 @@ export function ChatEditor({ page, notebookId, className = "" }: ChatEditorProps
   );
 }
 
-// Cell renderer component
-interface CellRendererProps {
+// Template variable type
+interface TemplateVariable {
+  name: string;
+  description: string;
+  example: string;
+}
+
+// Sortable cell wrapper
+interface SortableCellRendererProps {
   cell: ChatCell;
   index: number;
   isRunning: boolean;
   isExpanded: boolean;
+  isCollapsed: boolean;
+  searchQuery: string;
+  templateVariables?: TemplateVariable[];
   onUpdateContent: (content: string) => void;
   onExecute: () => void;
+  onRegenerate?: () => void;
   onDelete: () => void;
   onMoveUp: () => void;
   onMoveDown: () => void;
   onToggleThinking: () => void;
+  onToggleCollapse: () => void;
   onAddCellAfter: (type: "prompt" | "markdown") => void;
   canMoveUp: boolean;
   canMoveDown: boolean;
   canDelete: boolean;
 }
 
+function SortableCellRenderer(props: SortableCellRendererProps) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: props.cell.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+    zIndex: isDragging ? 1 : undefined,
+  };
+
+  return (
+    <div ref={setNodeRef} style={style}>
+      <CellRenderer
+        {...props}
+        dragHandleProps={{ attributes, listeners }}
+        isDragging={isDragging}
+      />
+    </div>
+  );
+}
+
+// Cell renderer component
+interface CellRendererProps {
+  cell: ChatCell;
+  index: number;
+  isRunning: boolean;
+  isExpanded: boolean;
+  isCollapsed: boolean;
+  searchQuery: string;
+  templateVariables?: TemplateVariable[];
+  onUpdateContent: (content: string) => void;
+  onExecute: () => void;
+  onRegenerate?: () => void;
+  onDelete: () => void;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+  onToggleThinking: () => void;
+  onToggleCollapse: () => void;
+  onAddCellAfter: (type: "prompt" | "markdown") => void;
+  canMoveUp: boolean;
+  canMoveDown: boolean;
+  canDelete: boolean;
+  dragHandleProps?: {
+    attributes: React.HTMLAttributes<HTMLElement>;
+    listeners: Record<string, unknown> | undefined;
+  };
+  isDragging?: boolean;
+}
+
 function CellRenderer({
   cell,
   isRunning,
   isExpanded,
+  isCollapsed,
+  searchQuery,
+  templateVariables,
   onUpdateContent,
   onExecute,
+  onRegenerate,
   onDelete,
   onMoveUp,
   onMoveDown,
   onToggleThinking,
+  onToggleCollapse,
   canMoveUp,
   canMoveDown,
   canDelete,
+  dragHandleProps,
 }: CellRendererProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [showVariablePicker, setShowVariablePicker] = useState(false);
+  const variablePickerRef = useRef<HTMLDivElement>(null);
 
   // Auto-resize textarea
   useEffect(() => {
@@ -491,6 +857,46 @@ function CellRenderer({
       textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
     }
   }, [cell.content]);
+
+  // Close variable picker on click outside
+  useEffect(() => {
+    if (!showVariablePicker) return;
+
+    const handleClickOutside = (e: MouseEvent) => {
+      if (variablePickerRef.current && !variablePickerRef.current.contains(e.target as Node)) {
+        setShowVariablePicker(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showVariablePicker]);
+
+  // Insert variable at cursor position
+  const insertVariable = useCallback(
+    (variableName: string) => {
+      const textarea = textareaRef.current;
+      if (!textarea) return;
+
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      const text = cell.content;
+      const variableText = `{{${variableName}}}`;
+
+      const newContent = text.slice(0, start) + variableText + text.slice(end);
+      onUpdateContent(newContent);
+
+      // Set cursor position after inserted variable
+      setTimeout(() => {
+        textarea.focus();
+        const newPos = start + variableText.length;
+        textarea.setSelectionRange(newPos, newPos);
+      }, 0);
+
+      setShowVariablePicker(false);
+    },
+    [cell.content, onUpdateContent]
+  );
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && (e.shiftKey || e.metaKey || e.ctrlKey)) {
@@ -501,31 +907,88 @@ function CellRenderer({
     }
   };
 
+  // Highlight search matches in text
+  const highlightText = (text: string): React.ReactNode => {
+    if (!searchQuery.trim()) return text;
+
+    const query = searchQuery.toLowerCase();
+    const parts: React.ReactNode[] = [];
+    let lastIndex = 0;
+    let lowerText = text.toLowerCase();
+    let matchIndex = lowerText.indexOf(query);
+
+    while (matchIndex !== -1) {
+      // Add text before match
+      if (matchIndex > lastIndex) {
+        parts.push(text.slice(lastIndex, matchIndex));
+      }
+      // Add highlighted match
+      parts.push(
+        <mark
+          key={matchIndex}
+          className="rounded px-0.5"
+          style={{ backgroundColor: "rgba(250, 204, 21, 0.4)" }}
+        >
+          {text.slice(matchIndex, matchIndex + query.length)}
+        </mark>
+      );
+      lastIndex = matchIndex + query.length;
+      matchIndex = lowerText.indexOf(query, lastIndex);
+    }
+
+    // Add remaining text
+    if (lastIndex < text.length) {
+      parts.push(text.slice(lastIndex));
+    }
+
+    return parts.length > 0 ? parts : text;
+  };
+
   const getBorderColor = () => {
     if (cell.type === "prompt") return "var(--color-accent)";
     if (cell.type === "response") return "var(--color-success, #22c55e)";
     return "var(--color-text-muted)";
   };
 
+  const hasSearchMatch =
+    searchQuery.trim() && cell.content.toLowerCase().includes(searchQuery.toLowerCase());
+
   return (
     <div
-      className={`rounded-xl border overflow-hidden transition-opacity ${isRunning ? "opacity-80" : ""}`}
+      className={`rounded-xl border overflow-hidden transition-all ${isRunning ? "opacity-80" : ""}`}
       style={{
-        borderColor: "var(--color-border)",
+        borderColor: hasSearchMatch ? "rgba(250, 204, 21, 0.6)" : "var(--color-border)",
         borderLeftWidth: "3px",
         borderLeftColor: getBorderColor(),
-        backgroundColor: cell.type === "response" ? "var(--color-bg-secondary)" : "var(--color-bg-primary)",
+        backgroundColor: hasSearchMatch
+          ? "rgba(250, 204, 21, 0.05)"
+          : cell.type === "response"
+            ? "var(--color-bg-secondary)"
+            : "var(--color-bg-primary)",
+        boxShadow: hasSearchMatch ? "0 0 0 1px rgba(250, 204, 21, 0.3)" : undefined,
       }}
     >
       {/* Cell header */}
       <div
-        className="flex items-center justify-between px-3 py-2 border-b"
+        className="group/header flex items-center justify-between px-3 py-2 border-b"
         style={{
           borderColor: "var(--color-border)",
           backgroundColor: "var(--color-bg-tertiary)",
         }}
       >
         <div className="flex items-center gap-2">
+          {/* Drag handle */}
+          {dragHandleProps && (
+            <span
+              {...dragHandleProps.attributes}
+              {...(dragHandleProps.listeners as React.HTMLAttributes<HTMLSpanElement>)}
+              className="flex h-5 w-4 cursor-grab items-center justify-center rounded opacity-0 group-hover/header:opacity-100 transition-opacity hover:bg-[--color-bg-elevated]"
+              style={{ color: "var(--color-text-muted)" }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <IconGrip />
+            </span>
+          )}
           <span
             className="text-xs font-medium uppercase"
             style={{ color: cell.type === "prompt" ? "var(--color-accent)" : "var(--color-text-muted)" }}
@@ -545,6 +1008,62 @@ function CellRenderer({
         </div>
         <div className="flex items-center gap-1">
           {/* Cell actions */}
+          {cell.type === "prompt" && templateVariables && templateVariables.length > 0 && (
+            <div className="relative" ref={variablePickerRef}>
+              <button
+                onClick={() => setShowVariablePicker(!showVariablePicker)}
+                className={`p-1 rounded transition-colors hover:bg-[--color-bg-elevated] ${showVariablePicker ? "bg-[--color-bg-elevated]" : ""}`}
+                style={{ color: "var(--color-text-muted)" }}
+                title="Insert template variable"
+              >
+                <IconVariable />
+              </button>
+              {showVariablePicker && (
+                <div
+                  className="absolute right-0 top-full mt-1 z-50 rounded-lg border shadow-lg overflow-hidden min-w-[220px]"
+                  style={{
+                    backgroundColor: "var(--color-bg-secondary)",
+                    borderColor: "var(--color-border)",
+                  }}
+                >
+                  <div
+                    className="px-3 py-2 border-b text-xs font-medium"
+                    style={{
+                      borderColor: "var(--color-border)",
+                      color: "var(--color-text-muted)",
+                    }}
+                  >
+                    Insert Variable
+                  </div>
+                  {templateVariables.map((variable) => (
+                    <button
+                      key={variable.name}
+                      onClick={() => insertVariable(variable.name)}
+                      className="flex flex-col w-full px-3 py-2 text-left transition-colors hover:bg-[--color-bg-tertiary]"
+                    >
+                      <div className="flex items-center gap-2">
+                        <code
+                          className="text-xs px-1 py-0.5 rounded"
+                          style={{
+                            backgroundColor: "var(--color-bg-tertiary)",
+                            color: "var(--color-accent)",
+                          }}
+                        >
+                          {`{{${variable.name}}}`}
+                        </code>
+                      </div>
+                      <span
+                        className="text-xs mt-0.5"
+                        style={{ color: "var(--color-text-muted)" }}
+                      >
+                        {variable.description} - e.g. "{variable.example}"
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           {cell.type === "prompt" && (
             <button
               onClick={onExecute}
@@ -588,6 +1107,14 @@ function CellRenderer({
           >
             <IconChevronDown />
           </button>
+          <button
+            onClick={onToggleCollapse}
+            className="p-1 rounded transition-colors hover:bg-[--color-bg-elevated]"
+            style={{ color: "var(--color-text-muted)" }}
+            title={isCollapsed ? "Expand cell" : "Collapse cell"}
+          >
+            {isCollapsed ? <IconChevronRight /> : <IconChevronDown2 />}
+          </button>
           {canDelete && (
             <button
               onClick={onDelete}
@@ -601,92 +1128,113 @@ function CellRenderer({
         </div>
       </div>
 
-      {/* Thinking section */}
-      {cell.thinking && isExpanded && (
+      {/* Collapsed preview */}
+      {isCollapsed ? (
         <div
-          className="px-3 py-2 text-xs border-b"
-          style={{
-            backgroundColor: "rgba(139, 92, 246, 0.05)",
-            borderColor: "var(--color-border)",
-            color: "var(--color-text-secondary)",
-          }}
+          className="px-3 py-2 cursor-pointer"
+          onClick={onToggleCollapse}
+          title="Click to expand"
         >
-          <pre className="whitespace-pre-wrap font-mono">{cell.thinking}</pre>
+          <p
+            className="text-sm"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            {highlightText(
+              (cell.content.split("\n")[0].slice(0, 100) || "(empty)") +
+                (cell.content.length > 100 ? "..." : "")
+            )}
+          </p>
         </div>
-      )}
+      ) : (
+        <>
+          {/* Thinking section */}
+          {cell.thinking && isExpanded && (
+            <div
+              className="px-3 py-2 text-xs border-b"
+              style={{
+                backgroundColor: "rgba(139, 92, 246, 0.05)",
+                borderColor: "var(--color-border)",
+                color: "var(--color-text-secondary)",
+              }}
+            >
+              <pre className="whitespace-pre-wrap font-mono">{cell.thinking}</pre>
+            </div>
+          )}
 
-      {/* Cell content */}
-      <div className="p-3">
-        {cell.type === "response" ? (
-          <div className="prose prose-sm max-w-none" style={{ color: "var(--color-text-primary)" }}>
-            {isRunning && !cell.content ? (
-              <div className="flex items-center gap-2">
-                <div className="flex items-center gap-1">
-                  <div
-                    className="h-2 w-2 animate-bounce rounded-full"
-                    style={{ backgroundColor: "var(--color-accent)" }}
-                  />
-                  <div
-                    className="h-2 w-2 animate-bounce rounded-full"
-                    style={{ backgroundColor: "var(--color-accent)", animationDelay: "0.1s" }}
-                  />
-                  <div
-                    className="h-2 w-2 animate-bounce rounded-full"
-                    style={{ backgroundColor: "var(--color-accent)", animationDelay: "0.2s" }}
-                  />
-                </div>
+          {/* Cell content */}
+          <div className="p-3">
+            {cell.type === "response" ? (
+              <div className="prose prose-sm max-w-none" style={{ color: "var(--color-text-primary)" }}>
+                {isRunning && !cell.content ? (
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1">
+                      <div
+                        className="h-2 w-2 animate-bounce rounded-full"
+                        style={{ backgroundColor: "var(--color-accent)" }}
+                      />
+                      <div
+                        className="h-2 w-2 animate-bounce rounded-full"
+                        style={{ backgroundColor: "var(--color-accent)", animationDelay: "0.1s" }}
+                      />
+                      <div
+                        className="h-2 w-2 animate-bounce rounded-full"
+                        style={{ backgroundColor: "var(--color-accent)", animationDelay: "0.2s" }}
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <ReactMarkdown
+                    components={{
+                      p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+                      ul: ({ children }) => <ul className="mb-2 ml-4 list-disc">{children}</ul>,
+                      ol: ({ children }) => <ol className="mb-2 ml-4 list-decimal">{children}</ol>,
+                      code: ({ children, className }) => {
+                        const isBlock = className?.includes("language-");
+                        if (isBlock) {
+                          return (
+                            <pre
+                              className="my-2 overflow-x-auto rounded-lg p-3 text-xs"
+                              style={{ backgroundColor: "var(--color-bg-tertiary)" }}
+                            >
+                              <code>{children}</code>
+                            </pre>
+                          );
+                        }
+                        return (
+                          <code
+                            className="rounded px-1 py-0.5 text-xs"
+                            style={{ backgroundColor: "var(--color-bg-tertiary)" }}
+                          >
+                            {children}
+                          </code>
+                        );
+                      },
+                    }}
+                  >
+                    {cell.content}
+                  </ReactMarkdown>
+                )}
               </div>
             ) : (
-              <ReactMarkdown
-                components={{
-                  p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-                  ul: ({ children }) => <ul className="mb-2 ml-4 list-disc">{children}</ul>,
-                  ol: ({ children }) => <ol className="mb-2 ml-4 list-decimal">{children}</ol>,
-                  code: ({ children, className }) => {
-                    const isBlock = className?.includes("language-");
-                    if (isBlock) {
-                      return (
-                        <pre
-                          className="my-2 overflow-x-auto rounded-lg p-3 text-xs"
-                          style={{ backgroundColor: "var(--color-bg-tertiary)" }}
-                        >
-                          <code>{children}</code>
-                        </pre>
-                      );
-                    }
-                    return (
-                      <code
-                        className="rounded px-1 py-0.5 text-xs"
-                        style={{ backgroundColor: "var(--color-bg-tertiary)" }}
-                      >
-                        {children}
-                      </code>
-                    );
-                  },
+              <textarea
+                ref={textareaRef}
+                value={cell.content}
+                onChange={(e) => onUpdateContent(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder={cell.type === "prompt" ? "Enter your prompt..." : "Enter markdown notes..."}
+                className="w-full resize-none bg-transparent outline-none text-sm"
+                style={{
+                  color: "var(--color-text-primary)",
+                  minHeight: "60px",
                 }}
-              >
-                {cell.content}
-              </ReactMarkdown>
+              />
             )}
           </div>
-        ) : (
-          <textarea
-            ref={textareaRef}
-            value={cell.content}
-            onChange={(e) => onUpdateContent(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={cell.type === "prompt" ? "Enter your prompt..." : "Enter markdown notes..."}
-            className="w-full resize-none bg-transparent outline-none text-sm"
-            style={{
-              color: "var(--color-text-primary)",
-              minHeight: "60px",
-            }}
-          />
-        )}
-      </div>
+        </>
+      )}
 
       {/* Stats footer for response cells */}
-      {cell.type === "response" && cell.stats && cell.status === "complete" && (
+      {!isCollapsed && cell.type === "response" && cell.stats && cell.status === "complete" && (
         <div
           className="flex items-center gap-3 px-3 py-2 border-t text-xs"
           style={{
@@ -703,12 +1251,48 @@ function CellRenderer({
           >
             {cell.stats.model}
           </span>
+          <div className="ml-auto flex items-center gap-1">
+            {onRegenerate && (
+              <button
+                onClick={onRegenerate}
+                disabled={isRunning}
+                className="p-1 rounded hover:bg-[--color-bg-tertiary] disabled:opacity-50"
+                title="Regenerate response"
+              >
+                <IconRefresh />
+              </button>
+            )}
+            <button
+              onClick={() => navigator.clipboard.writeText(cell.content)}
+              className="p-1 rounded hover:bg-[--color-bg-tertiary]"
+              title="Copy to clipboard"
+            >
+              <IconCopy />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Error footer with retry button */}
+      {!isCollapsed && cell.type === "response" && cell.status === "error" && onRegenerate && (
+        <div
+          className="flex items-center justify-between px-3 py-2 border-t text-xs"
+          style={{
+            borderColor: "var(--color-border)",
+            backgroundColor: "rgba(239, 68, 68, 0.05)",
+          }}
+        >
+          <span style={{ color: "var(--color-error)" }}>
+            {cell.error || "Failed to generate response"}
+          </span>
           <button
-            onClick={() => navigator.clipboard.writeText(cell.content)}
-            className="ml-auto p-1 rounded hover:bg-[--color-bg-tertiary]"
-            title="Copy to clipboard"
+            onClick={onRegenerate}
+            disabled={isRunning}
+            className="flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors disabled:opacity-50 hover:bg-[--color-bg-tertiary]"
+            style={{ color: "var(--color-text-secondary)" }}
           >
-            <IconCopy />
+            <IconRefresh />
+            Retry
           </button>
         </div>
       )}
@@ -867,7 +1451,137 @@ function ChatSettingsPanel({ settings, onUpdate, onClose }: ChatSettingsPanelPro
   );
 }
 
+// Search bar component
+interface SearchBarProps {
+  query: string;
+  onQueryChange: (query: string) => void;
+  onClose: () => void;
+  matchCount: number;
+  inputRef: React.RefObject<HTMLInputElement | null>;
+}
+
+function SearchBar({ query, onQueryChange, onClose, matchCount, inputRef }: SearchBarProps) {
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Escape") {
+      onClose();
+    }
+  };
+
+  return (
+    <div
+      className="flex items-center gap-3 px-4 py-2 border-b"
+      style={{
+        borderColor: "var(--color-border)",
+        backgroundColor: "var(--color-bg-secondary)",
+      }}
+    >
+      <IconSearch />
+      <input
+        ref={inputRef as React.RefObject<HTMLInputElement>}
+        type="text"
+        value={query}
+        onChange={(e) => onQueryChange(e.target.value)}
+        onKeyDown={handleKeyDown}
+        placeholder="Search in chat..."
+        className="flex-1 bg-transparent text-sm outline-none"
+        style={{ color: "var(--color-text-primary)" }}
+      />
+      {query.trim() && (
+        <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>
+          {matchCount} {matchCount === 1 ? "match" : "matches"}
+        </span>
+      )}
+      <button
+        onClick={onClose}
+        className="p-1 rounded hover:bg-[--color-bg-tertiary]"
+        style={{ color: "var(--color-text-muted)" }}
+        title="Close search"
+      >
+        <IconX />
+      </button>
+    </div>
+  );
+}
+
 // Icons
+function IconExport() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="17 8 12 3 7 8" />
+      <line x1="12" y1="3" x2="12" y2="15" />
+    </svg>
+  );
+}
+
+function IconDownload() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="7 10 12 15 17 10" />
+      <line x1="12" y1="15" x2="12" y2="3" />
+    </svg>
+  );
+}
+
+function IconGrip() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="8"
+      height="12"
+      viewBox="0 0 8 12"
+      fill="currentColor"
+    >
+      <circle cx="2" cy="2" r="1.2" />
+      <circle cx="6" cy="2" r="1.2" />
+      <circle cx="2" cy="6" r="1.2" />
+      <circle cx="6" cy="6" r="1.2" />
+      <circle cx="2" cy="10" r="1.2" />
+      <circle cx="6" cy="10" r="1.2" />
+    </svg>
+  );
+}
+
+function IconSearch() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="11" cy="11" r="8" />
+      <path d="m21 21-4.3-4.3" />
+    </svg>
+  );
+}
+
 function IconSettings() {
   return (
     <svg
@@ -957,6 +1671,42 @@ function IconChevronDown() {
   );
 }
 
+function IconChevronRight() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="m9 18 6-6-6-6" />
+    </svg>
+  );
+}
+
+function IconChevronDown2() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="m6 9 6 6 6-6" />
+    </svg>
+  );
+}
+
 function IconTrash() {
   return (
     <svg
@@ -993,6 +1743,44 @@ function IconPlus() {
   );
 }
 
+function IconCollapseAll() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="m7 20 5-5 5 5" />
+      <path d="m7 4 5 5 5-5" />
+    </svg>
+  );
+}
+
+function IconExpandAll() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="m7 15 5 5 5-5" />
+      <path d="m7 9 5-5 5 5" />
+    </svg>
+  );
+}
+
 function IconCopy() {
   return (
     <svg
@@ -1012,6 +1800,27 @@ function IconCopy() {
   );
 }
 
+function IconRefresh() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+      <path d="M3 3v5h5" />
+      <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16" />
+      <path d="M16 16h5v5" />
+    </svg>
+  );
+}
+
 function IconX() {
   return (
     <svg
@@ -1026,6 +1835,27 @@ function IconX() {
       strokeLinejoin="round"
     >
       <path d="M18 6L6 18M6 6l12 12" />
+    </svg>
+  );
+}
+
+function IconVariable() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M8 21s-4-3-4-9 4-9 4-9" />
+      <path d="M16 3s4 3 4 9-4 9-4 9" />
+      <line x1="15" y1="9" x2="9" y2="15" />
+      <line x1="9" y1="9" x2="15" y2="15" />
     </svg>
   );
 }
