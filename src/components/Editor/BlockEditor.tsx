@@ -1,4 +1,4 @@
-import { useEffect, useId, useCallback, useRef, useState } from "react";
+import { useEffect, useId, useCallback, useRef, useState, forwardRef, useImperativeHandle } from "react";
 import type { OutputData } from "@editorjs/editorjs";
 import { useEditor } from "./useEditor";
 import { useVimMode, type VimMode } from "./useVimMode";
@@ -23,7 +23,12 @@ interface BlockEditorProps {
   pages?: Array<{ id: string; title: string }>;
 }
 
-export function BlockEditor({
+export interface BlockEditorRef {
+  render: (data: OutputData) => void;
+  save: () => Promise<OutputData | null>;
+}
+
+export const BlockEditor = forwardRef<BlockEditorRef, BlockEditorProps>(function BlockEditor({
   initialData,
   onChange,
   onSave,
@@ -33,7 +38,7 @@ export function BlockEditor({
   className = "",
   notebookId,
   pages = [],
-}: BlockEditorProps) {
+}, ref) {
   const editorId = useId().replace(/:/g, "-");
   const holderId = `editor-${editorId}`;
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -64,7 +69,7 @@ export function BlockEditor({
     [onChange, onSave]
   );
 
-  const { editor, save } = useEditor({
+  const { editor, save, render } = useEditor({
     holderId,
     initialData,
     onChange: handleChange,
@@ -73,6 +78,12 @@ export function BlockEditor({
     notebookId,
     pages,
   });
+
+  // Expose render and save methods via ref
+  useImperativeHandle(ref, () => ({
+    render,
+    save,
+  }), [render, save]);
 
   // VI keybindings mode
   const { mode: vimMode, pendingKeys } = useVimMode({
@@ -213,4 +224,4 @@ export function BlockEditor({
       )}
     </div>
   );
-}
+});

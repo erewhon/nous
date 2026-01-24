@@ -144,7 +144,7 @@ export const DEFAULT_KEYBINDINGS: Keybinding[] = [
     action: "zenMode",
     label: "Zen Mode",
     description: "Toggle distraction-free writing mode",
-    key: "z",
+    key: ".",
     modifiers: { ctrl: true, shift: true, alt: false },
   },
 ];

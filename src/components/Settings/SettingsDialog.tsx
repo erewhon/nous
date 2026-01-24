@@ -17,7 +17,7 @@ type TabId = "ai" | "web-research" | "theme" | "system-prompt" | "libraries" | "
 
 const TABS: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: "theme", label: "Appearance", icon: <IconPalette /> },
-  { id: "keybindings", label: "Keyboard Shortcuts", icon: <IconKeyboard /> },
+  { id: "keybindings", label: "Shortcuts", icon: <IconKeyboard /> },
   { id: "libraries", label: "Libraries", icon: <IconLibrary /> },
   { id: "ai", label: "AI Providers", icon: <IconSparkles /> },
   { id: "system-prompt", label: "System Prompt", icon: <IconPrompt /> },
@@ -94,9 +94,13 @@ export function SettingsDialog({ isOpen, onClose, initialTab = "theme" }: Settin
                 onClick={() => setActiveTab(tab.id)}
                 className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
                   activeTab === tab.id
-                    ? "bg-[--color-accent]/10 text-[--color-accent]"
-                    : "text-[--color-text-secondary] hover:bg-[--color-bg-tertiary] hover:text-[--color-text-primary]"
+                    ? ""
+                    : "hover:bg-[--color-bg-tertiary]"
                 }`}
+                style={{
+                  backgroundColor: activeTab === tab.id ? "rgba(139, 92, 246, 0.15)" : undefined,
+                  color: activeTab === tab.id ? "var(--color-accent)" : "var(--color-text-secondary)",
+                }}
               >
                 {tab.icon}
                 {tab.label}

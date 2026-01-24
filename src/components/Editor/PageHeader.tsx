@@ -35,9 +35,15 @@ interface PageHeaderProps {
   zenMode?: boolean;
   onExitZenMode?: () => void;
   onEnterZenMode?: () => void;
+  onToggleHistory?: () => void;
+  historyCount?: number;
+  canUndo?: boolean;
+  canRedo?: boolean;
+  onUndo?: () => void;
+  onRedo?: () => void;
 }
 
-export function PageHeader({ page, isSaving, lastSaved, stats, pageText = "", zenMode = false, onExitZenMode, onEnterZenMode }: PageHeaderProps) {
+export function PageHeader({ page, isSaving, lastSaved, stats, pageText = "", zenMode = false, onExitZenMode, onEnterZenMode, onToggleHistory, historyCount = 0, canUndo = false, canRedo = false, onUndo, onRedo }: PageHeaderProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [title, setTitle] = useState(page.title);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -475,13 +481,101 @@ export function PageHeader({ page, isSaving, lastSaved, stats, pageText = "", ze
         </button>
       )}
 
+      {/* Undo/Redo buttons */}
+      <div className="ml-4 flex items-center">
+        <button
+          onClick={onUndo}
+          disabled={!canUndo}
+          className="rounded-l-lg p-2 transition-colors hover:opacity-80 disabled:opacity-30 disabled:cursor-not-allowed"
+          style={{ backgroundColor: "var(--color-bg-tertiary)" }}
+          title="Undo (Ctrl+Z)"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            <path d="M3 7v6h6" />
+            <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13" />
+          </svg>
+        </button>
+        <button
+          onClick={onRedo}
+          disabled={!canRedo}
+          className="rounded-r-lg border-l p-2 transition-colors hover:opacity-80 disabled:opacity-30 disabled:cursor-not-allowed"
+          style={{ backgroundColor: "var(--color-bg-tertiary)", borderColor: "var(--color-border)" }}
+          title="Redo (Ctrl+Shift+Z)"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            <path d="M21 7v6h-6" />
+            <path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3l3 2.7" />
+          </svg>
+        </button>
+      </div>
+
+      {/* History panel button */}
+      {onToggleHistory && (
+        <button
+          onClick={onToggleHistory}
+          className="relative ml-2 rounded-lg p-2 transition-colors hover:opacity-80"
+          style={{ backgroundColor: "var(--color-bg-tertiary)" }}
+          title="View edit history"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+            <path d="M3 3v5h5" />
+            <path d="M12 7v5l4 2" />
+          </svg>
+          {historyCount > 0 && (
+            <span
+              className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full text-[10px] font-medium"
+              style={{
+                backgroundColor: "var(--color-accent)",
+                color: "white",
+              }}
+            >
+              {historyCount > 9 ? "9+" : historyCount}
+            </span>
+          )}
+        </button>
+      )}
+
       {/* Zen Mode button */}
       {onEnterZenMode && (
         <button
           onClick={onEnterZenMode}
-          className="ml-4 rounded-lg p-2 transition-colors hover:opacity-80"
+          className="ml-2 rounded-lg p-2 transition-colors hover:opacity-80"
           style={{ backgroundColor: "var(--color-bg-tertiary)" }}
-          title="Enter Zen Mode (Ctrl+Shift+Z)"
+          title="Enter Zen Mode (Ctrl+Shift+.)"
         >
           <svg
             xmlns="http://www.w3.org/2000/svg"

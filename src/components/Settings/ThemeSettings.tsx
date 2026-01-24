@@ -7,6 +7,7 @@ import {
   type EditorKeymap,
   type UIMode,
 } from "../../stores/themeStore";
+import { useUndoHistoryStore } from "../../stores/undoHistoryStore";
 
 const UI_MODES: { value: UIMode; label: string; description: string }[] = [
   {
@@ -194,7 +195,7 @@ export function ThemeSettings() {
                 }}
               >
                 <span
-                  className="absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform"
+                  className="absolute left-0 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform"
                   style={{
                     transform: autoHidePanels
                       ? "translateX(20px)"
@@ -236,11 +237,11 @@ export function ThemeSettings() {
           >
             Distraction-free writing mode that hides all UI chrome. Press{" "}
             <kbd className="rounded bg-[--color-bg-tertiary] px-1.5 py-0.5 font-mono text-[10px]">
-              Ctrl+Shift+Z
+              Ctrl+Shift+.
             </kbd>{" "}
             or{" "}
             <kbd className="rounded bg-[--color-bg-tertiary] px-1.5 py-0.5 font-mono text-[10px]">
-              Cmd+Shift+Z
+              Cmd+Shift+.
             </kbd>{" "}
             to toggle, or press <kbd className="rounded bg-[--color-bg-tertiary] px-1.5 py-0.5 font-mono text-[10px]">Esc</kbd> to exit.
           </p>
@@ -273,7 +274,7 @@ export function ThemeSettings() {
               }}
             >
               <span
-                className="absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform"
+                className="absolute left-0 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform"
                 style={{
                   transform: zenModeSettings.typewriterScrolling
                     ? "translateX(20px)"
@@ -284,6 +285,9 @@ export function ThemeSettings() {
           </div>
         </div>
       </div>
+
+      {/* Undo History Settings */}
+      <UndoHistorySettings />
 
       {/* Theme Mode */}
       <div>
@@ -795,5 +799,124 @@ function IconEmacs() {
       <path d="M8 16h8" />
       <path d="M8 8v8" />
     </svg>
+  );
+}
+
+function UndoHistorySettings() {
+  const { settings, setSettings, clearAllHistory } = useUndoHistoryStore();
+
+  return (
+    <div>
+      <label
+        className="mb-3 block text-sm font-medium"
+        style={{ color: "var(--color-text-primary)" }}
+      >
+        Undo History
+      </label>
+      <div
+        className="rounded-lg border p-4 space-y-4"
+        style={{
+          borderColor: "var(--color-border)",
+          backgroundColor: "var(--color-bg-secondary)",
+        }}
+      >
+        <p
+          className="text-xs"
+          style={{ color: "var(--color-text-muted)" }}
+        >
+          Multi-level undo/redo with history panel. Press{" "}
+          <kbd className="rounded bg-[--color-bg-tertiary] px-1.5 py-0.5 font-mono text-[10px]">
+            Ctrl+Z
+          </kbd>{" "}
+          to undo,{" "}
+          <kbd className="rounded bg-[--color-bg-tertiary] px-1.5 py-0.5 font-mono text-[10px]">
+            Ctrl+Shift+Z
+          </kbd>{" "}
+          to redo.
+        </p>
+
+        {/* Max History Size */}
+        <div>
+          <div className="mb-2 flex items-center justify-between">
+            <span
+              className="text-sm font-medium"
+              style={{ color: "var(--color-text-primary)" }}
+            >
+              History Size
+            </span>
+            <span
+              className="text-sm"
+              style={{ color: "var(--color-text-muted)" }}
+            >
+              {settings.maxHistorySize} states
+            </span>
+          </div>
+          <input
+            type="range"
+            min="10"
+            max="100"
+            step="10"
+            value={settings.maxHistorySize}
+            onChange={(e) => setSettings({ maxHistorySize: parseInt(e.target.value) })}
+            className="w-full accent-[--color-accent]"
+          />
+          <div
+            className="mt-1 flex justify-between text-xs"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            <span>10</span>
+            <span>100</span>
+          </div>
+        </div>
+
+        {/* Persist History Toggle */}
+        <div className="flex items-center justify-between">
+          <div>
+            <span
+              className="block text-sm font-medium"
+              style={{ color: "var(--color-text-primary)" }}
+            >
+              Persist History
+            </span>
+            <span
+              className="block text-xs"
+              style={{ color: "var(--color-text-muted)" }}
+            >
+              Save undo history across sessions (uses storage)
+            </span>
+          </div>
+          <button
+            onClick={() => setSettings({ persistHistory: !settings.persistHistory })}
+            className="relative h-6 w-11 rounded-full transition-colors"
+            style={{
+              backgroundColor: settings.persistHistory
+                ? "var(--color-accent)"
+                : "var(--color-bg-tertiary)",
+            }}
+          >
+            <span
+              className="absolute left-0 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform"
+              style={{
+                transform: settings.persistHistory
+                  ? "translateX(20px)"
+                  : "translateX(2px)",
+              }}
+            />
+          </button>
+        </div>
+
+        {/* Clear History Button */}
+        <button
+          onClick={clearAllHistory}
+          className="w-full rounded-lg border px-3 py-2 text-sm transition-colors hover:bg-[--color-bg-tertiary]"
+          style={{
+            borderColor: "var(--color-border)",
+            color: "var(--color-text-secondary)",
+          }}
+        >
+          Clear All History
+        </button>
+      </div>
+    </div>
   );
 }

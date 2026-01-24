@@ -3,10 +3,13 @@ import type { OutputData } from "@editorjs/editorjs";
 import { usePageStore, type EditorPane } from "../../stores/pageStore";
 import { useLinkStore } from "../../stores/linkStore";
 import { useThemeStore } from "../../stores/themeStore";
+import { useUndoHistoryStore } from "../../stores/undoHistoryStore";
 import { useTypewriterScroll } from "../../hooks/useTypewriterScroll";
-import { BlockEditor } from "./BlockEditor";
+import { useUndoHistory } from "../../hooks/useUndoHistory";
+import { BlockEditor, type BlockEditorRef } from "./BlockEditor";
 import { PageHeader } from "./PageHeader";
 import { PaneTabBar } from "./PaneTabBar";
+import { UndoHistoryPanel } from "./UndoHistoryPanel";
 import { MarkdownEditor } from "../Markdown";
 import { PDFPageViewer } from "../PDF";
 import { JupyterViewer } from "../Jupyter";
@@ -49,12 +52,37 @@ export function EditorPaneContent({
   const zenModeSettings = useThemeStore((state) => state.zenModeSettings);
   const [isSaving, setIsSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
+  const [showHistoryPanel, setShowHistoryPanel] = useState(false);
   const editorScrollRef = useRef<HTMLDivElement>(null);
+  const editorRef = useRef<BlockEditorRef>(null);
 
   const selectedPage = pages.find((p) => p.id === pane.pageId);
+  const isStandardPage = selectedPage?.pageType === "standard" || !selectedPage?.pageType;
+  const history = useUndoHistoryStore((state) => state.getHistory(pane.pageId || ""));
+
+  // Callback when undo/redo changes state - render new data in editor
+  const handleUndoRedoStateChange = useCallback((data: OutputData) => {
+    if (editorRef.current) {
+      editorRef.current.render(data);
+    }
+  }, []);
+
+  // Undo history hook
+  const {
+    captureState,
+    captureStateNow,
+    undo,
+    redo,
+    jumpTo,
+    canUndo,
+    canRedo,
+  } = useUndoHistory({
+    pageId: pane.pageId || "",
+    enabled: isStandardPage && !!pane.pageId,
+    onStateChange: handleUndoRedoStateChange,
+  });
 
   // Typewriter scrolling for zen mode
-  const isStandardPage = selectedPage?.pageType === "standard" || !selectedPage?.pageType;
   useTypewriterScroll({
     enabled: zenMode && zenModeSettings.typewriterScrolling && isStandardPage,
     containerRef: editorScrollRef,
@@ -125,6 +153,24 @@ export function EditorPaneContent({
     return calculatePageStats(selectedPage.content.blocks);
   }, [selectedPage?.content?.blocks]);
 
+  // Capture initial state when page loads (for undo history)
+  useEffect(() => {
+    if (editorData && isStandardPage && pane.pageId) {
+      captureStateNow(editorData, "Initial state");
+    }
+    // Only run when page changes, not on every editorData update
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pane.pageId]);
+
+  // Handle content change (for undo history capture)
+  const handleChange = useCallback(
+    (data: OutputData) => {
+      // Capture state for undo history (debounced)
+      captureState(data);
+    },
+    [captureState]
+  );
+
   // Handle auto-save
   const handleSave = useCallback(
     async (data: OutputData) => {
@@ -151,6 +197,32 @@ export function EditorPaneContent({
       });
     },
     [notebookId, pane.pageId, selectedPage, updatePageContent, updatePageLinks]
+  );
+
+  // Handle jump to history state
+  const handleJumpToState = useCallback(
+    (entryId: string) => {
+      const data = jumpTo(entryId);
+      if (data && notebookId && pane.pageId && selectedPage) {
+        // Also save the jumped-to state
+        const editorData: EditorData = {
+          time: data.time,
+          version: data.version,
+          blocks: data.blocks.map((block) => ({
+            id: block.id ?? crypto.randomUUID(),
+            type: block.type,
+            data: block.data as Record<string, unknown>,
+          })),
+        };
+        updatePageContent(notebookId, pane.pageId, editorData, false);
+        updatePageLinks({
+          ...selectedPage,
+          content: editorData,
+        });
+      }
+      setShowHistoryPanel(false);
+    },
+    [jumpTo, notebookId, pane.pageId, selectedPage, updatePageContent, updatePageLinks]
   );
 
   // Handle explicit save
@@ -279,16 +351,33 @@ export function EditorPaneContent({
 
       {selectedPage ? (
         <>
-          <PageHeader
-            page={selectedPage}
-            isSaving={isSaving}
-            lastSaved={lastSaved}
-            stats={zenMode ? null : pageStats}
-            pageText={pageStats?.text}
-            zenMode={zenMode}
-            onExitZenMode={() => setZenMode(false)}
-            onEnterZenMode={() => setZenMode(true)}
-          />
+          <div className="relative">
+            <PageHeader
+              page={selectedPage}
+              isSaving={isSaving}
+              lastSaved={lastSaved}
+              stats={zenMode ? null : pageStats}
+              pageText={pageStats?.text}
+              zenMode={zenMode}
+              onExitZenMode={() => setZenMode(false)}
+              onEnterZenMode={() => setZenMode(true)}
+              onToggleHistory={isStandardPage ? () => setShowHistoryPanel(!showHistoryPanel) : undefined}
+              historyCount={history?.entries.length || 0}
+              canUndo={canUndo()}
+              canRedo={canRedo()}
+              onUndo={undo}
+              onRedo={redo}
+            />
+            {/* Undo History Panel */}
+            {isStandardPage && pane.pageId && (
+              <UndoHistoryPanel
+                pageId={pane.pageId}
+                isOpen={showHistoryPanel}
+                onClose={() => setShowHistoryPanel(false)}
+                onJumpToState={handleJumpToState}
+              />
+            )}
+          </div>
           <div
             ref={editorScrollRef}
             className={`flex-1 overflow-y-auto ${zenMode ? 'zen-editor-scroll' : 'px-8 py-6'}`}
@@ -349,8 +438,10 @@ export function EditorPaneContent({
               )}
               {(selectedPage.pageType === "standard" || !selectedPage.pageType) && (
                 <BlockEditor
+                  ref={editorRef}
                   key={selectedPage.id}
                   initialData={editorData}
+                  onChange={handleChange}
                   onSave={handleSave}
                   onExplicitSave={handleExplicitSave}
                   onLinkClick={handleLinkClick}

@@ -224,10 +224,18 @@ export function useEditor({
     }
   }, []);
 
+  // Render method - for external state updates (like undo/redo)
+  const render = useCallback((data: OutputData) => {
+    if (editorRef.current && isReady.current) {
+      editorRef.current.render(data);
+    }
+  }, []);
+
   return {
     editor: editorRef,
     isReady: isReady.current,
     save,
     clear,
+    render,
   };
 }
