@@ -334,6 +334,7 @@ impl SearchIndex {
             PageType::Jupyter => Self::extract_text_from_jupyter(file_content),
             PageType::Markdown => file_content.to_string(),
             PageType::Calendar => Self::extract_text_from_calendar(file_content),
+            PageType::Pdf | PageType::Epub => Self::extract_text_from_markdown(file_content),
             _ => String::new(),
         };
 
@@ -352,6 +353,49 @@ impl SearchIndex {
         self.writer.commit()?;
 
         Ok(())
+    }
+
+    /// Extract plain text from markdown content (strips formatting)
+    fn extract_text_from_markdown(markdown: &str) -> String {
+        // Simple markdown stripping - remove common formatting
+        let mut text = markdown.to_string();
+
+        // Remove code blocks (```...```)
+        let code_block_re = regex::Regex::new(r"```[\s\S]*?```").unwrap();
+        text = code_block_re.replace_all(&text, " ").to_string();
+
+        // Remove inline code (`...`)
+        let inline_code_re = regex::Regex::new(r"`[^`]+`").unwrap();
+        text = inline_code_re.replace_all(&text, " ").to_string();
+
+        // Remove headers (keep the text)
+        let header_re = regex::Regex::new(r"^#{1,6}\s+").unwrap();
+        text = header_re.replace_all(&text, "").to_string();
+
+        // Remove bold/italic markers
+        text = text.replace("**", "").replace("__", "").replace("*", "").replace("_", "");
+
+        // Remove links but keep text: [text](url) -> text
+        let link_re = regex::Regex::new(r"\[([^\]]+)\]\([^)]+\)").unwrap();
+        text = link_re.replace_all(&text, "$1").to_string();
+
+        // Remove images: ![alt](url) -> alt
+        let img_re = regex::Regex::new(r"!\[([^\]]*)\]\([^)]+\)").unwrap();
+        text = img_re.replace_all(&text, "$1").to_string();
+
+        // Remove blockquotes marker
+        let quote_re = regex::Regex::new(r"^>\s*").unwrap();
+        text = quote_re.replace_all(&text, "").to_string();
+
+        // Remove horizontal rules
+        let hr_re = regex::Regex::new(r"^---+$|^___+$|^\*\*\*+$").unwrap();
+        text = hr_re.replace_all(&text, "").to_string();
+
+        // Collapse multiple spaces/newlines
+        let space_re = regex::Regex::new(r"\s+").unwrap();
+        text = space_re.replace_all(&text, " ").to_string();
+
+        text.trim().to_string()
     }
 
     /// Extract text from calendar (ICS) content

@@ -438,10 +438,10 @@ Already implemented with Tantivy, may need refinement:
 - [x] Search results display by page type
 
 ### 28. Multi-Format Search Indexing
-- [ ] Extract text from PDF files for search (via pdfplumber or similar)
+- [x] Extract text from PDF files for search (via markitdown)
 - [x] Index Jupyter notebook content (code cells + markdown cells)
-- [ ] Index EPUB text content (chapter text)
-- [ ] Index Calendar events (event summaries and descriptions)
+- [x] Index EPUB text content (via markitdown)
+- [x] Index Calendar events (event summaries and descriptions)
 
 ### 29. Multi-Format Advanced Features
 - [ ] Linked file sync detection (detect external file changes, prompt to reload)

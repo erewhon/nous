@@ -102,6 +102,38 @@ pub fn import_file_as_page(
                     }
                 }
             }
+            PageType::Pdf | PageType::Epub => {
+                // Extract PDF/EPUB text using Python bridge (markitdown)
+                let file_path = storage.get_file_path(&page);
+                let file_type = format!("{:?}", page.page_type);
+                match file_path {
+                    Ok(path) => {
+                        if let Ok(python_ai) = state.python_ai.lock() {
+                            match python_ai.convert_document(path.to_string_lossy().to_string()) {
+                                Ok(result) => {
+                                    if result.error.is_none() {
+                                        search_index.index_page_with_content(&page, &result.content)
+                                    } else {
+                                        log::warn!("{} text extraction error: {:?}", file_type, result.error);
+                                        search_index.index_page(&page)
+                                    }
+                                }
+                                Err(e) => {
+                                    log::warn!("Failed to extract {} text for indexing: {}", file_type, e);
+                                    search_index.index_page(&page)
+                                }
+                            }
+                        } else {
+                            log::warn!("Failed to acquire Python bridge lock for {} indexing", file_type);
+                            search_index.index_page(&page)
+                        }
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to get {} file path for indexing: {}", file_type, e);
+                        search_index.index_page(&page)
+                    }
+                }
+            }
             _ => search_index.index_page(&page),
         };
         if let Err(e) = index_result {
