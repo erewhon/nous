@@ -11,6 +11,19 @@ use uuid::Uuid;
 
 use crate::storage::{EditorBlock, Page, PageType};
 
+/// Convert PageType to string for indexing
+fn page_type_to_str(page_type: &PageType) -> &'static str {
+    match page_type {
+        PageType::Standard => "standard",
+        PageType::Markdown => "markdown",
+        PageType::Pdf => "pdf",
+        PageType::Jupyter => "jupyter",
+        PageType::Epub => "epub",
+        PageType::Calendar => "calendar",
+        PageType::Chat => "chat",
+    }
+}
+
 #[derive(Error, Debug)]
 pub enum SearchError {
     #[error("Tantivy error: {0}")]
@@ -33,6 +46,7 @@ pub struct SearchResult {
     pub title: String,
     pub snippet: String,
     pub score: f32,
+    pub page_type: String,
 }
 
 /// Fields in the search index schema
@@ -42,6 +56,7 @@ struct SearchFields {
     title: Field,
     content: Field,
     tags: Field,
+    page_type: Field,
 }
 
 pub struct SearchIndex {
@@ -66,6 +81,7 @@ impl SearchIndex {
         let title = schema_builder.add_text_field("title", TEXT | STORED);
         let content = schema_builder.add_text_field("content", TEXT);
         let tags = schema_builder.add_text_field("tags", TEXT | STORED);
+        let page_type = schema_builder.add_text_field("page_type", STORED);
 
         let schema = schema_builder.build();
 
@@ -87,6 +103,7 @@ impl SearchIndex {
             title,
             content,
             tags,
+            page_type,
         };
 
         Ok(Self {
@@ -292,13 +309,15 @@ impl SearchIndex {
 
         let content = Self::extract_text_from_blocks(&page.content.blocks);
         let tags = page.tags.join(" ");
+        let page_type_str = page_type_to_str(&page.page_type);
 
         self.writer.add_document(doc!(
             self.fields.page_id => page.id.to_string(),
             self.fields.notebook_id => page.notebook_id.to_string(),
             self.fields.title => page.title.clone(),
             self.fields.content => content,
-            self.fields.tags => tags
+            self.fields.tags => tags,
+            self.fields.page_type => page_type_str
         ))?;
 
         self.writer.commit()?;
@@ -319,13 +338,15 @@ impl SearchIndex {
         };
 
         let tags = page.tags.join(" ");
+        let page_type_str = page_type_to_str(&page.page_type);
 
         self.writer.add_document(doc!(
             self.fields.page_id => page.id.to_string(),
             self.fields.notebook_id => page.notebook_id.to_string(),
             self.fields.title => page.title.clone(),
             self.fields.content => content,
-            self.fields.tags => tags
+            self.fields.tags => tags,
+            self.fields.page_type => page_type_str
         ))?;
 
         self.writer.commit()?;
@@ -411,12 +432,19 @@ impl SearchIndex {
                 .unwrap_or("")
                 .to_string();
 
+            let page_type = retrieved_doc
+                .get_first(self.fields.page_type)
+                .and_then(|v| v.as_str())
+                .unwrap_or("standard")
+                .to_string();
+
             results.push(SearchResult {
                 page_id,
                 notebook_id,
                 title,
                 snippet: tags, // Use tags as snippet for now
                 score,
+                page_type,
             });
         }
 
@@ -467,12 +495,19 @@ impl SearchIndex {
                 .unwrap_or("")
                 .to_string();
 
+            let page_type = retrieved_doc
+                .get_first(self.fields.page_type)
+                .and_then(|v| v.as_str())
+                .unwrap_or("standard")
+                .to_string();
+
             results.push(SearchResult {
                 page_id,
                 notebook_id,
                 title,
                 snippet: tags,
                 score,
+                page_type,
             });
         }
 
@@ -489,13 +524,15 @@ impl SearchIndex {
         for page in pages {
             let content = Self::extract_text_from_blocks(&page.content.blocks);
             let tags = page.tags.join(" ");
+            let page_type_str = page_type_to_str(&page.page_type);
 
             self.writer.add_document(doc!(
                 self.fields.page_id => page.id.to_string(),
                 self.fields.notebook_id => page.notebook_id.to_string(),
                 self.fields.title => page.title.clone(),
                 self.fields.content => content,
-                self.fields.tags => tags
+                self.fields.tags => tags,
+                self.fields.page_type => page_type_str
             ))?;
         }
 

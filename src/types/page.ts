@@ -146,6 +146,7 @@ export const SearchResultSchema = z.object({
   title: z.string(),
   snippet: z.string(),
   score: z.number(),
+  pageType: PageTypeSchema,
 });
 
 export type SearchResult = z.infer<typeof SearchResultSchema>;

@@ -433,9 +433,9 @@ Already implemented with Tantivy, may need refinement:
   - [x] CalendarViewer (ical.js with list/month views)
 
 ### 27. Multi-Format UI Polish
-- [ ] File type icons in sidebar (distinct icons for PDF, Jupyter, EPUB, Calendar pages)
-- [ ] Drag-drop import (drop files directly into page tree)
-- [ ] Search results display by page type
+- [x] File type icons in sidebar (distinct icons for PDF, Jupyter, EPUB, Calendar pages)
+- [x] Drag-drop import (drop files directly into page tree)
+- [x] Search results display by page type
 
 ### 28. Multi-Format Search Indexing
 - [ ] Extract text from PDF files for search (via pdfplumber or similar)

@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useEffect } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -14,6 +14,7 @@ import {
 } from "@dnd-kit/core";
 import { arrayMove } from "@dnd-kit/sortable";
 import { open } from "@tauri-apps/plugin-dialog";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { Folder, Page, Section, FileStorageMode } from "../../types/page";
 import { useFolderStore } from "../../stores/folderStore";
 import { usePageStore } from "../../stores/pageStore";
@@ -195,6 +196,56 @@ export function FolderTree({
   const [expandedPageIds, setExpandedPageIds] = useState<Set<string>>(new Set());
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [pendingImportPath, setPendingImportPath] = useState<string | null>(null);
+  const [isFileDragOver, setIsFileDragOver] = useState(false);
+  const treeContainerRef = useRef<HTMLDivElement>(null);
+
+  // Supported file extensions for import
+  const SUPPORTED_EXTENSIONS = ["md", "pdf", "ipynb", "epub", "ics"];
+
+  // Listen for Tauri file drop events
+  useEffect(() => {
+    const appWindow = getCurrentWindow();
+
+    const handleFileDrop = (event: { payload: { paths: string[]; position: { x: number; y: number } } }) => {
+      const { paths } = event.payload;
+      if (paths && paths.length > 0) {
+        // Find the first supported file
+        const supportedFile = paths.find((path) => {
+          const ext = path.split(".").pop()?.toLowerCase();
+          return ext && SUPPORTED_EXTENSIONS.includes(ext);
+        });
+
+        if (supportedFile) {
+          setPendingImportPath(supportedFile);
+          setImportDialogOpen(true);
+        }
+      }
+      setIsFileDragOver(false);
+    };
+
+    const handleDragEnter = () => {
+      setIsFileDragOver(true);
+    };
+
+    const handleDragLeave = () => {
+      setIsFileDragOver(false);
+    };
+
+    // Subscribe to Tauri window drag-drop events
+    const unlistenDrop = appWindow.onDragDropEvent((event) => {
+      if (event.payload.type === "drop") {
+        handleFileDrop({ payload: { paths: event.payload.paths, position: event.payload.position } });
+      } else if (event.payload.type === "enter" || event.payload.type === "over") {
+        handleDragEnter();
+      } else if (event.payload.type === "leave") {
+        handleDragLeave();
+      }
+    });
+
+    return () => {
+      unlistenDrop.then((unlisten) => unlisten());
+    };
+  }, []);
 
   // Toggle page expansion for nested pages
   const togglePageExpanded = useCallback((pageId: string) => {
@@ -1253,7 +1304,49 @@ END:VCALENDAR`;
         )}
 
         {/* Tree content */}
-        <div className="flex-1 overflow-y-auto px-2 pb-4 text-left">
+        <div
+          ref={treeContainerRef}
+          className="flex-1 overflow-y-auto px-2 pb-4 text-left relative"
+        >
+          {/* File drop overlay */}
+          {isFileDragOver && (
+            <div
+              className="absolute inset-2 z-40 flex flex-col items-center justify-center rounded-xl border-2 border-dashed"
+              style={{
+                backgroundColor: "rgba(139, 92, 246, 0.1)",
+                borderColor: "var(--color-accent)",
+              }}
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="32"
+                height="32"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                style={{ color: "var(--color-accent)" }}
+              >
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="17 8 12 3 7 8" />
+                <line x1="12" y1="3" x2="12" y2="15" />
+              </svg>
+              <span
+                className="mt-2 text-sm font-medium"
+                style={{ color: "var(--color-accent)" }}
+              >
+                Drop to import
+              </span>
+              <span
+                className="mt-1 text-xs"
+                style={{ color: "var(--color-text-muted)" }}
+              >
+                MD, PDF, Jupyter, EPUB, ICS
+              </span>
+            </div>
+          )}
           {visibleFolders.length === 0 && visiblePages.length === 0 ? (
             <div
               className="flex h-28 flex-col items-center justify-center gap-2 rounded-xl border border-dashed p-4 text-center mx-2"
