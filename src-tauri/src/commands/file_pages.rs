@@ -316,6 +316,41 @@ pub fn check_linked_file_modified(
         })
 }
 
+/// Mark a linked file as synced (update last_file_sync timestamp)
+#[tauri::command]
+pub fn mark_linked_file_synced(
+    state: State<AppState>,
+    notebook_id: String,
+    page_id: String,
+) -> CommandResult<Page> {
+    let storage = state.storage.lock().map_err(|e| CommandError {
+        message: format!("Failed to acquire storage lock: {}", e),
+    })?;
+
+    let notebook_uuid = Uuid::parse_str(&notebook_id).map_err(|e| CommandError {
+        message: format!("Invalid notebook ID: {}", e),
+    })?;
+
+    let page_uuid = Uuid::parse_str(&page_id).map_err(|e| CommandError {
+        message: format!("Invalid page ID: {}", e),
+    })?;
+
+    let mut page = storage
+        .get_page_any_type(notebook_uuid, page_uuid)
+        .map_err(|e| CommandError {
+            message: format!("Page not found: {}", e),
+        })?;
+
+    // Update the last_file_sync timestamp
+    page.last_file_sync = Some(chrono::Utc::now());
+
+    storage.update_page_metadata(&page).map_err(|e| CommandError {
+        message: format!("Failed to update page metadata: {}", e),
+    })?;
+
+    Ok(page)
+}
+
 /// Get list of supported file extensions for import
 #[tauri::command]
 pub fn get_supported_page_extensions() -> Vec<String> {

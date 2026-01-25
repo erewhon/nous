@@ -385,6 +385,7 @@ pub fn run() {
             commands::update_file_content,
             commands::get_file_path,
             commands::check_linked_file_modified,
+            commands::mark_linked_file_synced,
             commands::get_supported_page_extensions,
             commands::delete_file_page,
             commands::execute_jupyter_cell,

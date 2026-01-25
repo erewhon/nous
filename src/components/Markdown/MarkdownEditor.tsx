@@ -6,6 +6,8 @@ import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { syntaxHighlighting, defaultHighlightStyle, bracketMatching, foldGutter, indentOnInput } from "@codemirror/language";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { useThemeStore } from "../../stores/themeStore";
+import { useLinkedFileSync } from "../../hooks/useLinkedFileSync";
+import { LinkedFileChangedBanner } from "../LinkedFile";
 import type { Page } from "../../types/page";
 import * as api from "../../utils/api";
 
@@ -24,9 +26,30 @@ export function MarkdownEditor({ page, notebookId, onSave, className = "" }: Mar
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
+  const [isReloading, setIsReloading] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   const resolvedMode = useThemeStore((state) => state.resolvedMode);
   const isDark = resolvedMode === "dark";
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Linked file sync detection
+  const { isModified, dismiss, markSynced } = useLinkedFileSync(page, notebookId);
+
+  // Reload the markdown file
+  const handleReload = useCallback(async () => {
+    setIsReloading(true);
+    try {
+      // Mark the file as synced
+      await api.markLinkedFileSynced(notebookId, page.id);
+      markSynced();
+      // Force reload
+      setReloadKey((k) => k + 1);
+    } catch (err) {
+      console.error("Failed to reload markdown:", err);
+    } finally {
+      setIsReloading(false);
+    }
+  }, [notebookId, page.id, markSynced]);
 
   // Load markdown content
   useEffect(() => {
@@ -45,7 +68,7 @@ export function MarkdownEditor({ page, notebookId, onSave, className = "" }: Mar
     };
 
     loadContent();
-  }, [notebookId, page.id]);
+  }, [notebookId, page.id, reloadKey]);
 
   // Handle auto-save
   const handleContentChange = useCallback(
@@ -217,6 +240,16 @@ export function MarkdownEditor({ page, notebookId, onSave, className = "" }: Mar
 
   return (
     <div className={`flex flex-col h-full ${className}`}>
+      {/* Linked file changed banner */}
+      {isModified && (
+        <LinkedFileChangedBanner
+          onReload={handleReload}
+          onDismiss={dismiss}
+          isReloading={isReloading}
+          fileName={page.title}
+        />
+      )}
+
       {/* Status bar */}
       <div className="flex items-center justify-between px-4 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
         <div className="flex items-center space-x-4">

@@ -444,7 +444,7 @@ Already implemented with Tantivy, may need refinement:
 - [x] Index Calendar events (event summaries and descriptions)
 
 ### 29. Multi-Format Advanced Features
-- [ ] Linked file sync detection (detect external file changes, prompt to reload)
+- [x] Linked file sync detection (detect external file changes, prompt to reload)
 - [x] Jupyter cell editing (add, delete, reorder, edit cell content)
 - [x] Jupyter cell execution via Python kernel
 - [ ] PDF annotation persistence (save highlights/notes)

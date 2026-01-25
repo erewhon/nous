@@ -15,6 +15,8 @@ import {
   type JupyterOutput,
   normalizeSource,
 } from "../../types/jupyter";
+import { useLinkedFileSync } from "../../hooks/useLinkedFileSync";
+import { LinkedFileChangedBanner } from "../LinkedFile";
 import * as api from "../../utils/api";
 import { useThemeStore } from "../../stores/themeStore";
 
@@ -35,8 +37,29 @@ export function JupyterViewer({ page, notebookId, className = "" }: JupyterViewe
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [executingCells, setExecutingCells] = useState<Set<number>>(new Set());
   const [pythonAvailable, setPythonAvailable] = useState<boolean | null>(null);
+  const [isReloading, setIsReloading] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   const resolvedMode = useThemeStore((state) => state.resolvedMode);
   const isDark = resolvedMode === "dark";
+
+  // Linked file sync detection
+  const { isModified, dismiss, markSynced } = useLinkedFileSync(page, notebookId);
+
+  // Reload the notebook file
+  const handleReload = useCallback(async () => {
+    setIsReloading(true);
+    try {
+      // Mark the file as synced
+      await api.markLinkedFileSynced(notebookId, page.id);
+      markSynced();
+      // Force reload
+      setReloadKey((k) => k + 1);
+    } catch (err) {
+      console.error("Failed to reload Jupyter notebook:", err);
+    } finally {
+      setIsReloading(false);
+    }
+  }, [notebookId, page.id, markSynced]);
 
   // Check Python availability on mount
   useEffect(() => {
@@ -72,7 +95,7 @@ export function JupyterViewer({ page, notebookId, className = "" }: JupyterViewe
     };
 
     loadNotebook();
-  }, [notebookId, page.id]);
+  }, [notebookId, page.id, reloadKey]);
 
   // Get language from notebook metadata
   const language = useMemo(() => {
@@ -466,6 +489,16 @@ export function JupyterViewer({ page, notebookId, className = "" }: JupyterViewe
 
   return (
     <div className={`flex flex-col h-full ${className}`}>
+      {/* Linked file changed banner */}
+      {isModified && (
+        <LinkedFileChangedBanner
+          onReload={handleReload}
+          onDismiss={dismiss}
+          isReloading={isReloading}
+          fileName={page.title}
+        />
+      )}
+
       {/* Header */}
       <div
         className="flex items-center justify-between px-4 py-2 border-b"

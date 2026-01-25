@@ -1,6 +1,8 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import ICAL from "ical.js";
 import type { Page } from "../../types/page";
+import { useLinkedFileSync } from "../../hooks/useLinkedFileSync";
+import { LinkedFileChangedBanner } from "../LinkedFile";
 import * as api from "../../utils/api";
 import { useThemeStore } from "../../stores/themeStore";
 
@@ -30,8 +32,29 @@ export function CalendarViewer({ page, notebookId, className = "" }: CalendarVie
   const [error, setError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("list");
   const [selectedMonth, setSelectedMonth] = useState(new Date());
+  const [isReloading, setIsReloading] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   const resolvedMode = useThemeStore((state) => state.resolvedMode);
   const isDark = resolvedMode === "dark";
+
+  // Linked file sync detection
+  const { isModified, dismiss, markSynced } = useLinkedFileSync(page, notebookId);
+
+  // Reload the calendar file
+  const handleReload = useCallback(async () => {
+    setIsReloading(true);
+    try {
+      // Mark the file as synced
+      await api.markLinkedFileSynced(notebookId, page.id);
+      markSynced();
+      // Force reload
+      setReloadKey((k) => k + 1);
+    } catch (err) {
+      console.error("Failed to reload calendar:", err);
+    } finally {
+      setIsReloading(false);
+    }
+  }, [notebookId, page.id, markSynced]);
 
   // Load and parse ICS file
   useEffect(() => {
@@ -86,7 +109,7 @@ export function CalendarViewer({ page, notebookId, className = "" }: CalendarVie
     };
 
     loadCalendar();
-  }, [notebookId, page.id]);
+  }, [notebookId, page.id, reloadKey]);
 
   // Filter events for selected month in month view
   const filteredEvents = useMemo(() => {
@@ -180,6 +203,16 @@ export function CalendarViewer({ page, notebookId, className = "" }: CalendarVie
 
   return (
     <div className={`flex flex-col h-full ${className}`}>
+      {/* Linked file changed banner */}
+      {isModified && (
+        <LinkedFileChangedBanner
+          onReload={handleReload}
+          onDismiss={dismiss}
+          isReloading={isReloading}
+          fileName={page.title}
+        />
+      )}
+
       {/* Header */}
       <div
         className="flex items-center justify-between px-4 py-2 border-b"

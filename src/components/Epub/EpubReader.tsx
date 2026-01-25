@@ -2,6 +2,8 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import ePub, { type Book, type Rendition, type NavItem, type Location } from "epubjs";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import type { Page } from "../../types/page";
+import { useLinkedFileSync } from "../../hooks/useLinkedFileSync";
+import { LinkedFileChangedBanner } from "../LinkedFile";
 import * as api from "../../utils/api";
 import { useThemeStore } from "../../stores/themeStore";
 
@@ -23,9 +25,34 @@ export function EpubReader({ page, notebookId, className = "" }: EpubReaderProps
     title?: string;
     creator?: string;
   }>({});
+  const [isReloading, setIsReloading] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   const viewerRef = useRef<HTMLDivElement>(null);
   const resolvedMode = useThemeStore((state) => state.resolvedMode);
   const isDark = resolvedMode === "dark";
+
+  // Linked file sync detection
+  const { isModified, dismiss, markSynced } = useLinkedFileSync(page, notebookId);
+
+  // Reload the EPUB file
+  const handleReload = useCallback(async () => {
+    setIsReloading(true);
+    try {
+      // Destroy old book
+      if (book) {
+        book.destroy();
+      }
+      // Mark the file as synced
+      await api.markLinkedFileSynced(notebookId, page.id);
+      markSynced();
+      // Force reload
+      setReloadKey((k) => k + 1);
+    } catch (err) {
+      console.error("Failed to reload EPUB:", err);
+    } finally {
+      setIsReloading(false);
+    }
+  }, [notebookId, page.id, markSynced, book]);
 
   // Load EPUB file
   useEffect(() => {
@@ -66,7 +93,7 @@ export function EpubReader({ page, notebookId, className = "" }: EpubReaderProps
         book.destroy();
       }
     };
-  }, [notebookId, page.id]);
+  }, [notebookId, page.id, reloadKey]);
 
   // Render book when ready and viewer element is available
   useEffect(() => {
@@ -218,6 +245,16 @@ export function EpubReader({ page, notebookId, className = "" }: EpubReaderProps
 
   return (
     <div className={`flex flex-col h-full ${className}`}>
+      {/* Linked file changed banner */}
+      {isModified && (
+        <LinkedFileChangedBanner
+          onReload={handleReload}
+          onDismiss={dismiss}
+          isReloading={isReloading}
+          fileName={page.title}
+        />
+      )}
+
       {/* Header */}
       <div
         className="flex items-center justify-between px-4 py-2 border-b"

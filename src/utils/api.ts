@@ -1637,6 +1637,16 @@ export async function checkLinkedFileModified(
 }
 
 /**
+ * Mark a linked file as synced (update last_file_sync timestamp)
+ */
+export async function markLinkedFileSynced(
+  notebookId: string,
+  pageId: string
+): Promise<Page> {
+  return invoke<Page>("mark_linked_file_synced", { notebookId, pageId });
+}
+
+/**
  * Get list of supported file extensions for import
  */
 export async function getSupportedPageExtensions(): Promise<string[]> {

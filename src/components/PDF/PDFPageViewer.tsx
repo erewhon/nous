@@ -2,6 +2,8 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import type { Page as PageType } from "../../types/page";
+import { useLinkedFileSync } from "../../hooks/useLinkedFileSync";
+import { LinkedFileChangedBanner } from "../LinkedFile";
 import * as api from "../../utils/api";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
@@ -24,6 +26,31 @@ export function PDFPageViewer({ page, notebookId, className = "" }: PDFPageViewe
   const [zoom, setZoom] = useState(1);
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(800);
+  const [isReloading, setIsReloading] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
+
+  // Linked file sync detection
+  const { isModified, dismiss, markSynced } = useLinkedFileSync(page, notebookId);
+
+  // Reload the PDF file
+  const handleReload = useCallback(async () => {
+    setIsReloading(true);
+    try {
+      // Mark the file as synced
+      await api.markLinkedFileSynced(notebookId, page.id);
+      markSynced();
+      // Force reload by incrementing key and clearing cache
+      setReloadKey((k) => k + 1);
+      // Re-fetch file URL to bust cache
+      const filePath = await api.getFilePath(notebookId, page.id);
+      const url = convertFileSrc(filePath) + `?t=${Date.now()}`;
+      setFileUrl(url);
+    } catch (err) {
+      console.error("Failed to reload PDF:", err);
+    } finally {
+      setIsReloading(false);
+    }
+  }, [notebookId, page.id, markSynced]);
 
   // Load file path and convert to URL
   useEffect(() => {
@@ -43,7 +70,7 @@ export function PDFPageViewer({ page, notebookId, className = "" }: PDFPageViewe
     };
 
     loadFile();
-  }, [notebookId, page.id]);
+  }, [notebookId, page.id, reloadKey]);
 
   // Update container width on resize
   useEffect(() => {
@@ -150,6 +177,16 @@ export function PDFPageViewer({ page, notebookId, className = "" }: PDFPageViewe
 
   return (
     <div className={`flex flex-col h-full ${className}`}>
+      {/* Linked file changed banner */}
+      {isModified && (
+        <LinkedFileChangedBanner
+          onReload={handleReload}
+          onDismiss={dismiss}
+          isReloading={isReloading}
+          fileName={page.title}
+        />
+      )}
+
       {/* Toolbar */}
       <div
         className="flex items-center justify-between px-4 py-2 border-b"
