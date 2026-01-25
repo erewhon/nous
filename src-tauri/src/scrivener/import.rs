@@ -67,6 +67,7 @@ fn parse_scrivx(content: &str) -> Result<(String, Vec<BinderItem>)> {
     let mut in_binder = false;
     let mut current_id = String::new();
     let mut current_type = String::new();
+    let mut current_title = String::new();
 
     loop {
         match reader.read_event_into(&mut buf) {
@@ -79,14 +80,14 @@ fn parse_scrivx(content: &str) -> Result<(String, Vec<BinderItem>)> {
                         in_binder = true;
                     }
                     "BinderItem" => {
-                        // Get attributes
+                        // Get attributes - support both old "ID" and new "UUID" formats
                         let mut id = String::new();
                         let mut item_type = String::new();
                         for attr in e.attributes().filter_map(|a| a.ok()) {
                             let key = String::from_utf8_lossy(attr.key.as_ref()).to_string();
                             let value = String::from_utf8_lossy(&attr.value).to_string();
                             match key.as_str() {
-                                "ID" => id = value,
+                                "ID" | "UUID" => id = value,
                                 "Type" => item_type = value,
                                 _ => {}
                             }
@@ -99,12 +100,13 @@ fn parse_scrivx(content: &str) -> Result<(String, Vec<BinderItem>)> {
                         if !current_id.is_empty() {
                             item_stack.push(BinderItem {
                                 id: current_id.clone(),
-                                title: String::new(),
+                                title: current_title.clone(),
                                 item_type: current_type.clone(),
                                 children: Vec::new(),
                             });
                             current_id.clear();
                             current_type.clear();
+                            current_title.clear();
                         }
                     }
                     _ => {}
@@ -121,7 +123,7 @@ fn parse_scrivx(content: &str) -> Result<(String, Vec<BinderItem>)> {
                         if !current_id.is_empty() {
                             let item = BinderItem {
                                 id: current_id.clone(),
-                                title: String::new(),
+                                title: current_title.clone(),
                                 item_type: current_type.clone(),
                                 children: Vec::new(),
                             };
@@ -132,6 +134,7 @@ fn parse_scrivx(content: &str) -> Result<(String, Vec<BinderItem>)> {
                             }
                             current_id.clear();
                             current_type.clear();
+                            current_title.clear();
                         }
                     }
                     "Children" => {
@@ -153,20 +156,10 @@ fn parse_scrivx(content: &str) -> Result<(String, Vec<BinderItem>)> {
 
                 if current_element == "Title" {
                     if !current_id.is_empty() {
-                        // Update current item's title
-                        if let Some(item) = item_stack.last_mut() {
-                            if item.title.is_empty() {
-                                // Look for the item we're describing
-                            }
-                        }
+                        // We're inside a BinderItem, store the title
+                        current_title = text;
                     } else if project_title.is_empty() && !in_binder {
-                        project_title = text.clone();
-                    }
-                    // Store title for the current context
-                    if let Some(item) = item_stack.last_mut() {
-                        if item.title.is_empty() {
-                            item.title = text;
-                        }
+                        project_title = text;
                     }
                 }
             }
@@ -377,7 +370,7 @@ fn find_scrivx_file(scriv_path: &Path) -> Option<std::path::PathBuf> {
     None
 }
 
-/// Find the Docs directory containing RTF files
+/// Find the Docs directory containing RTF files (Scrivener 2 format)
 fn find_docs_dir(scriv_path: &Path) -> Option<std::path::PathBuf> {
     let files_docs = scriv_path.join("Files").join("Docs");
     if files_docs.is_dir() {
@@ -392,6 +385,64 @@ fn find_docs_dir(scriv_path: &Path) -> Option<std::path::PathBuf> {
     None
 }
 
+/// Find the Data directory containing UUID folders (Scrivener 3 format)
+fn find_data_dir(scriv_path: &Path) -> Option<std::path::PathBuf> {
+    let files_data = scriv_path.join("Files").join("Data");
+    if files_data.is_dir() {
+        return Some(files_data);
+    }
+
+    None
+}
+
+/// Read content for a document by ID/UUID
+fn read_document_content(docs_dir: Option<&Path>, data_dir: Option<&Path>, id: &str) -> String {
+    // Try Scrivener 3 format first: Files/Data/{UUID}/content.rtf
+    if let Some(data) = data_dir {
+        let content_path = data.join(id).join("content.rtf");
+        if content_path.exists() {
+            if let Ok(rtf_content) = fs::read_to_string(&content_path) {
+                return extract_text_from_rtf(&rtf_content);
+            }
+        }
+        // Also try .txt
+        let txt_path = data.join(id).join("content.txt");
+        if txt_path.exists() {
+            if let Ok(txt_content) = fs::read_to_string(&txt_path) {
+                return txt_content;
+            }
+        }
+    }
+
+    // Try Scrivener 2 format: Docs/{ID}.rtf
+    if let Some(docs) = docs_dir {
+        let rtf_path = docs.join(format!("{}.rtf", id));
+        if rtf_path.exists() {
+            if let Ok(rtf_content) = fs::read_to_string(&rtf_path) {
+                return extract_text_from_rtf(&rtf_content);
+            }
+        }
+        let txt_path = docs.join(format!("{}.txt", id));
+        if txt_path.exists() {
+            if let Ok(txt_content) = fs::read_to_string(&txt_path) {
+                return txt_content;
+            }
+        }
+    }
+
+    String::new()
+}
+
+/// Check if item type is a folder
+fn is_folder_type(item_type: &str) -> bool {
+    matches!(item_type, "Folder" | "DraftFolder" | "ResearchFolder")
+}
+
+/// Check if item type should be skipped
+fn should_skip_type(item_type: &str) -> bool {
+    matches!(item_type, "TrashFolder")
+}
+
 /// Flatten binder items with folder paths
 fn flatten_binder_items(
     items: &[BinderItem],
@@ -399,9 +450,14 @@ fn flatten_binder_items(
     result: &mut Vec<(BinderItem, Option<String>)>,
 ) {
     for item in items {
+        // Skip trash folder and its contents
+        if should_skip_type(&item.item_type) {
+            continue;
+        }
+
         let current_path = if let Some(pp) = parent_path {
             Some(format!("{}/{}", pp, item.title))
-        } else if !item.title.is_empty() && item.item_type == "Folder" {
+        } else if !item.title.is_empty() && is_folder_type(&item.item_type) {
             Some(item.title.clone())
         } else {
             None
@@ -427,12 +483,16 @@ fn count_items(items: &[BinderItem]) -> (usize, usize) {
     for item in items {
         match item.item_type.as_str() {
             "Text" => docs += 1,
-            "Folder" => folders += 1,
+            "Folder" | "DraftFolder" | "ResearchFolder" => folders += 1,
+            "TrashFolder" => {} // Skip trash
             _ => {}
         }
-        let (child_docs, child_folders) = count_items(&item.children);
-        docs += child_docs;
-        folders += child_folders;
+        // Don't count items in trash
+        if item.item_type != "TrashFolder" {
+            let (child_docs, child_folders) = count_items(&item.children);
+            docs += child_docs;
+            folders += child_folders;
+        }
     }
 
     (docs, folders)
@@ -484,9 +544,9 @@ pub fn preview_scrivener_project(scriv_path: &Path) -> Result<ScrivenerImportPre
         warnings.push("No text documents found in project".to_string());
     }
 
-    // Check for Docs directory
-    if find_docs_dir(scriv_path).is_none() {
-        warnings.push("Docs directory not found - content may not be imported".to_string());
+    // Check for content directories (Scrivener 2 or 3 format)
+    if find_docs_dir(scriv_path).is_none() && find_data_dir(scriv_path).is_none() {
+        warnings.push("No content directory found - content may not be imported".to_string());
     }
 
     Ok(ScrivenerImportPreview {
@@ -522,8 +582,9 @@ pub fn import_scrivener_project(
     let scrivx_content = fs::read_to_string(&scrivx_path)?;
     let (project_title, binder_items) = parse_scrivx(&scrivx_content)?;
 
-    // Find Docs directory
+    // Find content directories (support both Scrivener 2 and 3 formats)
     let docs_dir = find_docs_dir(scriv_path);
+    let data_dir = find_data_dir(scriv_path);
 
     // Create notebook
     let notebook_id = Uuid::new_v4();
@@ -565,24 +626,12 @@ pub fn import_scrivener_project(
     let mut pages = Vec::new();
 
     for (item, folder_path) in flat_items {
-        // Try to read content from RTF file
-        let mut content_text = String::new();
-
-        if let Some(ref docs) = docs_dir {
-            // Try various RTF file patterns
-            let rtf_path = docs.join(format!("{}.rtf", item.id));
-            let txt_path = docs.join(format!("{}.txt", item.id));
-
-            if rtf_path.exists() {
-                if let Ok(rtf_content) = fs::read_to_string(&rtf_path) {
-                    content_text = extract_text_from_rtf(&rtf_content);
-                }
-            } else if txt_path.exists() {
-                if let Ok(txt_content) = fs::read_to_string(&txt_path) {
-                    content_text = txt_content;
-                }
-            }
-        }
+        // Read content from RTF file (supports both Scrivener 2 and 3 formats)
+        let content_text = read_document_content(
+            docs_dir.as_deref(),
+            data_dir.as_deref(),
+            &item.id,
+        );
 
         // Convert to EditorJS blocks
         let blocks = text_to_editor_blocks(&content_text);

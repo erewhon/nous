@@ -102,6 +102,7 @@ Already implemented with Tantivy, may need refinement:
 - [x] Export entire notebook as ZIP
 - [x] Import notebook from ZIP
 - [x] Auto-backup with local storage (manual trigger + auto cleanup)
+- [x] Scheduled automatic backups (daily/weekly/monthly with configurable time)
 - [ ] Backup to cloud storage (optional) - Note: WebDAV sync now available for cloud access
 
 ### 8. Folders & Organization
@@ -447,7 +448,7 @@ Already implemented with Tantivy, may need refinement:
 - [x] Linked file sync detection (detect external file changes, prompt to reload)
 - [x] Jupyter cell editing (add, delete, reorder, edit cell content)
 - [x] Jupyter cell execution via Python kernel
-- [ ] PDF annotation persistence (save highlights/notes)
+- [x] PDF annotation persistence (save highlights/notes)
 - [ ] EPUB reading progress tracking
 - [ ] EPUB highlight/annotation support
 

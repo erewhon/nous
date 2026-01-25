@@ -354,6 +354,7 @@ mod tests {
             storage_mode: None,
             file_extension: None,
             last_file_sync: None,
+            deleted_at: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }

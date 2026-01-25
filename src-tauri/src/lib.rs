@@ -23,6 +23,7 @@ mod storage;
 pub mod sync;
 
 use actions::{ActionExecutor, ActionScheduler, ActionStorage};
+use commands::BackupScheduler;
 use external_editor::ExternalEditorManager;
 use flashcards::FlashcardStorage;
 use goals::GoalsStorage;
@@ -46,6 +47,7 @@ pub struct AppState {
     pub goals_storage: Mutex<GoalsStorage>,
     pub sync_manager: Arc<tokio::sync::Mutex<SyncManager>>,
     pub external_editor: Mutex<ExternalEditorManager>,
+    pub backup_scheduler: Arc<tokio::sync::Mutex<Option<BackupScheduler>>>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -130,6 +132,10 @@ pub fn run() {
 
     let library_storage_arc = Arc::new(Mutex::new(library_storage));
 
+    // Start backup scheduler
+    let backup_scheduler = commands::start_backup_scheduler(Arc::clone(&storage_arc));
+    let backup_scheduler_arc = Arc::new(tokio::sync::Mutex::new(Some(backup_scheduler)));
+
     let state = AppState {
         library_storage: library_storage_arc,
         storage: storage_arc,
@@ -143,6 +149,7 @@ pub fn run() {
         goals_storage: Mutex::new(goals_storage),
         sync_manager: sync_manager_arc,
         external_editor: Mutex::new(external_editor),
+        backup_scheduler: backup_scheduler_arc,
     };
 
     tauri::Builder::default()
@@ -228,6 +235,9 @@ pub fn run() {
             commands::create_notebook_backup,
             commands::list_backups,
             commands::delete_backup,
+            commands::get_backup_settings,
+            commands::update_backup_settings,
+            commands::run_scheduled_backup,
             // Notion import commands
             commands::preview_notion_export,
             commands::import_notion_export,
@@ -379,6 +389,13 @@ pub fn run() {
             commands::get_page_annotation,
             commands::save_page_annotation,
             commands::delete_page_annotation,
+            // PDF annotation commands
+            commands::get_pdf_annotations,
+            commands::save_pdf_annotations,
+            commands::add_pdf_highlight,
+            commands::update_pdf_highlight,
+            commands::delete_pdf_highlight,
+            commands::delete_pdf_annotations,
             // File-based page commands
             commands::import_file_as_page,
             commands::get_file_content,

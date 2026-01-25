@@ -12,6 +12,87 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter};
 use super::file_storage::{Result, StorageError};
 use super::models::{Notebook, Page};
 
+/// Backup schedule frequency
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub enum BackupFrequency {
+    Daily,
+    Weekly,
+    Monthly,
+}
+
+impl Default for BackupFrequency {
+    fn default() -> Self {
+        Self::Daily
+    }
+}
+
+/// Scheduled backup settings
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupSettings {
+    /// Whether scheduled backups are enabled
+    pub enabled: bool,
+    /// Backup frequency
+    pub frequency: BackupFrequency,
+    /// Time of day to run backup (HH:MM format)
+    pub time: String,
+    /// Day of week for weekly backups (0 = Sunday, 6 = Saturday)
+    pub day_of_week: Option<u8>,
+    /// Day of month for monthly backups (1-28)
+    pub day_of_month: Option<u8>,
+    /// Maximum number of backups to keep per notebook
+    pub max_backups_per_notebook: usize,
+    /// Notebooks to backup (empty = all)
+    pub notebook_ids: Vec<Uuid>,
+    /// Last backup time
+    pub last_backup: Option<DateTime<Utc>>,
+    /// Next scheduled backup time
+    pub next_backup: Option<DateTime<Utc>>,
+}
+
+impl Default for BackupSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            frequency: BackupFrequency::Daily,
+            time: "02:00".to_string(), // 2 AM default
+            day_of_week: Some(0), // Sunday for weekly
+            day_of_month: Some(1), // 1st for monthly
+            max_backups_per_notebook: 5,
+            notebook_ids: Vec::new(), // Empty = all notebooks
+            last_backup: None,
+            next_backup: None,
+        }
+    }
+}
+
+/// Get the backup settings file path
+pub fn get_backup_settings_path(data_dir: &Path) -> PathBuf {
+    data_dir.join("backup_settings.json")
+}
+
+/// Load backup settings from file
+pub fn load_backup_settings(data_dir: &Path) -> Result<BackupSettings> {
+    let settings_path = get_backup_settings_path(data_dir);
+
+    if !settings_path.exists() {
+        return Ok(BackupSettings::default());
+    }
+
+    let content = fs::read_to_string(&settings_path)?;
+    let settings: BackupSettings = serde_json::from_str(&content)?;
+    Ok(settings)
+}
+
+/// Save backup settings to file
+pub fn save_backup_settings(data_dir: &Path, settings: &BackupSettings) -> Result<()> {
+    let settings_path = get_backup_settings_path(data_dir);
+    let content = serde_json::to_string_pretty(settings)?;
+    fs::write(&settings_path, content)?;
+    Ok(())
+}
+
 /// Backup metadata stored in the ZIP file
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BackupMetadata {
@@ -318,4 +399,107 @@ pub fn list_auto_backups(data_dir: &Path) -> Result<Vec<(PathBuf, BackupMetadata
     backups.sort_by(|a, b| b.1.created_at.cmp(&a.1.created_at));
 
     Ok(backups)
+}
+
+/// Calculate the next backup time based on settings
+pub fn calculate_next_backup_time(settings: &BackupSettings) -> Option<DateTime<Utc>> {
+    use chrono::{Datelike, Local, NaiveTime, TimeZone, Weekday};
+
+    if !settings.enabled {
+        return None;
+    }
+
+    // Parse the time string
+    let time_parts: Vec<&str> = settings.time.split(':').collect();
+    if time_parts.len() != 2 {
+        return None;
+    }
+    let hour: u32 = time_parts[0].parse().ok()?;
+    let minute: u32 = time_parts[1].parse().ok()?;
+    let scheduled_time = NaiveTime::from_hms_opt(hour, minute, 0)?;
+
+    let now = Local::now();
+    let mut date = now.date_naive();
+
+    match settings.frequency {
+        BackupFrequency::Daily => {
+            // If today's time has passed, schedule for tomorrow
+            if now.time() >= scheduled_time {
+                date = date.succ_opt()?;
+            }
+        }
+        BackupFrequency::Weekly => {
+            let target_weekday = settings.day_of_week.unwrap_or(0);
+            // Convert to chrono weekday (0 = Sunday in our settings)
+            let target_day = match target_weekday {
+                0 => Weekday::Sun,
+                1 => Weekday::Mon,
+                2 => Weekday::Tue,
+                3 => Weekday::Wed,
+                4 => Weekday::Thu,
+                5 => Weekday::Fri,
+                6 => Weekday::Sat,
+                _ => Weekday::Sun,
+            };
+
+            // Find next occurrence of this weekday
+            let mut days_until = (target_day.num_days_from_sunday() as i32
+                - now.weekday().num_days_from_sunday() as i32)
+                .rem_euclid(7) as u32;
+
+            // If it's today but time has passed, go to next week
+            if days_until == 0 && now.time() >= scheduled_time {
+                days_until = 7;
+            }
+
+            for _ in 0..days_until {
+                date = date.succ_opt()?;
+            }
+        }
+        BackupFrequency::Monthly => {
+            let target_day = settings.day_of_month.unwrap_or(1).min(28) as u32;
+            let current_day = date.day();
+
+            if current_day > target_day || (current_day == target_day && now.time() >= scheduled_time)
+            {
+                // Move to next month
+                let mut month = date.month();
+                let mut year = date.year();
+                month += 1;
+                if month > 12 {
+                    month = 1;
+                    year += 1;
+                }
+                date = chrono::NaiveDate::from_ymd_opt(year, month, target_day)?;
+            } else {
+                date = chrono::NaiveDate::from_ymd_opt(date.year(), date.month(), target_day)?;
+            }
+        }
+    }
+
+    let datetime = date.and_time(scheduled_time);
+    Some(
+        Local
+            .from_local_datetime(&datetime)
+            .single()?
+            .with_timezone(&Utc),
+    )
+}
+
+/// Check if a backup is due
+pub fn is_backup_due(settings: &BackupSettings) -> bool {
+    if !settings.enabled {
+        return false;
+    }
+
+    if let Some(next_backup) = settings.next_backup {
+        return Utc::now() >= next_backup;
+    }
+
+    // If no next_backup is set, check if we should run based on last_backup
+    if settings.last_backup.is_none() {
+        return true; // Never backed up
+    }
+
+    false
 }

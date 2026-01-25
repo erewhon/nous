@@ -679,6 +679,36 @@ export async function deleteBackup(backupPath: string): Promise<void> {
   return invoke("delete_backup", { backupPath });
 }
 
+// ===== Backup Settings API =====
+
+export type BackupFrequency = "daily" | "weekly" | "monthly";
+
+export interface BackupSettings {
+  enabled: boolean;
+  frequency: BackupFrequency;
+  time: string; // "HH:MM" format
+  dayOfWeek?: number; // 0-6 for weekly (Sunday=0)
+  dayOfMonth?: number; // 1-31 for monthly
+  maxBackupsPerNotebook: number;
+  notebookIds: string[]; // empty = all notebooks
+  lastBackup?: string; // ISO date string
+  nextBackup?: string; // ISO date string
+}
+
+export async function getBackupSettings(): Promise<BackupSettings> {
+  return invoke<BackupSettings>("get_backup_settings");
+}
+
+export async function updateBackupSettings(
+  settings: BackupSettings
+): Promise<BackupSettings> {
+  return invoke<BackupSettings>("update_backup_settings", { settings });
+}
+
+export async function runScheduledBackup(): Promise<BackupInfo[]> {
+  return invoke<BackupInfo[]>("run_scheduled_backup");
+}
+
 // ===== Notion Import API =====
 
 export interface NotionPagePreview {
@@ -1661,6 +1691,108 @@ export async function deleteFilePage(
   pageId: string
 ): Promise<void> {
   return invoke<void>("delete_file_page", { notebookId, pageId });
+}
+
+// ===== PDF Annotation API =====
+
+/**
+ * PDF highlight rectangle
+ */
+export interface PDFRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * PDF highlight annotation
+ */
+export interface PDFHighlight {
+  id: string;
+  pageNumber: number;
+  rects: PDFRect[];
+  selectedText: string;
+  note?: string;
+  color: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * PDF page annotations container
+ */
+export interface PDFPageAnnotations {
+  pageId: string;
+  notebookId: string;
+  highlights: PDFHighlight[];
+  updatedAt: string;
+}
+
+/**
+ * Get PDF annotations for a page
+ */
+export async function getPdfAnnotations(
+  notebookId: string,
+  pageId: string
+): Promise<PDFPageAnnotations> {
+  return invoke<PDFPageAnnotations>("get_pdf_annotations", { notebookId, pageId });
+}
+
+/**
+ * Save all PDF annotations for a page
+ */
+export async function savePdfAnnotations(
+  notebookId: string,
+  pageId: string,
+  highlights: PDFHighlight[]
+): Promise<PDFPageAnnotations> {
+  return invoke<PDFPageAnnotations>("save_pdf_annotations", { notebookId, pageId, highlights });
+}
+
+/**
+ * Add a highlight to a PDF page
+ */
+export async function addPdfHighlight(
+  notebookId: string,
+  pageId: string,
+  highlight: PDFHighlight
+): Promise<PDFPageAnnotations> {
+  return invoke<PDFPageAnnotations>("add_pdf_highlight", { notebookId, pageId, highlight });
+}
+
+/**
+ * Update a PDF highlight
+ */
+export async function updatePdfHighlight(
+  notebookId: string,
+  pageId: string,
+  highlightId: string,
+  note?: string,
+  color?: string
+): Promise<PDFPageAnnotations> {
+  return invoke<PDFPageAnnotations>("update_pdf_highlight", { notebookId, pageId, highlightId, note, color });
+}
+
+/**
+ * Delete a PDF highlight
+ */
+export async function deletePdfHighlight(
+  notebookId: string,
+  pageId: string,
+  highlightId: string
+): Promise<PDFPageAnnotations> {
+  return invoke<PDFPageAnnotations>("delete_pdf_highlight", { notebookId, pageId, highlightId });
+}
+
+/**
+ * Delete all PDF annotations for a page
+ */
+export async function deletePdfAnnotations(
+  notebookId: string,
+  pageId: string
+): Promise<void> {
+  return invoke<void>("delete_pdf_annotations", { notebookId, pageId });
 }
 
 // ===== Jupyter Cell Execution =====

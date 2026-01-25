@@ -2,8 +2,12 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import type { Page as PageType } from "../../types/page";
+import type { PDFHighlight } from "../../types/pdf";
+import { HIGHLIGHT_COLORS } from "../../types/pdf";
 import { useLinkedFileSync } from "../../hooks/useLinkedFileSync";
 import { LinkedFileChangedBanner } from "../LinkedFile";
+import { PDFHighlightLayer } from "./PDFHighlightLayer";
+import { PDFAnnotationSidebar } from "./PDFAnnotationSidebar";
 import * as api from "../../utils/api";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
@@ -25,12 +29,35 @@ export function PDFPageViewer({ page, notebookId, className = "" }: PDFPageViewe
   const [totalPages, setTotalPages] = useState(0);
   const [zoom, setZoom] = useState(1);
   const containerRef = useRef<HTMLDivElement>(null);
+  const pdfContainerRef = useRef<HTMLDivElement>(null);
   const [containerWidth, setContainerWidth] = useState(800);
   const [isReloading, setIsReloading] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
 
+  // Annotation state
+  const [highlights, setHighlights] = useState<PDFHighlight[]>([]);
+  const [isAnnotating, setIsAnnotating] = useState(false);
+  const [selectedColor, setSelectedColor] = useState<string>(HIGHLIGHT_COLORS[0].value);
+  const [selectedHighlightId, setSelectedHighlightId] = useState<string | null>(null);
+  const [showSidebar, setShowSidebar] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+
   // Linked file sync detection
   const { isModified, dismiss, markSynced } = useLinkedFileSync(page, notebookId);
+
+  // Load annotations on mount
+  useEffect(() => {
+    const loadAnnotations = async () => {
+      try {
+        const annotations = await api.getPdfAnnotations(notebookId, page.id);
+        setHighlights(annotations.highlights);
+      } catch (err) {
+        console.error("Failed to load PDF annotations:", err);
+      }
+    };
+
+    loadAnnotations();
+  }, [notebookId, page.id]);
 
   // Reload the PDF file
   const handleReload = useCallback(async () => {
@@ -76,14 +103,15 @@ export function PDFPageViewer({ page, notebookId, className = "" }: PDFPageViewe
   useEffect(() => {
     const updateWidth = () => {
       if (containerRef.current) {
-        setContainerWidth(containerRef.current.clientWidth);
+        const sidebarWidth = showSidebar ? 300 : 0;
+        setContainerWidth(containerRef.current.clientWidth - sidebarWidth);
       }
     };
 
     updateWidth();
     window.addEventListener("resize", updateWidth);
     return () => window.removeEventListener("resize", updateWidth);
-  }, []);
+  }, [showSidebar]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -93,7 +121,9 @@ export function PDFPageViewer({ page, notebookId, className = "" }: PDFPageViewe
         return;
       }
 
-      if (e.key === "ArrowLeft" && currentPage > 1) {
+      if (e.key === "Escape" && isAnnotating) {
+        setIsAnnotating(false);
+      } else if (e.key === "ArrowLeft" && currentPage > 1) {
         setCurrentPage((p) => p - 1);
       } else if (e.key === "ArrowRight" && currentPage < totalPages) {
         setCurrentPage((p) => p + 1);
@@ -106,7 +136,7 @@ export function PDFPageViewer({ page, notebookId, className = "" }: PDFPageViewe
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [currentPage, totalPages]);
+  }, [currentPage, totalPages, isAnnotating]);
 
   const handleLoadSuccess = useCallback(({ numPages }: { numPages: number }) => {
     setTotalPages(numPages);
@@ -115,6 +145,101 @@ export function PDFPageViewer({ page, notebookId, className = "" }: PDFPageViewe
   const handleLoadError = useCallback((err: Error) => {
     setError(err.message || "Failed to load PDF");
     console.error("PDF load error:", err);
+  }, []);
+
+  // Highlight operations
+  const handleHighlightCreate = useCallback(
+    async (highlight: Omit<PDFHighlight, "id" | "createdAt" | "updatedAt">) => {
+      const now = new Date().toISOString();
+      const newHighlight: PDFHighlight = {
+        ...highlight,
+        id: crypto.randomUUID(),
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      // Optimistic update
+      setHighlights((prev) => [...prev, newHighlight]);
+      setIsSaving(true);
+
+      try {
+        const result = await api.addPdfHighlight(notebookId, page.id, newHighlight);
+        setHighlights(result.highlights);
+      } catch (err) {
+        console.error("Failed to save highlight:", err);
+        // Revert on error
+        setHighlights((prev) => prev.filter((h) => h.id !== newHighlight.id));
+      } finally {
+        setIsSaving(false);
+      }
+    },
+    [notebookId, page.id]
+  );
+
+  const handleHighlightUpdate = useCallback(
+    async (highlightId: string, updates: Partial<PDFHighlight>) => {
+      // Optimistic update
+      setHighlights((prev) =>
+        prev.map((h) =>
+          h.id === highlightId
+            ? { ...h, ...updates, updatedAt: new Date().toISOString() }
+            : h
+        )
+      );
+      setIsSaving(true);
+
+      try {
+        const result = await api.updatePdfHighlight(
+          notebookId,
+          page.id,
+          highlightId,
+          updates.note,
+          updates.color
+        );
+        setHighlights(result.highlights);
+      } catch (err) {
+        console.error("Failed to update highlight:", err);
+        // Reload to get correct state
+        const annotations = await api.getPdfAnnotations(notebookId, page.id);
+        setHighlights(annotations.highlights);
+      } finally {
+        setIsSaving(false);
+      }
+    },
+    [notebookId, page.id]
+  );
+
+  const handleHighlightDelete = useCallback(
+    async (highlightId: string) => {
+      const originalHighlights = highlights;
+      // Optimistic update
+      setHighlights((prev) => prev.filter((h) => h.id !== highlightId));
+      setSelectedHighlightId(null);
+      setIsSaving(true);
+
+      try {
+        const result = await api.deletePdfHighlight(notebookId, page.id, highlightId);
+        setHighlights(result.highlights);
+      } catch (err) {
+        console.error("Failed to delete highlight:", err);
+        // Revert on error
+        setHighlights(originalHighlights);
+      } finally {
+        setIsSaving(false);
+      }
+    },
+    [notebookId, page.id, highlights]
+  );
+
+  const handleHighlightClick = useCallback((id: string) => {
+    setSelectedHighlightId((prev) => (prev === id ? null : id));
+    if (!showSidebar) {
+      setShowSidebar(true);
+    }
+  }, [showSidebar]);
+
+  const handleGoToPage = useCallback((pageNum: number) => {
+    setCurrentPage(pageNum);
   }, []);
 
   const pageWidth = Math.min(containerWidth - 80, 900) * zoom;
@@ -176,7 +301,7 @@ export function PDFPageViewer({ page, notebookId, className = "" }: PDFPageViewe
   }
 
   return (
-    <div className={`flex flex-col h-full ${className}`}>
+    <div ref={containerRef} className={`flex flex-col h-full ${className}`}>
       {/* Linked file changed banner */}
       {isModified && (
         <LinkedFileChangedBanner
@@ -259,9 +384,9 @@ export function PDFPageViewer({ page, notebookId, className = "" }: PDFPageViewe
               max={totalPages}
               value={currentPage}
               onChange={(e) => {
-                const page = parseInt(e.target.value);
-                if (page >= 1 && page <= totalPages) {
-                  setCurrentPage(page);
+                const p = parseInt(e.target.value);
+                if (p >= 1 && p <= totalPages) {
+                  setCurrentPage(p);
                 }
               }}
               className="w-12 rounded border px-2 py-1 text-center text-sm"
@@ -295,107 +420,229 @@ export function PDFPageViewer({ page, notebookId, className = "" }: PDFPageViewe
           </button>
         </div>
 
-        {/* Right: Zoom controls */}
-        <div
-          className="flex items-center gap-1 rounded-lg border px-2 py-1"
-          style={{ borderColor: "var(--color-border)" }}
-        >
+        {/* Right: Tools */}
+        <div className="flex items-center gap-2">
+          {/* Zoom controls */}
+          <div
+            className="flex items-center gap-1 rounded-lg border px-2 py-1"
+            style={{ borderColor: "var(--color-border)" }}
+          >
+            <button
+              onClick={() => setZoom((z) => Math.max(z - 0.25, 0.5))}
+              disabled={zoom <= 0.5}
+              className="flex h-6 w-6 items-center justify-center rounded transition-colors disabled:opacity-40"
+              style={{ color: "var(--color-text-muted)" }}
+              title="Zoom out"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+            </button>
+            <span
+              className="min-w-[48px] text-center text-xs"
+              style={{ color: "var(--color-text-secondary)" }}
+            >
+              {Math.round(zoom * 100)}%
+            </span>
+            <button
+              onClick={() => setZoom((z) => Math.min(z + 0.25, 3))}
+              disabled={zoom >= 3}
+              className="flex h-6 w-6 items-center justify-center rounded transition-colors disabled:opacity-40"
+              style={{ color: "var(--color-text-muted)" }}
+              title="Zoom in"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <line x1="12" y1="5" x2="12" y2="19" />
+                <line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+            </button>
+          </div>
+
+          {/* Annotation toggle */}
           <button
-            onClick={() => setZoom((z) => Math.max(z - 0.25, 0.5))}
-            disabled={zoom <= 0.5}
-            className="flex h-6 w-6 items-center justify-center rounded transition-colors disabled:opacity-40"
-            style={{ color: "var(--color-text-muted)" }}
-            title="Zoom out"
+            onClick={() => setIsAnnotating(!isAnnotating)}
+            className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
+              isAnnotating ? "text-white" : ""
+            }`}
+            style={{
+              backgroundColor: isAnnotating
+                ? selectedColor
+                : "var(--color-bg-tertiary)",
+              color: isAnnotating ? "white" : "var(--color-text-secondary)",
+            }}
+            title={isAnnotating ? "Stop annotating (Esc)" : "Start annotating"}
           >
             <svg
               xmlns="http://www.w3.org/2000/svg"
-              width="14"
-              height="14"
+              width="16"
+              height="16"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
               strokeWidth="2"
             >
-              <line x1="5" y1="12" x2="19" y2="12" />
+              <path d="m9 11-6 6v3h9l3-3" />
+              <path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4" />
             </svg>
+            {isAnnotating ? "Stop" : "Annotate"}
           </button>
-          <span
-            className="min-w-[48px] text-center text-xs"
-            style={{ color: "var(--color-text-secondary)" }}
-          >
-            {Math.round(zoom * 100)}%
-          </span>
+
+          {/* Color picker (when annotating) */}
+          {isAnnotating && (
+            <div className="flex gap-1">
+              {HIGHLIGHT_COLORS.map((color) => (
+                <button
+                  key={color.value}
+                  onClick={() => setSelectedColor(color.value)}
+                  className={`h-6 w-6 rounded-full transition-transform ${
+                    selectedColor === color.value
+                      ? "ring-2 ring-offset-1 scale-110"
+                      : "hover:scale-110"
+                  }`}
+                  style={{
+                    backgroundColor: color.value,
+                  }}
+                  title={color.name}
+                />
+              ))}
+            </div>
+          )}
+
+          {/* Sidebar toggle */}
           <button
-            onClick={() => setZoom((z) => Math.min(z + 0.25, 3))}
-            disabled={zoom >= 3}
-            className="flex h-6 w-6 items-center justify-center rounded transition-colors disabled:opacity-40"
+            onClick={() => setShowSidebar(!showSidebar)}
+            className={`flex h-8 w-8 items-center justify-center rounded-lg transition-colors ${
+              showSidebar ? "bg-[--color-bg-tertiary]" : ""
+            }`}
             style={{ color: "var(--color-text-muted)" }}
-            title="Zoom in"
+            title={showSidebar ? "Hide annotations" : "Show annotations"}
           >
             <svg
               xmlns="http://www.w3.org/2000/svg"
-              width="14"
-              height="14"
+              width="18"
+              height="18"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
               strokeWidth="2"
             >
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
+              <rect x="3" y="3" width="18" height="18" rx="2" />
+              <path d="M15 3v18" />
             </svg>
+            {highlights.length > 0 && !showSidebar && (
+              <span
+                className="absolute -top-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full text-[10px] font-medium text-white"
+                style={{ backgroundColor: "var(--color-accent)" }}
+              >
+                {highlights.length}
+              </span>
+            )}
           </button>
         </div>
       </div>
 
-      {/* PDF Content */}
-      <div
-        ref={containerRef}
-        className="flex-1 overflow-auto"
-        style={{ backgroundColor: "var(--color-bg-tertiary)" }}
-      >
-        <div className="flex min-h-full justify-center p-6">
-          {fileUrl && (
-            <Document
-              file={fileUrl}
-              onLoadSuccess={handleLoadSuccess}
-              onLoadError={handleLoadError}
-              loading={
-                <div className="flex items-center gap-2">
-                  <svg
-                    className="h-5 w-5 animate-spin"
-                    xmlns="http://www.w3.org/2000/svg"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                  >
-                    <circle
-                      className="opacity-25"
-                      cx="12"
-                      cy="12"
-                      r="10"
-                      stroke="currentColor"
-                      strokeWidth="4"
-                    />
-                    <path
-                      className="opacity-75"
-                      fill="currentColor"
-                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                    />
-                  </svg>
-                  <span style={{ color: "var(--color-text-muted)" }}>Loading PDF...</span>
+      {/* Content area */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* PDF Content */}
+        <div
+          ref={pdfContainerRef}
+          className="flex-1 overflow-auto"
+          style={{ backgroundColor: "var(--color-bg-tertiary)" }}
+        >
+          <div className="flex min-h-full justify-center p-6">
+            {fileUrl && (
+              <Document
+                file={fileUrl}
+                onLoadSuccess={handleLoadSuccess}
+                onLoadError={handleLoadError}
+                loading={
+                  <div className="flex items-center gap-2">
+                    <svg
+                      className="h-5 w-5 animate-spin"
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                    >
+                      <circle
+                        className="opacity-25"
+                        cx="12"
+                        cy="12"
+                        r="10"
+                        stroke="currentColor"
+                        strokeWidth="4"
+                      />
+                      <path
+                        className="opacity-75"
+                        fill="currentColor"
+                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                      />
+                    </svg>
+                    <span style={{ color: "var(--color-text-muted)" }}>Loading PDF...</span>
+                  </div>
+                }
+              >
+                <div className="relative">
+                  <Page
+                    pageNumber={currentPage}
+                    width={pageWidth}
+                    renderTextLayer={true}
+                    renderAnnotationLayer={true}
+                    className="shadow-xl"
+                  />
+
+                  {/* Highlight layer */}
+                  <PDFHighlightLayer
+                    highlights={highlights}
+                    currentPage={currentPage}
+                    containerRef={pdfContainerRef}
+                    zoom={zoom}
+                    isAnnotating={isAnnotating}
+                    selectedColor={selectedColor}
+                    selectedHighlightId={selectedHighlightId}
+                    onHighlightCreate={handleHighlightCreate}
+                    onHighlightClick={handleHighlightClick}
+                  />
                 </div>
-              }
-            >
-              <Page
-                pageNumber={currentPage}
-                width={pageWidth}
-                renderTextLayer={true}
-                renderAnnotationLayer={true}
-                className="shadow-xl"
-              />
-            </Document>
-          )}
+              </Document>
+            )}
+          </div>
         </div>
+
+        {/* Sidebar */}
+        {showSidebar && (
+          <div
+            className="w-[300px] flex-shrink-0 border-l"
+            style={{
+              backgroundColor: "var(--color-bg-panel)",
+              borderColor: "var(--color-border)",
+            }}
+          >
+            <PDFAnnotationSidebar
+              highlights={highlights}
+              selectedHighlightId={selectedHighlightId}
+              onSelectHighlight={setSelectedHighlightId}
+              onUpdateHighlight={handleHighlightUpdate}
+              onDeleteHighlight={handleHighlightDelete}
+              onGoToPage={handleGoToPage}
+            />
+          </div>
+        )}
       </div>
 
       {/* Footer */}
@@ -407,7 +654,17 @@ export function PDFPageViewer({ page, notebookId, className = "" }: PDFPageViewe
           color: "var(--color-text-muted)",
         }}
       >
-        <span>Arrow keys to navigate | +/- to zoom</span>
+        <div className="flex items-center gap-2">
+          <span>{highlights.length} highlight(s)</span>
+          {isSaving && (
+            <>
+              <span>|</span>
+              <span className="animate-pulse">Saving...</span>
+            </>
+          )}
+          <span>|</span>
+          <span>Arrow keys to navigate | +/- to zoom</span>
+        </div>
         {page.sourceFile && (
           <span className="truncate max-w-[300px]" title={page.sourceFile}>
             {page.sourceFile}
