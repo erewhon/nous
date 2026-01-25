@@ -78,6 +78,7 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
     getActiveProviderType,
     getActiveApiKey,
     getEnabledModels,
+    setPendingPrompt,
   } = useAIStore();
   const { selectedPageId, pages, loadPages, updatePageContent, createPage, createSubpage } = usePageStore();
   const { notebooks, selectedNotebookId, loadNotebooks } = useNotebookStore();
@@ -252,6 +253,23 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
       setTimeout(() => inputRef.current?.focus(), 100);
     }
   }, [isOpen]);
+
+  // Auto-submit pending prompt when panel opens
+  useEffect(() => {
+    if (isOpen && conversation.pendingPrompt && !conversation.isLoading) {
+      const prompt = conversation.pendingPrompt;
+      setPendingPrompt(null); // Clear immediately to prevent re-triggering
+      setInput(prompt);
+      // Trigger submit after a short delay to ensure UI is ready
+      setTimeout(() => {
+        // Set the input and trigger handleSubmit manually
+        const submitBtn = document.querySelector("[data-ai-submit-btn]") as HTMLButtonElement;
+        if (submitBtn) {
+          submitBtn.click();
+        }
+      }, 100);
+    }
+  }, [isOpen, conversation.pendingPrompt, conversation.isLoading, setPendingPrompt]);
 
   // Extract plain text from Editor.js content
   const extractPlainText = useCallback((content: { blocks: Array<{ type: string; data: Record<string, unknown> }> }): string => {
@@ -1639,6 +1657,7 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
           <button
             onClick={handleSubmit}
             disabled={!input.trim() || conversation.isLoading}
+            data-ai-submit-btn
             className="flex h-12 w-12 items-center justify-center rounded-xl text-white shadow-md transition-all disabled:opacity-50"
             style={{
               background: "linear-gradient(to bottom right, var(--color-accent), var(--color-accent-secondary))",

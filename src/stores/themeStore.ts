@@ -417,7 +417,7 @@ export const useThemeStore = create<ThemeState>()(
 
       setFontSize: (fontSize) => {
         set((state) => ({
-          settings: { ...state.settings, fontSize: Math.min(20, Math.max(12, fontSize)) },
+          settings: { ...state.settings, fontSize: Math.min(32, Math.max(12, fontSize)) },
         }));
         get().applyTheme();
       },

@@ -473,7 +473,7 @@ export function ThemeSettings() {
         <input
           type="range"
           min="12"
-          max="20"
+          max="32"
           step="1"
           value={settings.fontSize}
           onChange={(e) => setFontSize(parseInt(e.target.value))}
@@ -484,7 +484,7 @@ export function ThemeSettings() {
           style={{ color: "var(--color-text-muted)" }}
         >
           <span>12px</span>
-          <span>20px</span>
+          <span>32px</span>
         </div>
       </div>
 

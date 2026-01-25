@@ -129,7 +129,7 @@ export function Layout() {
       {/* Sidebar container with transition */}
       <div
         ref={sidebarRef}
-        className="flex-shrink-0 overflow-hidden"
+        className="flex-shrink-0 overflow-hidden h-full"
         style={{
           width: `${sidebarWidth}px`,
           transition: autoHidePanels ? "width 0.2s ease-in-out" : "none",
@@ -140,7 +140,7 @@ export function Layout() {
       >
         {/* Keep sidebar rendered but control visibility for smooth transitions */}
         {(sidebarVisible || sidebarTransitioning) && (
-          <div style={{ width: `${panelWidths.sidebar}px` }}>
+          <div style={{ width: `${panelWidths.sidebar}px`, height: "100%" }}>
             <Sidebar width={panelWidths.sidebar} />
           </div>
         )}

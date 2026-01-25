@@ -6,6 +6,7 @@ interface TranscriptPanelProps {
   currentTime: number;
   onSegmentClick: (segment: TranscriptSegment) => void;
   onCopySegment?: (text: string) => void;
+  onSummarize?: (transcript: string) => void;
 }
 
 /**
@@ -16,6 +17,7 @@ export function TranscriptPanel({
   currentTime,
   onSegmentClick,
   onCopySegment,
+  onSummarize,
 }: TranscriptPanelProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [autoScroll, setAutoScroll] = useState(true);
@@ -84,6 +86,18 @@ export function TranscriptPanel({
     URL.revokeObjectURL(url);
   }, [transcription]);
 
+  // Get full transcript text for summarization
+  const getFullTranscriptText = useCallback(() => {
+    return transcription.segments.map((seg) => seg.text).join(" ");
+  }, [transcription]);
+
+  // Handle summarize click
+  const handleSummarize = useCallback(() => {
+    if (onSummarize) {
+      onSummarize(getFullTranscriptText());
+    }
+  }, [onSummarize, getFullTranscriptText]);
+
   return (
     <div className="transcript-panel">
       {/* Header with search and controls */}
@@ -113,6 +127,26 @@ export function TranscriptPanel({
               <path d="M12 19V5M5 12l7-7 7 7" />
             </svg>
           </button>
+          {onSummarize && (
+            <button
+              type="button"
+              onClick={handleSummarize}
+              className="transcript-btn transcript-btn--summarize"
+              title="Summarize with AI"
+            >
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z" />
+                <path d="M19 13l1 3 3 1-3 1-1 3-1-3-3-1 3-1 1-3z" />
+              </svg>
+            </button>
+          )}
           <button
             type="button"
             onClick={exportTranscript}
@@ -245,6 +279,15 @@ export function TranscriptPanel({
         .transcript-btn--active {
           color: var(--color-accent);
           background: var(--color-accent-bg);
+        }
+
+        .transcript-btn--summarize {
+          color: var(--color-accent);
+        }
+
+        .transcript-btn--summarize:hover {
+          background: rgba(139, 92, 246, 0.15);
+          color: var(--color-accent);
         }
 
         .transcript-info {

@@ -48,17 +48,22 @@ pub fn import_scrivener_project_cmd(
         return Err("Path is not a directory".to_string());
     }
 
-    let storage = state.storage.lock().map_err(|e| e.to_string())?;
-    let notebooks_dir = storage.notebooks_base_dir();
+    let notebooks_dir = {
+        let storage = state.storage.lock().map_err(|e| e.to_string())?;
+        storage.notebooks_base_dir()
+    };
 
     // Import the project
     let (notebook, pages) =
         import_scrivener_project(path, &notebooks_dir, notebook_name).map_err(|e| e.to_string())?;
 
-    // Index all pages in search
-    let mut search_index = state.search_index.lock().map_err(|e| e.to_string())?;
-    for page in &pages {
-        search_index.index_page(page).map_err(|e| e.to_string())?;
+    // Index all pages in search (errors here shouldn't fail the import)
+    if let Ok(mut search_index) = state.search_index.lock() {
+        for page in &pages {
+            if let Err(e) = search_index.index_page(page) {
+                log::warn!("Failed to index page '{}': {}", page.title, e);
+            }
+        }
     }
 
     Ok(notebook)

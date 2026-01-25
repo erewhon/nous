@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback, useState } from "react";
 import { useVideoStore } from "../../stores/videoStore";
+import { useAIStore } from "../../stores/aiStore";
 import { TranscriptPanel } from "./TranscriptPanel";
 
 interface VideoFullScreenProps {
@@ -15,6 +16,8 @@ export function VideoFullScreen({ onExportTranscript }: VideoFullScreenProps) {
     toggleTranscript,
     highlightSegment,
   } = useVideoStore();
+
+  const { openPanelWithPrompt } = useAIStore();
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const [showSidebar, setShowSidebar] = useState(true);
@@ -125,6 +128,27 @@ export function VideoFullScreen({ onExportTranscript }: VideoFullScreenProps) {
     console.log("Copied:", text.substring(0, 50));
   }, []);
 
+  // Handle summarize transcript with AI
+  const handleSummarizeTranscript = useCallback((transcript: string) => {
+    const videoName = videoData?.originalName || "video";
+    const duration = videoData?.transcription?.duration;
+    const durationStr = duration
+      ? `${Math.floor(duration / 60)}:${Math.floor(duration % 60).toString().padStart(2, "0")}`
+      : "unknown";
+
+    // Create a summarization request
+    const prompt = `Please summarize the following video transcript from "${videoName}" (${durationStr} duration). Provide:
+1. A brief overview (2-3 sentences)
+2. Key points or topics covered
+3. Any notable quotes or important details
+
+Transcript:
+${transcript}`;
+
+    // Open AI panel with the prompt - it will auto-submit
+    openPanelWithPrompt(prompt);
+  }, [videoData, openPanelWithPrompt]);
+
   if (!isOpen || !videoData) return null;
 
   return (
@@ -230,6 +254,7 @@ export function VideoFullScreen({ onExportTranscript }: VideoFullScreenProps) {
                 currentTime={currentTime}
                 onSegmentClick={handleSegmentClick}
                 onCopySegment={handleCopySegment}
+                onSummarize={handleSummarizeTranscript}
               />
             </div>
           )}

@@ -7,17 +7,18 @@
 import { useState, useRef, useEffect } from "react";
 import { useLibraryStore } from "../../stores/libraryStore";
 import { openLibraryWindow } from "../../utils/api";
-import type { Library } from "../../types/library";
+import type { Library, LibraryStats } from "../../types/library";
 
 interface LibrarySwitcherProps {
   onManageLibraries?: () => void;
 }
 
 export function LibrarySwitcher({ onManageLibraries }: LibrarySwitcherProps) {
-  const { libraries, currentLibrary, switchLibrary, fetchLibraries, fetchCurrentLibrary } =
+  const { libraries, currentLibrary, switchLibrary, fetchLibraries, fetchCurrentLibrary, getLibraryStats } =
     useLibraryStore();
   const [isOpen, setIsOpen] = useState(false);
   const [isSwitching, setIsSwitching] = useState(false);
+  const [stats, setStats] = useState<LibraryStats | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Fetch libraries on mount
@@ -25,6 +26,13 @@ export function LibrarySwitcher({ onManageLibraries }: LibrarySwitcherProps) {
     fetchLibraries();
     fetchCurrentLibrary();
   }, [fetchLibraries, fetchCurrentLibrary]);
+
+  // Fetch stats when current library changes
+  useEffect(() => {
+    if (currentLibrary) {
+      getLibraryStats(currentLibrary.id).then(setStats).catch(console.error);
+    }
+  }, [currentLibrary, getLibraryStats]);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -70,6 +78,14 @@ export function LibrarySwitcher({ onManageLibraries }: LibrarySwitcherProps) {
     return null;
   }
 
+  // Format bytes to human readable
+  const formatSize = (bytes: number): string => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+  };
+
   return (
     <div className="relative px-4 pb-2" ref={dropdownRef}>
       <button
@@ -95,6 +111,24 @@ export function LibrarySwitcher({ onManageLibraries }: LibrarySwitcherProps) {
           <polyline points="6 9 12 15 18 9" />
         </svg>
       </button>
+
+      {/* Library Stats */}
+      {stats && (
+        <div
+          className="flex items-center gap-3 px-2 py-1 text-xs"
+          style={{ color: "var(--color-text-muted)" }}
+        >
+          <span title={`${stats.notebookCount} notebooks${stats.archivedNotebookCount > 0 ? ` (${stats.archivedNotebookCount} archived)` : ""}`}>
+            {stats.notebookCount} notebooks
+          </span>
+          <span>•</span>
+          <span title={`${stats.pageCount} pages`}>{stats.pageCount} pages</span>
+          <span>•</span>
+          <span title={`${stats.assetCount} files, ${formatSize(stats.totalSizeBytes)}`}>
+            {formatSize(stats.totalSizeBytes)}
+          </span>
+        </div>
+      )}
 
       {isOpen && (
         <div

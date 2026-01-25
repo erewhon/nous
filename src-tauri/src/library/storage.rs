@@ -247,6 +247,9 @@ impl LibraryStorage {
         let notebooks_path = library.notebooks_path();
 
         let mut notebook_count = 0;
+        let mut archived_notebook_count = 0;
+        let mut page_count = 0;
+        let mut asset_count = 0;
         let mut total_size: u64 = 0;
         let mut last_modified: Option<chrono::DateTime<chrono::Utc>> = None;
 
@@ -256,9 +259,53 @@ impl LibraryStorage {
                 let path = entry.path();
 
                 if path.is_dir() {
+                    let notebook_json = path.join("notebook.json");
                     // Check if it's a valid notebook (has notebook.json)
-                    if path.join("notebook.json").exists() {
+                    if notebook_json.exists() {
                         notebook_count += 1;
+
+                        // Check if archived by reading notebook.json
+                        if let Ok(content) = fs::read_to_string(&notebook_json) {
+                            if let Ok(notebook) = serde_json::from_str::<serde_json::Value>(&content) {
+                                if notebook.get("isArchived").and_then(|v| v.as_bool()).unwrap_or(false) {
+                                    archived_notebook_count += 1;
+                                }
+                            }
+                        }
+
+                        // Count pages in pages directory
+                        let pages_dir = path.join("pages");
+                        if pages_dir.exists() {
+                            if let Ok(pages_entries) = fs::read_dir(&pages_dir) {
+                                for page_entry in pages_entries.filter_map(|e| e.ok()) {
+                                    if page_entry.path().extension().map_or(false, |ext| ext == "json") {
+                                        page_count += 1;
+                                    }
+                                }
+                            }
+                        }
+
+                        // Count assets in assets directory
+                        let assets_dir = path.join("assets");
+                        if assets_dir.exists() {
+                            if let Ok(assets_entries) = fs::read_dir(&assets_dir) {
+                                for asset_entry in assets_entries.filter_map(|e| e.ok()) {
+                                    let asset_path = asset_entry.path();
+                                    // Count files, not directories (skip subdirs like pdf_annotations)
+                                    if asset_path.is_file() {
+                                        asset_count += 1;
+                                    } else if asset_path.is_dir() {
+                                        // Count files in subdirectories too
+                                        if let Ok(sub_entries) = fs::read_dir(&asset_path) {
+                                            asset_count += sub_entries
+                                                .filter_map(|e| e.ok())
+                                                .filter(|e| e.path().is_file())
+                                                .count();
+                                        }
+                                    }
+                                }
+                            }
+                        }
 
                         // Calculate size recursively
                         total_size += dir_size(&path).unwrap_or(0);
@@ -280,6 +327,9 @@ impl LibraryStorage {
         Ok(LibraryStats {
             library_id: id,
             notebook_count,
+            archived_notebook_count,
+            page_count,
+            asset_count,
             total_size_bytes: total_size,
             last_modified,
         })

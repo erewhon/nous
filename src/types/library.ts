@@ -28,6 +28,9 @@ export type Library = z.infer<typeof LibrarySchema>;
 export const LibraryStatsSchema = z.object({
   libraryId: z.string().uuid(),
   notebookCount: z.number(),
+  archivedNotebookCount: z.number(),
+  pageCount: z.number(),
+  assetCount: z.number(),
   totalSizeBytes: z.number(),
   lastModified: z.string().nullable(),
 });

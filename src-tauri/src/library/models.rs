@@ -97,6 +97,15 @@ pub struct LibraryStats {
     /// Number of notebooks
     pub notebook_count: usize,
 
+    /// Number of archived notebooks
+    pub archived_notebook_count: usize,
+
+    /// Total number of pages across all notebooks
+    pub page_count: usize,
+
+    /// Total number of assets/attachments
+    pub asset_count: usize,
+
     /// Total size in bytes (approximate)
     pub total_size_bytes: u64,
 

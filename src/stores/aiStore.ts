@@ -53,6 +53,7 @@ interface AIPanelState {
 interface ConversationState {
   messages: ChatMessage[];
   isLoading: boolean;
+  pendingPrompt: string | null; // Auto-submit prompt when panel opens
 }
 
 interface AIState {
@@ -112,6 +113,8 @@ interface AIState {
   addMessage: (message: ChatMessage) => void;
   clearConversation: () => void;
   setLoading: (loading: boolean) => void;
+  setPendingPrompt: (prompt: string | null) => void;
+  openPanelWithPrompt: (prompt: string) => void;
 }
 
 const DEFAULT_SYSTEM_PROMPT = `You are a helpful AI assistant integrated into a note-taking application called Katt. You help users with their notes, answer questions about their content, provide summaries, brainstorm ideas, and assist with writing and organizing information. Be concise, helpful, and context-aware.
@@ -216,6 +219,7 @@ export const useAIStore = create<AIState>()(
       conversation: {
         messages: [],
         isLoading: false,
+        pendingPrompt: null,
       },
 
       // Provider configuration actions
@@ -506,6 +510,25 @@ export const useAIStore = create<AIState>()(
             isLoading,
           },
         })),
+
+      setPendingPrompt: (prompt) =>
+        set((state) => ({
+          conversation: {
+            ...state.conversation,
+            pendingPrompt: prompt,
+          },
+        })),
+
+      openPanelWithPrompt: (prompt) => {
+        set((state) => ({
+          panel: { ...state.panel, isOpen: true },
+          conversation: {
+            ...state.conversation,
+            messages: [], // Clear conversation for fresh context
+            pendingPrompt: prompt,
+          },
+        }));
+      },
     }),
     {
       name: "katt-ai-settings",
