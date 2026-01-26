@@ -10,6 +10,7 @@ import { SUPPORTED_VIDEO_MIMETYPES, SUPPORTED_VIDEO_EXTENSIONS } from "../../typ
 import { createVideoUploader } from "./videoUploader";
 import { VideoThumbnail } from "./VideoThumbnail";
 import { VideoPlayerModal } from "./VideoPlayerModal";
+import { transcribeVideo } from "../../utils/videoApi";
 
 interface VideoToolConfig extends ToolConfig {
   notebookId?: string;
@@ -780,8 +781,10 @@ export class VideoTool implements BlockTool {
       createElement(VideoPlayerModal, {
         isOpen: this.isModalOpen,
         onClose: () => this.closeVideoModal(),
-        videoPath: this.data.url,
+        videoPath: this.data.localPath || this.data.url,
         title: this.data.originalName || this.data.filename || "Video",
+        videoData: this.data,
+        blockId: this.blockId,
       })
     );
   }
@@ -889,7 +892,7 @@ export class VideoTool implements BlockTool {
       transcribeBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px;"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg> Transcribe';
       transcribeBtn.title = "Transcribe video audio using AI";
       transcribeBtn.addEventListener("click", () => {
-        this.config.onTranscribe?.(this.blockId, this.data.filename);
+        this.handleTranscribe();
       });
       transcriptSection.appendChild(transcribeBtn);
     } else if (this.data.transcriptionStatus === "pending") {
@@ -989,6 +992,52 @@ export class VideoTool implements BlockTool {
       if (this.data.url) {
         this.renderVideoPlayer();
       }
+    }
+  }
+
+  // Handle transcription request
+  private async handleTranscribe(): Promise<void> {
+    // Get the actual video path
+    const videoPath = this.data.localPath || this.data.url;
+
+    if (!videoPath) {
+      console.error("No video path available for transcription");
+      return;
+    }
+
+    // Skip if already transcribing or external embed (YouTube/Vimeo)
+    if (this.data.transcriptionStatus === "pending") {
+      return;
+    }
+    if (this.data.isExternal && this.data.externalType !== "direct") {
+      console.error("Cannot transcribe embedded videos (YouTube/Vimeo)");
+      return;
+    }
+
+    // Update status to pending
+    this.data.transcriptionStatus = "pending";
+    if (this.wrapper) {
+      this.wrapper.innerHTML = "";
+      this.renderVideoPlayer();
+    }
+
+    try {
+      console.log("Starting transcription for:", videoPath);
+      const result = await transcribeVideo(videoPath);
+      console.log("Transcription complete:", result.wordCount, "words");
+
+      // Update with result
+      this.data.transcription = result;
+      this.data.transcriptionStatus = "complete";
+    } catch (error) {
+      console.error("Transcription failed:", error);
+      this.data.transcriptionStatus = "error";
+    }
+
+    // Re-render to show result
+    if (this.wrapper) {
+      this.wrapper.innerHTML = "";
+      this.renderVideoPlayer();
     }
   }
 

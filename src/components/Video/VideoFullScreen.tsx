@@ -1,4 +1,5 @@
 import { useEffect, useRef, useCallback, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { useVideoStore } from "../../stores/videoStore";
 import { useAIStore } from "../../stores/aiStore";
 import { TranscriptPanel } from "./TranscriptPanel";
@@ -21,6 +22,8 @@ export function VideoFullScreen({ onExportTranscript }: VideoFullScreenProps) {
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const [showSidebar, setShowSidebar] = useState(true);
+  const [streamUrl, setStreamUrl] = useState<string | null>(null);
+  const [streamError, setStreamError] = useState<string | null>(null);
 
   const {
     isOpen,
@@ -28,6 +31,54 @@ export function VideoFullScreen({ onExportTranscript }: VideoFullScreenProps) {
     currentTime,
     isPlaying,
   } = viewerState;
+
+  // Fetch streaming URL for local videos
+  useEffect(() => {
+    if (!isOpen || !videoData) {
+      setStreamUrl(null);
+      setStreamError(null);
+      return;
+    }
+
+    // For external videos (YouTube, Vimeo, direct HTTP URLs), use the URL directly
+    if (videoData.isExternal && videoData.externalType !== "direct") {
+      // YouTube/Vimeo embeds don't need streaming
+      setStreamUrl(null);
+      return;
+    }
+
+    // For direct HTTP/HTTPS URLs, use them directly
+    if (videoData.url.startsWith("http://") || videoData.url.startsWith("https://")) {
+      // Check if it's our asset protocol URL that needs to be converted
+      if (!videoData.url.includes("asset.localhost")) {
+        setStreamUrl(videoData.url);
+        return;
+      }
+    }
+
+    // For local videos, get the streaming URL from the backend
+    // Extract the actual file path from the URL or use localPath
+    const videoPath = videoData.localPath || videoData.url;
+
+    // Skip if the path is already a streaming URL
+    if (videoPath.includes("127.0.0.1")) {
+      setStreamUrl(videoPath);
+      return;
+    }
+
+    // Get streaming URL from backend
+    invoke<string>("get_video_stream_url", { videoPath })
+      .then((url) => {
+        setStreamUrl(url);
+        setStreamError(null);
+      })
+      .catch((err) => {
+        console.error("Failed to get video stream URL:", err);
+        setStreamError(String(err));
+        // Fallback to original URL
+        setStreamUrl(videoData.url);
+      });
+  }, [isOpen, videoData]);
 
   // Sync video element with store state
   useEffect(() => {
@@ -238,12 +289,27 @@ ${transcript}`;
             className="video-fullscreen-player"
             style={{ flex: showSidebar && videoData.transcription ? "1 1 60%" : "1" }}
           >
-            <video
-              ref={videoRef}
-              src={videoData.url}
-              controls
-              className="video-fullscreen-video"
-            />
+            {streamUrl ? (
+              <video
+                ref={videoRef}
+                src={streamUrl}
+                controls
+                className="video-fullscreen-video"
+              />
+            ) : streamError ? (
+              <div className="video-fullscreen-error">
+                <p>Failed to load video</p>
+                <p className="video-fullscreen-error-detail">{streamError}</p>
+              </div>
+            ) : (
+              <div className="video-fullscreen-loading">
+                <svg className="animate-spin" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="10" strokeOpacity="0.25"/>
+                  <path d="M12 2a10 10 0 0 1 10 10" strokeOpacity="0.75"/>
+                </svg>
+                <p>Loading video...</p>
+              </div>
+            )}
           </div>
 
           {/* Transcript sidebar */}
@@ -411,6 +477,37 @@ ${transcript}`;
           border: 1px solid var(--color-border);
           border-radius: 3px;
           margin: 0 2px;
+        }
+
+        .video-fullscreen-loading,
+        .video-fullscreen-error {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          gap: 12px;
+          color: var(--color-text-muted);
+          font-size: 14px;
+        }
+
+        .video-fullscreen-error {
+          color: var(--color-error);
+        }
+
+        .video-fullscreen-error-detail {
+          font-size: 12px;
+          color: var(--color-text-muted);
+          max-width: 300px;
+          text-align: center;
+          word-break: break-all;
+        }
+
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+
+        .animate-spin {
+          animation: spin 1s linear infinite;
         }
       `}</style>
     </div>

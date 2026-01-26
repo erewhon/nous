@@ -21,6 +21,7 @@ mod scrivener;
 mod search;
 mod storage;
 pub mod sync;
+mod video_server;
 
 use actions::{ActionExecutor, ActionScheduler, ActionStorage};
 use commands::BackupScheduler;
@@ -33,6 +34,7 @@ use python_bridge::PythonAI;
 use search::SearchIndex;
 use storage::FileStorage;
 use sync::SyncManager;
+use video_server::VideoServer;
 
 pub struct AppState {
     pub library_storage: Arc<Mutex<LibraryStorage>>,
@@ -48,6 +50,7 @@ pub struct AppState {
     pub sync_manager: Arc<tokio::sync::Mutex<SyncManager>>,
     pub external_editor: Mutex<ExternalEditorManager>,
     pub backup_scheduler: Arc<tokio::sync::Mutex<Option<BackupScheduler>>>,
+    pub video_server: Arc<tokio::sync::Mutex<Option<VideoServer>>>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -136,6 +139,9 @@ pub fn run() {
     let backup_scheduler = commands::start_backup_scheduler(Arc::clone(&storage_arc));
     let backup_scheduler_arc = Arc::new(tokio::sync::Mutex::new(Some(backup_scheduler)));
 
+    // Video server will be started in setup hook
+    let video_server_arc = Arc::new(tokio::sync::Mutex::new(None));
+
     let state = AppState {
         library_storage: library_storage_arc,
         storage: storage_arc,
@@ -150,6 +156,7 @@ pub fn run() {
         sync_manager: sync_manager_arc,
         external_editor: Mutex::new(external_editor),
         backup_scheduler: backup_scheduler_arc,
+        video_server: video_server_arc,
     };
 
     tauri::Builder::default()
@@ -193,6 +200,35 @@ pub fn run() {
                 scheduler.start();
                 log::info!("Action scheduler started");
             }
+
+            // Start the video streaming server
+            let video_server_handle = state.video_server.clone();
+            tauri::async_runtime::spawn(async move {
+                // Allow serving videos from the data directory and /tmp
+                let allowed_dirs = if let Ok(data_dir) = storage::FileStorage::default_data_dir() {
+                    vec![
+                        data_dir,
+                        std::path::PathBuf::from("/tmp"),
+                    ]
+                } else {
+                    vec![std::path::PathBuf::from("/tmp")]
+                };
+
+                match video_server::start_server(allowed_dirs).await {
+                    Ok(server) => {
+                        log::info!(
+                            "Video server started on port {} with token {}...",
+                            server.port,
+                            &server.token[..8]
+                        );
+                        let mut handle = video_server_handle.lock().await;
+                        *handle = Some(server);
+                    }
+                    Err(e) => {
+                        log::error!("Failed to start video server: {}", e);
+                    }
+                }
+            });
 
             Ok(())
         })
@@ -418,6 +454,7 @@ pub fn run() {
             commands::get_video_metadata,
             commands::read_video_chunk,
             commands::open_video_with_system_player,
+            commands::get_video_stream_url,
             // Drawing/annotation commands
             commands::get_page_annotation,
             commands::save_page_annotation,

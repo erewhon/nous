@@ -220,16 +220,9 @@ async def transcribe_video(
         RuntimeError: If transcription fails.
     """
     if not FASTER_WHISPER_AVAILABLE:
-        return TranscriptionResult(
-            video_path=video_path,
-            audio_path=None,
-            language="",
-            language_probability=0.0,
-            duration=0.0,
-            segments=[],
-            word_count=0,
-            transcription_time=0.0,
-        ).model_dump()
+        raise ImportError(
+            "faster-whisper is not installed. Install with: uv pip install faster-whisper"
+        )
 
     path = Path(video_path)
     if not path.exists():

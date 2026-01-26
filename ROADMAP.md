@@ -516,6 +516,12 @@ Already implemented with Tantivy, may need refinement:
 
 ## Technical Debt & Polish
 
+- [ ] Move video storage from `/tmp/katt-videos` to main data directory
+  - Currently uploaded videos are stored in `/tmp/katt-videos/{notebook_id}/`
+  - This was a workaround for Tauri asset protocol issues with hidden directories
+  - With the embedded HTTP video server, videos can be stored anywhere
+  - Migration needed for existing notebooks with videos in /tmp
+  - Remove legacy asset protocol registration in lib.rs
 - [x] Add comprehensive error handling for file operations
   - Toast notification system (success, error, warning, info)
   - ToastContainer component with auto-dismiss and manual close

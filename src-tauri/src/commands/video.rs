@@ -350,3 +350,29 @@ pub fn read_video_chunk(
     // Return as base64 for efficient IPC transfer
     Ok(BASE64.encode(&buffer))
 }
+
+/// Get a streaming URL for a video file.
+/// The URL points to the embedded HTTP server with proper authentication.
+#[tauri::command]
+pub async fn get_video_stream_url(
+    state: State<'_, AppState>,
+    video_path: String,
+) -> Result<String, CommandError> {
+    let path = PathBuf::from(&video_path);
+
+    // Validate the file exists
+    if !path.exists() {
+        return Err(CommandError {
+            message: format!("Video file not found: {}", video_path),
+        });
+    }
+
+    // Get the video server from state
+    let video_server = state.video_server.lock().await;
+    let server = video_server.as_ref().ok_or_else(|| CommandError {
+        message: "Video streaming server not running".to_string(),
+    })?;
+
+    // Generate and return the streaming URL
+    Ok(server.stream_url(&video_path))
+}
