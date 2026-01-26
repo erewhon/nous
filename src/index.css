@@ -40,6 +40,16 @@
   --font-size-base: 16px;
   --line-height-base: 1.6;
 
+  /* UI Scale - affects sidebar, titles, page lists, etc. */
+  --ui-scale: 1;
+  --ui-font-size-xs: 10px;
+  --ui-font-size-sm: 12px;
+  --ui-font-size-base: 14px;
+  --ui-font-size-lg: 16px;
+  --ui-font-size-xl: 18px;
+  --ui-font-size-2xl: 20px;
+  --ui-font-size-3xl: 24px;
+
   /* Editor layout */
   --editor-max-width: 768px;
 }
@@ -57,6 +67,30 @@ body,
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+/* UI Scale - Override Tailwind text size classes to use scaled values */
+/* These use !important to override Tailwind's utility classes */
+.text-xs {
+  font-size: var(--ui-font-size-xs) !important;
+}
+.text-sm {
+  font-size: var(--ui-font-size-sm) !important;
+}
+.text-base {
+  font-size: var(--ui-font-size-base) !important;
+}
+.text-lg {
+  font-size: var(--ui-font-size-lg) !important;
+}
+.text-xl {
+  font-size: var(--ui-font-size-xl) !important;
+}
+.text-2xl {
+  font-size: var(--ui-font-size-2xl) !important;
+}
+.text-3xl {
+  font-size: var(--ui-font-size-3xl) !important;
 }
 
 /* Remove default focus outlines and add custom ones */

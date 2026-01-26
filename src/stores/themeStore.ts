@@ -48,8 +48,9 @@ interface ThemeSettings {
   fontFamily: FontFamily;
   editorWidth: EditorWidth;
   editorKeymap: EditorKeymap;
-  fontSize: number; // 12-20
+  fontSize: number; // 12-20 (editor base font size)
   lineHeight: number; // 1.4-2.0
+  uiScale: number; // 0.8-1.3 (UI scale multiplier, affects sidebar, titles, etc.)
 }
 
 interface ThemeState {
@@ -71,6 +72,7 @@ interface ThemeState {
   setEditorKeymap: (keymap: EditorKeymap) => void;
   setFontSize: (size: number) => void;
   setLineHeight: (height: number) => void;
+  setUIScale: (scale: number) => void;
   togglePageStats: () => void;
   setUIMode: (mode: UIMode) => void;
   setNotebookSortBy: (sort: NotebookSortOption) => void;
@@ -92,6 +94,7 @@ const DEFAULT_SETTINGS: ThemeSettings = {
   editorKeymap: "standard",
   fontSize: 16,
   lineHeight: 1.6,
+  uiScale: 1.0,
 };
 
 // Color schemes definitions
@@ -431,6 +434,13 @@ export const useThemeStore = create<ThemeState>()(
         get().applyTheme();
       },
 
+      setUIScale: (uiScale) => {
+        set((state) => ({
+          settings: { ...state.settings, uiScale: Math.min(1.3, Math.max(0.8, uiScale)) },
+        }));
+        get().applyTheme();
+      },
+
       togglePageStats: () => {
         set((state) => ({ showPageStats: !state.showPageStats }));
       },
@@ -509,6 +519,18 @@ export const useThemeStore = create<ThemeState>()(
         root.style.setProperty("--font-size-base", `${settings.fontSize}px`);
         root.style.setProperty("--line-height-base", `${settings.lineHeight}`);
 
+        // Apply UI scale - this scales sidebar, titles, page lists, etc.
+        const uiScale = settings.uiScale || 1.0;
+        root.style.setProperty("--ui-scale", `${uiScale}`);
+        // Calculate scaled sizes for common UI elements
+        root.style.setProperty("--ui-font-size-xs", `${10 * uiScale}px`);
+        root.style.setProperty("--ui-font-size-sm", `${12 * uiScale}px`);
+        root.style.setProperty("--ui-font-size-base", `${14 * uiScale}px`);
+        root.style.setProperty("--ui-font-size-lg", `${16 * uiScale}px`);
+        root.style.setProperty("--ui-font-size-xl", `${18 * uiScale}px`);
+        root.style.setProperty("--ui-font-size-2xl", `${20 * uiScale}px`);
+        root.style.setProperty("--ui-font-size-3xl", `${24 * uiScale}px`);
+
         // Set data attribute for potential CSS selectors
         root.setAttribute("data-theme", resolvedMode);
         root.setAttribute("data-color-scheme", settings.colorScheme);
@@ -547,6 +569,10 @@ export const useThemeStore = create<ThemeState>()(
             state.zenModeSettings = DEFAULT_ZEN_MODE_SETTINGS;
           } else {
             state.zenModeSettings = { ...DEFAULT_ZEN_MODE_SETTINGS, ...state.zenModeSettings };
+          }
+          // Migration: ensure uiScale exists with default
+          if (state.settings.uiScale === undefined) {
+            state.settings.uiScale = 1.0;
           }
           // Apply theme after rehydration
           setTimeout(() => state.applyTheme(), 0);

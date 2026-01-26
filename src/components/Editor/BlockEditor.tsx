@@ -165,6 +165,47 @@ export const BlockEditor = forwardRef<BlockEditorRef, BlockEditorProps>(function
     };
   }, [pages]);
 
+  // Fix popover positioning to prevent left-side truncation
+  // Editor.js popovers can extend beyond viewport when blocks are near left edge
+  useEffect(() => {
+    const repositionPopover = (popover: HTMLElement) => {
+      const rect = popover.getBoundingClientRect();
+      const minLeft = 16; // Minimum distance from left edge
+
+      if (rect.left < minLeft) {
+        // Calculate how much to shift right
+        const shiftAmount = minLeft - rect.left;
+        const currentLeft = parseFloat(popover.style.left) || 0;
+        popover.style.left = `${currentLeft + shiftAmount}px`;
+      }
+    };
+
+    // Observer to watch for popover elements appearing in the DOM
+    const observer = new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        for (const node of mutation.addedNodes) {
+          if (node instanceof HTMLElement) {
+            // Check if this is a popover or contains popovers
+            if (node.classList.contains("ce-popover")) {
+              repositionPopover(node);
+            }
+            // Also check children
+            const popovers = node.querySelectorAll(".ce-popover");
+            popovers.forEach((p) => repositionPopover(p as HTMLElement));
+          }
+        }
+      }
+    });
+
+    // Observe the entire document since popovers may be appended to body
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+    });
+
+    return () => observer.disconnect();
+  }, []);
+
   // Handle wiki-link clicks via event delegation
   // This ensures links loaded from saved content also work
   useEffect(() => {

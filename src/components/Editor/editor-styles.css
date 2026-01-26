@@ -2960,6 +2960,72 @@ wiki-link.broken,
   color: var(--color-text-primary) !important;
 }
 
+/* Fix popover positioning to prevent left-side truncation */
+/* The ce-popover is appended to body by Editor.js, so positioning is relative to viewport */
+.ce-popover {
+  /* Ensure popover stays within viewport */
+  max-width: calc(100vw - 32px);
+}
+
+/* Override popover positioning when it would be clipped on the left */
+.ce-popover--opened {
+  /* Use fixed positioning relative to viewport */
+  position: fixed !important;
+  /* Ensure minimum distance from left edge of viewport */
+  min-width: 200px;
+}
+
+/* When popover is positioned too far left, shift it right */
+@supports (left: max(0px, 16px)) {
+  .ce-popover--opened {
+    left: max(16px, var(--popover-left, 16px)) !important;
+  }
+}
+
+/* Fallback for browsers without max() support */
+.ce-popover--opened[style*="left: -"] {
+  left: 16px !important;
+}
+
+/* Ensure the editor doesn't clip popovers that remain within the editor */
+.codex-editor {
+  overflow: visible;
+}
+
+.codex-editor__redactor {
+  overflow: visible;
+}
+
+/* The block content should not clip */
+.ce-block__content {
+  overflow: visible;
+}
+
+/* The block editor panel should allow popovers to overflow */
+.block-editor {
+  overflow: visible;
+  /* Ensure proper stacking context */
+  position: relative;
+}
+
+/* Video and PDF blocks should not clip context menus */
+.video-block,
+.pdf-block {
+  overflow: visible;
+}
+
+/* Block tunes popover - position within view */
+.ce-block-tunes {
+  /* Ensure it doesn't get clipped */
+  z-index: 10001;
+}
+
+/* Force popover to stay within viewport bounds */
+.ce-popover[style] {
+  /* When left position would be negative or too far left */
+  transform: translateX(max(0px, calc(16px - var(--popover-offset-left, 0px))));
+}
+
 /* Columns Block Styles */
 .columns-block {
   margin: 1rem 0;

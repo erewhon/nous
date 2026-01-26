@@ -92,6 +92,7 @@ export function ThemeSettings() {
     setEditorKeymap,
     setFontSize,
     setLineHeight,
+    setUIScale,
     setUIMode,
     setAutoHidePanels,
     setZenModeSettings,
@@ -522,6 +523,47 @@ export function ThemeSettings() {
           <span>Compact</span>
           <span>Relaxed</span>
         </div>
+      </div>
+
+      {/* UI Scale */}
+      <div>
+        <div className="mb-2 flex items-center justify-between">
+          <label
+            className="text-sm font-medium"
+            style={{ color: "var(--color-text-primary)" }}
+          >
+            UI Scale
+          </label>
+          <span
+            className="text-sm"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            {Math.round((settings.uiScale || 1) * 100)}%
+          </span>
+        </div>
+        <input
+          type="range"
+          min="0.8"
+          max="1.3"
+          step="0.05"
+          value={settings.uiScale || 1}
+          onChange={(e) => setUIScale(parseFloat(e.target.value))}
+          className="w-full accent-[--color-accent]"
+        />
+        <div
+          className="mt-1 flex justify-between text-xs"
+          style={{ color: "var(--color-text-muted)" }}
+        >
+          <span>80%</span>
+          <span>100%</span>
+          <span>130%</span>
+        </div>
+        <p
+          className="mt-2 text-xs"
+          style={{ color: "var(--color-text-muted)" }}
+        >
+          Scales sidebar, page list, tabs, and other UI elements
+        </p>
       </div>
 
       {/* Editor Width */}

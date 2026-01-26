@@ -81,6 +81,10 @@ export const VideoBlockDataSchema = z.object({
   transcriptionStatus: TranscriptionStatusSchema.default("none"),
   // Show transcript in block view
   showTranscript: z.boolean().default(false),
+  // AI-generated two-sentence summary
+  summary: z.string().optional(),
+  // AI-generated three-paragraph synopsis
+  synopsis: z.string().optional(),
   // External video flag
   isExternal: z.boolean().default(false),
   // Type of external video (youtube, vimeo, direct)

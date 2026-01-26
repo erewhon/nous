@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { persist, createJSONStorage } from "zustand/middleware";
 import type { OutputData } from "@editorjs/editorjs";
 
 // History entry for a single state
@@ -9,6 +9,84 @@ export interface HistoryEntry {
   data: OutputData;
   description?: string; // Optional description (e.g., "Added paragraph")
 }
+
+// Strip large binary data from blocks before persisting to avoid quota issues
+function stripLargeDataForStorage(data: OutputData): OutputData {
+  return {
+    ...data,
+    blocks: data.blocks.map((block) => {
+      // Strip video thumbnails (base64 data URLs can be huge)
+      if (block.type === "video" && block.data?.thumbnailUrl) {
+        return {
+          ...block,
+          data: {
+            ...block.data,
+            thumbnailUrl: "", // Clear the base64 thumbnail
+          },
+        };
+      }
+      // Strip PDF thumbnails
+      if (block.type === "pdf" && block.data?.thumbnailUrl) {
+        return {
+          ...block,
+          data: {
+            ...block.data,
+            thumbnailUrl: "",
+          },
+        };
+      }
+      // Strip drawing data (can be large)
+      if (block.type === "drawing" && block.data?.dataUrl) {
+        return {
+          ...block,
+          data: {
+            ...block.data,
+            dataUrl: "", // Clear the base64 drawing
+          },
+        };
+      }
+      return block;
+    }),
+  };
+}
+
+// Custom storage that handles quota exceeded errors gracefully
+const safeStorage = {
+  getItem: (name: string): string | null => {
+    try {
+      return localStorage.getItem(name);
+    } catch (error) {
+      console.warn("Failed to read from localStorage:", error);
+      return null;
+    }
+  },
+  setItem: (name: string, value: string): void => {
+    try {
+      localStorage.setItem(name, value);
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "QuotaExceededError") {
+        console.warn("localStorage quota exceeded, clearing undo history to free space");
+        // Try to clear the undo history to free space
+        try {
+          localStorage.removeItem(name);
+          // Try again with the new (hopefully smaller) value
+          localStorage.setItem(name, value);
+        } catch {
+          console.error("Still unable to save undo history after clearing. Disabling persistence.");
+        }
+      } else {
+        console.error("Failed to write to localStorage:", error);
+      }
+    }
+  },
+  removeItem: (name: string): void => {
+    try {
+      localStorage.removeItem(name);
+    } catch (error) {
+      console.warn("Failed to remove from localStorage:", error);
+    }
+  },
+};
 
 // History for a single page
 interface PageHistory {
@@ -24,10 +102,33 @@ export interface UndoHistorySettings {
 }
 
 const DEFAULT_SETTINGS: UndoHistorySettings = {
-  maxHistorySize: 50,
+  maxHistorySize: 30, // Reduced from 50 to help prevent quota issues
   persistHistory: false,
   captureInterval: 1000, // 1 second debounce
 };
+
+// Maximum number of pages to keep history for (to prevent unbounded growth)
+const MAX_PAGES_WITH_HISTORY = 20;
+
+// Maximum allowed size for undo history storage (2MB to leave room for other data)
+const MAX_STORAGE_SIZE_BYTES = 2 * 1024 * 1024;
+
+// Startup check: Clear undo history if it's too large (helps recover from quota issues)
+try {
+  const stored = localStorage.getItem("katt-undo-history");
+  if (stored && stored.length > MAX_STORAGE_SIZE_BYTES) {
+    console.warn(`Undo history is too large (${(stored.length / 1024 / 1024).toFixed(2)}MB), clearing to prevent quota issues`);
+    localStorage.removeItem("katt-undo-history");
+  }
+} catch (error) {
+  console.warn("Error checking undo history size:", error);
+  // If we can't even read it, try to clear it
+  try {
+    localStorage.removeItem("katt-undo-history");
+  } catch {
+    // Ignore
+  }
+}
 
 interface UndoHistoryState {
   // Map of pageId -> PageHistory
@@ -106,9 +207,28 @@ export const useUndoHistoryStore = create<UndoHistoryState>()(
           entries = entries.slice(entries.length - maxHistorySize);
         }
 
+        // Limit total number of pages with history to prevent unbounded growth
+        let updatedHistories = { ...state.histories };
+        const pageIds = Object.keys(updatedHistories);
+        if (pageIds.length >= MAX_PAGES_WITH_HISTORY && !updatedHistories[pageId]) {
+          // Remove the oldest page history (by oldest entry timestamp)
+          let oldestPageId: string | null = null;
+          let oldestTimestamp = Infinity;
+          for (const pid of pageIds) {
+            const firstEntry = updatedHistories[pid]?.entries[0];
+            if (firstEntry && firstEntry.timestamp < oldestTimestamp) {
+              oldestTimestamp = firstEntry.timestamp;
+              oldestPageId = pid;
+            }
+          }
+          if (oldestPageId) {
+            delete updatedHistories[oldestPageId];
+          }
+        }
+
         set({
           histories: {
-            ...state.histories,
+            ...updatedHistories,
             [pageId]: {
               entries,
               currentIndex: -1, // Reset to end
@@ -240,17 +360,39 @@ export const useUndoHistoryStore = create<UndoHistoryState>()(
     }),
     {
       name: "katt-undo-history",
+      storage: createJSONStorage(() => safeStorage),
       partialize: (state) => {
         // Only persist if setting is enabled
         if (!state.settings.persistHistory) {
           return { settings: state.settings };
         }
+        // Strip large binary data from histories before persisting
+        const strippedHistories: Record<string, PageHistory> = {};
+        for (const [pageId, history] of Object.entries(state.histories)) {
+          strippedHistories[pageId] = {
+            ...history,
+            entries: history.entries.map((entry) => ({
+              ...entry,
+              data: stripLargeDataForStorage(entry.data),
+            })),
+          };
+        }
         return {
-          histories: state.histories,
+          histories: strippedHistories,
           settings: state.settings,
         };
       },
-      onRehydrateStorage: () => (state) => {
+      onRehydrateStorage: () => (state, error) => {
+        if (error) {
+          console.error("Failed to rehydrate undo history, clearing:", error);
+          // Clear the corrupted storage
+          try {
+            localStorage.removeItem("katt-undo-history");
+          } catch {
+            // Ignore errors when clearing
+          }
+          return;
+        }
         if (state && !state.settings.persistHistory) {
           // Clear histories if persistence is disabled
           state.histories = {};

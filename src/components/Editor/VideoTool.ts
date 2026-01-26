@@ -5,12 +5,15 @@ import type {
 } from "@editorjs/editorjs";
 import { createRoot, type Root } from "react-dom/client";
 import { createElement } from "react";
-import type { VideoBlockData, VideoDisplayMode } from "../../types/video";
+import type { VideoBlockData, VideoDisplayMode, TranscriptionResult } from "../../types/video";
 import { SUPPORTED_VIDEO_MIMETYPES, SUPPORTED_VIDEO_EXTENSIONS } from "../../types/video";
 import { createVideoUploader } from "./videoUploader";
 import { VideoThumbnail } from "./VideoThumbnail";
 import { VideoPlayerModal } from "./VideoPlayerModal";
-import { transcribeVideo } from "../../utils/videoApi";
+import { TranscriptionDialog } from "../Video/TranscriptionDialog";
+import { VideoSummary } from "../Video/VideoSummary";
+import { aiChat } from "../../utils/api";
+import { useAIStore } from "../../stores/aiStore";
 
 interface VideoToolConfig extends ToolConfig {
   notebookId?: string;
@@ -39,6 +42,11 @@ export class VideoTool implements BlockTool {
   private modalContainer: HTMLDivElement | null = null;
   private uploaderMode: "upload" | "url" = "upload";
   private isModalOpen: boolean = false;
+  private transcriptionDialogRoot: Root | null = null;
+  private transcriptionDialogContainer: HTMLDivElement | null = null;
+  private isTranscriptionDialogOpen: boolean = false;
+  private summaryRoot: Root | null = null;
+  private isSummaryCollapsed: boolean = false;
 
   static get toolbox() {
     return {
@@ -79,6 +87,8 @@ export class VideoTool implements BlockTool {
       transcription: data.transcription,
       transcriptionStatus: data.transcriptionStatus || "none",
       showTranscript: data.showTranscript || false,
+      summary: data.summary,
+      synopsis: data.synopsis,
       isExternal: data.isExternal || false,
       externalType: data.externalType,
       localPath: data.localPath,
@@ -539,6 +549,13 @@ export class VideoTool implements BlockTool {
   private renderVideoPlayer(): void {
     if (!this.wrapper) return;
 
+    console.log("renderVideoPlayer called, data:", {
+      hasSummary: !!this.data.summary,
+      summaryLength: this.data.summary?.length,
+      hasSynopsis: !!this.data.synopsis,
+      synopsisLength: this.data.synopsis?.length,
+    });
+
     const container = document.createElement("div");
     container.classList.add("video-player-container");
 
@@ -718,9 +735,49 @@ export class VideoTool implements BlockTool {
     if (transcriptContainer) {
       container.appendChild(transcriptContainer);
     }
+
+    // Summary component (if available)
+    if (this.data.summary || this.data.synopsis) {
+      const summaryContainer = document.createElement("div");
+      summaryContainer.classList.add("video-summary-container");
+      summaryContainer.id = `video-summary-${this.blockId}`;
+      this.mountVideoSummary(summaryContainer);
+      container.appendChild(summaryContainer);
+    }
+
     container.appendChild(this.captionEl);
 
     this.wrapper.appendChild(container);
+  }
+
+  private mountVideoSummary(container: HTMLElement): void {
+    this.summaryRoot = createRoot(container);
+    this.summaryRoot.render(
+      createElement(VideoSummary, {
+        summary: this.data.summary,
+        synopsis: this.data.synopsis,
+        collapsed: this.isSummaryCollapsed,
+        onToggleCollapse: () => {
+          this.isSummaryCollapsed = !this.isSummaryCollapsed;
+          this.renderVideoSummary();
+        },
+      })
+    );
+  }
+
+  private renderVideoSummary(): void {
+    if (!this.summaryRoot) return;
+    this.summaryRoot.render(
+      createElement(VideoSummary, {
+        summary: this.data.summary,
+        synopsis: this.data.synopsis,
+        collapsed: this.isSummaryCollapsed,
+        onToggleCollapse: () => {
+          this.isSummaryCollapsed = !this.isSummaryCollapsed;
+          this.renderVideoSummary();
+        },
+      })
+    );
   }
 
   private mountTranscriptPreview(container: HTMLElement): void {
@@ -820,7 +877,7 @@ export class VideoTool implements BlockTool {
   }
 
   save(): VideoBlockData {
-    return {
+    const savedData = {
       filename: this.data.filename,
       url: this.data.url,
       thumbnailUrl: this.data.thumbnailUrl,
@@ -832,10 +889,14 @@ export class VideoTool implements BlockTool {
       transcription: this.data.transcription,
       transcriptionStatus: this.data.transcriptionStatus,
       showTranscript: this.data.showTranscript,
+      summary: this.data.summary,
+      synopsis: this.data.synopsis,
       isExternal: this.data.isExternal,
       externalType: this.data.externalType,
       localPath: this.data.localPath,
     };
+    console.log("VideoTool.save() - saving summary:", !!savedData.summary, "synopsis:", !!savedData.synopsis);
+    return savedData;
   }
 
   validate(savedData: VideoBlockData): boolean {
@@ -885,23 +946,21 @@ export class VideoTool implements BlockTool {
     transcriptLabel.textContent = "Transcription";
     transcriptSection.appendChild(transcriptLabel);
 
-    if (this.data.transcriptionStatus === "none" || this.data.transcriptionStatus === "error") {
-      // Transcribe button
-      const transcribeBtn = document.createElement("div");
-      transcribeBtn.classList.add("cdx-settings-button");
-      transcribeBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px;"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg> Transcribe';
-      transcribeBtn.title = "Transcribe video audio using AI";
-      transcribeBtn.addEventListener("click", () => {
-        this.handleTranscribe();
-      });
-      transcriptSection.appendChild(transcribeBtn);
-    } else if (this.data.transcriptionStatus === "pending") {
-      const pendingEl = document.createElement("div");
-      pendingEl.classList.add("cdx-settings-button");
-      pendingEl.style.cursor = "default";
-      pendingEl.innerHTML = '<svg class="animate-spin" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px;"><circle cx="12" cy="12" r="10" stroke-opacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10" stroke-opacity="0.75"/></svg> Transcribing...';
-      transcriptSection.appendChild(pendingEl);
-    } else if (this.data.transcriptionStatus === "complete") {
+    // Transcribe button (always show, changes text based on status)
+    const transcribeBtn = document.createElement("div");
+    transcribeBtn.classList.add("cdx-settings-button");
+
+    const hasTranscription = this.data.transcriptionStatus === "complete";
+    transcribeBtn.innerHTML = hasTranscription
+      ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px;"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg> Re-transcribe'
+      : '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px;"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg> Transcribe';
+    transcribeBtn.title = hasTranscription ? "Re-transcribe video audio" : "Transcribe video audio using AI";
+    transcribeBtn.addEventListener("click", () => {
+      this.openTranscriptionDialog();
+    });
+    transcriptSection.appendChild(transcribeBtn);
+
+    if (this.data.transcriptionStatus === "complete") {
       // Show/hide transcript toggle
       const toggleBtn = document.createElement("div");
       toggleBtn.classList.add("cdx-settings-button");
@@ -925,8 +984,28 @@ export class VideoTool implements BlockTool {
       if (this.data.transcription) {
         const infoEl = document.createElement("div");
         infoEl.style.cssText = "font-size: 11px; color: var(--color-text-muted); margin-top: 4px;";
-        infoEl.textContent = `${this.data.transcription.wordCount} words, ${this.data.transcription.segments.length} segments`;
+        const hasSummary = this.data.summary ? " (with AI summary)" : "";
+        infoEl.textContent = `${this.data.transcription.wordCount} words, ${this.data.transcription.segments.length} segments${hasSummary}`;
         transcriptSection.appendChild(infoEl);
+      }
+
+      // Generate summary button if transcript exists but no summary
+      if (this.data.transcription && !this.data.summary) {
+        const generateBtn = document.createElement("div");
+        generateBtn.classList.add("cdx-settings-button");
+        generateBtn.style.marginTop = "8px";
+        generateBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px;"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg> Generate Summary';
+        generateBtn.title = "Generate AI summary and synopsis";
+        generateBtn.addEventListener("click", async () => {
+          generateBtn.innerHTML = '<svg class="animate-spin" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px;"><circle cx="12" cy="12" r="10" stroke-opacity="0.25"/><path d="M12 2a10 10 0 0 1 10 10" stroke-opacity="0.75"/></svg> Generating...';
+          generateBtn.style.pointerEvents = "none";
+          await this.generateSummaryAndSynopsis(this.data.transcription);
+          if (this.wrapper) {
+            this.wrapper.innerHTML = "";
+            this.renderVideoPlayer();
+          }
+        });
+        transcriptSection.appendChild(generateBtn);
       }
     }
 
@@ -995,49 +1074,168 @@ export class VideoTool implements BlockTool {
     }
   }
 
-  // Handle transcription request
-  private async handleTranscribe(): Promise<void> {
-    // Get the actual video path
-    const videoPath = this.data.localPath || this.data.url;
-
-    if (!videoPath) {
-      console.error("No video path available for transcription");
-      return;
-    }
-
-    // Skip if already transcribing or external embed (YouTube/Vimeo)
-    if (this.data.transcriptionStatus === "pending") {
-      return;
-    }
+  // Open the transcription dialog
+  private openTranscriptionDialog(): void {
+    // Don't open if it's an external embed (YouTube/Vimeo)
     if (this.data.isExternal && this.data.externalType !== "direct") {
       console.error("Cannot transcribe embedded videos (YouTube/Vimeo)");
       return;
     }
 
-    // Update status to pending
-    this.data.transcriptionStatus = "pending";
+    this.isTranscriptionDialogOpen = true;
+    this.createTranscriptionDialogContainer();
+    this.renderTranscriptionDialog();
+  }
+
+  // Close the transcription dialog
+  private closeTranscriptionDialog(): void {
+    this.isTranscriptionDialogOpen = false;
+    this.renderTranscriptionDialog();
+  }
+
+  // Handle transcription completion from dialog
+  private handleTranscriptionComplete(result: {
+    transcription: TranscriptionResult;
+    summary?: string;
+    synopsis?: string;
+  }): void {
+    console.log("handleTranscriptionComplete called with:", {
+      wordCount: result.transcription.wordCount,
+      hasSummary: !!result.summary,
+      summaryPreview: result.summary?.substring(0, 50),
+      hasSynopsis: !!result.synopsis,
+    });
+
+    this.data.transcription = result.transcription;
+    this.data.transcriptionStatus = "complete";
+    if (result.summary) {
+      this.data.summary = result.summary;
+      console.log("Summary set on data:", this.data.summary.substring(0, 50));
+    }
+    if (result.synopsis) {
+      this.data.synopsis = result.synopsis;
+      console.log("Synopsis set on data, length:", this.data.synopsis.length);
+    }
+
+    // Re-render to show results
+    console.log("Re-rendering video player, summary exists:", !!this.data.summary);
     if (this.wrapper) {
       this.wrapper.innerHTML = "";
       this.renderVideoPlayer();
     }
+  }
+
+  // Create transcription dialog container
+  private createTranscriptionDialogContainer(): void {
+    if (this.transcriptionDialogContainer) return;
+
+    this.transcriptionDialogContainer = document.createElement("div");
+    this.transcriptionDialogContainer.id = `transcription-dialog-${this.blockId}`;
+    document.body.appendChild(this.transcriptionDialogContainer);
+    this.transcriptionDialogRoot = createRoot(this.transcriptionDialogContainer);
+  }
+
+  // Render the transcription dialog
+  private renderTranscriptionDialog(): void {
+    if (!this.transcriptionDialogRoot) return;
+
+    const videoPath = this.data.localPath || this.data.url;
+    const videoName = this.data.originalName || this.data.filename || "Video";
+
+    this.transcriptionDialogRoot.render(
+      createElement(TranscriptionDialog, {
+        isOpen: this.isTranscriptionDialogOpen,
+        onClose: () => this.closeTranscriptionDialog(),
+        videoPath: videoPath,
+        videoName: videoName,
+        hasExistingTranscription: this.data.transcriptionStatus === "complete",
+        onComplete: (result) => this.handleTranscriptionComplete(result),
+      })
+    );
+  }
+
+  // Destroy transcription dialog container
+  private destroyTranscriptionDialogContainer(): void {
+    if (this.transcriptionDialogRoot) {
+      this.transcriptionDialogRoot.unmount();
+      this.transcriptionDialogRoot = null;
+    }
+    if (this.transcriptionDialogContainer) {
+      this.transcriptionDialogContainer.remove();
+      this.transcriptionDialogContainer = null;
+    }
+  }
+
+  // Generate AI summary and synopsis from transcription
+  private async generateSummaryAndSynopsis(transcription: VideoBlockData["transcription"]): Promise<void> {
+    if (!transcription || transcription.segments.length === 0) {
+      return;
+    }
+
+    // Get AI credentials from store (using getState for non-React context)
+    const aiStore = useAIStore.getState();
+    const providerType = aiStore.getActiveProviderType();
+    const apiKey = aiStore.getActiveApiKey();
+    const model = aiStore.getActiveModel();
+
+    if (!apiKey) {
+      console.warn("No API key configured for AI provider. Skipping summary generation.");
+      console.warn("Please configure your AI API key in Settings > AI.");
+      return;
+    }
+
+    // Combine all segment text into full transcript
+    const fullTranscript = transcription.segments.map(s => s.text).join(" ");
+    const videoName = this.data.originalName || "Video";
 
     try {
-      console.log("Starting transcription for:", videoPath);
-      const result = await transcribeVideo(videoPath);
-      console.log("Transcription complete:", result.wordCount, "words");
+      // Generate two-sentence summary
+      const summaryPrompt = `You are summarizing a video transcript. Provide exactly TWO sentences that capture the main topic and key points of this video. Be concise and informative.
 
-      // Update with result
-      this.data.transcription = result;
-      this.data.transcriptionStatus = "complete";
+Video: "${videoName}"
+
+Transcript:
+${fullTranscript}
+
+Respond with only the two-sentence summary, nothing else.`;
+
+      console.log("Calling aiChat for summary with provider:", providerType, "model:", model);
+      const summaryResponse = await aiChat(
+        [{ role: "user", content: summaryPrompt }],
+        { providerType, apiKey, model }
+      );
+
+      if (summaryResponse.content) {
+        this.data.summary = summaryResponse.content.trim();
+        console.log("Summary generated:", this.data.summary);
+      }
+
+      // Generate three-paragraph synopsis
+      const synopsisPrompt = `You are creating a synopsis of a video transcript. Write exactly THREE paragraphs that provide a comprehensive overview:
+
+Paragraph 1: Introduce the main topic and context of the video.
+Paragraph 2: Describe the key points, arguments, or information presented.
+Paragraph 3: Summarize conclusions, takeaways, or the significance of the content.
+
+Video: "${videoName}"
+
+Transcript:
+${fullTranscript}
+
+Respond with only the three paragraphs, separated by blank lines. No headings or labels.`;
+
+      const synopsisResponse = await aiChat(
+        [{ role: "user", content: synopsisPrompt }],
+        { providerType, apiKey, model }
+      );
+
+      if (synopsisResponse.content) {
+        this.data.synopsis = synopsisResponse.content.trim();
+        console.log("Synopsis generated");
+      }
     } catch (error) {
-      console.error("Transcription failed:", error);
-      this.data.transcriptionStatus = "error";
-    }
-
-    // Re-render to show result
-    if (this.wrapper) {
-      this.wrapper.innerHTML = "";
-      this.renderVideoPlayer();
+      console.error("Failed to generate summary/synopsis:", error);
+      // Don't fail the whole transcription if summary fails
     }
   }
 
@@ -1047,7 +1245,12 @@ export class VideoTool implements BlockTool {
       this.viewerRoot.unmount();
       this.viewerRoot = null;
     }
+    if (this.summaryRoot) {
+      this.summaryRoot.unmount();
+      this.summaryRoot = null;
+    }
     this.destroyModalContainer();
+    this.destroyTranscriptionDialogContainer();
     this.videoEl = null;
   }
 }
