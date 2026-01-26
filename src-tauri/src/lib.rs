@@ -165,6 +165,28 @@ pub fn run() {
                 )?;
             }
 
+            // Register the data directory with the asset protocol scope
+            // This allows all assets (images, videos, etc.) to be loaded via convertFileSrc
+            if let Ok(data_dir) = storage::FileStorage::default_data_dir() {
+                log::info!("Registering data directory with asset protocol: {:?}", data_dir);
+                if let Err(e) = app.asset_protocol_scope().allow_directory(&data_dir, true) {
+                    log::error!("Failed to register data directory with asset protocol: {}", e);
+                } else {
+                    log::info!("Successfully registered data directory with asset protocol");
+                }
+            }
+
+            // Register /tmp/katt-videos for video assets (workaround for hidden directory issues)
+            let video_tmp_dir = std::path::PathBuf::from("/tmp/katt-videos");
+            if let Err(e) = std::fs::create_dir_all(&video_tmp_dir) {
+                log::warn!("Failed to create /tmp/katt-videos directory: {}", e);
+            }
+            if let Err(e) = app.asset_protocol_scope().allow_directory(&video_tmp_dir, true) {
+                log::error!("Failed to register /tmp/katt-videos with asset protocol: {}", e);
+            } else {
+                log::info!("Successfully registered /tmp/katt-videos with asset protocol");
+            }
+
             // Start the action scheduler
             let state: tauri::State<AppState> = app.handle().state();
             if let Ok(mut scheduler) = state.action_scheduler.lock() {
@@ -216,6 +238,10 @@ pub fn run() {
             commands::import_markdown_file,
             // Asset commands
             commands::get_notebook_assets_path,
+            commands::save_notebook_asset,
+            commands::register_asset_path,
+            commands::get_asset_data_url,
+            commands::save_video_asset,
             // Web research commands
             commands::web_search,
             commands::scrape_url,
@@ -385,6 +411,13 @@ pub fn run() {
             commands::get_video_duration,
             commands::is_supported_video,
             commands::get_supported_video_extensions,
+            commands::link_external_video,
+            // Video thumbnail and streaming commands
+            commands::generate_video_thumbnail,
+            commands::get_video_thumbnail_data_url,
+            commands::get_video_metadata,
+            commands::read_video_chunk,
+            commands::open_video_with_system_player,
             // Drawing/annotation commands
             commands::get_page_annotation,
             commands::save_page_annotation,

@@ -59,6 +59,8 @@ const COLOR_SCHEMES: { value: ColorScheme; label: string; colors: string[] }[] =
 const FONT_FAMILIES: { value: FontFamily; label: string; preview: string }[] = [
   { value: "system", label: "System Default", preview: "Aa Bb Cc" },
   { value: "inter", label: "Inter", preview: "Aa Bb Cc" },
+  { value: "serif", label: "Serif (Georgia)", preview: "Aa Bb Cc" },
+  { value: "tufte", label: "Tufte (Palatino)", preview: "Aa Bb Cc" },
   { value: "jetbrains-mono", label: "JetBrains Mono", preview: "Aa Bb Cc" },
   { value: "fira-code", label: "Fira Code", preview: "Aa Bb Cc" },
 ];

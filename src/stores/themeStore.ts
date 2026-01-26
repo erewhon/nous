@@ -3,7 +3,7 @@ import { persist } from "zustand/middleware";
 
 export type ThemeMode = "light" | "dark" | "system";
 export type ColorScheme = "default" | "catppuccin" | "nord" | "dracula" | "tufte";
-export type FontFamily = "system" | "inter" | "jetbrains-mono" | "fira-code";
+export type FontFamily = "system" | "inter" | "jetbrains-mono" | "fira-code" | "serif" | "tufte";
 export type EditorWidth = "narrow" | "medium" | "wide" | "full";
 export type UIMode = "classic" | "overview";
 export type NotebookSortOption = "position" | "name-asc" | "name-desc" | "updated" | "created" | "pages";
@@ -341,6 +341,8 @@ const FONT_FAMILIES = {
   inter: '"Inter", -apple-system, BlinkMacSystemFont, sans-serif',
   "jetbrains-mono": '"JetBrains Mono", "Fira Code", monospace',
   "fira-code": '"Fira Code", "JetBrains Mono", monospace',
+  "serif": 'Georgia, "Times New Roman", Times, serif',
+  "tufte": '"Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif',
 };
 
 const EDITOR_WIDTHS = {

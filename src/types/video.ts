@@ -52,12 +52,19 @@ export const TranscriptionStatusSchema = z.enum([
 ]);
 export type TranscriptionStatus = z.infer<typeof TranscriptionStatusSchema>;
 
+// External video type (YouTube, Vimeo, or direct link)
+export const ExternalVideoTypeSchema = z.enum(["youtube", "vimeo", "direct"]);
+export type ExternalVideoType = z.infer<typeof ExternalVideoTypeSchema>;
+
 // Video block data stored in Editor.js
 export const VideoBlockDataSchema = z.object({
-  // Asset filename (e.g., "1704067200000-abc123.mp4")
+  // Asset filename (e.g., "1704067200000-abc123.mp4") - empty for external videos
   filename: z.string(),
-  // Full URL for rendering (convertFileSrc result)
+  // Full URL for rendering (convertFileSrc result or external URL)
+  // For local videos, this is now the file path (not asset URL)
   url: z.string(),
+  // Thumbnail as data URL (data:image/jpeg;base64,...) for local videos
+  thumbnailUrl: z.string().optional(),
   // Original filename for display
   originalName: z.string().optional(),
   // Caption below video
@@ -74,6 +81,12 @@ export const VideoBlockDataSchema = z.object({
   transcriptionStatus: TranscriptionStatusSchema.default("none"),
   // Show transcript in block view
   showTranscript: z.boolean().default(false),
+  // External video flag
+  isExternal: z.boolean().default(false),
+  // Type of external video (youtube, vimeo, direct)
+  externalType: ExternalVideoTypeSchema.optional(),
+  // Original local file path (for linked local videos)
+  localPath: z.string().optional(),
 });
 
 export type VideoBlockData = z.infer<typeof VideoBlockDataSchema>;
@@ -94,13 +107,25 @@ export interface VideoViewerState {
 
 // Video upload response (following PDF pattern)
 export interface VideoUploadResponse {
-  success: number;
+  success: 0 | 1;
   file: {
-    url: string;
+    url: string;              // File path (not asset URL)
+    thumbnailUrl: string;     // data:image/jpeg;base64,...
     filename: string;
     originalName: string;
   };
 }
+
+// ===== Video Streaming Types =====
+
+// Video metadata for streaming
+export const VideoMetadataSchema = z.object({
+  sizeBytes: z.number(),
+  mimeType: z.string(),
+  durationSeconds: z.number().optional(),
+});
+
+export type VideoMetadata = z.infer<typeof VideoMetadataSchema>;
 
 // ===== Progress Types =====
 

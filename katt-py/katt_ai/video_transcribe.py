@@ -349,3 +349,98 @@ def is_supported_video_sync(file_path: str) -> bool:
 def get_supported_extensions_sync() -> list[str]:
     """Synchronous wrapper for get_supported_extensions (for PyO3 bridge)."""
     return get_supported_extensions()
+
+
+async def extract_thumbnail(
+    video_path: str,
+    output_path: str | None = None,
+    timestamp_seconds: float = 1.0,
+    width: int = 480,
+) -> str:
+    """Extract a single frame as JPEG thumbnail from a video.
+
+    Args:
+        video_path: Path to the video file.
+        output_path: Optional path for the output thumbnail.
+                    If not provided, creates file alongside video as {video}.thumb.jpg.
+        timestamp_seconds: Time in video to extract frame from (default 1.0s).
+        width: Width of thumbnail in pixels (height auto-scales to maintain aspect ratio).
+
+    Returns:
+        Path to the extracted thumbnail file.
+
+    Raises:
+        FileNotFoundError: If video file doesn't exist.
+        RuntimeError: If ffmpeg is not available or fails.
+    """
+    path = Path(video_path)
+    if not path.exists():
+        raise FileNotFoundError(f"Video file not found: {video_path}")
+
+    if not is_ffmpeg_available():
+        raise RuntimeError("ffmpeg is not installed. Please install ffmpeg.")
+
+    # Generate output path if not provided
+    if output_path is None:
+        output_path = str(path.parent / f"{path.name}.thumb.jpg")
+
+    # Get video duration to ensure timestamp is valid
+    try:
+        duration = get_video_duration(video_path)
+        # If requested timestamp is beyond video duration, use 10% of duration or 0
+        if timestamp_seconds >= duration:
+            timestamp_seconds = min(1.0, duration * 0.1)
+    except RuntimeError:
+        # If we can't get duration, just try with the requested timestamp
+        pass
+
+    # Extract single frame using ffmpeg
+    # -ss before -i for fast seeking
+    # -vframes 1 to extract only one frame
+    # -vf scale to resize maintaining aspect ratio
+    # -q:v 2 for high quality JPEG (lower is better, range 2-31)
+    process = await asyncio.create_subprocess_exec(
+        "ffmpeg",
+        "-ss",
+        str(timestamp_seconds),
+        "-i",
+        str(path),
+        "-vframes",
+        "1",
+        "-vf",
+        f"scale={width}:-1",
+        "-q:v",
+        "2",
+        "-y",  # Overwrite output
+        output_path,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+
+    _, stderr = await process.communicate()
+
+    if process.returncode != 0:
+        raise RuntimeError(f"ffmpeg thumbnail extraction failed: {stderr.decode()}")
+
+    # Verify output file was created
+    if not Path(output_path).exists():
+        raise RuntimeError("Thumbnail file was not created")
+
+    return output_path
+
+
+def extract_thumbnail_sync(
+    video_path: str,
+    output_path: str | None = None,
+    timestamp_seconds: float = 1.0,
+    width: int = 480,
+) -> str:
+    """Synchronous wrapper for extract_thumbnail (for PyO3 bridge)."""
+    return asyncio.run(
+        extract_thumbnail(
+            video_path=video_path,
+            output_path=output_path,
+            timestamp_seconds=timestamp_seconds,
+            width=width,
+        )
+    )

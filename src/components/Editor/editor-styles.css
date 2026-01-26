@@ -31,6 +31,9 @@
 
 .block-editor {
   min-height: 300px;
+  font-family: var(--font-family);
+  font-size: var(--font-size-base, 16px);
+  line-height: var(--line-height-base, 1.6);
 }
 
 /* Editor.js base styles */
@@ -49,7 +52,8 @@
 }
 
 .ce-paragraph {
-  line-height: 1.75;
+  font-size: var(--font-size-base, 16px);
+  line-height: var(--line-height-base, 1.75);
   color: var(--color-text-primary);
 }
 
@@ -60,25 +64,25 @@
 }
 
 h1.ce-header {
-  font-size: 2rem;
+  font-size: calc(var(--font-size-base, 16px) * 2);
   margin-top: 1.5rem;
   margin-bottom: 1rem;
 }
 
 h2.ce-header {
-  font-size: 1.5rem;
+  font-size: calc(var(--font-size-base, 16px) * 1.5);
   margin-top: 1.25rem;
   margin-bottom: 0.75rem;
 }
 
 h3.ce-header {
-  font-size: 1.25rem;
+  font-size: calc(var(--font-size-base, 16px) * 1.25);
   margin-top: 1rem;
   margin-bottom: 0.5rem;
 }
 
 h4.ce-header {
-  font-size: 1.1rem;
+  font-size: calc(var(--font-size-base, 16px) * 1.1);
   margin-top: 0.75rem;
   margin-bottom: 0.5rem;
 }
@@ -91,7 +95,8 @@ h4.ce-header {
 
 .cdx-list__item {
   padding: 0.25rem 0;
-  line-height: 1.75;
+  font-size: var(--font-size-base, 16px);
+  line-height: var(--line-height-base, 1.75);
   position: relative;
   transition: background-color 0.15s ease, opacity 0.15s ease;
 }
@@ -1562,7 +1567,35 @@ wiki-link.broken,
   border: 1px solid var(--color-border);
   border-radius: 8px;
   background: var(--color-bg-secondary);
-  overflow: hidden;
+  /* Don't use overflow:hidden - it clips the popover menu */
+}
+
+/* Video wrapper and element styles */
+.video-wrapper {
+  position: relative;
+  background: #000;
+  border-radius: 0;
+}
+
+.video-element {
+  display: block;
+  width: 100%;
+  max-height: 400px;
+  object-fit: contain;
+  background: #000;
+}
+
+.video-iframe {
+  display: block;
+  width: 100%;
+  min-height: 300px;
+  border: none;
+  background: #000;
+}
+
+.video-player-container {
+  display: flex;
+  flex-direction: column;
 }
 
 .video-uploader {

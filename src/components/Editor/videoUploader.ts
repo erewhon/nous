@@ -1,8 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
-import { convertFileSrc } from "@tauri-apps/api/core";
 import { writeFile, mkdir, exists } from "@tauri-apps/plugin-fs";
 import type { VideoUploadResponse } from "../../types/video";
-import { SUPPORTED_VIDEO_MIMETYPES, SUPPORTED_VIDEO_EXTENSIONS } from "../../types/video";
+import {
+  SUPPORTED_VIDEO_MIMETYPES,
+  SUPPORTED_VIDEO_EXTENSIONS,
+} from "../../types/video";
 
 interface VideoUploaderConfig {
   notebookId: string;
@@ -42,7 +44,7 @@ export function createVideoUploader(config: VideoUploaderConfig) {
           console.error("Invalid video file type:", file.type);
           return {
             success: 0,
-            file: { url: "", filename: "", originalName: file.name },
+            file: { url: "", thumbnailUrl: "", filename: "", originalName: file.name },
           };
         }
 
@@ -64,17 +66,55 @@ export function createVideoUploader(config: VideoUploaderConfig) {
         const filename = `${timestamp}-${randomPart}${ext}`;
         const filePath = `${assetsPath}/${filename}`;
 
-        // Read file as ArrayBuffer and write
+        console.log("Writing video to:", filePath);
+
+        // Read file as ArrayBuffer and write using fs plugin (efficient binary write)
         const arrayBuffer = await file.arrayBuffer();
         await writeFile(filePath, new Uint8Array(arrayBuffer));
 
-        // Return convertFileSrc URL for display
-        const url = convertFileSrc(filePath);
+        console.log("Video written successfully");
+
+        // Save video to a non-hidden directory to workaround asset protocol scope issues
+        // The asset protocol has issues with paths containing .local on Linux
+        const videoPath = await invoke<string>("save_video_asset", {
+          notebookId: config.notebookId,
+          filename,
+          sourcePath: filePath,
+        });
+
+        console.log("Video saved to:", videoPath);
+
+        // Generate thumbnail from video
+        let thumbnailUrl = "";
+        try {
+          // Generate thumbnail (extracts first frame)
+          const thumbnailPath = await invoke<string>(
+            "generate_video_thumbnail",
+            {
+              videoPath,
+              timestampSeconds: 1.0, // Extract frame at 1 second
+            }
+          );
+          console.log("Thumbnail generated at:", thumbnailPath);
+
+          // Get thumbnail as data URL for embedding
+          thumbnailUrl = await invoke<string>("get_video_thumbnail_data_url", {
+            thumbnailPath,
+          });
+          console.log(
+            "Thumbnail data URL generated, length:",
+            thumbnailUrl.length
+          );
+        } catch (thumbnailError) {
+          console.warn("Failed to generate thumbnail:", thumbnailError);
+          // Continue without thumbnail - video will still work
+        }
 
         return {
           success: 1,
           file: {
-            url,
+            url: videoPath, // Store file path, not asset URL
+            thumbnailUrl,
             filename,
             originalName: file.name,
           },
@@ -83,7 +123,7 @@ export function createVideoUploader(config: VideoUploaderConfig) {
         console.error("Video upload failed:", error);
         return {
           success: 0,
-          file: { url: "", filename: "", originalName: file.name },
+          file: { url: "", thumbnailUrl: "", filename: "", originalName: file.name },
         };
       }
     },

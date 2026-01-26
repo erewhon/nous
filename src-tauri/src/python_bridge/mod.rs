@@ -1841,6 +1841,39 @@ impl PythonAI {
         })
     }
 
+    /// Extract a thumbnail frame from a video
+    pub fn extract_video_thumbnail(
+        &self,
+        video_path: &str,
+        output_path: Option<&str>,
+        timestamp_seconds: Option<f64>,
+        width: Option<i32>,
+    ) -> Result<String> {
+        Python::attach(|py| {
+            self.setup_python_path(py)?;
+
+            let video_module = py.import("katt_ai.video_transcribe")?;
+            let extract_fn = video_module.getattr("extract_thumbnail_sync")?;
+
+            let kwargs = PyDict::new(py);
+            kwargs.set_item("video_path", video_path)?;
+            if let Some(output) = output_path {
+                kwargs.set_item("output_path", output)?;
+            }
+            if let Some(ts) = timestamp_seconds {
+                kwargs.set_item("timestamp_seconds", ts)?;
+            }
+            if let Some(w) = width {
+                kwargs.set_item("width", w)?;
+            }
+
+            let result = extract_fn.call((), Some(&kwargs))?;
+            let thumbnail_path: String = result.extract()?;
+
+            Ok(thumbnail_path)
+        })
+    }
+
     // ===== Jupyter Cell Execution =====
 
     /// Execute a Jupyter notebook code cell

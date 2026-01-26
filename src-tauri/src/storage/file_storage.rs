@@ -1500,3 +1500,68 @@ impl FileStorage {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    /// Test that asset paths are correctly generated.
+    ///
+    /// This is important for Tauri's asset protocol scope configuration.
+    /// On Linux, the default data directory is ~/.local/share/katt which contains
+    /// a hidden directory (.local). The asset protocol scope must be configured with
+    /// `requireLiteralLeadingDot: false` to allow access to these paths.
+    #[test]
+    fn test_asset_path_generation() {
+        let temp_dir = TempDir::new().unwrap();
+        let storage = FileStorage::new(temp_dir.path().to_path_buf());
+        storage.init().unwrap();
+
+        let notebook_id = Uuid::new_v4();
+        let assets_dir = storage.notebook_assets_dir(notebook_id);
+
+        // Verify path structure: base_path/notebooks/<uuid>/assets
+        assert!(assets_dir.ends_with("assets"));
+        assert!(assets_dir.to_string_lossy().contains(&notebook_id.to_string()));
+    }
+
+    /// Test that the default data directory on Linux contains hidden directories.
+    ///
+    /// This documents why the asset protocol scope needs `requireLiteralLeadingDot: false`
+    /// on Linux systems.
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn test_default_data_dir_contains_hidden_directory() {
+        if let Ok(data_dir) = FileStorage::default_data_dir() {
+            let path_str = data_dir.to_string_lossy();
+            // On Linux, the default data dir is ~/.local/share/katt
+            // This contains .local which is a "hidden" directory (starts with .)
+            // Tauri's asset protocol with default settings won't match paths
+            // containing hidden directories unless requireLiteralLeadingDot: false
+            assert!(
+                path_str.contains("/.local/") || path_str.contains("\\."),
+                "Expected default data dir to contain hidden directory, got: {}",
+                path_str
+            );
+        }
+    }
+
+    /// Test that asset paths are absolute paths starting with /
+    #[test]
+    fn test_asset_paths_are_absolute() {
+        let temp_dir = TempDir::new().unwrap();
+        let storage = FileStorage::new(temp_dir.path().to_path_buf());
+        storage.init().unwrap();
+
+        let notebook_id = Uuid::new_v4();
+        let assets_dir = storage.notebook_assets_dir(notebook_id);
+
+        // The path should be absolute
+        assert!(
+            assets_dir.is_absolute(),
+            "Asset path should be absolute, got: {:?}",
+            assets_dir
+        );
+    }
+}

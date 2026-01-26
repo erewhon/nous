@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import {
   DndContext,
   closestCenter,
@@ -19,6 +19,18 @@ import { CSS } from "@dnd-kit/utilities";
 import type { Section } from "../../types/page";
 import { useThemeStore } from "../../stores/themeStore";
 import { SectionSettingsDialog } from "./SectionSettingsDialog";
+
+// Section sort options
+type SectionSortOption = "manual" | "name-asc" | "name-desc" | "created-desc" | "created-asc" | "modified-desc";
+
+const SORT_OPTIONS: { value: SectionSortOption; label: string }[] = [
+  { value: "manual", label: "Manual" },
+  { value: "name-asc", label: "Name A→Z" },
+  { value: "name-desc", label: "Name Z→A" },
+  { value: "created-desc", label: "Newest First" },
+  { value: "created-asc", label: "Oldest First" },
+  { value: "modified-desc", label: "Recently Modified" },
+];
 
 interface SectionListProps {
   sections: Section[];
@@ -147,8 +159,34 @@ export function SectionList({
 }: SectionListProps) {
   const [editingSection, setEditingSection] = useState<Section | null>(null);
   const [isCreating, setIsCreating] = useState(false);
+  const [sortOption, setSortOption] = useState<SectionSortOption>("manual");
+  const [showSortMenu, setShowSortMenu] = useState(false);
   const autoHidePanels = useThemeStore((state) => state.autoHidePanels);
   const setAutoHidePanels = useThemeStore((state) => state.setAutoHidePanels);
+
+  // Sort sections based on selected option
+  const sortedSections = useMemo(() => {
+    if (sortOption === "manual") {
+      return sections;
+    }
+
+    return [...sections].sort((a, b) => {
+      switch (sortOption) {
+        case "name-asc":
+          return a.name.localeCompare(b.name);
+        case "name-desc":
+          return b.name.localeCompare(a.name);
+        case "created-desc":
+          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        case "created-asc":
+          return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+        case "modified-desc":
+          return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+        default:
+          return 0;
+      }
+    });
+  }, [sections, sortOption]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -212,6 +250,53 @@ export function SectionList({
           Sections
         </span>
         <div className="flex items-center gap-1">
+          {/* Sort button */}
+          <div className="relative">
+            <button
+              onClick={() => setShowSortMenu(!showSortMenu)}
+              className="flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
+              style={{ color: sortOption !== "manual" ? "var(--color-accent)" : "var(--color-text-muted)" }}
+              title="Sort sections"
+            >
+              <IconSort />
+            </button>
+            {showSortMenu && (
+              <>
+                <div
+                  className="fixed inset-0 z-10"
+                  onClick={() => setShowSortMenu(false)}
+                />
+                <div
+                  className="absolute right-0 top-full z-20 mt-1 min-w-[140px] rounded-lg border py-1 shadow-lg"
+                  style={{
+                    backgroundColor: "var(--color-bg-secondary)",
+                    borderColor: "var(--color-border)",
+                  }}
+                >
+                  {SORT_OPTIONS.map((option) => (
+                    <button
+                      key={option.value}
+                      onClick={() => {
+                        setSortOption(option.value);
+                        setShowSortMenu(false);
+                      }}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors hover:bg-[--color-bg-tertiary]"
+                      style={{
+                        color: sortOption === option.value ? "var(--color-accent)" : "var(--color-text-secondary)",
+                      }}
+                    >
+                      {sortOption === option.value && (
+                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                      )}
+                      <span className={sortOption === option.value ? "" : "ml-[20px]"}>{option.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
           <button
             onClick={() => setAutoHidePanels(!autoHidePanels)}
             className="flex h-6 w-6 items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
@@ -295,31 +380,96 @@ export function SectionList({
             </li>
           )}
 
-          {/* Individual sections with drag-and-drop */}
-          <DndContext
-            sensors={sensors}
-            collisionDetection={closestCenter}
-            onDragEnd={handleDragEnd}
-          >
-            <SortableContext
-              items={sections.map((s) => s.id)}
-              strategy={verticalListSortingStrategy}
+          {/* Individual sections with drag-and-drop (only in manual mode) */}
+          {sortOption === "manual" ? (
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={handleDragEnd}
             >
-              {sections.map((section) => (
-                <SortableSectionItem
-                  key={section.id}
-                  section={section}
-                  isSelected={selectedSectionId === section.id}
-                  onSelect={() => onSelectSection(section.id)}
-                  onEdit={() => setEditingSection(section)}
-                />
-              ))}
-            </SortableContext>
-          </DndContext>
+              <SortableContext
+                items={sortedSections.map((s) => s.id)}
+                strategy={verticalListSortingStrategy}
+              >
+                {sortedSections.map((section) => (
+                  <SortableSectionItem
+                    key={section.id}
+                    section={section}
+                    isSelected={selectedSectionId === section.id}
+                    onSelect={() => onSelectSection(section.id)}
+                    onEdit={() => setEditingSection(section)}
+                  />
+                ))}
+              </SortableContext>
+            </DndContext>
+          ) : (
+            // Non-draggable list for sorted views
+            sortedSections.map((section) => (
+              <li key={section.id}>
+                <button
+                  onClick={() => onSelectSection(section.id)}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    setEditingSection(section);
+                  }}
+                  className="group flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition-all"
+                  style={{
+                    backgroundColor: selectedSectionId === section.id
+                      ? section.color
+                        ? `${section.color}15`
+                        : "var(--color-bg-tertiary)"
+                      : "transparent",
+                    color: selectedSectionId === section.id
+                      ? "var(--color-text-primary)"
+                      : "var(--color-text-secondary)",
+                    borderLeft: selectedSectionId === section.id
+                      ? `3px solid ${section.color || "var(--color-accent)"}`
+                      : "3px solid transparent",
+                    paddingLeft: "calc(0.75rem + 11px)", // Account for missing grip icon
+                  }}
+                  title="Right-click to edit"
+                >
+                  {/* Color indicator */}
+                  <span
+                    className="h-3 w-3 flex-shrink-0 rounded-full"
+                    style={{
+                      backgroundColor: section.color || "var(--color-text-muted)",
+                    }}
+                  />
+                  <span className="flex-1 truncate">{section.name}</span>
+                  {/* Edit button on hover */}
+                  <span
+                    className="opacity-0 group-hover:opacity-100 transition-opacity"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setEditingSection(section);
+                    }}
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="12"
+                      height="12"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      style={{ color: "var(--color-text-muted)" }}
+                    >
+                      <circle cx="12" cy="12" r="1" />
+                      <circle cx="12" cy="5" r="1" />
+                      <circle cx="12" cy="19" r="1" />
+                    </svg>
+                  </span>
+                </button>
+              </li>
+            ))
+          )}
         </ul>
 
         {/* Empty state */}
-        {sections.length === 0 && (
+        {sortedSections.length === 0 && (
           <div
             className="mt-4 rounded-lg border border-dashed p-4 text-center"
             style={{ borderColor: "var(--color-border)" }}
@@ -400,6 +550,26 @@ function IconPanelClose() {
       <rect x="3" y="3" width="18" height="18" rx="2" />
       <path d="M9 3v18" />
       <path d="M16 15l-3-3 3-3" />
+    </svg>
+  );
+}
+
+function IconSort() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M3 6h18" />
+      <path d="M7 12h10" />
+      <path d="M10 18h4" />
     </svg>
   );
 }

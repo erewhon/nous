@@ -3,15 +3,53 @@
   "identifier": "default",
   "description": "enables the default permissions",
   "windows": [
-    "main"
+    "main",
+    "library"
   ],
   "permissions": [
     "core:default",
     "dialog:default",
     "fs:default",
-    "fs:allow-read",
-    "fs:allow-write",
-    "fs:allow-exists",
-    "fs:allow-mkdir"
+    "fs:read-all",
+    "fs:write-all",
+    {
+      "identifier": "fs:scope",
+      "allow": [
+        { "path": "$APPLOCALDATA/**" },
+        { "path": "$HOME/**" },
+        { "path": "/home/**" },
+        { "path": "**/.local/**" }
+      ],
+      "requireLiteralLeadingDot": false
+    },
+    {
+      "identifier": "fs:allow-exists",
+      "allow": [
+        { "path": "$APPLOCALDATA/**" },
+        { "path": "$HOME/**" },
+        { "path": "**/.local/**" }
+      ],
+      "requireLiteralLeadingDot": false
+    },
+    {
+      "identifier": "fs:allow-mkdir",
+      "allow": [
+        { "path": "$APPLOCALDATA/**" },
+        { "path": "$HOME/**" },
+        { "path": "**/.local/**" }
+      ],
+      "requireLiteralLeadingDot": false
+    },
+    {
+      "identifier": "fs:allow-write-text-file",
+      "allow": [
+        { "path": "$APPLOCALDATA/**" },
+        { "path": "$HOME/**" }
+      ],
+      "requireLiteralLeadingDot": false
+    },
+    "fs:allow-rename",
+    "fs:allow-remove",
+    "fs:allow-copy-file"
   ]
 }

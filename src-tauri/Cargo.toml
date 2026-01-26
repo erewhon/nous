@@ -19,7 +19,7 @@ tauri-build = { version = "2.5.3", features = [] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 log = "0.4"
-tauri = { version = "2.9.5", features = ["devtools"] }
+tauri = { version = "2.9.5", features = ["protocol-asset", "devtools"] }
 tauri-plugin-log = "2"
 tauri-plugin-fs = "2"
 tauri-plugin-dialog = "2"
@@ -58,6 +58,9 @@ tokio = { version = "1", features = ["full"] }
 
 # Git integration
 git2 = "0.20"
+
+# Misc utilities
+md5 = "0.7"
 
 # Sync support
 reqwest = { version = "0.12", features = ["json", "rustls-tls", "blocking"] }
