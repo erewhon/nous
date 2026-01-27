@@ -17,6 +17,7 @@ mod notion;
 mod obsidian;
 mod orgmode;
 mod python_bridge;
+mod rag;
 mod scrivener;
 mod search;
 mod storage;
@@ -31,6 +32,7 @@ use goals::GoalsStorage;
 use inbox::InboxStorage;
 use library::LibraryStorage;
 use python_bridge::PythonAI;
+use rag::VectorIndex;
 use search::SearchIndex;
 use storage::FileStorage;
 use sync::SyncManager;
@@ -40,6 +42,7 @@ pub struct AppState {
     pub library_storage: Arc<Mutex<LibraryStorage>>,
     pub storage: Arc<Mutex<FileStorage>>,
     pub search_index: Mutex<SearchIndex>,
+    pub vector_index: Mutex<VectorIndex>,
     pub python_ai: Arc<Mutex<PythonAI>>,
     pub action_storage: Arc<Mutex<ActionStorage>>,
     pub action_executor: Arc<Mutex<ActionExecutor>>,
@@ -72,6 +75,10 @@ pub fn run() {
     // Initialize search index at the library path
     let search_dir = current_library.search_index_path();
     let search_index = SearchIndex::new(search_dir).expect("Failed to initialize search index");
+
+    // Initialize vector index for RAG at the library path
+    let vector_db_path = current_library.path.join(".katt").join("vectors.db");
+    let vector_index = VectorIndex::new(vector_db_path).expect("Failed to initialize vector index");
 
     // Initialize Python AI bridge
     // The katt-py package is in the project root (same level as src-tauri)
@@ -146,6 +153,7 @@ pub fn run() {
         library_storage: library_storage_arc,
         storage: storage_arc,
         search_index: Mutex::new(search_index),
+        vector_index: Mutex::new(vector_index),
         python_ai: python_ai_arc,
         action_storage: action_storage_arc,
         action_executor: action_executor_arc,
@@ -497,6 +505,20 @@ pub fn run() {
             commands::mcp_get_tools,
             commands::mcp_get_running_servers,
             commands::mcp_call_tool,
+            // RAG commands
+            commands::configure_embeddings,
+            commands::get_embedding_config,
+            commands::semantic_search,
+            commands::hybrid_search,
+            commands::get_rag_context,
+            commands::index_page_embedding,
+            commands::remove_page_embedding,
+            commands::get_page_chunks,
+            commands::rebuild_vector_index,
+            commands::get_vector_index_stats,
+            commands::generate_embedding,
+            commands::generate_embeddings_batch,
+            commands::discover_embedding_models,
             // Window commands
             commands::open_library_window,
             commands::close_library_window,

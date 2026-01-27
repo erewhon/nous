@@ -59,6 +59,9 @@ tokio = { version = "1", features = ["full"] }
 # Git integration
 git2 = "0.20"
 
+# SQLite for vector index
+rusqlite = { version = "0.32", features = ["bundled"] }
+
 # Misc utilities
 md5 = "0.7"
 

@@ -4,22 +4,24 @@ import { useWebResearchStore } from "../../stores/webResearchStore";
 import { ThemeSettings } from "./ThemeSettings";
 import { KeybindingsSettings } from "./KeybindingsSettings";
 import { MCPServersSettings } from "./MCPServersSettings";
+import { RAGSettings } from "./RAGSettings";
 import { LibrarySettingsPanel } from "../Library";
 import type { ProviderType, ProviderConfig } from "../../types/ai";
 
 interface SettingsDialogProps {
   isOpen: boolean;
   onClose: () => void;
-  initialTab?: "ai" | "web-research" | "theme" | "system-prompt" | "libraries" | "keybindings" | "mcp";
+  initialTab?: "ai" | "web-research" | "theme" | "system-prompt" | "libraries" | "keybindings" | "mcp" | "rag";
 }
 
-type TabId = "ai" | "web-research" | "theme" | "system-prompt" | "libraries" | "keybindings" | "mcp";
+type TabId = "ai" | "web-research" | "theme" | "system-prompt" | "libraries" | "keybindings" | "mcp" | "rag";
 
 const TABS: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: "theme", label: "Appearance", icon: <IconPalette /> },
   { id: "keybindings", label: "Shortcuts", icon: <IconKeyboard /> },
   { id: "libraries", label: "Libraries", icon: <IconLibrary /> },
   { id: "ai", label: "AI Providers", icon: <IconSparkles /> },
+  { id: "rag", label: "Semantic Search", icon: <IconBrain /> },
   { id: "system-prompt", label: "System Prompt", icon: <IconPrompt /> },
   { id: "mcp", label: "MCP Servers", icon: <IconPlug /> },
   { id: "web-research", label: "Web Research", icon: <IconGlobe /> },
@@ -137,6 +139,7 @@ export function SettingsDialog({ isOpen, onClose, initialTab = "theme" }: Settin
             {activeTab === "keybindings" && <KeybindingsSettings />}
             {activeTab === "libraries" && <LibrarySettingsPanel />}
             {activeTab === "ai" && <AISettingsContent />}
+            {activeTab === "rag" && <RAGSettings />}
             {activeTab === "system-prompt" && <SystemPromptSettingsContent />}
             {activeTab === "mcp" && <MCPServersSettings />}
             {activeTab === "web-research" && <WebResearchSettingsContent />}
@@ -456,9 +459,9 @@ function ProviderAccordion({
           }}
         >
           <span
-            className="absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform"
+            className="absolute left-0 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform"
             style={{
-              transform: provider.enabled ? "translateX(16px)" : "translateX(2px)",
+              transform: provider.enabled ? "translateX(18px)" : "translateX(2px)",
             }}
           />
         </button>
@@ -824,10 +827,10 @@ function WebResearchSettingsContent() {
             }}
           >
             <span
-              className="absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform"
+              className="absolute left-0 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform"
               style={{
                 transform: settings.includeAnswer
-                  ? "translateX(20px)"
+                  ? "translateX(22px)"
                   : "translateX(2px)",
               }}
             />
@@ -1326,6 +1329,32 @@ function IconPlug() {
       <path d="M9 8V2" />
       <path d="M15 8V2" />
       <path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z" />
+    </svg>
+  );
+}
+
+function IconBrain() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z" />
+      <path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z" />
+      <path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4" />
+      <path d="M17.599 6.5a3 3 0 0 0 .399-1.375" />
+      <path d="M6.003 5.125A3 3 0 0 0 6.401 6.5" />
+      <path d="M3.477 10.896a4 4 0 0 1 .585-.396" />
+      <path d="M19.938 10.5a4 4 0 0 1 .585.396" />
+      <path d="M6 18a4 4 0 0 1-1.967-.516" />
+      <path d="M19.967 17.484A4 4 0 0 1 18 18" />
     </svg>
   );
 }

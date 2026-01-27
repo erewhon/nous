@@ -24,6 +24,18 @@ from katt_ai.document_convert import (
     is_supported_file_sync,
     ConversionResult,
 )
+from katt_ai.embeddings import (
+    generate_embedding,
+    generate_embedding_sync,
+    generate_embeddings_batch,
+    generate_embeddings_batch_sync,
+    get_embedding_models,
+    get_default_dimensions,
+    discover_models,
+    discover_models_sync,
+    EMBEDDING_MODELS,
+    EmbeddingConfig,
+)
 
 __all__ = [
     "chat",
@@ -54,4 +66,15 @@ __all__ = [
     "is_supported_file",
     "is_supported_file_sync",
     "ConversionResult",
+    # Embeddings
+    "generate_embedding",
+    "generate_embedding_sync",
+    "generate_embeddings_batch",
+    "generate_embeddings_batch_sync",
+    "get_embedding_models",
+    "get_default_dimensions",
+    "discover_models",
+    "discover_models_sync",
+    "EMBEDDING_MODELS",
+    "EmbeddingConfig",
 ]

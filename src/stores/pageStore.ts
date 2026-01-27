@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { Page, EditorData } from "../types/page";
 import * as api from "../utils/api";
+import { useRAGStore } from "./ragStore";
 
 // Recent page entry for tracking access history
 export interface RecentPageEntry {
@@ -216,6 +217,10 @@ export const usePageStore = create<PageStore>()(
           selectedPageId: page.id,
         };
       });
+
+      // Trigger RAG indexing in background (non-blocking)
+      useRAGStore.getState().indexPage(notebookId, page.id).catch(() => {});
+
       return page;
     } catch (err) {
       set({
@@ -285,6 +290,12 @@ export const usePageStore = create<PageStore>()(
       // Updating the store causes re-renders that steal focus from the editor
       // Fresh content is fetched when switching pages via selectPage
       await api.updatePage(notebookId, pageId, { content }, commit);
+
+      // Trigger RAG re-indexing in background (non-blocking)
+      // Only index on explicit commits to avoid excessive indexing during typing
+      if (commit) {
+        useRAGStore.getState().indexPage(notebookId, pageId).catch(() => {});
+      }
     } catch (err) {
       // Only update state on error
       set({
@@ -303,6 +314,9 @@ export const usePageStore = create<PageStore>()(
         selectedPageId:
           state.selectedPageId === pageId ? null : state.selectedPageId,
       }));
+
+      // Remove from RAG index in background (non-blocking)
+      useRAGStore.getState().removePage(pageId).catch(() => {});
     } catch (err) {
       set({
         error: err instanceof Error ? err.message : "Failed to delete page",
@@ -351,6 +365,9 @@ export const usePageStore = create<PageStore>()(
           selectedPageId: newPage.id,
         };
       });
+
+      // Trigger RAG indexing for the duplicated page in background (non-blocking)
+      useRAGStore.getState().indexPage(notebookId, newPage.id).catch(() => {});
     } catch (err) {
       set({
         error: err instanceof Error ? err.message : "Failed to duplicate page",

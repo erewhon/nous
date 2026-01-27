@@ -2155,6 +2155,128 @@ impl PythonAI {
             Ok(servers)
         })
     }
+
+    // ===== Embedding Methods for RAG =====
+
+    /// Generate embedding for a single text
+    pub fn generate_embedding(&self, text: &str, config: &str) -> Result<Vec<f64>> {
+        Python::attach(|py| {
+            self.setup_python_path(py)?;
+
+            let embed_module = py.import("katt_ai.embeddings")?;
+            let embed_fn = embed_module.getattr("generate_embedding_sync")?;
+
+            // Parse config JSON to Python dict
+            let config_dict: serde_json::Value = serde_json::from_str(config)?;
+            let py_config = PyDict::new(py);
+
+            if let serde_json::Value::Object(map) = config_dict {
+                for (key, value) in map {
+                    match value {
+                        serde_json::Value::String(s) => py_config.set_item(key, s)?,
+                        serde_json::Value::Number(n) => {
+                            if let Some(i) = n.as_i64() {
+                                py_config.set_item(key, i)?;
+                            } else if let Some(f) = n.as_f64() {
+                                py_config.set_item(key, f)?;
+                            }
+                        }
+                        serde_json::Value::Null => py_config.set_item(key, py.None())?,
+                        _ => {}
+                    }
+                }
+            }
+
+            let result = embed_fn.call1((text, py_config))?;
+            let embedding: Vec<f64> = result.extract()?;
+
+            Ok(embedding)
+        })
+    }
+
+    /// Generate embeddings for multiple texts
+    pub fn generate_embeddings_batch(&self, texts: Vec<&str>, config: &str) -> Result<Vec<Vec<f64>>> {
+        Python::attach(|py| {
+            self.setup_python_path(py)?;
+
+            let embed_module = py.import("katt_ai.embeddings")?;
+            let embed_fn = embed_module.getattr("generate_embeddings_batch_sync")?;
+
+            // Convert texts to Python list
+            let py_texts = PyList::empty(py);
+            for text in texts {
+                py_texts.append(text)?;
+            }
+
+            // Parse config JSON to Python dict
+            let config_dict: serde_json::Value = serde_json::from_str(config)?;
+            let py_config = PyDict::new(py);
+
+            if let serde_json::Value::Object(map) = config_dict {
+                for (key, value) in map {
+                    match value {
+                        serde_json::Value::String(s) => py_config.set_item(key, s)?,
+                        serde_json::Value::Number(n) => {
+                            if let Some(i) = n.as_i64() {
+                                py_config.set_item(key, i)?;
+                            } else if let Some(f) = n.as_f64() {
+                                py_config.set_item(key, f)?;
+                            }
+                        }
+                        serde_json::Value::Null => py_config.set_item(key, py.None())?,
+                        _ => {}
+                    }
+                }
+            }
+
+            let result = embed_fn.call1((py_texts, py_config))?;
+            let embeddings: Vec<Vec<f64>> = result.extract()?;
+
+            Ok(embeddings)
+        })
+    }
+
+    /// Discover available embedding models from a provider
+    pub fn discover_embedding_models(&self, provider: &str, base_url: Option<&str>) -> Result<Vec<DiscoveredModel>> {
+        Python::attach(|py| {
+            self.setup_python_path(py)?;
+
+            let embed_module = py.import("katt_ai.embeddings")?;
+            let discover_fn = embed_module.getattr("discover_models_sync")?;
+
+            let result = discover_fn.call1((provider, base_url))?;
+            let models_list: Vec<HashMap<String, Py<PyAny>>> = result.extract()?;
+
+            let mut models = Vec::new();
+            for model_dict in models_list {
+                models.push(DiscoveredModel {
+                    id: model_dict
+                        .get("id")
+                        .and_then(|v| v.extract::<String>(py).ok())
+                        .unwrap_or_default(),
+                    name: model_dict
+                        .get("name")
+                        .and_then(|v| v.extract::<String>(py).ok())
+                        .unwrap_or_default(),
+                    dimensions: model_dict
+                        .get("dimensions")
+                        .and_then(|v| v.extract::<i64>(py).ok())
+                        .unwrap_or(768) as u32,
+                });
+            }
+
+            Ok(models)
+        })
+    }
+}
+
+/// Discovered embedding model info
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiscoveredModel {
+    pub id: String,
+    pub name: String,
+    pub dimensions: u32,
 }
 
 #[cfg(test)]
