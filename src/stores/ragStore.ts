@@ -10,6 +10,7 @@ import type {
 } from "../types/rag";
 import { EMBEDDING_MODELS, DEFAULT_EMBEDDING_BASE_URLS, getModelDimensions, EMBEDDING_PROVIDER_INFO } from "../types/rag";
 import type { SearchResult } from "../types/page";
+import { listNotebooks, listPages } from "../utils/api";
 
 interface RAGSettings {
   // Embedding configuration
@@ -351,9 +352,60 @@ export const useRAGStore = create<RAGStore>()(
 
       // Rebuild the entire index
       rebuildIndex: async () => {
+        const state = get();
+        if (!state.isConfigured) {
+          throw new Error("RAG not configured");
+        }
+
         try {
-          set({ isIndexing: true, indexingProgress: null });
+          set({ isIndexing: true, indexingProgress: null, lastError: null });
+
+          // Clear the existing index
           await invoke("rebuild_vector_index");
+
+          // Get all non-archived notebooks
+          const notebooks = await listNotebooks();
+          const activeNotebooks = notebooks.filter((nb) => !nb.archived);
+
+          // Collect all pages from all notebooks
+          const allPages: Array<{ notebookId: string; pageId: string }> = [];
+          for (const notebook of activeNotebooks) {
+            const pages = await listPages(notebook.id, false); // Don't include archived pages
+            for (const page of pages) {
+              allPages.push({ notebookId: notebook.id, pageId: page.id });
+            }
+          }
+
+          const total = allPages.length;
+          set({ indexingProgress: { current: 0, total } });
+
+          // Index each page
+          for (let i = 0; i < allPages.length; i++) {
+            const { notebookId, pageId } = allPages[i];
+            try {
+              // Get page chunks
+              const chunks = await invoke<string[]>("get_page_chunks", { notebookId, pageId });
+
+              if (chunks.length > 0) {
+                // Generate embeddings for chunks
+                const embeddings = await get().getEmbeddings(chunks);
+
+                // Index the page
+                await invoke("index_page_embedding", {
+                  notebookId,
+                  pageId,
+                  embeddings,
+                });
+              }
+            } catch (pageError) {
+              console.warn(`Failed to index page ${pageId}:`, pageError);
+              // Continue with other pages
+            }
+
+            set({ indexingProgress: { current: i + 1, total } });
+          }
+
+          // Update stats
           await get().getStats();
         } catch (error) {
           console.error("Failed to rebuild index:", error);

@@ -4,7 +4,7 @@ import asyncio
 from typing import Any
 
 import httpx
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, OpenAI
 from pydantic import BaseModel
 
 
@@ -151,19 +151,84 @@ async def _generate_lmstudio_embedding(
     return response.data[0].embedding
 
 
-# Synchronous wrappers for PyO3 integration
+# Synchronous implementations for PyO3 integration
+# Using sync clients to avoid asyncio.run() event loop issues
+
+
+def _generate_openai_embedding_sync(text: str, model: str, api_key: str | None) -> list[float]:
+    """Generate embedding using OpenAI API (synchronous)."""
+    client = OpenAI(api_key=api_key)
+    response = client.embeddings.create(model=model, input=text)
+    return response.data[0].embedding
+
+
+def _generate_openai_embeddings_batch_sync(
+    texts: list[str], model: str, api_key: str | None
+) -> list[list[float]]:
+    """Generate embeddings in batch using OpenAI API (synchronous)."""
+    client = OpenAI(api_key=api_key)
+    max_batch_size = 2048
+    all_embeddings: list[list[float]] = []
+
+    for i in range(0, len(texts), max_batch_size):
+        batch = texts[i : i + max_batch_size]
+        response = client.embeddings.create(model=model, input=batch)
+        sorted_data = sorted(response.data, key=lambda x: x.index)
+        all_embeddings.extend([d.embedding for d in sorted_data])
+
+    return all_embeddings
+
+
+def _generate_ollama_embedding_sync(text: str, model: str, base_url: str) -> list[float]:
+    """Generate embedding using Ollama API (synchronous)."""
+    with httpx.Client(timeout=60) as client:
+        response = client.post(
+            f"{base_url}/api/embeddings",
+            json={"model": model, "prompt": text},
+        )
+        response.raise_for_status()
+        return response.json()["embedding"]
+
+
+def _generate_lmstudio_embedding_sync(text: str, model: str, base_url: str) -> list[float]:
+    """Generate embedding using LM Studio (synchronous)."""
+    client = OpenAI(api_key="lm-studio", base_url=base_url)
+    response = client.embeddings.create(model=model, input=text)
+    return response.data[0].embedding
 
 
 def generate_embedding_sync(text: str, config: dict[str, Any]) -> list[float]:
-    """Synchronous wrapper for generate_embedding."""
-    return asyncio.run(generate_embedding(text, config))
+    """Generate embedding for a single text (synchronous version for PyO3)."""
+    provider = config.get("provider", "openai")
+    model = config.get("model", "text-embedding-3-small")
+
+    if provider == "openai":
+        return _generate_openai_embedding_sync(text, model, config.get("api_key"))
+    elif provider == "ollama":
+        base_url = config.get("base_url", "http://localhost:11434")
+        return _generate_ollama_embedding_sync(text, model, base_url)
+    elif provider == "lmstudio":
+        base_url = config.get("base_url", "http://localhost:1234/v1")
+        return _generate_lmstudio_embedding_sync(text, model, base_url)
+    else:
+        raise ValueError(f"Unknown embedding provider: {provider}")
 
 
 def generate_embeddings_batch_sync(
     texts: list[str], config: dict[str, Any]
 ) -> list[list[float]]:
-    """Synchronous wrapper for generate_embeddings_batch."""
-    return asyncio.run(generate_embeddings_batch(texts, config))
+    """Generate embeddings for multiple texts (synchronous version for PyO3)."""
+    if not texts:
+        return []
+
+    provider = config.get("provider", "openai")
+    model = config.get("model", "text-embedding-3-small")
+
+    if provider == "openai":
+        return _generate_openai_embeddings_batch_sync(texts, model, config.get("api_key"))
+
+    # For non-OpenAI providers, process sequentially
+    return [generate_embedding_sync(text, config) for text in texts]
 
 
 # Constants for common embedding models
@@ -365,6 +430,83 @@ async def discover_models(provider: str, base_url: str | None = None) -> list[di
         return []
 
 
+def _discover_ollama_models_sync(base_url: str) -> list[dict[str, Any]]:
+    """Discover available embedding models from Ollama (synchronous)."""
+    try:
+        with httpx.Client(timeout=10) as client:
+            response = client.get(f"{base_url}/api/tags")
+            response.raise_for_status()
+            data = response.json()
+
+            models = []
+            for model in data.get("models", []):
+                name = model.get("name", "")
+                if _is_likely_embedding_model(name):
+                    dimensions = _estimate_dimensions_from_name(name)
+                    models.append({
+                        "id": name,
+                        "name": name,
+                        "dimensions": dimensions,
+                    })
+
+            if not models:
+                for model in data.get("models", []):
+                    name = model.get("name", "")
+                    models.append({
+                        "id": name,
+                        "name": name,
+                        "dimensions": 768,
+                    })
+
+            return models
+    except Exception as e:
+        print(f"Failed to discover Ollama models: {e}")
+        return []
+
+
+def _discover_lmstudio_models_sync(base_url: str) -> list[dict[str, Any]]:
+    """Discover available embedding models from LM Studio (synchronous)."""
+    try:
+        with httpx.Client(timeout=10) as client:
+            response = client.get(f"{base_url}/models")
+            response.raise_for_status()
+            data = response.json()
+
+            models = []
+            for model in data.get("data", []):
+                model_id = model.get("id", "")
+                if _is_likely_embedding_model(model_id):
+                    dimensions = _estimate_dimensions_from_name(model_id)
+                    models.append({
+                        "id": model_id,
+                        "name": model_id,
+                        "dimensions": dimensions,
+                    })
+
+            if not models:
+                for model in data.get("data", []):
+                    model_id = model.get("id", "")
+                    models.append({
+                        "id": model_id,
+                        "name": model_id,
+                        "dimensions": 768,
+                    })
+
+            return models
+    except Exception as e:
+        print(f"Failed to discover LM Studio models: {e}")
+        return []
+
+
 def discover_models_sync(provider: str, base_url: str | None = None) -> list[dict[str, Any]]:
-    """Synchronous wrapper for discover_models."""
-    return asyncio.run(discover_models(provider, base_url))
+    """Discover available embedding models for a provider (synchronous)."""
+    if provider == "ollama":
+        url = base_url or "http://localhost:11434"
+        return _discover_ollama_models_sync(url)
+    elif provider == "lmstudio":
+        url = base_url or "http://localhost:1234/v1"
+        return _discover_lmstudio_models_sync(url)
+    elif provider == "openai":
+        return EMBEDDING_MODELS.get("openai", [])
+    else:
+        return []

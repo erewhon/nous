@@ -178,6 +178,30 @@ fn strip_html_tags(html: &str) -> String {
         .to_string()
 }
 
+/// Find the nearest valid UTF-8 character boundary at or before the given byte index.
+fn floor_char_boundary(s: &str, index: usize) -> usize {
+    if index >= s.len() {
+        return s.len();
+    }
+    let mut i = index;
+    while i > 0 && !s.is_char_boundary(i) {
+        i -= 1;
+    }
+    i
+}
+
+/// Find the nearest valid UTF-8 character boundary at or after the given byte index.
+fn ceil_char_boundary(s: &str, index: usize) -> usize {
+    if index >= s.len() {
+        return s.len();
+    }
+    let mut i = index;
+    while i < s.len() && !s.is_char_boundary(i) {
+        i += 1;
+    }
+    i
+}
+
 /// Split text into overlapping chunks using a sliding window approach.
 /// Returns tuples of (chunk_text, start_offset, end_offset).
 fn sliding_window(text: &str, max_chars: usize, overlap: usize) -> Vec<(String, usize, usize)> {
@@ -195,16 +219,31 @@ fn sliding_window(text: &str, max_chars: usize, overlap: usize) -> Vec<(String, 
     let mut start = 0;
 
     while start < text.len() {
-        let end = (start + max_chars).min(text.len());
+        // Ensure end is at a valid UTF-8 boundary
+        let end = floor_char_boundary(text, (start + max_chars).min(text.len()));
+
+        // Safety check: if we can't make progress, break
+        if end <= start {
+            break;
+        }
 
         // Try to find a good break point (sentence or paragraph boundary)
         let chunk_end = if end < text.len() {
-            find_break_point(&text[start..end], max_chars)
+            find_break_point(&text[start..end], end - start)
                 .map(|offset| start + offset)
                 .unwrap_or(end)
         } else {
             end
         };
+
+        // Ensure chunk_end is at a valid UTF-8 boundary
+        let chunk_end = floor_char_boundary(text, chunk_end);
+
+        // Safety check: ensure we make progress
+        if chunk_end <= start {
+            start = ceil_char_boundary(text, start + 1);
+            continue;
+        }
 
         let chunk_text = text[start..chunk_end].trim().to_string();
         if !chunk_text.is_empty() {
@@ -215,9 +254,10 @@ fn sliding_window(text: &str, max_chars: usize, overlap: usize) -> Vec<(String, 
         let step = chunk_end - start;
         if step <= overlap {
             // Avoid infinite loop if chunk is too small
-            start = chunk_end;
+            start = ceil_char_boundary(text, chunk_end);
         } else {
-            start = chunk_end - overlap;
+            // Ensure the new start is at a valid UTF-8 boundary
+            start = ceil_char_boundary(text, chunk_end.saturating_sub(overlap));
         }
     }
 
@@ -226,7 +266,8 @@ fn sliding_window(text: &str, max_chars: usize, overlap: usize) -> Vec<(String, 
 
 /// Find a good break point in text (prefer sentence/paragraph boundaries).
 fn find_break_point(text: &str, max_len: usize) -> Option<usize> {
-    let search_text = &text[..max_len.min(text.len())];
+    let search_end = floor_char_boundary(text, max_len.min(text.len()));
+    let search_text = &text[..search_end];
 
     // Look for paragraph boundary (double newline)
     if let Some(pos) = search_text.rfind("\n\n") {

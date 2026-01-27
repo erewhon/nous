@@ -13,6 +13,7 @@ export function RAGSettings() {
     isConfigured,
     isIndexing,
     isDiscoveringModels,
+    indexingProgress,
     stats,
     discoveredModels,
     lastError,
@@ -484,8 +485,30 @@ export function RAGSettings() {
               color: "var(--color-text-primary)",
             }}
           >
-            {isRebuildingIndex || isIndexing ? "Rebuilding..." : "Rebuild Index"}
+            {isRebuildingIndex || isIndexing
+              ? indexingProgress
+                ? `Indexing ${indexingProgress.current}/${indexingProgress.total} pages...`
+                : "Rebuilding..."
+              : "Rebuild Index"}
           </button>
+
+          {/* Progress Bar */}
+          {(isRebuildingIndex || isIndexing) && indexingProgress && indexingProgress.total > 0 && (
+            <div className="mt-2">
+              <div
+                className="h-2 w-full rounded-full overflow-hidden"
+                style={{ backgroundColor: "var(--color-bg-tertiary)" }}
+              >
+                <div
+                  className="h-full rounded-full transition-all duration-300"
+                  style={{
+                    width: `${(indexingProgress.current / indexingProgress.total) * 100}%`,
+                    backgroundColor: "var(--color-accent)",
+                  }}
+                />
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
