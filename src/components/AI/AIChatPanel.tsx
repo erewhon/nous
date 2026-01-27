@@ -5,6 +5,8 @@ import { useAIStore, AI_PANEL_CONSTRAINTS } from "../../stores/aiStore";
 import { usePageStore } from "../../stores/pageStore";
 import { useNotebookStore } from "../../stores/notebookStore";
 import { useSectionStore } from "../../stores/sectionStore";
+import { useRAGStore } from "../../stores/ragStore";
+import type { SemanticSearchResult } from "../../types/rag";
 import {
   aiChatStream,
   createNotebook as apiCreateNotebook,
@@ -52,6 +54,8 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
   const [isDragging, setIsDragging] = useState(false);
   const [chatModelOverride, setChatModelOverride] = useState<string | null>(null);
   const [showModelSelector, setShowModelSelector] = useState(false);
+  const [ragContext, setRagContext] = useState<SemanticSearchResult[]>([]);
+  const [showRagContext, setShowRagContext] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -83,6 +87,11 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
   const { selectedPageId, pages, loadPages, updatePageContent, createPage, createSubpage } = usePageStore();
   const { notebooks, selectedNotebookId, loadNotebooks } = useNotebookStore();
   const { sections } = useSectionStore();
+  const {
+    isConfigured: ragConfigured,
+    settings: ragSettings,
+    getContext: getRagContext
+  } = useRAGStore();
 
   // Use props if provided, otherwise use store state
   const isOpen = isOpenProp !== undefined ? isOpenProp : panel.isOpen;
@@ -693,8 +702,24 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
     setDisplayMessages(prev => [...prev, { role: "user", content: userMessage.content }]);
     setInput("");
     setLoading(true);
-    setStatusText("Connecting...");
     setCreatedItems([]); // Clear previous created items
+    setRagContext([]); // Clear previous RAG context
+
+    // Fetch RAG context if enabled
+    let fetchedRagContext: SemanticSearchResult[] = [];
+    if (ragConfigured && ragSettings.ragEnabled) {
+      setStatusText("Searching relevant content...");
+      try {
+        // Use current notebook if context is locked, otherwise search all notebooks
+        const searchNotebookId = panel.lockedContext?.notebookId || selectedNotebookId || undefined;
+        fetchedRagContext = await getRagContext(userMessage.content, searchNotebookId, 5);
+        setRagContext(fetchedRagContext);
+      } catch (error) {
+        console.warn("Failed to fetch RAG context:", error);
+      }
+    }
+
+    setStatusText("Connecting...");
 
     const startTime = Date.now();
 
@@ -867,7 +892,16 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
         return promptParts.length > 0 ? promptParts.join("\n\n") : undefined;
       };
 
-      const resolvedSystemPrompt = resolveSystemPrompt();
+      let resolvedSystemPrompt = resolveSystemPrompt();
+
+      // Append RAG context to system prompt if we have relevant chunks
+      if (fetchedRagContext.length > 0) {
+        const ragContextText = fetchedRagContext
+          .map((chunk, i) => `[${i + 1}] "${chunk.title}" (score: ${chunk.score.toFixed(2)}):\n${chunk.content}`)
+          .join("\n\n");
+        const ragSection = `\n\n## Relevant Context from Other Notes\nThe following excerpts from the user's notes may be relevant to their question:\n\n${ragContextText}\n\nUse this context to provide more informed and accurate responses. If the context is not relevant to the user's question, you may ignore it.`;
+        resolvedSystemPrompt = (resolvedSystemPrompt || "") + ragSection;
+      }
 
       // Resolve model with inheritance: chat override > page > section > notebook > app default
       const resolveModel = (): string => {
@@ -1565,6 +1599,76 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
                 </div>
               </div>
             )}
+            {/* Show RAG context */}
+            {ragContext.length > 0 && (
+              <div
+                className="rounded-xl border p-4"
+                style={{
+                  backgroundColor: "rgba(139, 92, 246, 0.05)",
+                  borderColor: "rgba(139, 92, 246, 0.2)",
+                }}
+              >
+                <button
+                  onClick={() => setShowRagContext(!showRagContext)}
+                  className="flex items-center gap-2 w-full text-left"
+                >
+                  <IconBrain style={{ width: 14, height: 14, color: "var(--color-accent)" }} />
+                  <span
+                    className="text-sm font-medium flex-1"
+                    style={{ color: "var(--color-accent)" }}
+                  >
+                    {ragContext.length} relevant chunk{ragContext.length > 1 ? "s" : ""} found
+                  </span>
+                  <IconChevron
+                    style={{
+                      width: 12,
+                      height: 12,
+                      color: "var(--color-accent)",
+                      transform: showRagContext ? "rotate(180deg)" : "rotate(0deg)",
+                      transition: "transform 0.2s",
+                    }}
+                  />
+                </button>
+                {showRagContext && (
+                  <div className="mt-3 space-y-2">
+                    {ragContext.map((chunk) => (
+                      <div
+                        key={chunk.chunkId}
+                        className="rounded-lg p-3"
+                        style={{
+                          backgroundColor: "var(--color-bg-secondary)",
+                          border: "1px solid var(--color-border)",
+                        }}
+                      >
+                        <div className="flex items-center justify-between mb-2">
+                          <span
+                            className="text-xs font-medium"
+                            style={{ color: "var(--color-text-primary)" }}
+                          >
+                            {chunk.title}
+                          </span>
+                          <span
+                            className="text-xs rounded-full px-2 py-0.5"
+                            style={{
+                              backgroundColor: "rgba(139, 92, 246, 0.1)",
+                              color: "var(--color-accent)",
+                            }}
+                          >
+                            {(chunk.score * 100).toFixed(0)}% match
+                          </span>
+                        </div>
+                        <p
+                          className="text-xs leading-relaxed line-clamp-3"
+                          style={{ color: "var(--color-text-secondary)" }}
+                        >
+                          {chunk.content}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
             {/* Show created items */}
             {createdItems.length > 0 && (
               <div
@@ -1773,7 +1877,23 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
               </div>
             )}
           </div>
-          <span className="opacity-75">Enter to send</span>
+          <div className="flex items-center gap-3">
+            {/* RAG status indicator */}
+            {ragConfigured && ragSettings.ragEnabled && (
+              <span
+                className="flex items-center gap-1 rounded-full px-2 py-0.5"
+                style={{
+                  backgroundColor: "rgba(139, 92, 246, 0.2)",
+                  color: "var(--color-accent)",
+                }}
+                title="Semantic search enabled - relevant notes will be included in context"
+              >
+                <IconBrain style={{ width: 10, height: 10 }} />
+                RAG
+              </span>
+            )}
+            <span className="opacity-75">Enter to send</span>
+          </div>
         </div>
       </div>
     </div>
