@@ -37,6 +37,7 @@ export async function updateNotebook(
     systemPromptMode?: string;
     aiProvider?: string;
     aiModel?: string;
+    isPinned?: boolean;
   }
 ): Promise<Notebook> {
   return invoke<Notebook>("update_notebook", { notebookId, ...updates });
@@ -88,6 +89,7 @@ export async function updatePage(
     sectionId?: string | null;
     pageType?: "standard" | "markdown" | "pdf" | "jupyter" | "epub" | "calendar" | "chat";
     fileExtension?: string | null;
+    isFavorite?: boolean;
   },
   commit?: boolean // Whether to create a git commit (default: false, use true for explicit saves)
 ): Promise<Page> {
@@ -105,6 +107,7 @@ export async function updatePage(
   if (updates.sectionId !== undefined) params.sectionId = updates.sectionId;
   if (updates.pageType !== undefined) params.pageType = updates.pageType;
   if (updates.fileExtension !== undefined) params.fileExtension = updates.fileExtension;
+  if (updates.isFavorite !== undefined) params.isFavorite = updates.isFavorite;
 
   return invoke<Page>("update_page", params);
 }

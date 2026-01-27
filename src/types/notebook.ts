@@ -21,6 +21,7 @@ export const NotebookSchema = z.object({
   aiProvider: AIProviderTypeSchema.optional(),
   aiModel: z.string().optional(),
   syncConfig: SyncConfigSchema.optional(),
+  isPinned: z.boolean().default(false),
   position: z.number().default(0),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),

@@ -3,6 +3,14 @@ import { persist } from "zustand/middleware";
 import type { Page, EditorData } from "../types/page";
 import * as api from "../utils/api";
 
+// Recent page entry for tracking access history
+export interface RecentPageEntry {
+  pageId: string;
+  notebookId: string;
+  title: string;
+  accessedAt: string;
+}
+
 // Tab within a pane
 export interface PaneTab {
   pageId: string;
@@ -28,6 +36,8 @@ interface PageState {
   error: string | null;
   // Incremented when page data is fetched fresh, to force memo recomputation
   pageDataVersion: number;
+  // Recent pages tracking
+  recentPages: RecentPageEntry[];
 }
 
 interface PageActions {
@@ -117,6 +127,14 @@ interface PageActions {
   getActivePane: () => EditorPane | null;
   getPaneById: (paneId: string) => EditorPane | null;
 
+  // Favorites
+  toggleFavorite: (notebookId: string, pageId: string) => Promise<void>;
+  getFavoritePages: () => Page[];
+
+  // Recent pages
+  clearRecentPages: () => void;
+  getRecentPages: (limit?: number) => RecentPageEntry[];
+
   // Error handling
   clearError: () => void;
 }
@@ -142,6 +160,7 @@ export const usePageStore = create<PageStore>()(
   isLoading: false,
   error: null,
   pageDataVersion: 0,
+  recentPages: [],
 
   // Actions
   loadPages: async (notebookId, includeArchived) => {
@@ -464,10 +483,25 @@ export const usePageStore = create<PageStore>()(
       set({ selectedPageId: id });
     }
 
-    // When selecting a page, fetch fresh data from backend
+    // When selecting a page, fetch fresh data from backend and track in recent pages
     if (id) {
       const page = state.pages.find((p) => p.id === id);
       if (page) {
+        // Track in recent pages
+        const recentEntry: RecentPageEntry = {
+          pageId: page.id,
+          notebookId: page.notebookId,
+          title: page.title,
+          accessedAt: new Date().toISOString(),
+        };
+        set((state) => {
+          // Remove existing entry for this page if present
+          const filtered = state.recentPages.filter((r) => r.pageId !== id);
+          // Add to front, limit to 20
+          const newRecent = [recentEntry, ...filtered].slice(0, 20);
+          return { recentPages: newRecent };
+        });
+
         api.getPage(page.notebookId, id).then((freshPage) => {
           set((state) => ({
             pages: state.pages.map((p) => (p.id === id ? freshPage : p)),
@@ -759,6 +793,40 @@ export const usePageStore = create<PageStore>()(
     return state.panes.find((p) => p.id === paneId) || null;
   },
 
+  // Favorites
+  toggleFavorite: async (notebookId, pageId) => {
+    const state = get();
+    const page = state.pages.find((p) => p.id === pageId);
+    if (!page) return;
+
+    const newFavorite = !page.isFavorite;
+    try {
+      const updatedPage = await api.updatePage(notebookId, pageId, { isFavorite: newFavorite });
+      set((state) => ({
+        pages: state.pages.map((p) => (p.id === pageId ? updatedPage : p)),
+      }));
+    } catch (err) {
+      set({
+        error: err instanceof Error ? err.message : "Failed to toggle favorite",
+      });
+    }
+  },
+
+  getFavoritePages: () => {
+    const { pages } = get();
+    return pages.filter((p) => p.isFavorite && !p.deletedAt);
+  },
+
+  // Recent pages
+  clearRecentPages: () => {
+    set({ recentPages: [] });
+  },
+
+  getRecentPages: (limit = 20) => {
+    const { recentPages } = get();
+    return recentPages.slice(0, limit);
+  },
+
   clearError: () => {
     set({ error: null });
   },
@@ -768,6 +836,7 @@ export const usePageStore = create<PageStore>()(
       partialize: (state) => ({
         panes: state.panes,
         activePaneId: state.activePaneId,
+        recentPages: state.recentPages,
       }),
       onRehydrateStorage: () => (state) => {
         if (state) {
@@ -784,6 +853,10 @@ export const usePageStore = create<PageStore>()(
           // Set selectedPageId from active pane
           const activePane = state.panes.find((p) => p.id === state.activePaneId);
           state.selectedPageId = activePane?.pageId || null;
+          // Ensure recentPages array exists
+          if (!state.recentPages) {
+            state.recentPages = [];
+          }
         }
       },
     }

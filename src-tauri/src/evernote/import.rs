@@ -459,6 +459,7 @@ pub fn import_evernote_enex(
         ai_provider: None,
         ai_model: None,
         sync_config: None,
+        is_pinned: false,
         position: 0,
         created_at: now,
         updated_at: now,
@@ -565,6 +566,7 @@ pub fn import_evernote_enex(
             file_extension: None,
             last_file_sync: None,
             deleted_at: None,
+            is_favorite: false,
             created_at: note.created.unwrap_or(now),
             updated_at: note.updated.unwrap_or(now),
         };

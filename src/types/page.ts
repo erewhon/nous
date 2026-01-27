@@ -101,6 +101,8 @@ export const PageSchema = z.object({
   lastFileSync: z.string().datetime().nullable().optional(), // Last sync time for linked files
   // Soft delete support - pages in trash
   deletedAt: z.string().datetime().nullable().optional(), // When page was moved to trash (null = not deleted)
+  // Favorites
+  isFavorite: z.boolean().default(false),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });

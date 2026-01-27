@@ -660,6 +660,7 @@ fn import_org_file(content: &str, notebook_id: Uuid, fallback_title: &str) -> Pa
         file_extension: None,
         last_file_sync: None,
         deleted_at: None,
+        is_favorite: false,
         created_at,
         updated_at: now,
     }
@@ -965,6 +966,7 @@ pub fn import_orgmode(
         ai_provider: None,
         ai_model: None,
         sync_config: None,
+        is_pinned: false,
         position: 0,
         created_at: now,
         updated_at: now,

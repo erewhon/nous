@@ -30,9 +30,13 @@ interface NotebookActions {
   // Archive visibility
   toggleShowArchived: () => void;
 
+  // Pinning
+  togglePinned: (id: string) => Promise<void>;
+
   // Computed
   getVisibleNotebooks: () => Notebook[];
   getArchivedNotebooks: () => Notebook[];
+  getPinnedNotebooks: () => Notebook[];
 
   // Error handling
   clearError: () => void;
@@ -178,6 +182,25 @@ export const useNotebookStore = create<NotebookStore>((set, get) => ({
     set((state) => ({ showArchived: !state.showArchived }));
   },
 
+  togglePinned: async (id) => {
+    const state = get();
+    const notebook = state.notebooks.find((n) => n.id === id);
+    if (!notebook) return;
+
+    const newPinned = !notebook.isPinned;
+    set({ error: null });
+    try {
+      const updated = await api.updateNotebook(id, { isPinned: newPinned });
+      set((state) => ({
+        notebooks: state.notebooks.map((n) => (n.id === id ? updated : n)),
+      }));
+    } catch (err) {
+      set({
+        error: err instanceof Error ? err.message : "Failed to toggle pinned",
+      });
+    }
+  },
+
   getVisibleNotebooks: () => {
     const { notebooks, showArchived } = get();
     if (showArchived) {
@@ -189,6 +212,11 @@ export const useNotebookStore = create<NotebookStore>((set, get) => ({
   getArchivedNotebooks: () => {
     const { notebooks } = get();
     return notebooks.filter((n) => n.archived);
+  },
+
+  getPinnedNotebooks: () => {
+    const { notebooks } = get();
+    return notebooks.filter((n) => n.isPinned && !n.archived);
   },
 
   clearError: () => {

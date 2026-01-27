@@ -604,6 +604,7 @@ pub fn import_scrivener_project(
         ai_provider: None,
         ai_model: None,
         sync_config: None,
+        is_pinned: false,
         position: 0,
         created_at: now,
         updated_at: now,
@@ -675,6 +676,7 @@ pub fn import_scrivener_project(
             file_extension: None,
             last_file_sync: None,
             deleted_at: None,
+            is_favorite: false,
             created_at: now,
             updated_at: now,
         };

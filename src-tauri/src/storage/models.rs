@@ -223,6 +223,9 @@ pub struct Notebook {
     /// Sync configuration for this notebook
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sync_config: Option<SyncConfig>,
+    /// Whether this notebook is pinned to the top
+    #[serde(default)]
+    pub is_pinned: bool,
     /// Position for ordering notebooks
     #[serde(default)]
     pub position: i32,
@@ -246,6 +249,7 @@ impl Notebook {
             ai_provider: None,
             ai_model: None,
             sync_config: None,
+            is_pinned: false,
             position: 0,
             created_at: now,
             updated_at: now,
@@ -333,6 +337,9 @@ pub struct Page {
     /// When the page was moved to trash (None = not deleted)
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub deleted_at: Option<DateTime<Utc>>,
+    /// Whether this page is marked as a favorite
+    #[serde(default)]
+    pub is_favorite: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -361,6 +368,7 @@ impl Page {
             file_extension: None,
             last_file_sync: None,
             deleted_at: None,
+            is_favorite: false,
             created_at: now,
             updated_at: now,
         }

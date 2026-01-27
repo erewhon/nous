@@ -62,6 +62,7 @@ pub fn update_notebook(
     system_prompt_mode: Option<String>,
     ai_provider: Option<String>,
     ai_model: Option<String>,
+    is_pinned: Option<bool>,
 ) -> CommandResult<Notebook> {
     let storage = state.storage.lock().unwrap();
     let id = Uuid::parse_str(&notebook_id).map_err(|e| CommandError {
@@ -103,6 +104,10 @@ pub fn update_notebook(
     // Allow setting ai_model to None (empty string clears it)
     if let Some(model) = ai_model {
         notebook.ai_model = if model.is_empty() { None } else { Some(model) };
+    }
+    // Set is_pinned if provided
+    if let Some(pinned) = is_pinned {
+        notebook.is_pinned = pinned;
     }
     notebook.updated_at = chrono::Utc::now();
 

@@ -1278,6 +1278,7 @@ impl FileStorage {
             file_extension: Some(ext.to_lowercase()),
             last_file_sync: Some(now),
             deleted_at: None,
+            is_favorite: false,
             created_at: now,
             updated_at: now,
         };

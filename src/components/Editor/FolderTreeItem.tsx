@@ -76,6 +76,7 @@ interface FolderTreeItemProps {
   onCreatePage: (folderId?: string) => void;
   onCreateSubpage?: (parentPageId: string) => void;
   onDeletePage?: (pageId: string, pageTitle: string) => void;
+  onToggleFavorite?: (pageId: string) => void;
   onRenameFolder: (folderId: string, newName: string) => void;
   onDeleteFolder: (folderId: string) => void;
   renderFolder: (folder: Folder, depth: number) => React.ReactNode;
@@ -103,6 +104,7 @@ export const FolderTreeItem = memo(function FolderTreeItem({
   onCreatePage,
   onCreateSubpage,
   onDeletePage,
+  onToggleFavorite,
   onRenameFolder,
   onDeleteFolder,
   renderFolder,
@@ -439,6 +441,7 @@ export const FolderTreeItem = memo(function FolderTreeItem({
               onOpenInNewPane={onOpenInNewPane}
               onCreateSubpage={onCreateSubpage}
               onDeletePage={onDeletePage}
+              onToggleFavorite={onToggleFavorite}
               sections={sections}
               onMoveToSection={onMoveToSection}
               onMoveToNotebook={onMoveToNotebook}
@@ -580,6 +583,7 @@ interface DraggablePageItemProps {
   onOpenInNewPane?: (pageId: string) => void; // Open page in a new split pane
   onCreateSubpage?: (parentPageId: string) => void;
   onDeletePage?: (pageId: string, pageTitle: string) => void; // Delete the page
+  onToggleFavorite?: (pageId: string) => void; // Toggle favorite status
   sections?: Section[];
   onMoveToSection?: (pageId: string, sectionId: string | null) => void;
   onMoveToNotebook?: (pageId: string, pageTitle: string) => void; // Move page to another notebook
@@ -600,6 +604,7 @@ const DraggablePageItem = memo(function DraggablePageItem({
   onOpenInNewPane,
   onCreateSubpage,
   onDeletePage,
+  onToggleFavorite,
   sections,
   onMoveToSection,
   onMoveToNotebook,
@@ -610,6 +615,7 @@ const DraggablePageItem = memo(function DraggablePageItem({
 }: DraggablePageItemProps) {
   const [showContextMenu, setShowContextMenu] = useState(false);
   const [contextMenuPos, setContextMenuPos] = useState({ x: 0, y: 0 });
+  const [isHovered, setIsHovered] = useState(false);
 
   // Make page draggable
   const {
@@ -692,6 +698,14 @@ const DraggablePageItem = memo(function DraggablePageItem({
     onTogglePageExpand?.(page.id);
   }, [onTogglePageExpand, page.id]);
 
+  const handleToggleFavorite = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (onToggleFavorite) {
+      onToggleFavorite(page.id);
+    }
+    setShowContextMenu(false);
+  }, [onToggleFavorite, page.id]);
+
   return (
     <>
       <li
@@ -701,6 +715,8 @@ const DraggablePageItem = memo(function DraggablePageItem({
         {...attributes}
         className={isDragging ? "opacity-50" : ""}
         onContextMenu={handleContextMenu}
+        onMouseEnter={() => setIsHovered(true)}
+        onMouseLeave={() => setIsHovered(false)}
       >
         <div
           className="flex w-full min-w-0 items-center gap-1 rounded-lg py-1.5 text-left transition-all"
@@ -766,6 +782,15 @@ const DraggablePageItem = memo(function DraggablePageItem({
               <PageTypeIcon pageType={page.pageType} />
             </span>
             <span className="flex-1 min-w-0 truncate text-sm">{page.title}</span>
+            {page.isFavorite && !isHovered && (
+              <span
+                className="flex-shrink-0"
+                style={{ color: "var(--color-accent)" }}
+                title="Favorite"
+              >
+                <IconStarFilled />
+              </span>
+            )}
             {hasChildren && (
               <span
                 className="flex-shrink-0 text-xs"
@@ -786,6 +811,17 @@ const DraggablePageItem = memo(function DraggablePageItem({
               </span>
             )}
           </button>
+          {/* Star button on hover */}
+          {isHovered && onToggleFavorite && (
+            <button
+              onClick={handleToggleFavorite}
+              className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded transition-colors hover:bg-[var(--color-bg-tertiary)]"
+              style={{ color: page.isFavorite ? "var(--color-accent)" : "var(--color-text-muted)" }}
+              title={page.isFavorite ? "Remove from favorites" : "Add to favorites"}
+            >
+              {page.isFavorite ? <IconStarFilled /> : <IconStar />}
+            </button>
+          )}
         </div>
 
         {/* Child pages */}
@@ -803,6 +839,7 @@ const DraggablePageItem = memo(function DraggablePageItem({
                 onOpenInNewPane={onOpenInNewPane}
                 onCreateSubpage={onCreateSubpage}
                 onDeletePage={onDeletePage}
+                onToggleFavorite={onToggleFavorite}
                 sections={sections}
                 onMoveToSection={onMoveToSection}
                 onMoveToNotebook={onMoveToNotebook}
@@ -906,6 +943,26 @@ const DraggablePageItem = memo(function DraggablePageItem({
                   <path d="M12 5v14M5 12h14" />
                 </svg>
                 Create Subpage
+              </button>
+            </>
+          )}
+
+          {/* Favorite option */}
+          {onToggleFavorite && (
+            <>
+              {(onCreateSubpage || onOpenInNewPane) && (
+                <div
+                  className="my-1 border-t"
+                  style={{ borderColor: "var(--color-border)" }}
+                />
+              )}
+              <button
+                onClick={handleToggleFavorite}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-sm transition-colors hover:bg-[var(--color-bg-tertiary)]"
+                style={{ color: page.isFavorite ? "var(--color-accent)" : "var(--color-text-primary)" }}
+              >
+                {page.isFavorite ? <IconStarFilled /> : <IconStar />}
+                {page.isFavorite ? "Remove from Favorites" : "Add to Favorites"}
               </button>
             </>
           )}
@@ -1036,5 +1093,41 @@ const DraggablePageItem = memo(function DraggablePageItem({
     </>
   );
 });
+
+function IconStar() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+    </svg>
+  );
+}
+
+function IconStarFilled() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+    </svg>
+  );
+}
 
 export { PageItem, DraggablePageItem };

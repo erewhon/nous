@@ -149,7 +149,7 @@ export function FolderTree({
   onReorderPages,
   onMoveToNotebook,
 }: FolderTreeProps) {
-  const { createPage, createSubpage, movePageToFolder, movePageToParent, loadPages } = usePageStore();
+  const { createPage, createSubpage, movePageToFolder, movePageToParent, loadPages, toggleFavorite } = usePageStore();
   const {
     expandedFolderIds,
     toggleFolderExpanded,
@@ -578,6 +578,14 @@ END:VCALENDAR`;
     [notebookId, loadPages]
   );
 
+  // Handle toggling favorite status
+  const handleToggleFavorite = useCallback(
+    (pageId: string) => {
+      toggleFavorite(notebookId, pageId);
+    },
+    [notebookId, toggleFavorite]
+  );
+
   // DnD handlers
   const handleDragStart = useCallback((event: DragStartEvent) => {
     const { active } = event;
@@ -814,6 +822,7 @@ END:VCALENDAR`;
           onCreatePage={handleCreatePage}
           onCreateSubpage={handleCreateSubpage}
           onDeletePage={handleDeletePage}
+          onToggleFavorite={handleToggleFavorite}
           onRenameFolder={handleRenameFolder}
           onDeleteFolder={handleDeleteFolder}
           renderFolder={renderFolder}
@@ -843,6 +852,7 @@ END:VCALENDAR`;
       handleCreatePage,
       handleCreateSubpage,
       handleDeletePage,
+      handleToggleFavorite,
       handleRenameFolder,
       handleDeleteFolder,
       sectionsEnabled,
@@ -1382,6 +1392,7 @@ END:VCALENDAR`;
                   onOpenInNewPane={onOpenInNewPane}
                   onCreateSubpage={handleCreateSubpage}
                   onDeletePage={handleDeletePage}
+                  onToggleFavorite={handleToggleFavorite}
                   sections={sectionsEnabled ? sections : undefined}
                   onMoveToSection={onMovePageToSection}
                   onMoveToNotebook={onMoveToNotebook}

@@ -43,6 +43,7 @@ interface SortableNotebookItemProps {
   onHoverStart: () => void;
   onHoverEnd: () => void;
   onOpenSettings: () => void;
+  onTogglePinned: () => void;
 }
 
 function SortableNotebookItem({
@@ -54,6 +55,7 @@ function SortableNotebookItem({
   onHoverStart,
   onHoverEnd,
   onOpenSettings,
+  onTogglePinned,
 }: SortableNotebookItemProps) {
   const {
     attributes,
@@ -126,6 +128,15 @@ function SortableNotebookItem({
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1.5">
               <span className="block truncate font-medium">{notebook.name}</span>
+              {notebook.isPinned && (
+                <span
+                  title="Pinned"
+                  className="flex h-4 w-4 items-center justify-center"
+                  style={{ color: "var(--color-accent)" }}
+                >
+                  <IconPin />
+                </span>
+              )}
               {notebook.archived && (
                 <span
                   title="Archived"
@@ -150,19 +161,32 @@ function SortableNotebookItem({
             </span>
           </div>
         </button>
-        {/* Settings button - visible on hover */}
+        {/* Pin and Settings buttons - visible on hover */}
         {(isHovered || isSelected) && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onOpenSettings();
-            }}
-            className="flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-secondary]"
-            style={{ color: "var(--color-text-muted)" }}
-            title="Notebook settings"
-          >
-            <IconSettings />
-          </button>
+          <div className="flex items-center gap-0.5">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onTogglePinned();
+              }}
+              className="flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-secondary]"
+              style={{ color: notebook.isPinned ? "var(--color-accent)" : "var(--color-text-muted)" }}
+              title={notebook.isPinned ? "Unpin notebook" : "Pin notebook"}
+            >
+              <IconPin />
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenSettings();
+              }}
+              className="flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-secondary]"
+              style={{ color: "var(--color-text-muted)" }}
+              title="Notebook settings"
+            >
+              <IconSettings />
+            </button>
+          </div>
         )}
       </div>
     </li>
@@ -173,7 +197,7 @@ export function NotebookList({
   notebooks,
   selectedNotebookId,
 }: NotebookListProps) {
-  const { selectNotebook, reorderNotebooks } = useNotebookStore();
+  const { selectNotebook, reorderNotebooks, togglePinned } = useNotebookStore();
   const { notebookSortBy: sortBy, setNotebookSortBy: setSortBy } = useThemeStore();
   const [settingsNotebook, setSettingsNotebook] = useState<Notebook | null>(null);
   const [hoveredNotebookId, setHoveredNotebookId] = useState<string | null>(null);
@@ -190,9 +214,14 @@ export function NotebookList({
     })
   );
 
-  // Sort notebooks based on selected option
+  // Sort notebooks based on selected option, with pinned always first
   const sortedNotebooks = useMemo(() => {
     return [...notebooks].sort((a, b) => {
+      // Pinned notebooks always come first
+      if (a.isPinned && !b.isPinned) return -1;
+      if (!a.isPinned && b.isPinned) return 1;
+
+      // Within pinned or unpinned, sort by selected option
       switch (sortBy) {
         case "position":
           return a.position - b.position;
@@ -311,6 +340,7 @@ export function NotebookList({
                 onHoverStart={() => setHoveredNotebookId(notebook.id)}
                 onHoverEnd={() => setHoveredNotebookId(null)}
                 onOpenSettings={() => setSettingsNotebook(notebook)}
+                onTogglePinned={() => togglePinned(notebook.id)}
               />
             ))}
           </ul>
@@ -422,6 +452,25 @@ function IconSort() {
       <path d="M11 13h4" />
       <path d="M3 17l3 3 3-3" />
       <path d="M6 18V4" />
+    </svg>
+  );
+}
+
+function IconPin() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <line x1="12" y1="17" x2="12" y2="22" />
+      <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z" />
     </svg>
   );
 }

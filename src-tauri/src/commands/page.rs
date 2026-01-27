@@ -132,6 +132,7 @@ pub fn update_page(
     section_id: Option<Option<String>>,
     page_type: Option<String>,
     file_extension: Option<String>,
+    is_favorite: Option<bool>,
     #[allow(unused_variables)]
     commit: Option<bool>, // Whether to create a git commit (default: false)
 ) -> CommandResult<Page> {
@@ -208,6 +209,10 @@ pub fn update_page(
                 }
             }
         }
+    }
+    // Set is_favorite if provided
+    if let Some(favorite) = is_favorite {
+        page.is_favorite = favorite;
     }
     page.updated_at = chrono::Utc::now();
 
