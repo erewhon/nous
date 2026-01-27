@@ -1,9 +1,12 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
+export type SearchMode = "keyword" | "hybrid" | "semantic";
+
 interface SearchState {
   recentSearches: string[];
   searchScope: "all" | "current";
+  searchMode: SearchMode;
   selectedNotebookFilter: string | null;
 }
 
@@ -11,6 +14,7 @@ interface SearchActions {
   addRecentSearch: (query: string) => void;
   clearRecentSearches: () => void;
   setSearchScope: (scope: "all" | "current") => void;
+  setSearchMode: (mode: SearchMode) => void;
   setNotebookFilter: (notebookId: string | null) => void;
 }
 
@@ -23,6 +27,7 @@ export const useSearchStore = create<SearchStore>()(
     (set) => ({
       recentSearches: [],
       searchScope: "all",
+      searchMode: "keyword" as SearchMode,
       selectedNotebookFilter: null,
 
       addRecentSearch: (query: string) => {
@@ -47,6 +52,10 @@ export const useSearchStore = create<SearchStore>()(
         set({ searchScope: scope });
       },
 
+      setSearchMode: (mode) => {
+        set({ searchMode: mode });
+      },
+
       setNotebookFilter: (notebookId) => {
         set({ selectedNotebookFilter: notebookId });
       },
@@ -56,6 +65,7 @@ export const useSearchStore = create<SearchStore>()(
       partialize: (state) => ({
         recentSearches: state.recentSearches,
         searchScope: state.searchScope,
+        searchMode: state.searchMode,
       }),
     }
   )

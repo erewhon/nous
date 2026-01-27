@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 // Embedding provider types
-export const EmbeddingProviderSchema = z.enum(["openai", "ollama", "lmstudio"]);
+export const EmbeddingProviderSchema = z.enum(["openai", "ollama", "lmstudio", "bedrock"]);
 export type EmbeddingProvider = z.infer<typeof EmbeddingProviderSchema>;
 
 // Embedding configuration schema
@@ -56,12 +56,19 @@ export const EMBEDDING_MODELS: Record<
   lmstudio: [
     { id: "text-embedding-nomic-embed-text-v1.5", name: "Nomic Embed", dimensions: 768 },
   ],
+  bedrock: [
+    { id: "amazon.titan-embed-text-v1", name: "Titan Embeddings G1", dimensions: 1536 },
+    { id: "amazon.titan-embed-text-v2:0", name: "Titan Embeddings G2", dimensions: 1024 },
+    { id: "cohere.embed-english-v3", name: "Cohere Embed English v3", dimensions: 1024 },
+    { id: "cohere.embed-multilingual-v3", name: "Cohere Embed Multilingual v3", dimensions: 1024 },
+  ],
 };
 
-// Default base URLs for local providers
+// Default base URLs for local providers (or region for Bedrock)
 export const DEFAULT_EMBEDDING_BASE_URLS: Partial<Record<EmbeddingProvider, string>> = {
   ollama: "http://localhost:11434",
   lmstudio: "http://localhost:1234/v1",
+  bedrock: "us-east-1",
 };
 
 // Helper to get default dimensions for a model
@@ -76,6 +83,7 @@ export function getModelDimensions(provider: EmbeddingProvider, modelId: string)
     openai: 1536,
     ollama: 768,
     lmstudio: 768,
+    bedrock: 1024,
   };
   return defaults[provider];
 }
@@ -83,7 +91,14 @@ export function getModelDimensions(provider: EmbeddingProvider, modelId: string)
 // Provider info for UI
 export const EMBEDDING_PROVIDER_INFO: Record<
   EmbeddingProvider,
-  { label: string; description: string; needsApiKey: boolean; supportsDiscovery: boolean }
+  {
+    label: string;
+    description: string;
+    needsApiKey: boolean;
+    supportsDiscovery: boolean;
+    needsRegion?: boolean;
+    apiKeyPlaceholder?: string;
+  }
 > = {
   openai: {
     label: "OpenAI",
@@ -102,6 +117,14 @@ export const EMBEDDING_PROVIDER_INFO: Record<
     description: "Local embeddings via LM Studio",
     needsApiKey: false,
     supportsDiscovery: true,
+  },
+  bedrock: {
+    label: "AWS Bedrock",
+    description: "AWS-hosted embeddings (Titan, Cohere)",
+    needsApiKey: true,
+    supportsDiscovery: false,
+    needsRegion: true,
+    apiKeyPlaceholder: "access_key:secret_key (or leave empty for IAM role)",
   },
 };
 

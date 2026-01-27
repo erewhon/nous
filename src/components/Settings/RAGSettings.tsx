@@ -201,14 +201,14 @@ export function RAGSettings() {
             className="mb-2 block text-sm font-medium"
             style={{ color: "var(--color-text-primary)" }}
           >
-            API Key
+            {settings.provider === "bedrock" ? "AWS Credentials" : "API Key"}
           </label>
           <div className="relative">
             <input
               type={showApiKey ? "text" : "password"}
               value={settings.apiKey}
               onChange={(e) => setApiKey(e.target.value)}
-              placeholder={`Enter your ${providerInfo.label} API key`}
+              placeholder={providerInfo.apiKeyPlaceholder || `Enter your ${providerInfo.label} API key`}
               className="w-full rounded-lg border px-3 py-2.5 pr-10 text-sm outline-none transition-colors focus:border-[--color-accent]"
               style={{
                 backgroundColor: "var(--color-bg-secondary)",
@@ -229,14 +229,47 @@ export function RAGSettings() {
             className="mt-1.5 text-xs"
             style={{ color: "var(--color-text-muted)" }}
           >
-            Get your API key from{" "}
-            {settings.provider === "openai" ? "platform.openai.com" : "your provider"}
+            {settings.provider === "openai" && "Get your API key from platform.openai.com"}
+            {settings.provider === "bedrock" && "Format: ACCESS_KEY:SECRET_KEY or leave empty to use IAM role/environment credentials"}
+          </p>
+        </div>
+      )}
+
+      {/* AWS Region (for Bedrock) */}
+      {providerInfo.needsRegion && (
+        <div>
+          <label
+            className="mb-2 block text-sm font-medium"
+            style={{ color: "var(--color-text-primary)" }}
+          >
+            AWS Region
+          </label>
+          <select
+            value={settings.baseUrl || DEFAULT_EMBEDDING_BASE_URLS[settings.provider] || "us-east-1"}
+            onChange={(e) => setBaseUrl(e.target.value)}
+            className="w-full rounded-lg border px-3 py-2.5 text-sm outline-none transition-colors focus:border-[--color-accent] dark-select"
+            style={{
+              backgroundColor: "var(--color-bg-secondary)",
+              borderColor: "var(--color-border)",
+              color: "var(--color-text-primary)",
+            }}
+          >
+            <option value="us-east-1">US East (N. Virginia)</option>
+            <option value="us-west-2">US West (Oregon)</option>
+            <option value="eu-west-1">Europe (Ireland)</option>
+            <option value="eu-central-1">Europe (Frankfurt)</option>
+            <option value="ap-southeast-1">Asia Pacific (Singapore)</option>
+            <option value="ap-northeast-1">Asia Pacific (Tokyo)</option>
+            <option value="ap-south-1">Asia Pacific (Mumbai)</option>
+          </select>
+          <p className="mt-1.5 text-xs" style={{ color: "var(--color-text-muted)" }}>
+            Select the AWS region where Bedrock is enabled
           </p>
         </div>
       )}
 
       {/* Base URL (for local providers) */}
-      {!providerInfo.needsApiKey && (
+      {!providerInfo.needsApiKey && !providerInfo.needsRegion && (
         <div>
           <label
             className="mb-2 block text-sm font-medium"

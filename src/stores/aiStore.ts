@@ -133,6 +133,7 @@ function createDefaultSettings(): AISettings {
     createDefaultProviderConfig("anthropic"),
     createDefaultProviderConfig("ollama"),
     createDefaultProviderConfig("lmstudio"),
+    createDefaultProviderConfig("bedrock"),
   ];
 
   return {

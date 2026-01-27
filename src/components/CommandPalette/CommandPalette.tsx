@@ -8,8 +8,9 @@ import {
 } from "react";
 import { useNotebookStore } from "../../stores/notebookStore";
 import { usePageStore } from "../../stores/pageStore";
-import { useSearchStore } from "../../stores/searchStore";
+import { useSearchStore, type SearchMode } from "../../stores/searchStore";
 import { useActionStore } from "../../stores/actionStore";
+import { useRAGStore } from "../../stores/ragStore";
 import { searchPages, exportPageToFile, importMarkdownFile, convertDocument, importMarkdown } from "../../utils/api";
 import { save, open } from "@tauri-apps/plugin-dialog";
 import { highlightText } from "../../utils/highlightText";
@@ -53,9 +54,10 @@ export function CommandPalette({
   const { notebooks, selectedNotebookId, selectNotebook, createNotebook } =
     useNotebookStore();
   const { pages, selectPage, createPage } = usePageStore();
-  const { recentSearches, searchScope, addRecentSearch, setSearchScope, clearRecentSearches } =
+  const { recentSearches, searchScope, searchMode, addRecentSearch, setSearchScope, setSearchMode, clearRecentSearches } =
     useSearchStore();
   const { actions, runAction: executeAction, openActionLibrary } = useActionStore();
+  const { isConfigured: ragConfigured, settings: ragSettings, hybridSearch, semanticSearch } = useRAGStore();
 
   // Debounced search
   useEffect(() => {
@@ -72,13 +74,33 @@ export function CommandPalette({
     setIsSearching(true);
     searchTimeoutRef.current = setTimeout(async () => {
       try {
-        const results = await searchPages(query, 50);
-        // Filter by notebook scope if set to "current"
-        const filtered =
-          searchScope === "current" && selectedNotebookId
-            ? results.filter((r) => r.notebookId === selectedNotebookId)
-            : results;
-        setSearchResults(filtered.slice(0, 20));
+        let results: SearchResult[];
+        const notebookFilter = searchScope === "current" ? selectedNotebookId : undefined;
+
+        // Choose search method based on mode and RAG availability
+        if (searchMode === "hybrid" && ragConfigured && ragSettings.ragEnabled) {
+          results = await hybridSearch(query, notebookFilter ?? undefined, 50);
+        } else if (searchMode === "semantic" && ragConfigured && ragSettings.ragEnabled) {
+          // Semantic search returns SemanticSearchResult, convert to SearchResult
+          const semanticResults = await semanticSearch(query, notebookFilter ?? undefined, 50);
+          results = semanticResults.map((r) => ({
+            pageId: r.pageId,
+            notebookId: r.notebookId,
+            title: r.title,
+            snippet: r.content,
+            score: r.score,
+            pageType: "standard" as PageType,
+          }));
+        } else {
+          // Default to keyword search
+          results = await searchPages(query, 50);
+          // Filter by notebook scope if set to "current"
+          if (searchScope === "current" && selectedNotebookId) {
+            results = results.filter((r) => r.notebookId === selectedNotebookId);
+          }
+        }
+
+        setSearchResults(results.slice(0, 20));
         // Save to recent searches
         addRecentSearch(query);
       } catch (error) {
@@ -87,14 +109,14 @@ export function CommandPalette({
       } finally {
         setIsSearching(false);
       }
-    }, 150);
+    }, searchMode === "keyword" ? 150 : 300); // Slightly longer debounce for semantic search
 
     return () => {
       if (searchTimeoutRef.current) {
         clearTimeout(searchTimeoutRef.current);
       }
     };
-  }, [query, searchScope, selectedNotebookId, addRecentSearch]);
+  }, [query, searchScope, searchMode, selectedNotebookId, addRecentSearch, ragConfigured, ragSettings.ragEnabled, hybridSearch, semanticSearch]);
 
   // Build commands list
   const commands = useMemo<Command[]>(() => {
@@ -603,6 +625,42 @@ export function CommandPalette({
           >
             Current notebook
           </button>
+
+          {/* Divider */}
+          <div
+            className="h-4 w-px mx-1"
+            style={{ backgroundColor: "var(--color-border)" }}
+          />
+
+          {/* Search mode toggle */}
+          <span
+            className="text-xs"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            Mode:
+          </span>
+          {(["keyword", "hybrid", "semantic"] as SearchMode[]).map((mode) => {
+            const isActive = searchMode === mode;
+            const isDisabled = mode !== "keyword" && (!ragConfigured || !ragSettings.ragEnabled);
+            return (
+              <button
+                key={mode}
+                onClick={() => !isDisabled && setSearchMode(mode)}
+                disabled={isDisabled}
+                className="rounded-full text-xs px-3 py-1 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                style={{
+                  backgroundColor: isActive
+                    ? "var(--color-accent)"
+                    : "var(--color-bg-tertiary)",
+                  color: isActive ? "white" : "var(--color-text-secondary)",
+                }}
+                title={isDisabled ? "Enable Semantic Search in Settings to use this mode" : undefined}
+              >
+                {mode === "keyword" ? "Keyword" : mode === "hybrid" ? "Hybrid" : "Semantic"}
+              </button>
+            );
+          })}
+
           {recentSearches.length > 0 && !query.trim() && (
             <button
               onClick={clearRecentSearches}

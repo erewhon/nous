@@ -1,11 +1,21 @@
 """Embedding generation for RAG (Retrieval-Augmented Generation)."""
 
 import asyncio
+import json
 from typing import Any
 
 import httpx
 from openai import AsyncOpenAI, OpenAI
 from pydantic import BaseModel
+
+# Optional boto3 import for AWS Bedrock
+try:
+    import boto3
+    from botocore.config import Config as BotoConfig
+
+    HAS_BOTO3 = True
+except ImportError:
+    HAS_BOTO3 = False
 
 
 # Known embedding model patterns for filtering
@@ -56,6 +66,11 @@ async def generate_embedding(text: str, config: dict[str, Any]) -> list[float]:
     elif provider == "lmstudio":
         base_url = config.get("base_url", "http://localhost:1234/v1")
         return await _generate_lmstudio_embedding(text, model, base_url)
+
+    elif provider == "bedrock":
+        region = config.get("base_url", "us-east-1")  # Using base_url for region
+        credentials = _parse_bedrock_credentials(config.get("api_key"))
+        return await _generate_bedrock_embedding(text, model, region, credentials)
 
     else:
         raise ValueError(f"Unknown embedding provider: {provider}")
@@ -151,6 +166,19 @@ async def _generate_lmstudio_embedding(
     return response.data[0].embedding
 
 
+async def _generate_bedrock_embedding(
+    text: str, model: str, region: str, credentials: dict[str, str] | None = None
+) -> list[float]:
+    """Generate embedding using AWS Bedrock."""
+    # Run sync version in executor to avoid blocking
+    import asyncio
+
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(
+        None, _generate_bedrock_embedding_sync, text, model, region, credentials
+    )
+
+
 # Synchronous implementations for PyO3 integration
 # Using sync clients to avoid asyncio.run() event loop issues
 
@@ -197,6 +225,131 @@ def _generate_lmstudio_embedding_sync(text: str, model: str, base_url: str) -> l
     return response.data[0].embedding
 
 
+def _generate_bedrock_embedding_sync(
+    text: str, model: str, region: str, credentials: dict[str, str] | None = None
+) -> list[float]:
+    """Generate embedding using AWS Bedrock (synchronous)."""
+    if not HAS_BOTO3:
+        raise ImportError(
+            "boto3 is required for Bedrock embeddings. "
+            "Install with: pip install boto3"
+        )
+
+    # Configure boto3 client
+    config = BotoConfig(
+        region_name=region,
+        retries={"max_attempts": 3, "mode": "adaptive"},
+    )
+
+    # Create client with explicit credentials or default credential chain
+    if credentials and credentials.get("access_key") and credentials.get("secret_key"):
+        client = boto3.client(
+            "bedrock-runtime",
+            region_name=region,
+            aws_access_key_id=credentials["access_key"],
+            aws_secret_access_key=credentials["secret_key"],
+            config=config,
+        )
+    else:
+        # Use default credential chain (env vars, ~/.aws/credentials, IAM role, etc.)
+        client = boto3.client("bedrock-runtime", region_name=region, config=config)
+
+    # Prepare request body based on model provider
+    if model.startswith("amazon.titan"):
+        body = json.dumps({"inputText": text})
+    elif model.startswith("cohere.embed"):
+        body = json.dumps({
+            "texts": [text],
+            "input_type": "search_document",
+        })
+    else:
+        # Default format (works for most models)
+        body = json.dumps({"inputText": text})
+
+    # Invoke model
+    response = client.invoke_model(
+        modelId=model,
+        body=body,
+        contentType="application/json",
+        accept="application/json",
+    )
+
+    # Parse response based on model provider
+    response_body = json.loads(response["body"].read())
+
+    if model.startswith("amazon.titan"):
+        return response_body["embedding"]
+    elif model.startswith("cohere.embed"):
+        return response_body["embeddings"][0]
+    else:
+        # Try common response formats
+        if "embedding" in response_body:
+            return response_body["embedding"]
+        elif "embeddings" in response_body:
+            return response_body["embeddings"][0]
+        else:
+            raise ValueError(f"Unknown response format for model {model}: {response_body}")
+
+
+def _generate_bedrock_embeddings_batch_sync(
+    texts: list[str], model: str, region: str, credentials: dict[str, str] | None = None
+) -> list[list[float]]:
+    """Generate embeddings in batch using AWS Bedrock (synchronous)."""
+    if not HAS_BOTO3:
+        raise ImportError(
+            "boto3 is required for Bedrock embeddings. "
+            "Install with: pip install boto3"
+        )
+
+    # Configure boto3 client
+    config = BotoConfig(
+        region_name=region,
+        retries={"max_attempts": 3, "mode": "adaptive"},
+    )
+
+    if credentials and credentials.get("access_key") and credentials.get("secret_key"):
+        client = boto3.client(
+            "bedrock-runtime",
+            region_name=region,
+            aws_access_key_id=credentials["access_key"],
+            aws_secret_access_key=credentials["secret_key"],
+            config=config,
+        )
+    else:
+        client = boto3.client("bedrock-runtime", region_name=region, config=config)
+
+    # Cohere supports batch natively
+    if model.startswith("cohere.embed"):
+        # Cohere has a max batch size of 96
+        max_batch_size = 96
+        all_embeddings: list[list[float]] = []
+
+        for i in range(0, len(texts), max_batch_size):
+            batch = texts[i : i + max_batch_size]
+            body = json.dumps({
+                "texts": batch,
+                "input_type": "search_document",
+            })
+
+            response = client.invoke_model(
+                modelId=model,
+                body=body,
+                contentType="application/json",
+                accept="application/json",
+            )
+
+            response_body = json.loads(response["body"].read())
+            all_embeddings.extend(response_body["embeddings"])
+
+        return all_embeddings
+
+    # For other models, process one at a time
+    return [
+        _generate_bedrock_embedding_sync(text, model, region, credentials)
+        for text in texts
+    ]
+
+
 def generate_embedding_sync(text: str, config: dict[str, Any]) -> list[float]:
     """Generate embedding for a single text (synchronous version for PyO3)."""
     provider = config.get("provider", "openai")
@@ -210,8 +363,28 @@ def generate_embedding_sync(text: str, config: dict[str, Any]) -> list[float]:
     elif provider == "lmstudio":
         base_url = config.get("base_url", "http://localhost:1234/v1")
         return _generate_lmstudio_embedding_sync(text, model, base_url)
+    elif provider == "bedrock":
+        region = config.get("base_url", "us-east-1")  # Using base_url field for region
+        credentials = _parse_bedrock_credentials(config.get("api_key"))
+        return _generate_bedrock_embedding_sync(text, model, region, credentials)
     else:
         raise ValueError(f"Unknown embedding provider: {provider}")
+
+
+def _parse_bedrock_credentials(api_key: str | None) -> dict[str, str] | None:
+    """Parse Bedrock credentials from api_key field.
+
+    Format: "access_key:secret_key" or empty/None to use default credentials.
+    """
+    if not api_key or api_key.strip() == "":
+        return None
+
+    if ":" in api_key:
+        parts = api_key.split(":", 1)
+        return {"access_key": parts[0], "secret_key": parts[1]}
+
+    # If no colon, assume it's just the access key (secret might be in env)
+    return {"access_key": api_key, "secret_key": ""}
 
 
 def generate_embeddings_batch_sync(
@@ -227,7 +400,12 @@ def generate_embeddings_batch_sync(
     if provider == "openai":
         return _generate_openai_embeddings_batch_sync(texts, model, config.get("api_key"))
 
-    # For non-OpenAI providers, process sequentially
+    if provider == "bedrock":
+        region = config.get("base_url", "us-east-1")
+        credentials = _parse_bedrock_credentials(config.get("api_key"))
+        return _generate_bedrock_embeddings_batch_sync(texts, model, region, credentials)
+
+    # For other providers, process sequentially
     return [generate_embedding_sync(text, config) for text in texts]
 
 
@@ -252,6 +430,12 @@ EMBEDDING_MODELS = {
             "dimensions": 768,
         },
     ],
+    "bedrock": [
+        {"id": "amazon.titan-embed-text-v1", "name": "Titan Embeddings G1", "dimensions": 1536},
+        {"id": "amazon.titan-embed-text-v2:0", "name": "Titan Embeddings G2", "dimensions": 1024},
+        {"id": "cohere.embed-english-v3", "name": "Cohere Embed English v3", "dimensions": 1024},
+        {"id": "cohere.embed-multilingual-v3", "name": "Cohere Embed Multilingual v3", "dimensions": 1024},
+    ],
 }
 
 
@@ -272,6 +456,7 @@ def get_default_dimensions(provider: str, model: str) -> int:
         "openai": 1536,
         "ollama": 768,
         "lmstudio": 768,
+        "bedrock": 1024,
     }
     return defaults.get(provider, 768)
 
@@ -426,6 +611,9 @@ async def discover_models(provider: str, base_url: str | None = None) -> list[di
     elif provider == "openai":
         # OpenAI models are well-known, return static list
         return EMBEDDING_MODELS.get("openai", [])
+    elif provider == "bedrock":
+        # Bedrock models are well-known, return static list
+        return EMBEDDING_MODELS.get("bedrock", [])
     else:
         return []
 
@@ -508,5 +696,7 @@ def discover_models_sync(provider: str, base_url: str | None = None) -> list[dic
         return _discover_lmstudio_models_sync(url)
     elif provider == "openai":
         return EMBEDDING_MODELS.get("openai", [])
+    elif provider == "bedrock":
+        return EMBEDDING_MODELS.get("bedrock", [])
     else:
         return []

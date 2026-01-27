@@ -27,7 +27,7 @@ const TABS: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: "web-research", label: "Web Research", icon: <IconGlobe /> },
 ];
 
-const PROVIDER_INFO: Record<ProviderType, { label: string; description: string; needsApiKey: boolean }> = {
+const PROVIDER_INFO: Record<ProviderType, { label: string; description: string; needsApiKey: boolean; needsRegion?: boolean; apiKeyPlaceholder?: string }> = {
   openai: {
     label: "OpenAI",
     description: "GPT-4o, GPT-4, o1 models",
@@ -47,6 +47,13 @@ const PROVIDER_INFO: Record<ProviderType, { label: string; description: string; 
     label: "LM Studio",
     description: "Local models via LM Studio",
     needsApiKey: false,
+  },
+  bedrock: {
+    label: "AWS Bedrock",
+    description: "Claude, Titan, Llama via AWS",
+    needsApiKey: true,
+    needsRegion: true,
+    apiKeyPlaceholder: "access_key:secret_key (or leave empty for IAM)",
   },
 };
 
@@ -174,12 +181,14 @@ function AISettingsContent() {
     anthropic: false,
     ollama: false,
     lmstudio: false,
+    bedrock: false,
   });
   const [newModelInputs, setNewModelInputs] = useState<Record<ProviderType, string>>({
     openai: "",
     anthropic: "",
     ollama: "",
     lmstudio: "",
+    bedrock: "",
   });
 
   const toggleApiKeyVisibility = (type: ProviderType) => {
@@ -399,7 +408,7 @@ function ProviderAccordion({
   onAddModel,
 }: {
   provider: ProviderConfig;
-  info: { label: string; description: string; needsApiKey: boolean };
+  info: { label: string; description: string; needsApiKey: boolean; needsRegion?: boolean; apiKeyPlaceholder?: string };
   isExpanded: boolean;
   onToggleExpand: () => void;
   onToggleEnabled: (enabled: boolean) => void;
@@ -480,14 +489,14 @@ function ProviderAccordion({
                 className="mb-1.5 block text-xs font-medium"
                 style={{ color: "var(--color-text-muted)" }}
               >
-                API Key
+                {provider.type === "bedrock" ? "AWS Credentials" : "API Key"}
               </label>
               <div className="relative">
                 <input
                   type={showApiKey ? "text" : "password"}
                   value={provider.apiKey || ""}
                   onChange={(e) => onApiKeyChange(e.target.value)}
-                  placeholder={`Enter your ${info.label} API key`}
+                  placeholder={info.apiKeyPlaceholder || `Enter your ${info.label} API key`}
                   className="w-full rounded-lg border px-3 py-2 pr-10 text-sm outline-none transition-colors focus:border-[--color-accent]"
                   style={{
                     backgroundColor: "var(--color-bg-tertiary)",
@@ -505,15 +514,48 @@ function ProviderAccordion({
                 </button>
               </div>
               <p className="mt-1 text-xs" style={{ color: "var(--color-text-muted)" }}>
-                {provider.type === "openai"
-                  ? "Get your API key from platform.openai.com"
-                  : "Get your API key from console.anthropic.com"}
+                {provider.type === "openai" && "Get your API key from platform.openai.com"}
+                {provider.type === "anthropic" && "Get your API key from console.anthropic.com"}
+                {provider.type === "bedrock" && "Format: ACCESS_KEY:SECRET_KEY or leave empty for IAM/env credentials"}
+              </p>
+            </div>
+          )}
+
+          {/* AWS Region (for Bedrock) */}
+          {info.needsRegion && (
+            <div className="mb-4">
+              <label
+                className="mb-1.5 block text-xs font-medium"
+                style={{ color: "var(--color-text-muted)" }}
+              >
+                AWS Region
+              </label>
+              <select
+                value={provider.baseUrl || "us-east-1"}
+                onChange={(e) => onBaseUrlChange(e.target.value)}
+                className="w-full rounded-lg border px-3 py-2 text-sm outline-none transition-colors focus:border-[--color-accent] dark-select"
+                style={{
+                  backgroundColor: "var(--color-bg-tertiary)",
+                  borderColor: "var(--color-border)",
+                  color: "var(--color-text-primary)",
+                }}
+              >
+                <option value="us-east-1">US East (N. Virginia)</option>
+                <option value="us-west-2">US West (Oregon)</option>
+                <option value="eu-west-1">Europe (Ireland)</option>
+                <option value="eu-central-1">Europe (Frankfurt)</option>
+                <option value="ap-southeast-1">Asia Pacific (Singapore)</option>
+                <option value="ap-northeast-1">Asia Pacific (Tokyo)</option>
+                <option value="ap-south-1">Asia Pacific (Mumbai)</option>
+              </select>
+              <p className="mt-1 text-xs" style={{ color: "var(--color-text-muted)" }}>
+                Select the AWS region where Bedrock is enabled
               </p>
             </div>
           )}
 
           {/* Base URL (for local providers) */}
-          {!info.needsApiKey && (
+          {!info.needsApiKey && !info.needsRegion && (
             <div className="mb-4">
               <label
                 className="mb-1.5 block text-xs font-medium"

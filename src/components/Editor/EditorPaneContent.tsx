@@ -46,7 +46,7 @@ export function EditorPaneContent({
   showPaneControls,
   zenMode = false,
 }: EditorPaneContentProps) {
-  const { pages, updatePageContent, createPage, pageDataVersion, openTabInPane, closeTabInPane, updateTabTitleInPane } = usePageStore();
+  const { pages, updatePageContent, setPageContentLocal, createPage, pageDataVersion, openTabInPane, closeTabInPane, updateTabTitleInPane } = usePageStore();
   const { updatePageLinks } = useLinkStore();
   const setZenMode = useThemeStore((state) => state.setZenMode);
   const zenModeSettings = useThemeStore((state) => state.zenModeSettings);
@@ -162,6 +162,32 @@ export function EditorPaneContent({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pane.pageId]);
 
+  // Track if this is the initial mount for this page
+  const isInitialMountRef = useRef(true);
+  const lastPageIdRef = useRef(pane.pageId);
+
+  // Reset initial mount flag when page changes
+  useEffect(() => {
+    if (lastPageIdRef.current !== pane.pageId) {
+      isInitialMountRef.current = true;
+      lastPageIdRef.current = pane.pageId;
+    }
+  }, [pane.pageId]);
+
+  // Update editor when fresh data arrives (pageDataVersion changes)
+  useEffect(() => {
+    // Skip initial mount - initialData prop handles that
+    if (isInitialMountRef.current) {
+      isInitialMountRef.current = false;
+      return;
+    }
+
+    // Render fresh data to the editor
+    if (editorRef.current && editorData && isStandardPage) {
+      editorRef.current.render(editorData);
+    }
+  }, [pageDataVersion, editorData, isStandardPage]);
+
   // Handle content change (for undo history capture)
   const handleChange = useCallback(
     (data: OutputData) => {
@@ -186,6 +212,11 @@ export function EditorPaneContent({
         })),
       };
 
+      // Update local store immediately (optimistic update)
+      // This ensures the cache is fresh even if backend save hasn't completed
+      // Critical for flush-on-unmount to avoid race conditions when navigating back
+      setPageContentLocal(pane.pageId, editorData);
+
       await updatePageContent(notebookId, pane.pageId, editorData, false);
 
       requestAnimationFrame(() => {
@@ -196,7 +227,7 @@ export function EditorPaneContent({
         setLastSaved(new Date());
       });
     },
-    [notebookId, pane.pageId, selectedPage, updatePageContent, updatePageLinks]
+    [notebookId, pane.pageId, selectedPage, updatePageContent, setPageContentLocal, updatePageLinks]
   );
 
   // Handle jump to history state
@@ -242,6 +273,9 @@ export function EditorPaneContent({
           })),
         };
 
+        // Update local store immediately (optimistic update)
+        setPageContentLocal(pane.pageId, editorData);
+
         await updatePageContent(notebookId, pane.pageId, editorData, true);
         updatePageLinks({
           ...selectedPage,
@@ -252,7 +286,7 @@ export function EditorPaneContent({
         setIsSaving(false);
       }
     },
-    [notebookId, pane.pageId, selectedPage, updatePageContent, updatePageLinks]
+    [notebookId, pane.pageId, selectedPage, updatePageContent, setPageContentLocal, updatePageLinks]
   );
 
   // Handle wiki link clicks

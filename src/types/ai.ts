@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 // Provider types
-export const ProviderTypeSchema = z.enum(["openai", "anthropic", "ollama", "lmstudio"]);
+export const ProviderTypeSchema = z.enum(["openai", "anthropic", "ollama", "lmstudio", "bedrock"]);
 export type ProviderType = z.infer<typeof ProviderTypeSchema>;
 
 // Model configuration for a provider
@@ -52,12 +52,23 @@ export const DEFAULT_MODELS: Record<ProviderType, Array<{ id: string; name: stri
   lmstudio: [
     { id: "local-model", name: "Local Model" },
   ],
+  bedrock: [
+    { id: "anthropic.claude-3-5-sonnet-20241022-v2:0", name: "Claude 3.5 Sonnet v2" },
+    { id: "anthropic.claude-3-5-haiku-20241022-v1:0", name: "Claude 3.5 Haiku" },
+    { id: "anthropic.claude-3-sonnet-20240229-v1:0", name: "Claude 3 Sonnet" },
+    { id: "amazon.titan-text-premier-v1:0", name: "Titan Text Premier" },
+    { id: "amazon.titan-text-express-v1", name: "Titan Text Express" },
+    { id: "meta.llama3-2-90b-instruct-v1:0", name: "Llama 3.2 90B" },
+    { id: "meta.llama3-2-11b-instruct-v1:0", name: "Llama 3.2 11B" },
+    { id: "mistral.mistral-large-2407-v1:0", name: "Mistral Large" },
+  ],
 };
 
-// Default base URLs for local providers
+// Default base URLs for local providers (or region for Bedrock)
 export const DEFAULT_BASE_URLS: Partial<Record<ProviderType, string>> = {
   ollama: "http://localhost:11434",
   lmstudio: "http://localhost:1234/v1",
+  bedrock: "us-east-1",
 };
 
 // Helper to create default provider config

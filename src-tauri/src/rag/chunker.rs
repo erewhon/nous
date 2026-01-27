@@ -138,6 +138,58 @@ fn extract_text_from_block(block: &EditorBlock) -> String {
             }
         }
 
+        "video" => {
+            let mut parts: Vec<String> = Vec::new();
+
+            // Extract caption
+            if let Some(caption) = block.data.get("caption").and_then(|v| v.as_str()) {
+                let caption = caption.trim();
+                if !caption.is_empty() {
+                    parts.push(format!("Video: {}", caption));
+                }
+            }
+
+            // Extract original name/title
+            if let Some(name) = block.data.get("originalName").and_then(|v| v.as_str()) {
+                let name = name.trim();
+                if !name.is_empty() && !parts.iter().any(|p| p.contains(name)) {
+                    parts.push(format!("Title: {}", name));
+                }
+            }
+
+            // Extract summary (2-sentence summary)
+            if let Some(summary) = block.data.get("summary").and_then(|v| v.as_str()) {
+                let summary = summary.trim();
+                if !summary.is_empty() {
+                    parts.push(format!("Summary: {}", summary));
+                }
+            }
+
+            // Extract synopsis (3-paragraph overview)
+            if let Some(synopsis) = block.data.get("synopsis").and_then(|v| v.as_str()) {
+                let synopsis = synopsis.trim();
+                if !synopsis.is_empty() {
+                    parts.push(format!("Synopsis: {}", synopsis));
+                }
+            }
+
+            // Extract transcript from transcription.segments
+            if let Some(transcription) = block.data.get("transcription") {
+                if let Some(segments) = transcription.get("segments").and_then(|v| v.as_array()) {
+                    let transcript_text: String = segments
+                        .iter()
+                        .filter_map(|seg| seg.get("text").and_then(|v| v.as_str()))
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    if !transcript_text.is_empty() {
+                        parts.push(format!("Transcript: {}", transcript_text));
+                    }
+                }
+            }
+
+            parts.join("\n\n")
+        }
+
         _ => {
             // For unknown block types, try common text fields
             block

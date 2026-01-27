@@ -43,6 +43,11 @@ export const BlockEditor = forwardRef<BlockEditorRef, BlockEditorProps>(function
   const holderId = `editor-${editorId}`;
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  // Track pending data that needs to be saved on unmount
+  const pendingDataRef = useRef<OutputData | null>(null);
+  // Keep a ref to onSave so cleanup effect can access latest callback without re-running
+  const onSaveRef = useRef(onSave);
+  onSaveRef.current = onSave;
 
   // Get keymap setting from theme store
   const editorKeymap = useThemeStore((state) => state.settings.editorKeymap);
@@ -57,6 +62,9 @@ export const BlockEditor = forwardRef<BlockEditorRef, BlockEditorProps>(function
     (data: OutputData) => {
       onChange?.(data);
 
+      // Track pending data for flush on unmount
+      pendingDataRef.current = data;
+
       // Debounce auto-save
       if (saveTimeoutRef.current) {
         clearTimeout(saveTimeoutRef.current);
@@ -64,6 +72,7 @@ export const BlockEditor = forwardRef<BlockEditorRef, BlockEditorProps>(function
 
       saveTimeoutRef.current = setTimeout(() => {
         onSave?.(data);
+        pendingDataRef.current = null; // Clear after successful save
       }, 2000); // Auto-save after 2 seconds of inactivity
     },
     [onChange, onSave]
@@ -110,20 +119,31 @@ export const BlockEditor = forwardRef<BlockEditorRef, BlockEditorProps>(function
   // Checklist enhancements (drag handles and auto-sort)
   useChecklistEnhancer(editor, holderId);
 
-  // Cleanup timeout on unmount
+  // Cleanup: flush pending save on unmount
   useEffect(() => {
     return () => {
       if (saveTimeoutRef.current) {
         clearTimeout(saveTimeoutRef.current);
       }
+      // Flush any pending save immediately before unmounting
+      if (pendingDataRef.current && onSaveRef.current) {
+        onSaveRef.current(pendingDataRef.current);
+        pendingDataRef.current = null;
+      }
     };
-  }, []);
+  }, []); // Empty deps - only runs on unmount, uses refs for latest values
 
   // Save on Ctrl+S - this is an explicit save that should trigger git commit
   useEffect(() => {
     const handleKeyDown = async (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === "s") {
         e.preventDefault();
+        // Clear pending debounced save since we're saving explicitly now
+        if (saveTimeoutRef.current) {
+          clearTimeout(saveTimeoutRef.current);
+        }
+        pendingDataRef.current = null;
+
         const data = await save();
         if (data) {
           // Use explicit save callback if provided, otherwise fall back to regular save

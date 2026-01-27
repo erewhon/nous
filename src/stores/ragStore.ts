@@ -118,6 +118,7 @@ export const useRAGStore = create<RAGStore>()(
         openai: [],
         ollama: [],
         lmstudio: [],
+        bedrock: [],
       },
       lastError: null,
 

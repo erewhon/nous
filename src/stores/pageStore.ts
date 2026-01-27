@@ -70,6 +70,9 @@ interface PageActions {
     content: EditorData,
     commit?: boolean // Whether to create a git commit (default: false)
   ) => Promise<void>;
+  // Update page content in local store only (no backend call)
+  // Used for optimistic updates when flushing editor on unmount
+  setPageContentLocal: (pageId: string, content: EditorData) => void;
   deletePage: (notebookId: string, pageId: string) => Promise<void>;
   duplicatePage: (notebookId: string, pageId: string) => Promise<void>;
 
@@ -303,6 +306,16 @@ export const usePageStore = create<PageStore>()(
           err instanceof Error ? err.message : "Failed to update page content",
       });
     }
+  },
+
+  setPageContentLocal: (pageId, content) => {
+    // Update local store only - used for optimistic updates when editor unmounts
+    // This ensures the store cache is fresh even if backend save hasn't completed
+    set((state) => ({
+      pages: state.pages.map((p) =>
+        p.id === pageId ? { ...p, content, updatedAt: new Date().toISOString() } : p
+      ),
+    }));
   },
 
   deletePage: async (notebookId, pageId) => {
