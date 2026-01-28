@@ -46,6 +46,7 @@ export class VideoTool implements BlockTool {
   private transcriptionDialogContainer: HTMLDivElement | null = null;
   private isTranscriptionDialogOpen: boolean = false;
   private summaryRoot: Root | null = null;
+  private thumbnailRoot: Root | null = null;
   private isSummaryCollapsed: boolean = false;
 
   static get toolbox() {
@@ -130,6 +131,7 @@ export class VideoTool implements BlockTool {
 
       // Construct asset URL manually - use http://asset.localhost format
       this.data.url = `http://asset.localhost${linkedPath}`;
+      this.cleanupReactRoots();
       this.wrapper.innerHTML = "";
       this.renderVideoPlayer();
     } catch (error) {
@@ -425,6 +427,7 @@ export class VideoTool implements BlockTool {
       // Brief delay to show completion, then render player
       setTimeout(() => {
         if (this.wrapper) {
+          this.cleanupReactRoots();
           this.wrapper.innerHTML = "";
           this.renderVideoPlayer();
         }
@@ -479,6 +482,7 @@ export class VideoTool implements BlockTool {
       this.data.originalName = cleanPath.split(/[/\\]/).pop() || "Local Video";
       this.data.filename = "";
       this.data.localPath = cleanPath;
+      this.cleanupReactRoots();
       this.wrapper.innerHTML = "";
       this.renderVideoPlayer();
     } catch (error) {
@@ -517,6 +521,7 @@ export class VideoTool implements BlockTool {
       this.data.externalType = "youtube";
       this.data.originalName = `YouTube: ${videoId}`;
       this.data.filename = "";
+      this.cleanupReactRoots();
       this.wrapper.innerHTML = "";
       this.renderVideoPlayer();
       return;
@@ -531,6 +536,7 @@ export class VideoTool implements BlockTool {
       this.data.externalType = "vimeo";
       this.data.originalName = `Vimeo: ${videoId}`;
       this.data.filename = "";
+      this.cleanupReactRoots();
       this.wrapper.innerHTML = "";
       this.renderVideoPlayer();
       return;
@@ -542,6 +548,7 @@ export class VideoTool implements BlockTool {
     this.data.externalType = "direct";
     this.data.originalName = url.split("/").pop() || "External Video";
     this.data.filename = "";
+    this.cleanupReactRoots();
     this.wrapper.innerHTML = "";
     this.renderVideoPlayer();
   }
@@ -627,9 +634,15 @@ export class VideoTool implements BlockTool {
       // Create thumbnail container and mount React component
       const thumbnailContainer = document.createElement("div");
       thumbnailContainer.classList.add("video-thumbnail-container");
-      const thumbnailRoot = createRoot(thumbnailContainer);
 
-      thumbnailRoot.render(
+      // Clean up existing thumbnail root before creating new one
+      if (this.thumbnailRoot) {
+        this.thumbnailRoot.unmount();
+        this.thumbnailRoot = null;
+      }
+      this.thumbnailRoot = createRoot(thumbnailContainer);
+
+      this.thumbnailRoot.render(
         createElement(VideoThumbnail, {
           videoPath: this.data.url,
           thumbnailUrl: this.data.thumbnailUrl,
@@ -812,6 +825,25 @@ export class VideoTool implements BlockTool {
   }
 
   /**
+   * Cleanup all React roots before re-rendering.
+   * This prevents duplication when switching pages or re-rendering.
+   */
+  private cleanupReactRoots(): void {
+    if (this.viewerRoot) {
+      this.viewerRoot.unmount();
+      this.viewerRoot = null;
+    }
+    if (this.summaryRoot) {
+      this.summaryRoot.unmount();
+      this.summaryRoot = null;
+    }
+    if (this.thumbnailRoot) {
+      this.thumbnailRoot.unmount();
+      this.thumbnailRoot = null;
+    }
+  }
+
+  /**
    * Create and mount the modal container for the video player.
    */
   private createModalContainer(): void {
@@ -974,6 +1006,7 @@ export class VideoTool implements BlockTool {
         toggleBtn.classList.toggle("cdx-settings-button--active", this.data.showTranscript);
         // Re-render to show/hide transcript
         if (this.wrapper) {
+          this.cleanupReactRoots();
           this.wrapper.innerHTML = "";
           this.renderVideoPlayer();
         }
@@ -1001,6 +1034,7 @@ export class VideoTool implements BlockTool {
           generateBtn.style.pointerEvents = "none";
           await this.generateSummaryAndSynopsis(this.data.transcription);
           if (this.wrapper) {
+            this.cleanupReactRoots();
             this.wrapper.innerHTML = "";
             this.renderVideoPlayer();
           }
@@ -1034,6 +1068,7 @@ export class VideoTool implements BlockTool {
       this.data.transcription = undefined;
       this.data.transcriptionStatus = "none";
       this.data.showTranscript = false;
+      this.cleanupReactRoots();
       this.destroyModalContainer();
       if (this.wrapper) {
         this.wrapper.innerHTML = "";
@@ -1067,6 +1102,7 @@ export class VideoTool implements BlockTool {
     }
     // Re-render to reflect new status
     if (this.wrapper) {
+      this.cleanupReactRoots();
       this.wrapper.innerHTML = "";
       if (this.data.url) {
         this.renderVideoPlayer();
@@ -1120,6 +1156,7 @@ export class VideoTool implements BlockTool {
     // Re-render to show results
     console.log("Re-rendering video player, summary exists:", !!this.data.summary);
     if (this.wrapper) {
+      this.cleanupReactRoots();
       this.wrapper.innerHTML = "";
       this.renderVideoPlayer();
     }
@@ -1241,14 +1278,7 @@ Respond with only the three paragraphs, separated by blank lines. No headings or
 
   // Cleanup
   destroy(): void {
-    if (this.viewerRoot) {
-      this.viewerRoot.unmount();
-      this.viewerRoot = null;
-    }
-    if (this.summaryRoot) {
-      this.summaryRoot.unmount();
-      this.summaryRoot = null;
-    }
+    this.cleanupReactRoots();
     this.destroyModalContainer();
     this.destroyTranscriptionDialogContainer();
     this.videoEl = null;

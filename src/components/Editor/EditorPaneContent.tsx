@@ -162,31 +162,10 @@ export function EditorPaneContent({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pane.pageId]);
 
-  // Track if this is the initial mount for this page
-  const isInitialMountRef = useRef(true);
-  const lastPageIdRef = useRef(pane.pageId);
-
-  // Reset initial mount flag when page changes
-  useEffect(() => {
-    if (lastPageIdRef.current !== pane.pageId) {
-      isInitialMountRef.current = true;
-      lastPageIdRef.current = pane.pageId;
-    }
-  }, [pane.pageId]);
-
-  // Update editor when fresh data arrives (pageDataVersion changes)
-  useEffect(() => {
-    // Skip initial mount - initialData prop handles that
-    if (isInitialMountRef.current) {
-      isInitialMountRef.current = false;
-      return;
-    }
-
-    // Render fresh data to the editor
-    if (editorRef.current && editorData && isStandardPage) {
-      editorRef.current.render(editorData);
-    }
-  }, [pageDataVersion, editorData, isStandardPage]);
+  // NOTE: We removed the effect that called editorRef.current.render(editorData) here.
+  // It was causing duplicate block rendering because useEditor already has an effect
+  // that renders when initialData changes (which is derived from editorData/pageDataVersion).
+  // Having both effects caused Editor.js to render blocks twice, creating duplicates.
 
   // Handle content change (for undo history capture)
   const handleChange = useCallback(
@@ -202,10 +181,22 @@ export function EditorPaneContent({
     async (data: OutputData) => {
       if (!notebookId || !pane.pageId || !selectedPage) return;
 
+      // Deduplicate blocks by ID to prevent corruption from Editor.js bugs
+      const seenIds = new Set<string>();
+      const uniqueBlocks = data.blocks.filter((block) => {
+        const id = block.id ?? crypto.randomUUID();
+        if (seenIds.has(id)) {
+          console.warn('[EditorPaneContent] Duplicate block ID detected and removed:', id);
+          return false;
+        }
+        seenIds.add(id);
+        return true;
+      });
+
       const editorData: EditorData = {
         time: data.time,
         version: data.version,
-        blocks: data.blocks.map((block) => ({
+        blocks: uniqueBlocks.map((block) => ({
           id: block.id ?? crypto.randomUUID(),
           type: block.type,
           data: block.data as Record<string, unknown>,
@@ -235,11 +226,22 @@ export function EditorPaneContent({
     (entryId: string) => {
       const data = jumpTo(entryId);
       if (data && notebookId && pane.pageId && selectedPage) {
+        // Deduplicate blocks by ID to prevent corruption
+        const seenIds = new Set<string>();
+        const uniqueBlocks = data.blocks.filter((block) => {
+          const id = block.id ?? crypto.randomUUID();
+          if (seenIds.has(id)) {
+            return false;
+          }
+          seenIds.add(id);
+          return true;
+        });
+
         // Also save the jumped-to state
         const editorData: EditorData = {
           time: data.time,
           version: data.version,
-          blocks: data.blocks.map((block) => ({
+          blocks: uniqueBlocks.map((block) => ({
             id: block.id ?? crypto.randomUUID(),
             type: block.type,
             data: block.data as Record<string, unknown>,
@@ -263,10 +265,22 @@ export function EditorPaneContent({
 
       setIsSaving(true);
       try {
+        // Deduplicate blocks by ID to prevent corruption from Editor.js bugs
+        const seenIds = new Set<string>();
+        const uniqueBlocks = data.blocks.filter((block) => {
+          const id = block.id ?? crypto.randomUUID();
+          if (seenIds.has(id)) {
+            console.warn('[EditorPaneContent] Duplicate block ID detected and removed:', id);
+            return false;
+          }
+          seenIds.add(id);
+          return true;
+        });
+
         const editorData: EditorData = {
           time: data.time,
           version: data.version,
-          blocks: data.blocks.map((block) => ({
+          blocks: uniqueBlocks.map((block) => ({
             id: block.id ?? crypto.randomUUID(),
             type: block.type,
             data: block.data as Record<string, unknown>,

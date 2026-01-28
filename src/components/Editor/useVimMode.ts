@@ -1378,6 +1378,13 @@ export function useVimMode({
         return;
       }
 
+      // Don't interfere when Editor.js popover is open (slash commands, block tunes, etc.)
+      // This allows typing in the popover's search field for filtering
+      const popoverOpen = document.querySelector('.ce-popover--opened');
+      if (popoverOpen) {
+        return;
+      }
+
       // Only handle when focus is in the editor
       if (!containerRef.current?.contains(document.activeElement)) {
         return;

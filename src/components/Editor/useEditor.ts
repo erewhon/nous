@@ -46,6 +46,8 @@ export function useEditor({
 }: UseEditorOptions) {
   const editorRef = useRef<EditorJS | null>(null);
   const isReady = useRef(false);
+  // Flag to prevent onChange from firing during render operations
+  const isRenderingRef = useRef(false);
 
   // Initialize editor
   useEffect(() => {
@@ -180,7 +182,8 @@ export function useEditor({
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       tools: tools as any,
       onChange: async () => {
-        if (onChange && editorRef.current && isReady.current) {
+        // Don't save during render operations - this can capture partial/corrupted data
+        if (onChange && editorRef.current && isReady.current && !isRenderingRef.current) {
           const data = await editorRef.current.save();
           onChange(data);
         }
@@ -205,7 +208,12 @@ export function useEditor({
   // Update data when initialData changes (for switching between pages)
   useEffect(() => {
     if (editorRef.current && isReady.current && initialData) {
-      editorRef.current.render(initialData);
+      // Set flag to prevent onChange from firing during render
+      isRenderingRef.current = true;
+      editorRef.current.render(initialData).finally(() => {
+        // Clear flag after render completes
+        isRenderingRef.current = false;
+      });
     }
   }, [initialData]);
 
@@ -227,7 +235,11 @@ export function useEditor({
   // Render method - for external state updates (like undo/redo)
   const render = useCallback((data: OutputData) => {
     if (editorRef.current && isReady.current) {
-      editorRef.current.render(data);
+      // Set flag to prevent onChange from firing during render
+      isRenderingRef.current = true;
+      editorRef.current.render(data).finally(() => {
+        isRenderingRef.current = false;
+      });
     }
   }, []);
 
