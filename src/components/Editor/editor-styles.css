@@ -580,6 +580,10 @@ h4.ce-header {
   border: 1px solid #3a3a5a !important;
   border-radius: 8px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  /* Ensure popover is always visible and properly positioned */
+  z-index: 10002 !important;
+  /* Prevent any parent transforms from affecting fixed positioning */
+  position: fixed !important;
 }
 
 .ce-popover__container {
@@ -2985,31 +2989,19 @@ wiki-link.broken,
   color: var(--color-text-primary) !important;
 }
 
-/* Fix popover positioning to prevent left-side truncation */
-/* The ce-popover is appended to body by Editor.js, so positioning is relative to viewport */
+/* Editor.js popovers are appended to body with position: fixed */
+/* Positioning is handled by JavaScript in BlockEditor.tsx */
 .ce-popover {
   /* Ensure popover stays within viewport */
   max-width: calc(100vw - 32px);
 }
 
-/* Override popover positioning when it would be clipped on the left */
+/* When popover is open, ensure it's visible */
 .ce-popover--opened {
   /* Use fixed positioning relative to viewport */
   position: fixed !important;
-  /* Ensure minimum distance from left edge of viewport */
+  /* Ensure minimum width for usability */
   min-width: 200px;
-}
-
-/* When popover is positioned too far left, shift it right */
-@supports (left: max(0px, 16px)) {
-  .ce-popover--opened {
-    left: max(16px, var(--popover-left, 16px)) !important;
-  }
-}
-
-/* Fallback for browsers without max() support */
-.ce-popover--opened[style*="left: -"] {
-  left: 16px !important;
 }
 
 /* Ensure the editor doesn't clip popovers that remain within the editor */
@@ -3045,44 +3037,90 @@ wiki-link.broken,
   z-index: 10001;
 }
 
-/* Force popover to stay within viewport bounds */
-.ce-popover[style] {
-  /* When left position would be negative or too far left */
-  transform: translateX(max(0px, calc(16px - var(--popover-offset-left, 0px))));
+/* Editor.js popovers are appended to body with position: fixed */
+/* Ensure they appear above all content including video blocks */
+
+/* Slash command popover - highest priority */
+.ce-popover--opened {
+  z-index: 10002 !important;
+  /* Ensure popover doesn't get clipped */
+  overflow: visible !important;
 }
 
-/* Ensure slash command popover is visible above all content */
-/* This fixes visibility issues when triggered below videos/summaries */
-.ce-popover--opened {
+/* Block tunes settings popover */
+.ce-settings,
+.ce-settings__default-zone,
+.ce-settings__plugin-zone {
   z-index: 10002 !important;
 }
 
-/* Inline toolbar should also have high z-index */
+/* Block tunes container */
+.ce-block-tunes {
+  z-index: 10001 !important;
+}
+
+/* Inline toolbar */
 .ce-inline-toolbar {
   z-index: 10001 !important;
 }
 
-/* Block tunes (settings menu) should appear above all block content */
-/* Use !important to override any inline styles */
-.ce-block-tunes,
-.ce-settings {
-  z-index: 10001 !important;
+/* Ensure the Editor.js toolbox (slash menu items) is visible */
+.ce-toolbox {
+  z-index: 10002 !important;
 }
 
-/* Ensure video block content doesn't overlap with block tunes menu */
-/* Set z-index to 0 so block tunes (z-index: 10001) appear above */
+/* Video block elements should have low z-index to not interfere with popovers */
+/* Using auto instead of 0 to avoid creating unnecessary stacking contexts */
 .video-block .video-thumbnail,
 .video-block .video-wrapper,
-.video-block .video-player-container,
+.video-block .video-player-container {
+  position: relative;
+  z-index: auto;
+}
+
+/* Video summary should not interfere with Editor.js popovers */
 .video-block .video-summary {
   position: relative;
-  z-index: 0 !important;
+  z-index: auto;
 }
 
 /* Ensure overlays inside video thumbnails also don't cover block tunes */
 .video-thumbnail > div[style*="position: absolute"],
 .video-thumbnail > div[style*="inset: 0"] {
   z-index: 1 !important;
+}
+
+/* Ensure the Editor.js toolbar is visible and clickable above video content */
+/* The toolbar contains the plus (+) and settings (⋮) buttons */
+.ce-toolbar {
+  /* Force toolbar above all video block content */
+  z-index: 10000 !important;
+  pointer-events: auto !important;
+}
+
+.ce-toolbar__actions {
+  z-index: 10000 !important;
+}
+
+/* The popover that appears when clicking the settings button */
+/* Uses position: fixed and is appended near the block */
+.ce-popover,
+.ce-settings {
+  /* Ensure popover appears above video content */
+  z-index: 10002 !important;
+}
+
+/* The popover container should not be clipped by video block */
+.ce-popover__container {
+  z-index: 10002 !important;
+}
+
+/* When a block is focused or hovered, ensure its content doesn't cover the toolbar */
+.ce-block:hover .video-block,
+.ce-block--focused .video-block,
+.ce-block--selected .video-block {
+  /* Prevent video from creating stacking context that traps toolbar */
+  z-index: auto !important;
 }
 
 /* Columns Block Styles */

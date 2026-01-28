@@ -185,19 +185,51 @@ export const BlockEditor = forwardRef<BlockEditorRef, BlockEditorProps>(function
     };
   }, [pages]);
 
-  // Fix popover positioning to prevent left-side truncation
-  // Editor.js popovers can extend beyond viewport when blocks are near left edge
+  // Fix popover positioning to prevent clipping
+  // Editor.js popovers can extend beyond viewport when blocks are near edges
   useEffect(() => {
     const repositionPopover = (popover: HTMLElement) => {
-      const rect = popover.getBoundingClientRect();
-      const minLeft = 16; // Minimum distance from left edge
+      // Wait for styles to apply
+      requestAnimationFrame(() => {
+        const rect = popover.getBoundingClientRect();
+        const viewportHeight = window.innerHeight;
+        const viewportWidth = window.innerWidth;
+        const minMargin = 16; // Minimum distance from edges
 
-      if (rect.left < minLeft) {
-        // Calculate how much to shift right
-        const shiftAmount = minLeft - rect.left;
-        const currentLeft = parseFloat(popover.style.left) || 0;
-        popover.style.left = `${currentLeft + shiftAmount}px`;
-      }
+        // Fix horizontal position if clipped on the left
+        if (rect.left < minMargin) {
+          const shiftAmount = minMargin - rect.left;
+          const currentLeft = parseFloat(popover.style.left) || 0;
+          popover.style.left = `${currentLeft + shiftAmount}px`;
+        }
+
+        // Fix horizontal position if clipped on the right
+        if (rect.right > viewportWidth - minMargin) {
+          const shiftAmount = rect.right - (viewportWidth - minMargin);
+          const currentLeft = parseFloat(popover.style.left) || 0;
+          popover.style.left = `${currentLeft - shiftAmount}px`;
+        }
+
+        // Ensure popover is visible vertically - don't let it go off-screen
+        if (rect.top < minMargin) {
+          const currentTop = parseFloat(popover.style.top) || 0;
+          popover.style.top = `${currentTop + (minMargin - rect.top)}px`;
+        }
+
+        // If popover extends below viewport, position it above the trigger instead
+        if (rect.bottom > viewportHeight - minMargin) {
+          // Calculate how much of the popover is below the viewport
+          const overflow = rect.bottom - (viewportHeight - minMargin);
+          const currentTop = parseFloat(popover.style.top) || 0;
+          // Shift up, but not above the viewport
+          const newTop = Math.max(minMargin, currentTop - overflow);
+          popover.style.top = `${newTop}px`;
+        }
+
+        // Ensure the popover is visible
+        popover.style.visibility = 'visible';
+        popover.style.opacity = '1';
+      });
     };
 
     // Observer to watch for popover elements appearing in the DOM
