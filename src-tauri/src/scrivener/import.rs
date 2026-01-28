@@ -604,6 +604,7 @@ pub fn import_scrivener_project(
         ai_provider: None,
         ai_model: None,
         sync_config: None,
+        encryption_config: None,
         is_pinned: false,
         position: 0,
         created_at: now,

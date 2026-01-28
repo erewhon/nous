@@ -171,6 +171,29 @@ impl LibraryStorage {
         Ok(updated)
     }
 
+    /// Update a library's encryption configuration
+    pub fn update_library_encryption(
+        &self,
+        id: Uuid,
+        encryption_config: Option<crate::encryption::EncryptionConfig>,
+    ) -> Result<Library, LibraryError> {
+        let mut libraries = self.list_libraries()?;
+
+        let lib = libraries
+            .iter_mut()
+            .find(|lib| lib.id == id)
+            .ok_or(LibraryError::NotFound(id))?;
+
+        lib.encryption_config = encryption_config;
+        lib.updated_at = chrono::Utc::now();
+
+        let updated = lib.clone();
+        self.save_libraries(&libraries)?;
+
+        log::info!("Updated library encryption config for '{}'", updated.name);
+        Ok(updated)
+    }
+
     /// Delete a library (cannot delete default)
     pub fn delete_library(&self, id: Uuid) -> Result<(), LibraryError> {
         let libraries = self.list_libraries()?;

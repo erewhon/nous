@@ -9,6 +9,10 @@ use super::models::{
     EditorBlock, EditorData, FileStorageMode, Folder, FolderType, Notebook, NotebookType, Page,
     PageType, Section,
 };
+use crate::encryption::{
+    decrypt_json, encrypt_json, is_encrypted_file, EncryptedContainer, EncryptionError,
+    EncryptionKey,
+};
 
 #[derive(Error, Debug)]
 pub enum StorageError {
@@ -20,6 +24,9 @@ pub enum StorageError {
 
     #[error("ZIP error: {0}")]
     Zip(#[from] zip::result::ZipError),
+
+    #[error("Encryption error: {0}")]
+    Encryption(#[from] EncryptionError),
 
     #[error("Notebook not found: {0}")]
     NotebookNotFound(Uuid),
@@ -50,6 +57,9 @@ pub enum StorageError {
 
     #[error("Invalid page type for operation: expected {expected}, got {actual}")]
     InvalidPageType { expected: String, actual: String },
+
+    #[error("Content is encrypted but no key provided")]
+    EncryptedContentNoKey,
 }
 
 pub type Result<T> = std::result::Result<T, StorageError>;
@@ -1499,6 +1509,334 @@ impl FileStorage {
         }
 
         Ok(())
+    }
+
+    // ===== Encrypted Page Operations =====
+
+    /// Get a page, automatically decrypting if necessary
+    ///
+    /// If the page file is encrypted and a key is provided, it will be decrypted.
+    /// If the page file is encrypted and no key is provided, returns an error.
+    /// If the page file is not encrypted, returns the page normally.
+    pub fn get_page_encrypted(
+        &self,
+        notebook_id: Uuid,
+        page_id: Uuid,
+        key: Option<&EncryptionKey>,
+    ) -> Result<Page> {
+        let page_path = self.page_path(notebook_id, page_id);
+
+        if !page_path.exists() {
+            return Err(StorageError::PageNotFound(page_id));
+        }
+
+        let content = fs::read_to_string(&page_path)?;
+
+        // Check if the content is encrypted
+        if is_encrypted_file(&content) {
+            let key = key.ok_or(StorageError::EncryptedContentNoKey)?;
+            let container: EncryptedContainer = serde_json::from_str(&content)?;
+            let page: Page = decrypt_json(&container, key)?;
+            Ok(page)
+        } else {
+            // Normal unencrypted page
+            let page: Page = serde_json::from_str(&content)?;
+            Ok(page)
+        }
+    }
+
+    /// Update a page, optionally encrypting the content
+    ///
+    /// If a key is provided, the page will be encrypted before writing.
+    /// If no key is provided, the page is written as normal JSON.
+    pub fn update_page_encrypted(
+        &self,
+        page: &Page,
+        key: Option<&EncryptionKey>,
+    ) -> Result<()> {
+        let page_path = self.page_path(page.notebook_id, page.id);
+
+        if !page_path.exists() {
+            return Err(StorageError::PageNotFound(page.id));
+        }
+
+        let content = if let Some(key) = key {
+            let container = encrypt_json(page, key)?;
+            serde_json::to_string_pretty(&container)?
+        } else {
+            serde_json::to_string_pretty(page)?
+        };
+
+        fs::write(&page_path, content)?;
+        Ok(())
+    }
+
+    /// Create a page, optionally encrypting the content
+    pub fn create_page_encrypted(
+        &self,
+        notebook_id: Uuid,
+        title: String,
+        key: Option<&EncryptionKey>,
+    ) -> Result<Page> {
+        // Verify notebook exists
+        if !self.notebook_dir(notebook_id).exists() {
+            return Err(StorageError::NotebookNotFound(notebook_id));
+        }
+
+        let page = Page::new(notebook_id, title);
+        let page_path = self.page_path(notebook_id, page.id);
+
+        let content = if let Some(key) = key {
+            let container = encrypt_json(&page, key)?;
+            serde_json::to_string_pretty(&container)?
+        } else {
+            serde_json::to_string_pretty(&page)?
+        };
+
+        fs::write(&page_path, content)?;
+        Ok(page)
+    }
+
+    /// List pages, automatically decrypting if necessary
+    ///
+    /// If a key is provided, encrypted pages will be decrypted.
+    /// If no key is provided, encrypted pages will be returned with a placeholder title.
+    pub fn list_pages_encrypted(
+        &self,
+        notebook_id: Uuid,
+        key: Option<&EncryptionKey>,
+    ) -> Result<Vec<Page>> {
+        let pages_dir = self.pages_dir(notebook_id);
+
+        if !pages_dir.exists() {
+            return Err(StorageError::NotebookNotFound(notebook_id));
+        }
+
+        let mut pages = Vec::new();
+
+        for entry in fs::read_dir(&pages_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+
+            if path.is_file() && path.extension().map_or(false, |e| e == "json") {
+                let content = fs::read_to_string(&path)?;
+
+                // Check if encrypted
+                if is_encrypted_file(&content) {
+                    if let Some(key) = key {
+                        // Decrypt and add
+                        if let Ok(container) = serde_json::from_str::<EncryptedContainer>(&content) {
+                            if let Ok(page) = decrypt_json::<Page>(&container, key) {
+                                pages.push(page);
+                            }
+                        }
+                    }
+                    // If no key provided, skip encrypted pages (they're locked)
+                } else {
+                    // Normal unencrypted page
+                    let page: Page = serde_json::from_str(&content)?;
+                    pages.push(page);
+                }
+            }
+        }
+
+        // Sort by updated_at descending
+        pages.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+
+        Ok(pages)
+    }
+
+    /// Check if a page file is encrypted
+    pub fn is_page_encrypted(&self, notebook_id: Uuid, page_id: Uuid) -> Result<bool> {
+        let page_path = self.page_path(notebook_id, page_id);
+
+        if !page_path.exists() {
+            return Err(StorageError::PageNotFound(page_id));
+        }
+
+        let content = fs::read_to_string(&page_path)?;
+        Ok(is_encrypted_file(&content))
+    }
+
+    /// Encrypt all pages in a notebook
+    ///
+    /// Re-encrypts all pages with the given key. Used when enabling encryption.
+    pub fn encrypt_all_pages(&self, notebook_id: Uuid, key: &EncryptionKey) -> Result<usize> {
+        let pages_dir = self.pages_dir(notebook_id);
+
+        if !pages_dir.exists() {
+            return Err(StorageError::NotebookNotFound(notebook_id));
+        }
+
+        let mut encrypted_count = 0;
+
+        for entry in fs::read_dir(&pages_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+
+            if path.is_file() && path.extension().map_or(false, |e| e == "json") {
+                let content = fs::read_to_string(&path)?;
+
+                // Skip if already encrypted
+                if is_encrypted_file(&content) {
+                    continue;
+                }
+
+                // Parse and re-encrypt
+                let page: Page = serde_json::from_str(&content)?;
+                let container = encrypt_json(&page, key)?;
+                let encrypted = serde_json::to_string_pretty(&container)?;
+                fs::write(&path, encrypted)?;
+                encrypted_count += 1;
+            }
+        }
+
+        Ok(encrypted_count)
+    }
+
+    /// Decrypt all pages in a notebook
+    ///
+    /// Decrypts all pages and saves as plain JSON. Used when disabling encryption.
+    pub fn decrypt_all_pages(&self, notebook_id: Uuid, key: &EncryptionKey) -> Result<usize> {
+        let pages_dir = self.pages_dir(notebook_id);
+
+        if !pages_dir.exists() {
+            return Err(StorageError::NotebookNotFound(notebook_id));
+        }
+
+        let mut decrypted_count = 0;
+
+        for entry in fs::read_dir(&pages_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+
+            if path.is_file() && path.extension().map_or(false, |e| e == "json") {
+                let content = fs::read_to_string(&path)?;
+
+                // Skip if not encrypted
+                if !is_encrypted_file(&content) {
+                    continue;
+                }
+
+                // Parse and decrypt
+                let container: EncryptedContainer = serde_json::from_str(&content)?;
+                let page: Page = decrypt_json(&container, key)?;
+                let decrypted = serde_json::to_string_pretty(&page)?;
+                fs::write(&path, decrypted)?;
+                decrypted_count += 1;
+            }
+        }
+
+        Ok(decrypted_count)
+    }
+
+    /// Re-encrypt all pages with a new key (for password change)
+    pub fn reencrypt_all_pages(
+        &self,
+        notebook_id: Uuid,
+        old_key: &EncryptionKey,
+        new_key: &EncryptionKey,
+    ) -> Result<usize> {
+        let pages_dir = self.pages_dir(notebook_id);
+
+        if !pages_dir.exists() {
+            return Err(StorageError::NotebookNotFound(notebook_id));
+        }
+
+        let mut reencrypted_count = 0;
+
+        for entry in fs::read_dir(&pages_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+
+            if path.is_file() && path.extension().map_or(false, |e| e == "json") {
+                let content = fs::read_to_string(&path)?;
+
+                // Only re-encrypt if currently encrypted
+                if is_encrypted_file(&content) {
+                    // Decrypt with old key
+                    let container: EncryptedContainer = serde_json::from_str(&content)?;
+                    let page: Page = decrypt_json(&container, old_key)?;
+
+                    // Re-encrypt with new key
+                    let new_container = encrypt_json(&page, new_key)?;
+                    let encrypted = serde_json::to_string_pretty(&new_container)?;
+                    fs::write(&path, encrypted)?;
+                    reencrypted_count += 1;
+                }
+            }
+        }
+
+        Ok(reencrypted_count)
+    }
+
+    /// Encrypt an asset file (binary data)
+    pub fn encrypt_asset(
+        &self,
+        notebook_id: Uuid,
+        asset_name: &str,
+        data: &[u8],
+        key: &EncryptionKey,
+    ) -> Result<PathBuf> {
+        use crate::encryption::encrypt_to_container;
+
+        let assets_dir = self.notebook_assets_dir(notebook_id);
+        fs::create_dir_all(&assets_dir)?;
+
+        // Determine content type from extension
+        let content_type = match asset_name.rsplit('.').next() {
+            Some("png") => "image/png",
+            Some("jpg") | Some("jpeg") => "image/jpeg",
+            Some("gif") => "image/gif",
+            Some("webp") => "image/webp",
+            Some("pdf") => "application/pdf",
+            Some("mp4") => "video/mp4",
+            Some("webm") => "video/webm",
+            _ => "application/octet-stream",
+        };
+
+        // Encrypt the data
+        let container = encrypt_to_container(data, key, content_type)?;
+        let encrypted = serde_json::to_string(&container)?;
+
+        // Save with .enc extension
+        let encrypted_name = format!("{}.enc", asset_name);
+        let asset_path = assets_dir.join(&encrypted_name);
+        fs::write(&asset_path, encrypted)?;
+
+        Ok(asset_path)
+    }
+
+    /// Decrypt an asset file (binary data)
+    pub fn decrypt_asset(
+        &self,
+        notebook_id: Uuid,
+        asset_name: &str,
+        key: &EncryptionKey,
+    ) -> Result<Vec<u8>> {
+        use crate::encryption::decrypt_from_container;
+
+        let assets_dir = self.notebook_assets_dir(notebook_id);
+
+        // Try encrypted name first
+        let encrypted_name = format!("{}.enc", asset_name);
+        let encrypted_path = assets_dir.join(&encrypted_name);
+
+        if encrypted_path.exists() {
+            let content = fs::read_to_string(&encrypted_path)?;
+            let container: EncryptedContainer = serde_json::from_str(&content)?;
+            let data = decrypt_from_container(&container, key)?;
+            return Ok(data);
+        }
+
+        // Try original name (might be unencrypted)
+        let asset_path = assets_dir.join(asset_name);
+        if asset_path.exists() {
+            let data = fs::read(&asset_path)?;
+            return Ok(data);
+        }
+
+        Err(StorageError::FileNotFound(asset_name.to_string()))
     }
 }
 

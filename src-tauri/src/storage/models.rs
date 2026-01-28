@@ -2,6 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::encryption::EncryptionConfig;
 use crate::sync::config::SyncConfig;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -223,6 +224,9 @@ pub struct Notebook {
     /// Sync configuration for this notebook
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sync_config: Option<SyncConfig>,
+    /// Encryption configuration for this notebook
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub encryption_config: Option<EncryptionConfig>,
     /// Whether this notebook is pinned to the top
     #[serde(default)]
     pub is_pinned: bool,
@@ -249,11 +253,27 @@ impl Notebook {
             ai_provider: None,
             ai_model: None,
             sync_config: None,
+            encryption_config: None,
             is_pinned: false,
             position: 0,
             created_at: now,
             updated_at: now,
         }
+    }
+
+    /// Check if this notebook is encrypted
+    pub fn is_encrypted(&self) -> bool {
+        self.encryption_config
+            .as_ref()
+            .map(|c| c.enabled)
+            .unwrap_or(false)
+    }
+
+    /// Get encryption password hint if available
+    pub fn encryption_hint(&self) -> Option<&str> {
+        self.encryption_config
+            .as_ref()
+            .and_then(|c| c.password_hint.as_deref())
     }
 }
 

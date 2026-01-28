@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { EncryptionConfigSchema } from "./encryption";
 import { SyncConfigSchema } from "./sync";
 import { SystemPromptModeSchema } from "./page";
 
@@ -21,6 +22,7 @@ export const NotebookSchema = z.object({
   aiProvider: AIProviderTypeSchema.optional(),
   aiModel: z.string().optional(),
   syncConfig: SyncConfigSchema.optional(),
+  encryptionConfig: EncryptionConfigSchema.optional(),
   isPinned: z.boolean().default(false),
   position: z.number().default(0),
   createdAt: z.string().datetime(),

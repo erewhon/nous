@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use uuid::Uuid;
 
+use crate::encryption::EncryptionConfig;
+
 /// A library is a collection of notebooks stored at a specific path
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -33,6 +35,10 @@ pub struct Library {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
 
+    /// Encryption configuration for this library
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub encryption_config: Option<EncryptionConfig>,
+
     /// Creation timestamp
     pub created_at: DateTime<Utc>,
 
@@ -51,6 +57,7 @@ impl Library {
             is_default: false,
             icon: None,
             color: None,
+            encryption_config: None,
             created_at: now,
             updated_at: now,
         }
@@ -66,9 +73,25 @@ impl Library {
             is_default: true,
             icon: Some("📚".to_string()),
             color: None,
+            encryption_config: None,
             created_at: now,
             updated_at: now,
         }
+    }
+
+    /// Check if this library is encrypted
+    pub fn is_encrypted(&self) -> bool {
+        self.encryption_config
+            .as_ref()
+            .map(|c| c.enabled)
+            .unwrap_or(false)
+    }
+
+    /// Get encryption password hint if available
+    pub fn encryption_hint(&self) -> Option<&str> {
+        self.encryption_config
+            .as_ref()
+            .and_then(|c| c.password_hint.as_deref())
     }
 
     /// Get the notebooks directory for this library

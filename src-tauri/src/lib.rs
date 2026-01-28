@@ -4,6 +4,7 @@ use tauri::Manager;
 
 mod actions;
 mod commands;
+pub mod encryption;
 mod evernote;
 mod external_editor;
 mod flashcards;
@@ -26,6 +27,7 @@ mod video_server;
 
 use actions::{ActionExecutor, ActionScheduler, ActionStorage};
 use commands::BackupScheduler;
+use encryption::EncryptionManager;
 use external_editor::ExternalEditorManager;
 use flashcards::FlashcardStorage;
 use goals::GoalsStorage;
@@ -54,6 +56,7 @@ pub struct AppState {
     pub external_editor: Mutex<ExternalEditorManager>,
     pub backup_scheduler: Arc<tokio::sync::Mutex<Option<BackupScheduler>>>,
     pub video_server: Arc<tokio::sync::Mutex<Option<VideoServer>>>,
+    pub encryption_manager: Arc<EncryptionManager>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -149,6 +152,9 @@ pub fn run() {
     // Video server will be started in setup hook
     let video_server_arc = Arc::new(tokio::sync::Mutex::new(None));
 
+    // Initialize encryption manager
+    let encryption_manager = Arc::new(EncryptionManager::new());
+
     let state = AppState {
         library_storage: library_storage_arc,
         storage: storage_arc,
@@ -165,6 +171,7 @@ pub fn run() {
         external_editor: Mutex::new(external_editor),
         backup_scheduler: backup_scheduler_arc,
         video_server: video_server_arc,
+        encryption_manager,
     };
 
     tauri::Builder::default()
@@ -523,6 +530,26 @@ pub fn run() {
             commands::open_library_window,
             commands::close_library_window,
             commands::is_library_window_open,
+            // Encryption commands
+            commands::enable_notebook_encryption,
+            commands::disable_notebook_encryption,
+            commands::unlock_notebook,
+            commands::lock_notebook,
+            commands::is_notebook_unlocked,
+            commands::is_notebook_encrypted,
+            commands::get_notebook_password_hint,
+            commands::change_notebook_password,
+            commands::get_unlocked_notebooks,
+            commands::enable_library_encryption,
+            commands::disable_library_encryption,
+            commands::unlock_library,
+            commands::lock_library,
+            commands::is_library_unlocked,
+            commands::is_library_encrypted,
+            commands::get_library_password_hint,
+            commands::lock_all,
+            commands::get_encryption_stats,
+            commands::cleanup_expired_sessions,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,5 +1,7 @@
 //! RAG (Retrieval-Augmented Generation) commands for semantic search.
 
+use std::collections::HashSet;
+
 use serde_json;
 use tauri::State;
 use uuid::Uuid;
@@ -9,6 +11,28 @@ use crate::search::SearchResult;
 use crate::AppState;
 
 use super::CommandError;
+
+/// Get the set of notebook IDs that are encrypted but not unlocked (i.e., locked)
+fn get_locked_notebook_ids(state: &State<AppState>) -> Result<HashSet<Uuid>, CommandError> {
+    let storage = state.storage.lock().map_err(|e| CommandError {
+        message: format!("Failed to acquire storage lock: {}", e),
+    })?;
+
+    let encryption_manager = &state.encryption_manager;
+
+    let notebooks = storage.list_notebooks().map_err(|e| CommandError {
+        message: format!("Failed to list notebooks: {}", e),
+    })?;
+
+    let mut locked_ids = HashSet::new();
+    for notebook in notebooks {
+        if notebook.is_encrypted() && !encryption_manager.is_notebook_unlocked(notebook.id) {
+            locked_ids.insert(notebook.id);
+        }
+    }
+
+    Ok(locked_ids)
+}
 
 /// Configure the embedding model for RAG.
 #[tauri::command]
@@ -70,13 +94,28 @@ pub fn semantic_search(
             message: format!("Invalid notebook ID: {}", e),
         })?;
 
+    // Get locked notebook IDs to filter out
+    let locked_ids = get_locked_notebook_ids(&state)?;
+
     let results = vector_index
         .search(&query_embedding, limit.unwrap_or(10), notebook_uuid)
         .map_err(|e| CommandError {
             message: format!("Semantic search failed: {}", e),
         })?;
 
-    Ok(results)
+    // Filter out results from locked notebooks
+    let filtered_results: Vec<SemanticSearchResult> = results
+        .into_iter()
+        .filter(|r| {
+            if let Ok(nb_id) = Uuid::parse_str(&r.notebook_id) {
+                !locked_ids.contains(&nb_id)
+            } else {
+                true
+            }
+        })
+        .collect();
+
+    Ok(filtered_results)
 }
 
 /// Perform hybrid search combining semantic and keyword search.
@@ -93,6 +132,9 @@ pub fn hybrid_search(
     let semantic_weight = semantic_weight.unwrap_or(0.5).clamp(0.0, 1.0);
     let keyword_weight = 1.0 - semantic_weight;
 
+    // Get locked notebook IDs to filter out
+    let locked_ids = get_locked_notebook_ids(&state)?;
+
     // Perform semantic search
     let vector_index = state.vector_index.lock().map_err(|e| CommandError {
         message: format!("Failed to acquire vector index lock: {}", e),
@@ -106,11 +148,20 @@ pub fn hybrid_search(
             message: format!("Invalid notebook ID: {}", e),
         })?;
 
-    let semantic_results = vector_index
+    let semantic_results: Vec<SemanticSearchResult> = vector_index
         .search(&query_embedding, limit * 2, notebook_uuid)
         .map_err(|e| CommandError {
             message: format!("Semantic search failed: {}", e),
-        })?;
+        })?
+        .into_iter()
+        .filter(|r| {
+            if let Ok(nb_id) = Uuid::parse_str(&r.notebook_id) {
+                !locked_ids.contains(&nb_id)
+            } else {
+                true
+            }
+        })
+        .collect();
 
     drop(vector_index);
 
@@ -119,11 +170,20 @@ pub fn hybrid_search(
         message: format!("Failed to acquire search index lock: {}", e),
     })?;
 
-    let keyword_results = search_index
+    let keyword_results: Vec<SearchResult> = search_index
         .search(&query, limit * 2)
         .map_err(|e| CommandError {
             message: format!("Keyword search failed: {}", e),
-        })?;
+        })?
+        .into_iter()
+        .filter(|r| {
+            if let Ok(nb_id) = Uuid::parse_str(&r.notebook_id) {
+                !locked_ids.contains(&nb_id)
+            } else {
+                true
+            }
+        })
+        .collect();
 
     drop(search_index);
 
@@ -204,13 +264,28 @@ pub fn get_rag_context(
             message: format!("Invalid notebook ID: {}", e),
         })?;
 
+    // Get locked notebook IDs to filter out
+    let locked_ids = get_locked_notebook_ids(&state)?;
+
     let results = vector_index
         .search(&query_embedding, max_chunks.unwrap_or(5), notebook_uuid)
         .map_err(|e| CommandError {
             message: format!("Failed to get RAG context: {}", e),
         })?;
 
-    Ok(results)
+    // Filter out results from locked notebooks
+    let filtered_results: Vec<SemanticSearchResult> = results
+        .into_iter()
+        .filter(|r| {
+            if let Ok(nb_id) = Uuid::parse_str(&r.notebook_id) {
+                !locked_ids.contains(&nb_id)
+            } else {
+                true
+            }
+        })
+        .collect();
+
+    Ok(filtered_results)
 }
 
 /// Index a page with its embedding.

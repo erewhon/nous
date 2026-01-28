@@ -19,7 +19,9 @@ import { CSS } from "@dnd-kit/utilities";
 import type { Notebook } from "../../types/notebook";
 import { useNotebookStore } from "../../stores/notebookStore";
 import { useThemeStore, type NotebookSortOption } from "../../stores/themeStore";
+import { useEncryptionStore } from "../../stores/encryptionStore";
 import { NotebookSettingsDialog } from "../NotebookSettings";
+import { LockIndicator } from "../Encryption";
 
 const SORT_OPTIONS: { value: NotebookSortOption; label: string }[] = [
   { value: "position", label: "Manual" },
@@ -65,6 +67,10 @@ function SortableNotebookItem({
     transition,
     isDragging,
   } = useSortable({ id: notebook.id, disabled: !isDraggable });
+
+  const { isNotebookUnlocked } = useEncryptionStore();
+  const isEncrypted = notebook.encryptionConfig?.enabled ?? false;
+  const isUnlocked = isEncrypted ? isNotebookUnlocked(notebook.id) : false;
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -154,6 +160,13 @@ function SortableNotebookItem({
                 >
                   <IconPrompt />
                 </span>
+              )}
+              {isEncrypted && (
+                <LockIndicator
+                  isEncrypted={isEncrypted}
+                  isUnlocked={isUnlocked}
+                  size={12}
+                />
               )}
             </div>
             <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>

@@ -7,6 +7,7 @@ import { useAIStore } from "../../stores/aiStore";
 import { useSyncStore } from "../../stores/syncStore";
 import { useLibraryStore } from "../../stores/libraryStore";
 import { MoveNotebookDialog } from "../Move/MoveNotebookDialog";
+import { EncryptionSettings } from "../Encryption";
 import {
   gitIsEnabled,
   gitInit,
@@ -1362,6 +1363,17 @@ export function NotebookSettingsDialog({
               </p>
             )}
           </div>
+
+          {/* Encryption */}
+          <EncryptionSettings
+            type="notebook"
+            id={notebook.id}
+            name={notebook.name}
+            encryptionConfig={notebook.encryptionConfig}
+            onConfigChange={() => {
+              loadNotebooks();
+            }}
+          />
 
           {/* Info */}
           <div

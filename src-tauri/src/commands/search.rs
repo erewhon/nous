@@ -1,10 +1,35 @@
+use std::collections::HashSet;
+
 use tauri::State;
+use uuid::Uuid;
 
 use crate::search::SearchResult;
 use crate::storage::PageType;
 use crate::AppState;
 
 use super::CommandError;
+
+/// Get the set of notebook IDs that are encrypted but not unlocked (i.e., locked)
+fn get_locked_notebook_ids(state: &State<AppState>) -> Result<HashSet<Uuid>, CommandError> {
+    let storage = state.storage.lock().map_err(|e| CommandError {
+        message: format!("Failed to acquire storage lock: {}", e),
+    })?;
+
+    let encryption_manager = &state.encryption_manager;
+
+    let notebooks = storage.list_notebooks().map_err(|e| CommandError {
+        message: format!("Failed to list notebooks: {}", e),
+    })?;
+
+    let mut locked_ids = HashSet::new();
+    for notebook in notebooks {
+        if notebook.is_encrypted() && !encryption_manager.is_notebook_unlocked(notebook.id) {
+            locked_ids.insert(notebook.id);
+        }
+    }
+
+    Ok(locked_ids)
+}
 
 /// Search pages across all notebooks
 #[tauri::command]
@@ -17,13 +42,28 @@ pub fn search_pages(
         message: format!("Failed to acquire search lock: {}", e),
     })?;
 
+    // Get locked notebook IDs to filter out
+    let locked_ids = get_locked_notebook_ids(&state)?;
+
     let results = search_index
         .search(&query, limit.unwrap_or(20))
         .map_err(|e| CommandError {
             message: format!("Search error: {}", e),
         })?;
 
-    Ok(results)
+    // Filter out results from locked notebooks
+    let filtered_results: Vec<SearchResult> = results
+        .into_iter()
+        .filter(|r| {
+            if let Ok(notebook_id) = Uuid::parse_str(&r.notebook_id) {
+                !locked_ids.contains(&notebook_id)
+            } else {
+                true // Keep results with invalid UUIDs (shouldn't happen)
+            }
+        })
+        .collect();
+
+    Ok(filtered_results)
 }
 
 /// Fuzzy search pages (for autocomplete)
@@ -37,13 +77,28 @@ pub fn fuzzy_search_pages(
         message: format!("Failed to acquire search lock: {}", e),
     })?;
 
+    // Get locked notebook IDs to filter out
+    let locked_ids = get_locked_notebook_ids(&state)?;
+
     let results = search_index
         .fuzzy_search(&query, limit.unwrap_or(10))
         .map_err(|e| CommandError {
             message: format!("Fuzzy search error: {}", e),
         })?;
 
-    Ok(results)
+    // Filter out results from locked notebooks
+    let filtered_results: Vec<SearchResult> = results
+        .into_iter()
+        .filter(|r| {
+            if let Ok(notebook_id) = Uuid::parse_str(&r.notebook_id) {
+                !locked_ids.contains(&notebook_id)
+            } else {
+                true
+            }
+        })
+        .collect();
+
+    Ok(filtered_results)
 }
 
 /// Rebuild the search index from all pages
@@ -61,14 +116,25 @@ pub fn rebuild_search_index(state: State<AppState>) -> Result<(), CommandError> 
         message: format!("Failed to acquire Python bridge lock: {}", e),
     })?;
 
+    let encryption_manager = &state.encryption_manager;
+
     // Get all notebooks
     let notebooks = storage.list_notebooks().map_err(|e| CommandError {
         message: format!("Failed to list notebooks: {}", e),
     })?;
 
-    // Collect all pages
+    // Collect all pages from unlocked notebooks only
     let mut all_pages = Vec::new();
     for notebook in notebooks {
+        // Skip encrypted notebooks that are locked
+        if notebook.is_encrypted() && !encryption_manager.is_notebook_unlocked(notebook.id) {
+            log::debug!(
+                "Skipping indexing for locked encrypted notebook: {}",
+                notebook.id
+            );
+            continue;
+        }
+
         let pages = storage.list_pages(notebook.id).map_err(|e| CommandError {
             message: format!("Failed to list pages: {}", e),
         })?;
