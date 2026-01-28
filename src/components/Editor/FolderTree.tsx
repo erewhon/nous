@@ -196,6 +196,7 @@ export function FolderTree({
   const [expandedPageIds, setExpandedPageIds] = useState<Set<string>>(new Set());
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [pendingImportPath, setPendingImportPath] = useState<string | null>(null);
+  const [isImporting, setIsImporting] = useState(false);
   const [isFileDragOver, setIsFileDragOver] = useState(false);
   const treeContainerRef = useRef<HTMLDivElement>(null);
 
@@ -503,6 +504,7 @@ END:VCALENDAR`;
     async (storageMode: FileStorageMode) => {
       if (!pendingImportPath) return;
 
+      setIsImporting(true);
       try {
         const sectionId = sectionsEnabled && selectedSectionId ? selectedSectionId : undefined;
         await api.importFileAsPage(notebookId, pendingImportPath, storageMode, undefined, sectionId);
@@ -511,6 +513,7 @@ END:VCALENDAR`;
       } catch (err) {
         console.error("Failed to import file:", err);
       } finally {
+        setIsImporting(false);
         setImportDialogOpen(false);
         setPendingImportPath(null);
       }
@@ -894,6 +897,7 @@ END:VCALENDAR`;
         filePath={pendingImportPath || ""}
         onConfirm={handleConfirmImport}
         onCancel={handleCancelImport}
+        isImporting={isImporting}
       />
       <DndContext
         sensors={sensors}
