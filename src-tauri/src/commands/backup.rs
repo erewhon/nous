@@ -212,94 +212,104 @@ pub fn update_backup_settings(
     Ok(settings)
 }
 
-/// Manually trigger scheduled backup for all configured notebooks
+/// Manually trigger scheduled backup for all configured notebooks.
+/// This command runs asynchronously to allow progress events to be delivered.
 #[tauri::command]
-pub fn run_scheduled_backup(
+pub async fn run_scheduled_backup(
     app: AppHandle,
-    state: State<AppState>,
+    state: State<'_, AppState>,
 ) -> Result<Vec<BackupInfo>, String> {
     let data_dir = crate::storage::FileStorage::default_data_dir().map_err(|e| e.to_string())?;
     let settings = load_backup_settings(&data_dir).map_err(|e| e.to_string())?;
 
-    let storage = state.storage.lock().map_err(|e| e.to_string())?;
-
-    // Get notebooks to backup
-    let notebooks = if settings.notebook_ids.is_empty() {
-        // Backup all notebooks
-        storage.list_notebooks().map_err(|e| e.to_string())?
-    } else {
-        // Backup only specified notebooks
-        settings
-            .notebook_ids
-            .iter()
-            .filter_map(|id| storage.get_notebook(*id).ok())
-            .collect()
+    // Gather notebooks while holding the lock, then release it
+    let notebooks = {
+        let storage = state.storage.lock().map_err(|e| e.to_string())?;
+        if settings.notebook_ids.is_empty() {
+            storage.list_notebooks().map_err(|e| e.to_string())?
+        } else {
+            settings
+                .notebook_ids
+                .iter()
+                .filter_map(|id| storage.get_notebook(*id).ok())
+                .collect()
+        }
     };
 
-    let mut backup_infos = Vec::new();
-    let total_notebooks = notebooks.len();
+    let max_backups = settings.max_backups_per_notebook;
+    let data_dir_clone = data_dir.clone();
+    let app_for_backup = app.clone();
 
-    for (idx, notebook) in notebooks.iter().enumerate() {
-        let notebook_dir = data_dir.join("notebooks").join(notebook.id.to_string());
+    // Run the backup in a blocking task to avoid blocking the async runtime
+    let backup_infos: Vec<BackupInfo> = tokio::task::spawn_blocking(move || {
+        let mut backup_infos = Vec::new();
+        let total_notebooks = notebooks.len();
 
-        // Emit notebook-level progress
-        let _ = app.emit(
+        for (idx, notebook) in notebooks.iter().enumerate() {
+            let notebook_dir = data_dir_clone.join("notebooks").join(notebook.id.to_string());
+
+            // Emit notebook-level progress
+            let _ = app_for_backup.emit(
+                "backup-progress",
+                BackupProgress {
+                    current: idx,
+                    total: total_notebooks,
+                    message: format!("Backing up {}...", notebook.name),
+                },
+            );
+
+            let app_clone = app_for_backup.clone();
+            let notebook_name = notebook.name.clone();
+            let progress_fn = move |file_current: usize, file_total: usize, _name: &str| {
+                let _ = app_clone.emit(
+                    "backup-progress",
+                    BackupProgress {
+                        current: file_current,
+                        total: file_total,
+                        message: format!(
+                            "Backing up {} ({}/{})",
+                            notebook_name, file_current, file_total
+                        ),
+                    },
+                );
+            };
+
+            match create_auto_backup(
+                &notebook_dir,
+                notebook,
+                &data_dir_clone,
+                max_backups,
+                Some(&progress_fn),
+            ) {
+                Ok(backup_path) => {
+                    if let Ok(metadata) = get_backup_info(&backup_path) {
+                        let mut info: BackupInfo = metadata.into();
+                        info.path = backup_path.to_string_lossy().to_string();
+                        backup_infos.push(info);
+                    }
+                }
+                Err(e) => {
+                    log::error!("Failed to backup notebook '{}': {}", notebook.name, e);
+                }
+            }
+        }
+
+        // Emit completion
+        let _ = app_for_backup.emit(
             "backup-progress",
             BackupProgress {
-                current: idx,
+                current: total_notebooks,
                 total: total_notebooks,
-                message: format!("Backing up {}...", notebook.name),
+                message: "Backup complete".to_string(),
             },
         );
 
-        let app_clone = app.clone();
-        let notebook_name = notebook.name.clone();
-        let progress_fn = move |file_current: usize, file_total: usize, _name: &str| {
-            let _ = app_clone.emit(
-                "backup-progress",
-                BackupProgress {
-                    current: file_current,
-                    total: file_total,
-                    message: format!(
-                        "Backing up {} ({}/{})",
-                        notebook_name, file_current, file_total
-                    ),
-                },
-            );
-        };
-
-        match create_auto_backup(
-            &notebook_dir,
-            notebook,
-            &data_dir,
-            settings.max_backups_per_notebook,
-            Some(&progress_fn),
-        ) {
-            Ok(backup_path) => {
-                if let Ok(metadata) = get_backup_info(&backup_path) {
-                    let mut info: BackupInfo = metadata.into();
-                    info.path = backup_path.to_string_lossy().to_string();
-                    backup_infos.push(info);
-                }
-            }
-            Err(e) => {
-                log::error!("Failed to backup notebook '{}': {}", notebook.name, e);
-            }
-        }
-    }
-
-    // Emit completion
-    let _ = app.emit(
-        "backup-progress",
-        BackupProgress {
-            current: total_notebooks,
-            total: total_notebooks,
-            message: "Backup complete".to_string(),
-        },
-    );
+        backup_infos
+    })
+    .await
+    .map_err(|e| format!("Backup task failed: {}", e))?;
 
     // Update last backup time
-    drop(storage);
     let mut updated_settings = load_backup_settings(&data_dir).map_err(|e| e.to_string())?;
     updated_settings.last_backup = Some(Utc::now());
     updated_settings.next_backup = calculate_next_backup_time(&updated_settings);
