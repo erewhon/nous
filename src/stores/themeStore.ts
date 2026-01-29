@@ -63,6 +63,8 @@ interface ThemeState {
   panelWidths: PanelWidths;
   autoHidePanels: boolean;  // Auto-hide all panels together
   panelsHovered: boolean;   // Track hover state for auto-hide (all panels as one)
+  showRecentPages: boolean;   // Show Recent section in sidebar
+  showFavoritePages: boolean; // Show Favorites section in sidebar
   zenMode: boolean;  // Distraction-free writing mode
   zenModeSettings: ZenModeSettings;  // Zen mode configuration (persisted)
   setMode: (mode: ThemeMode) => void;
@@ -80,6 +82,8 @@ interface ThemeState {
   setPanelWidth: (panel: keyof PanelWidths, width: number) => void;
   setAutoHidePanels: (enabled: boolean) => void;
   setPanelsHovered: (hovered: boolean) => void;
+  setShowRecentPages: (show: boolean) => void;
+  setShowFavoritePages: (show: boolean) => void;
   setZenMode: (enabled: boolean) => void;
   toggleZenMode: () => void;
   setZenModeSettings: (settings: Partial<ZenModeSettings>) => void;
@@ -382,6 +386,8 @@ export const useThemeStore = create<ThemeState>()(
       panelWidths: DEFAULT_PANEL_WIDTHS,
       autoHidePanels: false,
       panelsHovered: false,
+      showRecentPages: true,
+      showFavoritePages: true,
       zenMode: false,  // Always starts as false (not persisted)
       zenModeSettings: DEFAULT_ZEN_MODE_SETTINGS,
 
@@ -477,6 +483,14 @@ export const useThemeStore = create<ThemeState>()(
         set({ panelsHovered: hovered });
       },
 
+      setShowRecentPages: (show) => {
+        set({ showRecentPages: show });
+      },
+
+      setShowFavoritePages: (show) => {
+        set({ showFavoritePages: show });
+      },
+
       setZenMode: (enabled) => {
         set({ zenMode: enabled });
       },
@@ -538,7 +552,7 @@ export const useThemeStore = create<ThemeState>()(
     }),
     {
       name: "katt-theme",
-      partialize: (state) => ({ settings: state.settings, showPageStats: state.showPageStats, uiMode: state.uiMode, notebookSortBy: state.notebookSortBy, pageSortBy: state.pageSortBy, panelWidths: state.panelWidths, autoHidePanels: state.autoHidePanels, zenModeSettings: state.zenModeSettings }),
+      partialize: (state) => ({ settings: state.settings, showPageStats: state.showPageStats, uiMode: state.uiMode, notebookSortBy: state.notebookSortBy, pageSortBy: state.pageSortBy, panelWidths: state.panelWidths, autoHidePanels: state.autoHidePanels, zenModeSettings: state.zenModeSettings, showRecentPages: state.showRecentPages, showFavoritePages: state.showFavoritePages }),
       onRehydrateStorage: () => (state) => {
         if (state) {
           // Resolve system theme on rehydration

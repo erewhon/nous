@@ -24,6 +24,8 @@ export function Sidebar({ width = 256 }: SidebarProps) {
   const { summary: goalsSummary, togglePanel: toggleGoals } = useGoalsStore();
   const autoHidePanels = useThemeStore((state) => state.autoHidePanels);
   const setAutoHidePanels = useThemeStore((state) => state.setAutoHidePanels);
+  const showRecentPages = useThemeStore((state) => state.showRecentPages);
+  const showFavoritePages = useThemeStore((state) => state.showFavoritePages);
 
   // Collapsible section states
   const [recentExpanded, setRecentExpanded] = useState(true);
@@ -184,7 +186,7 @@ export function Sidebar({ width = 256 }: SidebarProps) {
       />
 
       {/* Recent Pages Section */}
-      {recentPages.length > 0 && (
+      {showRecentPages && recentPages.length > 0 && (
         <div className="px-3">
           <button
             onClick={() => setRecentExpanded(!recentExpanded)}
@@ -282,7 +284,7 @@ export function Sidebar({ width = 256 }: SidebarProps) {
       )}
 
       {/* Favorites Section */}
-      {favoritePages.length > 0 && (
+      {showFavoritePages && favoritePages.length > 0 && (
         <div className="px-3">
           <button
             onClick={() => setFavoritesExpanded(!favoritesExpanded)}

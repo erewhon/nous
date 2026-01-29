@@ -84,6 +84,8 @@ export function ThemeSettings() {
     resolvedMode,
     uiMode,
     autoHidePanels,
+    showRecentPages,
+    showFavoritePages,
     zenModeSettings,
     setMode,
     setColorScheme,
@@ -95,6 +97,8 @@ export function ThemeSettings() {
     setUIScale,
     setUIMode,
     setAutoHidePanels,
+    setShowRecentPages,
+    setShowFavoritePages,
     setZenModeSettings,
   } = useThemeStore();
 
@@ -215,6 +219,94 @@ export function ThemeSettings() {
                 Tip: Press <kbd className="rounded bg-[--color-bg-tertiary] px-1.5 py-0.5 font-mono text-[10px]">Ctrl+\</kbd> or <kbd className="rounded bg-[--color-bg-tertiary] px-1.5 py-0.5 font-mono text-[10px]">Cmd+\</kbd> to toggle panels
               </p>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Sidebar Sections */}
+      {uiMode === "classic" && (
+        <div>
+          <label
+            className="mb-3 block text-sm font-medium"
+            style={{ color: "var(--color-text-primary)" }}
+          >
+            Sidebar Sections
+          </label>
+          <div
+            className="rounded-lg border p-4 space-y-4"
+            style={{
+              borderColor: "var(--color-border)",
+              backgroundColor: "var(--color-bg-secondary)",
+            }}
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <span
+                  className="block text-sm font-medium"
+                  style={{ color: "var(--color-text-primary)" }}
+                >
+                  Show Recent Pages
+                </span>
+                <span
+                  className="block text-xs"
+                  style={{ color: "var(--color-text-muted)" }}
+                >
+                  Display recently visited pages in the sidebar
+                </span>
+              </div>
+              <button
+                onClick={() => setShowRecentPages(!showRecentPages)}
+                className="relative h-6 w-11 rounded-full transition-colors"
+                style={{
+                  backgroundColor: showRecentPages
+                    ? "var(--color-accent)"
+                    : "var(--color-bg-tertiary)",
+                }}
+              >
+                <span
+                  className="absolute left-0 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform"
+                  style={{
+                    transform: showRecentPages
+                      ? "translateX(20px)"
+                      : "translateX(2px)",
+                  }}
+                />
+              </button>
+            </div>
+            <div className="flex items-center justify-between">
+              <div>
+                <span
+                  className="block text-sm font-medium"
+                  style={{ color: "var(--color-text-primary)" }}
+                >
+                  Show Favorites
+                </span>
+                <span
+                  className="block text-xs"
+                  style={{ color: "var(--color-text-muted)" }}
+                >
+                  Display favorite pages in the sidebar
+                </span>
+              </div>
+              <button
+                onClick={() => setShowFavoritePages(!showFavoritePages)}
+                className="relative h-6 w-11 rounded-full transition-colors"
+                style={{
+                  backgroundColor: showFavoritePages
+                    ? "var(--color-accent)"
+                    : "var(--color-bg-tertiary)",
+                }}
+              >
+                <span
+                  className="absolute left-0 top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform"
+                  style={{
+                    transform: showFavoritePages
+                      ? "translateX(20px)"
+                      : "translateX(2px)",
+                  }}
+                />
+              </button>
+            </div>
           </div>
         </div>
       )}
