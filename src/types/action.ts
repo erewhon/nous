@@ -87,6 +87,7 @@ export const PageSelectorSchema = z.object({
   updatedWithinDays: z.number().optional(),
   archivedOnly: z.boolean().default(false),
   inFolder: z.string().optional(),
+  fromTemplate: z.string().optional(),
 });
 
 export type PageSelector = z.infer<typeof PageSelectorSchema>;
@@ -199,16 +200,22 @@ export const ManageTagsStepSchema = z.object({
   removeTags: z.array(z.string()).default([]),
 });
 
-export const SearchAndProcessStepSchema: z.ZodType<SearchAndProcessStep> = z.lazy(() =>
-  z.object({
-    type: z.literal("searchAndProcess"),
-    query: z.string(),
-    processSteps: z.array(ActionStepSchema),
-    limit: z.number().optional(),
-  })
-);
+export const SearchAndProcessStepSchema: z.ZodType<SearchAndProcessStep> =
+  z.lazy(() =>
+    z.object({
+      type: z.literal("searchAndProcess"),
+      query: z.string(),
+      processSteps: z.array(ActionStepSchema),
+      limit: z.number().optional(),
+    })
+  );
 
-export const SummaryStyleSchema = z.enum(["concise", "detailed", "bullets", "narrative"]);
+export const SummaryStyleSchema = z.enum([
+  "concise",
+  "detailed",
+  "bullets",
+  "narrative",
+]);
 export type SummaryStyle = z.infer<typeof SummaryStyleSchema>;
 
 export const AiSummarizeStepSchema = z.object({
@@ -225,6 +232,8 @@ export const CarryForwardItemsStepSchema = z.object({
   destination: NotebookTargetSchema,
   titleTemplate: z.string(),
   templateId: z.string().optional(),
+  findExisting: PageSelectorSchema.optional(),
+  insertAfterSection: z.string().optional(),
 });
 
 export const DelayStepSchema = z.object({
@@ -289,7 +298,8 @@ export const ActionStepSchema: z.ZodType<ActionStep> = z.lazy(() =>
   ])
 );
 
-export type ActionStep = z.infer<typeof CreatePageFromTemplateStepSchema>
+export type ActionStep =
+  | z.infer<typeof CreatePageFromTemplateStepSchema>
   | z.infer<typeof CreateNotebookStepSchema>
   | z.infer<typeof CreateFolderStepSchema>
   | z.infer<typeof MovePagesStepSchema>

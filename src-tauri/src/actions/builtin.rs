@@ -313,17 +313,18 @@ fn create_carry_forward_action() -> Action {
         steps: vec![ActionStep::CarryForwardItems {
             source_selector: PageSelector {
                 notebook: Some(NotebookTarget::Current),
-                title_pattern: None,
-                with_tags: vec!["daily-outcomes".to_string()],
-                without_tags: vec![],
                 created_within_days: Some(1),
-                updated_within_days: None,
-                archived_only: false,
-                in_folder: None,
+                ..Default::default()
             },
             destination: NotebookTarget::Current,
-            title_template: "{{dayOfWeek}}, {{date}} - Carried Forward".to_string(),
-            template_id: Some("agile-results-daily".to_string()),
+            title_template: "{{dayOfWeek}}, {{date}} - Daily Journal".to_string(),
+            template_id: Some("daily-journal".to_string()),
+            find_existing: Some(PageSelector {
+                notebook: Some(NotebookTarget::Current),
+                created_within_days: Some(0), // Today only
+                ..Default::default()
+            }),
+            insert_after_section: Some("Today's Goals".to_string()),
         }],
         enabled: true,
         is_built_in: true,

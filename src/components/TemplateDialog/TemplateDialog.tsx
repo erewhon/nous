@@ -1,7 +1,11 @@
 import { useCallback, useState } from "react";
-import { useTemplateStore, type PageTemplate } from "../../stores/templateStore";
+import {
+  useTemplateStore,
+  type PageTemplate,
+} from "../../stores/templateStore";
 import { usePageStore } from "../../stores/pageStore";
 import type { EditorData } from "../../types/page";
+import { TemplatePreview } from "./TemplatePreview";
 
 interface TemplateDialogProps {
   isOpen: boolean;
@@ -9,14 +13,23 @@ interface TemplateDialogProps {
   notebookId: string | null;
 }
 
-export function TemplateDialog({ isOpen, onClose, notebookId }: TemplateDialogProps) {
+export function TemplateDialog({
+  isOpen,
+  onClose,
+  notebookId,
+}: TemplateDialogProps) {
   const { templates, deleteTemplate, updateTemplate } = useTemplateStore();
   const { createPage, updatePageContent } = usePageStore();
   const [isManageMode, setIsManageMode] = useState(false);
-  const [editingTemplate, setEditingTemplate] = useState<PageTemplate | null>(null);
+  const [editingTemplate, setEditingTemplate] = useState<PageTemplate | null>(
+    null
+  );
   const [editName, setEditName] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [previewTemplate, setPreviewTemplate] = useState<PageTemplate | null>(
+    null
+  );
 
   const customTemplates = templates.filter((t) => !t.isBuiltIn);
   const builtInTemplates = templates.filter((t) => t.isBuiltIn);
@@ -40,8 +53,16 @@ export function TemplateDialog({ isOpen, onClose, notebookId }: TemplateDialogPr
         title = template.name;
       }
 
-      // Create the page
-      await createPage(notebookId, title);
+      // Create the page (pass template ID for tracking, except for blank)
+      const tplId = template.id !== "blank" ? template.id : undefined;
+      await createPage(
+        notebookId,
+        title,
+        undefined,
+        undefined,
+        undefined,
+        tplId
+      );
 
       // Get the newly created page (it should be selected after creation)
       const state = usePageStore.getState();
@@ -105,10 +126,23 @@ export function TemplateDialog({ isOpen, onClose, notebookId }: TemplateDialogPr
     setDeleteConfirm(null);
   };
 
+  const handleTemplateClick = useCallback(
+    (template: PageTemplate) => {
+      // Show preview for built-in templates (except blank), create directly for custom/blank
+      if (template.isBuiltIn && template.id !== "blank") {
+        setPreviewTemplate(template);
+      } else {
+        handleSelectTemplate(template);
+      }
+    },
+    [handleSelectTemplate]
+  );
+
   const handleClose = () => {
     setIsManageMode(false);
     setEditingTemplate(null);
     setDeleteConfirm(null);
+    setPreviewTemplate(null);
     onClose();
   };
 
@@ -140,6 +174,21 @@ export function TemplateDialog({ isOpen, onClose, notebookId }: TemplateDialogPr
         return <IconFile />;
     }
   };
+
+  // Template preview modal
+  if (previewTemplate) {
+    return (
+      <TemplatePreview
+        template={previewTemplate}
+        onBack={() => setPreviewTemplate(null)}
+        onUseTemplate={() => {
+          handleSelectTemplate(previewTemplate);
+          setPreviewTemplate(null);
+        }}
+        getIconComponent={getIconComponent}
+      />
+    );
+  }
 
   // Delete confirmation modal
   if (deleteConfirm) {
@@ -551,10 +600,7 @@ export function TemplateDialog({ isOpen, onClose, notebookId }: TemplateDialogPr
             >
               Choose a Template
             </h2>
-            <p
-              className="text-sm"
-              style={{ color: "var(--color-text-muted)" }}
-            >
+            <p className="text-sm" style={{ color: "var(--color-text-muted)" }}>
               Start with a pre-made structure or blank page
             </p>
           </div>
@@ -656,7 +702,7 @@ export function TemplateDialog({ isOpen, onClose, notebookId }: TemplateDialogPr
             {builtInTemplates.map((template) => (
               <button
                 key={template.id}
-                onClick={() => handleSelectTemplate(template)}
+                onClick={() => handleTemplateClick(template)}
                 className="flex items-start gap-4 rounded-lg border p-4 text-left transition-all hover:border-[--color-accent] hover:shadow-md"
                 style={{
                   backgroundColor: "var(--color-bg-secondary)",

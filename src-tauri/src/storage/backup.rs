@@ -109,13 +109,22 @@ pub fn export_notebook_to_zip(
     notebook_dir: &Path,
     notebook: &Notebook,
     output_path: &Path,
+    progress_fn: Option<&dyn Fn(usize, usize, &str)>,
 ) -> Result<BackupMetadata> {
+    // Pre-count total files for progress reporting
+    let total_files = WalkDir::new(notebook_dir)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().is_file())
+        .count();
+
     let file = File::create(output_path)?;
     let mut zip = ZipWriter::new(file);
     let options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
 
     let mut page_count = 0;
     let mut asset_count = 0;
+    let mut files_processed = 0;
 
     // Walk through the notebook directory
     for entry in WalkDir::new(notebook_dir) {
@@ -143,6 +152,11 @@ pub fn export_notebook_to_zip(
             let mut file_content = Vec::new();
             File::open(path)?.read_to_end(&mut file_content)?;
             zip.write_all(&file_content)?;
+
+            files_processed += 1;
+            if let Some(ref cb) = progress_fn {
+                cb(files_processed, total_files, &notebook.name);
+            }
         } else if path.is_dir() && path != notebook_dir {
             // Add empty directories
             let name = format!("{}/", relative_path.to_string_lossy());
@@ -325,6 +339,7 @@ pub fn create_auto_backup(
     notebook: &Notebook,
     data_dir: &Path,
     max_backups: usize,
+    progress_fn: Option<&dyn Fn(usize, usize, &str)>,
 ) -> Result<PathBuf> {
     let backup_dir = get_auto_backup_dir(data_dir);
     fs::create_dir_all(&backup_dir)?;
@@ -338,7 +353,7 @@ pub fn create_auto_backup(
     let backup_path = backup_dir.join(&filename);
 
     // Create the backup
-    export_notebook_to_zip(notebook_dir, notebook, &backup_path)?;
+    export_notebook_to_zip(notebook_dir, notebook, &backup_path, progress_fn)?;
 
     // Clean up old backups for this notebook
     cleanup_old_backups(&backup_dir, &notebook.id, max_backups)?;

@@ -1,6 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { Notebook, NotebookType } from "../types/notebook";
-import type { Page, EditorData, SearchResult, Folder, Section } from "../types/page";
+import type {
+  Page,
+  EditorData,
+  SearchResult,
+  Folder,
+  Section,
+} from "../types/page";
 import type {
   SyncConfigInput,
   SyncStatus,
@@ -72,9 +78,17 @@ export async function createPage(
   title: string,
   folderId?: string,
   parentPageId?: string,
-  sectionId?: string
+  sectionId?: string,
+  templateId?: string
 ): Promise<Page> {
-  return invoke<Page>("create_page", { notebookId, title, folderId, parentPageId, sectionId });
+  return invoke<Page>("create_page", {
+    notebookId,
+    title,
+    folderId,
+    parentPageId,
+    sectionId,
+    templateId,
+  });
 }
 
 export async function updatePage(
@@ -87,7 +101,14 @@ export async function updatePage(
     systemPrompt?: string;
     systemPromptMode?: string;
     sectionId?: string | null;
-    pageType?: "standard" | "markdown" | "pdf" | "jupyter" | "epub" | "calendar" | "chat";
+    pageType?:
+      | "standard"
+      | "markdown"
+      | "pdf"
+      | "jupyter"
+      | "epub"
+      | "calendar"
+      | "chat";
     fileExtension?: string | null;
     isFavorite?: boolean;
   },
@@ -102,11 +123,14 @@ export async function updatePage(
   if (updates.title !== undefined) params.title = updates.title;
   if (updates.content !== undefined) params.content = updates.content;
   if (updates.tags !== undefined) params.tags = updates.tags;
-  if (updates.systemPrompt !== undefined) params.systemPrompt = updates.systemPrompt;
-  if (updates.systemPromptMode !== undefined) params.systemPromptMode = updates.systemPromptMode;
+  if (updates.systemPrompt !== undefined)
+    params.systemPrompt = updates.systemPrompt;
+  if (updates.systemPromptMode !== undefined)
+    params.systemPromptMode = updates.systemPromptMode;
   if (updates.sectionId !== undefined) params.sectionId = updates.sectionId;
   if (updates.pageType !== undefined) params.pageType = updates.pageType;
-  if (updates.fileExtension !== undefined) params.fileExtension = updates.fileExtension;
+  if (updates.fileExtension !== undefined)
+    params.fileExtension = updates.fileExtension;
   if (updates.isFavorite !== undefined) params.isFavorite = updates.isFavorite;
 
   return invoke<Page>("update_page", params);
@@ -150,7 +174,12 @@ export async function movePageToParent(
   parentPageId?: string,
   position?: number
 ): Promise<Page> {
-  return invoke<Page>("move_page_to_parent", { notebookId, pageId, parentPageId, position });
+  return invoke<Page>("move_page_to_parent", {
+    notebookId,
+    pageId,
+    parentPageId,
+    position,
+  });
 }
 
 export async function movePageToNotebook(
@@ -159,7 +188,12 @@ export async function movePageToNotebook(
   targetNotebookId: string,
   targetFolderId?: string
 ): Promise<Page> {
-  return invoke<Page>("move_page_to_notebook", { sourceNotebookId, pageId, targetNotebookId, targetFolderId });
+  return invoke<Page>("move_page_to_notebook", {
+    sourceNotebookId,
+    pageId,
+    targetNotebookId,
+    targetFolderId,
+  });
 }
 
 // ===== Folder API =====
@@ -181,7 +215,12 @@ export async function createFolder(
   parentId?: string,
   sectionId?: string
 ): Promise<Folder> {
-  return invoke<Folder>("create_folder", { notebookId, name, parentId, sectionId });
+  return invoke<Folder>("create_folder", {
+    notebookId,
+    name,
+    parentId,
+    sectionId,
+  });
 }
 
 export async function updateFolder(
@@ -538,7 +577,10 @@ export async function mergeTags(
   return invoke<number>("merge_tags", { notebookId, tagsToMerge, targetTag });
 }
 
-export async function deleteTag(notebookId: string, tag: string): Promise<number> {
+export async function deleteTag(
+  notebookId: string,
+  tag: string
+): Promise<number> {
   return invoke<number>("delete_tag", { notebookId, tag });
 }
 
@@ -768,14 +810,19 @@ export interface ObsidianImportPreview {
 export async function previewObsidianVault(
   vaultPath: string
 ): Promise<ObsidianImportPreview> {
-  return invoke<ObsidianImportPreview>("preview_obsidian_vault_cmd", { vaultPath });
+  return invoke<ObsidianImportPreview>("preview_obsidian_vault_cmd", {
+    vaultPath,
+  });
 }
 
 export async function importObsidianVault(
   vaultPath: string,
   notebookName?: string
 ): Promise<Notebook> {
-  return invoke<Notebook>("import_obsidian_vault_cmd", { vaultPath, notebookName });
+  return invoke<Notebook>("import_obsidian_vault_cmd", {
+    vaultPath,
+    notebookName,
+  });
 }
 
 // ===== Evernote Import API =====
@@ -798,14 +845,19 @@ export interface EvernoteImportPreview {
 export async function previewEvernoteEnex(
   enexPath: string
 ): Promise<EvernoteImportPreview> {
-  return invoke<EvernoteImportPreview>("preview_evernote_enex_cmd", { enexPath });
+  return invoke<EvernoteImportPreview>("preview_evernote_enex_cmd", {
+    enexPath,
+  });
 }
 
 export async function importEvernoteEnex(
   enexPath: string,
   notebookName?: string
 ): Promise<Notebook> {
-  return invoke<Notebook>("import_evernote_enex_cmd", { enexPath, notebookName });
+  return invoke<Notebook>("import_evernote_enex_cmd", {
+    enexPath,
+    notebookName,
+  });
 }
 
 // ===== Scrivener Import API =====
@@ -827,14 +879,19 @@ export interface ScrivenerImportPreview {
 export async function previewScrivenerProject(
   scrivPath: string
 ): Promise<ScrivenerImportPreview> {
-  return invoke<ScrivenerImportPreview>("preview_scrivener_project_cmd", { scrivPath });
+  return invoke<ScrivenerImportPreview>("preview_scrivener_project_cmd", {
+    scrivPath,
+  });
 }
 
 export async function importScrivenerProject(
   scrivPath: string,
   notebookName?: string
 ): Promise<Notebook> {
-  return invoke<Notebook>("import_scrivener_project_cmd", { scrivPath, notebookName });
+  return invoke<Notebook>("import_scrivener_project_cmd", {
+    scrivPath,
+    notebookName,
+  });
 }
 
 // ===== Org-mode Import API =====
@@ -981,9 +1038,7 @@ export async function runActionByName(
   });
 }
 
-export async function findActionsByKeywords(
-  input: string
-): Promise<Action[]> {
+export async function findActionsByKeywords(input: string): Promise<Action[]> {
   return invoke<Action[]>("find_actions_by_keywords", { input });
 }
 
@@ -1022,7 +1077,9 @@ import type {
   UpdateGoalRequest,
 } from "../types/goals";
 
-export async function inboxCapture(request: CaptureRequest): Promise<InboxItem> {
+export async function inboxCapture(
+  request: CaptureRequest
+): Promise<InboxItem> {
   return invoke<InboxItem>("inbox_capture", { request });
 }
 
@@ -1376,7 +1433,13 @@ export async function createSection(
 export async function updateSection(
   notebookId: string,
   sectionId: string,
-  updates: { name?: string; description?: string | null; color?: string | null; systemPrompt?: string | null; systemPromptMode?: string }
+  updates: {
+    name?: string;
+    description?: string | null;
+    color?: string | null;
+    systemPrompt?: string | null;
+    systemPromptMode?: string;
+  }
 ): Promise<Section> {
   return invoke<Section>("update_section", {
     notebookId,
@@ -1567,7 +1630,9 @@ export async function switchLibrary(libraryId: string): Promise<Library> {
 /**
  * Get statistics for a library
  */
-export async function getLibraryStats(libraryId: string): Promise<LibraryStats> {
+export async function getLibraryStats(
+  libraryId: string
+): Promise<LibraryStats> {
   return invoke<LibraryStats>("get_library_stats", { libraryId });
 }
 
@@ -1593,7 +1658,11 @@ export async function moveNotebookToLibrary(
   sourceLibraryId: string,
   targetLibraryId: string
 ): Promise<string> {
-  return invoke<string>("move_notebook_to_library", { notebookId, sourceLibraryId, targetLibraryId });
+  return invoke<string>("move_notebook_to_library", {
+    notebookId,
+    sourceLibraryId,
+    targetLibraryId,
+  });
 }
 
 // ===== File-Based Page API =====
@@ -1635,7 +1704,10 @@ export async function getFileContent(
   notebookId: string,
   pageId: string
 ): Promise<FileContentResponse> {
-  return invoke<FileContentResponse>("get_file_content", { notebookId, pageId });
+  return invoke<FileContentResponse>("get_file_content", {
+    notebookId,
+    pageId,
+  });
 }
 
 /**
@@ -1739,7 +1811,10 @@ export async function getPdfAnnotations(
   notebookId: string,
   pageId: string
 ): Promise<PDFPageAnnotations> {
-  return invoke<PDFPageAnnotations>("get_pdf_annotations", { notebookId, pageId });
+  return invoke<PDFPageAnnotations>("get_pdf_annotations", {
+    notebookId,
+    pageId,
+  });
 }
 
 /**
@@ -1750,7 +1825,11 @@ export async function savePdfAnnotations(
   pageId: string,
   highlights: PDFHighlight[]
 ): Promise<PDFPageAnnotations> {
-  return invoke<PDFPageAnnotations>("save_pdf_annotations", { notebookId, pageId, highlights });
+  return invoke<PDFPageAnnotations>("save_pdf_annotations", {
+    notebookId,
+    pageId,
+    highlights,
+  });
 }
 
 /**
@@ -1761,7 +1840,11 @@ export async function addPdfHighlight(
   pageId: string,
   highlight: PDFHighlight
 ): Promise<PDFPageAnnotations> {
-  return invoke<PDFPageAnnotations>("add_pdf_highlight", { notebookId, pageId, highlight });
+  return invoke<PDFPageAnnotations>("add_pdf_highlight", {
+    notebookId,
+    pageId,
+    highlight,
+  });
 }
 
 /**
@@ -1774,7 +1857,13 @@ export async function updatePdfHighlight(
   note?: string,
   color?: string
 ): Promise<PDFPageAnnotations> {
-  return invoke<PDFPageAnnotations>("update_pdf_highlight", { notebookId, pageId, highlightId, note, color });
+  return invoke<PDFPageAnnotations>("update_pdf_highlight", {
+    notebookId,
+    pageId,
+    highlightId,
+    note,
+    color,
+  });
 }
 
 /**
@@ -1785,7 +1874,11 @@ export async function deletePdfHighlight(
   pageId: string,
   highlightId: string
 ): Promise<PDFPageAnnotations> {
-  return invoke<PDFPageAnnotations>("delete_pdf_highlight", { notebookId, pageId, highlightId });
+  return invoke<PDFPageAnnotations>("delete_pdf_highlight", {
+    notebookId,
+    pageId,
+    highlightId,
+  });
 }
 
 /**
@@ -1907,7 +2000,10 @@ export async function createGoal(request: CreateGoalRequest): Promise<Goal> {
 /**
  * Update an existing goal
  */
-export async function updateGoal(id: string, updates: UpdateGoalRequest): Promise<Goal> {
+export async function updateGoal(
+  id: string,
+  updates: UpdateGoalRequest
+): Promise<Goal> {
   return invoke<Goal>("update_goal", { id, updates });
 }
 
@@ -1940,7 +2036,11 @@ export async function recordGoalProgress(
   date: string,
   completed: boolean
 ): Promise<GoalProgress> {
-  return invoke<GoalProgress>("record_goal_progress", { goalId, date, completed });
+  return invoke<GoalProgress>("record_goal_progress", {
+    goalId,
+    date,
+    completed,
+  });
 }
 
 /**
@@ -1951,7 +2051,11 @@ export async function getGoalProgress(
   startDate: string,
   endDate: string
 ): Promise<GoalProgress[]> {
-  return invoke<GoalProgress[]>("get_goal_progress", { goalId, startDate, endDate });
+  return invoke<GoalProgress[]>("get_goal_progress", {
+    goalId,
+    startDate,
+    endDate,
+  });
 }
 
 /**

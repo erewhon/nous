@@ -56,6 +56,7 @@ pub fn create_page(
     folder_id: Option<String>,
     parent_page_id: Option<String>,
     section_id: Option<String>,
+    template_id: Option<String>,
 ) -> CommandResult<Page> {
     let storage = state.storage.lock().unwrap();
     let nb_id = Uuid::parse_str(&notebook_id).map_err(|e| CommandError {
@@ -84,6 +85,12 @@ pub fn create_page(
         .transpose()?;
 
     let mut page = storage.create_page(nb_id, title)?;
+
+    // If template_id specified, set it on the page
+    if template_id.is_some() {
+        page.template_id = template_id;
+        storage.update_page(&page)?;
+    }
 
     // If folder_id specified, move page to that folder
     if fld_id.is_some() {

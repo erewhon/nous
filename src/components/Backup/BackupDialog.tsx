@@ -88,6 +88,13 @@ export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
     message: string;
   } | null>(null);
 
+  // Backup progress state
+  const [backupProgress, setBackupProgress] = useState<{
+    current: number;
+    total: number;
+    message: string;
+  } | null>(null);
+
   // Backup schedule state
   const [backupSettings, setBackupSettings] = useState<BackupSettings | null>(null);
 
@@ -125,6 +132,31 @@ export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
         unlisten();
       }
       setImportProgress(null);
+    };
+  }, [isOpen]);
+
+  // Listen for backup progress events
+  useEffect(() => {
+    let unlisten: UnlistenFn | null = null;
+
+    const setupListener = async () => {
+      unlisten = await listen<{ current: number; total: number; message: string }>(
+        "backup-progress",
+        (event) => {
+          setBackupProgress(event.payload);
+        }
+      );
+    };
+
+    if (isOpen) {
+      setupListener();
+    }
+
+    return () => {
+      if (unlisten) {
+        unlisten();
+      }
+      setBackupProgress(null);
     };
   }, [isOpen]);
 
@@ -186,6 +218,7 @@ export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
       toast.error(message);
     } finally {
       setIsLoading(false);
+      setBackupProgress(null);
     }
   };
 
@@ -1004,6 +1037,7 @@ export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
                 isLoading={isLoading}
                 onSave={handleSaveBackupSettings}
                 onRunNow={handleRunBackupNow}
+                backupProgress={backupProgress}
               />
             )}
           </div>
@@ -1258,12 +1292,14 @@ function ScheduleTab({
   isLoading,
   onSave,
   onRunNow,
+  backupProgress,
 }: {
   settings: BackupSettings | null;
   notebooks: Notebook[];
   isLoading: boolean;
   onSave: (settings: BackupSettings) => void;
   onRunNow: () => void;
+  backupProgress: { current: number; total: number; message: string } | null;
 }) {
   const [localSettings, setLocalSettings] = useState<BackupSettings>({
     enabled: false,
@@ -1604,6 +1640,32 @@ function ScheduleTab({
                 </span>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Backup Progress */}
+      {backupProgress && (
+        <div className="rounded-lg p-3" style={{ backgroundColor: "var(--color-bg-secondary)" }}>
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm" style={{ color: "var(--color-text-secondary)" }}>
+              {backupProgress.message}
+            </span>
+            <span className="text-sm font-medium" style={{ color: "var(--color-text-primary)" }}>
+              {backupProgress.current} / {backupProgress.total}
+            </span>
+          </div>
+          <div
+            className="h-2 rounded-full overflow-hidden"
+            style={{ backgroundColor: "var(--color-bg-tertiary)" }}
+          >
+            <div
+              className="h-full rounded-full transition-all duration-150"
+              style={{
+                backgroundColor: "var(--color-accent)",
+                width: `${backupProgress.total > 0 ? (backupProgress.current / backupProgress.total) * 100 : 0}%`,
+              }}
+            />
           </div>
         </div>
       )}

@@ -1287,6 +1287,7 @@ impl FileStorage {
             storage_mode: Some(storage_mode),
             file_extension: Some(ext.to_lowercase()),
             last_file_sync: Some(now),
+            template_id: None,
             deleted_at: None,
             is_favorite: false,
             created_at: now,

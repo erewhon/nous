@@ -357,6 +357,9 @@ pub struct Page {
     /// When the page was moved to trash (None = not deleted)
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub deleted_at: Option<DateTime<Utc>>,
+    /// Template this page was created from
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub template_id: Option<String>,
     /// Whether this page is marked as a favorite
     #[serde(default)]
     pub is_favorite: bool,
@@ -387,6 +390,7 @@ impl Page {
             storage_mode: None,
             file_extension: None,
             last_file_sync: None,
+            template_id: None,
             deleted_at: None,
             is_favorite: false,
             created_at: now,

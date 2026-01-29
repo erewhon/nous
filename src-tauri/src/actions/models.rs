@@ -8,6 +8,7 @@ use uuid::Uuid;
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum Schedule {
     /// Daily at specific time
+    #[serde(rename_all = "camelCase")]
     Daily {
         /// Time in HH:MM format
         time: String,
@@ -23,6 +24,7 @@ pub enum Schedule {
         time: String,
     },
     /// Monthly on specific day
+    #[serde(rename_all = "camelCase")]
     Monthly {
         /// Day of month (1-31)
         day_of_month: u8,
@@ -98,6 +100,8 @@ pub struct PageSelector {
     pub archived_only: bool,
     /// Folder name
     pub in_folder: Option<String>,
+    /// Filter by template ID the page was created from
+    pub from_template: Option<String>,
 }
 
 // ===== Page Destination =====
@@ -115,11 +119,13 @@ pub struct PageDestination {
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum SummaryOutput {
     /// New page with summary
+    #[serde(rename_all = "camelCase")]
     NewPage {
         notebook_target: NotebookTarget,
         title_template: String,
     },
     /// Prepend to existing page
+    #[serde(rename_all = "camelCase")]
     PrependToPage { page_selector: PageSelector },
     /// Return as result (for chaining)
     Result,
@@ -146,6 +152,7 @@ pub enum StepCondition {
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum ActionStep {
     /// Create a page from a template
+    #[serde(rename_all = "camelCase")]
     CreatePageFromTemplate {
         template_id: String,
         notebook_target: NotebookTarget,
@@ -158,12 +165,14 @@ pub enum ActionStep {
         tags: Vec<String>,
     },
     /// Create a new notebook
+    #[serde(rename_all = "camelCase")]
     CreateNotebook {
         name: String,
         #[serde(default)]
         notebook_type: Option<String>,
     },
     /// Create folder in a notebook
+    #[serde(rename_all = "camelCase")]
     CreateFolder {
         notebook_target: NotebookTarget,
         name: String,
@@ -177,6 +186,7 @@ pub enum ActionStep {
     /// Archive pages matching criteria
     ArchivePages { selector: PageSelector },
     /// Add/remove tags from pages
+    #[serde(rename_all = "camelCase")]
     ManageTags {
         selector: PageSelector,
         #[serde(default)]
@@ -185,12 +195,14 @@ pub enum ActionStep {
         remove_tags: Vec<String>,
     },
     /// Search and process results
+    #[serde(rename_all = "camelCase")]
     SearchAndProcess {
         query: String,
         process_steps: Vec<ActionStep>,
         limit: Option<usize>,
     },
     /// AI summarization of pages
+    #[serde(rename_all = "camelCase")]
     AiSummarize {
         selector: PageSelector,
         /// Where to place the summary
@@ -199,15 +211,23 @@ pub enum ActionStep {
         custom_prompt: Option<String>,
     },
     /// Carry forward incomplete checklist items
+    #[serde(rename_all = "camelCase")]
     CarryForwardItems {
         source_selector: PageSelector,
         destination: NotebookTarget,
         title_template: String,
         template_id: Option<String>,
+        /// Find existing destination page instead of always creating new
+        #[serde(default)]
+        find_existing: Option<PageSelector>,
+        /// Insert carried items after this section header
+        #[serde(default)]
+        insert_after_section: Option<String>,
     },
     /// Wait/delay step (for chaining)
     Delay { seconds: u64 },
     /// Conditional execution
+    #[serde(rename_all = "camelCase")]
     Conditional {
         condition: StepCondition,
         then_steps: Vec<ActionStep>,

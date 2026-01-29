@@ -1,5 +1,9 @@
 import { useState } from "react";
-import type { ActionStep, NotebookTarget, PageSelector } from "../../types/action";
+import type {
+  ActionStep,
+  NotebookTarget,
+  PageSelector,
+} from "../../types/action";
 import { STEP_TYPES } from "../../types/action";
 
 interface StepBuilderProps {
@@ -8,7 +12,11 @@ interface StepBuilderProps {
   viewOnly?: boolean;
 }
 
-export function StepBuilder({ steps, onChange, viewOnly = false }: StepBuilderProps) {
+export function StepBuilder({
+  steps,
+  onChange,
+  viewOnly = false,
+}: StepBuilderProps) {
   const [expandedStep, setExpandedStep] = useState<number | null>(null);
 
   const addStep = (type: ActionStep["type"]) => {
@@ -35,18 +43,19 @@ export function StepBuilder({ steps, onChange, viewOnly = false }: StepBuilderPr
     if (newIndex < 0 || newIndex >= steps.length) return;
 
     const newSteps = [...steps];
-    [newSteps[index], newSteps[newIndex]] = [newSteps[newIndex], newSteps[index]];
+    [newSteps[index], newSteps[newIndex]] = [
+      newSteps[newIndex],
+      newSteps[index],
+    ];
     onChange(newSteps);
     setExpandedStep(newIndex);
   };
 
   return (
     <div className="space-y-4">
-      <p
-        className="text-sm"
-        style={{ color: "var(--color-text-muted)" }}
-      >
-        Define the steps this action will execute. Steps run in order from top to bottom.
+      <p className="text-sm" style={{ color: "var(--color-text-muted)" }}>
+        Define the steps this action will execute. Steps run in order from top
+        to bottom.
       </p>
 
       {/* Steps list */}
@@ -57,7 +66,9 @@ export function StepBuilder({ steps, onChange, viewOnly = false }: StepBuilderPr
             step={step}
             index={index}
             isExpanded={expandedStep === index}
-            onToggle={() => setExpandedStep(expandedStep === index ? null : index)}
+            onToggle={() =>
+              setExpandedStep(expandedStep === index ? null : index)
+            }
             onRemove={() => removeStep(index)}
             onUpdate={(updated) => updateStep(index, updated)}
             onMoveUp={() => moveStep(index, "up")}
@@ -204,7 +215,10 @@ function StepCard({
             {getStepSummary(step)}
           </div>
         </div>
-        <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+        <div
+          className="flex items-center gap-1"
+          onClick={(e) => e.stopPropagation()}
+        >
           {!viewOnly && (
             <>
               <button
@@ -328,10 +342,7 @@ function StepEditor({ step, onUpdate, viewOnly = false }: StepEditorProps) {
       );
     default:
       return (
-        <div
-          className="text-sm"
-          style={{ color: "var(--color-text-muted)" }}
-        >
+        <div className="text-sm" style={{ color: "var(--color-text-muted)" }}>
           Configuration for this step type is not yet available.
         </div>
       );
@@ -339,10 +350,16 @@ function StepEditor({ step, onUpdate, viewOnly = false }: StepEditorProps) {
 }
 
 // Helper to format notebook target
-function formatNotebookTarget(target: { type: string; name?: string; id?: string }): string {
+function formatNotebookTarget(target: {
+  type: string;
+  name?: string;
+  id?: string;
+}): string {
   if (target.type === "current") return "Current notebook";
-  if (target.type === "byName" && "name" in target) return `Notebook: ${target.name}`;
-  if (target.type === "byId" && "id" in target) return `Notebook ID: ${target.id}`;
+  if (target.type === "byName" && "name" in target)
+    return `Notebook: ${target.name}`;
+  if (target.type === "byId" && "id" in target)
+    return `Notebook ID: ${target.id}`;
   return "Unknown target";
 }
 
@@ -352,51 +369,120 @@ function StepConfigSummary({ step }: { step: ActionStep }) {
     case "createPageFromTemplate":
       return (
         <div className="space-y-1">
-          <div><span className="font-medium">Template:</span> {step.templateId || "Not set"}</div>
-          <div><span className="font-medium">Title:</span> {step.titleTemplate}</div>
-          <div><span className="font-medium">Target:</span> {formatNotebookTarget(step.notebookTarget)}</div>
-          {step.tags.length > 0 && <div><span className="font-medium">Tags:</span> {step.tags.join(", ")}</div>}
+          <div>
+            <span className="font-medium">Template:</span>{" "}
+            {step.templateId || "Not set"}
+          </div>
+          <div>
+            <span className="font-medium">Title:</span> {step.titleTemplate}
+          </div>
+          <div>
+            <span className="font-medium">Target:</span>{" "}
+            {formatNotebookTarget(step.notebookTarget)}
+          </div>
+          {step.tags.length > 0 && (
+            <div>
+              <span className="font-medium">Tags:</span> {step.tags.join(", ")}
+            </div>
+          )}
         </div>
       );
     case "createNotebook":
-      return <div><span className="font-medium">Name:</span> {step.name}</div>;
+      return (
+        <div>
+          <span className="font-medium">Name:</span> {step.name}
+        </div>
+      );
     case "createFolder":
       return (
         <div className="space-y-1">
-          <div><span className="font-medium">Name:</span> {step.name}</div>
-          <div><span className="font-medium">Target:</span> {formatNotebookTarget(step.notebookTarget)}</div>
+          <div>
+            <span className="font-medium">Name:</span> {step.name}
+          </div>
+          <div>
+            <span className="font-medium">Target:</span>{" "}
+            {formatNotebookTarget(step.notebookTarget)}
+          </div>
         </div>
       );
     case "archivePages":
       return (
         <div className="space-y-1">
-          {step.selector.titlePattern && <div><span className="font-medium">Title pattern:</span> {step.selector.titlePattern}</div>}
-          {step.selector.withTags.length > 0 && <div><span className="font-medium">With tags:</span> {step.selector.withTags.join(", ")}</div>}
-          {step.selector.createdWithinDays && <div><span className="font-medium">Created within:</span> {step.selector.createdWithinDays} days</div>}
+          {step.selector.titlePattern && (
+            <div>
+              <span className="font-medium">Title pattern:</span>{" "}
+              {step.selector.titlePattern}
+            </div>
+          )}
+          {step.selector.withTags.length > 0 && (
+            <div>
+              <span className="font-medium">With tags:</span>{" "}
+              {step.selector.withTags.join(", ")}
+            </div>
+          )}
+          {step.selector.createdWithinDays && (
+            <div>
+              <span className="font-medium">Created within:</span>{" "}
+              {step.selector.createdWithinDays} days
+            </div>
+          )}
         </div>
       );
     case "manageTags":
       return (
         <div className="space-y-1">
-          {step.addTags.length > 0 && <div><span className="font-medium">Add tags:</span> {step.addTags.join(", ")}</div>}
-          {step.removeTags.length > 0 && <div><span className="font-medium">Remove tags:</span> {step.removeTags.join(", ")}</div>}
+          {step.addTags.length > 0 && (
+            <div>
+              <span className="font-medium">Add tags:</span>{" "}
+              {step.addTags.join(", ")}
+            </div>
+          )}
+          {step.removeTags.length > 0 && (
+            <div>
+              <span className="font-medium">Remove tags:</span>{" "}
+              {step.removeTags.join(", ")}
+            </div>
+          )}
         </div>
       );
     case "delay":
-      return <div><span className="font-medium">Duration:</span> {step.seconds} seconds</div>;
+      return (
+        <div>
+          <span className="font-medium">Duration:</span> {step.seconds} seconds
+        </div>
+      );
     case "carryForwardItems":
       return (
         <div className="space-y-1">
-          <div><span className="font-medium">Title:</span> {step.titleTemplate}</div>
-          <div><span className="font-medium">Destination:</span> {formatNotebookTarget(step.destination)}</div>
+          <div>
+            <span className="font-medium">Title:</span> {step.titleTemplate}
+          </div>
+          <div>
+            <span className="font-medium">Destination:</span>{" "}
+            {formatNotebookTarget(step.destination)}
+          </div>
         </div>
       );
     case "aiSummarize":
       return (
         <div className="space-y-1">
-          <div><span className="font-medium">Style:</span> {step.summaryStyle}</div>
-          <div><span className="font-medium">Output:</span> {step.outputTarget.type === "result" ? "Variable" : step.outputTarget.type === "newPage" ? `New page: ${step.outputTarget.titleTemplate}` : "Prepend to page"}</div>
-          {step.customPrompt && <div><span className="font-medium">Custom prompt:</span> {step.customPrompt}</div>}
+          <div>
+            <span className="font-medium">Style:</span> {step.summaryStyle}
+          </div>
+          <div>
+            <span className="font-medium">Output:</span>{" "}
+            {step.outputTarget.type === "result"
+              ? "Variable"
+              : step.outputTarget.type === "newPage"
+                ? `New page: ${step.outputTarget.titleTemplate}`
+                : "Prepend to page"}
+          </div>
+          {step.customPrompt && (
+            <div>
+              <span className="font-medium">Custom prompt:</span>{" "}
+              {step.customPrompt}
+            </div>
+          )}
         </div>
       );
     default:
@@ -458,7 +544,8 @@ function CreatePageFromTemplateEditor({
           className="mt-1 text-xs"
           style={{ color: "var(--color-text-muted)" }}
         >
-          Variables: {"{{date}}"}, {"{{dayOfWeek}}"}, {"{{weekNumber}}"}, {"{{monthName}}"}, {"{{year}}"}
+          Variables: {"{{date}}"}, {"{{dayOfWeek}}"}, {"{{weekNumber}}"},{" "}
+          {"{{monthName}}"}, {"{{year}}"}
         </p>
       </div>
       <NotebookTargetEditor
@@ -707,6 +794,81 @@ function CarryForwardEditor({
         onChange={(destination) => onUpdate({ destination })}
         label="Destination Notebook"
       />
+
+      {/* Find Existing Page */}
+      <div
+        className="rounded-lg border p-3"
+        style={{
+          borderColor: "var(--color-border)",
+          backgroundColor: "var(--color-bg-secondary)",
+        }}
+      >
+        <div className="mb-2 flex items-center gap-2">
+          <input
+            type="checkbox"
+            id="findExisting"
+            checked={!!step.findExisting}
+            onChange={(e) =>
+              onUpdate({
+                findExisting: e.target.checked
+                  ? {
+                      withTags: [],
+                      withoutTags: [],
+                      archivedOnly: false,
+                    }
+                  : undefined,
+              })
+            }
+            className="rounded"
+          />
+          <label
+            htmlFor="findExisting"
+            className="text-xs font-medium"
+            style={{ color: "var(--color-text-secondary)" }}
+          >
+            Find existing page instead of always creating new
+          </label>
+        </div>
+        {step.findExisting && (
+          <PageSelectorEditor
+            selector={step.findExisting}
+            onChange={(findExisting) => onUpdate({ findExisting })}
+            label="Find existing page matching"
+          />
+        )}
+      </div>
+
+      {/* Insert After Section */}
+      <div>
+        <label
+          className="mb-1.5 block text-xs font-medium"
+          style={{ color: "var(--color-text-secondary)" }}
+        >
+          Insert After Section (optional)
+        </label>
+        <input
+          type="text"
+          value={step.insertAfterSection || ""}
+          onChange={(e) =>
+            onUpdate({
+              insertAfterSection: e.target.value || undefined,
+            })
+          }
+          placeholder="e.g., Today's Goals"
+          className="w-full rounded-lg border px-3 py-2 text-sm outline-none transition-colors focus:border-[--color-accent]"
+          style={{
+            backgroundColor: "var(--color-bg-tertiary)",
+            borderColor: "var(--color-border)",
+            color: "var(--color-text-primary)",
+          }}
+        />
+        <p
+          className="mt-1 text-xs"
+          style={{ color: "var(--color-text-muted)" }}
+        >
+          Carried items will be inserted after this section header
+        </p>
+      </div>
     </div>
   );
 }
@@ -720,9 +882,21 @@ function AiSummarizeEditor({
 }) {
   const summaryStyles = [
     { value: "concise", label: "Concise", description: "Brief and focused" },
-    { value: "detailed", label: "Detailed", description: "Comprehensive coverage" },
-    { value: "bullets", label: "Bullets", description: "Organized bullet points" },
-    { value: "narrative", label: "Narrative", description: "Flowing story form" },
+    {
+      value: "detailed",
+      label: "Detailed",
+      description: "Comprehensive coverage",
+    },
+    {
+      value: "bullets",
+      label: "Bullets",
+      description: "Organized bullet points",
+    },
+    {
+      value: "narrative",
+      label: "Narrative",
+      description: "Flowing story form",
+    },
   ] as const;
 
   return (
@@ -856,7 +1030,9 @@ function AiSummarizeEditor({
         </label>
         <textarea
           value={step.customPrompt || ""}
-          onChange={(e) => onUpdate({ customPrompt: e.target.value || undefined })}
+          onChange={(e) =>
+            onUpdate({ customPrompt: e.target.value || undefined })
+          }
           placeholder="e.g., Summarize the key decisions and action items from these pages"
           rows={3}
           className="w-full resize-none rounded-lg border px-3 py-2 text-sm outline-none transition-colors focus:border-[--color-accent]"
@@ -902,7 +1078,9 @@ function NotebookTargetEditor({
                 ? "var(--color-accent)"
                 : "var(--color-bg-tertiary)",
             color:
-              target.type === "current" ? "white" : "var(--color-text-secondary)",
+              target.type === "current"
+                ? "white"
+                : "var(--color-text-secondary)",
           }}
         >
           Current
@@ -918,7 +1096,9 @@ function NotebookTargetEditor({
                 ? "var(--color-accent)"
                 : "var(--color-bg-tertiary)",
             color:
-              target.type === "byName" ? "white" : "var(--color-text-secondary)",
+              target.type === "byName"
+                ? "white"
+                : "var(--color-text-secondary)",
           }}
         >
           By Name
@@ -1130,12 +1310,20 @@ function getStepSummary(step: ActionStep): string {
       return `Archive matching pages`;
     case "manageTags":
       const adds = step.addTags.length > 0 ? `+${step.addTags.join(", ")}` : "";
-      const removes = step.removeTags.length > 0 ? `-${step.removeTags.join(", ")}` : "";
+      const removes =
+        step.removeTags.length > 0 ? `-${step.removeTags.join(", ")}` : "";
       return `Tags: ${adds} ${removes}`.trim() || "Manage tags";
     case "aiSummarize":
       return "AI summarize selected pages";
-    case "carryForwardItems":
-      return `Carry forward to "${step.titleTemplate}"`;
+    case "carryForwardItems": {
+      const dest = step.findExisting
+        ? "existing or new page"
+        : `"${step.titleTemplate}"`;
+      const section = step.insertAfterSection
+        ? ` after "${step.insertAfterSection}"`
+        : "";
+      return `Carry forward to ${dest}${section}`;
+    }
     case "delay":
       return `Wait ${step.seconds} seconds`;
     case "conditional":
@@ -1154,7 +1342,14 @@ function StepIcon({ type }: { type: ActionStep["type"] }) {
   switch (type) {
     case "createPageFromTemplate":
       return (
-        <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2">
+        <svg
+          width={size}
+          height={size}
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke={color}
+          strokeWidth="2"
+        >
           <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
           <polyline points="14,2 14,8 20,8" />
           <line x1="12" y1="18" x2="12" y2="12" />
@@ -1163,7 +1358,14 @@ function StepIcon({ type }: { type: ActionStep["type"] }) {
       );
     case "createNotebook":
       return (
-        <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2">
+        <svg
+          width={size}
+          height={size}
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke={color}
+          strokeWidth="2"
+        >
           <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" />
           <line x1="12" y1="13" x2="12" y2="7" />
           <line x1="9" y1="10" x2="15" y2="10" />
@@ -1171,7 +1373,14 @@ function StepIcon({ type }: { type: ActionStep["type"] }) {
       );
     case "createFolder":
       return (
-        <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2">
+        <svg
+          width={size}
+          height={size}
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke={color}
+          strokeWidth="2"
+        >
           <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
           <line x1="12" y1="11" x2="12" y2="17" />
           <line x1="9" y1="14" x2="15" y2="14" />
@@ -1179,7 +1388,14 @@ function StepIcon({ type }: { type: ActionStep["type"] }) {
       );
     case "archivePages":
       return (
-        <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2">
+        <svg
+          width={size}
+          height={size}
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke={color}
+          strokeWidth="2"
+        >
           <polyline points="21 8 21 21 3 21 3 8" />
           <rect x="1" y="3" width="22" height="5" />
           <line x1="10" y1="12" x2="14" y2="12" />
@@ -1187,34 +1403,69 @@ function StepIcon({ type }: { type: ActionStep["type"] }) {
       );
     case "manageTags":
       return (
-        <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2">
+        <svg
+          width={size}
+          height={size}
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke={color}
+          strokeWidth="2"
+        >
           <path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z" />
           <line x1="7" y1="7" x2="7.01" y2="7" />
         </svg>
       );
     case "aiSummarize":
       return (
-        <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2">
+        <svg
+          width={size}
+          height={size}
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke={color}
+          strokeWidth="2"
+        >
           <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
         </svg>
       );
     case "carryForwardItems":
       return (
-        <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2">
+        <svg
+          width={size}
+          height={size}
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke={color}
+          strokeWidth="2"
+        >
           <line x1="5" y1="12" x2="19" y2="12" />
           <polyline points="12 5 19 12 12 19" />
         </svg>
       );
     case "delay":
       return (
-        <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2">
+        <svg
+          width={size}
+          height={size}
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke={color}
+          strokeWidth="2"
+        >
           <circle cx="12" cy="12" r="10" />
           <polyline points="12 6 12 12 16 14" />
         </svg>
       );
     case "conditional":
       return (
-        <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2">
+        <svg
+          width={size}
+          height={size}
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke={color}
+          strokeWidth="2"
+        >
           <line x1="6" y1="3" x2="6" y2="15" />
           <circle cx="18" cy="6" r="3" />
           <circle cx="6" cy="18" r="3" />
@@ -1223,7 +1474,14 @@ function StepIcon({ type }: { type: ActionStep["type"] }) {
       );
     default:
       return (
-        <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2">
+        <svg
+          width={size}
+          height={size}
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke={color}
+          strokeWidth="2"
+        >
           <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
         </svg>
       );

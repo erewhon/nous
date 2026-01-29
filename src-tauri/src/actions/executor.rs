@@ -241,12 +241,16 @@ impl ActionExecutor {
                 destination,
                 title_template,
                 template_id,
+                find_existing,
+                insert_after_section,
             } => {
                 self.execute_carry_forward(
                     source_selector,
                     destination,
                     title_template,
                     template_id.as_ref(),
+                    find_existing.as_ref(),
+                    insert_after_section.as_ref(),
                     context,
                 )
             }
@@ -509,12 +513,28 @@ impl ActionExecutor {
         source_selector: &PageSelector,
         destination: &NotebookTarget,
         title_template: &str,
-        _template_id: Option<&String>,
+        template_id: Option<&String>,
+        find_existing: Option<&PageSelector>,
+        insert_after_section: Option<&String>,
         context: &mut ExecutionContext,
     ) -> Result<(), ExecutionError> {
-        // Find source pages
-        let source_pages = self.find_pages(source_selector, context)?;
+        // Find the destination page first (if it exists) so we can exclude it from sources
+        let dest_page_id = if let Some(existing_selector) = find_existing {
+            let mut pages = self.find_pages(existing_selector, context)?;
+            pages.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+            pages.first().map(|p| p.id)
+        } else {
+            None
+        };
+
+        // Find source pages, excluding the destination page to avoid self-duplication
+        let source_pages: Vec<_> = self
+            .find_pages(source_selector, context)?
+            .into_iter()
+            .filter(|p| Some(p.id) != dest_page_id)
+            .collect();
         if source_pages.is_empty() {
+            log::info!("CarryForward: No source pages found (excluding destination)");
             return Ok(()); // Nothing to carry forward
         }
 
@@ -546,21 +566,75 @@ impl ActionExecutor {
             return Ok(()); // No incomplete items
         }
 
-        // Create destination page
         let notebook_id = self.resolve_notebook_target(destination, context)?;
-        let storage = self.storage.lock().map_err(|e| {
-            ExecutionError::StepFailed(format!(
-                "Failed to lock storage: {}",
-                e
-            ))
-        })?;
 
-        let title = self.variable_resolver.substitute(title_template, &context.variables);
-        let page = storage.create_page(notebook_id, title)?;
-        context.created_pages.push(page.id.to_string());
+        // Reuse the destination page we already found (or None if find_existing wasn't set)
+        let existing_page = if let Some(page_id) = dest_page_id {
+            let storage = self.storage.lock().map_err(|e| {
+                ExecutionError::StepFailed(format!("Failed to lock storage: {}", e))
+            })?;
+            storage.get_page(notebook_id, page_id).ok()
+        } else {
+            None
+        };
 
-        // Note: The actual content with incomplete items would be set by frontend
-        // since EditorJS content format is complex. We just create the page here.
+        let carry_forward_blocks = build_carry_forward_blocks(&incomplete_items);
+
+        if let Some(mut existing) = existing_page {
+            // Insert into existing page
+            let insert_pos = if let Some(section_name) = insert_after_section {
+                find_section_end(&existing.content.blocks, section_name)
+            } else {
+                existing.content.blocks.len()
+            };
+
+            let mut new_blocks = existing.content.blocks.clone();
+            for (i, block) in carry_forward_blocks.into_iter().enumerate() {
+                new_blocks.insert(insert_pos + i, block);
+            }
+            existing.content.blocks = new_blocks;
+            existing.content.time = Some(chrono::Utc::now().timestamp_millis());
+
+            let storage = self.storage.lock().map_err(|e| {
+                ExecutionError::StepFailed(format!("Failed to lock storage: {}", e))
+            })?;
+            storage.update_page(&existing)?;
+            context.modified_pages.push(existing.id.to_string());
+
+            log::info!(
+                "CarryForward: Inserted {} items into existing page '{}'",
+                incomplete_items.len(),
+                existing.title
+            );
+        } else {
+            // Create new destination page
+            let storage = self.storage.lock().map_err(|e| {
+                ExecutionError::StepFailed(format!("Failed to lock storage: {}", e))
+            })?;
+
+            let title = self
+                .variable_resolver
+                .substitute(title_template, &context.variables);
+            let mut page = storage.create_page(notebook_id, title)?;
+
+            // Set template_id if provided
+            if let Some(tpl_id) = template_id {
+                page.template_id = Some(tpl_id.clone());
+            }
+
+            // Set content with carried forward blocks
+            page.content.blocks = carry_forward_blocks;
+            page.content.time = Some(chrono::Utc::now().timestamp_millis());
+            storage.update_page(&page)?;
+
+            context.created_pages.push(page.id.to_string());
+
+            log::info!(
+                "CarryForward: Created new page '{}' with {} items",
+                page.title,
+                incomplete_items.len()
+            );
+        }
 
         Ok(())
     }
@@ -789,14 +863,8 @@ impl ActionExecutor {
         selector: &PageSelector,
         context: &ExecutionContext,
     ) -> Result<Vec<crate::storage::Page>, ExecutionError> {
-        let storage = self.storage.lock().map_err(|e| {
-            ExecutionError::StepFailed(format!(
-                "Failed to lock storage: {}",
-                e
-            ))
-        })?;
-
-        // Determine notebook to search
+        // Resolve notebook target BEFORE acquiring storage lock to avoid deadlock
+        // (resolve_notebook_target also acquires the storage lock)
         let notebook_id = if let Some(target) = &selector.notebook {
             Some(self.resolve_notebook_target(target, context)?)
         } else {
@@ -805,6 +873,13 @@ impl ActionExecutor {
 
         let notebook_id = notebook_id.ok_or_else(|| {
             ExecutionError::InvalidConfig("No notebook specified for page selector".to_string())
+        })?;
+
+        let storage = self.storage.lock().map_err(|e| {
+            ExecutionError::StepFailed(format!(
+                "Failed to lock storage: {}",
+                e
+            ))
         })?;
 
         // Get pages
@@ -850,16 +925,31 @@ impl ActionExecutor {
                     }
                 }
 
-                // Date filters
+                // Date filters (use start-of-day so 0 = today, 1 = since yesterday, etc.)
                 if let Some(days) = selector.created_within_days {
-                    let cutoff = now - chrono::Duration::days(days as i64);
-                    if p.created_at < cutoff.with_timezone(&Utc) {
+                    let cutoff = (now - chrono::Duration::days(days as i64))
+                        .date_naive()
+                        .and_hms_opt(0, 0, 0)
+                        .unwrap()
+                        .and_utc();
+                    if p.created_at < cutoff {
                         return false;
                     }
                 }
                 if let Some(days) = selector.updated_within_days {
-                    let cutoff = now - chrono::Duration::days(days as i64);
-                    if p.updated_at < cutoff.with_timezone(&Utc) {
+                    let cutoff = (now - chrono::Duration::days(days as i64))
+                        .date_naive()
+                        .and_hms_opt(0, 0, 0)
+                        .unwrap()
+                        .and_utc();
+                    if p.updated_at < cutoff {
+                        return false;
+                    }
+                }
+
+                // Template filter
+                if let Some(template) = &selector.from_template {
+                    if p.template_id.as_deref() != Some(template.as_str()) {
                         return false;
                     }
                 }
@@ -908,4 +998,84 @@ impl ActionExecutor {
             }
         }
     }
+}
+
+/// Build EditorJS blocks for carried-forward items
+fn build_carry_forward_blocks(items: &[String]) -> Vec<EditorBlock> {
+    let header = EditorBlock {
+        id: Uuid::new_v4().to_string(),
+        block_type: "header".to_string(),
+        data: serde_json::json!({
+            "text": "Carried Forward",
+            "level": 2
+        }),
+    };
+
+    let checklist_items: Vec<serde_json::Value> = items
+        .iter()
+        .map(|text| {
+            serde_json::json!({
+                "text": text,
+                "checked": false
+            })
+        })
+        .collect();
+
+    let checklist = EditorBlock {
+        id: Uuid::new_v4().to_string(),
+        block_type: "checklist".to_string(),
+        data: serde_json::json!({
+            "items": checklist_items
+        }),
+    };
+
+    vec![header, checklist]
+}
+
+/// Find the insertion position after a named section.
+///
+/// Searches for a header block whose text contains `section_name` (case-insensitive).
+/// Returns the index just before the next same-or-higher-level header, or end of blocks.
+fn find_section_end(blocks: &[EditorBlock], section_name: &str) -> usize {
+    let section_lower = section_name.to_lowercase();
+
+    // Find the header matching the section name
+    let mut header_idx = None;
+    let mut header_level = 0u64;
+    for (i, block) in blocks.iter().enumerate() {
+        if block.block_type == "header" {
+            if let Some(text) = block.data.get("text").and_then(|t| t.as_str()) {
+                if text.to_lowercase().contains(&section_lower) {
+                    header_idx = Some(i);
+                    header_level = block
+                        .data
+                        .get("level")
+                        .and_then(|l| l.as_u64())
+                        .unwrap_or(2);
+                    break;
+                }
+            }
+        }
+    }
+
+    let Some(start) = header_idx else {
+        // Section not found — fall back to end
+        return blocks.len();
+    };
+
+    // Walk forward to find the next header at the same or higher level
+    for i in (start + 1)..blocks.len() {
+        if blocks[i].block_type == "header" {
+            let level = blocks[i]
+                .data
+                .get("level")
+                .and_then(|l| l.as_u64())
+                .unwrap_or(2);
+            if level <= header_level {
+                return i;
+            }
+        }
+    }
+
+    blocks.len()
 }

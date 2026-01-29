@@ -6,6 +6,9 @@ use crate::actions::builtin::get_builtin_actions;
 use crate::actions::models::{Action, ActionUpdate};
 use crate::storage::StorageError;
 
+/// Version for built-in actions — bump this to force regeneration
+const BUILTIN_ACTIONS_VERSION: u32 = 4;
+
 /// Storage for custom actions
 /// Actions are stored in ~/.local/share/katt/actions/
 pub struct ActionStorage {
@@ -29,16 +32,32 @@ impl ActionStorage {
         Ok(storage)
     }
 
-    /// Ensure all built-in actions exist in storage
+    /// Ensure all built-in actions exist in storage (regenerates when version bumps)
     fn ensure_builtin_actions(&self) -> Result<(), StorageError> {
+        let version_path = self.base_path.join("builtin_version.txt");
+        let current = fs::read_to_string(&version_path)
+            .ok()
+            .and_then(|v| v.trim().parse::<u32>().ok())
+            .unwrap_or(0);
+        let needs_regen = current < BUILTIN_ACTIONS_VERSION;
+
         for action in get_builtin_actions() {
             let path = self.action_path(action.id);
-            if !path.exists() {
+            if needs_regen || !path.exists() {
                 let content = serde_json::to_string_pretty(&action)?;
                 fs::write(&path, content)?;
                 log::info!("Created built-in action: {}", action.name);
             }
         }
+
+        if needs_regen {
+            fs::write(&version_path, BUILTIN_ACTIONS_VERSION.to_string())?;
+            log::info!(
+                "Updated built-in actions to version {}",
+                BUILTIN_ACTIONS_VERSION
+            );
+        }
+
         Ok(())
     }
 

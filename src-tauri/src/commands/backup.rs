@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tauri::State;
+use tauri::{AppHandle, Emitter, State};
 use tokio::sync::Mutex as TokioMutex;
 use uuid::Uuid;
 
@@ -37,6 +37,13 @@ impl From<BackupMetadata> for BackupInfo {
     }
 }
 
+#[derive(Clone, Serialize)]
+struct BackupProgress {
+    current: usize,
+    total: usize,
+    message: String,
+}
+
 /// Export a notebook to a ZIP file
 #[tauri::command]
 pub fn export_notebook_zip(
@@ -57,7 +64,7 @@ pub fn export_notebook_zip(
 
     // Export to ZIP
     let metadata =
-        export_notebook_to_zip(&notebook_dir, &notebook, std::path::Path::new(&output_path))
+        export_notebook_to_zip(&notebook_dir, &notebook, std::path::Path::new(&output_path), None)
             .map_err(|e| e.to_string())?;
 
     let mut info: BackupInfo = metadata.into();
@@ -133,7 +140,8 @@ pub fn create_notebook_backup(
 
     // Create backup (keep max 5 auto-backups per notebook)
     let backup_path =
-        create_auto_backup(&notebook_dir, &notebook, &data_dir, 5).map_err(|e| e.to_string())?;
+        create_auto_backup(&notebook_dir, &notebook, &data_dir, 5, None)
+            .map_err(|e| e.to_string())?;
 
     // Get metadata
     let metadata = get_backup_info(&backup_path).map_err(|e| e.to_string())?;
@@ -206,7 +214,10 @@ pub fn update_backup_settings(
 
 /// Manually trigger scheduled backup for all configured notebooks
 #[tauri::command]
-pub fn run_scheduled_backup(state: State<AppState>) -> Result<Vec<BackupInfo>, String> {
+pub fn run_scheduled_backup(
+    app: AppHandle,
+    state: State<AppState>,
+) -> Result<Vec<BackupInfo>, String> {
     let data_dir = crate::storage::FileStorage::default_data_dir().map_err(|e| e.to_string())?;
     let settings = load_backup_settings(&data_dir).map_err(|e| e.to_string())?;
 
@@ -226,15 +237,43 @@ pub fn run_scheduled_backup(state: State<AppState>) -> Result<Vec<BackupInfo>, S
     };
 
     let mut backup_infos = Vec::new();
+    let total_notebooks = notebooks.len();
 
-    for notebook in notebooks {
+    for (idx, notebook) in notebooks.iter().enumerate() {
         let notebook_dir = data_dir.join("notebooks").join(notebook.id.to_string());
+
+        // Emit notebook-level progress
+        let _ = app.emit(
+            "backup-progress",
+            BackupProgress {
+                current: idx,
+                total: total_notebooks,
+                message: format!("Backing up {}...", notebook.name),
+            },
+        );
+
+        let app_clone = app.clone();
+        let notebook_name = notebook.name.clone();
+        let progress_fn = move |file_current: usize, file_total: usize, _name: &str| {
+            let _ = app_clone.emit(
+                "backup-progress",
+                BackupProgress {
+                    current: file_current,
+                    total: file_total,
+                    message: format!(
+                        "Backing up {} ({}/{})",
+                        notebook_name, file_current, file_total
+                    ),
+                },
+            );
+        };
 
         match create_auto_backup(
             &notebook_dir,
-            &notebook,
+            notebook,
             &data_dir,
             settings.max_backups_per_notebook,
+            Some(&progress_fn),
         ) {
             Ok(backup_path) => {
                 if let Ok(metadata) = get_backup_info(&backup_path) {
@@ -248,6 +287,16 @@ pub fn run_scheduled_backup(state: State<AppState>) -> Result<Vec<BackupInfo>, S
             }
         }
     }
+
+    // Emit completion
+    let _ = app.emit(
+        "backup-progress",
+        BackupProgress {
+            current: total_notebooks,
+            total: total_notebooks,
+            message: "Backup complete".to_string(),
+        },
+    );
 
     // Update last backup time
     drop(storage);
@@ -423,6 +472,7 @@ fn run_backup(
             &notebook,
             data_dir,
             settings.max_backups_per_notebook,
+            None,
         ) {
             Ok(_) => {
                 log::info!("Backup scheduler: Backed up '{}'", notebook.name);

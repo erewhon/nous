@@ -99,6 +99,8 @@ export const PageSchema = z.object({
   storageMode: FileStorageModeSchema.nullable().optional(), // How file is stored (embedded/linked)
   fileExtension: z.string().nullable().optional(), // Original file extension (e.g., "pdf", "md")
   lastFileSync: z.string().datetime().nullable().optional(), // Last sync time for linked files
+  // Template tracking
+  templateId: z.string().nullable().optional(), // Template this page was created from
   // Soft delete support - pages in trash
   deletedAt: z.string().datetime().nullable().optional(), // When page was moved to trash (null = not deleted)
   // Favorites
