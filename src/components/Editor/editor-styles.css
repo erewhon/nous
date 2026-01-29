@@ -51,6 +51,11 @@
   padding: 0.5rem 0;
 }
 
+/* Override Editor.js default block selection highlight for dark mode */
+.ce-block--selected .ce-block__content {
+  background: rgba(139, 92, 246, 0.15) !important;
+}
+
 .ce-paragraph {
   font-size: var(--font-size-base, 16px);
   line-height: var(--line-height-base, 1.75);
@@ -2986,15 +2991,14 @@ wiki-link.broken,
   color: var(--color-text-primary) !important;
 }
 
-/* Editor.js popovers are appended to body with position: fixed */
-/* Positioning is handled by JavaScript in BlockEditor.tsx */
+/* Editor.js popover positioning fixes.
+   Popovers are appended inside the toolbar wrapper, which sits inside
+   containers with overflow:hidden. JavaScript in BlockEditor.tsx portals
+   the popover to document.body with position:fixed so it escapes clipping. */
 .ce-popover {
-  /* Ensure popover stays within viewport */
   max-width: calc(100vw - 32px);
 }
 
-/* When popover is open, ensure it's visible */
-/* Do NOT override position - let Editor.js handle positioning */
 .ce-popover--opened {
   min-width: 200px;
 }
@@ -3091,6 +3095,11 @@ wiki-link.broken,
   /* Force toolbar above all video block content */
   z-index: 10000 !important;
   pointer-events: auto !important;
+  /* Editor.js sets will-change: opacity, top on the toolbar. In WebKitGTK
+     (Tauri on Linux), will-change with any value creates a containing block
+     for position:fixed descendants, preventing popover containers from
+     escaping overflow:hidden ancestors. Reset to auto. */
+  will-change: auto !important;
 }
 
 .ce-toolbar__actions {
