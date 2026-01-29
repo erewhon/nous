@@ -580,10 +580,7 @@ h4.ce-header {
   border: 1px solid #3a3a5a !important;
   border-radius: 8px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
-  /* Ensure popover is always visible and properly positioned */
   z-index: 10002 !important;
-  /* Prevent any parent transforms from affecting fixed positioning */
-  position: fixed !important;
 }
 
 .ce-popover__container {
@@ -2997,10 +2994,8 @@ wiki-link.broken,
 }
 
 /* When popover is open, ensure it's visible */
+/* Do NOT override position - let Editor.js handle positioning */
 .ce-popover--opened {
-  /* Use fixed positioning relative to viewport */
-  position: fixed !important;
-  /* Ensure minimum width for usability */
   min-width: 200px;
 }
 

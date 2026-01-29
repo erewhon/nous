@@ -185,74 +185,62 @@ export const BlockEditor = forwardRef<BlockEditorRef, BlockEditorProps>(function
     };
   }, [pages]);
 
-  // Fix popover positioning to prevent clipping
-  // Editor.js popovers can extend beyond viewport when blocks are near edges
+  // Fix popover positioning to prevent left-side clipping
+  // Editor.js positions popovers near the toolbar which can be off the left edge
   useEffect(() => {
     const repositionPopover = (popover: HTMLElement) => {
-      // Wait for styles to apply
       requestAnimationFrame(() => {
         const rect = popover.getBoundingClientRect();
-        const viewportHeight = window.innerHeight;
-        const viewportWidth = window.innerWidth;
-        const minMargin = 16; // Minimum distance from edges
+        const minLeft = 16; // Minimum distance from left edge
 
-        // Fix horizontal position if clipped on the left
-        if (rect.left < minMargin) {
-          const shiftAmount = minMargin - rect.left;
-          const currentLeft = parseFloat(popover.style.left) || 0;
+        if (rect.left < minLeft) {
+          // Use getComputedStyle to get the actual current left value,
+          // which works whether set via inline style, class, or stylesheet
+          const computed = window.getComputedStyle(popover);
+          const currentLeft = parseFloat(computed.left) || 0;
+          const shiftAmount = minLeft - rect.left;
           popover.style.left = `${currentLeft + shiftAmount}px`;
         }
-
-        // Fix horizontal position if clipped on the right
-        if (rect.right > viewportWidth - minMargin) {
-          const shiftAmount = rect.right - (viewportWidth - minMargin);
-          const currentLeft = parseFloat(popover.style.left) || 0;
-          popover.style.left = `${currentLeft - shiftAmount}px`;
-        }
-
-        // Ensure popover is visible vertically - don't let it go off-screen
-        if (rect.top < minMargin) {
-          const currentTop = parseFloat(popover.style.top) || 0;
-          popover.style.top = `${currentTop + (minMargin - rect.top)}px`;
-        }
-
-        // If popover extends below viewport, position it above the trigger instead
-        if (rect.bottom > viewportHeight - minMargin) {
-          // Calculate how much of the popover is below the viewport
-          const overflow = rect.bottom - (viewportHeight - minMargin);
-          const currentTop = parseFloat(popover.style.top) || 0;
-          // Shift up, but not above the viewport
-          const newTop = Math.max(minMargin, currentTop - overflow);
-          popover.style.top = `${newTop}px`;
-        }
-
-        // Ensure the popover is visible
-        popover.style.visibility = 'visible';
-        popover.style.opacity = '1';
       });
     };
 
-    // Observer to watch for popover elements appearing in the DOM
+    const isPopover = (el: HTMLElement) =>
+      el.classList.contains("ce-popover") ||
+      el.classList.contains("ce-settings") ||
+      el.classList.contains("ce-block-tunes");
+
+    const checkAndFix = (el: HTMLElement) => {
+      if (isPopover(el)) {
+        repositionPopover(el);
+      }
+      el.querySelectorAll(".ce-popover, .ce-settings, .ce-block-tunes").forEach((p) =>
+        repositionPopover(p as HTMLElement)
+      );
+    };
+
+    // Watch for popovers being added or becoming visible (class/style changes)
     const observer = new MutationObserver((mutations) => {
       for (const mutation of mutations) {
+        // New nodes added (popover created)
         for (const node of mutation.addedNodes) {
           if (node instanceof HTMLElement) {
-            // Check if this is a popover or contains popovers
-            if (node.classList.contains("ce-popover")) {
-              repositionPopover(node);
-            }
-            // Also check children
-            const popovers = node.querySelectorAll(".ce-popover");
-            popovers.forEach((p) => repositionPopover(p as HTMLElement));
+            checkAndFix(node);
+          }
+        }
+        // Attribute changes (popover shown/repositioned via class or style)
+        if (mutation.type === "attributes" && mutation.target instanceof HTMLElement) {
+          if (isPopover(mutation.target)) {
+            repositionPopover(mutation.target);
           }
         }
       }
     });
 
-    // Observe the entire document since popovers may be appended to body
     observer.observe(document.body, {
       childList: true,
       subtree: true,
+      attributes: true,
+      attributeFilter: ["class", "style"],
     });
 
     return () => observer.disconnect();
