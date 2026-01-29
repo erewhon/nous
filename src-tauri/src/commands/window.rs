@@ -17,7 +17,7 @@ pub async fn open_library_window(app: AppHandle, library_id: String) -> Result<S
     let url = format!("/?library={}", library_id);
 
     WebviewWindowBuilder::new(&app, &label, WebviewUrl::App(url.into()))
-        .title("Katt")
+        .title("Nous")
         .inner_size(1200.0, 800.0)
         .min_inner_size(800.0, 600.0)
         .center()

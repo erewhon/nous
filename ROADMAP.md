@@ -1,4 +1,4 @@
-# Katt Development Roadmap
+# Nous Development Roadmap
 
 ## Completed
 
@@ -378,7 +378,7 @@ Already implemented with Tantivy, may need refinement:
   - Integration with faster-whisper (CTranslate2-optimized, local)
   - Word-level timestamps for precise synchronization
   - Auto-detect language with confidence scoring
-  - Python module: `katt_ai/video_transcribe.py`
+  - Python module: `nous_ai/video_transcribe.py`
   - Tauri commands: transcribe_video, get_video_duration, is_supported_video
 - [x] Sync transcription with video playback
   - Click transcript segment to jump to timestamp
@@ -395,7 +395,7 @@ Already implemented with Tantivy, may need refinement:
 - [x] **markitdown** integration
   - Microsoft's tool for converting documents to markdown
   - Support for PDF, Word, Excel, PowerPoint, images, audio, HTML, CSV, JSON, XML, ZIP, EPUB
-  - Python module: `katt_ai/document_convert.py`
+  - Python module: `nous_ai/document_convert.py`
   - Rust bridge: `python_bridge/mod.rs` (convert_document, convert_documents_batch)
   - Tauri commands: convert_document, convert_documents_batch, get_supported_document_extensions, is_supported_document
   - Command Palette: "Import Document" command
@@ -407,7 +407,7 @@ Already implemented with Tantivy, may need refinement:
   - Works with OpenAI and Anthropic providers
   - Screenshot capture support
   - Optional dependency (install with `uv pip install browser-use && uvx browser-use install`)
-  - Python module: `katt_ai/browser_automation.py`
+  - Python module: `nous_ai/browser_automation.py`
   - Tauri command: `browser_run_task`
   - https://github.com/browser-use/browser-use
 
@@ -516,8 +516,8 @@ Already implemented with Tantivy, may need refinement:
 
 ## Technical Debt & Polish
 
-- [ ] Move video storage from `/tmp/katt-videos` to main data directory
-  - Currently uploaded videos are stored in `/tmp/katt-videos/{notebook_id}/`
+- [ ] Move video storage from `/tmp/nous-videos` to main data directory
+  - Currently uploaded videos are stored in `/tmp/nous-videos/{notebook_id}/`
   - This was a workaround for Tauri asset protocol issues with hidden directories
   - With the embedded HTTP video server, videos can be stored anywhere
   - Migration needed for existing notebooks with videos in /tmp
@@ -550,5 +550,5 @@ Already implemented with Tantivy, may need refinement:
 ## Notes
 
 - Priority order within sections is flexible
-- AI features depend on Python bridge (katt-py) being properly configured
+- AI features depend on Python bridge (nous-py) being properly configured
 - Some features may require additional Tauri plugins

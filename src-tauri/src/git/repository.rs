@@ -259,13 +259,13 @@ fn get_signature(repo: &Repository) -> Result<Signature<'static>> {
     // Try to get from git config
     if let Ok(sig) = repo.signature() {
         return Ok(Signature::now(
-            sig.name().unwrap_or("Katt User"),
-            sig.email().unwrap_or("katt@local"),
+            sig.name().unwrap_or("Nous User"),
+            sig.email().unwrap_or("nous@local"),
         )?);
     }
 
     // Fall back to default
-    Ok(Signature::now("Katt User", "katt@local")?)
+    Ok(Signature::now("Nous User", "nous@local")?)
 }
 
 /// Get commit history for a file or the entire repo

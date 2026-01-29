@@ -1,8 +1,8 @@
 """Katt AI - AI operations for the Katt notebook application."""
 
-from katt_ai.chat import chat, chat_with_context
-from katt_ai.providers import get_provider, list_providers
-from katt_ai.models import (
+from nous_ai.chat import chat, chat_with_context
+from nous_ai.providers import get_provider, list_providers
+from nous_ai.models import (
     ChatMessage,
     ChatResponse,
     ProviderConfig,
@@ -11,9 +11,9 @@ from katt_ai.models import (
     ScrapedContent,
     ResearchSummary,
 )
-from katt_ai.web_research import web_search, scrape_url, summarize_research
-from katt_ai.inbox import classify_inbox_item, classify_inbox_item_sync
-from katt_ai.document_convert import (
+from nous_ai.web_research import web_search, scrape_url, summarize_research
+from nous_ai.inbox import classify_inbox_item, classify_inbox_item_sync
+from nous_ai.document_convert import (
     convert_document,
     convert_document_sync,
     convert_documents_batch,
@@ -24,7 +24,7 @@ from katt_ai.document_convert import (
     is_supported_file_sync,
     ConversionResult,
 )
-from katt_ai.embeddings import (
+from nous_ai.embeddings import (
     generate_embedding,
     generate_embedding_sync,
     generate_embeddings_batch,

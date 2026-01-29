@@ -229,8 +229,8 @@ export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
 
       const safeName = notebook.name.replace(/[/\\?%*:|"<>]/g, "-");
       const path = await save({
-        defaultPath: `${safeName}.katt.zip`,
-        filters: [{ name: "Katt Backup", extensions: ["zip"] }],
+        defaultPath: `${safeName}.nous.zip`,
+        filters: [{ name: "Nous Backup", extensions: ["zip"] }],
       });
 
       if (!path) return;
@@ -256,7 +256,7 @@ export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
 
       const path = await open({
         multiple: false,
-        filters: [{ name: "Katt Backup", extensions: ["zip"] }],
+        filters: [{ name: "Nous Backup", extensions: ["zip"] }],
       });
 
       if (!path) return;
@@ -1151,7 +1151,7 @@ function ImportTab({
         className="text-sm"
         style={{ color: "var(--color-text-muted)" }}
       >
-        Import a notebook from a Katt backup file (.zip).
+        Import a notebook from a Nous backup file (.zip).
       </p>
 
       <div

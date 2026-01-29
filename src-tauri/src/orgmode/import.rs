@@ -1,6 +1,6 @@
 //! Org-mode import implementation
 //!
-//! Parses org-mode syntax and converts to Katt EditorData blocks.
+//! Parses org-mode syntax and converts to Nous EditorData blocks.
 
 use std::collections::HashMap;
 use std::fs;

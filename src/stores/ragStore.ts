@@ -518,7 +518,7 @@ export const useRAGStore = create<RAGStore>()(
       },
     }),
     {
-      name: "katt-rag-settings",
+      name: "nous-rag-settings",
       version: 1,
       // Only persist settings, not runtime state
       partialize: (state) => ({

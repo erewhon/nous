@@ -70,7 +70,7 @@ export function Sidebar({ width = 256 }: SidebarProps) {
             className="text-base font-semibold"
             style={{ color: "var(--color-text-primary)" }}
           >
-            Katt
+            Nous
           </span>
         </div>
         <div className="flex items-center gap-1">

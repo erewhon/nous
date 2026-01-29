@@ -31,7 +31,7 @@ pub fn preview_obsidian_vault_cmd(vault_path: String) -> CommandResult<ObsidianI
 
 /// Import an Obsidian vault as a new notebook
 ///
-/// Converts all markdown files in the vault to a new Katt notebook.
+/// Converts all markdown files in the vault to a new Nous notebook.
 #[tauri::command]
 pub fn import_obsidian_vault_cmd(
     state: State<AppState>,

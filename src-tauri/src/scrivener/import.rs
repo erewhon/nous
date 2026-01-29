@@ -1,6 +1,6 @@
 //! Scrivener .scriv import implementation
 //!
-//! Converts Scrivener project folders to Katt notebooks.
+//! Converts Scrivener project folders to Nous notebooks.
 
 use std::collections::HashMap;
 use std::fs;

@@ -31,7 +31,7 @@ pub fn preview_scrivener_project_cmd(scriv_path: String) -> CommandResult<Scrive
 
 /// Import a Scrivener .scriv project as a new notebook
 ///
-/// Converts all documents in the project to a new Katt notebook.
+/// Converts all documents in the project to a new Nous notebook.
 #[tauri::command]
 pub fn import_scrivener_project_cmd(
     state: State<AppState>,

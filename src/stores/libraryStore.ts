@@ -149,7 +149,7 @@ export const useLibraryStore = create<LibraryState>()(
       clearError: () => set({ error: null }),
     }),
     {
-      name: "katt-library",
+      name: "nous-library",
       partialize: () => ({
         // Only persist the current library ID for quick restore
         // Full data is fetched from backend

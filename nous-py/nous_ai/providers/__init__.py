@@ -1,12 +1,12 @@
 """AI provider implementations."""
 
-from katt_ai.models import ProviderConfig, ProviderType
-from katt_ai.providers.base import BaseProvider
-from katt_ai.providers.openai_provider import OpenAIProvider
-from katt_ai.providers.anthropic_provider import AnthropicProvider
-from katt_ai.providers.ollama_provider import OllamaProvider
-from katt_ai.providers.lmstudio_provider import LMStudioProvider
-from katt_ai.providers.bedrock_provider import BedrockProvider
+from nous_ai.models import ProviderConfig, ProviderType
+from nous_ai.providers.base import BaseProvider
+from nous_ai.providers.openai_provider import OpenAIProvider
+from nous_ai.providers.anthropic_provider import AnthropicProvider
+from nous_ai.providers.ollama_provider import OllamaProvider
+from nous_ai.providers.lmstudio_provider import LMStudioProvider
+from nous_ai.providers.bedrock_provider import BedrockProvider
 
 _PROVIDERS: dict[ProviderType, type[BaseProvider]] = {
     ProviderType.OPENAI: OpenAIProvider,

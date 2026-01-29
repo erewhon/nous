@@ -1,6 +1,6 @@
 //! Notion import module
 //!
-//! Handles importing Notion export ZIP files into Katt notebooks.
+//! Handles importing Notion export ZIP files into Nous notebooks.
 //! Supports:
 //! - Markdown pages with nested folder structure
 //! - Database CSVs (each row becomes a page)

@@ -197,7 +197,7 @@ export function NotebookOverview({
               className="text-2xl font-bold"
               style={{ color: "var(--color-text-primary)" }}
             >
-              Katt
+              Nous
             </h1>
             <p
               className="text-sm"

@@ -5,7 +5,7 @@ import json
 import re
 from typing import Any, Generator
 
-from katt_ai.models import (
+from nous_ai.models import (
     ChatMessage,
     ChatResponse,
     MCPTool,
@@ -13,8 +13,8 @@ from katt_ai.models import (
     ProviderConfig,
     ProviderType,
 )
-from katt_ai.providers import get_provider
-from katt_ai.browser_automation import BROWSER_USE_AVAILABLE
+from nous_ai.providers import get_provider
+from nous_ai.browser_automation import BROWSER_USE_AVAILABLE
 
 # MCP tool namespace prefix
 MCP_TOOL_PREFIX = "mcp:"
@@ -1056,7 +1056,7 @@ async def chat_with_tools_stream(
     mcp_manager = None
     if library_path:
         try:
-            from katt_ai.mcp_client import get_manager
+            from nous_ai.mcp_client import get_manager
             mcp_manager = get_manager(library_path)
             mcp_tools = await mcp_manager.get_all_tools()
         except Exception as e:

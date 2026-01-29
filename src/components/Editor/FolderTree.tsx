@@ -460,7 +460,7 @@ export function FolderTree({
       // Initialize with empty iCalendar content
       const icsContent = `BEGIN:VCALENDAR
 VERSION:2.0
-PRODID:-//Katt//Katt Calendar//EN
+PRODID:-//Nous//Nous Calendar//EN
 CALSCALE:GREGORIAN
 METHOD:PUBLISH
 X-WR-CALNAME:${title}

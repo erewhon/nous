@@ -115,16 +115,16 @@ const MAX_STORAGE_SIZE_BYTES = 2 * 1024 * 1024;
 
 // Startup check: Clear undo history if it's too large (helps recover from quota issues)
 try {
-  const stored = localStorage.getItem("katt-undo-history");
+  const stored = localStorage.getItem("nous-undo-history");
   if (stored && stored.length > MAX_STORAGE_SIZE_BYTES) {
     console.warn(`Undo history is too large (${(stored.length / 1024 / 1024).toFixed(2)}MB), clearing to prevent quota issues`);
-    localStorage.removeItem("katt-undo-history");
+    localStorage.removeItem("nous-undo-history");
   }
 } catch (error) {
   console.warn("Error checking undo history size:", error);
   // If we can't even read it, try to clear it
   try {
-    localStorage.removeItem("katt-undo-history");
+    localStorage.removeItem("nous-undo-history");
   } catch {
     // Ignore
   }
@@ -359,7 +359,7 @@ export const useUndoHistoryStore = create<UndoHistoryState>()(
       },
     }),
     {
-      name: "katt-undo-history",
+      name: "nous-undo-history",
       storage: createJSONStorage(() => safeStorage),
       partialize: (state) => {
         // Only persist if setting is enabled
@@ -387,7 +387,7 @@ export const useUndoHistoryStore = create<UndoHistoryState>()(
           console.error("Failed to rehydrate undo history, clearing:", error);
           // Clear the corrupted storage
           try {
-            localStorage.removeItem("katt-undo-history");
+            localStorage.removeItem("nous-undo-history");
           } catch {
             // Ignore errors when clearing
           }

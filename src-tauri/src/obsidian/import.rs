@@ -1,6 +1,6 @@
 //! Obsidian vault import implementation
 //!
-//! Converts Obsidian vault folders to Katt notebooks.
+//! Converts Obsidian vault folders to Nous notebooks.
 
 use std::collections::HashMap;
 use std::fs;

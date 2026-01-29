@@ -1,7 +1,7 @@
 [project]
-name = "katt-ai"
+name = "nous-ai"
 version = "0.1.0"
-description = "AI operations for Katt notebook application"
+description = "AI operations for Nous notebook application"
 requires-python = ">=3.11"
 dependencies = [
     "pydantic>=2.0",

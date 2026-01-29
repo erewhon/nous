@@ -368,16 +368,16 @@ pub struct MCPToolResult {
 
 /// Python AI bridge for calling Python functions
 pub struct PythonAI {
-    katt_py_path: PathBuf,
+    nous_py_path: PathBuf,
 }
 
 impl PythonAI {
     /// Create a new PythonAI instance
-    pub fn new(katt_py_path: PathBuf) -> Self {
-        Self { katt_py_path }
+    pub fn new(nous_py_path: PathBuf) -> Self {
+        Self { nous_py_path }
     }
 
-    /// Initialize Python path to include katt-py and its venv site-packages
+    /// Initialize Python path to include nous-py and its venv site-packages
     #[allow(deprecated)]
     fn setup_python_path(&self, py: Python<'_>) -> Result<()> {
         let sys = py.import("sys")?;
@@ -386,14 +386,14 @@ impl PythonAI {
             PythonError::TypeConversion(format!("Failed to convert sys.path to list: {}", e))
         })?;
 
-        // Add katt-py source directory
-        let katt_py_str = self.katt_py_path.to_string_lossy().to_string();
+        // Add nous-py source directory
+        let nous_py_str = self.nous_py_path.to_string_lossy().to_string();
         let already_added = path_list.iter().any(|p| {
-            p.extract::<String>().ok() == Some(katt_py_str.clone())
+            p.extract::<String>().ok() == Some(nous_py_str.clone())
         });
 
         if !already_added {
-            path_list.insert(0, katt_py_str.clone())?;
+            path_list.insert(0, nous_py_str.clone())?;
         }
 
         // Add venv site-packages for dependencies (pydantic, httpx, etc.)
@@ -403,7 +403,7 @@ impl PythonAI {
         let minor: i32 = version_info.getattr("minor")?.extract()?;
         let site_packages = format!(
             "{}/.venv/lib/python{}.{}/site-packages",
-            katt_py_str, major, minor
+            nous_py_str, major, minor
         );
 
         let site_already_added = path_list.iter().any(|p| {
@@ -422,7 +422,7 @@ impl PythonAI {
         Python::attach(|py| {
             self.setup_python_path(py)?;
 
-            let chat_module = py.import("katt_ai.chat")?;
+            let chat_module = py.import("nous_ai.chat")?;
             let chat_fn = chat_module.getattr("chat_sync")?;
 
             // Convert messages to Python list of dicts
@@ -489,7 +489,7 @@ impl PythonAI {
         Python::attach(|py| {
             self.setup_python_path(py)?;
 
-            let chat_module = py.import("katt_ai.chat")?;
+            let chat_module = py.import("nous_ai.chat")?;
             let chat_fn = chat_module.getattr("chat_with_context_sync")?;
 
             let kwargs = PyDict::new(py);
@@ -573,7 +573,7 @@ impl PythonAI {
         Python::attach(|py| {
             self.setup_python_path(py)?;
 
-            let chat_module = py.import("katt_ai.chat")?;
+            let chat_module = py.import("nous_ai.chat")?;
             let chat_fn = chat_module.getattr("chat_with_tools_sync")?;
 
             let kwargs = PyDict::new(py);
@@ -725,7 +725,7 @@ impl PythonAI {
         library_path: Option<String>,
     ) -> Result<mpsc::Receiver<StreamEvent>> {
         let (tx, rx) = mpsc::channel();
-        let katt_py_path = self.katt_py_path.clone();
+        let nous_py_path = self.nous_py_path.clone();
 
         // Spawn a thread to run the Python code
         std::thread::spawn(move || {
@@ -737,8 +737,8 @@ impl PythonAI {
                     PythonError::TypeConversion(format!("Failed to convert sys.path to list: {}", e))
                 })?;
 
-                let katt_py_str = katt_py_path.to_string_lossy().to_string();
-                log::info!("Python bridge: katt_py_path = {}", katt_py_str);
+                let nous_py_str = nous_py_path.to_string_lossy().to_string();
+                log::info!("Python bridge: nous_py_path = {}", nous_py_str);
 
                 // Log current sys.path for debugging
                 let current_paths: Vec<String> = path_list.iter()
@@ -747,17 +747,17 @@ impl PythonAI {
                 log::info!("Python bridge: initial sys.path = {:?}", current_paths);
 
                 let already_added = path_list.iter().any(|p| {
-                    p.extract::<String>().ok() == Some(katt_py_str.clone())
+                    p.extract::<String>().ok() == Some(nous_py_str.clone())
                 });
 
                 if !already_added {
-                    path_list.insert(0, katt_py_str.clone())?;
-                    log::info!("Python bridge: added {} to sys.path", katt_py_str);
+                    path_list.insert(0, nous_py_str.clone())?;
+                    log::info!("Python bridge: added {} to sys.path", nous_py_str);
                 }
 
                 // Add venv site-packages
                 // Try to find the actual site-packages directory (venv may use different Python version)
-                let venv_lib = format!("{}/.venv/lib", katt_py_str);
+                let venv_lib = format!("{}/.venv/lib", nous_py_str);
                 let mut site_packages = String::new();
 
                 // Look for any pythonX.Y directory in .venv/lib
@@ -781,7 +781,7 @@ impl PythonAI {
                     let minor: i32 = version_info.getattr("minor")?.extract()?;
                     site_packages = format!(
                         "{}/.venv/lib/python{}.{}/site-packages",
-                        katt_py_str, major, minor
+                        nous_py_str, major, minor
                     );
                 }
                 log::info!("Python bridge: site_packages = {}", site_packages);
@@ -820,8 +820,8 @@ impl PythonAI {
                     }
                 }
 
-                log::info!("Python bridge: attempting to import katt_ai.chat");
-                let chat_module = py.import("katt_ai.chat")?;
+                log::info!("Python bridge: attempting to import nous_ai.chat");
+                let chat_module = py.import("nous_ai.chat")?;
                 let chat_fn = chat_module.getattr("chat_with_tools_stream_sync")?;
 
                 // Create a Python callback that sends to our channel
@@ -995,7 +995,7 @@ impl PythonAI {
         Python::attach(|py| {
             self.setup_python_path(py)?;
 
-            let chat_module = py.import("katt_ai.chat")?;
+            let chat_module = py.import("nous_ai.chat")?;
             let summarize_fn = chat_module.getattr("summarize_page_sync")?;
 
             let kwargs = PyDict::new(py);
@@ -1036,7 +1036,7 @@ impl PythonAI {
         Python::attach(|py| {
             self.setup_python_path(py)?;
 
-            let chat_module = py.import("katt_ai.chat")?;
+            let chat_module = py.import("nous_ai.chat")?;
             let summarize_fn = chat_module.getattr("summarize_pages_sync")?;
 
             // Convert pages to Python list of dicts
@@ -1111,7 +1111,7 @@ impl PythonAI {
         Python::attach(|py| {
             self.setup_python_path(py)?;
 
-            let chat_module = py.import("katt_ai.chat")?;
+            let chat_module = py.import("nous_ai.chat")?;
             let suggest_fn = chat_module.getattr("suggest_page_tags_sync")?;
 
             let kwargs = PyDict::new(py);
@@ -1148,7 +1148,7 @@ impl PythonAI {
         Python::attach(|py| {
             self.setup_python_path(py)?;
 
-            let chat_module = py.import("katt_ai.chat")?;
+            let chat_module = py.import("nous_ai.chat")?;
             let suggest_fn = chat_module.getattr("suggest_related_pages_sync")?;
 
             // Convert available_pages to Python list of dicts
@@ -1212,7 +1212,7 @@ impl PythonAI {
         Python::attach(|py| {
             self.setup_python_path(py)?;
 
-            let web_module = py.import("katt_ai.web_research")?;
+            let web_module = py.import("nous_ai.web_research")?;
             let search_fn = web_module.getattr("web_search_sync")?;
 
             let kwargs = PyDict::new(py);
@@ -1264,7 +1264,7 @@ impl PythonAI {
         Python::attach(|py| {
             self.setup_python_path(py)?;
 
-            let web_module = py.import("katt_ai.web_research")?;
+            let web_module = py.import("nous_ai.web_research")?;
             let scrape_fn = web_module.getattr("scrape_url_sync")?;
 
             let kwargs = PyDict::new(py);
@@ -1294,7 +1294,7 @@ impl PythonAI {
         Python::attach(|py| {
             self.setup_python_path(py)?;
 
-            let web_module = py.import("katt_ai.web_research")?;
+            let web_module = py.import("nous_ai.web_research")?;
             let summarize_fn = web_module.getattr("summarize_research_sync")?;
 
             // Convert contents to Python list of dicts
@@ -1367,7 +1367,7 @@ impl PythonAI {
         Python::attach(|py| {
             self.setup_python_path(py)?;
 
-            let inbox_module = py.import("katt_ai.inbox")?;
+            let inbox_module = py.import("nous_ai.inbox")?;
             let classify_fn = inbox_module.getattr("classify_inbox_item_sync")?;
 
             // Convert notebooks to Python list
@@ -1514,7 +1514,7 @@ impl PythonAI {
         Python::attach(|py| {
             self.setup_python_path(py)?;
 
-            let doc_module = py.import("katt_ai.document_convert")?;
+            let doc_module = py.import("nous_ai.document_convert")?;
             let convert_fn = doc_module.getattr("convert_document_sync")?;
 
             let kwargs = PyDict::new(py);
@@ -1558,7 +1558,7 @@ impl PythonAI {
         Python::attach(|py| {
             self.setup_python_path(py)?;
 
-            let doc_module = py.import("katt_ai.document_convert")?;
+            let doc_module = py.import("nous_ai.document_convert")?;
             let convert_fn = doc_module.getattr("convert_documents_batch_sync")?;
 
             // Convert file paths to Python list
@@ -1610,7 +1610,7 @@ impl PythonAI {
         Python::attach(|py| {
             self.setup_python_path(py)?;
 
-            let doc_module = py.import("katt_ai.document_convert")?;
+            let doc_module = py.import("nous_ai.document_convert")?;
             let get_ext_fn = doc_module.getattr("get_supported_extensions_sync")?;
 
             let result = get_ext_fn.call0()?;
@@ -1625,7 +1625,7 @@ impl PythonAI {
         Python::attach(|py| {
             self.setup_python_path(py)?;
 
-            let doc_module = py.import("katt_ai.document_convert")?;
+            let doc_module = py.import("nous_ai.document_convert")?;
             let is_supported_fn = doc_module.getattr("is_supported_file_sync")?;
 
             let kwargs = PyDict::new(py);
@@ -1652,7 +1652,7 @@ impl PythonAI {
         Python::attach(|py| {
             self.setup_python_path(py)?;
 
-            let browser_module = py.import("katt_ai.browser_automation")?;
+            let browser_module = py.import("nous_ai.browser_automation")?;
             let run_fn = browser_module.getattr("run_browser_task_sync")?;
 
             let kwargs = PyDict::new(py);
@@ -1707,7 +1707,7 @@ impl PythonAI {
         Python::attach(|py| {
             self.setup_python_path(py)?;
 
-            let video_module = py.import("katt_ai.video_transcribe")?;
+            let video_module = py.import("nous_ai.video_transcribe")?;
             let transcribe_fn = video_module.getattr("transcribe_video_sync")?;
 
             let kwargs = PyDict::new(py);
@@ -1801,7 +1801,7 @@ impl PythonAI {
         Python::attach(|py| {
             self.setup_python_path(py)?;
 
-            let video_module = py.import("katt_ai.video_transcribe")?;
+            let video_module = py.import("nous_ai.video_transcribe")?;
             let duration_fn = video_module.getattr("get_video_duration_sync")?;
 
             let result = duration_fn.call1((video_path,))?;
@@ -1816,7 +1816,7 @@ impl PythonAI {
         Python::attach(|py| {
             self.setup_python_path(py)?;
 
-            let video_module = py.import("katt_ai.video_transcribe")?;
+            let video_module = py.import("nous_ai.video_transcribe")?;
             let check_fn = video_module.getattr("is_supported_video_sync")?;
 
             let result = check_fn.call1((file_path,))?;
@@ -1831,7 +1831,7 @@ impl PythonAI {
         Python::attach(|py| {
             self.setup_python_path(py)?;
 
-            let video_module = py.import("katt_ai.video_transcribe")?;
+            let video_module = py.import("nous_ai.video_transcribe")?;
             let get_ext_fn = video_module.getattr("get_supported_extensions_sync")?;
 
             let result = get_ext_fn.call0()?;
@@ -1852,7 +1852,7 @@ impl PythonAI {
         Python::attach(|py| {
             self.setup_python_path(py)?;
 
-            let video_module = py.import("katt_ai.video_transcribe")?;
+            let video_module = py.import("nous_ai.video_transcribe")?;
             let extract_fn = video_module.getattr("extract_thumbnail_sync")?;
 
             let kwargs = PyDict::new(py);
@@ -1881,7 +1881,7 @@ impl PythonAI {
         Python::attach(|py| {
             self.setup_python_path(py)?;
 
-            let jupyter_module = py.import("katt_ai.jupyter_execute")?;
+            let jupyter_module = py.import("nous_ai.jupyter_execute")?;
             let execute_fn = jupyter_module.getattr("execute_cell")?;
 
             let result = execute_fn.call1((code, cell_index))?;
@@ -1928,7 +1928,7 @@ impl PythonAI {
         Python::attach(|py| {
             self.setup_python_path(py)?;
 
-            let jupyter_module = py.import("katt_ai.jupyter_execute")?;
+            let jupyter_module = py.import("nous_ai.jupyter_execute")?;
             let check_fn = jupyter_module.getattr("check_python_available")?;
 
             let result = check_fn.call0()?;
@@ -1958,7 +1958,7 @@ impl PythonAI {
         Python::attach(|py| {
             self.setup_python_path(py)?;
 
-            let mcp_module = py.import("katt_ai.mcp_client")?;
+            let mcp_module = py.import("nous_ai.mcp_client")?;
             let load_fn = mcp_module.getattr("mcp_load_config_sync")?;
 
             let result = load_fn.call1((library_path,))?;
@@ -1990,7 +1990,7 @@ impl PythonAI {
         Python::attach(|py| {
             self.setup_python_path(py)?;
 
-            let mcp_module = py.import("katt_ai.mcp_client")?;
+            let mcp_module = py.import("nous_ai.mcp_client")?;
             let save_fn = mcp_module.getattr("mcp_save_config_sync")?;
 
             // Convert config to Python dict
@@ -2025,7 +2025,7 @@ impl PythonAI {
         Python::attach(|py| {
             self.setup_python_path(py)?;
 
-            let mcp_module = py.import("katt_ai.mcp_client")?;
+            let mcp_module = py.import("nous_ai.mcp_client")?;
             let start_fn = mcp_module.getattr("mcp_start_servers_sync")?;
 
             let result = start_fn.call1((library_path,))?;
@@ -2040,7 +2040,7 @@ impl PythonAI {
         Python::attach(|py| {
             self.setup_python_path(py)?;
 
-            let mcp_module = py.import("katt_ai.mcp_client")?;
+            let mcp_module = py.import("nous_ai.mcp_client")?;
             let stop_fn = mcp_module.getattr("mcp_stop_servers_sync")?;
 
             stop_fn.call1((library_path,))?;
@@ -2053,7 +2053,7 @@ impl PythonAI {
         Python::attach(|py| {
             self.setup_python_path(py)?;
 
-            let mcp_module = py.import("katt_ai.mcp_client")?;
+            let mcp_module = py.import("nous_ai.mcp_client")?;
             let get_tools_fn = mcp_module.getattr("mcp_get_tools_sync")?;
 
             let result = get_tools_fn.call1((library_path,))?;
@@ -2102,7 +2102,7 @@ impl PythonAI {
         Python::attach(|py| {
             self.setup_python_path(py)?;
 
-            let mcp_module = py.import("katt_ai.mcp_client")?;
+            let mcp_module = py.import("nous_ai.mcp_client")?;
             let call_fn = mcp_module.getattr("mcp_call_tool_sync")?;
 
             // Convert arguments to Python dict
@@ -2146,7 +2146,7 @@ impl PythonAI {
         Python::attach(|py| {
             self.setup_python_path(py)?;
 
-            let mcp_module = py.import("katt_ai.mcp_client")?;
+            let mcp_module = py.import("nous_ai.mcp_client")?;
             let get_fn = mcp_module.getattr("mcp_get_running_servers_sync")?;
 
             let result = get_fn.call1((library_path,))?;
@@ -2163,7 +2163,7 @@ impl PythonAI {
         Python::attach(|py| {
             self.setup_python_path(py)?;
 
-            let embed_module = py.import("katt_ai.embeddings")?;
+            let embed_module = py.import("nous_ai.embeddings")?;
             let embed_fn = embed_module.getattr("generate_embedding_sync")?;
 
             // Parse config JSON to Python dict
@@ -2199,7 +2199,7 @@ impl PythonAI {
         Python::attach(|py| {
             self.setup_python_path(py)?;
 
-            let embed_module = py.import("katt_ai.embeddings")?;
+            let embed_module = py.import("nous_ai.embeddings")?;
             let embed_fn = embed_module.getattr("generate_embeddings_batch_sync")?;
 
             // Convert texts to Python list
@@ -2241,7 +2241,7 @@ impl PythonAI {
         Python::attach(|py| {
             self.setup_python_path(py)?;
 
-            let embed_module = py.import("katt_ai.embeddings")?;
+            let embed_module = py.import("nous_ai.embeddings")?;
             let discover_fn = embed_module.getattr("discover_models_sync")?;
 
             let result = discover_fn.call1((provider, base_url))?;

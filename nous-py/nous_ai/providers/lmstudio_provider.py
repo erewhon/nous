@@ -2,8 +2,8 @@
 
 from openai import AsyncOpenAI
 
-from katt_ai.models import ChatMessage, ChatResponse, ProviderConfig, ProviderType
-from katt_ai.providers.base import BaseProvider
+from nous_ai.models import ChatMessage, ChatResponse, ProviderConfig, ProviderType
+from nous_ai.providers.base import BaseProvider
 
 
 class LMStudioProvider(BaseProvider):

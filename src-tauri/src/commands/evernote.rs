@@ -27,7 +27,7 @@ pub fn preview_evernote_enex_cmd(enex_path: String) -> CommandResult<EvernoteImp
 
 /// Import an Evernote .enex export as a new notebook
 ///
-/// Converts all notes in the ENEX file to a new Katt notebook.
+/// Converts all notes in the ENEX file to a new Nous notebook.
 #[tauri::command]
 pub fn import_evernote_enex_cmd(
     state: State<AppState>,

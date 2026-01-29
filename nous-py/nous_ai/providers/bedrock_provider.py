@@ -3,8 +3,8 @@
 import json
 from typing import Any
 
-from katt_ai.models import ChatMessage, ChatResponse, ProviderConfig, ProviderType
-from katt_ai.providers.base import BaseProvider
+from nous_ai.models import ChatMessage, ChatResponse, ProviderConfig, ProviderType
+from nous_ai.providers.base import BaseProvider
 
 # Optional boto3 import
 try:

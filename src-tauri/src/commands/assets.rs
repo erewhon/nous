@@ -66,8 +66,8 @@ pub fn save_video_asset(
     filename: String,
     source_path: String,
 ) -> CommandResult<String> {
-    // Use /tmp/katt-videos/ which has no hidden directories in the path
-    let video_dir = PathBuf::from("/tmp/katt-videos").join(&notebook_id);
+    // Use /tmp/nous-videos/ which has no hidden directories in the path
+    let video_dir = PathBuf::from("/tmp/nous-videos").join(&notebook_id);
 
     fs::create_dir_all(&video_dir).map_err(|e| CommandError {
         message: format!("Failed to create video directory: {}", e),

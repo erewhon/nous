@@ -36,7 +36,7 @@ pub fn preview_notion_export(zip_path: String) -> CommandResult<NotionImportPrev
 
 /// Import a Notion export ZIP as a new notebook
 ///
-/// Converts all markdown files and databases in the ZIP to a new Katt notebook.
+/// Converts all markdown files and databases in the ZIP to a new Nous notebook.
 /// This command runs asynchronously to allow progress events to be delivered.
 #[tauri::command]
 pub async fn import_notion_export(

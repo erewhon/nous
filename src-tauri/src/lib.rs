@@ -80,26 +80,26 @@ pub fn run() {
     let search_index = SearchIndex::new(search_dir).expect("Failed to initialize search index");
 
     // Initialize vector index for RAG at the library path
-    let vector_db_path = current_library.path.join(".katt").join("vectors.db");
+    let vector_db_path = current_library.path.join(".nous").join("vectors.db");
     let vector_index = VectorIndex::new(vector_db_path).expect("Failed to initialize vector index");
 
     // Initialize Python AI bridge
-    // The katt-py package is in the project root (same level as src-tauri)
+    // The nous-py package is in the project root (same level as src-tauri)
     // When running from src-tauri, we need to go up one level
-    let katt_py_path = std::env::current_dir()
+    let nous_py_path = std::env::current_dir()
         .map(|p| {
-            // Check if katt-py exists in current dir or parent
-            let direct = p.join("katt-py");
+            // Check if nous-py exists in current dir or parent
+            let direct = p.join("nous-py");
             if direct.exists() {
                 direct
             } else {
                 // Try parent directory (when running from src-tauri)
-                p.parent().map(|parent| parent.join("katt-py")).unwrap_or(direct)
+                p.parent().map(|parent| parent.join("nous-py")).unwrap_or(direct)
             }
         })
-        .unwrap_or_else(|_| std::path::PathBuf::from("katt-py"));
-    log::info!("Python AI bridge path: {:?}", katt_py_path);
-    let python_ai = PythonAI::new(katt_py_path);
+        .unwrap_or_else(|_| std::path::PathBuf::from("nous-py"));
+    log::info!("Python AI bridge path: {:?}", nous_py_path);
+    let python_ai = PythonAI::new(nous_py_path);
 
     // Initialize action storage
     let action_storage = ActionStorage::new(data_dir.clone())
@@ -198,15 +198,15 @@ pub fn run() {
                 }
             }
 
-            // Register /tmp/katt-videos for video assets (workaround for hidden directory issues)
-            let video_tmp_dir = std::path::PathBuf::from("/tmp/katt-videos");
+            // Register /tmp/nous-videos for video assets (workaround for hidden directory issues)
+            let video_tmp_dir = std::path::PathBuf::from("/tmp/nous-videos");
             if let Err(e) = std::fs::create_dir_all(&video_tmp_dir) {
-                log::warn!("Failed to create /tmp/katt-videos directory: {}", e);
+                log::warn!("Failed to create /tmp/nous-videos directory: {}", e);
             }
             if let Err(e) = app.asset_protocol_scope().allow_directory(&video_tmp_dir, true) {
-                log::error!("Failed to register /tmp/katt-videos with asset protocol: {}", e);
+                log::error!("Failed to register /tmp/nous-videos with asset protocol: {}", e);
             } else {
-                log::info!("Successfully registered /tmp/katt-videos with asset protocol");
+                log::info!("Successfully registered /tmp/nous-videos with asset protocol");
             }
 
             // Start the action scheduler

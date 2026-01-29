@@ -1,6 +1,6 @@
 //! Joplin import module
 //!
-//! Handles importing Joplin export files (JEX/RAW) into Katt notebooks.
+//! Handles importing Joplin export files (JEX/RAW) into Nous notebooks.
 //! Supports: JEX archives (tar), RAW directory exports, notes, notebooks, tags, resources
 
 mod import;

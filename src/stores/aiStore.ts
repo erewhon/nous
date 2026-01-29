@@ -117,7 +117,7 @@ interface AIState {
   openPanelWithPrompt: (prompt: string) => void;
 }
 
-const DEFAULT_SYSTEM_PROMPT = `You are a helpful AI assistant integrated into a note-taking application called Katt. You help users with their notes, answer questions about their content, provide summaries, brainstorm ideas, and assist with writing and organizing information. Be concise, helpful, and context-aware.
+const DEFAULT_SYSTEM_PROMPT = `You are a helpful AI assistant integrated into a note-taking application called Nous. You help users with their notes, answer questions about their content, provide summaries, brainstorm ideas, and assist with writing and organizing information. Be concise, helpful, and context-aware.
 
 IMPORTANT: You have access to tools that let you create notebooks and pages. When the user asks you to create, write, or save content:
 - USE the create_page tool to actually create the page - do NOT just describe what you would create
@@ -532,7 +532,7 @@ export const useAIStore = create<AIState>()(
       },
     }),
     {
-      name: "katt-ai-settings",
+      name: "nous-ai-settings",
       version: 2, // Increment when making breaking changes
       // Persist settings and panel state, not conversation
       partialize: (state) => ({

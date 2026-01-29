@@ -206,7 +206,7 @@ export const useTabStore = create<TabStore>()(
       },
     }),
     {
-      name: "katt-tabs",
+      name: "nous-tabs",
       partialize: (state) => ({
         openTabs: state.openTabs,
         activeTabId: state.activeTabId,

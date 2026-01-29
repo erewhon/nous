@@ -1,6 +1,6 @@
 //! Notion import implementation
 //!
-//! Converts Notion export ZIP files to Katt notebooks.
+//! Converts Notion export ZIP files to Nous notebooks.
 
 use std::collections::HashMap;
 use std::fs::{self, File};
@@ -704,7 +704,7 @@ pub fn import_notion_zip(
 
     // Process pages and build notion_id -> page.id mapping
     let mut pages: Vec<Page> = Vec::new();
-    let mut notion_to_katt_id: HashMap<String, Uuid> = HashMap::new();
+    let mut notion_to_nous_id: HashMap<String, Uuid> = HashMap::new();
 
     for info in page_infos {
         // Convert internal links to wiki-links
@@ -734,10 +734,10 @@ pub fn import_notion_zip(
         let mut page = import_markdown_to_page(&content, notebook_id, &info.clean_title);
         page.tags = tags;
 
-        // Set parent_page_id based on the folder -> notion_id -> katt_id mapping
+        // Set parent_page_id based on the folder -> notion_id -> nous_id mapping
         if let Some(parent_folder) = get_parent_folder_path(&info.original_path) {
             if let Some(parent_notion_id) = folder_to_notion_id.get(&parent_folder) {
-                if let Some(&parent_page_id) = notion_to_katt_id.get(parent_notion_id) {
+                if let Some(&parent_page_id) = notion_to_nous_id.get(parent_notion_id) {
                     page.parent_page_id = Some(parent_page_id);
                 }
             }
@@ -745,7 +745,7 @@ pub fn import_notion_zip(
 
         // Track this page's notion_id for child pages
         if let Some(ref notion_id) = info.notion_id {
-            notion_to_katt_id.insert(notion_id.clone(), page.id);
+            notion_to_nous_id.insert(notion_id.clone(), page.id);
         }
 
         // Save page
@@ -1038,7 +1038,7 @@ where
 
     // Process pages and build notion_id -> page.id mapping
     let mut pages: Vec<Page> = Vec::new();
-    let mut notion_to_katt_id: HashMap<String, Uuid> = HashMap::new();
+    let mut notion_to_nous_id: HashMap<String, Uuid> = HashMap::new();
     let total_pages = page_infos.len();
 
     for (page_idx, info) in page_infos.into_iter().enumerate() {
@@ -1074,10 +1074,10 @@ where
         let mut page = import_markdown_to_page(&content, notebook_id, &info.clean_title);
         page.tags = tags;
 
-        // Set parent_page_id based on the folder -> notion_id -> katt_id mapping
+        // Set parent_page_id based on the folder -> notion_id -> nous_id mapping
         if let Some(parent_folder) = get_parent_folder_path(&info.original_path) {
             if let Some(parent_notion_id) = folder_to_notion_id.get(&parent_folder) {
-                if let Some(&parent_page_id) = notion_to_katt_id.get(parent_notion_id) {
+                if let Some(&parent_page_id) = notion_to_nous_id.get(parent_notion_id) {
                     page.parent_page_id = Some(parent_page_id);
                 }
             }
@@ -1085,7 +1085,7 @@ where
 
         // Track this page's notion_id for child pages
         if let Some(ref notion_id) = info.notion_id {
-            notion_to_katt_id.insert(notion_id.clone(), page.id);
+            notion_to_nous_id.insert(notion_id.clone(), page.id);
         }
 
         // Save page

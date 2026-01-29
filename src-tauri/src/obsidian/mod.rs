@@ -1,6 +1,6 @@
 //! Obsidian import module
 //!
-//! Handles importing Obsidian vault folders into Katt notebooks.
+//! Handles importing Obsidian vault folders into Nous notebooks.
 //! Supports:
 //! - Markdown pages with YAML frontmatter
 //! - Wiki-links [[page]] preservation

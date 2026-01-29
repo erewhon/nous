@@ -10,7 +10,7 @@ use crate::storage::StorageError;
 const BUILTIN_ACTIONS_VERSION: u32 = 4;
 
 /// Storage for custom actions
-/// Actions are stored in ~/.local/share/katt/actions/
+/// Actions are stored in ~/.local/share/nous/actions/
 pub struct ActionStorage {
     base_path: PathBuf,
 }

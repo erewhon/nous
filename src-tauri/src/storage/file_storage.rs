@@ -76,7 +76,7 @@ impl FileStorage {
     /// Get the default data directory
     pub fn default_data_dir() -> Result<PathBuf> {
         dirs::data_local_dir()
-            .map(|p| p.join("katt"))
+            .map(|p| p.join("nous"))
             .ok_or(StorageError::DataDirNotFound)
     }
 
@@ -1849,7 +1849,7 @@ mod tests {
     /// Test that asset paths are correctly generated.
     ///
     /// This is important for Tauri's asset protocol scope configuration.
-    /// On Linux, the default data directory is ~/.local/share/katt which contains
+    /// On Linux, the default data directory is ~/.local/share/nous which contains
     /// a hidden directory (.local). The asset protocol scope must be configured with
     /// `requireLiteralLeadingDot: false` to allow access to these paths.
     #[test]
@@ -1875,7 +1875,7 @@ mod tests {
     fn test_default_data_dir_contains_hidden_directory() {
         if let Ok(data_dir) = FileStorage::default_data_dir() {
             let path_str = data_dir.to_string_lossy();
-            // On Linux, the default data dir is ~/.local/share/katt
+            // On Linux, the default data dir is ~/.local/share/nous
             // This contains .local which is a "hidden" directory (starts with .)
             // Tauri's asset protocol with default settings won't match paths
             // containing hidden directories unless requireLiteralLeadingDot: false

@@ -358,7 +358,7 @@ export function EditorArea() {
             className="mb-3 text-2xl font-bold"
             style={{ color: "var(--color-text-primary)" }}
           >
-            Welcome to Katt
+            Welcome to Nous
           </h2>
           <p
             className="leading-relaxed"

@@ -2,7 +2,7 @@
 
 from abc import ABC, abstractmethod
 
-from katt_ai.models import ChatMessage, ChatResponse, ProviderConfig
+from nous_ai.models import ChatMessage, ChatResponse, ProviderConfig
 
 
 class BaseProvider(ABC):

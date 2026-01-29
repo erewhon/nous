@@ -44,7 +44,7 @@ function App() {
   // Set window title based on library
   useEffect(() => {
     if (library) {
-      const title = isSecondaryWindow ? `Katt - ${library.name}` : "Katt";
+      const title = isSecondaryWindow ? `Nous - ${library.name}` : "Nous";
       getCurrentWindow().setTitle(title).catch(console.error);
     }
   }, [library, isSecondaryWindow]);

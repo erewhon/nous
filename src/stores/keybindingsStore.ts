@@ -248,7 +248,7 @@ export const useKeybindingsStore = create<KeybindingsStore>()(
       },
     }),
     {
-      name: "katt-keybindings",
+      name: "nous-keybindings",
       partialize: (state) => ({ keybindings: state.keybindings }),
     }
   )

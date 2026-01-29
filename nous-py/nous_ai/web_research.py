@@ -8,7 +8,7 @@ import httpx
 import trafilatura
 from tavily import AsyncTavilyClient
 
-from katt_ai.models import (
+from nous_ai.models import (
     ProviderConfig,
     ProviderType,
     ScrapedContent,
@@ -17,7 +17,7 @@ from katt_ai.models import (
     ResearchSummary,
     SourceRef,
 )
-from katt_ai.providers import get_provider
+from nous_ai.providers import get_provider
 
 
 async def web_search(
@@ -178,7 +178,7 @@ Web content to analyze:
 Please provide a JSON summary following the specified format."""
 
     # Get AI response
-    from katt_ai.models import ChatMessage
+    from nous_ai.models import ChatMessage
 
     messages = [
         ChatMessage(role="system", content=system_prompt),

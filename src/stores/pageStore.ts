@@ -972,7 +972,7 @@ export const usePageStore = create<PageStore>()(
       },
     }),
     {
-      name: "katt-pages",
+      name: "nous-pages",
       partialize: (state) => ({
         panes: state.panes,
         activePaneId: state.activePaneId,

@@ -9,7 +9,7 @@ from typing import Any
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-from katt_ai.models import (
+from nous_ai.models import (
     MCPServerConfig,
     MCPServersConfig,
     MCPTool,

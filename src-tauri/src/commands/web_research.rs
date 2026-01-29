@@ -136,7 +136,7 @@ pub async fn fetch_link_metadata(url: String) -> Result<Option<LinkMetadata>, Co
     // Create a client with timeout
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
-        .user_agent("Mozilla/5.0 (compatible; Katt/1.0)")
+        .user_agent("Mozilla/5.0 (compatible; Nous/1.0)")
         .build()
         .map_err(|e| CommandError {
             message: format!("Failed to create HTTP client: {}", e),
@@ -318,7 +318,7 @@ pub async fn fetch_url_content(url: String) -> Result<UrlContent, CommandError> 
     // Create a client with timeout
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
-        .user_agent("Mozilla/5.0 (compatible; Katt/1.0)")
+        .user_agent("Mozilla/5.0 (compatible; Nous/1.0)")
         .build()
         .map_err(|e| CommandError {
             message: format!("Failed to create HTTP client: {}", e),

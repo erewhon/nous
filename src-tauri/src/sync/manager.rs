@@ -150,7 +150,7 @@ impl SyncManager {
 
     /// Get credentials from keyring
     fn get_credentials(&self, notebook_id: Uuid) -> Result<SyncCredentials, SyncError> {
-        let entry = keyring::Entry::new("katt-sync", &notebook_id.to_string())
+        let entry = keyring::Entry::new("nous-sync", &notebook_id.to_string())
             .map_err(|e| SyncError::Keyring(e.to_string()))?;
 
         let password = entry
@@ -176,7 +176,7 @@ impl SyncManager {
         username: &str,
         password: &str,
     ) -> Result<(), SyncError> {
-        let entry = keyring::Entry::new("katt-sync", &notebook_id.to_string())
+        let entry = keyring::Entry::new("nous-sync", &notebook_id.to_string())
             .map_err(|e| SyncError::Keyring(e.to_string()))?;
 
         entry
@@ -188,7 +188,7 @@ impl SyncManager {
 
     /// Delete credentials from keyring
     fn delete_credentials(&self, notebook_id: Uuid) -> Result<(), SyncError> {
-        let entry = keyring::Entry::new("katt-sync", &notebook_id.to_string())
+        let entry = keyring::Entry::new("nous-sync", &notebook_id.to_string())
             .map_err(|e| SyncError::Keyring(e.to_string()))?;
 
         // Ignore error if not found

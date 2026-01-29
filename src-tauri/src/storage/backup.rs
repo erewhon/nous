@@ -349,7 +349,7 @@ pub fn create_auto_backup(
     let safe_name = notebook
         .name
         .replace(|c: char| !c.is_alphanumeric() && c != '-' && c != '_', "_");
-    let filename = format!("{}_{}.katt.zip", safe_name, timestamp);
+    let filename = format!("{}_{}.nous.zip", safe_name, timestamp);
     let backup_path = backup_dir.join(&filename);
 
     // Create the backup

@@ -61,7 +61,7 @@ export const useSearchStore = create<SearchStore>()(
       },
     }),
     {
-      name: "katt-search",
+      name: "nous-search",
       partialize: (state) => ({
         recentSearches: state.recentSearches,
         searchScope: state.searchScope,

@@ -193,7 +193,7 @@ export const useWebResearchStore = create<WebResearchState>()(
       setError: (error) => set({ error }),
     }),
     {
-      name: "katt-web-research-settings",
+      name: "nous-web-research-settings",
       // Only persist settings, not session state
       partialize: (state) => ({ settings: state.settings }),
     }

@@ -42,7 +42,7 @@ pub type Result<T> = std::result::Result<T, FlashcardStorageError>;
 
 /// Storage manager for flashcard operations
 pub struct FlashcardStorage {
-    /// Base path for notebooks (e.g., ~/.local/share/katt/notebooks)
+    /// Base path for notebooks (e.g., ~/.local/share/nous/notebooks)
     notebooks_path: PathBuf,
 }
 

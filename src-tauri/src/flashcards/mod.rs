@@ -1,4 +1,4 @@
-//! Flashcard and spaced repetition system for Katt
+//! Flashcard and spaced repetition system for Nous
 //!
 //! This module provides:
 //! - Deck management (per-notebook flashcard collections)

@@ -1,6 +1,6 @@
 //! Evernote .enex import implementation
 //!
-//! Converts Evernote export files (.enex) to Katt notebooks.
+//! Converts Evernote export files (.enex) to Nous notebooks.
 
 use std::collections::HashMap;
 use std::fs;

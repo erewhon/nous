@@ -809,7 +809,7 @@ export const useTemplateStore = create<TemplateStore>()(
       },
     }),
     {
-      name: "katt-templates",
+      name: "nous-templates",
       partialize: (state) => ({
         // Only persist custom templates
         templates: state.templates.filter((t) => !t.isBuiltIn),

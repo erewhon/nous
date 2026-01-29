@@ -551,7 +551,7 @@ export const useThemeStore = create<ThemeState>()(
       },
     }),
     {
-      name: "katt-theme",
+      name: "nous-theme",
       partialize: (state) => ({ settings: state.settings, showPageStats: state.showPageStats, uiMode: state.uiMode, notebookSortBy: state.notebookSortBy, pageSortBy: state.pageSortBy, panelWidths: state.panelWidths, autoHidePanels: state.autoHidePanels, zenModeSettings: state.zenModeSettings, showRecentPages: state.showRecentPages, showFavoritePages: state.showFavoritePages }),
       onRehydrateStorage: () => (state) => {
         if (state) {

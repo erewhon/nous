@@ -106,7 +106,7 @@ export function LibrarySettingsPanel() {
     const library = libraries.find((l) => l.id === id);
     if (!library || library.isDefault) return;
 
-    if (!confirm(`Delete library "${library.name}"? This will not delete the notebooks, only remove the library from Katt.`)) {
+    if (!confirm(`Delete library "${library.name}"? This will not delete the notebooks, only remove the library from Nous.`)) {
       return;
     }
 

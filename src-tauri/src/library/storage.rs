@@ -32,7 +32,7 @@ pub enum LibraryError {
 
 /// Storage for library configuration
 pub struct LibraryStorage {
-    /// Base path for app data (e.g., ~/.local/share/katt)
+    /// Base path for app data (e.g., ~/.local/share/nous)
     base_path: PathBuf,
 }
 
@@ -385,7 +385,7 @@ impl LibraryStorage {
                 ));
             }
             // Check if writable by trying to create a test file
-            let test_file = path.join(".katt_write_test");
+            let test_file = path.join(".nous_write_test");
             match fs::write(&test_file, "test") {
                 Ok(_) => {
                     let _ = fs::remove_file(&test_file);

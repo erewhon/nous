@@ -1,6 +1,6 @@
 //! Joplin JEX/RAW import implementation
 //!
-//! Converts Joplin export files (JEX archives or RAW directories) to Katt notebooks.
+//! Converts Joplin export files (JEX archives or RAW directories) to Nous notebooks.
 //!
 //! Joplin exports contain:
 //! - .md files with note content and metadata
@@ -808,10 +808,10 @@ pub fn import_joplin(
     let notebook_json = serde_json::to_string_pretty(&notebook)?;
     fs::write(notebook_dir.join("notebook.json"), notebook_json)?;
 
-    // Create Katt folders from Joplin folders
+    // Create Nous folders from Joplin folders
     // We need to handle folder hierarchy - create parent folders first
-    let mut joplin_to_katt_folder: HashMap<String, Uuid> = HashMap::new();
-    let mut katt_folders: Vec<Folder> = Vec::new();
+    let mut joplin_to_nous_folder: HashMap<String, Uuid> = HashMap::new();
+    let mut nous_folders: Vec<Folder> = Vec::new();
 
     // Sort folders by depth (no parent first, then single parent, etc.)
     // This ensures parents are created before children
@@ -826,7 +826,7 @@ pub fn import_joplin(
         let parent_uuid = joplin_folder
             .parent_id
             .as_ref()
-            .and_then(|pid| joplin_to_katt_folder.get(pid).copied());
+            .and_then(|pid| joplin_to_nous_folder.get(pid).copied());
 
         // Build folder name with emoji prefix if available
         let folder_name = match &joplin_folder.icon {
@@ -834,16 +834,16 @@ pub fn import_joplin(
             _ => joplin_folder.title.clone(),
         };
 
-        let mut katt_folder = Folder::new(notebook_id, folder_name, parent_uuid);
-        katt_folder.position = katt_folders.len() as i32;
+        let mut nous_folder = Folder::new(notebook_id, folder_name, parent_uuid);
+        nous_folder.position = nous_folders.len() as i32;
 
-        joplin_to_katt_folder.insert(joplin_folder.id.clone(), katt_folder.id);
-        katt_folders.push(katt_folder);
+        joplin_to_nous_folder.insert(joplin_folder.id.clone(), nous_folder.id);
+        nous_folders.push(nous_folder);
     }
 
     // Save folders to folders.json
-    if !katt_folders.is_empty() {
-        let folders_json = serde_json::to_string_pretty(&katt_folders)?;
+    if !nous_folders.is_empty() {
+        let folders_json = serde_json::to_string_pretty(&nous_folders)?;
         fs::write(notebook_dir.join("folders.json"), folders_json)?;
     }
 
@@ -978,8 +978,8 @@ pub fn import_joplin(
 
         // Set folder_id if the note was in a Joplin folder
         if let Some(joplin_parent_id) = &note.metadata.parent_id {
-            if let Some(&katt_folder_id) = joplin_to_katt_folder.get(joplin_parent_id) {
-                page.folder_id = Some(katt_folder_id);
+            if let Some(&nous_folder_id) = joplin_to_nous_folder.get(joplin_parent_id) {
+                page.folder_id = Some(nous_folder_id);
             }
         }
 
@@ -1151,9 +1151,9 @@ where
 
     progress(25, 100, "Creating folders...");
 
-    // Create Katt folders from Joplin folders
-    let mut joplin_to_katt_folder: HashMap<String, Uuid> = HashMap::new();
-    let mut katt_folders: Vec<Folder> = Vec::new();
+    // Create Nous folders from Joplin folders
+    let mut joplin_to_nous_folder: HashMap<String, Uuid> = HashMap::new();
+    let mut nous_folders: Vec<Folder> = Vec::new();
 
     let mut sorted_joplin_folders: Vec<&JoplinFolder> = folders.values().collect();
     sorted_joplin_folders.sort_by(|a, b| {
@@ -1166,22 +1166,22 @@ where
         let parent_uuid = joplin_folder
             .parent_id
             .as_ref()
-            .and_then(|pid| joplin_to_katt_folder.get(pid).copied());
+            .and_then(|pid| joplin_to_nous_folder.get(pid).copied());
 
         let folder_name = match &joplin_folder.icon {
             Some(emoji) if !emoji.is_empty() => format!("{} {}", emoji, joplin_folder.title),
             _ => joplin_folder.title.clone(),
         };
 
-        let mut katt_folder = Folder::new(notebook_id, folder_name, parent_uuid);
-        katt_folder.position = katt_folders.len() as i32;
+        let mut nous_folder = Folder::new(notebook_id, folder_name, parent_uuid);
+        nous_folder.position = nous_folders.len() as i32;
 
-        joplin_to_katt_folder.insert(joplin_folder.id.clone(), katt_folder.id);
-        katt_folders.push(katt_folder);
+        joplin_to_nous_folder.insert(joplin_folder.id.clone(), nous_folder.id);
+        nous_folders.push(nous_folder);
     }
 
-    if !katt_folders.is_empty() {
-        let folders_json = serde_json::to_string_pretty(&katt_folders)?;
+    if !nous_folders.is_empty() {
+        let folders_json = serde_json::to_string_pretty(&nous_folders)?;
         fs::write(notebook_dir.join("folders.json"), folders_json)?;
     }
 
@@ -1320,8 +1320,8 @@ where
         let mut page = import_markdown_to_page(&content, notebook_id, &title);
 
         if let Some(joplin_parent_id) = &note.metadata.parent_id {
-            if let Some(&katt_folder_id) = joplin_to_katt_folder.get(joplin_parent_id) {
-                page.folder_id = Some(katt_folder_id);
+            if let Some(&nous_folder_id) = joplin_to_nous_folder.get(joplin_parent_id) {
+                page.folder_id = Some(nous_folder_id);
             }
         }
 

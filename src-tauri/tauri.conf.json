@@ -1,8 +1,8 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "Katt",
+  "productName": "Nous",
   "version": "0.1.0",
-  "identifier": "com.katt.app",
+  "identifier": "com.nous.app",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Katt",
+        "title": "Nous",
         "width": 1200,
         "height": 800,
         "minWidth": 800,
@@ -30,9 +30,9 @@
         "scope": {
           "allow": [
             "/tmp/**",
-            "/tmp/katt-videos/**",
+            "/tmp/nous-videos/**",
             "tmp/**",
-            "tmp/katt-videos/**"
+            "tmp/nous-videos/**"
           ]
         }
       }

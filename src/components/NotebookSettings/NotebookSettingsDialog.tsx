@@ -1150,7 +1150,7 @@ export function NotebookSettingsDialog({
                     type="text"
                     value={syncRemotePath}
                     onChange={(e) => setSyncRemotePath(e.target.value)}
-                    placeholder="/katt-sync/my-notebook"
+                    placeholder="/nous-sync/my-notebook"
                     className="w-full rounded-md border px-2.5 py-1.5 text-xs outline-none transition-colors focus:border-[--color-accent]"
                     style={{
                       backgroundColor: "var(--color-bg-tertiary)",
@@ -1245,7 +1245,7 @@ export function NotebookSettingsDialog({
                       try {
                         await configureSync(notebook.id, {
                           serverUrl: syncServerUrl,
-                          remotePath: syncRemotePath || `/katt-sync/${notebook.id}`,
+                          remotePath: syncRemotePath || `/nous-sync/${notebook.id}`,
                           username: syncUsername,
                           password: syncPassword,
                           authType: "basic" as AuthType,

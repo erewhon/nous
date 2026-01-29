@@ -36,7 +36,7 @@ pub fn preview_joplin_import_cmd(path: String) -> CommandResult<JoplinImportPrev
 
 /// Import a Joplin export as a new notebook
 ///
-/// Converts all notes from the JEX archive or RAW directory to a new Katt notebook.
+/// Converts all notes from the JEX archive or RAW directory to a new Nous notebook.
 /// Handles notes, folders, tags, and resources.
 #[tauri::command]
 pub fn import_joplin_cmd(

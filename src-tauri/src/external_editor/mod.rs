@@ -155,7 +155,7 @@ pub struct ExternalEditorManager {
 impl ExternalEditorManager {
     /// Create a new external editor manager
     pub fn new() -> Result<Self> {
-        let temp_dir = std::env::temp_dir().join("katt-external-edit");
+        let temp_dir = std::env::temp_dir().join("nous-external-edit");
         std::fs::create_dir_all(&temp_dir)?;
 
         Ok(Self {
