@@ -185,10 +185,13 @@ export const BlockEditor = forwardRef<BlockEditorRef, BlockEditorProps>(function
     };
   }, [pages]);
 
-  // Fix Editor.js popover clipping: popovers are appended inside the toolbar
-  // wrapper, which sits inside containers with overflow:hidden/auto. Absolutely
-  // positioned popovers get clipped. To escape, we portal the popover element
-  // to document.body and position it with position:fixed using viewport coords.
+  // Fix Editor.js popover clipping: popovers sit inside containers with
+  // overflow:hidden / overflow-y:auto (EditorPaneContent), which clips them.
+  // We apply position:fixed with calculated viewport coordinates so the
+  // popover escapes clipping while staying in the DOM tree (preserving
+  // Editor.js keyboard forwarding, search filtering, and tool insertion).
+  // The will-change:auto override on .ce-toolbar (editor-styles.css) prevents
+  // WebKitGTK from creating a containing block that would defeat position:fixed.
   //
   // Two popover patterns in Editor.js:
   //   1. Block tunes: created on open, destroyed on close (detected via childList)
@@ -198,167 +201,96 @@ export const BlockEditor = forwardRef<BlockEditorRef, BlockEditorProps>(function
     const editorContainer = containerRef.current;
     if (!editorContainer) return;
 
-    // Track popovers we've moved to document.body so we can observe
-    // them for re-showing (toolbox pattern) and clean up on unmount
-    const movedPopovers = new Set<HTMLElement>();
-    let movedObserver: MutationObserver | null = null;
+    const fixPopover = (popover: HTMLElement) => {
+      // Guard: already processing or fixed
+      if (popover.dataset.fixedPopover) return;
+      popover.dataset.fixedPopover = "pending";
 
-    const positionPopover = (popover: HTMLElement) => {
-      const popoverContainer = popover.querySelector(".ce-popover__container") as HTMLElement;
-      if (!popoverContainer) return;
-
-      // Find the best anchor: the active settings button, the opened toolbar,
-      // or the current block. This gives us a position near the trigger.
-      const settingsBtn = editorContainer.querySelector(
-        ".ce-toolbar__settings-btn--active"
-      ) as HTMLElement;
-      const toolbar = editorContainer.querySelector(
-        ".ce-toolbar--opened"
-      ) as HTMLElement;
-      const currentBlock = editorContainer.querySelector(
-        ".ce-block--selected, .ce-block--focused"
-      ) as HTMLElement;
-      const anchor = settingsBtn || toolbar || currentBlock;
-      if (!anchor) return;
-      const anchorRect = anchor.getBoundingClientRect();
-
-      // Remove directional classes — we position it ourselves
-      popover.classList.remove("ce-popover--open-left");
-      popover.classList.remove("ce-popover--open-top");
-
-      // Position the popover wrapper with fixed positioning
-      popover.style.position = "fixed";
-      popover.style.zIndex = "10002";
-
-      // Make the container flow normally inside the fixed popover
-      // instead of using absolute positioning with CSS variables
-      popoverContainer.style.position = "relative";
-      popoverContainer.style.left = "0";
-      popoverContainer.style.top = "0";
-
-      const width = popoverContainer.offsetWidth || 200;
-      const height = popoverContainer.offsetHeight || 270;
-
-      // Position below the anchor
-      let left = anchorRect.left;
-      let top = anchorRect.bottom + 4;
-
-      // Clamp within viewport
-      if (left < 8) left = 8;
-      if (left + width > window.innerWidth - 8) {
-        left = Math.max(8, window.innerWidth - width - 8);
-      }
-      if (top + height > window.innerHeight - 8) {
-        // Open upward
-        top = anchorRect.top - height - 4;
-        if (top < 8) top = 8;
-      }
-
-      popover.style.left = `${left}px`;
-      popover.style.top = `${top}px`;
-    };
-
-    const portalAndPosition = (popover: HTMLElement) => {
-      // Move to document.body if not already there
-      if (popover.parentElement !== document.body) {
-        document.body.appendChild(popover);
-      }
-      positionPopover(popover);
-
-      // Start observing this popover for re-show events (toolbox pattern:
-      // the element stays in document.body and gets --opened toggled)
-      if (!movedPopovers.has(popover)) {
-        movedPopovers.add(popover);
-        movedObserver?.observe(popover, {
-          attributes: true,
-          attributeFilter: ["class"],
-        });
-      }
-    };
-
-    const scheduleFixPopover = (popover: HTMLElement) => {
-      // Wait for Editor.js to finish its positioning
       requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          if (popover.classList.contains("ce-popover--opened")) {
-            portalAndPosition(popover);
-          }
-        });
+        // Bail if popover was closed before rAF fired
+        if (!popover.classList.contains("ce-popover--opened")) {
+          delete popover.dataset.fixedPopover;
+          return;
+        }
+
+        // Force rightward opening
+        popover.classList.remove("ce-popover--open-left");
+
+        // The popover sits inside .ce-toolbar__actions which is at right:100%
+        // (the left margin, potentially off-screen). We can't use the popover's
+        // own rect for horizontal positioning. Instead, anchor to the toolbar
+        // (spans editor width) for X, and the settings button for Y.
+        const toolbar = editorContainer.querySelector(".ce-toolbar") as HTMLElement;
+        if (!toolbar) {
+          delete popover.dataset.fixedPopover;
+          return;
+        }
+
+        const toolbarRect = toolbar.getBoundingClientRect();
+        const settingsBtn = toolbar.querySelector(".ce-toolbar__settings-btn");
+        const btnRect = settingsBtn?.getBoundingClientRect();
+
+        // Vertical: below the settings button (or toolbar top as fallback)
+        const top = (btnRect ? btnRect.bottom + 4 : toolbarRect.top);
+
+        // Horizontal: aligned to the toolbar's left edge (= editor content left)
+        const left = toolbarRect.left;
+
+        // Apply fixed positioning to escape overflow clipping
+        popover.style.position = "fixed";
+        popover.style.top = `${top}px`;
+        popover.style.left = `${left}px`;
+        popover.style.margin = "0";
+        popover.dataset.fixedPopover = "true";
       });
     };
 
-    // Observer for popovers inside the editor (detects newly created popovers
-    // for the tunes pattern, and class changes for the toolbox pattern)
-    const editorObserver = new MutationObserver((mutations) => {
+    const resetPopover = (popover: HTMLElement) => {
+      if (popover.dataset.fixedPopover) {
+        popover.style.position = "";
+        popover.style.top = "";
+        popover.style.left = "";
+        popover.style.margin = "";
+        delete popover.dataset.fixedPopover;
+      }
+    };
+
+    const observer = new MutationObserver((mutations) => {
       for (const mutation of mutations) {
         if (mutation.type === "childList") {
           // Pattern 1: Tunes popover — new element added to DOM
           mutation.addedNodes.forEach((node) => {
             if (!(node instanceof HTMLElement)) return;
-            const popovers: HTMLElement[] = [];
             if (node.classList?.contains("ce-popover")) {
-              popovers.push(node);
+              fixPopover(node);
             } else if (node.querySelectorAll) {
               node.querySelectorAll(".ce-popover").forEach((p) =>
-                popovers.push(p as HTMLElement)
+                fixPopover(p as HTMLElement)
               );
-            }
-            for (const popover of popovers) {
-              scheduleFixPopover(popover);
             }
           });
         } else if (mutation.type === "attributes") {
-          // Pattern 2: Toolbox popover — existing element gets --opened class
+          // Pattern 2: Toolbox popover — existing element toggled via class
           const target = mutation.target as HTMLElement;
-          if (
-            target.classList?.contains("ce-popover") &&
-            target.classList.contains("ce-popover--opened") &&
-            target.parentElement !== document.body
-          ) {
-            scheduleFixPopover(target);
+          if (target.classList?.contains("ce-popover")) {
+            if (target.classList.contains("ce-popover--opened")) {
+              fixPopover(target);
+            } else {
+              resetPopover(target);
+            }
           }
         }
       }
     });
 
-    editorObserver.observe(editorContainer, {
+    observer.observe(editorContainer, {
       childList: true,
       subtree: true,
       attributes: true,
       attributeFilter: ["class"],
     });
 
-    // Observer for popovers that have been moved to document.body
-    // (detects toolbox being re-shown after initial portal)
-    movedObserver = new MutationObserver((mutations) => {
-      for (const mutation of mutations) {
-        const target = mutation.target as HTMLElement;
-        if (
-          target.classList?.contains("ce-popover--opened") &&
-          movedPopovers.has(target)
-        ) {
-          requestAnimationFrame(() => {
-            requestAnimationFrame(() => {
-              if (target.classList.contains("ce-popover--opened")) {
-                positionPopover(target);
-              }
-            });
-          });
-        }
-      }
-    });
-
-    return () => {
-      editorObserver.disconnect();
-      movedObserver?.disconnect();
-      // Clean up portaled popovers
-      movedPopovers.forEach((p) => {
-        if (p.parentElement === document.body) {
-          p.remove();
-        }
-      });
-      movedPopovers.clear();
-    };
+    return () => observer.disconnect();
   }, [readOnly]);
 
   // Handle wiki-link clicks via event delegation

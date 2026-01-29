@@ -2992,15 +2992,22 @@ wiki-link.broken,
 }
 
 /* Editor.js popover positioning fixes.
-   Popovers are appended inside the toolbar wrapper, which sits inside
-   containers with overflow:hidden. JavaScript in BlockEditor.tsx portals
-   the popover to document.body with position:fixed so it escapes clipping. */
+   Popovers open leftward by default when near the right edge, going off-screen.
+   JavaScript in BlockEditor.tsx removes the open-left class to force rightward
+   opening. The outer pane container uses min-h-0 instead of overflow-hidden
+   (in EditorPaneContent) so popovers aren't clipped. This CSS variable override
+   is a fallback in case the class removal doesn't fire in time. */
 .ce-popover {
   max-width: calc(100vw - 32px);
 }
 
 .ce-popover--opened {
   min-width: 200px;
+}
+
+/* Force rightward opening as CSS fallback for BlockEditor.tsx class removal */
+.ce-popover--open-left .ce-popover__container {
+  --popover-left: 0 !important;
 }
 
 /* Ensure the editor doesn't clip popovers that remain within the editor */
