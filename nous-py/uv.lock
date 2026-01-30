@@ -1310,58 +1310,6 @@ wheels = [
 ]
 
 [[package]]
-name = "katt-ai"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "anthropic" },
-    { name = "httpx" },
-    { name = "markitdown" },
-    { name = "openai" },
-    { name = "pydantic" },
-    { name = "tavily-python" },
-    { name = "trafilatura" },
-]
-
-[package.optional-dependencies]
-bedrock = [
-    { name = "boto3" },
-]
-browser = [
-    { name = "browser-use" },
-]
-dev = [
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "ruff" },
-]
-ollama = [
-    { name = "ollama" },
-]
-transcription = [
-    { name = "faster-whisper" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "anthropic", specifier = ">=0.40" },
-    { name = "boto3", marker = "extra == 'bedrock'", specifier = ">=1.35" },
-    { name = "browser-use", marker = "extra == 'browser'", specifier = ">=0.2" },
-    { name = "faster-whisper", marker = "extra == 'transcription'", specifier = ">=1.0" },
-    { name = "httpx", specifier = ">=0.27" },
-    { name = "markitdown", specifier = ">=0.1" },
-    { name = "ollama", marker = "extra == 'ollama'", specifier = ">=0.4" },
-    { name = "openai", specifier = ">=1.0" },
-    { name = "pydantic", specifier = ">=2.0" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
-    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.8" },
-    { name = "tavily-python", specifier = ">=0.5" },
-    { name = "trafilatura", specifier = ">=1.12" },
-]
-provides-extras = ["dev", "ollama", "browser", "transcription", "bedrock"]
-
-[[package]]
 name = "lxml"
 version = "6.0.2"
 source = { registry = "https://pypi.org/simple" }
@@ -1700,6 +1648,56 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/7f/ae/3148b988a9c6239903e786eac19c889fab607c31d6efa7fb2147e5680f23/multidict-6.7.0-cp314-cp314t-win_arm64.whl", hash = "sha256:cc41db090ed742f32bd2d2c721861725e6109681eddf835d0a82bd3a5c382827", size = 44804, upload-time = "2025-10-06T14:51:55.415Z" },
     { url = "https://files.pythonhosted.org/packages/b7/da/7d22601b625e241d4f23ef1ebff8acfc60da633c9e7e7922e24d10f592b3/multidict-6.7.0-py3-none-any.whl", hash = "sha256:394fc5c42a333c9ffc3e421a4c85e08580d990e08b99f6bf35b4132114c5dcb3", size = 12317, upload-time = "2025-10-06T14:52:29.272Z" },
 ]
+
+[[package]]
+name = "nous-ai"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "anthropic" },
+    { name = "boto3" },
+    { name = "httpx" },
+    { name = "markitdown" },
+    { name = "openai" },
+    { name = "pydantic" },
+    { name = "tavily-python" },
+    { name = "trafilatura" },
+]
+
+[package.optional-dependencies]
+browser = [
+    { name = "browser-use" },
+]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "ruff" },
+]
+ollama = [
+    { name = "ollama" },
+]
+transcription = [
+    { name = "faster-whisper" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "anthropic", specifier = ">=0.40" },
+    { name = "boto3", specifier = ">=1.35" },
+    { name = "browser-use", marker = "extra == 'browser'", specifier = ">=0.2" },
+    { name = "faster-whisper", marker = "extra == 'transcription'", specifier = ">=1.0" },
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "markitdown", specifier = ">=0.1" },
+    { name = "ollama", marker = "extra == 'ollama'", specifier = ">=0.4" },
+    { name = "openai", specifier = ">=1.0" },
+    { name = "pydantic", specifier = ">=2.0" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.8" },
+    { name = "tavily-python", specifier = ">=0.5" },
+    { name = "trafilatura", specifier = ">=1.12" },
+]
+provides-extras = ["dev", "ollama", "browser", "transcription"]
 
 [[package]]
 name = "numpy"

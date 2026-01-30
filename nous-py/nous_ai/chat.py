@@ -62,25 +62,31 @@ def convert_mcp_tools_to_openai_format(mcp_tools: list[MCPTool]) -> list[dict]:
 def _split_into_chunks(text: str, chunk_size: int = 20) -> Generator[str, None, None]:
     """Split text into chunks for simulated streaming.
 
-    Splits by words to maintain readability, yielding approximately
-    chunk_size characters at a time. Smaller chunks create a more
-    visible streaming effect.
+    Yields approximately chunk_size characters at a time, breaking
+    at newlines or spaces when possible. All whitespace (including
+    newlines and indentation) is preserved exactly.
     """
     if not text:
         return
 
-    words = text.split()
-    current_chunk = ""
+    i = 0
+    while i < len(text):
+        end = min(i + chunk_size, len(text))
 
-    for word in words:
-        if len(current_chunk) + len(word) + 1 > chunk_size and current_chunk:
-            yield current_chunk + " "
-            current_chunk = word
-        else:
-            current_chunk = current_chunk + " " + word if current_chunk else word
+        # If not at the end, try to break at a newline or space
+        if end < len(text):
+            # Prefer breaking at a newline
+            nl_pos = text.find("\n", i, end)
+            if nl_pos >= 0:
+                end = nl_pos + 1
+            else:
+                # Try to break at a space
+                space_pos = text.rfind(" ", i, end)
+                if space_pos > i:
+                    end = space_pos + 1
 
-    if current_chunk:
-        yield current_chunk
+        yield text[i:end]
+        i = end
 
 
 def _emit_chunks_with_delay(callback: Any, event_type: str, text: str) -> None:

@@ -127,35 +127,49 @@ export function OutputRenderer({ output, isDark }: OutputRendererProps) {
 }
 
 /**
- * Convert a JupyterOutputItem (camelCase API response) to a JupyterOutput (snake_case Jupyter format).
+ * Convert a raw output item from the backend to a JupyterOutput.
+ *
+ * The backend returns snake_case keys (output_type, execution_count)
+ * but the TypeScript interface declares camelCase. This function
+ * handles both formats for robustness.
  */
 export function apiOutputToJupyterOutput(item: JupyterOutputItem): JupyterOutput {
-  switch (item.outputType) {
+  // The backend actually returns snake_case keys, so read both formats
+  const raw = item as unknown as Record<string, unknown>;
+  const outputType = (item.outputType || raw.output_type) as string || "stream";
+
+  switch (outputType) {
     case "stream":
       return {
         output_type: "stream",
-        name: item.name || "stdout",
-        text: item.text || "",
+        name: ((item.name || raw.name) as "stdout" | "stderr") || "stdout",
+        text: (item.text || raw.text) as string | string[] || "",
       };
     case "execute_result":
       return {
         output_type: "execute_result",
-        execution_count: item.executionCount ?? null,
-        data: item.data || {},
-        metadata: item.metadata || {},
+        execution_count: (item.executionCount ?? raw.execution_count ?? null) as number | null,
+        data: (item.data || raw.data || {}) as Record<string, string | string[]>,
+        metadata: (item.metadata || raw.metadata || {}) as Record<string, unknown>,
       };
     case "display_data":
       return {
         output_type: "display_data",
-        data: item.data || {},
-        metadata: item.metadata || {},
+        data: (item.data || raw.data || {}) as Record<string, string | string[]>,
+        metadata: (item.metadata || raw.metadata || {}) as Record<string, unknown>,
       };
     case "error":
       return {
         output_type: "error",
-        ename: item.ename || "Error",
-        evalue: item.evalue || "",
-        traceback: item.traceback || [],
+        ename: (item.ename || raw.ename as string) || "Error",
+        evalue: (item.evalue || raw.evalue as string) || "",
+        traceback: (item.traceback || raw.traceback || []) as string[],
+      };
+    default:
+      return {
+        output_type: "stream",
+        name: "stdout",
+        text: String(item),
       };
   }
 }
