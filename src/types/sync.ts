@@ -20,6 +20,7 @@ export const SyncConfigSchema = z.object({
   syncMode: SyncModeSchema.default("manual"),
   syncInterval: z.number().optional(), // seconds, for periodic mode
   lastSync: z.string().datetime().optional(),
+  managedByLibrary: z.boolean().optional(),
 });
 
 export type SyncConfig = z.infer<typeof SyncConfigSchema>;
@@ -118,3 +119,32 @@ export const QueueItemSchema = z.object({
 });
 
 export type QueueItem = z.infer<typeof QueueItemSchema>;
+
+// ===== Library Sync Config =====
+
+export const LibrarySyncConfigSchema = z.object({
+  enabled: z.boolean(),
+  serverUrl: z.string().url(),
+  remoteBasePath: z.string(),
+  authType: AuthTypeSchema,
+  syncMode: SyncModeSchema.default("manual"),
+  syncInterval: z.number().optional(),
+});
+
+export type LibrarySyncConfig = z.infer<typeof LibrarySyncConfigSchema>;
+
+// ===== Library Sync Config Input =====
+
+export const LibrarySyncConfigInputSchema = z.object({
+  serverUrl: z.string().url(),
+  remoteBasePath: z.string(),
+  username: z.string(),
+  password: z.string(),
+  authType: AuthTypeSchema.default("basic"),
+  syncMode: SyncModeSchema.default("manual"),
+  syncInterval: z.number().optional(),
+});
+
+export type LibrarySyncConfigInput = z.infer<
+  typeof LibrarySyncConfigInputSchema
+>;

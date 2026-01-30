@@ -6,7 +6,9 @@
 
 import { useState, useEffect } from "react";
 import { useLibraryStore } from "../../stores/libraryStore";
+import { useSyncStore } from "../../stores/syncStore";
 import type { LibraryStats } from "../../types/library";
+import type { SyncMode, AuthType } from "../../types/sync";
 import * as api from "../../utils/api";
 
 export function LibrarySettingsPanel() {
@@ -20,6 +22,18 @@ export function LibrarySettingsPanel() {
     switchLibrary,
   } = useLibraryStore();
 
+  const {
+    testConnection,
+    configureLibrary,
+    disableLibrary,
+    syncLibraryNow,
+    isTestingConnection,
+    testConnectionResult,
+    clearTestResult,
+    isConfiguring,
+    isLibrarySyncing,
+  } = useSyncStore();
+
   const [isCreating, setIsCreating] = useState(false);
   const [newName, setNewName] = useState("");
   const [newPath, setNewPath] = useState("");
@@ -28,6 +42,15 @@ export function LibrarySettingsPanel() {
   const [editName, setEditName] = useState("");
   const [stats, setStats] = useState<Record<string, LibraryStats>>({});
   const [isLoading, setIsLoading] = useState(false);
+
+  // Cloud sync state
+  const [showSyncConfig, setShowSyncConfig] = useState(false);
+  const [syncServerUrl, setSyncServerUrl] = useState("");
+  const [syncUsername, setSyncUsername] = useState("");
+  const [syncPassword, setSyncPassword] = useState("");
+  const [syncBasePath, setSyncBasePath] = useState("");
+  const [syncMode, setSyncMode] = useState<SyncMode>("manual");
+  const [syncError, setSyncError] = useState<string | null>(null);
 
   useEffect(() => {
     fetchLibraries();
@@ -460,6 +483,310 @@ export function LibrarySettingsPanel() {
           </div>
         ))}
       </div>
+
+      {/* Cloud Sync for Active Library */}
+      {currentLibrary && (
+        <div className="space-y-3 pt-2">
+          <h3
+            className="text-sm font-medium"
+            style={{ color: "var(--color-text-primary)" }}
+          >
+            Cloud Sync
+          </h3>
+          <p
+            className="text-xs"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            Sync all notebooks in the active library to a WebDAV server.
+          </p>
+
+          <div
+            className="rounded-md border p-3"
+            style={{
+              backgroundColor: "var(--color-bg-secondary)",
+              borderColor: "var(--color-border)",
+            }}
+          >
+            {/* Sync configured - show status */}
+            {currentLibrary.syncConfig?.enabled ? (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium"
+                      style={{
+                        backgroundColor: "rgba(34, 197, 94, 0.15)",
+                        color: "rgb(34, 197, 94)",
+                      }}
+                    >
+                      <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
+                      Sync Enabled
+                    </span>
+                  </div>
+                </div>
+
+                <div className="text-xs space-y-1" style={{ color: "var(--color-text-muted)" }}>
+                  <div>
+                    Server: <span style={{ color: "var(--color-text-secondary)" }}>{currentLibrary.syncConfig.serverUrl}</span>
+                  </div>
+                  <div>
+                    Base Path: <span style={{ color: "var(--color-text-secondary)" }}>{currentLibrary.syncConfig.remoteBasePath}</span>
+                  </div>
+                  <div>
+                    Mode: <span style={{ color: "var(--color-text-secondary)" }}>
+                      {currentLibrary.syncConfig.syncMode === "manual" ? "Manual" :
+                       currentLibrary.syncConfig.syncMode === "onsave" ? "On Save" : "Periodic"}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex gap-2">
+                  <button
+                    onClick={async () => {
+                      if (!currentLibrary) return;
+                      setSyncError(null);
+                      try {
+                        await syncLibraryNow(currentLibrary.id);
+                        fetchLibraries();
+                      } catch (e) {
+                        setSyncError(e instanceof Error ? e.message : "Sync failed");
+                      }
+                    }}
+                    disabled={isLibrarySyncing}
+                    className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors hover:opacity-90"
+                    style={{
+                      backgroundColor: "var(--color-accent)",
+                      color: "white",
+                    }}
+                  >
+                    {isLibrarySyncing ? "Syncing..." : "Sync All Now"}
+                  </button>
+                  <button
+                    onClick={async () => {
+                      if (!currentLibrary) return;
+                      if (confirm("Disable cloud sync for this library? All notebook sync configs managed by the library will be cleared.")) {
+                        setSyncError(null);
+                        try {
+                          await disableLibrary(currentLibrary.id);
+                          fetchLibraries();
+                        } catch (e) {
+                          setSyncError(e instanceof Error ? e.message : "Failed to disable sync");
+                        }
+                      }
+                    }}
+                    className="rounded-md px-3 py-1.5 text-xs font-medium transition-colors"
+                    style={{
+                      backgroundColor: "var(--color-bg-tertiary)",
+                      color: "var(--color-text-secondary)",
+                    }}
+                  >
+                    Disable
+                  </button>
+                </div>
+
+                {syncError && (
+                  <p className="text-xs" style={{ color: "var(--color-error)" }}>{syncError}</p>
+                )}
+              </div>
+            ) : (
+              <>
+                {/* Not configured - show form or button */}
+                {!showSyncConfig ? (
+                  <div className="flex items-center justify-between">
+                    <span
+                      className="text-xs"
+                      style={{ color: "var(--color-text-muted)" }}
+                    >
+                      Not configured
+                    </span>
+                    <button
+                      onClick={() => {
+                        setShowSyncConfig(true);
+                        setSyncBasePath(`/nous-sync/${currentLibrary.name.toLowerCase().replace(/\s+/g, "-")}`);
+                      }}
+                      className="rounded-md px-3 py-1.5 text-xs font-medium transition-colors hover:opacity-90"
+                      style={{
+                        backgroundColor: "var(--color-accent)",
+                        color: "white",
+                      }}
+                    >
+                      Configure
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-xs font-medium mb-1" style={{ color: "var(--color-text-secondary)" }}>
+                        WebDAV Server URL
+                      </label>
+                      <input
+                        type="text"
+                        value={syncServerUrl}
+                        onChange={(e) => setSyncServerUrl(e.target.value)}
+                        placeholder="https://cloud.example.com/remote.php/dav/files/user/"
+                        className="w-full rounded-md border px-2.5 py-1.5 text-xs outline-none transition-colors focus:border-[--color-accent]"
+                        style={{
+                          backgroundColor: "var(--color-bg-primary)",
+                          borderColor: "var(--color-border)",
+                          color: "var(--color-text-primary)",
+                        }}
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-medium mb-1" style={{ color: "var(--color-text-secondary)" }}>
+                        Base Remote Path
+                      </label>
+                      <input
+                        type="text"
+                        value={syncBasePath}
+                        onChange={(e) => setSyncBasePath(e.target.value)}
+                        placeholder="/nous-sync/my-library"
+                        className="w-full rounded-md border px-2.5 py-1.5 text-xs outline-none transition-colors focus:border-[--color-accent]"
+                        style={{
+                          backgroundColor: "var(--color-bg-primary)",
+                          borderColor: "var(--color-border)",
+                          color: "var(--color-text-primary)",
+                        }}
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-medium mb-1" style={{ color: "var(--color-text-secondary)" }}>
+                        Username
+                      </label>
+                      <input
+                        type="text"
+                        value={syncUsername}
+                        onChange={(e) => setSyncUsername(e.target.value)}
+                        placeholder="username"
+                        className="w-full rounded-md border px-2.5 py-1.5 text-xs outline-none transition-colors focus:border-[--color-accent]"
+                        style={{
+                          backgroundColor: "var(--color-bg-primary)",
+                          borderColor: "var(--color-border)",
+                          color: "var(--color-text-primary)",
+                        }}
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-medium mb-1" style={{ color: "var(--color-text-secondary)" }}>
+                        Password / App Token
+                      </label>
+                      <input
+                        type="password"
+                        value={syncPassword}
+                        onChange={(e) => setSyncPassword(e.target.value)}
+                        placeholder="password"
+                        className="w-full rounded-md border px-2.5 py-1.5 text-xs outline-none transition-colors focus:border-[--color-accent]"
+                        style={{
+                          backgroundColor: "var(--color-bg-primary)",
+                          borderColor: "var(--color-border)",
+                          color: "var(--color-text-primary)",
+                        }}
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-medium mb-1" style={{ color: "var(--color-text-secondary)" }}>
+                        Sync Mode
+                      </label>
+                      <select
+                        value={syncMode}
+                        onChange={(e) => setSyncMode(e.target.value as SyncMode)}
+                        className="w-full rounded-md border px-2.5 py-1.5 text-xs outline-none transition-colors focus:border-[--color-accent]"
+                        style={{
+                          backgroundColor: "var(--color-bg-primary)",
+                          borderColor: "var(--color-border)",
+                          color: "var(--color-text-primary)",
+                        }}
+                      >
+                        <option value="manual">Manual</option>
+                        <option value="onsave">On Save</option>
+                        <option value="periodic">Periodic</option>
+                      </select>
+                    </div>
+
+                    <div className="flex gap-2">
+                      <button
+                        onClick={async () => {
+                          setSyncError(null);
+                          const result = await testConnection(syncServerUrl, syncUsername, syncPassword);
+                          if (!result) {
+                            setSyncError("Connection failed. Check your URL and credentials.");
+                          }
+                        }}
+                        disabled={isTestingConnection || !syncServerUrl || !syncUsername || !syncPassword}
+                        className="flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition-colors"
+                        style={{
+                          backgroundColor: "var(--color-bg-tertiary)",
+                          color: "var(--color-text-secondary)",
+                        }}
+                      >
+                        {isTestingConnection ? "Testing..." : testConnectionResult === true ? "Connected!" : "Test Connection"}
+                      </button>
+                      <button
+                        onClick={async () => {
+                          if (!currentLibrary) return;
+                          setSyncError(null);
+                          try {
+                            await configureLibrary(currentLibrary.id, {
+                              serverUrl: syncServerUrl,
+                              remoteBasePath: syncBasePath || `/nous-sync/${currentLibrary.id}`,
+                              username: syncUsername,
+                              password: syncPassword,
+                              authType: "basic" as AuthType,
+                              syncMode,
+                            });
+                            setShowSyncConfig(false);
+                            clearTestResult();
+                            fetchLibraries();
+                          } catch (e) {
+                            setSyncError(e instanceof Error ? e.message : "Failed to enable sync");
+                          }
+                        }}
+                        disabled={isConfiguring || !syncServerUrl || !syncUsername || !syncPassword}
+                        className="flex-1 rounded-md px-3 py-1.5 text-xs font-medium transition-colors hover:opacity-90"
+                        style={{
+                          backgroundColor: "var(--color-accent)",
+                          color: "white",
+                        }}
+                      >
+                        {isConfiguring ? "Enabling..." : "Enable Sync"}
+                      </button>
+                    </div>
+
+                    <div className="flex justify-end">
+                      <button
+                        onClick={() => {
+                          setShowSyncConfig(false);
+                          setSyncServerUrl("");
+                          setSyncUsername("");
+                          setSyncPassword("");
+                          setSyncBasePath("");
+                          setSyncError(null);
+                          clearTestResult();
+                        }}
+                        className="text-xs transition-colors"
+                        style={{ color: "var(--color-text-muted)" }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+
+                    {testConnectionResult === true && (
+                      <p className="text-xs text-green-500">Connection successful!</p>
+                    )}
+                    {syncError && (
+                      <p className="text-xs" style={{ color: "var(--color-error)" }}>{syncError}</p>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

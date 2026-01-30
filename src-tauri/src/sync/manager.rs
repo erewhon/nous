@@ -5,12 +5,13 @@ use std::sync::{Arc, Mutex};
 use thiserror::Error;
 use uuid::Uuid;
 
+use crate::library::LibraryStorage;
 use crate::storage::Page;
 use crate::storage::FileStorage;
 
 use super::config::{
-    SyncConfig, SyncConfigInput, SyncCredentials, SyncManifest,
-    SyncState, SyncStatus, SyncResult,
+    LibrarySyncConfig, LibrarySyncConfigInput, SyncConfig, SyncConfigInput, SyncCredentials,
+    SyncManifest, SyncState, SyncStatus, SyncResult,
 };
 use super::crdt::PageDocument;
 use super::metadata::LocalSyncState;
@@ -19,6 +20,9 @@ use super::webdav::{WebDAVClient, WebDAVError};
 
 /// Type alias for shared storage
 pub type SharedStorage = Arc<Mutex<FileStorage>>;
+
+/// Type alias for shared library storage
+pub type SharedLibraryStorage = Arc<Mutex<LibraryStorage>>;
 
 #[derive(Error, Debug)]
 pub enum SyncError {
@@ -251,6 +255,7 @@ impl SyncManager {
             sync_mode: input.sync_mode,
             sync_interval: input.sync_interval,
             last_sync: None,
+            managed_by_library: None,
         };
 
         // Update notebook (lock only during synchronous operation)
@@ -670,5 +675,285 @@ impl SyncManager {
             .into_iter()
             .cloned()
             .collect()
+    }
+
+    // ===== Library-level sync methods =====
+
+    /// Get library credentials from keyring
+    fn get_library_credentials(&self, library_id: Uuid) -> Result<SyncCredentials, SyncError> {
+        let entry = keyring::Entry::new("nous-library-sync", &library_id.to_string())
+            .map_err(|e| SyncError::Keyring(e.to_string()))?;
+
+        let password = entry
+            .get_password()
+            .map_err(|_| SyncError::CredentialsNotFound)?;
+
+        let parts: Vec<&str> = password.splitn(2, ':').collect();
+        if parts.len() != 2 {
+            return Err(SyncError::CredentialsNotFound);
+        }
+
+        Ok(SyncCredentials {
+            username: parts[0].to_string(),
+            password: parts[1].to_string(),
+        })
+    }
+
+    /// Store library credentials in keyring
+    fn store_library_credentials(
+        &self,
+        library_id: Uuid,
+        username: &str,
+        password: &str,
+    ) -> Result<(), SyncError> {
+        let entry = keyring::Entry::new("nous-library-sync", &library_id.to_string())
+            .map_err(|e| SyncError::Keyring(e.to_string()))?;
+
+        entry
+            .set_password(&format!("{}:{}", username, password))
+            .map_err(|e| SyncError::Keyring(e.to_string()))?;
+
+        Ok(())
+    }
+
+    /// Delete library credentials from keyring
+    fn delete_library_credentials(&self, library_id: Uuid) -> Result<(), SyncError> {
+        let entry = keyring::Entry::new("nous-library-sync", &library_id.to_string())
+            .map_err(|e| SyncError::Keyring(e.to_string()))?;
+
+        let _ = entry.delete_credential();
+        Ok(())
+    }
+
+    /// Configure library-level sync for all notebooks
+    pub async fn configure_library_sync(
+        &self,
+        library_id: Uuid,
+        library_storage: &SharedLibraryStorage,
+        storage: &SharedStorage,
+        input: LibrarySyncConfigInput,
+    ) -> Result<(), SyncError> {
+        // Test connection first
+        let success = self
+            .test_connection(&input.server_url, &input.username, &input.password)
+            .await?;
+
+        if !success {
+            return Err(SyncError::WebDAV(super::webdav::WebDAVError::AuthFailed));
+        }
+
+        // Store library credentials in keyring
+        self.store_library_credentials(library_id, &input.username, &input.password)?;
+
+        // Build library sync config
+        let config = LibrarySyncConfig {
+            enabled: true,
+            server_url: input.server_url.clone(),
+            remote_base_path: input.remote_base_path.clone(),
+            auth_type: input.auth_type.clone(),
+            sync_mode: input.sync_mode.clone(),
+            sync_interval: input.sync_interval,
+        };
+
+        // Save config on library
+        {
+            let lib_storage = library_storage.lock().unwrap();
+            lib_storage
+                .update_library_sync_config(library_id, Some(config.clone()))
+                .map_err(|e| SyncError::IO(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
+        }
+
+        // Apply to all existing notebooks
+        let notebooks = {
+            let storage_guard = storage.lock().unwrap();
+            storage_guard.list_notebooks().unwrap_or_default()
+        };
+
+        for notebook in &notebooks {
+            if let Err(e) = self
+                .apply_library_sync_to_notebook(
+                    library_id,
+                    notebook.id,
+                    &config,
+                    storage,
+                )
+                .await
+            {
+                log::warn!(
+                    "Failed to apply library sync to notebook {}: {}",
+                    notebook.id,
+                    e
+                );
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Apply library sync config to a single notebook (no connection test)
+    pub async fn apply_library_sync_to_notebook(
+        &self,
+        library_id: Uuid,
+        notebook_id: Uuid,
+        library_config: &LibrarySyncConfig,
+        storage: &SharedStorage,
+    ) -> Result<(), SyncError> {
+        // Get library credentials and copy to notebook keyring
+        let creds = self.get_library_credentials(library_id)?;
+        self.store_credentials(notebook_id, &creds.username, &creds.password)?;
+
+        // Build per-notebook sync config
+        let remote_path = format!("{}/{}", library_config.remote_base_path, notebook_id);
+        let config = SyncConfig {
+            enabled: true,
+            server_url: library_config.server_url.clone(),
+            remote_path: remote_path.clone(),
+            auth_type: library_config.auth_type.clone(),
+            sync_mode: library_config.sync_mode.clone(),
+            sync_interval: library_config.sync_interval,
+            last_sync: None,
+            managed_by_library: Some(true),
+        };
+
+        // Update notebook
+        {
+            let storage_guard = storage.lock().unwrap();
+            let mut notebook = storage_guard.get_notebook(notebook_id)?;
+            notebook.sync_config = Some(config.clone());
+            storage_guard.update_notebook(&notebook)?;
+        }
+
+        // Create remote directory structure
+        let client = WebDAVClient::new(config.server_url.clone(), creds)?;
+        client
+            .mkdir_p(&format!("{}/pages", remote_path))
+            .await?;
+        client
+            .mkdir_p(&format!("{}/assets", remote_path))
+            .await?;
+
+        // Initialize local state
+        let state = LocalSyncState::new(notebook_id);
+        self.save_local_state(notebook_id, &state)?;
+
+        log::info!(
+            "Applied library sync to notebook {} (remote: {})",
+            notebook_id,
+            remote_path
+        );
+
+        Ok(())
+    }
+
+    /// Disable library-level sync for all notebooks
+    pub fn disable_library_sync(
+        &self,
+        library_id: Uuid,
+        library_storage: &SharedLibraryStorage,
+        storage: &SharedStorage,
+    ) -> Result<(), SyncError> {
+        // Get all notebooks and disable sync for library-managed ones
+        let notebooks = {
+            let storage_guard = storage.lock().unwrap();
+            storage_guard.list_notebooks().unwrap_or_default()
+        };
+
+        for notebook in &notebooks {
+            let is_managed = notebook
+                .sync_config
+                .as_ref()
+                .and_then(|c| c.managed_by_library)
+                .unwrap_or(false);
+
+            if is_managed {
+                if let Err(e) = self.disable_sync(notebook.id, storage) {
+                    log::warn!(
+                        "Failed to disable sync for notebook {}: {}",
+                        notebook.id,
+                        e
+                    );
+                }
+            }
+        }
+
+        // Delete library credentials from keyring
+        self.delete_library_credentials(library_id)?;
+
+        // Clear sync config on library
+        {
+            let lib_storage = library_storage.lock().unwrap();
+            lib_storage
+                .update_library_sync_config(library_id, None)
+                .map_err(|e| SyncError::IO(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
+        }
+
+        log::info!("Disabled library sync for library {}", library_id);
+        Ok(())
+    }
+
+    /// Sync all notebooks in a library
+    pub async fn sync_library(
+        &self,
+        _library_id: Uuid,
+        storage: &SharedStorage,
+    ) -> Result<SyncResult, SyncError> {
+        let start = std::time::Instant::now();
+
+        let notebooks = {
+            let storage_guard = storage.lock().unwrap();
+            storage_guard.list_notebooks().unwrap_or_default()
+        };
+
+        let mut total_pulled = 0;
+        let mut total_pushed = 0;
+        let mut total_conflicts = 0;
+        let mut errors = Vec::new();
+
+        for notebook in &notebooks {
+            let is_managed = notebook
+                .sync_config
+                .as_ref()
+                .and_then(|c| c.managed_by_library)
+                .unwrap_or(false);
+            let is_enabled = notebook
+                .sync_config
+                .as_ref()
+                .map(|c| c.enabled)
+                .unwrap_or(false);
+
+            if is_managed && is_enabled {
+                match self.sync_notebook(notebook.id, storage).await {
+                    Ok(result) => {
+                        total_pulled += result.pages_pulled;
+                        total_pushed += result.pages_pushed;
+                        total_conflicts += result.conflicts_resolved;
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to sync notebook {}: {}", notebook.id, e);
+                        errors.push(format!("{}: {}", notebook.name, e));
+                    }
+                }
+            }
+        }
+
+        let duration_ms = start.elapsed().as_millis() as u64;
+
+        if errors.is_empty() {
+            Ok(SyncResult::success(
+                total_pulled,
+                total_pushed,
+                total_conflicts,
+                duration_ms,
+            ))
+        } else {
+            Ok(SyncResult {
+                success: false,
+                pages_pulled: total_pulled,
+                pages_pushed: total_pushed,
+                conflicts_resolved: total_conflicts,
+                error: Some(errors.join("; ")),
+                duration_ms,
+            })
+        }
     }
 }

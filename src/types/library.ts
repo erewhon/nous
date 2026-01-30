@@ -6,6 +6,7 @@
 
 import { z } from "zod";
 import { EncryptionConfigSchema } from "./encryption";
+import { LibrarySyncConfigSchema } from "./sync";
 
 /**
  * Library schema - represents a notebook storage location
@@ -18,6 +19,7 @@ export const LibrarySchema = z.object({
   icon: z.string().optional(),
   color: z.string().optional(),
   encryptionConfig: EncryptionConfigSchema.optional(),
+  syncConfig: LibrarySyncConfigSchema.optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });

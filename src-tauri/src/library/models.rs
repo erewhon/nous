@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use uuid::Uuid;
 
 use crate::encryption::EncryptionConfig;
+use crate::sync::config::LibrarySyncConfig;
 
 /// A library is a collection of notebooks stored at a specific path
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -39,6 +40,10 @@ pub struct Library {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub encryption_config: Option<EncryptionConfig>,
 
+    /// Library-level sync configuration (applies to all notebooks)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sync_config: Option<LibrarySyncConfig>,
+
     /// Creation timestamp
     pub created_at: DateTime<Utc>,
 
@@ -58,6 +63,7 @@ impl Library {
             icon: None,
             color: None,
             encryption_config: None,
+            sync_config: None,
             created_at: now,
             updated_at: now,
         }
@@ -74,6 +80,7 @@ impl Library {
             icon: Some("📚".to_string()),
             color: None,
             encryption_config: None,
+            sync_config: None,
             created_at: now,
             updated_at: now,
         }

@@ -1093,6 +1093,17 @@ export function NotebookSettingsDialog({
                 >
                   Cloud Sync
                 </span>
+                {notebook?.syncConfig?.managedByLibrary && (
+                  <span
+                    className="text-xs px-1.5 py-0.5 rounded"
+                    style={{
+                      backgroundColor: "rgba(139, 92, 246, 0.15)",
+                      color: "rgb(139, 92, 246)",
+                    }}
+                  >
+                    Managed by library
+                  </span>
+                )}
               </div>
               {notebook?.syncConfig?.enabled ? (
                 <span
@@ -1119,7 +1130,7 @@ export function NotebookSettingsDialog({
               )}
             </div>
 
-            {/* Sync configuration form */}
+            {/* Sync configuration form - only show when NOT managed by library */}
             {showSyncConfig && !notebook?.syncConfig?.enabled && (
               <div className="space-y-3">
                 {/* Server URL */}
@@ -1281,6 +1292,18 @@ export function NotebookSettingsDialog({
             {/* Sync enabled - show status and controls */}
             {notebook?.syncConfig?.enabled && (
               <div className="space-y-3">
+                {/* Library-managed: show read-only config info */}
+                {notebook.syncConfig.managedByLibrary && (
+                  <div className="text-xs space-y-1" style={{ color: "var(--color-text-muted)" }}>
+                    <div>
+                      Server: <span style={{ color: "var(--color-text-secondary)" }}>{notebook.syncConfig.serverUrl}</span>
+                    </div>
+                    <div>
+                      Remote Path: <span style={{ color: "var(--color-text-secondary)" }}>{notebook.syncConfig.remotePath}</span>
+                    </div>
+                  </div>
+                )}
+
                 {/* Status */}
                 <div className="flex items-center gap-4 text-xs" style={{ color: "var(--color-text-muted)" }}>
                   <span>
@@ -1307,7 +1330,7 @@ export function NotebookSettingsDialog({
                   </div>
                 )}
 
-                {/* Sync Now + Disable buttons */}
+                {/* Sync Now button (always available) + Disable button (only when NOT managed by library) */}
                 <div className="flex gap-2">
                   <button
                     onClick={async () => {
@@ -1329,26 +1352,35 @@ export function NotebookSettingsDialog({
                     <IconSync spinning={isSyncing(notebook.id)} />
                     {isSyncing(notebook.id) ? "Syncing..." : "Sync Now"}
                   </button>
-                  <button
-                    onClick={async () => {
-                      if (!notebook) return;
-                      if (confirm("Disable cloud sync for this notebook? Local data will be preserved.")) {
-                        try {
-                          await disableSync(notebook.id);
-                        } catch (e) {
-                          setSyncError(e instanceof Error ? e.message : "Failed to disable sync");
+                  {!notebook.syncConfig.managedByLibrary && (
+                    <button
+                      onClick={async () => {
+                        if (!notebook) return;
+                        if (confirm("Disable cloud sync for this notebook? Local data will be preserved.")) {
+                          try {
+                            await disableSync(notebook.id);
+                          } catch (e) {
+                            setSyncError(e instanceof Error ? e.message : "Failed to disable sync");
+                          }
                         }
-                      }
-                    }}
-                    className="rounded-md px-3 py-1.5 text-xs font-medium transition-colors"
-                    style={{
-                      backgroundColor: "var(--color-bg-tertiary)",
-                      color: "var(--color-text-secondary)",
-                    }}
-                  >
-                    Disable
-                  </button>
+                      }}
+                      className="rounded-md px-3 py-1.5 text-xs font-medium transition-colors"
+                      style={{
+                        backgroundColor: "var(--color-bg-tertiary)",
+                        color: "var(--color-text-secondary)",
+                      }}
+                    >
+                      Disable
+                    </button>
+                  )}
                 </div>
+
+                {/* Library-managed hint */}
+                {notebook.syncConfig.managedByLibrary && (
+                  <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
+                    This sync configuration is managed by library-level settings. To change or disable sync, go to Library Settings.
+                  </p>
+                )}
 
                 {/* Error message */}
                 {syncError && (

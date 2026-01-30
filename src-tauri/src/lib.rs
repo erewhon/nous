@@ -453,6 +453,11 @@ pub fn run() {
             commands::sync_now,
             commands::sync_queue_status,
             commands::sync_disable,
+            // Library sync commands
+            commands::library_sync_configure,
+            commands::library_sync_disable,
+            commands::library_sync_now,
+            commands::library_sync_configure_notebook,
             // Document conversion commands (markitdown)
             commands::convert_document,
             commands::convert_documents_batch,

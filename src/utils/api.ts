@@ -12,6 +12,7 @@ import type {
   SyncStatus,
   SyncResult,
   QueueItem,
+  LibrarySyncConfigInput,
 } from "../types/sync";
 
 // ===== Notebook API =====
@@ -1517,6 +1518,30 @@ export async function syncQueueStatus(
 
 export async function syncDisable(notebookId: string): Promise<void> {
   return invoke("sync_disable", { notebookId });
+}
+
+// ===== Library Sync API =====
+
+export async function librarySyncConfigure(
+  libraryId: string,
+  config: LibrarySyncConfigInput
+): Promise<void> {
+  return invoke("library_sync_configure", { libraryId, config });
+}
+
+export async function librarySyncDisable(libraryId: string): Promise<void> {
+  return invoke("library_sync_disable", { libraryId });
+}
+
+export async function librarySyncNow(libraryId: string): Promise<SyncResult> {
+  return invoke<SyncResult>("library_sync_now", { libraryId });
+}
+
+export async function librarySyncConfigureNotebook(
+  libraryId: string,
+  notebookId: string
+): Promise<void> {
+  return invoke("library_sync_configure_notebook", { libraryId, notebookId });
 }
 
 // ===== Document Conversion API (markitdown) =====

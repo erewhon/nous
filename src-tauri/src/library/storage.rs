@@ -406,6 +406,29 @@ impl LibraryStorage {
         Ok(())
     }
 
+    /// Update a library's sync configuration
+    pub fn update_library_sync_config(
+        &self,
+        id: Uuid,
+        sync_config: Option<crate::sync::config::LibrarySyncConfig>,
+    ) -> Result<Library, LibraryError> {
+        let mut libraries = self.list_libraries()?;
+
+        let lib = libraries
+            .iter_mut()
+            .find(|lib| lib.id == id)
+            .ok_or(LibraryError::NotFound(id))?;
+
+        lib.sync_config = sync_config;
+        lib.updated_at = chrono::Utc::now();
+
+        let updated = lib.clone();
+        self.save_libraries(&libraries)?;
+
+        log::info!("Updated library sync config for '{}'", updated.name);
+        Ok(updated)
+    }
+
     /// Save libraries to file
     fn save_libraries(&self, libraries: &[Library]) -> Result<(), LibraryError> {
         let content = serde_json::to_string_pretty(libraries)?;

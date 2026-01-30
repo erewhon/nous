@@ -18,6 +18,7 @@ import {
   getScheduledActions,
   setActionEnabled,
 } from "../utils/api";
+import { usePageStore } from "./pageStore";
 
 interface ActionState {
   actions: Action[];
@@ -192,6 +193,15 @@ export const useActionStore = create<ActionStore>()((set, get) => ({
       const result = await runAction(actionId, options);
       // Refresh actions to update last_run time
       await get().loadActions();
+      // Reload any pages modified or created by the action so the editor
+      // picks up backend changes instead of overwriting them on auto-save
+      const affectedPages = [
+        ...result.modifiedPages,
+        ...result.createdPages,
+      ];
+      if (affectedPages.length > 0) {
+        await usePageStore.getState().refreshPages(affectedPages);
+      }
       set({ isLoading: false });
       return result;
     } catch (error) {
@@ -209,6 +219,14 @@ export const useActionStore = create<ActionStore>()((set, get) => ({
       const result = await runActionByName(actionName, options);
       // Refresh actions to update last_run time
       await get().loadActions();
+      // Reload any pages modified or created by the action
+      const affectedPages = [
+        ...result.modifiedPages,
+        ...result.createdPages,
+      ];
+      if (affectedPages.length > 0) {
+        await usePageStore.getState().refreshPages(affectedPages);
+      }
       set({ isLoading: false });
       return result;
     } catch (error) {

@@ -127,6 +127,17 @@ export const BlockEditor = forwardRef<BlockEditorRef, BlockEditorProps>(function
     enabled: !readOnly,
   });
 
+  // When initialData changes from outside (e.g., after an action modifies a page),
+  // cancel any pending auto-save to prevent stale editor content from overwriting
+  // the fresh backend data that the editor is about to render.
+  useEffect(() => {
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = null;
+    }
+    pendingDataRef.current = null;
+  }, [initialData]);
+
   // Cleanup: flush pending save on unmount
   useEffect(() => {
     return () => {

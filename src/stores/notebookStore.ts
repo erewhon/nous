@@ -91,6 +91,17 @@ export const useNotebookStore = create<NotebookStore>()(
         notebooks: [notebook, ...state.notebooks],
         selectedNotebookId: notebook.id,
       }));
+
+      // Auto-configure sync if library has sync enabled
+      try {
+        const currentLibrary = await api.getCurrentLibrary();
+        if (currentLibrary.syncConfig?.enabled) {
+          await api.librarySyncConfigureNotebook(currentLibrary.id, notebook.id);
+        }
+      } catch (syncErr) {
+        // Don't fail notebook creation if sync auto-config fails
+        console.warn("Failed to auto-configure sync for new notebook:", syncErr);
+      }
     } catch (err) {
       set({
         error:

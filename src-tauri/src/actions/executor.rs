@@ -176,6 +176,17 @@ impl ActionExecutor {
         result.errors = context.errors;
         result.complete(result.errors.is_empty());
 
+        log::info!(
+            "Action '{}' completed: {}/{} steps, {} modified, {} created, {} errors: {:?}",
+            action.name,
+            result.steps_completed,
+            result.steps_total,
+            result.modified_pages.len(),
+            result.created_pages.len(),
+            result.errors.len(),
+            result.errors,
+        );
+
         // Update last run time
         if let Ok(mut action_storage) = self.action_storage.lock() {
             let _ = action_storage.update_last_run(action_id);
@@ -518,21 +529,38 @@ impl ActionExecutor {
         insert_after_section: Option<&String>,
         context: &mut ExecutionContext,
     ) -> Result<(), ExecutionError> {
+        log::info!("CarryForward: Starting execution");
+
         // Find the destination page first (if it exists) so we can exclude it from sources
         let dest_page_id = if let Some(existing_selector) = find_existing {
             let mut pages = self.find_pages(existing_selector, context)?;
+            log::info!(
+                "CarryForward: find_existing matched {} pages: {:?}",
+                pages.len(),
+                pages.iter().map(|p| &p.title).collect::<Vec<_>>()
+            );
             pages.sort_by(|a, b| b.created_at.cmp(&a.created_at));
             pages.first().map(|p| p.id)
         } else {
+            log::info!("CarryForward: No find_existing selector provided");
             None
         };
 
         // Find source pages, excluding the destination page to avoid self-duplication
-        let source_pages: Vec<_> = self
-            .find_pages(source_selector, context)?
+        let all_source_pages = self.find_pages(source_selector, context)?;
+        log::info!(
+            "CarryForward: source_selector matched {} pages: {:?}",
+            all_source_pages.len(),
+            all_source_pages.iter().map(|p| &p.title).collect::<Vec<_>>()
+        );
+        let source_pages: Vec<_> = all_source_pages
             .into_iter()
             .filter(|p| Some(p.id) != dest_page_id)
             .collect();
+        log::info!(
+            "CarryForward: After excluding destination, {} source pages remain",
+            source_pages.len()
+        );
         if source_pages.is_empty() {
             log::info!("CarryForward: No source pages found (excluding destination)");
             return Ok(()); // Nothing to carry forward
@@ -541,7 +569,22 @@ impl ActionExecutor {
         // Extract incomplete checklist items from source pages
         let mut incomplete_items: Vec<String> = Vec::new();
         for page in &source_pages {
+            // Also specifically extract unchecked items from under a "Carried Forward"
+            // heading, so tasks that were already carried forward but still incomplete
+            // are re-carried. We walk all blocks; items under a "Carried Forward"
+            // heading are picked up alongside items from other sections.
+            let mut in_carried_forward_section = false;
             for block in &page.content.blocks {
+                // Track whether we're inside a "Carried Forward" section
+                if block.block_type == "header" {
+                    if let Some(text) = block.data.get("text").and_then(|t| t.as_str()) {
+                        in_carried_forward_section =
+                            text.to_lowercase().contains("carried forward");
+                    } else {
+                        in_carried_forward_section = false;
+                    }
+                }
+
                 if block.block_type == "checklist" {
                     if let Some(items) = block.data.get("items") {
                         if let Some(items_array) = items.as_array() {
@@ -550,7 +593,9 @@ impl ActionExecutor {
                                     if !checked.as_bool().unwrap_or(true) {
                                         if let Some(text) = item.get("text") {
                                             if let Some(text_str) = text.as_str() {
-                                                incomplete_items.push(text_str.to_string());
+                                                if !text_str.trim().is_empty() {
+                                                    incomplete_items.push(text_str.to_string());
+                                                }
                                             }
                                         }
                                     }
@@ -560,11 +605,17 @@ impl ActionExecutor {
                     }
                 }
             }
+            if in_carried_forward_section {
+                log::debug!(
+                    "CarryForward: Found 'Carried Forward' section on source page '{}'",
+                    page.title
+                );
+            }
         }
-
-        if incomplete_items.is_empty() {
-            return Ok(()); // No incomplete items
-        }
+        log::info!(
+            "CarryForward: Extracted {} incomplete items from source pages",
+            incomplete_items.len()
+        );
 
         let notebook_id = self.resolve_notebook_target(destination, context)?;
 
@@ -578,10 +629,41 @@ impl ActionExecutor {
             None
         };
 
+        // If the destination page already has a "Carried Forward" section with
+        // still-unchecked items, merge those into the list so they aren't lost.
+        // This handles re-runs on the same day and ensures previously-carried
+        // items that remain incomplete continue to appear.
+        if let Some(ref dest) = existing_page {
+            let existing_cf_items = extract_carried_forward_items(&dest.content.blocks);
+            if !existing_cf_items.is_empty() {
+                log::info!(
+                    "CarryForward: Found {} existing unchecked items in destination page '{}'",
+                    existing_cf_items.len(),
+                    dest.title
+                );
+                for item in existing_cf_items {
+                    if !incomplete_items.contains(&item) {
+                        incomplete_items.push(item);
+                    }
+                }
+            }
+        }
+
+        if incomplete_items.is_empty() {
+            return Ok(()); // No incomplete items
+        }
+
+        // Deduplicate while preserving order
+        let mut seen = std::collections::HashSet::new();
+        incomplete_items.retain(|item| seen.insert(item.clone()));
+
         let carry_forward_blocks = build_carry_forward_blocks(&incomplete_items);
 
         if let Some(mut existing) = existing_page {
-            // Insert into existing page
+            // Remove any pre-existing "Carried Forward" section to avoid duplicates
+            existing.content.blocks = remove_carried_forward_section(existing.content.blocks);
+
+            // Insert at the right position
             let insert_pos = if let Some(section_name) = insert_after_section {
                 find_section_end(&existing.content.blocks, section_name)
             } else {
@@ -1078,4 +1160,91 @@ fn find_section_end(blocks: &[EditorBlock], section_name: &str) -> usize {
     }
 
     blocks.len()
+}
+
+/// Extract unchecked checklist items from under a "Carried Forward" heading.
+///
+/// Walks blocks, detects a header containing "Carried Forward" (case-insensitive),
+/// and collects unchecked items from checklist blocks that follow it until the
+/// next same-or-higher-level header.
+fn extract_carried_forward_items(blocks: &[EditorBlock]) -> Vec<String> {
+    let mut items = Vec::new();
+    let mut in_section = false;
+    let mut section_level = 0u64;
+
+    for block in blocks {
+        if block.block_type == "header" {
+            let level = block
+                .data
+                .get("level")
+                .and_then(|l| l.as_u64())
+                .unwrap_or(2);
+            if let Some(text) = block.data.get("text").and_then(|t| t.as_str()) {
+                if text.to_lowercase().contains("carried forward") {
+                    in_section = true;
+                    section_level = level;
+                    continue;
+                }
+            }
+            // Another header at same or higher level ends the section
+            if in_section && level <= section_level {
+                break;
+            }
+        }
+
+        if in_section && block.block_type == "checklist" {
+            if let Some(items_val) = block.data.get("items").and_then(|v| v.as_array()) {
+                for item in items_val {
+                    let checked = item
+                        .get("checked")
+                        .and_then(|c| c.as_bool())
+                        .unwrap_or(true);
+                    if !checked {
+                        if let Some(text) = item.get("text").and_then(|t| t.as_str()) {
+                            if !text.trim().is_empty() {
+                                items.push(text.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    items
+}
+
+/// Remove the "Carried Forward" section (header + following content blocks up to
+/// the next same-or-higher-level header) from a list of blocks.
+fn remove_carried_forward_section(blocks: Vec<EditorBlock>) -> Vec<EditorBlock> {
+    let mut result = Vec::new();
+    let mut skip = false;
+    let mut section_level = 0u64;
+
+    for block in blocks {
+        if block.block_type == "header" {
+            let level = block
+                .data
+                .get("level")
+                .and_then(|l| l.as_u64())
+                .unwrap_or(2);
+            if let Some(text) = block.data.get("text").and_then(|t| t.as_str()) {
+                if text.to_lowercase().contains("carried forward") {
+                    skip = true;
+                    section_level = level;
+                    continue;
+                }
+            }
+            // Another header at same or higher level ends the skip
+            if skip && level <= section_level {
+                skip = false;
+            }
+        }
+
+        if !skip {
+            result.push(block);
+        }
+    }
+
+    result
 }

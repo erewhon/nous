@@ -23,6 +23,9 @@ pub struct SyncConfig {
     /// Last successful sync timestamp
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_sync: Option<DateTime<Utc>>,
+    /// Whether this sync config is managed by library-level sync
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub managed_by_library: Option<bool>,
 }
 
 impl Default for SyncConfig {
@@ -35,6 +38,7 @@ impl Default for SyncConfig {
             sync_mode: SyncMode::Manual,
             sync_interval: None,
             last_sync: None,
+            managed_by_library: None,
         }
     }
 }
@@ -174,6 +178,34 @@ impl SyncResult {
 pub struct SyncConfigInput {
     pub server_url: String,
     pub remote_path: String,
+    pub username: String,
+    pub password: String,
+    pub auth_type: AuthType,
+    pub sync_mode: SyncMode,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sync_interval: Option<u64>,
+}
+
+/// Library-level sync configuration (stored on Library)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibrarySyncConfig {
+    pub enabled: bool,
+    pub server_url: String,
+    /// Base remote path for all notebooks (e.g., "/nous-sync/my-library")
+    pub remote_base_path: String,
+    pub auth_type: AuthType,
+    pub sync_mode: SyncMode,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sync_interval: Option<u64>,
+}
+
+/// Input for configuring library-level sync (includes credentials)
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibrarySyncConfigInput {
+    pub server_url: String,
+    pub remote_base_path: String,
     pub username: String,
     pub password: String,
     pub auth_type: AuthType,

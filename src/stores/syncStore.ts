@@ -4,6 +4,7 @@ import type {
   SyncResult,
   SyncConfigInput,
   QueueItem,
+  LibrarySyncConfigInput,
 } from "../types/sync";
 import {
   syncTestConnection,
@@ -12,6 +13,9 @@ import {
   syncNow,
   syncQueueStatus,
   syncDisable,
+  librarySyncConfigure,
+  librarySyncDisable,
+  librarySyncNow,
 } from "../utils/api";
 
 interface SyncState {
@@ -28,6 +32,8 @@ interface SyncState {
   isConfiguring: boolean;
   // Errors
   error: string | null;
+  // Library sync state
+  isLibrarySyncing: boolean;
 }
 
 interface SyncActions {
@@ -68,6 +74,14 @@ interface SyncActions {
 
   // Get queue for a notebook
   getQueue: (notebookId: string) => QueueItem[];
+
+  // Library sync
+  configureLibrary: (
+    libraryId: string,
+    config: LibrarySyncConfigInput
+  ) => Promise<void>;
+  disableLibrary: (libraryId: string) => Promise<void>;
+  syncLibraryNow: (libraryId: string) => Promise<SyncResult>;
 }
 
 type SyncStore = SyncState & SyncActions;
@@ -81,6 +95,7 @@ export const useSyncStore = create<SyncStore>((set, get) => ({
   testConnectionResult: null,
   isConfiguring: false,
   error: null,
+  isLibrarySyncing: false,
 
   // Test connection
   testConnection: async (serverUrl, username, password) => {
@@ -238,5 +253,43 @@ export const useSyncStore = create<SyncStore>((set, get) => ({
   // Get queue for a notebook
   getQueue: (notebookId) => {
     return get().queueByNotebook.get(notebookId) ?? [];
+  },
+
+  // Library sync - configure
+  configureLibrary: async (libraryId, config) => {
+    set({ isConfiguring: true, error: null });
+    try {
+      await librarySyncConfigure(libraryId, config);
+      set({ isConfiguring: false });
+    } catch (e) {
+      const error = e instanceof Error ? e.message : String(e);
+      set({ error, isConfiguring: false });
+      throw e;
+    }
+  },
+
+  // Library sync - disable
+  disableLibrary: async (libraryId) => {
+    try {
+      await librarySyncDisable(libraryId);
+    } catch (e) {
+      const error = e instanceof Error ? e.message : String(e);
+      set({ error });
+      throw e;
+    }
+  },
+
+  // Library sync - sync all now
+  syncLibraryNow: async (libraryId) => {
+    set({ isLibrarySyncing: true, error: null });
+    try {
+      const result = await librarySyncNow(libraryId);
+      set({ isLibrarySyncing: false });
+      return result;
+    } catch (e) {
+      const error = e instanceof Error ? e.message : String(e);
+      set({ error, isLibrarySyncing: false });
+      throw e;
+    }
   },
 }));

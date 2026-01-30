@@ -136,6 +136,9 @@ interface PageActions {
   toggleFavorite: (notebookId: string, pageId: string) => Promise<void>;
   getFavoritePages: () => Page[];
 
+  // Refresh pages modified by backend (e.g., after action execution)
+  refreshPages: (pageIds: string[]) => Promise<void>;
+
   // Recent pages
   clearRecentPages: () => void;
   getRecentPages: (limit?: number) => RecentPageEntry[];
@@ -955,6 +958,35 @@ export const usePageStore = create<PageStore>()(
       getFavoritePages: () => {
         const { pages } = get();
         return pages.filter((p) => p.isFavorite && !p.deletedAt);
+      },
+
+      // Refresh pages modified by backend (e.g., after action execution)
+      refreshPages: async (pageIds) => {
+        if (pageIds.length === 0) return;
+        const state = get();
+        const results = await Promise.allSettled(
+          pageIds.map((pageId) => {
+            const page = state.pages.find((p) => p.id === pageId);
+            if (page) {
+              return api.getPage(page.notebookId, pageId);
+            }
+            return Promise.reject(new Error(`Page ${pageId} not in store`));
+          })
+        );
+        const freshPages = results
+          .filter(
+            (r): r is PromiseFulfilledResult<Page> => r.status === "fulfilled"
+          )
+          .map((r) => r.value);
+        if (freshPages.length > 0) {
+          set((state) => ({
+            pages: state.pages.map((p) => {
+              const fresh = freshPages.find((f) => f.id === p.id);
+              return fresh ?? p;
+            }),
+            pageDataVersion: state.pageDataVersion + 1,
+          }));
+        }
       },
 
       // Recent pages
