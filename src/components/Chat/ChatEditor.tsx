@@ -1,5 +1,10 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+import rehypeRaw from "rehype-raw";
+import "katex/dist/katex.min.css";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { save } from "@tauri-apps/plugin-dialog";
 import { writeTextFile } from "@tauri-apps/plugin-fs";
@@ -86,7 +91,7 @@ export function ChatEditor({ page, notebookId, className = "" }: ChatEditorProps
   const resolvedMode = useThemeStore((state) => state.resolvedMode);
   const isDark = resolvedMode === "dark";
 
-  const { settings, getActiveProviderType, getActiveApiKey, getActiveModel } = useAIStore();
+  const { settings, getActiveProviderType, getActiveApiKey, getActiveModel, getProviderForModel, getProviderConfig } = useAIStore();
   const { notebooks, selectedNotebookId, loadNotebooks } = useNotebookStore();
   const { loadPages } = usePageStore();
   const currentNotebook = notebooks.find((n) => n.id === selectedNotebookId);
@@ -508,14 +513,18 @@ export function ChatEditor({ page, notebookId, className = "" }: ChatEditorProps
         const systemPrompt =
           promptCell.systemPrompt || content.settings.defaultSystemPrompt || currentNotebook?.systemPrompt;
 
+        // Resolve the correct provider for the selected model
+        const resolvedProvider = model ? getProviderForModel(model) : getActiveProviderType();
+        const resolvedProviderConfig = getProviderConfig(resolvedProvider);
+
         // Process template variables in the prompt
         const processedPrompt = processTemplateVariables(promptCell.content);
 
         // Make API call
         await api.aiChatStream(processedPrompt, {
           conversationHistory: history as ChatMessage[],
-          providerType: getActiveProviderType(),
-          apiKey: getActiveApiKey() || undefined,
+          providerType: resolvedProvider,
+          apiKey: resolvedProviderConfig?.apiKey || undefined,
           model: model || undefined,
           temperature: settings.temperature,
           maxTokens: settings.maxTokens,
@@ -567,7 +576,8 @@ export function ChatEditor({ page, notebookId, className = "" }: ChatEditorProps
       settings,
       currentNotebook,
       getActiveProviderType,
-      getActiveApiKey,
+      getProviderForModel,
+      getProviderConfig,
       processTemplateVariables,
       executeActions,
     ]
@@ -1628,16 +1638,85 @@ function CellRenderer({
                     codeBlockIndexRef.current = 0;
                     return (
                       <ReactMarkdown
+                        remarkPlugins={[remarkGfm, remarkMath]}
+                        rehypePlugins={[rehypeKatex, rehypeRaw]}
                         components={{
-                          p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-                          ul: ({ children }) => <ul className="mb-2 ml-4 list-disc">{children}</ul>,
-                          ol: ({ children }) => <ol className="mb-2 ml-4 list-decimal">{children}</ol>,
+                          h1: ({ children }) => (
+                            <h1 className="text-2xl font-bold mt-4 mb-2" style={{ color: "var(--color-text-primary)" }}>{children}</h1>
+                          ),
+                          h2: ({ children }) => (
+                            <h2 className="text-xl font-bold mt-3 mb-2" style={{ color: "var(--color-text-primary)" }}>{children}</h2>
+                          ),
+                          h3: ({ children }) => (
+                            <h3 className="text-lg font-semibold mt-3 mb-1" style={{ color: "var(--color-text-primary)" }}>{children}</h3>
+                          ),
+                          h4: ({ children }) => (
+                            <h4 className="text-base font-semibold mt-2 mb-1" style={{ color: "var(--color-text-primary)" }}>{children}</h4>
+                          ),
+                          p: ({ children }) => <p className="mb-2 last:mb-0 leading-relaxed">{children}</p>,
+                          ul: ({ children }) => <ul className="mb-2 ml-4 list-disc space-y-1">{children}</ul>,
+                          ol: ({ children }) => <ol className="mb-2 ml-4 list-decimal space-y-1">{children}</ol>,
+                          li: ({ children }) => <li className="ml-2">{children}</li>,
+                          a: ({ href, children }) => (
+                            <a
+                              href={href}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="underline hover:no-underline"
+                              style={{ color: "var(--color-accent)" }}
+                            >
+                              {children}
+                            </a>
+                          ),
+                          blockquote: ({ children }) => (
+                            <blockquote
+                              className="border-l-4 pl-4 my-2 italic"
+                              style={{
+                                borderColor: "var(--color-accent)",
+                                color: "var(--color-text-secondary)",
+                              }}
+                            >
+                              {children}
+                            </blockquote>
+                          ),
+                          table: ({ children }) => (
+                            <div className="overflow-x-auto my-4">
+                              <table className="min-w-full border-collapse" style={{ borderColor: "var(--color-border)" }}>
+                                {children}
+                              </table>
+                            </div>
+                          ),
+                          thead: ({ children }) => (
+                            <thead style={{ backgroundColor: "var(--color-bg-tertiary)" }}>{children}</thead>
+                          ),
+                          th: ({ children }) => (
+                            <th className="border px-3 py-2 text-left font-semibold" style={{ borderColor: "var(--color-border)" }}>
+                              {children}
+                            </th>
+                          ),
+                          td: ({ children }) => (
+                            <td className="border px-3 py-2" style={{ borderColor: "var(--color-border)" }}>
+                              {children}
+                            </td>
+                          ),
+                          hr: () => <hr className="my-4" style={{ borderColor: "var(--color-border)" }} />,
+                          img: ({ src, alt }) => (
+                            <img src={src} alt={alt || ""} className="max-w-full my-2 rounded" />
+                          ),
+                          input: ({ checked }) => (
+                            <input type="checkbox" checked={checked} disabled className="mr-2" />
+                          ),
+                          del: ({ children }) => (
+                            <del style={{ color: "var(--color-text-muted)" }}>{children}</del>
+                          ),
+                          strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+                          pre: ({ children }) => <>{children}</>,
                           code: ({ children, className }) => {
                             const isBlock = className?.includes("language-");
                             if (!isBlock) {
                               return (
                                 <code
-                                  className="rounded px-1 py-0.5 text-xs"
+                                  className="rounded px-1 py-0.5 text-xs font-mono"
                                   style={{ backgroundColor: "var(--color-bg-tertiary)" }}
                                 >
                                   {children}
