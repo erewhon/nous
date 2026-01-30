@@ -145,7 +145,7 @@ pub async fn library_sync_now(
     let sync_manager = state.sync_manager.lock().await;
 
     sync_manager
-        .sync_library(library_uuid, &state.storage)
+        .sync_library(library_uuid, &state.library_storage, &state.storage)
         .await
         .map_err(|e| e.to_string())
 }

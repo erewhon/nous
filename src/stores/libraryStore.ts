@@ -44,7 +44,12 @@ export const useLibraryStore = create<LibraryState>()(
         set({ isLoading: true, error: null });
         try {
           const libraries = await api.listLibraries();
-          set({ libraries, isLoading: false });
+          set((state) => {
+            const currentLibrary = state.currentLibrary
+              ? libraries.find((lib) => lib.id === state.currentLibrary!.id) ?? state.currentLibrary
+              : null;
+            return { libraries, currentLibrary, isLoading: false };
+          });
         } catch (e) {
           const error = e instanceof Error ? e.message : "Failed to fetch libraries";
           set({ error, isLoading: false });

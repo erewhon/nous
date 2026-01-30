@@ -49,6 +49,7 @@ pub enum SyncError {
 }
 
 /// Result of syncing a single page
+#[derive(Debug)]
 enum PageSyncResult {
     Unchanged,
     Pulled,
@@ -152,8 +153,34 @@ impl SyncManager {
         Ok(())
     }
 
-    /// Get credentials from keyring
+    // ===== Credential storage (file-based with keyring fallback) =====
+
+    /// Path to file-based credential store
+    fn credentials_file_path(&self, service: &str, id: Uuid) -> PathBuf {
+        self.data_dir.join(".credentials").join(service).join(id.to_string())
+    }
+
+    /// Parse "username:password" format
+    fn parse_credentials(data: &str) -> Result<SyncCredentials, SyncError> {
+        let parts: Vec<&str> = data.splitn(2, ':').collect();
+        if parts.len() != 2 {
+            return Err(SyncError::CredentialsNotFound);
+        }
+        Ok(SyncCredentials {
+            username: parts[0].to_string(),
+            password: parts[1].to_string(),
+        })
+    }
+
+    /// Get credentials: try file first, then keyring
     fn get_credentials(&self, notebook_id: Uuid) -> Result<SyncCredentials, SyncError> {
+        // Try file-based store first
+        let file_path = self.credentials_file_path("nous-sync", notebook_id);
+        if let Ok(data) = std::fs::read_to_string(&file_path) {
+            return Self::parse_credentials(data.trim());
+        }
+
+        // Fall back to keyring
         let entry = keyring::Entry::new("nous-sync", &notebook_id.to_string())
             .map_err(|e| SyncError::Keyring(e.to_string()))?;
 
@@ -161,42 +188,49 @@ impl SyncManager {
             .get_password()
             .map_err(|_| SyncError::CredentialsNotFound)?;
 
-        // Password is stored as "username:password"
-        let parts: Vec<&str> = password.splitn(2, ':').collect();
-        if parts.len() != 2 {
-            return Err(SyncError::CredentialsNotFound);
-        }
-
-        Ok(SyncCredentials {
-            username: parts[0].to_string(),
-            password: parts[1].to_string(),
-        })
+        Self::parse_credentials(&password)
     }
 
-    /// Store credentials in keyring
+    /// Store credentials: write to file, also try keyring
     fn store_credentials(
         &self,
         notebook_id: Uuid,
         username: &str,
         password: &str,
     ) -> Result<(), SyncError> {
-        let entry = keyring::Entry::new("nous-sync", &notebook_id.to_string())
-            .map_err(|e| SyncError::Keyring(e.to_string()))?;
+        let value = format!("{}:{}", username, password);
 
-        entry
-            .set_password(&format!("{}:{}", username, password))
-            .map_err(|e| SyncError::Keyring(e.to_string()))?;
+        // Always write to file-based store
+        let file_path = self.credentials_file_path("nous-sync", notebook_id);
+        if let Some(parent) = file_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(&file_path, &value)?;
+        // Restrict permissions on Unix
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&file_path, std::fs::Permissions::from_mode(0o600));
+        }
+
+        // Also try keyring (best-effort)
+        if let Ok(entry) = keyring::Entry::new("nous-sync", &notebook_id.to_string()) {
+            let _ = entry.set_password(&value);
+        }
 
         Ok(())
     }
 
-    /// Delete credentials from keyring
+    /// Delete credentials from both stores
     fn delete_credentials(&self, notebook_id: Uuid) -> Result<(), SyncError> {
-        let entry = keyring::Entry::new("nous-sync", &notebook_id.to_string())
-            .map_err(|e| SyncError::Keyring(e.to_string()))?;
+        // Delete file
+        let file_path = self.credentials_file_path("nous-sync", notebook_id);
+        let _ = std::fs::remove_file(&file_path);
 
-        // Ignore error if not found
-        let _ = entry.delete_credential();
+        // Delete from keyring
+        if let Ok(entry) = keyring::Entry::new("nous-sync", &notebook_id.to_string()) {
+            let _ = entry.delete_credential();
+        }
         Ok(())
     }
 
@@ -348,6 +382,7 @@ impl SyncManager {
         storage: &SharedStorage,
     ) -> Result<SyncResult, SyncError> {
         let start = std::time::Instant::now();
+        log::info!("Sync: starting notebook {}", notebook_id);
 
         // Get notebook config (short lock)
         let (config, local_pages) = {
@@ -363,9 +398,21 @@ impl SyncManager {
             (config, pages)
         }; // Lock released
 
+        log::info!(
+            "Sync: notebook {} has {} pages, remote_path={}",
+            notebook_id,
+            local_pages.len(),
+            config.remote_path,
+        );
+
         // Get client
         let client = self.get_client(notebook_id, &config)?;
         let mut local_state = self.get_local_state(notebook_id);
+        log::info!(
+            "Sync: local_state has {} tracked pages, last_sync={:?}",
+            local_state.pages.len(),
+            local_state.last_sync,
+        );
 
         let mut pages_pulled = 0;
         let mut pages_pushed = 0;
@@ -374,14 +421,24 @@ impl SyncManager {
         // Fetch remote manifest
         let remote_manifest = self
             .fetch_manifest(&client, &config.remote_path)
-            .await
-            .ok();
+            .await;
+        match &remote_manifest {
+            Ok(m) => log::info!("Sync: remote manifest has {} pages", m.pages.len()),
+            Err(e) => log::info!("Sync: no remote manifest (first sync?): {}", e),
+        }
+        let remote_manifest = remote_manifest.ok();
 
         // Sync each page
         for page in &local_pages {
+            log::info!("Sync: syncing page '{}' ({})", page.title, page.id);
             let result = self
                 .sync_page(&client, &config, &mut local_state, storage, notebook_id, page)
-                .await?;
+                .await;
+            match &result {
+                Ok(r) => log::info!("Sync: page '{}' result: {:?}", page.title, r),
+                Err(e) => log::error!("Sync: page '{}' error: {}", page.title, e),
+            }
+            let result = result?;
 
             match result {
                 PageSyncResult::Pulled => pages_pulled += 1,
@@ -471,12 +528,18 @@ impl SyncManager {
         let remote_path = format!("{}/pages/{}.crdt", config.remote_path, page.id);
 
         // Load or create local CRDT
-        let local_doc = if crdt_path.exists() {
+        let crdt_existed = crdt_path.exists();
+        let local_doc = if crdt_existed {
             let data = std::fs::read(&crdt_path)?;
             PageDocument::from_state(&data)?
         } else {
             PageDocument::from_editor_data(&page.content)?
         };
+        log::debug!(
+            "Sync page: crdt_existed={}, remote_path={}",
+            crdt_existed,
+            remote_path,
+        );
 
         // Check if remote exists
         let remote_result = client.get_with_etag(&remote_path).await;
@@ -679,8 +742,15 @@ impl SyncManager {
 
     // ===== Library-level sync methods =====
 
-    /// Get library credentials from keyring
+    /// Get library credentials: try file first, then keyring
     fn get_library_credentials(&self, library_id: Uuid) -> Result<SyncCredentials, SyncError> {
+        // Try file-based store first
+        let file_path = self.credentials_file_path("nous-library-sync", library_id);
+        if let Ok(data) = std::fs::read_to_string(&file_path) {
+            return Self::parse_credentials(data.trim());
+        }
+
+        // Fall back to keyring
         let entry = keyring::Entry::new("nous-library-sync", &library_id.to_string())
             .map_err(|e| SyncError::Keyring(e.to_string()))?;
 
@@ -688,40 +758,46 @@ impl SyncManager {
             .get_password()
             .map_err(|_| SyncError::CredentialsNotFound)?;
 
-        let parts: Vec<&str> = password.splitn(2, ':').collect();
-        if parts.len() != 2 {
-            return Err(SyncError::CredentialsNotFound);
-        }
-
-        Ok(SyncCredentials {
-            username: parts[0].to_string(),
-            password: parts[1].to_string(),
-        })
+        Self::parse_credentials(&password)
     }
 
-    /// Store library credentials in keyring
+    /// Store library credentials: write to file, also try keyring
     fn store_library_credentials(
         &self,
         library_id: Uuid,
         username: &str,
         password: &str,
     ) -> Result<(), SyncError> {
-        let entry = keyring::Entry::new("nous-library-sync", &library_id.to_string())
-            .map_err(|e| SyncError::Keyring(e.to_string()))?;
+        let value = format!("{}:{}", username, password);
 
-        entry
-            .set_password(&format!("{}:{}", username, password))
-            .map_err(|e| SyncError::Keyring(e.to_string()))?;
+        // Always write to file-based store
+        let file_path = self.credentials_file_path("nous-library-sync", library_id);
+        if let Some(parent) = file_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(&file_path, &value)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(&file_path, std::fs::Permissions::from_mode(0o600));
+        }
+
+        // Also try keyring (best-effort)
+        if let Ok(entry) = keyring::Entry::new("nous-library-sync", &library_id.to_string()) {
+            let _ = entry.set_password(&value);
+        }
 
         Ok(())
     }
 
-    /// Delete library credentials from keyring
+    /// Delete library credentials from both stores
     fn delete_library_credentials(&self, library_id: Uuid) -> Result<(), SyncError> {
-        let entry = keyring::Entry::new("nous-library-sync", &library_id.to_string())
-            .map_err(|e| SyncError::Keyring(e.to_string()))?;
+        let file_path = self.credentials_file_path("nous-library-sync", library_id);
+        let _ = std::fs::remove_file(&file_path);
 
-        let _ = entry.delete_credential();
+        if let Ok(entry) = keyring::Entry::new("nous-library-sync", &library_id.to_string()) {
+            let _ = entry.delete_credential();
+        }
         Ok(())
     }
 
@@ -769,8 +845,15 @@ impl SyncManager {
             storage_guard.list_notebooks().unwrap_or_default()
         };
 
+        log::info!(
+            "configure_library_sync: applying to {} notebooks",
+            notebooks.len(),
+        );
+
+        let mut applied = 0;
+        let mut failed = 0;
         for notebook in &notebooks {
-            if let Err(e) = self
+            match self
                 .apply_library_sync_to_notebook(
                     library_id,
                     notebook.id,
@@ -779,13 +862,24 @@ impl SyncManager {
                 )
                 .await
             {
-                log::warn!(
-                    "Failed to apply library sync to notebook {}: {}",
-                    notebook.id,
-                    e
-                );
+                Ok(()) => applied += 1,
+                Err(e) => {
+                    failed += 1;
+                    log::warn!(
+                        "Failed to apply library sync to notebook '{}' ({}): {}",
+                        notebook.name,
+                        notebook.id,
+                        e
+                    );
+                }
             }
         }
+
+        log::info!(
+            "configure_library_sync: applied={}, failed={}",
+            applied,
+            failed,
+        );
 
         Ok(())
     }
@@ -894,20 +988,37 @@ impl SyncManager {
     /// Sync all notebooks in a library
     pub async fn sync_library(
         &self,
-        _library_id: Uuid,
+        library_id: Uuid,
+        library_storage: &SharedLibraryStorage,
         storage: &SharedStorage,
     ) -> Result<SyncResult, SyncError> {
         let start = std::time::Instant::now();
+
+        // Get library sync config (needed for auto-apply)
+        let library_config = {
+            let lib_storage = library_storage.lock().unwrap();
+            lib_storage
+                .get_library(library_id)
+                .ok()
+                .and_then(|lib| lib.sync_config)
+        };
 
         let notebooks = {
             let storage_guard = storage.lock().unwrap();
             storage_guard.list_notebooks().unwrap_or_default()
         };
 
+        log::info!(
+            "Library sync: found {} total notebooks, library_config={}",
+            notebooks.len(),
+            if library_config.is_some() { "present" } else { "none" },
+        );
+
         let mut total_pulled = 0;
         let mut total_pushed = 0;
         let mut total_conflicts = 0;
         let mut errors = Vec::new();
+        let mut synced_count = 0;
 
         for notebook in &notebooks {
             let is_managed = notebook
@@ -921,20 +1032,94 @@ impl SyncManager {
                 .map(|c| c.enabled)
                 .unwrap_or(false);
 
-            if is_managed && is_enabled {
-                match self.sync_notebook(notebook.id, storage).await {
-                    Ok(result) => {
-                        total_pulled += result.pages_pulled;
-                        total_pushed += result.pages_pushed;
-                        total_conflicts += result.conflicts_resolved;
+            // Auto-apply library config to notebooks missing sync config
+            if !is_managed {
+                if let Some(ref lib_config) = library_config {
+                    log::info!(
+                        "Library sync: auto-applying config to notebook '{}' ({})",
+                        notebook.name,
+                        notebook.id,
+                    );
+                    match self
+                        .apply_library_sync_to_notebook(
+                            library_id,
+                            notebook.id,
+                            lib_config,
+                            storage,
+                        )
+                        .await
+                    {
+                        Ok(()) => {
+                            log::info!(
+                                "Library sync: auto-applied to '{}' successfully",
+                                notebook.name,
+                            );
+                            // Now this notebook is managed and enabled, sync it
+                        }
+                        Err(e) => {
+                            log::warn!(
+                                "Library sync: failed to auto-apply to '{}': {}",
+                                notebook.name,
+                                e,
+                            );
+                            errors.push(format!("{}: failed to configure: {}", notebook.name, e));
+                            continue;
+                        }
                     }
-                    Err(e) => {
-                        log::warn!("Failed to sync notebook {}: {}", notebook.id, e);
-                        errors.push(format!("{}: {}", notebook.name, e));
-                    }
+                } else {
+                    log::info!(
+                        "Library sync: notebook '{}' ({}): managed={}, enabled={} — skipping",
+                        notebook.name,
+                        notebook.id,
+                        is_managed,
+                        is_enabled,
+                    );
+                    continue;
+                }
+            } else if !is_enabled {
+                log::info!(
+                    "Library sync: notebook '{}' ({}): managed but disabled — skipping",
+                    notebook.name,
+                    notebook.id,
+                );
+                continue;
+            }
+
+            synced_count += 1;
+            log::info!(
+                "Library sync: syncing notebook '{}' ({})",
+                notebook.name,
+                notebook.id,
+            );
+            match self.sync_notebook(notebook.id, storage).await {
+                Ok(result) => {
+                    log::info!(
+                        "Library sync: notebook '{}' done: pulled={}, pushed={}, conflicts={}",
+                        notebook.name,
+                        result.pages_pulled,
+                        result.pages_pushed,
+                        result.conflicts_resolved,
+                    );
+                    total_pulled += result.pages_pulled;
+                    total_pushed += result.pages_pushed;
+                    total_conflicts += result.conflicts_resolved;
+                }
+                Err(e) => {
+                    log::warn!("Failed to sync notebook {}: {}", notebook.id, e);
+                    errors.push(format!("{}: {}", notebook.name, e));
                 }
             }
         }
+
+        log::info!(
+            "Library sync complete: {}/{} notebooks synced, pulled={}, pushed={}, conflicts={}, errors={}",
+            synced_count,
+            notebooks.len(),
+            total_pulled,
+            total_pushed,
+            total_conflicts,
+            errors.len(),
+        );
 
         let duration_ms = start.elapsed().as_millis() as u64;
 

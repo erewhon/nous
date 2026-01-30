@@ -51,6 +51,7 @@ export function LibrarySettingsPanel() {
   const [syncBasePath, setSyncBasePath] = useState("");
   const [syncMode, setSyncMode] = useState<SyncMode>("manual");
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [syncResult, setSyncResult] = useState<string | null>(null);
 
   useEffect(() => {
     fetchLibraries();
@@ -545,9 +546,23 @@ export function LibrarySettingsPanel() {
                     onClick={async () => {
                       if (!currentLibrary) return;
                       setSyncError(null);
+                      setSyncResult(null);
                       try {
-                        await syncLibraryNow(currentLibrary.id);
+                        const result = await syncLibraryNow(currentLibrary.id);
                         fetchLibraries();
+                        if (result.success) {
+                          const parts = [];
+                          if (result.pagesPushed > 0) parts.push(`${result.pagesPushed} pushed`);
+                          if (result.pagesPulled > 0) parts.push(`${result.pagesPulled} pulled`);
+                          if (result.conflictsResolved > 0) parts.push(`${result.conflictsResolved} conflicts resolved`);
+                          setSyncResult(
+                            parts.length > 0
+                              ? `Sync complete: ${parts.join(", ")}`
+                              : "Sync complete (no changes)"
+                          );
+                        } else {
+                          setSyncError(result.error || "Sync failed");
+                        }
                       } catch (e) {
                         setSyncError(e instanceof Error ? e.message : "Sync failed");
                       }
@@ -584,6 +599,9 @@ export function LibrarySettingsPanel() {
                   </button>
                 </div>
 
+                {syncResult && (
+                  <p className="text-xs" style={{ color: "rgb(34, 197, 94)" }}>{syncResult}</p>
+                )}
                 {syncError && (
                   <p className="text-xs" style={{ color: "var(--color-error)" }}>{syncError}</p>
                 )}
