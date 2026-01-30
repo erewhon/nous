@@ -906,7 +906,7 @@ END:VCALENDAR`;
         onDragOver={handleDragOver}
         onDragEnd={handleDragEnd}
       >
-      <div className="flex h-full flex-col">
+      <div className="flex h-full flex-col relative">
         {/* Header */}
         <div className="flex items-center justify-between p-5">
           <span
@@ -1279,48 +1279,15 @@ END:VCALENDAR`;
           </div>
         )}
 
-        {/* Section drop zones - shown when dragging */}
-        {showSectionDropZones && sectionsEnabled && (
-          <div
-            className="mx-2 mb-2 rounded-lg p-2"
-            style={{
-              backgroundColor: "var(--color-bg-tertiary)",
-              border: "1px solid var(--color-border)",
-            }}
-          >
-            <div
-              className="mb-1.5 text-xs font-medium"
-              style={{ color: "var(--color-text-muted)" }}
-            >
-              Drop to move to section:
-            </div>
-            <div className="flex flex-col gap-1">
-              <DroppableUnsorted isOver={overSectionId === "unsorted"} />
-              {sections.map((section) => (
-                <DroppableSection
-                  key={section.id}
-                  section={section}
-                  isOver={overSectionId === section.id}
-                >
-                  <span
-                    className="h-3 w-3 flex-shrink-0 rounded-full"
-                    style={{
-                      backgroundColor: section.color || "var(--color-text-muted)",
-                    }}
-                  />
-                  <span className="text-xs truncate" style={{ color: "var(--color-text-primary)" }}>
-                    {section.name}
-                  </span>
-                </DroppableSection>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Tree content */}
+        {/* Tree content — extra bottom padding when section drop zones overlay is visible */}
         <div
           ref={treeContainerRef}
-          className="flex-1 overflow-y-auto px-2 pb-4 text-left relative"
+          className="flex-1 overflow-y-auto px-2 text-left relative"
+          style={{
+            paddingBottom: showSectionDropZones && sectionsEnabled
+              ? `${60 + sections.length * 36}px`
+              : "16px",
+          }}
         >
           {/* File drop overlay */}
           {isFileDragOver && (
@@ -1409,6 +1376,45 @@ END:VCALENDAR`;
             </ul>
           )}
         </div>
+
+        {/* Section drop zones - absolutely positioned over tree, no layout shift */}
+        {showSectionDropZones && sectionsEnabled && (
+          <div
+            className="absolute bottom-0 left-0 right-0 z-30 mx-2 mb-2 rounded-lg p-2"
+            style={{
+              backgroundColor: "var(--color-bg-secondary)",
+              border: "1px solid var(--color-border)",
+              boxShadow: "0 -4px 12px rgba(0, 0, 0, 0.25)",
+            }}
+          >
+            <div
+              className="mb-1.5 text-xs font-medium"
+              style={{ color: "var(--color-text-muted)" }}
+            >
+              Drop to move to section:
+            </div>
+            <div className="flex flex-col gap-1">
+              <DroppableUnsorted isOver={overSectionId === "unsorted"} />
+              {sections.map((section) => (
+                <DroppableSection
+                  key={section.id}
+                  section={section}
+                  isOver={overSectionId === section.id}
+                >
+                  <span
+                    className="h-3 w-3 flex-shrink-0 rounded-full"
+                    style={{
+                      backgroundColor: section.color || "var(--color-text-muted)",
+                    }}
+                  />
+                  <span className="text-xs truncate" style={{ color: "var(--color-text-primary)" }}>
+                    {section.name}
+                  </span>
+                </DroppableSection>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Drag overlay */}

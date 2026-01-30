@@ -143,13 +143,14 @@ export const FolderTreeItem = memo(function FolderTreeItem({
     disabled: isArchive,
   });
 
-  // Combine refs for both draggable and droppable
-  const combinedRef = useCallback(
+  // Draggable ref goes on the <li> (entire folder subtree moves when dragged).
+  // Droppable ref goes on just the header row so closestCenter targets the
+  // compact header, not the entire expanded subtree.
+  const draggableRef = useCallback(
     (node: HTMLLIElement | null) => {
-      setDroppableRef(node);
       setDraggableRef(node);
     },
-    [setDroppableRef, setDraggableRef]
+    [setDraggableRef]
   );
 
   const hasChildren = childFolders.length > 0 || pages.length > 0;
@@ -214,12 +215,13 @@ export const FolderTreeItem = memo(function FolderTreeItem({
   return (
     <>
     <li
-      ref={combinedRef}
+      ref={draggableRef}
       style={dragStyle}
       className={isDragging ? "opacity-50" : ""}
     >
-      {/* Folder row */}
+      {/* Folder row — also the drop target so closestCenter hits the header, not the subtree */}
       <div
+        ref={setDroppableRef}
         className="group flex min-w-0 items-center gap-1 rounded-lg py-1.5 transition-all cursor-pointer"
         style={{
           paddingLeft: `${paddingLeft}px`,
