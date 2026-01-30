@@ -2268,6 +2268,35 @@ impl PythonAI {
             Ok(models)
         })
     }
+
+    /// Discover available chat models from a local provider (ollama/lmstudio)
+    pub fn discover_chat_models(&self, provider: &str, base_url: &str) -> Result<Vec<DiscoveredChatModel>> {
+        Python::attach(|py| {
+            self.setup_python_path(py)?;
+
+            let chat_module = py.import("nous_ai.chat")?;
+            let discover_fn = chat_module.getattr("discover_chat_models_sync")?;
+
+            let result = discover_fn.call1((provider, base_url))?;
+            let models_list: Vec<HashMap<String, Py<PyAny>>> = result.extract()?;
+
+            let mut models = Vec::new();
+            for model_dict in models_list {
+                models.push(DiscoveredChatModel {
+                    id: model_dict
+                        .get("id")
+                        .and_then(|v| v.extract::<String>(py).ok())
+                        .unwrap_or_default(),
+                    name: model_dict
+                        .get("name")
+                        .and_then(|v| v.extract::<String>(py).ok())
+                        .unwrap_or_default(),
+                });
+            }
+
+            Ok(models)
+        })
+    }
 }
 
 /// Discovered embedding model info
@@ -2277,6 +2306,14 @@ pub struct DiscoveredModel {
     pub id: String,
     pub name: String,
     pub dimensions: u32,
+}
+
+/// Discovered chat model info
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiscoveredChatModel {
+    pub id: String,
+    pub name: String,
 }
 
 #[cfg(test)]

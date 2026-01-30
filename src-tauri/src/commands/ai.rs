@@ -4,8 +4,8 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::python_bridge::{
     AIConfig, BrowserTaskResult, ChatMessage, ChatResponse, ChatResponseWithActions,
-    NotebookInfo, PageContext, PageInfo, PageSummaryInput, PagesSummaryResult,
-    RelatedPageSuggestion, StreamEvent,
+    DiscoveredChatModel, NotebookInfo, PageContext, PageInfo, PageSummaryInput,
+    PagesSummaryResult, RelatedPageSuggestion, StreamEvent,
 };
 use crate::AppState;
 
@@ -385,4 +385,22 @@ pub async fn browser_run_task(
     .map_err(|e| CommandError {
         message: format!("Task join error: {}", e),
     })?
+}
+
+/// Discover available chat models from a local provider
+#[tauri::command]
+pub fn discover_ai_models(
+    state: State<AppState>,
+    provider: String,
+    base_url: String,
+) -> Result<Vec<DiscoveredChatModel>, CommandError> {
+    let python_ai = state.python_ai.lock().map_err(|e| CommandError {
+        message: format!("Failed to acquire Python AI lock: {}", e),
+    })?;
+
+    python_ai
+        .discover_chat_models(&provider, &base_url)
+        .map_err(|e| CommandError {
+            message: format!("Failed to discover models: {}", e),
+        })
 }

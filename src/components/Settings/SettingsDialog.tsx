@@ -171,11 +171,14 @@ function AISettingsContent() {
     setDefaultModel,
     setTemperature,
     setMaxTokens,
+    isDiscoveringModels,
+    discoverModels,
   } = useAIStore();
 
   const [expandedProvider, setExpandedProvider] = useState<ProviderType | null>(
     settings.defaultProvider
   );
+  const [discoveryResult, setDiscoveryResult] = useState<Record<string, string>>({});
   const [showApiKeys, setShowApiKeys] = useState<Record<ProviderType, boolean>>({
     openai: false,
     anthropic: false,
@@ -200,6 +203,26 @@ function AISettingsContent() {
     if (modelName) {
       addModel(type, { id: modelName, name: modelName });
       setNewModelInputs((prev) => ({ ...prev, [type]: "" }));
+    }
+  };
+
+  const handleDiscoverModels = async (type: ProviderType) => {
+    setDiscoveryResult((prev) => ({ ...prev, [type]: "" }));
+    try {
+      const result = await discoverModels(type);
+      if (result.found === 0) {
+        setDiscoveryResult((prev) => ({ ...prev, [type]: "No models found. Is the server running?" }));
+      } else {
+        setDiscoveryResult((prev) => ({
+          ...prev,
+          [type]: `Found ${result.found} model${result.found !== 1 ? "s" : ""}, added ${result.added} new`,
+        }));
+      }
+    } catch {
+      setDiscoveryResult((prev) => ({
+        ...prev,
+        [type]: "Failed to connect. Is the server running?",
+      }));
     }
   };
 
@@ -243,6 +266,9 @@ function AISettingsContent() {
               setNewModelInputs((prev) => ({ ...prev, [provider.type]: value }))
             }
             onAddModel={() => handleAddModel(provider.type)}
+            isDiscovering={isDiscoveringModels}
+            discoveryResult={discoveryResult[provider.type]}
+            onDiscoverModels={() => handleDiscoverModels(provider.type)}
           />
         ))}
       </div>
@@ -406,6 +432,9 @@ function ProviderAccordion({
   newModelInput,
   onNewModelInputChange,
   onAddModel,
+  isDiscovering,
+  discoveryResult,
+  onDiscoverModels,
 }: {
   provider: ProviderConfig;
   info: { label: string; description: string; needsApiKey: boolean; needsRegion?: boolean; apiKeyPlaceholder?: string };
@@ -421,6 +450,9 @@ function ProviderAccordion({
   newModelInput: string;
   onNewModelInputChange: (value: string) => void;
   onAddModel: () => void;
+  isDiscovering?: boolean;
+  discoveryResult?: string;
+  onDiscoverModels?: () => void;
 }) {
   return (
     <div
@@ -585,12 +617,34 @@ function ProviderAccordion({
 
           {/* Models */}
           <div>
-            <label
-              className="mb-2 block text-xs font-medium"
-              style={{ color: "var(--color-text-muted)" }}
-            >
-              Available Models
-            </label>
+            <div className="mb-2 flex items-center justify-between">
+              <label
+                className="text-xs font-medium"
+                style={{ color: "var(--color-text-muted)" }}
+              >
+                Available Models
+              </label>
+              {(provider.type === "ollama" || provider.type === "lmstudio") && onDiscoverModels && (
+                <button
+                  onClick={onDiscoverModels}
+                  disabled={isDiscovering}
+                  className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-medium transition-colors hover:bg-[--color-bg-tertiary] disabled:opacity-50"
+                  style={{ color: "var(--color-accent)" }}
+                >
+                  {isDiscovering ? (
+                    <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                  ) : (
+                    <IconRefresh />
+                  )}
+                  {isDiscovering ? "Discovering..." : "Discover Models"}
+                </button>
+              )}
+            </div>
+            {discoveryResult && (
+              <p className="mb-2 text-xs" style={{ color: "var(--color-text-muted)" }}>
+                {discoveryResult}
+              </p>
+            )}
             <div className="space-y-1.5">
               {provider.models.map((model) => (
                 <div
@@ -1371,6 +1425,27 @@ function IconPlug() {
       <path d="M9 8V2" />
       <path d="M15 8V2" />
       <path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z" />
+    </svg>
+  );
+}
+
+function IconRefresh() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M21 2v6h-6" />
+      <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
+      <path d="M3 22v-6h6" />
+      <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
     </svg>
   );
 }

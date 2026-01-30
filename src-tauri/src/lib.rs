@@ -282,6 +282,7 @@ pub fn run() {
             commands::ai_chat_stream,
             commands::ai_summarize_pages,
             commands::browser_run_task,
+            commands::discover_ai_models,
             // Markdown commands
             commands::export_page_markdown,
             commands::import_markdown,

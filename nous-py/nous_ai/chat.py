@@ -1452,3 +1452,45 @@ def chat_with_tools_stream_sync(
             "actions": [],
             "thinking": "",
         }
+
+
+def discover_chat_models_sync(provider: str, base_url: str) -> list[dict[str, str]]:
+    """Discover available chat models from a local provider.
+
+    Args:
+        provider: Provider type ('ollama' or 'lmstudio').
+        base_url: Base URL of the provider server.
+
+    Returns:
+        List of dicts with 'id' and 'name' keys.
+    """
+    import urllib.request
+    import urllib.error
+
+    try:
+        if provider == "ollama":
+            url = f"{base_url.rstrip('/')}/api/tags"
+            req = urllib.request.Request(url, method="GET")
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read().decode())
+                models = data.get("models", [])
+                return [
+                    {"id": m.get("name", ""), "name": m.get("name", "")}
+                    for m in models
+                    if m.get("name")
+                ]
+        elif provider == "lmstudio":
+            url = f"{base_url.rstrip('/')}/v1/models"
+            req = urllib.request.Request(url, method="GET")
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read().decode())
+                models = data.get("data", [])
+                return [
+                    {"id": m.get("id", ""), "name": m.get("id", "")}
+                    for m in models
+                    if m.get("id")
+                ]
+        else:
+            return []
+    except (urllib.error.URLError, OSError, json.JSONDecodeError, KeyError):
+        return []

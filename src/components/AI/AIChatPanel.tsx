@@ -79,9 +79,9 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
     setPanelPosition,
     resetPanelPosition,
     toggleDetached,
-    getActiveProviderType,
-    getActiveApiKey,
     getEnabledModels,
+    getProviderForModel,
+    getProviderConfig,
     setPendingPrompt,
   } = useAIStore();
   const { selectedPageId, pages, loadPages, updatePageContent, createPage, createSubpage } = usePageStore();
@@ -914,14 +914,18 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
 
       const resolvedModel = resolveModel();
 
+      // Resolve the provider from the model being sent
+      const resolvedProvider = getProviderForModel(resolvedModel);
+      const resolvedProviderConfig = getProviderConfig(resolvedProvider);
+
       // Start the streaming request - command now waits for completion
       await aiChatStream(userMessage.content, {
         pageContext,
         conversationHistory: conversation.messages.slice(-10),
         availableNotebooks,
         currentNotebookId: selectedNotebookId || undefined,
-        providerType: getActiveProviderType(),
-        apiKey: getActiveApiKey() || undefined,
+        providerType: resolvedProvider,
+        apiKey: resolvedProviderConfig?.apiKey || undefined,
         model: resolvedModel || undefined,
         temperature: settings.temperature,
         maxTokens: settings.maxTokens,
@@ -1235,24 +1239,30 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
       </div>
 
       {/* Settings hint if no API key */}
-      {!getActiveApiKey() && settings.defaultProvider !== "ollama" && (
-        <button
-          onClick={onOpenSettings}
-          className="flex w-full items-center gap-2 border-b px-5 py-3 text-left text-sm transition-all hover:bg-[--color-bg-tertiary]"
-          style={{
-            borderColor: "var(--color-border)",
-            backgroundColor: "rgba(249, 226, 175, 0.1)",
-            color: "var(--color-warning)",
-          }}
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="10" />
-            <line x1="12" y1="8" x2="12" y2="12" />
-            <line x1="12" y1="16" x2="12.01" y2="16" />
-          </svg>
-          <span>Configure your {settings.defaultProvider} API key to get started</span>
-        </button>
-      )}
+      {(() => {
+        const activeModel = chatModelOverride || currentPage?.aiModel || currentSection?.aiModel || currentNotebook?.aiModel || settings.defaultModel;
+        const activeProvider = getProviderForModel(activeModel);
+        const activeProviderConfig = getProviderConfig(activeProvider);
+        const needsKey = activeProvider !== "ollama" && activeProvider !== "lmstudio" && !activeProviderConfig?.apiKey;
+        return needsKey ? (
+          <button
+            onClick={onOpenSettings}
+            className="flex w-full items-center gap-2 border-b px-5 py-3 text-left text-sm transition-all hover:bg-[--color-bg-tertiary]"
+            style={{
+              borderColor: "var(--color-border)",
+              backgroundColor: "rgba(249, 226, 175, 0.1)",
+              color: "var(--color-warning)",
+            }}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="8" x2="12" y2="12" />
+              <line x1="12" y1="16" x2="12.01" y2="16" />
+            </svg>
+            <span>Configure your {activeProvider} API key to get started</span>
+          </button>
+        ) : null;
+      })()}
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-5">
@@ -1786,7 +1796,7 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
                   color: "var(--color-success)",
                 }}
               >
-                {settings.defaultProvider}
+                {getProviderForModel(chatModelOverride || currentPage?.aiModel || currentSection?.aiModel || currentNotebook?.aiModel || settings.defaultModel)}
               </span>
               <span>
                 {chatModelOverride || currentPage?.aiModel || currentSection?.aiModel || currentNotebook?.aiModel || settings.defaultModel || "default"}

@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import { invoke } from "@tauri-apps/api/core";
 import type { ChatMessage, ProviderType, ProviderConfig, ModelConfig } from "../types/ai";
 import { createDefaultProviderConfig, DEFAULT_MODELS } from "../types/ai";
 
@@ -87,6 +88,7 @@ interface AIState {
   // Helper to get provider config
   getProviderConfig: (type: ProviderType) => ProviderConfig | undefined;
   getEnabledModels: () => Array<{ provider: ProviderType; model: ModelConfig }>;
+  getProviderForModel: (modelId: string) => ProviderType;
 
   // Legacy compatibility helpers - return active provider/model info
   getActiveProviderType: () => ProviderType;
@@ -108,6 +110,10 @@ interface AIState {
   resetPanelPosition: () => void;
   setDetached: (isDetached: boolean) => void;
   toggleDetached: () => void;
+
+  // Model discovery
+  isDiscoveringModels: boolean;
+  discoverModels: (providerType: ProviderType) => Promise<{ found: number; added: number }>;
 
   // Conversation actions
   addMessage: (message: ChatMessage) => void;
@@ -222,6 +228,7 @@ export const useAIStore = create<AIState>()(
         isLoading: false,
         pendingPrompt: null,
       },
+      isDiscoveringModels: false,
 
       // Provider configuration actions
       updateProviderConfig: (type, updates) =>
@@ -370,6 +377,16 @@ export const useAIStore = create<AIState>()(
         return result;
       },
 
+      getProviderForModel: (modelId: string) => {
+        const providers = get().settings.providers;
+        for (const provider of providers) {
+          if (provider.models.some((m) => m.id === modelId)) {
+            return provider.type;
+          }
+        }
+        return get().settings.defaultProvider;
+      },
+
       // Legacy compatibility helpers
       getActiveProviderType: () => {
         return get().settings.defaultProvider;
@@ -487,6 +504,29 @@ export const useAIStore = create<AIState>()(
             position: state.panel.isDetached ? null : state.panel.position,
           },
         })),
+
+      discoverModels: async (providerType: ProviderType) => {
+        set({ isDiscoveringModels: true });
+        try {
+          const providerConfig = get().settings.providers.find((p) => p.type === providerType);
+          const baseUrl = providerConfig?.baseUrl || (providerType === "ollama" ? "http://localhost:11434" : "http://localhost:1234");
+          const models = await invoke<Array<{ id: string; name: string }>>("discover_ai_models", {
+            provider: providerType,
+            baseUrl,
+          });
+          const existingIds = new Set(providerConfig?.models.map((m) => m.id) || []);
+          let added = 0;
+          for (const model of models) {
+            if (!existingIds.has(model.id)) {
+              get().addModel(providerType, { id: model.id, name: model.name });
+              added++;
+            }
+          }
+          return { found: models.length, added };
+        } finally {
+          set({ isDiscoveringModels: false });
+        }
+      },
 
       addMessage: (message) =>
         set((state) => ({
