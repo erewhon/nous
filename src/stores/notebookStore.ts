@@ -1,6 +1,13 @@
 import { create } from "zustand";
 import type { Notebook, NotebookType } from "../types/notebook";
+import { usePageStore } from "./pageStore";
+import { useSectionStore } from "./sectionStore";
 import * as api from "../utils/api";
+
+interface NotebookViewState {
+  sectionId: string | null;
+  pageId: string | null;
+}
 
 interface NotebookState {
   notebooks: Notebook[];
@@ -8,6 +15,8 @@ interface NotebookState {
   showArchived: boolean;
   isLoading: boolean;
   error: string | null;
+  /** Remembers the last viewed section and page for each notebook */
+  notebookViewState: Record<string, NotebookViewState>;
 }
 
 interface NotebookActions {
@@ -26,6 +35,10 @@ interface NotebookActions {
 
   // Selection
   selectNotebook: (id: string | null) => void;
+
+  // View state memory
+  saveNotebookViewState: (notebookId: string, sectionId: string | null, pageId: string | null) => void;
+  getNotebookViewState: (notebookId: string) => NotebookViewState | null;
 
   // Archive visibility
   toggleShowArchived: () => void;
@@ -51,6 +64,7 @@ export const useNotebookStore = create<NotebookStore>((set, get) => ({
   showArchived: false,
   isLoading: false,
   error: null,
+  notebookViewState: {},
 
   // Actions
   loadNotebooks: async () => {
@@ -175,7 +189,31 @@ export const useNotebookStore = create<NotebookStore>((set, get) => ({
   },
 
   selectNotebook: (id) => {
+    const currentId = get().selectedNotebookId;
+    if (currentId && currentId !== id) {
+      const pageId = usePageStore.getState().selectedPageId;
+      const sectionId = useSectionStore.getState().selectedSectionId;
+      set((state) => ({
+        notebookViewState: {
+          ...state.notebookViewState,
+          [currentId]: { sectionId, pageId },
+        },
+      }));
+    }
     set({ selectedNotebookId: id });
+  },
+
+  saveNotebookViewState: (notebookId, sectionId, pageId) => {
+    set((state) => ({
+      notebookViewState: {
+        ...state.notebookViewState,
+        [notebookId]: { sectionId, pageId },
+      },
+    }));
+  },
+
+  getNotebookViewState: (notebookId) => {
+    return get().notebookViewState[notebookId] ?? null;
   },
 
   toggleShowArchived: () => {

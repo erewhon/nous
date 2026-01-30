@@ -6,6 +6,7 @@ import { usePageStore } from "../../stores/pageStore";
 import { useNotebookStore } from "../../stores/notebookStore";
 import { useSectionStore } from "../../stores/sectionStore";
 import { useRAGStore } from "../../stores/ragStore";
+import { useInboxStore } from "../../stores/inboxStore";
 import type { SemanticSearchResult } from "../../types/rag";
 import {
   aiChatStream,
@@ -87,6 +88,7 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
   const { selectedPageId, pages, loadPages, updatePageContent, createPage, createSubpage } = usePageStore();
   const { notebooks, selectedNotebookId, loadNotebooks } = useNotebookStore();
   const { sections } = useSectionStore();
+  const { quickCapture } = useInboxStore();
   const {
     isConfigured: ragConfigured,
     settings: ragSettings,
@@ -1567,6 +1569,34 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
                           <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
                         </svg>
                         Copy
+                      </button>
+                      <button
+                        onClick={async () => {
+                          const title = msg.content.split("\n")[0].replace(/^#+\s*/, "").slice(0, 100) || "AI Response";
+                          await quickCapture(title, msg.content, ["ai-chat"]);
+                        }}
+                        className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs transition-colors hover:opacity-80"
+                        style={{
+                          backgroundColor: "var(--color-bg-tertiary)",
+                          color: "var(--color-text-secondary)",
+                        }}
+                        title="Send to Inbox"
+                      >
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          width="12"
+                          height="12"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
+                          <polyline points="22 12 16 12 14 15 10 15 8 12 2 12" />
+                          <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
+                        </svg>
+                        Inbox
                       </button>
                     </div>
                   )}

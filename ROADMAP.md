@@ -248,9 +248,10 @@ Already implemented with Tantivy, may need refinement:
 - [x] Extract highlights to page (creates new page with quotes)
 
 ### 16. Notebook Encryption
-- [ ] Password-protected notebooks
-- [ ] Encrypt notebook data at rest
-- [ ] Secure unlock flow
+- [x] Password-protected notebooks
+- [x] Encrypt notebook data at rest (ChaCha20-Poly1305 + Argon2id)
+- [x] Secure unlock flow (auto-lock timeout, in-memory key management)
+- [x] Library-level encryption
 - [ ] Optional biometric unlock
 
 ### 17. Theme Customization

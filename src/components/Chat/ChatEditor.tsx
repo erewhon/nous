@@ -42,6 +42,9 @@ import {
 import { useAIStore } from "../../stores/aiStore";
 import { useNotebookStore } from "../../stores/notebookStore";
 import { usePageStore } from "../../stores/pageStore";
+import { OutputRenderer, apiOutputToJupyterOutput } from "../shared/OutputRenderer";
+import { useThemeStore } from "../../stores/themeStore";
+import type { JupyterCellOutput } from "../../utils/api";
 
 // Track created items to show in UI
 interface CreatedItem {
@@ -78,6 +81,10 @@ export function ChatEditor({ page, notebookId, className = "" }: ChatEditorProps
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const [createdItems, setCreatedItems] = useState<CreatedItem[]>([]);
+  const [pythonAvailable, setPythonAvailable] = useState<boolean | null>(null);
+  const [executingBlocks, setExecutingBlocks] = useState<Set<string>>(new Set());
+  const resolvedMode = useThemeStore((state) => state.resolvedMode);
+  const isDark = resolvedMode === "dark";
 
   const { settings, getActiveProviderType, getActiveApiKey, getActiveModel } = useAIStore();
   const { notebooks, selectedNotebookId, loadNotebooks } = useNotebookStore();
@@ -113,6 +120,13 @@ export function ChatEditor({ page, notebookId, className = "" }: ChatEditorProps
 
     loadContent();
   }, [notebookId, page.id]);
+
+  // Check Python availability
+  useEffect(() => {
+    api.checkPythonExecutionAvailable()
+      .then((info) => setPythonAvailable(info.available))
+      .catch(() => setPythonAvailable(false));
+  }, []);
 
   // Auto-save with debounce
   const saveContent = useCallback(
@@ -407,6 +421,7 @@ export function ChatEditor({ page, notebookId, className = "" }: ChatEditorProps
           error: undefined,
           thinking: undefined,
           stats: undefined,
+          codeOutputs: undefined,
         });
       } else {
         // Create new response cell in same branch as prompt
@@ -556,6 +571,49 @@ export function ChatEditor({ page, notebookId, className = "" }: ChatEditorProps
       processTemplateVariables,
       executeActions,
     ]
+  );
+
+  // Execute a code block within a response cell
+  const executeCodeBlock = useCallback(
+    async (cellId: string, blockIndex: number, code: string) => {
+      const key = `${cellId}:${blockIndex}`;
+      setExecutingBlocks((prev) => new Set(prev).add(key));
+
+      try {
+        const result: JupyterCellOutput = await api.executeJupyterCell(code, blockIndex);
+        updateCell(cellId, {
+          codeOutputs: {
+            ...(content?.cells.find((c) => c.id === cellId)?.codeOutputs || {}),
+            [String(blockIndex)]: result,
+          },
+        });
+      } catch (err) {
+        updateCell(cellId, {
+          codeOutputs: {
+            ...(content?.cells.find((c) => c.id === cellId)?.codeOutputs || {}),
+            [String(blockIndex)]: {
+              success: false,
+              outputs: [
+                {
+                  outputType: "error" as const,
+                  ename: "ExecutionError",
+                  evalue: err instanceof Error ? err.message : "Unknown error",
+                  traceback: [],
+                },
+              ],
+              executionCount: null,
+            },
+          },
+        });
+      } finally {
+        setExecutingBlocks((prev) => {
+          const next = new Set(prev);
+          next.delete(key);
+          return next;
+        });
+      }
+    },
+    [content, updateCell]
   );
 
   // Toggle thinking expansion
@@ -1060,6 +1118,9 @@ export function ChatEditor({ page, notebookId, className = "" }: ChatEditorProps
                 isCollapsed={collapsedCells.has(cell.id)}
                 searchQuery={searchQuery}
                 templateVariables={cell.type === "prompt" ? templateVariables : undefined}
+                pythonAvailable={pythonAvailable}
+                executingBlocks={executingBlocks}
+                isDark={isDark}
                 onUpdateContent={(newContent) => updateCell(cell.id, { content: newContent })}
                 onExecute={() => executePrompt(cell.id)}
                 onRegenerate={
@@ -1074,6 +1135,7 @@ export function ChatEditor({ page, notebookId, className = "" }: ChatEditorProps
                 onToggleThinking={() => toggleThinking(cell.id)}
                 onToggleCollapse={() => toggleCollapse(cell.id)}
                 onAddCellAfter={(type) => addCell(type, cell.id)}
+                onExecuteCodeBlock={executeCodeBlock}
                 canMoveUp={index > 0}
                 canMoveDown={index < visibleCells.length - 1}
                 canDelete={visibleCells.length > 1}
@@ -1108,6 +1170,9 @@ interface SortableCellRendererProps {
   isCollapsed: boolean;
   searchQuery: string;
   templateVariables?: TemplateVariable[];
+  pythonAvailable: boolean | null;
+  executingBlocks: Set<string>;
+  isDark: boolean;
   onUpdateContent: (content: string) => void;
   onExecute: () => void;
   onRegenerate?: () => void;
@@ -1118,6 +1183,7 @@ interface SortableCellRendererProps {
   onToggleThinking: () => void;
   onToggleCollapse: () => void;
   onAddCellAfter: (type: "prompt" | "markdown") => void;
+  onExecuteCodeBlock: (cellId: string, blockIndex: number, code: string) => void;
   canMoveUp: boolean;
   canMoveDown: boolean;
   canDelete: boolean;
@@ -1160,6 +1226,9 @@ interface CellRendererProps {
   isCollapsed: boolean;
   searchQuery: string;
   templateVariables?: TemplateVariable[];
+  pythonAvailable: boolean | null;
+  executingBlocks: Set<string>;
+  isDark: boolean;
   onUpdateContent: (content: string) => void;
   onExecute: () => void;
   onRegenerate?: () => void;
@@ -1170,6 +1239,7 @@ interface CellRendererProps {
   onToggleThinking: () => void;
   onToggleCollapse: () => void;
   onAddCellAfter: (type: "prompt" | "markdown") => void;
+  onExecuteCodeBlock: (cellId: string, blockIndex: number, code: string) => void;
   canMoveUp: boolean;
   canMoveDown: boolean;
   canDelete: boolean;
@@ -1187,6 +1257,9 @@ function CellRenderer({
   isCollapsed,
   searchQuery,
   templateVariables,
+  pythonAvailable,
+  executingBlocks,
+  isDark,
   onUpdateContent,
   onExecute,
   onRegenerate,
@@ -1196,6 +1269,7 @@ function CellRenderer({
   onMoveDown,
   onToggleThinking,
   onToggleCollapse,
+  onExecuteCodeBlock,
   canMoveUp,
   canMoveDown,
   canDelete,
@@ -1204,6 +1278,7 @@ function CellRenderer({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [showVariablePicker, setShowVariablePicker] = useState(false);
   const variablePickerRef = useRef<HTMLDivElement>(null);
+  const codeBlockIndexRef = useRef(0);
 
   // Auto-resize textarea
   useEffect(() => {
@@ -1548,36 +1623,98 @@ function CellRenderer({
                     </div>
                   </div>
                 ) : (
-                  <ReactMarkdown
-                    components={{
-                      p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
-                      ul: ({ children }) => <ul className="mb-2 ml-4 list-disc">{children}</ul>,
-                      ol: ({ children }) => <ol className="mb-2 ml-4 list-decimal">{children}</ol>,
-                      code: ({ children, className }) => {
-                        const isBlock = className?.includes("language-");
-                        if (isBlock) {
-                          return (
-                            <pre
-                              className="my-2 overflow-x-auto rounded-lg p-3 text-xs"
-                              style={{ backgroundColor: "var(--color-bg-tertiary)" }}
-                            >
-                              <code>{children}</code>
-                            </pre>
-                          );
-                        }
-                        return (
-                          <code
-                            className="rounded px-1 py-0.5 text-xs"
-                            style={{ backgroundColor: "var(--color-bg-tertiary)" }}
-                          >
-                            {children}
-                          </code>
-                        );
-                      },
-                    }}
-                  >
-                    {cell.content}
-                  </ReactMarkdown>
+                  (() => {
+                    // Reset code block index counter before each render
+                    codeBlockIndexRef.current = 0;
+                    return (
+                      <ReactMarkdown
+                        components={{
+                          p: ({ children }) => <p className="mb-2 last:mb-0">{children}</p>,
+                          ul: ({ children }) => <ul className="mb-2 ml-4 list-disc">{children}</ul>,
+                          ol: ({ children }) => <ol className="mb-2 ml-4 list-decimal">{children}</ol>,
+                          code: ({ children, className }) => {
+                            const isBlock = className?.includes("language-");
+                            if (!isBlock) {
+                              return (
+                                <code
+                                  className="rounded px-1 py-0.5 text-xs"
+                                  style={{ backgroundColor: "var(--color-bg-tertiary)" }}
+                                >
+                                  {children}
+                                </code>
+                              );
+                            }
+
+                            const lang = className?.replace("language-", "") || "";
+                            const isPython = /^(python|py|python3)$/i.test(lang);
+                            const blockIndex = codeBlockIndexRef.current++;
+                            const codeText = String(children).replace(/\n$/, "");
+                            const execKey = `${cell.id}:${blockIndex}`;
+                            const isExecuting = executingBlocks.has(execKey);
+                            const blockOutput = cell.codeOutputs?.[String(blockIndex)] as
+                              | JupyterCellOutput
+                              | undefined;
+
+                            return (
+                              <div className="my-2">
+                                <div className="group/codeblock relative">
+                                  <pre
+                                    className="overflow-x-auto rounded-lg p-3 text-xs"
+                                    style={{ backgroundColor: "var(--color-bg-tertiary)" }}
+                                  >
+                                    <code>{children}</code>
+                                  </pre>
+                                  {isPython && pythonAvailable && (
+                                    <button
+                                      onClick={() => onExecuteCodeBlock(cell.id, blockIndex, codeText)}
+                                      disabled={isExecuting}
+                                      className="absolute top-2 right-2 flex items-center gap-1 px-2 py-1 rounded text-xs transition-all opacity-0 group-hover/codeblock:opacity-100"
+                                      style={{
+                                        backgroundColor: isExecuting
+                                          ? "var(--color-bg-tertiary)"
+                                          : "var(--color-accent)",
+                                        color: isExecuting ? "var(--color-text-muted)" : "white",
+                                        cursor: isExecuting ? "not-allowed" : "pointer",
+                                      }}
+                                      title={isExecuting ? "Running..." : "Run code"}
+                                    >
+                                      {isExecuting ? (
+                                        <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none">
+                                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                                        </svg>
+                                      ) : (
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
+                                          <polygon points="5 3 19 12 5 21 5 3" />
+                                        </svg>
+                                      )}
+                                      {isExecuting ? "Running" : "Run"}
+                                    </button>
+                                  )}
+                                </div>
+                                {blockOutput && blockOutput.outputs && blockOutput.outputs.length > 0 && (
+                                  <div
+                                    className="rounded-b-lg border border-t-0 overflow-hidden"
+                                    style={{ borderColor: "var(--color-border)" }}
+                                  >
+                                    {blockOutput.outputs.map((item, i) => (
+                                      <OutputRenderer
+                                        key={i}
+                                        output={apiOutputToJupyterOutput(item)}
+                                        isDark={isDark}
+                                      />
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          },
+                        }}
+                      >
+                        {cell.content}
+                      </ReactMarkdown>
+                    );
+                  })()
                 )}
               </div>
             ) : (
