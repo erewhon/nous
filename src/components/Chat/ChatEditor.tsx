@@ -427,6 +427,7 @@ export function ChatEditor({ page, notebookId, className = "" }: ChatEditorProps
           thinking: undefined,
           stats: undefined,
           codeOutputs: undefined,
+          codeEdits: undefined,
         });
       } else {
         // Create new response cell in same branch as prompt
@@ -622,6 +623,22 @@ export function ChatEditor({ page, notebookId, className = "" }: ChatEditorProps
           return next;
         });
       }
+    },
+    [content, updateCell]
+  );
+
+  // Update code edit for a specific block in a cell
+  const updateCodeEdit = useCallback(
+    (cellId: string, blockIndex: string, code: string) => {
+      const cell = content?.cells.find((c) => c.id === cellId);
+      if (!cell) return;
+      const originalEdits = cell.codeEdits || {};
+      updateCell(cellId, {
+        codeEdits: {
+          ...originalEdits,
+          [blockIndex]: code,
+        },
+      });
     },
     [content, updateCell]
   );
@@ -1146,6 +1163,7 @@ export function ChatEditor({ page, notebookId, className = "" }: ChatEditorProps
                 onToggleCollapse={() => toggleCollapse(cell.id)}
                 onAddCellAfter={(type) => addCell(type, cell.id)}
                 onExecuteCodeBlock={executeCodeBlock}
+                onUpdateCodeEdit={updateCodeEdit}
                 canMoveUp={index > 0}
                 canMoveDown={index < visibleCells.length - 1}
                 canDelete={visibleCells.length > 1}
@@ -1194,6 +1212,7 @@ interface SortableCellRendererProps {
   onToggleCollapse: () => void;
   onAddCellAfter: (type: "prompt" | "markdown") => void;
   onExecuteCodeBlock: (cellId: string, blockIndex: number, code: string) => void;
+  onUpdateCodeEdit: (cellId: string, blockIndex: string, code: string) => void;
   canMoveUp: boolean;
   canMoveDown: boolean;
   canDelete: boolean;
@@ -1250,6 +1269,7 @@ interface CellRendererProps {
   onToggleCollapse: () => void;
   onAddCellAfter: (type: "prompt" | "markdown") => void;
   onExecuteCodeBlock: (cellId: string, blockIndex: number, code: string) => void;
+  onUpdateCodeEdit: (cellId: string, blockIndex: string, code: string) => void;
   canMoveUp: boolean;
   canMoveDown: boolean;
   canDelete: boolean;
@@ -1280,6 +1300,7 @@ function CellRenderer({
   onToggleThinking,
   onToggleCollapse,
   onExecuteCodeBlock,
+  onUpdateCodeEdit,
   canMoveUp,
   canMoveDown,
   canDelete,
@@ -1289,6 +1310,8 @@ function CellRenderer({
   const [showVariablePicker, setShowVariablePicker] = useState(false);
   const variablePickerRef = useRef<HTMLDivElement>(null);
   const codeBlockIndexRef = useRef(0);
+  const [editingBlockIndex, setEditingBlockIndex] = useState<number | null>(null);
+  const [editingCode, setEditingCode] = useState("");
 
   // Auto-resize textarea
   useEffect(() => {
@@ -1727,48 +1750,124 @@ function CellRenderer({
                             const lang = className?.replace("language-", "") || "";
                             const isPython = /^(python|py|python3)$/i.test(lang);
                             const blockIndex = codeBlockIndexRef.current++;
-                            const codeText = String(children).replace(/\n$/, "");
+                            const blockIndexStr = String(blockIndex);
+                            const originalCode = String(children).replace(/\n$/, "");
+                            const codeText = cell.codeEdits?.[blockIndexStr] ?? originalCode;
+                            const isEdited = cell.codeEdits?.[blockIndexStr] !== undefined;
                             const execKey = `${cell.id}:${blockIndex}`;
                             const isExecuting = executingBlocks.has(execKey);
-                            const blockOutput = cell.codeOutputs?.[String(blockIndex)] as
+                            const isEditing = editingBlockIndex === blockIndex;
+                            const blockOutput = cell.codeOutputs?.[blockIndexStr] as
                               | JupyterCellOutput
                               | undefined;
 
                             return (
                               <div className="my-2">
                                 <div className="group/codeblock relative">
-                                  <pre
-                                    className="overflow-x-auto rounded-lg p-3 text-xs"
-                                    style={{ backgroundColor: "var(--color-bg-tertiary)" }}
-                                  >
-                                    <code>{children}</code>
-                                  </pre>
-                                  {isPython && pythonAvailable && (
-                                    <button
-                                      onClick={() => onExecuteCodeBlock(cell.id, blockIndex, codeText)}
-                                      disabled={isExecuting}
-                                      className="absolute top-2 right-2 flex items-center gap-1 px-2 py-1 rounded text-xs transition-all opacity-0 group-hover/codeblock:opacity-100"
-                                      style={{
-                                        backgroundColor: isExecuting
-                                          ? "var(--color-bg-tertiary)"
-                                          : "var(--color-accent)",
-                                        color: isExecuting ? "var(--color-text-muted)" : "white",
-                                        cursor: isExecuting ? "not-allowed" : "pointer",
+                                  {isEditing ? (
+                                    <textarea
+                                      autoFocus
+                                      value={editingCode}
+                                      onChange={(e) => setEditingCode(e.target.value)}
+                                      onBlur={() => {
+                                        const trimmed = editingCode;
+                                        if (trimmed !== originalCode) {
+                                          onUpdateCodeEdit(cell.id, blockIndexStr, trimmed);
+                                        } else if (isEdited) {
+                                          // Reverted to original — clear the edit
+                                          onUpdateCodeEdit(cell.id, blockIndexStr, originalCode);
+                                        }
+                                        setEditingBlockIndex(null);
                                       }}
-                                      title={isExecuting ? "Running..." : "Run code"}
+                                      onKeyDown={(e) => {
+                                        if (e.key === "Escape") {
+                                          (e.target as HTMLTextAreaElement).blur();
+                                        }
+                                        if (e.key === "Tab") {
+                                          e.preventDefault();
+                                          const target = e.target as HTMLTextAreaElement;
+                                          const start = target.selectionStart;
+                                          const end = target.selectionEnd;
+                                          const newCode = editingCode.slice(0, start) + "    " + editingCode.slice(end);
+                                          setEditingCode(newCode);
+                                          setTimeout(() => {
+                                            target.selectionStart = target.selectionEnd = start + 4;
+                                          }, 0);
+                                        }
+                                      }}
+                                      className="w-full overflow-x-auto rounded-lg p-3 text-xs font-mono outline-none resize-none"
+                                      style={{
+                                        backgroundColor: "var(--color-bg-tertiary)",
+                                        color: "var(--color-text-primary)",
+                                        minHeight: "60px",
+                                        border: "1px solid var(--color-accent)",
+                                      }}
+                                      spellCheck={false}
+                                    />
+                                  ) : (
+                                    <pre
+                                      className="overflow-x-auto rounded-lg p-3 text-xs"
+                                      style={{ backgroundColor: "var(--color-bg-tertiary)" }}
                                     >
-                                      {isExecuting ? (
-                                        <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none">
-                                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                                      <code>{isEdited ? codeText : children}</code>
+                                    </pre>
+                                  )}
+                                  {isEdited && !isEditing && (
+                                    <span
+                                      className="absolute top-2 left-3 text-xs italic"
+                                      style={{ color: "var(--color-text-muted)" }}
+                                    >
+                                      (edited)
+                                    </span>
+                                  )}
+                                  {!isEditing && cell.status !== "running" && (
+                                    <div className="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover/codeblock:opacity-100 transition-all">
+                                      <button
+                                        onClick={() => {
+                                          setEditingBlockIndex(blockIndex);
+                                          setEditingCode(codeText);
+                                        }}
+                                        className="flex items-center gap-1 px-2 py-1 rounded text-xs"
+                                        style={{
+                                          backgroundColor: "var(--color-bg-elevated)",
+                                          color: "var(--color-text-secondary)",
+                                        }}
+                                        title="Edit code"
+                                      >
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                                          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
                                         </svg>
-                                      ) : (
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
-                                          <polygon points="5 3 19 12 5 21 5 3" />
-                                        </svg>
+                                        Edit
+                                      </button>
+                                      {isPython && pythonAvailable && (
+                                        <button
+                                          onClick={() => onExecuteCodeBlock(cell.id, blockIndex, codeText)}
+                                          disabled={isExecuting}
+                                          className="flex items-center gap-1 px-2 py-1 rounded text-xs"
+                                          style={{
+                                            backgroundColor: isExecuting
+                                              ? "var(--color-bg-tertiary)"
+                                              : "var(--color-accent)",
+                                            color: isExecuting ? "var(--color-text-muted)" : "white",
+                                            cursor: isExecuting ? "not-allowed" : "pointer",
+                                          }}
+                                          title={isExecuting ? "Running..." : "Run code"}
+                                        >
+                                          {isExecuting ? (
+                                            <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none">
+                                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                                            </svg>
+                                          ) : (
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
+                                              <polygon points="5 3 19 12 5 21 5 3" />
+                                            </svg>
+                                          )}
+                                          {isExecuting ? "Running" : "Run"}
+                                        </button>
                                       )}
-                                      {isExecuting ? "Running" : "Run"}
-                                    </button>
+                                    </div>
                                   )}
                                 </div>
                                 {blockOutput && blockOutput.outputs && blockOutput.outputs.length > 0 && (

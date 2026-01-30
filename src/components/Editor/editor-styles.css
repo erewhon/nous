@@ -3340,3 +3340,38 @@ wiki-link.broken,
     grid-template-columns: 1fr;
   }
 }
+
+/* Header collapse toggle — inline before header text */
+.ce-header-collapse-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+  width: 20px;
+  height: 20px;
+  margin-right: 4px;
+  cursor: pointer;
+  color: var(--color-text-muted);
+  transition: color 0.15s ease, background-color 0.15s ease;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.ce-header-collapse-toggle:hover {
+  color: var(--color-text-secondary);
+  background-color: var(--color-bg-tertiary);
+}
+
+.ce-header-collapse-toggle svg {
+  transition: transform 0.15s ease;
+}
+
+/* Rotate chevron when collapsed (pointing right) */
+.ce-header-collapse-toggle--collapsed svg {
+  transform: rotate(-90deg);
+}
+
+/* Hidden blocks in collapsed sections */
+.ce-block--section-collapsed {
+  display: none !important;
+}

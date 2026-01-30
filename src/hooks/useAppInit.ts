@@ -9,9 +9,9 @@ import { useWindowLibrary } from "../contexts/WindowContext";
 const GOALS_CHECK_INTERVAL = 15 * 60 * 1000;
 
 export function useAppInit() {
-  const { loadNotebooks, selectedNotebookId, getNotebookViewState } = useNotebookStore();
-  const { loadPages, clearPages, selectPage, pages, isLoading: pagesLoading } = usePageStore();
-  const { selectSection } = useSectionStore();
+  const { loadNotebooks, notebooks, selectedNotebookId, selectNotebook, getNotebookViewState, saveNotebookViewState } = useNotebookStore();
+  const { loadPages, clearPages, selectPage, selectedPageId, pages, isLoading: pagesLoading } = usePageStore();
+  const { sections, selectedSectionId, selectSection } = useSectionStore();
   const { loadGoals, checkAutoGoals, loadSummary } = useGoalsStore();
   const { library } = useWindowLibrary();
   const goalsIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -23,6 +23,14 @@ export function useAppInit() {
       loadNotebooks();
     }
   }, [loadNotebooks, library]);
+
+  // Validate persisted selectedNotebookId still exists after notebooks load
+  useEffect(() => {
+    if (notebooks.length === 0 || !selectedNotebookId) return;
+    if (!notebooks.some((n) => n.id === selectedNotebookId)) {
+      selectNotebook(null);
+    }
+  }, [notebooks, selectedNotebookId, selectNotebook]);
 
   // Load pages when notebook selection changes
   useEffect(() => {
@@ -44,12 +52,26 @@ export function useAppInit() {
     if (!savedState) return;
 
     if (savedState.sectionId) {
-      selectSection(savedState.sectionId);
+      // Validate section still exists if sections are loaded
+      if (sections.length === 0 || sections.some((s) => s.id === savedState.sectionId)) {
+        selectSection(savedState.sectionId);
+      }
     }
     if (savedState.pageId && pages.some((p) => p.id === savedState.pageId)) {
       selectPage(savedState.pageId);
     }
-  }, [selectedNotebookId, pagesLoading, pages, getNotebookViewState, selectPage, selectSection]);
+  }, [selectedNotebookId, pagesLoading, pages, sections, getNotebookViewState, selectPage, selectSection]);
+
+  // Continuously persist current section/page into notebookViewState so it
+  // survives an app restart (selectNotebook only saves on *switch*, not on quit)
+  useEffect(() => {
+    if (!selectedNotebookId) return;
+    // Skip during the initial restore to avoid overwriting saved state with
+    // stale defaults before the restore effect has run
+    if (restoredForNotebookRef.current !== selectedNotebookId) return;
+
+    saveNotebookViewState(selectedNotebookId, selectedSectionId, selectedPageId);
+  }, [selectedNotebookId, selectedSectionId, selectedPageId, saveNotebookViewState]);
 
   // Load goals and check auto-detected goals on app init and periodically
   useEffect(() => {

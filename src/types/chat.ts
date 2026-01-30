@@ -39,6 +39,8 @@ export const ChatCellSchema = z.object({
   error: z.string().optional(),
   // For response cells - code block execution outputs (keyed by block index)
   codeOutputs: z.record(z.string(), z.any()).optional(),
+  // For response cells - edited code blocks (keyed by block index string)
+  codeEdits: z.record(z.string(), z.string()).optional(),
   // Branch this cell belongs to (default: "main")
   branchId: z.string().default("main"),
 });

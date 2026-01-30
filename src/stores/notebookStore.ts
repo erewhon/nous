@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { persist } from "zustand/middleware";
 import type { Notebook, NotebookType } from "../types/notebook";
 import { usePageStore } from "./pageStore";
 import { useSectionStore } from "./sectionStore";
@@ -57,7 +58,9 @@ interface NotebookActions {
 
 type NotebookStore = NotebookState & NotebookActions;
 
-export const useNotebookStore = create<NotebookStore>((set, get) => ({
+export const useNotebookStore = create<NotebookStore>()(
+  persist(
+    (set, get) => ({
   // Initial state
   notebooks: [],
   selectedNotebookId: null,
@@ -260,4 +263,18 @@ export const useNotebookStore = create<NotebookStore>((set, get) => ({
   clearError: () => {
     set({ error: null });
   },
-}));
+}),
+    {
+      name: "nous-notebooks",
+      partialize: (state) => ({
+        selectedNotebookId: state.selectedNotebookId,
+        notebookViewState: state.notebookViewState,
+      }),
+      onRehydrateStorage: () => (state) => {
+        if (state && !state.notebookViewState) {
+          state.notebookViewState = {};
+        }
+      },
+    }
+  )
+);

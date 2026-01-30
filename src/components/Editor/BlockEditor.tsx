@@ -5,6 +5,7 @@ import { useVimMode, type VimMode } from "./useVimMode";
 import { useEmacsMode } from "./useEmacsMode";
 import { useBlockDragHandles } from "./useBlockDragHandles";
 import { useChecklistEnhancer } from "./useChecklistEnhancer";
+import { useHeaderCollapse } from "./useHeaderCollapse";
 import { VimModeIndicator } from "./VimModeIndicator";
 import { WikiLinkAutocomplete } from "./WikiLinkAutocomplete";
 import { WikiLinkTool } from "./WikiLinkTool";
@@ -118,6 +119,13 @@ export const BlockEditor = forwardRef<BlockEditorRef, BlockEditorProps>(function
 
   // Checklist enhancements (drag handles and auto-sort)
   useChecklistEnhancer(editor, holderId);
+
+  // Collapsible header sections
+  useHeaderCollapse({
+    containerRef: containerRef as React.RefObject<HTMLElement>,
+    editorRef: editor,
+    enabled: !readOnly,
+  });
 
   // Cleanup: flush pending save on unmount
   useEffect(() => {

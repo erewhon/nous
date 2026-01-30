@@ -475,10 +475,12 @@ Already implemented with Tantivy, may need refinement:
 - [x] Distinct icons for each page type in sidebar
 
 ### 31. Chat Page Enhancements (Next)
-- [ ] **Code Execution** - Run code blocks in responses via Jupyter kernel
+- [x] **Code Execution** - Run code blocks in responses via Jupyter kernel
   - Connect to existing Jupyter kernel infrastructure
   - Execute code cells inline with output display
-  - Support multiple languages (Python, JavaScript, etc.)
+  - Run button on Python code blocks with inline output rendering
+  - Outputs persist in chat file via `codeOutputs` field
+  - Shared `OutputRenderer` component with Jupyter viewer
 - [x] **Regenerate Response** - Re-run a prompt to get alternative responses
   - Button on response cells to regenerate
   - Retry button on error responses
