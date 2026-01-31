@@ -179,6 +179,11 @@ pub fn sync_from_external_editor(
     // Update the page
     storage.update_page(&updated_page)?;
 
+    // Notify sync manager of the change
+    if let Ok(sync_manager) = state.sync_manager.try_lock() {
+        sync_manager.queue_page_update(notebook_uuid, page_uuid);
+    }
+
     // Mark as synced
     editor_manager.mark_as_synced(page_uuid)?;
 

@@ -498,19 +498,30 @@ impl WebDAVClient {
     ) -> Result<Vec<ResourceInfo>, WebDAVError> {
         let mut files = Vec::new();
         let mut dirs_to_visit = vec![path.to_string()];
+        let mut visited = std::collections::HashSet::new();
 
         while let Some(dir) = dirs_to_visit.pop() {
+            // Normalize for cycle detection
+            let dir_normalized = dir.trim_matches('/').to_string();
+            if !visited.insert(dir_normalized.clone()) {
+                continue;
+            }
+
             let entries = match self.propfind(&dir, 1).await {
                 Ok(entries) => entries,
                 Err(WebDAVError::NotFound(_)) => continue,
                 Err(e) => return Err(e),
             };
 
+            log::debug!(
+                "list_files_recursive: PROPFIND '{}' returned {} entries",
+                dir, entries.len()
+            );
+
             for entry in entries {
-                // Skip the directory itself
-                let entry_path = entry.path.trim_end_matches('/');
-                let dir_trimmed = dir.trim_end_matches('/');
-                if entry_path == dir_trimmed {
+                // Skip the directory itself (normalize both sides for comparison)
+                let entry_normalized = entry.path.trim_matches('/');
+                if entry_normalized == dir_normalized {
                     continue;
                 }
 
@@ -542,6 +553,7 @@ fn parse_propfind_response(xml: &str, base_url: &str) -> Result<Vec<ResourceInfo
 
     // Simple XML parsing - look for response elements
     // This is a basic implementation; could use quick-xml for more robust parsing
+    log::debug!("parse_propfind: xml length={}, base_url={}", xml.len(), base_url);
 
     let mut current_path = String::new();
     let mut current_etag = None;
@@ -569,10 +581,20 @@ fn parse_propfind_response(xml: &str, base_url: &str) -> Result<Vec<ResourceInfo
                 if let Some(end) = line.find("</D:href>").or_else(|| line.find("</d:href>")) {
                     let href = &line[start..end];
                     // Remove base URL prefix if present
-                    let path = href
-                        .strip_prefix(base_url)
-                        .unwrap_or(href)
-                        .trim_start_matches('/');
+                    // Try full URL first (some servers return full URLs in href)
+                    // Then try just the path component (most servers return absolute paths)
+                    let path = if let Some(stripped) = href.strip_prefix(base_url) {
+                        stripped
+                    } else if let Some(scheme_end) = base_url.find("://") {
+                        // Extract path component from base_url (e.g., "/remote.php/dav/files/user")
+                        let after_scheme = &base_url[scheme_end + 3..];
+                        let base_path = after_scheme.find('/').map(|i| &after_scheme[i..]).unwrap_or("");
+                        let base_path = base_path.trim_end_matches('/');
+                        href.strip_prefix(base_path).unwrap_or(href)
+                    } else {
+                        href
+                    };
+                    let path = path.trim_start_matches('/');
                     current_path = urlencoding::decode(path)
                         .unwrap_or_else(|_| path.into())
                         .to_string();
@@ -621,6 +643,16 @@ fn parse_propfind_response(xml: &str, base_url: &str) -> Result<Vec<ResourceInfo
             }
             in_response = false;
         }
+    }
+
+    log::debug!(
+        "parse_propfind: parsed {} resources from response",
+        resources.len()
+    );
+    if resources.is_empty() && xml.len() > 100 {
+        // Log first part of XML to help diagnose parsing failures
+        let preview: String = xml.chars().take(500).collect();
+        log::debug!("parse_propfind: XML preview (0 resources): {}", preview);
     }
 
     Ok(resources)

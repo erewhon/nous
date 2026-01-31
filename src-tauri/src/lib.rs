@@ -498,6 +498,8 @@ pub fn run() {
             commands::library_sync_disable,
             commands::library_sync_now,
             commands::library_sync_configure_notebook,
+            commands::sync_update_config,
+            commands::library_sync_update_config,
             // Document conversion commands (markitdown)
             commands::convert_document,
             commands::convert_documents_batch,

@@ -175,7 +175,10 @@ impl LocalSyncState {
                     return true;
                 }
                 match (state.synced_mtime, current_mtime) {
-                    (Some(synced), Some(current)) => current > synced,
+                    (Some(synced), Some(current)) => {
+                        let diff = current.signed_duration_since(synced);
+                        diff.num_seconds().abs() > 1
+                    }
                     (None, Some(_)) => true,
                     _ => false,
                 }

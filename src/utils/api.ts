@@ -1573,6 +1573,22 @@ export async function librarySyncConfigureNotebook(
   return invoke("library_sync_configure_notebook", { libraryId, notebookId });
 }
 
+export async function syncUpdateConfig(
+  notebookId: string,
+  syncMode: string,
+  syncInterval?: number
+): Promise<void> {
+  return invoke("sync_update_config", { notebookId, syncMode, syncInterval });
+}
+
+export async function librarySyncUpdateConfig(
+  libraryId: string,
+  syncMode: string,
+  syncInterval?: number
+): Promise<void> {
+  return invoke("library_sync_update_config", { libraryId, syncMode, syncInterval });
+}
+
 // ===== Document Conversion API (markitdown) =====
 
 export interface DocumentConversionResult {

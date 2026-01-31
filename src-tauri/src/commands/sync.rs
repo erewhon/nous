@@ -1,4 +1,4 @@
-use tauri::State;
+use tauri::{AppHandle, State};
 use uuid::Uuid;
 
 use crate::sync::{LibrarySyncConfigInput, QueueItem, SyncConfigInput, SyncResult, SyncStatus};
@@ -66,15 +66,15 @@ pub async fn sync_status(
 /// Trigger manual sync
 #[tauri::command]
 pub async fn sync_now(
+    app: AppHandle,
     state: State<'_, AppState>,
     notebook_id: String,
 ) -> CommandResult<SyncResult> {
     let uuid = parse_uuid(&notebook_id)?;
     let sync_manager = state.sync_manager.lock().await;
 
-    // Pass Arc directly, SyncManager handles internal locking
     sync_manager
-        .sync_notebook(uuid, &state.storage)
+        .sync_notebook(uuid, &state.storage, Some(&app))
         .await
         .map_err(|e| e.to_string())
 }
@@ -138,6 +138,7 @@ pub async fn library_sync_disable(
 /// Sync all notebooks in a library
 #[tauri::command]
 pub async fn library_sync_now(
+    app: AppHandle,
     state: State<'_, AppState>,
     library_id: String,
 ) -> CommandResult<SyncResult> {
@@ -145,7 +146,7 @@ pub async fn library_sync_now(
     let sync_manager = state.sync_manager.lock().await;
 
     sync_manager
-        .sync_library(library_uuid, &state.library_storage, &state.storage)
+        .sync_library(library_uuid, &state.library_storage, &state.storage, Some(&app))
         .await
         .map_err(|e| e.to_string())
 }
@@ -177,4 +178,75 @@ pub async fn library_sync_configure_notebook(
         .apply_library_sync_to_notebook(lib_uuid, nb_uuid, &library_config, &state.storage)
         .await
         .map_err(|e| e.to_string())
+}
+
+/// Update sync config (mode/interval) for an already-configured notebook
+#[tauri::command]
+pub async fn sync_update_config(
+    state: State<'_, AppState>,
+    notebook_id: String,
+    sync_mode: String,
+    sync_interval: Option<u64>,
+) -> CommandResult<()> {
+    let uuid = parse_uuid(&notebook_id)?;
+
+    let storage = state.storage.lock().unwrap();
+    let mut notebook = storage.get_notebook(uuid).map_err(|e| e.to_string())?;
+
+    let config = notebook
+        .sync_config
+        .as_mut()
+        .ok_or_else(|| "Sync not configured for this notebook".to_string())?;
+
+    config.sync_mode = serde_json::from_value(serde_json::Value::String(sync_mode))
+        .map_err(|e| format!("Invalid sync mode: {}", e))?;
+    config.sync_interval = sync_interval;
+    storage.update_notebook(&notebook).map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+/// Update sync mode for a library and all its managed notebooks
+#[tauri::command]
+pub async fn library_sync_update_config(
+    state: State<'_, AppState>,
+    library_id: String,
+    sync_mode: String,
+    sync_interval: Option<u64>,
+) -> CommandResult<()> {
+    let lib_uuid = parse_uuid(&library_id)?;
+    let parsed_mode: crate::sync::SyncMode =
+        serde_json::from_value(serde_json::Value::String(sync_mode))
+            .map_err(|e| format!("Invalid sync mode: {}", e))?;
+
+    // Update library sync config
+    {
+        let lib_storage = state.library_storage.lock().unwrap();
+        let library = lib_storage.get_library(lib_uuid).map_err(|e| e.to_string())?;
+        let mut config = library
+            .sync_config
+            .ok_or_else(|| "Sync not configured for this library".to_string())?;
+        config.sync_mode = parsed_mode.clone();
+        config.sync_interval = sync_interval;
+        lib_storage
+            .update_library_sync_config(lib_uuid, Some(config))
+            .map_err(|e| e.to_string())?;
+    }
+
+    // Propagate to all managed notebooks
+    {
+        let storage = state.storage.lock().unwrap();
+        let notebooks = storage.list_notebooks().map_err(|e| e.to_string())?;
+        for mut notebook in notebooks {
+            if let Some(ref mut config) = notebook.sync_config {
+                if config.managed_by_library == Some(true) {
+                    config.sync_mode = parsed_mode.clone();
+                    config.sync_interval = sync_interval;
+                    let _ = storage.update_notebook(&notebook);
+                }
+            }
+        }
+    }
+
+    Ok(())
 }

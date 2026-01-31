@@ -16,6 +16,7 @@ import {
   librarySyncConfigure,
   librarySyncDisable,
   librarySyncNow,
+  syncUpdateConfig,
 } from "../utils/api";
 
 interface SyncState {
@@ -74,6 +75,13 @@ interface SyncActions {
 
   // Get queue for a notebook
   getQueue: (notebookId: string) => QueueItem[];
+
+  // Update config
+  updateConfig: (
+    notebookId: string,
+    syncMode: string,
+    syncInterval?: number
+  ) => Promise<void>;
 
   // Library sync
   configureLibrary: (
@@ -253,6 +261,17 @@ export const useSyncStore = create<SyncStore>((set, get) => ({
   // Get queue for a notebook
   getQueue: (notebookId) => {
     return get().queueByNotebook.get(notebookId) ?? [];
+  },
+
+  // Update config (mode/interval)
+  updateConfig: async (notebookId, syncMode, syncInterval) => {
+    try {
+      await syncUpdateConfig(notebookId, syncMode, syncInterval);
+    } catch (e) {
+      const error = e instanceof Error ? e.message : String(e);
+      set({ error });
+      throw e;
+    }
   },
 
   // Library sync - configure

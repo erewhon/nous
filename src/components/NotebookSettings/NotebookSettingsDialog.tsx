@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { Notebook, AIProviderType } from "../../types/notebook";
 import type { SystemPromptMode } from "../../types/page";
 import type { SyncMode, AuthType } from "../../types/sync";
@@ -24,6 +25,7 @@ import {
   gitIsMerging,
   getCoverPage,
   createCoverPage,
+  syncUpdateConfig,
   type GitStatus,
   type MergeResult,
 } from "../../utils/api";
@@ -118,6 +120,12 @@ export function NotebookSettingsDialog({
   const [syncRemotePath, setSyncRemotePath] = useState("");
   const [syncMode, setSyncMode] = useState<SyncMode>("manual");
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [syncProgress, setSyncProgress] = useState<{
+    current: number;
+    total: number;
+    message: string;
+    phase: string;
+  } | null>(null);
 
   // Load sync status
   const loadSyncStatusData = useCallback(async () => {
@@ -189,6 +197,40 @@ export function NotebookSettingsDialog({
       }
     }
   }, [notebook, loadGitStatus, loadCoverStatus, loadSyncStatusData]);
+
+  // Listen for sync-progress events
+  useEffect(() => {
+    let unlisten: UnlistenFn | null = null;
+
+    const setupListener = async () => {
+      unlisten = await listen<{
+        notebook_id: string;
+        current: number;
+        total: number;
+        message: string;
+        phase: string;
+      }>("sync-progress", (event) => {
+        if (notebook && event.payload.notebook_id === notebook.id) {
+          if (event.payload.phase === "complete") {
+            setSyncProgress(null);
+          } else {
+            setSyncProgress(event.payload);
+          }
+        }
+      });
+    };
+
+    if (isOpen && notebook) {
+      setupListener();
+    }
+
+    return () => {
+      if (unlisten) {
+        unlisten();
+      }
+      setSyncProgress(null);
+    };
+  }, [isOpen, notebook]);
 
   // Focus name input when dialog opens
   useEffect(() => {
@@ -1306,11 +1348,37 @@ export function NotebookSettingsDialog({
 
                 {/* Status */}
                 <div className="flex items-center gap-4 text-xs" style={{ color: "var(--color-text-muted)" }}>
-                  <span>
-                    Mode: <strong style={{ color: "var(--color-text-primary)" }}>
-                      {notebook.syncConfig.syncMode === "manual" ? "Manual" :
-                       notebook.syncConfig.syncMode === "onsave" ? "On Save" : "Periodic"}
-                    </strong>
+                  <span className="flex items-center gap-1">
+                    Mode:{" "}
+                    {notebook.syncConfig.managedByLibrary ? (
+                      <strong style={{ color: "var(--color-text-primary)" }}>
+                        {notebook.syncConfig.syncMode === "manual" ? "Manual" :
+                         notebook.syncConfig.syncMode === "onsave" ? "On Save" : "Periodic"}
+                      </strong>
+                    ) : (
+                      <select
+                        value={notebook.syncConfig.syncMode}
+                        onChange={async (e) => {
+                          const newMode = e.target.value as SyncMode;
+                          try {
+                            await syncUpdateConfig(notebook.id, newMode);
+                            loadNotebooks();
+                          } catch (err) {
+                            setSyncError(err instanceof Error ? err.message : "Failed to update sync mode");
+                          }
+                        }}
+                        className="rounded border px-1.5 py-0.5 text-xs outline-none"
+                        style={{
+                          backgroundColor: "var(--color-bg-tertiary)",
+                          borderColor: "var(--color-border)",
+                          color: "var(--color-text-primary)",
+                        }}
+                      >
+                        <option value="manual">Manual</option>
+                        <option value="onsave">On Save</option>
+                        <option value="periodic">Periodic</option>
+                      </select>
+                    )}
                   </span>
                   {getSyncStatus(notebook.id)?.pendingChanges ? (
                     <span className="text-yellow-500">
@@ -1374,6 +1442,34 @@ export function NotebookSettingsDialog({
                     </button>
                   )}
                 </div>
+
+                {/* Sync Progress */}
+                {syncProgress && (
+                  <div className="rounded-lg p-2.5" style={{ backgroundColor: "var(--color-bg-tertiary)" }}>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-xs" style={{ color: "var(--color-text-secondary)" }}>
+                        {syncProgress.message}
+                      </span>
+                      {syncProgress.total > 0 && (
+                        <span className="text-xs font-medium" style={{ color: "var(--color-text-primary)" }}>
+                          {syncProgress.current} / {syncProgress.total}
+                        </span>
+                      )}
+                    </div>
+                    <div
+                      className="h-1.5 rounded-full overflow-hidden"
+                      style={{ backgroundColor: "var(--color-bg-secondary)" }}
+                    >
+                      <div
+                        className="h-full rounded-full transition-all duration-150"
+                        style={{
+                          backgroundColor: "var(--color-accent)",
+                          width: `${syncProgress.total > 0 ? (syncProgress.current / syncProgress.total) * 100 : 100}%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
 
                 {/* Library-managed hint */}
                 {notebook.syncConfig.managedByLibrary && (

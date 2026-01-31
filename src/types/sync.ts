@@ -150,3 +150,14 @@ export const LibrarySyncConfigInputSchema = z.object({
 export type LibrarySyncConfigInput = z.infer<
   typeof LibrarySyncConfigInputSchema
 >;
+
+// ===== Sync Update Config Input =====
+
+export const SyncUpdateConfigInputSchema = z.object({
+  syncMode: SyncModeSchema,
+  syncInterval: z.number().optional(),
+});
+
+export type SyncUpdateConfigInput = z.infer<
+  typeof SyncUpdateConfigInputSchema
+>;

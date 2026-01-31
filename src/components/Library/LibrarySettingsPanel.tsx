@@ -5,6 +5,7 @@
  */
 
 import { useState, useEffect } from "react";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useLibraryStore } from "../../stores/libraryStore";
 import { useSyncStore } from "../../stores/syncStore";
 import type { LibraryStats } from "../../types/library";
@@ -52,10 +53,49 @@ export function LibrarySettingsPanel() {
   const [syncMode, setSyncMode] = useState<SyncMode>("manual");
   const [syncError, setSyncError] = useState<string | null>(null);
   const [syncResult, setSyncResult] = useState<string | null>(null);
+  const [syncProgress, setSyncProgress] = useState<{
+    notebook_id: string;
+    current: number;
+    total: number;
+    message: string;
+    phase: string;
+  } | null>(null);
 
   useEffect(() => {
     fetchLibraries();
   }, [fetchLibraries]);
+
+  // Listen for sync-progress events during library sync
+  useEffect(() => {
+    let unlisten: UnlistenFn | null = null;
+
+    const setupListener = async () => {
+      unlisten = await listen<{
+        notebook_id: string;
+        current: number;
+        total: number;
+        message: string;
+        phase: string;
+      }>("sync-progress", (event) => {
+        if (event.payload.phase === "complete") {
+          setSyncProgress(null);
+        } else {
+          setSyncProgress(event.payload);
+        }
+      });
+    };
+
+    if (isLibrarySyncing) {
+      setupListener();
+    }
+
+    return () => {
+      if (unlisten) {
+        unlisten();
+      }
+      setSyncProgress(null);
+    };
+  }, [isLibrarySyncing]);
 
   // Load stats for all libraries
   useEffect(() => {
@@ -533,11 +573,30 @@ export function LibrarySettingsPanel() {
                   <div>
                     Base Path: <span style={{ color: "var(--color-text-secondary)" }}>{currentLibrary.syncConfig.remoteBasePath}</span>
                   </div>
-                  <div>
-                    Mode: <span style={{ color: "var(--color-text-secondary)" }}>
-                      {currentLibrary.syncConfig.syncMode === "manual" ? "Manual" :
-                       currentLibrary.syncConfig.syncMode === "onsave" ? "On Save" : "Periodic"}
-                    </span>
+                  <div className="flex items-center gap-1">
+                    Mode:{" "}
+                    <select
+                      value={currentLibrary.syncConfig.syncMode}
+                      onChange={async (e) => {
+                        const newMode = e.target.value as SyncMode;
+                        try {
+                          await api.librarySyncUpdateConfig(currentLibrary.id, newMode);
+                          fetchLibraries();
+                        } catch (err) {
+                          setSyncError(err instanceof Error ? err.message : "Failed to update sync mode");
+                        }
+                      }}
+                      className="rounded border px-1.5 py-0.5 text-xs outline-none"
+                      style={{
+                        backgroundColor: "var(--color-bg-tertiary)",
+                        borderColor: "var(--color-border)",
+                        color: "var(--color-text-primary)",
+                      }}
+                    >
+                      <option value="manual">Manual</option>
+                      <option value="onsave">On Save</option>
+                      <option value="periodic">Periodic</option>
+                    </select>
                   </div>
                 </div>
 
@@ -601,6 +660,32 @@ export function LibrarySettingsPanel() {
                   </button>
                 </div>
 
+                {syncProgress && (
+                  <div className="rounded-lg p-2.5" style={{ backgroundColor: "var(--color-bg-tertiary)" }}>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-xs" style={{ color: "var(--color-text-secondary)" }}>
+                        {syncProgress.message}
+                      </span>
+                      {syncProgress.total > 0 && (
+                        <span className="text-xs font-medium" style={{ color: "var(--color-text-primary)" }}>
+                          {syncProgress.current} / {syncProgress.total}
+                        </span>
+                      )}
+                    </div>
+                    <div
+                      className="h-1.5 rounded-full overflow-hidden"
+                      style={{ backgroundColor: "var(--color-border)" }}
+                    >
+                      <div
+                        className="h-full rounded-full transition-all duration-300"
+                        style={{
+                          backgroundColor: "var(--color-accent)",
+                          width: `${syncProgress.total > 0 ? (syncProgress.current / syncProgress.total) * 100 : 100}%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
                 {syncResult && (
                   <p className="text-xs" style={{ color: "rgb(34, 197, 94)" }}>{syncResult}</p>
                 )}

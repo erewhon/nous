@@ -1,9 +1,12 @@
 use chrono::{DateTime, Utc};
+use serde::Serialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
 use uuid::Uuid;
+
+use tauri::Emitter;
 
 use crate::library::LibraryStorage;
 use crate::storage::Page;
@@ -62,6 +65,16 @@ enum PageSyncResult {
 struct AssetSyncResult {
     assets_pushed: usize,
     assets_pulled: usize,
+}
+
+/// Progress event payload for sync operations
+#[derive(Clone, Serialize)]
+pub struct SyncProgress {
+    pub notebook_id: String,
+    pub current: usize,
+    pub total: usize,
+    pub message: String,
+    pub phase: String,
 }
 
 /// Manager for sync operations
@@ -395,6 +408,7 @@ impl SyncManager {
         &self,
         notebook_id: Uuid,
         storage: &SharedStorage,
+        app_handle: Option<&tauri::AppHandle>,
     ) -> Result<SyncResult, SyncError> {
         let start = std::time::Instant::now();
         log::info!("Sync: starting notebook {}", notebook_id);
@@ -441,8 +455,9 @@ impl SyncManager {
             .await;
         match &remote_manifest {
             Ok(m) => log::info!("Sync: remote manifest has {} pages", m.pages.len()),
-            Err(e) => log::info!("Sync: no remote manifest (first sync?): {}", e),
+            Err(e) => log::debug!("Sync: no remote manifest (first sync?): {}", e),
         }
+        let manifest_existed = remote_manifest.is_ok();
         let mut manifest = remote_manifest.unwrap_or_else(|_| {
             SyncManifest::new(notebook_id, local_state.client_id.clone())
         });
@@ -481,20 +496,37 @@ impl SyncManager {
         };
 
         // 5. Sync each local page (with skip optimization)
-        for page in &local_pages {
+        let total_pages = local_pages.len();
+        for (page_idx, page) in local_pages.iter().enumerate() {
+            if let Some(app) = app_handle {
+                let _ = app.emit("sync-progress", SyncProgress {
+                    notebook_id: notebook_id.to_string(),
+                    current: page_idx + 1,
+                    total: total_pages,
+                    message: format!("Syncing page: {}", page.title),
+                    phase: "pages".to_string(),
+                });
+            }
             let local_needs_sync = local_state.page_needs_sync(page.id);
+            // Fallback: also check page.updated_at against last_synced in case
+            // mark_page_modified was never called (e.g., before sync integration was added)
+            let updated_since_sync = local_state.pages.get(&page.id)
+                .and_then(|s| s.last_synced)
+                .map(|synced| page.updated_at > synced)
+                .unwrap_or(false);
             let remote_may_have_changed = remote_changed_pages.contains(&page.id);
 
-            if !local_needs_sync && !remote_may_have_changed {
+            if !local_needs_sync && !updated_since_sync && !remote_may_have_changed {
                 log::debug!("Sync: skipping page '{}' ({}) — no changes", page.title, page.id);
                 continue;
             }
 
             log::info!(
-                "Sync: syncing page '{}' ({}) local_needs_sync={} remote_changed={}",
+                "Sync: syncing page '{}' ({}) local_needs_sync={} updated_since_sync={} remote_changed={}",
                 page.title,
                 page.id,
                 local_needs_sync,
+                updated_since_sync,
                 remote_may_have_changed,
             );
             let result = self
@@ -557,7 +589,8 @@ impl SyncManager {
             }
         }
 
-        if !synced_page_ids.is_empty() {
+        // Push manifest if: we synced pages OR it didn't exist yet on remote
+        if !synced_page_ids.is_empty() || !manifest_existed {
             manifest.version += 1;
             manifest.last_client_id = local_state.client_id.clone();
             manifest.updated_at = Utc::now();
@@ -585,13 +618,22 @@ impl SyncManager {
             changelog.compact(200);
         }
 
-        if !synced_page_ids.is_empty() {
+        if !synced_page_ids.is_empty() || !manifest_existed {
             if let Err(e) = self.push_changelog(&client, &config.remote_path, &changelog).await {
                 log::error!("Sync: failed to push changelog: {}", e);
             }
         }
 
         // 9. Sync assets
+        if let Some(app) = app_handle {
+            let _ = app.emit("sync-progress", SyncProgress {
+                notebook_id: notebook_id.to_string(),
+                current: 0,
+                total: 0,
+                message: "Syncing assets...".to_string(),
+                phase: "assets".to_string(),
+            });
+        }
         let asset_result = self
             .sync_assets(&client, &config, &mut local_state, notebook_id)
             .await
@@ -631,6 +673,16 @@ impl SyncManager {
             }
             storage_guard.update_notebook(&notebook)?;
         } // Lock released
+
+        if let Some(app) = app_handle {
+            let _ = app.emit("sync-progress", SyncProgress {
+                notebook_id: notebook_id.to_string(),
+                current: total_pages,
+                total: total_pages,
+                message: "Complete".to_string(),
+                phase: "complete".to_string(),
+            });
+        }
 
         Ok(SyncResult::success(
             pages_pulled,
@@ -1003,14 +1055,23 @@ impl SyncManager {
                         return Some((rel, r));
                     }
                 }
+                log::debug!("Asset sync: could not extract relative path from '{}' (prefix='{}')", path, remote_assets_prefix);
                 None
             })
             .collect();
+        log::info!(
+            "Asset sync: remote_map has {} entries from {} remote assets",
+            remote_map.len(),
+            remote_assets.len(),
+        );
 
         // 4. Push: local assets that need syncing to remote
+        // Use local sync state as primary indicator — asset_needs_push returns true for
+        // untracked assets (first sync) and for assets modified since last sync.
+        // remote_map is only used as a fallback for assets that were synced but may have
+        // been deleted from the remote.
         for (relative_path, (abs_path, size, mtime)) in &local_assets {
-            let needs_push = !remote_map.contains_key(relative_path)
-                || local_state.asset_needs_push(relative_path, *size, *mtime);
+            let needs_push = local_state.asset_needs_push(relative_path, *size, *mtime);
 
             if !needs_push {
                 continue;
@@ -1408,6 +1469,7 @@ impl SyncManager {
         library_id: Uuid,
         library_storage: &SharedLibraryStorage,
         storage: &SharedStorage,
+        app_handle: Option<&tauri::AppHandle>,
     ) -> Result<SyncResult, SyncError> {
         let start = std::time::Instant::now();
 
@@ -1510,7 +1572,7 @@ impl SyncManager {
                 notebook.name,
                 notebook.id,
             );
-            match self.sync_notebook(notebook.id, storage).await {
+            match self.sync_notebook(notebook.id, storage, app_handle).await {
                 Ok(result) => {
                     log::info!(
                         "Library sync: notebook '{}' done: pulled={}, pushed={}, conflicts={}, assets_pushed={}, assets_pulled={}",

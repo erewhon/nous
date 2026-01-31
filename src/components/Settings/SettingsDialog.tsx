@@ -5,21 +5,23 @@ import { ThemeSettings } from "./ThemeSettings";
 import { KeybindingsSettings } from "./KeybindingsSettings";
 import { MCPServersSettings } from "./MCPServersSettings";
 import { RAGSettings } from "./RAGSettings";
+import { BackupScheduleSettings } from "./BackupScheduleSettings";
 import { LibrarySettingsPanel } from "../Library";
 import type { ProviderType, ProviderConfig } from "../../types/ai";
 
 interface SettingsDialogProps {
   isOpen: boolean;
   onClose: () => void;
-  initialTab?: "ai" | "web-research" | "theme" | "system-prompt" | "libraries" | "keybindings" | "mcp" | "rag";
+  initialTab?: "ai" | "web-research" | "theme" | "system-prompt" | "libraries" | "keybindings" | "mcp" | "rag" | "backup";
 }
 
-type TabId = "ai" | "web-research" | "theme" | "system-prompt" | "libraries" | "keybindings" | "mcp" | "rag";
+type TabId = "ai" | "web-research" | "theme" | "system-prompt" | "libraries" | "keybindings" | "mcp" | "rag" | "backup";
 
 const TABS: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: "theme", label: "Appearance", icon: <IconPalette /> },
   { id: "keybindings", label: "Shortcuts", icon: <IconKeyboard /> },
   { id: "libraries", label: "Libraries", icon: <IconLibrary /> },
+  { id: "backup", label: "Backup", icon: <IconBackup /> },
   { id: "ai", label: "AI Providers", icon: <IconSparkles /> },
   { id: "rag", label: "Semantic Search", icon: <IconBrain /> },
   { id: "system-prompt", label: "System Prompt", icon: <IconPrompt /> },
@@ -145,6 +147,7 @@ export function SettingsDialog({ isOpen, onClose, initialTab = "theme" }: Settin
             {activeTab === "theme" && <ThemeSettings />}
             {activeTab === "keybindings" && <KeybindingsSettings />}
             {activeTab === "libraries" && <LibrarySettingsPanel />}
+            {activeTab === "backup" && <BackupScheduleSettings />}
             {activeTab === "ai" && <AISettingsContent />}
             {activeTab === "rag" && <RAGSettings />}
             {activeTab === "system-prompt" && <SystemPromptSettingsContent />}
@@ -1446,6 +1449,26 @@ function IconRefresh() {
       <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
       <path d="M3 22v-6h6" />
       <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
+    </svg>
+  );
+}
+
+function IconBackup() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <polyline points="21 8 21 21 3 21 3 8" />
+      <rect x="1" y="3" width="22" height="5" />
+      <line x1="10" y1="12" x2="14" y2="12" />
     </svg>
   );
 }
