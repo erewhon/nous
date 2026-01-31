@@ -39,7 +39,7 @@ use python_bridge::PythonAI;
 use rag::VectorIndex;
 use search::SearchIndex;
 use storage::FileStorage;
-use sync::SyncManager;
+use sync::{SyncManager, SyncScheduler};
 use video_server::VideoServer;
 
 pub struct AppState {
@@ -57,6 +57,7 @@ pub struct AppState {
     pub sync_manager: Arc<tokio::sync::Mutex<SyncManager>>,
     pub external_editor: Mutex<ExternalEditorManager>,
     pub backup_scheduler: Arc<tokio::sync::Mutex<Option<BackupScheduler>>>,
+    pub sync_scheduler: Arc<tokio::sync::Mutex<Option<SyncScheduler>>>,
     pub video_server: Arc<tokio::sync::Mutex<Option<VideoServer>>>,
     pub encryption_manager: Arc<EncryptionManager>,
 }
@@ -186,6 +187,14 @@ pub fn run() {
     let backup_scheduler = commands::start_backup_scheduler(Arc::clone(&storage_arc));
     let backup_scheduler_arc = Arc::new(tokio::sync::Mutex::new(Some(backup_scheduler)));
 
+    // Start sync scheduler for periodic syncs
+    let sync_scheduler = sync::scheduler::start_sync_scheduler(
+        Arc::clone(&sync_manager_arc),
+        Arc::clone(&storage_arc),
+        Arc::clone(&library_storage_arc),
+    );
+    let sync_scheduler_arc = Arc::new(tokio::sync::Mutex::new(Some(sync_scheduler)));
+
     // Video server will be started in setup hook
     let video_server_arc = Arc::new(tokio::sync::Mutex::new(None));
 
@@ -207,6 +216,7 @@ pub fn run() {
         sync_manager: sync_manager_arc,
         external_editor: Mutex::new(external_editor),
         backup_scheduler: backup_scheduler_arc,
+        sync_scheduler: sync_scheduler_arc,
         video_server: video_server_arc,
         encryption_manager,
     };

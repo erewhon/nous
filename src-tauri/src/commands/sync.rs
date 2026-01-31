@@ -203,6 +203,13 @@ pub async fn sync_update_config(
     config.sync_interval = sync_interval;
     storage.update_notebook(&notebook).map_err(|e| e.to_string())?;
 
+    // Notify sync scheduler of config change
+    if let Ok(scheduler) = state.sync_scheduler.try_lock() {
+        if let Some(ref s) = *scheduler {
+            s.reload();
+        }
+    }
+
     Ok(())
 }
 
@@ -245,6 +252,13 @@ pub async fn library_sync_update_config(
                     let _ = storage.update_notebook(&notebook);
                 }
             }
+        }
+    }
+
+    // Notify sync scheduler of config change
+    if let Ok(scheduler) = state.sync_scheduler.try_lock() {
+        if let Some(ref s) = *scheduler {
+            s.reload();
         }
     }
 

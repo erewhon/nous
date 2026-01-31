@@ -579,8 +579,11 @@ export function LibrarySettingsPanel() {
                       value={currentLibrary.syncConfig.syncMode}
                       onChange={async (e) => {
                         const newMode = e.target.value as SyncMode;
+                        const interval = newMode === "periodic"
+                          ? (currentLibrary.syncConfig.syncInterval || 900)
+                          : undefined;
                         try {
-                          await api.librarySyncUpdateConfig(currentLibrary.id, newMode);
+                          await api.librarySyncUpdateConfig(currentLibrary.id, newMode, interval);
                           fetchLibraries();
                         } catch (err) {
                           setSyncError(err instanceof Error ? err.message : "Failed to update sync mode");
@@ -598,6 +601,36 @@ export function LibrarySettingsPanel() {
                       <option value="periodic">Periodic</option>
                     </select>
                   </div>
+                  {currentLibrary.syncConfig.syncMode === "periodic" && (
+                    <div className="flex items-center gap-1">
+                      Interval:{" "}
+                      <select
+                        value={currentLibrary.syncConfig.syncInterval || 900}
+                        onChange={async (e) => {
+                          const interval = parseInt(e.target.value, 10);
+                          try {
+                            await api.librarySyncUpdateConfig(currentLibrary.id, "periodic", interval);
+                            fetchLibraries();
+                          } catch (err) {
+                            setSyncError(err instanceof Error ? err.message : "Failed to update sync interval");
+                          }
+                        }}
+                        className="rounded border px-1.5 py-0.5 text-xs outline-none"
+                        style={{
+                          backgroundColor: "var(--color-bg-tertiary)",
+                          borderColor: "var(--color-border)",
+                          color: "var(--color-text-primary)",
+                        }}
+                      >
+                        <option value={300}>5 minutes</option>
+                        <option value={600}>10 minutes</option>
+                        <option value={900}>15 minutes</option>
+                        <option value={1800}>30 minutes</option>
+                        <option value={3600}>1 hour</option>
+                        <option value={7200}>2 hours</option>
+                      </select>
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex gap-2">
