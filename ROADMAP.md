@@ -322,7 +322,12 @@ Already implemented with Tantivy, may need refinement:
   - Clear history option
 
 ### 21. Import from Other Apps
-- [ ] OneNote notebook import
+- [x] OneNote notebook import (standalone CLI tool via Apache Tika)
+  - `tools/onenote_to_nous.py` converts desktop backup `.one` files to `.nous.zip`
+  - Parses OneNote binary format via Tika (requires Java 11+)
+  - Converts XHTML to Editor.js blocks (headers, paragraphs, lists, tables, images)
+  - Groups `.one` files by directory into folders
+  - See `tools/ONENOTE_IMPORT.md` for usage
 - [x] Scrivener project import (.scriv folders with RTF content)
 - [x] Evernote export import (.enex XML with HTML content)
 - [x] Notion export import (ZIP with markdown & CSV databases)
