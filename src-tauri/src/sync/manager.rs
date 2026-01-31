@@ -1,6 +1,6 @@
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
 use uuid::Uuid;
@@ -57,6 +57,13 @@ enum PageSyncResult {
     Merged,
 }
 
+/// Result of syncing assets for a notebook
+#[derive(Debug, Default)]
+struct AssetSyncResult {
+    assets_pushed: usize,
+    assets_pulled: usize,
+}
+
 /// Manager for sync operations
 pub struct SyncManager {
     /// Base data directory
@@ -103,6 +110,14 @@ impl SyncManager {
     /// Get the local state file path for a notebook
     fn local_state_path(&self, notebook_id: Uuid) -> PathBuf {
         self.sync_dir(notebook_id).join("local_state.json")
+    }
+
+    /// Get the assets directory for a notebook
+    fn assets_dir(&self, notebook_id: Uuid) -> PathBuf {
+        self.data_dir
+            .join("notebooks")
+            .join(notebook_id.to_string())
+            .join("assets")
     }
 
     /// Load the sync queue from disk
@@ -468,6 +483,15 @@ impl SyncManager {
             }
         }
 
+        // Sync assets
+        let asset_result = self
+            .sync_assets(&client, &config, &mut local_state, notebook_id)
+            .await
+            .unwrap_or_else(|e| {
+                log::error!("Asset sync failed for notebook {}: {}", notebook_id, e);
+                AssetSyncResult::default()
+            });
+
         // Process queue items
         let queue_items: Vec<_> = {
             let queue = self.queue.lock().unwrap();
@@ -499,6 +523,8 @@ impl SyncManager {
             pages_pushed,
             conflicts_resolved,
             start.elapsed().as_millis() as u64,
+            asset_result.assets_pushed,
+            asset_result.assets_pulled,
         ))
     }
 
@@ -689,6 +715,201 @@ impl SyncManager {
         local_state.mark_page_synced(page_id, etag, doc.state_vector());
 
         Ok(page)
+    }
+
+    /// Discover all local asset files under the notebook's assets directory
+    fn discover_local_assets(
+        assets_dir: &Path,
+    ) -> HashMap<String, (PathBuf, u64, Option<DateTime<Utc>>)> {
+        let mut assets = HashMap::new();
+        if !assets_dir.exists() {
+            return assets;
+        }
+
+        for entry in walkdir::WalkDir::new(assets_dir)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            if !entry.file_type().is_file() {
+                continue;
+            }
+
+            let abs_path = entry.path().to_path_buf();
+            let relative = match abs_path.strip_prefix(assets_dir) {
+                Ok(r) => r.to_string_lossy().replace('\\', "/"),
+                Err(_) => continue,
+            };
+
+            let metadata = match std::fs::metadata(&abs_path) {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+
+            let size = metadata.len();
+            let mtime = metadata
+                .modified()
+                .ok()
+                .map(|t| DateTime::<Utc>::from(t));
+
+            assets.insert(relative, (abs_path, size, mtime));
+        }
+
+        assets
+    }
+
+    /// Sync assets between local and remote for a notebook
+    async fn sync_assets(
+        &self,
+        client: &WebDAVClient,
+        config: &super::config::SyncConfig,
+        local_state: &mut LocalSyncState,
+        notebook_id: Uuid,
+    ) -> Result<AssetSyncResult, SyncError> {
+        let assets_dir = self.assets_dir(notebook_id);
+        let remote_assets_base = format!("{}/assets", config.remote_path);
+
+        // 1. Discover local assets
+        let local_assets = Self::discover_local_assets(&assets_dir);
+        log::info!(
+            "Asset sync: discovered {} local assets for notebook {}",
+            local_assets.len(),
+            notebook_id,
+        );
+
+        // 2. Discover remote assets
+        let remote_assets = match client.list_files_recursive(&remote_assets_base).await {
+            Ok(files) => files,
+            Err(WebDAVError::NotFound(_)) => {
+                log::info!("Asset sync: remote assets directory not found, will create");
+                Vec::new()
+            }
+            Err(e) => return Err(e.into()),
+        };
+        log::info!("Asset sync: found {} remote assets", remote_assets.len());
+
+        // 3. Ensure remote subdirectories exist
+        for subdir in &["images", "embedded", "pdf_annotations", "annotations"] {
+            let _ = client.mkdir_p(&format!("{}/{}", remote_assets_base, subdir)).await;
+        }
+
+        let mut result = AssetSyncResult::default();
+
+        // Build a set of remote relative paths for quick lookup
+        let remote_assets_prefix = format!("{}/", remote_assets_base.trim_end_matches('/'));
+        let remote_map: HashMap<String, &super::webdav::ResourceInfo> = remote_assets
+            .iter()
+            .filter_map(|r| {
+                let path = r.path.trim_end_matches('/');
+                // Extract relative path from the full remote path
+                if let Some(rel) = path.strip_prefix(remote_assets_prefix.trim_end_matches('/')) {
+                    let rel = rel.trim_start_matches('/').to_string();
+                    if !rel.is_empty() {
+                        return Some((rel, r));
+                    }
+                }
+                None
+            })
+            .collect();
+
+        // 4. Push: local assets that need syncing to remote
+        for (relative_path, (abs_path, size, mtime)) in &local_assets {
+            let needs_push = !remote_map.contains_key(relative_path)
+                || local_state.asset_needs_push(relative_path, *size, *mtime);
+
+            if !needs_push {
+                continue;
+            }
+
+            let remote_path = format!("{}/{}", remote_assets_base, relative_path);
+            let existing_etag = local_state
+                .assets
+                .get(relative_path)
+                .and_then(|s| s.remote_etag.clone());
+
+            log::info!("Asset sync: pushing {}", relative_path);
+
+            let put_result = client
+                .put_file(&remote_path, abs_path, existing_etag.as_deref())
+                .await;
+
+            match put_result {
+                Ok(resp) if resp.conflict => {
+                    // Conflict: re-upload without If-Match (last-write-wins)
+                    log::info!("Asset sync: conflict on {}, re-uploading (last-write-wins)", relative_path);
+                    match client.put_file(&remote_path, abs_path, None).await {
+                        Ok(resp2) => {
+                            local_state.mark_asset_synced(relative_path, resp2.etag, *size, *mtime);
+                            result.assets_pushed += 1;
+                        }
+                        Err(e) => {
+                            log::error!("Asset sync: failed to push {} after conflict: {}", relative_path, e);
+                        }
+                    }
+                }
+                Ok(resp) => {
+                    local_state.mark_asset_synced(relative_path, resp.etag, *size, *mtime);
+                    result.assets_pushed += 1;
+                }
+                Err(e) => {
+                    log::error!("Asset sync: failed to push {}: {}", relative_path, e);
+                }
+            }
+        }
+
+        // 5. Pull: remote assets not present locally, or with changed ETags
+        for (relative_path, remote_info) in &remote_map {
+            let local_path = assets_dir.join(relative_path);
+            let is_locally_present = local_path.exists();
+
+            let should_pull = if !is_locally_present {
+                true
+            } else {
+                // Check if remote changed and local hasn't been modified since last sync
+                match local_state.assets.get(relative_path) {
+                    Some(asset_state) => {
+                        let remote_etag_changed = remote_info.etag.as_deref()
+                            != asset_state.remote_etag.as_deref();
+                        let local_modified = local_assets.get(relative_path)
+                            .map(|(_, size, mtime)| {
+                                local_state.asset_needs_push(relative_path, *size, *mtime)
+                            })
+                            .unwrap_or(false);
+                        remote_etag_changed && !local_modified
+                    }
+                    None => true,
+                }
+            };
+
+            if !should_pull {
+                continue;
+            }
+
+            let remote_path_full = format!("{}/{}", remote_assets_base, relative_path);
+            log::info!("Asset sync: pulling {}", relative_path);
+
+            match client.get_to_file(&remote_path_full, &local_path).await {
+                Ok(etag) => {
+                    let metadata = std::fs::metadata(&local_path).ok();
+                    let size = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
+                    let mtime = metadata
+                        .and_then(|m| m.modified().ok())
+                        .map(|t| DateTime::<Utc>::from(t));
+                    local_state.mark_asset_synced(relative_path, etag, size, mtime);
+                    result.assets_pulled += 1;
+                }
+                Err(e) => {
+                    log::error!("Asset sync: failed to pull {}: {}", relative_path, e);
+                }
+            }
+        }
+
+        log::info!(
+            "Asset sync complete: {} pushed, {} pulled",
+            result.assets_pushed,
+            result.assets_pulled,
+        );
+
+        Ok(result)
     }
 
     /// Disable sync for a notebook
@@ -1017,6 +1238,8 @@ impl SyncManager {
         let mut total_pulled = 0;
         let mut total_pushed = 0;
         let mut total_conflicts = 0;
+        let mut total_assets_pushed = 0;
+        let mut total_assets_pulled = 0;
         let mut errors = Vec::new();
         let mut synced_count = 0;
 
@@ -1094,15 +1317,19 @@ impl SyncManager {
             match self.sync_notebook(notebook.id, storage).await {
                 Ok(result) => {
                     log::info!(
-                        "Library sync: notebook '{}' done: pulled={}, pushed={}, conflicts={}",
+                        "Library sync: notebook '{}' done: pulled={}, pushed={}, conflicts={}, assets_pushed={}, assets_pulled={}",
                         notebook.name,
                         result.pages_pulled,
                         result.pages_pushed,
                         result.conflicts_resolved,
+                        result.assets_pushed,
+                        result.assets_pulled,
                     );
                     total_pulled += result.pages_pulled;
                     total_pushed += result.pages_pushed;
                     total_conflicts += result.conflicts_resolved;
+                    total_assets_pushed += result.assets_pushed;
+                    total_assets_pulled += result.assets_pulled;
                 }
                 Err(e) => {
                     log::warn!("Failed to sync notebook {}: {}", notebook.id, e);
@@ -1129,6 +1356,8 @@ impl SyncManager {
                 total_pushed,
                 total_conflicts,
                 duration_ms,
+                total_assets_pushed,
+                total_assets_pulled,
             ))
         } else {
             Ok(SyncResult {
@@ -1138,6 +1367,8 @@ impl SyncManager {
                 conflicts_resolved: total_conflicts,
                 error: Some(errors.join("; ")),
                 duration_ms,
+                assets_pushed: total_assets_pushed,
+                assets_pulled: total_assets_pulled,
             })
         }
     }

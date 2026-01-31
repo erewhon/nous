@@ -23,6 +23,8 @@ import {
   importOrgmode,
   previewJoplinImport,
   importJoplin,
+  previewOneNote,
+  importOneNote,
   type BackupInfo,
   type BackupSettings,
   type BackupFrequency,
@@ -32,6 +34,7 @@ import {
   type ScrivenerImportPreview,
   type OrgmodeImportPreview,
   type JoplinImportPreview,
+  type OneNoteImportPreview,
 } from "../../utils/api";
 import { useNotebookStore } from "../../stores/notebookStore";
 import { useToastStore } from "../../stores/toastStore";
@@ -42,7 +45,7 @@ interface BackupDialogProps {
   onClose: () => void;
 }
 
-type ImportTab = "export" | "import" | "notion" | "obsidian" | "evernote" | "scrivener" | "orgmode" | "joplin" | "backups" | "schedule";
+type ImportTab = "export" | "import" | "notion" | "obsidian" | "evernote" | "scrivener" | "orgmode" | "joplin" | "onenote" | "backups" | "schedule";
 
 export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
   const [activeTab, setActiveTab] = useState<ImportTab>("export");
@@ -80,6 +83,11 @@ export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
   const [joplinPreview, setJoplinPreview] = useState<JoplinImportPreview | null>(null);
   const [joplinSourcePath, setJoplinSourcePath] = useState<string | null>(null);
   const [joplinNotebookName, setJoplinNotebookName] = useState("");
+
+  // OneNote import state
+  const [onenotePreview, setOnenotePreview] = useState<OneNoteImportPreview | null>(null);
+  const [onenoteSourcePath, setOnenoteSourcePath] = useState<string | null>(null);
+  const [onenoteNotebookName, setOnenoteNotebookName] = useState("");
 
   // Import progress state
   const [importProgress, setImportProgress] = useState<{
@@ -776,6 +784,93 @@ export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
     setError(null);
   };
 
+  // OneNote Import handlers
+  const handleOnenoteSelectFile = async () => {
+    try {
+      setError(null);
+      setSuccess(null);
+      setOnenotePreview(null);
+      setOnenoteSourcePath(null);
+
+      const path = await open({
+        multiple: false,
+        filters: [{ name: "OneNote Section", extensions: ["one"] }],
+      });
+
+      if (!path) return;
+
+      setIsLoading(true);
+      const preview = await previewOneNote(path);
+      setOnenotePreview(preview);
+      setOnenoteSourcePath(path);
+      setOnenoteNotebookName(preview.suggestedName);
+    } catch (err) {
+      setError(`Failed to read OneNote file: ${err}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleOnenoteSelectFolder = async () => {
+    try {
+      setError(null);
+      setSuccess(null);
+      setOnenotePreview(null);
+      setOnenoteSourcePath(null);
+
+      const path = await open({
+        directory: true,
+        multiple: false,
+      });
+
+      if (!path) return;
+
+      setIsLoading(true);
+      const preview = await previewOneNote(path);
+      setOnenotePreview(preview);
+      setOnenoteSourcePath(path);
+      setOnenoteNotebookName(preview.suggestedName);
+    } catch (err) {
+      setError(`Failed to read OneNote notebook: ${err}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleOnenoteImport = async () => {
+    if (!onenoteSourcePath) return;
+
+    try {
+      setError(null);
+      setSuccess(null);
+      setImportProgress(null);
+      setIsLoading(true);
+
+      const notebook = await importOneNote(
+        onenoteSourcePath,
+        onenoteNotebookName || undefined
+      );
+      await loadNotebooks();
+      setSuccess(`Imported "${notebook.name}" from OneNote successfully`);
+
+      setOnenotePreview(null);
+      setOnenoteSourcePath(null);
+      setOnenoteNotebookName("");
+    } catch (err) {
+      setError(`OneNote import failed: ${err}`);
+    } finally {
+      setIsLoading(false);
+      setImportProgress(null);
+    }
+  };
+
+  const handleOnenoteCancel = () => {
+    setOnenotePreview(null);
+    setOnenoteSourcePath(null);
+    setOnenoteNotebookName("");
+    setError(null);
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -822,6 +917,7 @@ export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
               { id: "scrivener" as const, label: "Scrivener", icon: <IconScrivener /> },
               { id: "orgmode" as const, label: "Org-mode", icon: <IconOrgmode /> },
               { id: "joplin" as const, label: "Joplin", icon: <IconJoplin /> },
+              { id: "onenote" as const, label: "OneNote", icon: <IconOneNote /> },
               { id: "backups" as const, label: "Auto-Backups", icon: <IconArchive /> },
               { id: "schedule" as const, label: "Schedule", icon: <IconClock /> },
             ].map((tab) => (
@@ -866,6 +962,7 @@ export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
               {activeTab === "scrivener" && "Import from Scrivener"}
               {activeTab === "orgmode" && "Import from Org-mode"}
               {activeTab === "joplin" && "Import from Joplin"}
+              {activeTab === "onenote" && "Import from OneNote"}
               {activeTab === "backups" && "Auto-Backups"}
               {activeTab === "schedule" && "Scheduled Backups"}
             </h3>
@@ -1020,6 +1117,18 @@ export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
                 onImport={handleJoplinImport}
                 onCancel={handleJoplinCancel}
                 onNameChange={setJoplinNotebookName}
+              />
+            )}
+            {activeTab === "onenote" && (
+              <OneNoteImportTab
+                isLoading={isLoading}
+                preview={onenotePreview}
+                notebookName={onenoteNotebookName}
+                onSelectFile={handleOnenoteSelectFile}
+                onSelectFolder={handleOnenoteSelectFolder}
+                onImport={handleOnenoteImport}
+                onCancel={handleOnenoteCancel}
+                onNameChange={setOnenoteNotebookName}
               />
             )}
             {activeTab === "backups" && (
@@ -3366,6 +3475,267 @@ function IconOrgmode({ size = 16 }: { size?: number }) {
       <circle cx="12" cy="12" r="10" />
       <path d="M12 6v6l4 2" />
     </svg>
+  );
+}
+
+function IconOneNote({ size = 16 }: { size?: number }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+      <path d="M8 7h2l3 7 3-7h2" />
+    </svg>
+  );
+}
+
+// OneNote Import Tab
+function OneNoteImportTab({
+  isLoading,
+  preview,
+  notebookName,
+  onSelectFile,
+  onSelectFolder,
+  onImport,
+  onCancel,
+  onNameChange,
+}: {
+  isLoading: boolean;
+  preview: OneNoteImportPreview | null;
+  notebookName: string;
+  onSelectFile: () => void;
+  onSelectFolder: () => void;
+  onImport: () => void;
+  onCancel: () => void;
+  onNameChange: (name: string) => void;
+}) {
+  if (!preview) {
+    return (
+      <div className="space-y-6">
+        <p
+          className="text-sm"
+          style={{ color: "var(--color-text-muted)" }}
+        >
+          Import pages from a OneNote section file (.one) or a notebook folder containing multiple sections.
+        </p>
+
+        <div
+          className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed p-12"
+          style={{ borderColor: "var(--color-border)" }}
+        >
+          <div
+            className="mb-4 rounded-full p-4"
+            style={{ backgroundColor: "var(--color-bg-tertiary)" }}
+          >
+            <IconOneNote size={32} />
+          </div>
+          <h4
+            className="mb-2 text-lg font-medium"
+            style={{ color: "var(--color-text-primary)" }}
+          >
+            Import from OneNote
+          </h4>
+          <p
+            className="mb-6 text-center text-sm"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            Select a .one section file or a notebook folder
+          </p>
+          <div className="flex gap-3">
+            <button
+              onClick={onSelectFile}
+              disabled={isLoading}
+              className="rounded-lg px-6 py-2.5 text-sm font-medium transition-colors"
+              style={{
+                backgroundColor: "var(--color-accent)",
+                color: "white",
+                opacity: isLoading ? 0.5 : 1,
+              }}
+            >
+              {isLoading ? "Loading..." : "Choose File"}
+            </button>
+            <button
+              onClick={onSelectFolder}
+              disabled={isLoading}
+              className="rounded-lg px-6 py-2.5 text-sm font-medium transition-colors"
+              style={{
+                backgroundColor: "var(--color-bg-tertiary)",
+                color: "var(--color-text-secondary)",
+                opacity: isLoading ? 0.5 : 1,
+              }}
+            >
+              {isLoading ? "Loading..." : "Choose Folder"}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <p
+        className="text-sm"
+        style={{ color: "var(--color-text-muted)" }}
+      >
+        Review the import preview and confirm.
+      </p>
+
+      <div
+        className="grid grid-cols-3 gap-4 rounded-lg border p-4"
+        style={{
+          borderColor: "var(--color-border)",
+          backgroundColor: "var(--color-bg-secondary)",
+        }}
+      >
+        <div>
+          <div
+            className="text-2xl font-bold"
+            style={{ color: "var(--color-accent)" }}
+          >
+            {preview.sectionCount}
+          </div>
+          <div
+            className="text-sm"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            {preview.sectionCount === 1 ? "Section" : "Sections"}
+          </div>
+        </div>
+        <div>
+          <div
+            className="text-2xl font-bold"
+            style={{ color: "var(--color-accent)" }}
+          >
+            {preview.pageCount}
+          </div>
+          <div
+            className="text-sm"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            Pages
+          </div>
+        </div>
+        <div>
+          <div
+            className="text-2xl font-bold"
+            style={{ color: "var(--color-accent)" }}
+          >
+            {preview.imageCount}
+          </div>
+          <div
+            className="text-sm"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            Images
+          </div>
+        </div>
+      </div>
+
+      {preview.sections.length > 0 && (
+        <div>
+          <h4
+            className="mb-2 text-sm font-medium"
+            style={{ color: "var(--color-text-primary)" }}
+          >
+            Sections
+          </h4>
+          <div
+            className="max-h-32 space-y-1 overflow-y-auto rounded-lg border p-2"
+            style={{
+              borderColor: "var(--color-border)",
+              backgroundColor: "var(--color-bg-secondary)",
+            }}
+          >
+            {preview.sections.map((section, i) => (
+              <div
+                key={i}
+                className="flex items-center justify-between text-sm"
+                style={{ color: "var(--color-text-secondary)" }}
+              >
+                <span className="truncate">{section.name}</span>
+                <span className="text-xs opacity-60">
+                  {section.pageCount} {section.pageCount === 1 ? "page" : "pages"}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {preview.warnings.length > 0 && (
+        <div
+          className="rounded-lg p-3 text-sm"
+          style={{
+            backgroundColor: "rgba(234, 179, 8, 0.1)",
+            color: "var(--color-warning)",
+          }}
+        >
+          <strong>Warnings:</strong>
+          <ul className="mt-1 list-disc pl-4">
+            {preview.warnings.map((w, i) => (
+              <li key={i}>{w}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <div>
+        <label
+          className="mb-2 block text-sm font-medium"
+          style={{ color: "var(--color-text-primary)" }}
+        >
+          Notebook Name
+        </label>
+        <input
+          type="text"
+          value={notebookName}
+          onChange={(e) => onNameChange(e.target.value)}
+          className="w-full rounded-lg border px-4 py-2 text-sm"
+          style={{
+            borderColor: "var(--color-border)",
+            backgroundColor: "var(--color-bg-secondary)",
+            color: "var(--color-text-primary)",
+          }}
+          placeholder="Enter notebook name"
+        />
+      </div>
+
+      <div className="flex justify-end gap-3">
+        <button
+          onClick={onCancel}
+          disabled={isLoading}
+          className="rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+          style={{
+            backgroundColor: "var(--color-bg-tertiary)",
+            color: "var(--color-text-secondary)",
+          }}
+        >
+          Cancel
+        </button>
+        <button
+          onClick={onImport}
+          disabled={isLoading}
+          className="rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+          style={{
+            backgroundColor: "var(--color-accent)",
+            color: "white",
+            opacity: isLoading ? 0.5 : 1,
+          }}
+        >
+          {isLoading ? "Importing..." : "Import Notebook"}
+        </button>
+      </div>
+    </div>
   );
 }
 

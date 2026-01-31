@@ -552,9 +552,11 @@ export function LibrarySettingsPanel() {
                         fetchLibraries();
                         if (result.success) {
                           const parts = [];
-                          if (result.pagesPushed > 0) parts.push(`${result.pagesPushed} pushed`);
-                          if (result.pagesPulled > 0) parts.push(`${result.pagesPulled} pulled`);
+                          if (result.pagesPushed > 0) parts.push(`${result.pagesPushed} pages pushed`);
+                          if (result.pagesPulled > 0) parts.push(`${result.pagesPulled} pages pulled`);
                           if (result.conflictsResolved > 0) parts.push(`${result.conflictsResolved} conflicts resolved`);
+                          if (result.assetsPushed > 0) parts.push(`${result.assetsPushed} assets pushed`);
+                          if (result.assetsPulled > 0) parts.push(`${result.assetsPulled} assets pulled`);
                           setSyncResult(
                             parts.length > 0
                               ? `Sync complete: ${parts.join(", ")}`

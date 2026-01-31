@@ -16,6 +16,7 @@ mod library;
 mod markdown;
 mod notion;
 mod obsidian;
+mod onenote;
 mod orgmode;
 mod python_bridge;
 mod rag;
@@ -331,6 +332,9 @@ pub fn run() {
             // Joplin import commands
             commands::preview_joplin_import_cmd,
             commands::import_joplin_cmd,
+            // OneNote import commands
+            commands::preview_onenote_cmd,
+            commands::import_onenote_cmd,
             // Org-mode import commands
             commands::preview_orgmode_cmd,
             commands::import_orgmode_cmd,

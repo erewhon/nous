@@ -72,6 +72,8 @@ export const SyncResultSchema = z.object({
   conflictsResolved: z.number().default(0),
   error: z.string().optional(),
   duration: z.number().optional(), // milliseconds
+  assetsPushed: z.number().default(0),
+  assetsPulled: z.number().default(0),
 });
 
 export type SyncResult = z.infer<typeof SyncResultSchema>;

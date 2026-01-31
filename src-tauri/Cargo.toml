@@ -52,6 +52,9 @@ base64 = "0.22"
 # Joplin import support
 tar = "0.4"
 
+# OneNote import support
+onenote_parser = "1.1"
+
 # PyO3 for Python integration
 pyo3 = { version = "0.27", features = ["auto-initialize"] }
 tokio = { version = "1", features = ["full"] }
@@ -66,7 +69,9 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 md5 = "0.7"
 
 # Sync support
-reqwest = { version = "0.12", features = ["json", "rustls-tls", "blocking"] }
+reqwest = { version = "0.12", features = ["json", "rustls-tls", "blocking", "stream"] }
+tokio-util = { version = "0.7", features = ["io"] }
+futures-util = "0.3"
 yrs = "0.22"
 keyring = "3.0"
 hostname = "0.4"

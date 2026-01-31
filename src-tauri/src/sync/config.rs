@@ -146,10 +146,23 @@ pub struct SyncResult {
     pub error: Option<String>,
     /// Duration of sync in milliseconds
     pub duration_ms: u64,
+    /// Number of assets pushed to remote
+    #[serde(default)]
+    pub assets_pushed: usize,
+    /// Number of assets pulled from remote
+    #[serde(default)]
+    pub assets_pulled: usize,
 }
 
 impl SyncResult {
-    pub fn success(pages_pulled: usize, pages_pushed: usize, conflicts_resolved: usize, duration_ms: u64) -> Self {
+    pub fn success(
+        pages_pulled: usize,
+        pages_pushed: usize,
+        conflicts_resolved: usize,
+        duration_ms: u64,
+        assets_pushed: usize,
+        assets_pulled: usize,
+    ) -> Self {
         Self {
             success: true,
             pages_pulled,
@@ -157,6 +170,8 @@ impl SyncResult {
             conflicts_resolved,
             error: None,
             duration_ms,
+            assets_pushed,
+            assets_pulled,
         }
     }
 
@@ -168,6 +183,8 @@ impl SyncResult {
             conflicts_resolved: 0,
             error: Some(message),
             duration_ms: 0,
+            assets_pushed: 0,
+            assets_pulled: 0,
         }
     }
 }

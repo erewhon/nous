@@ -964,6 +964,35 @@ export async function importJoplin(
   return invoke<Notebook>("import_joplin_cmd", { path, notebookName });
 }
 
+// ===== OneNote Import API =====
+
+export interface OneNoteSectionPreview {
+  name: string;
+  pageCount: number;
+}
+
+export interface OneNoteImportPreview {
+  sectionCount: number;
+  pageCount: number;
+  imageCount: number;
+  sections: OneNoteSectionPreview[];
+  suggestedName: string;
+  warnings: string[];
+}
+
+export async function previewOneNote(
+  path: string
+): Promise<OneNoteImportPreview> {
+  return invoke<OneNoteImportPreview>("preview_onenote_cmd", { path });
+}
+
+export async function importOneNote(
+  path: string,
+  notebookName?: string
+): Promise<Notebook> {
+  return invoke<Notebook>("import_onenote_cmd", { path, notebookName });
+}
+
 // ===== Actions API =====
 
 import type {

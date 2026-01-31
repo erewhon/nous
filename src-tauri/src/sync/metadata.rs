@@ -20,6 +20,25 @@ pub struct LocalSyncState {
     /// Remote manifest version we last synced with
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remote_version: Option<u32>,
+    /// Per-asset sync state (keyed by relative path)
+    #[serde(default)]
+    pub assets: HashMap<String, LocalAssetState>,
+}
+
+/// Local sync state for a single asset
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalAssetState {
+    /// Relative path within assets directory (e.g. "images/foo.png")
+    pub relative_path: String,
+    /// ETag from last sync (for conflict detection)
+    pub remote_etag: Option<String>,
+    /// File size at last sync
+    pub synced_size: u64,
+    /// File modification time at last sync
+    pub synced_mtime: Option<DateTime<Utc>>,
+    /// When this asset was last synced
+    pub last_synced: Option<DateTime<Utc>>,
 }
 
 /// Local sync state for a single page
@@ -48,6 +67,7 @@ impl LocalSyncState {
             last_sync: None,
             pages: HashMap::new(),
             remote_version: None,
+            assets: HashMap::new(),
         }
     }
 
@@ -115,6 +135,49 @@ impl LocalSyncState {
             .filter(|(id, _)| self.page_needs_sync(**id))
             .map(|(id, _)| *id)
             .collect()
+    }
+
+    /// Record that an asset was successfully synced
+    pub fn mark_asset_synced(
+        &mut self,
+        relative_path: &str,
+        etag: Option<String>,
+        size: u64,
+        mtime: Option<DateTime<Utc>>,
+    ) {
+        let now = Utc::now();
+        self.assets.insert(
+            relative_path.to_string(),
+            LocalAssetState {
+                relative_path: relative_path.to_string(),
+                remote_etag: etag,
+                synced_size: size,
+                synced_mtime: mtime,
+                last_synced: Some(now),
+            },
+        );
+    }
+
+    /// Check if a local asset needs to be pushed (changed since last sync)
+    pub fn asset_needs_push(
+        &self,
+        relative_path: &str,
+        current_size: u64,
+        current_mtime: Option<DateTime<Utc>>,
+    ) -> bool {
+        match self.assets.get(relative_path) {
+            Some(state) => {
+                if state.synced_size != current_size {
+                    return true;
+                }
+                match (state.synced_mtime, current_mtime) {
+                    (Some(synced), Some(current)) => current > synced,
+                    (None, Some(_)) => true,
+                    _ => false,
+                }
+            }
+            None => true, // Never synced
+        }
     }
 }
 

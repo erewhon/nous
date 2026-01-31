@@ -1,6 +1,10 @@
+use std::path::Path;
+
+use futures_util::StreamExt;
 use reqwest::{Client, Method, StatusCode};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use tokio::io::AsyncWriteExt;
 
 use crate::sync::config::SyncCredentials;
 
@@ -27,6 +31,8 @@ pub enum WebDAVError {
     XmlParse(String),
     #[error("Invalid URL: {0}")]
     InvalidUrl(String),
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
 }
 
 /// Response from a PUT operation
@@ -59,7 +65,8 @@ impl WebDAVClient {
         }
 
         let client = Client::builder()
-            .timeout(std::time::Duration::from_secs(30))
+            .timeout(std::time::Duration::from_secs(300))
+            .connect_timeout(std::time::Duration::from_secs(30))
             .build()?;
 
         Ok(Self {
@@ -313,6 +320,152 @@ impl WebDAVClient {
         }
 
         Ok(())
+    }
+
+    /// GET streaming - Download file to a local path, returning the ETag
+    pub async fn get_to_file(
+        &self,
+        remote_path: &str,
+        local_path: &Path,
+    ) -> Result<Option<String>, WebDAVError> {
+        let url = self.url(remote_path);
+
+        let response = self
+            .client
+            .get(&url)
+            .basic_auth(&self.credentials.username, Some(&self.credentials.password))
+            .send()
+            .await?;
+
+        match response.status() {
+            StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => {
+                return Err(WebDAVError::AuthFailed);
+            }
+            StatusCode::NOT_FOUND => {
+                return Err(WebDAVError::NotFound(remote_path.to_string()));
+            }
+            status if !status.is_success() => {
+                return Err(WebDAVError::Server {
+                    status: status.as_u16(),
+                    message: response.text().await.unwrap_or_default(),
+                });
+            }
+            _ => {}
+        }
+
+        let etag = response
+            .headers()
+            .get("etag")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.trim_matches('"').to_string());
+
+        // Create parent directories
+        if let Some(parent) = local_path.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
+
+        // Stream response body to file
+        let mut file = tokio::fs::File::create(local_path).await?;
+        let mut stream = response.bytes_stream();
+
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(WebDAVError::Http)?;
+            file.write_all(&chunk).await?;
+        }
+
+        file.flush().await?;
+
+        Ok(etag)
+    }
+
+    /// PUT streaming - Upload a local file to a remote path
+    pub async fn put_file(
+        &self,
+        remote_path: &str,
+        local_path: &Path,
+        etag: Option<&str>,
+    ) -> Result<PutResponse, WebDAVError> {
+        let url = self.url(remote_path);
+
+        let file = tokio::fs::File::open(local_path).await?;
+        let metadata = file.metadata().await?;
+        let file_size = metadata.len();
+
+        let stream = tokio_util::io::ReaderStream::new(file);
+        let body = reqwest::Body::wrap_stream(stream);
+
+        let mut request = self
+            .client
+            .put(&url)
+            .basic_auth(&self.credentials.username, Some(&self.credentials.password))
+            .header("Content-Length", file_size)
+            .body(body);
+
+        if let Some(etag) = etag {
+            request = request.header("If-Match", format!("\"{}\"", etag));
+        }
+
+        let response = request.send().await?;
+
+        match response.status() {
+            StatusCode::CREATED | StatusCode::NO_CONTENT | StatusCode::OK => {
+                let new_etag = response
+                    .headers()
+                    .get("etag")
+                    .and_then(|v| v.to_str().ok())
+                    .map(|s| s.trim_matches('"').to_string());
+
+                Ok(PutResponse {
+                    success: true,
+                    etag: new_etag,
+                    conflict: false,
+                })
+            }
+            StatusCode::PRECONDITION_FAILED => Ok(PutResponse {
+                success: false,
+                etag: None,
+                conflict: true,
+            }),
+            StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => Err(WebDAVError::AuthFailed),
+            status => Err(WebDAVError::Server {
+                status: status.as_u16(),
+                message: response.text().await.unwrap_or_default(),
+            }),
+        }
+    }
+
+    /// List all files recursively under a path using iterative BFS
+    pub async fn list_files_recursive(
+        &self,
+        path: &str,
+    ) -> Result<Vec<ResourceInfo>, WebDAVError> {
+        let mut files = Vec::new();
+        let mut dirs_to_visit = vec![path.to_string()];
+
+        while let Some(dir) = dirs_to_visit.pop() {
+            let entries = match self.propfind(&dir, 1).await {
+                Ok(entries) => entries,
+                Err(WebDAVError::NotFound(_)) => continue,
+                Err(e) => return Err(e),
+            };
+
+            for entry in entries {
+                // Skip the directory itself
+                let entry_path = entry.path.trim_end_matches('/');
+                let dir_trimmed = dir.trim_end_matches('/');
+                if entry_path == dir_trimmed {
+                    continue;
+                }
+
+                if entry.is_collection {
+                    dirs_to_visit.push(entry.path.clone());
+                } else {
+                    files.push(entry);
+                }
+            }
+        }
+
+        Ok(files)
     }
 }
 

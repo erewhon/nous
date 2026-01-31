@@ -12,6 +12,6 @@ pub use config::{
 };
 pub use crdt::{CRDTError, PageDocument};
 pub use manager::SyncManager;
-pub use metadata::{LocalPageState, LocalSyncState};
+pub use metadata::{LocalAssetState, LocalPageState, LocalSyncState};
 pub use queue::{QueueItem, SyncOperation, SyncQueue};
 pub use webdav::{PutResponse, ResourceInfo, WebDAVClient, WebDAVError};
