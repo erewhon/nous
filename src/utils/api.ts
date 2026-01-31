@@ -1586,7 +1586,11 @@ export async function librarySyncUpdateConfig(
   syncMode: string,
   syncInterval?: number
 ): Promise<void> {
-  return invoke("library_sync_update_config", { libraryId, syncMode, syncInterval });
+  return invoke("library_sync_update_config", {
+    libraryId,
+    syncMode,
+    syncInterval,
+  });
 }
 
 // ===== Document Conversion API (markitdown) =====
@@ -2147,4 +2151,57 @@ export async function getGoalsSummary(): Promise<GoalsSummary> {
  */
 export async function toggleGoalToday(goalId: string): Promise<GoalProgress> {
   return invoke<GoalProgress>("toggle_goal_today", { goalId });
+}
+
+// ===== Audio Generation API =====
+
+import type {
+  AudioGenerationResult,
+  TTSProviderInfo,
+  TTSVoiceInfo,
+  TTSConfig,
+} from "../types/audio";
+
+export async function generatePageAudio(
+  notebookId: string,
+  pageId: string,
+  mode: string,
+  ttsConfig: TTSConfig,
+  options?: {
+    aiConfig?: {
+      providerType: string;
+      apiKey?: string;
+      model?: string;
+    };
+    voiceB?: string;
+    targetLength?: string;
+    customInstructions?: string;
+  }
+): Promise<AudioGenerationResult> {
+  return invoke<AudioGenerationResult>("generate_page_audio", {
+    notebookId,
+    pageId,
+    mode,
+    ttsConfig,
+    aiConfig: options?.aiConfig,
+    voiceB: options?.voiceB,
+    targetLength: options?.targetLength,
+    customInstructions: options?.customInstructions,
+  });
+}
+
+export async function getTtsProviders(): Promise<TTSProviderInfo[]> {
+  return invoke<TTSProviderInfo[]>("get_tts_providers");
+}
+
+export async function listTtsVoices(
+  provider: string,
+  apiKey?: string,
+  baseUrl?: string
+): Promise<TTSVoiceInfo[]> {
+  return invoke<TTSVoiceInfo[]>("list_tts_voices", {
+    provider,
+    apiKey,
+    baseUrl,
+  });
 }

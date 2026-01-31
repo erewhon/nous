@@ -325,7 +325,13 @@ async def generate_podcast_script(
     if json_match:
         text = json_match.group(1).strip()
 
-    script: list[dict[str, str]] = json.loads(text)
+    try:
+        script: list[dict[str, str]] = json.loads(text)
+    except json.JSONDecodeError as e:
+        raise ValueError(
+            f"LLM response was not valid JSON. Parse error: {e}. "
+            f"Raw response (first 500 chars): {text[:500]}"
+        ) from e
 
     # Validate structure
     validated: list[dict[str, str]] = []
@@ -372,9 +378,16 @@ async def _generate_podcast_audio(
 
             try:
                 segment = AudioSegment.from_mp3(io.BytesIO(chunk))
-            except Exception:
+            except Exception as mp3_err:
                 # Try WAV fallback (e.g. from Kokoro without ffmpeg mp3 support)
-                segment = AudioSegment.from_wav(io.BytesIO(chunk))
+                try:
+                    segment = AudioSegment.from_wav(io.BytesIO(chunk))
+                except Exception as wav_err:
+                    raise RuntimeError(
+                        f"Failed to decode audio chunk {i} as MP3 ({mp3_err}) "
+                        f"or WAV ({wav_err}). The TTS provider may have returned "
+                        f"invalid audio data ({len(chunk)} bytes)."
+                    ) from wav_err
             combined += segment
             if i < len(audio_chunks) - 1:
                 combined += silence
@@ -465,6 +478,11 @@ async def generate_page_audio(
     else:
         # Simple TTS mode
         audio_bytes = await synthesize(content, config_a)
+        if not audio_bytes:
+            raise RuntimeError(
+                f"TTS provider '{config_a.provider.value}' returned empty audio data. "
+                "Check that the provider is configured correctly and the API key is valid."
+            )
         with open(output_path, "wb") as f:
             f.write(audio_bytes)
 

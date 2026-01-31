@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAIStore, DEFAULT_SYSTEM_PROMPT } from "../../stores/aiStore";
 import { useWebResearchStore } from "../../stores/webResearchStore";
+import { useAudioStore } from "../../stores/audioStore";
 import { ThemeSettings } from "./ThemeSettings";
 import { KeybindingsSettings } from "./KeybindingsSettings";
 import { MCPServersSettings } from "./MCPServersSettings";
@@ -8,14 +9,35 @@ import { RAGSettings } from "./RAGSettings";
 import { BackupScheduleSettings } from "./BackupScheduleSettings";
 import { LibrarySettingsPanel } from "../Library";
 import type { ProviderType, ProviderConfig } from "../../types/ai";
+import type { TTSProviderType } from "../../types/audio";
 
 interface SettingsDialogProps {
   isOpen: boolean;
   onClose: () => void;
-  initialTab?: "ai" | "web-research" | "theme" | "system-prompt" | "libraries" | "keybindings" | "mcp" | "rag" | "backup";
+  initialTab?:
+    | "ai"
+    | "web-research"
+    | "theme"
+    | "system-prompt"
+    | "libraries"
+    | "keybindings"
+    | "mcp"
+    | "rag"
+    | "backup"
+    | "audio";
 }
 
-type TabId = "ai" | "web-research" | "theme" | "system-prompt" | "libraries" | "keybindings" | "mcp" | "rag" | "backup";
+type TabId =
+  | "ai"
+  | "web-research"
+  | "theme"
+  | "system-prompt"
+  | "libraries"
+  | "keybindings"
+  | "mcp"
+  | "rag"
+  | "backup"
+  | "audio";
 
 const TABS: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: "theme", label: "Appearance", icon: <IconPalette /> },
@@ -25,11 +47,21 @@ const TABS: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: "ai", label: "AI Providers", icon: <IconSparkles /> },
   { id: "rag", label: "Semantic Search", icon: <IconBrain /> },
   { id: "system-prompt", label: "System Prompt", icon: <IconPrompt /> },
+  { id: "audio", label: "Audio / TTS", icon: <IconAudio /> },
   { id: "mcp", label: "MCP Servers", icon: <IconPlug /> },
   { id: "web-research", label: "Web Research", icon: <IconGlobe /> },
 ];
 
-const PROVIDER_INFO: Record<ProviderType, { label: string; description: string; needsApiKey: boolean; needsRegion?: boolean; apiKeyPlaceholder?: string }> = {
+const PROVIDER_INFO: Record<
+  ProviderType,
+  {
+    label: string;
+    description: string;
+    needsApiKey: boolean;
+    needsRegion?: boolean;
+    apiKeyPlaceholder?: string;
+  }
+> = {
   openai: {
     label: "OpenAI",
     description: "GPT-4o, GPT-4, o1 models",
@@ -59,7 +91,11 @@ const PROVIDER_INFO: Record<ProviderType, { label: string; description: string; 
   },
 };
 
-export function SettingsDialog({ isOpen, onClose, initialTab = "theme" }: SettingsDialogProps) {
+export function SettingsDialog({
+  isOpen,
+  onClose,
+  initialTab = "theme",
+}: SettingsDialogProps) {
   const [activeTab, setActiveTab] = useState<TabId>(initialTab);
 
   if (!isOpen) return null;
@@ -104,13 +140,17 @@ export function SettingsDialog({ isOpen, onClose, initialTab = "theme" }: Settin
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
                 className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
-                  activeTab === tab.id
-                    ? ""
-                    : "hover:bg-[--color-bg-tertiary]"
+                  activeTab === tab.id ? "" : "hover:bg-[--color-bg-tertiary]"
                 }`}
                 style={{
-                  backgroundColor: activeTab === tab.id ? "rgba(139, 92, 246, 0.15)" : undefined,
-                  color: activeTab === tab.id ? "var(--color-accent)" : "var(--color-text-secondary)",
+                  backgroundColor:
+                    activeTab === tab.id
+                      ? "rgba(139, 92, 246, 0.15)"
+                      : undefined,
+                  color:
+                    activeTab === tab.id
+                      ? "var(--color-accent)"
+                      : "var(--color-text-secondary)",
                 }}
               >
                 {tab.icon}
@@ -151,6 +191,7 @@ export function SettingsDialog({ isOpen, onClose, initialTab = "theme" }: Settin
             {activeTab === "ai" && <AISettingsContent />}
             {activeTab === "rag" && <RAGSettings />}
             {activeTab === "system-prompt" && <SystemPromptSettingsContent />}
+            {activeTab === "audio" && <AudioSettingsContent />}
             {activeTab === "mcp" && <MCPServersSettings />}
             {activeTab === "web-research" && <WebResearchSettingsContent />}
           </div>
@@ -181,15 +222,21 @@ function AISettingsContent() {
   const [expandedProvider, setExpandedProvider] = useState<ProviderType | null>(
     settings.defaultProvider
   );
-  const [discoveryResult, setDiscoveryResult] = useState<Record<string, string>>({});
-  const [showApiKeys, setShowApiKeys] = useState<Record<ProviderType, boolean>>({
-    openai: false,
-    anthropic: false,
-    ollama: false,
-    lmstudio: false,
-    bedrock: false,
-  });
-  const [newModelInputs, setNewModelInputs] = useState<Record<ProviderType, string>>({
+  const [discoveryResult, setDiscoveryResult] = useState<
+    Record<string, string>
+  >({});
+  const [showApiKeys, setShowApiKeys] = useState<Record<ProviderType, boolean>>(
+    {
+      openai: false,
+      anthropic: false,
+      ollama: false,
+      lmstudio: false,
+      bedrock: false,
+    }
+  );
+  const [newModelInputs, setNewModelInputs] = useState<
+    Record<ProviderType, string>
+  >({
     openai: "",
     anthropic: "",
     ollama: "",
@@ -214,7 +261,10 @@ function AISettingsContent() {
     try {
       const result = await discoverModels(type);
       if (result.found === 0) {
-        setDiscoveryResult((prev) => ({ ...prev, [type]: "No models found. Is the server running?" }));
+        setDiscoveryResult((prev) => ({
+          ...prev,
+          [type]: "No models found. Is the server running?",
+        }));
       } else {
         setDiscoveryResult((prev) => ({
           ...prev,
@@ -233,11 +283,13 @@ function AISettingsContent() {
   const enabledModels = settings.providers
     .filter((p) => p.enabled)
     .flatMap((p) =>
-      p.models.filter((m) => m.enabled).map((m) => ({
-        provider: p.type,
-        model: m,
-        displayName: `${PROVIDER_INFO[p.type].label}: ${m.name}`,
-      }))
+      p.models
+        .filter((m) => m.enabled)
+        .map((m) => ({
+          provider: p.type,
+          model: m,
+          displayName: `${PROVIDER_INFO[p.type].label}: ${m.name}`,
+        }))
     );
 
   return (
@@ -255,9 +307,13 @@ function AISettingsContent() {
                 expandedProvider === provider.type ? null : provider.type
               )
             }
-            onToggleEnabled={(enabled) => setProviderEnabled(provider.type, enabled)}
+            onToggleEnabled={(enabled) =>
+              setProviderEnabled(provider.type, enabled)
+            }
             showApiKey={showApiKeys[provider.type]}
-            onToggleApiKeyVisibility={() => toggleApiKeyVisibility(provider.type)}
+            onToggleApiKeyVisibility={() =>
+              toggleApiKeyVisibility(provider.type)
+            }
             onApiKeyChange={(key) => setProviderApiKey(provider.type, key)}
             onBaseUrlChange={(url) => setProviderBaseUrl(provider.type, url)}
             onToggleModel={(modelId, enabled) =>
@@ -302,7 +358,9 @@ function AISettingsContent() {
             </label>
             <select
               value={settings.defaultProvider}
-              onChange={(e) => setDefaultProvider(e.target.value as ProviderType)}
+              onChange={(e) =>
+                setDefaultProvider(e.target.value as ProviderType)
+              }
               className="w-full rounded-lg border px-3 py-2 text-sm outline-none transition-colors focus:border-[--color-accent] dark-select"
               style={{
                 backgroundColor: "var(--color-bg-tertiary)",
@@ -440,7 +498,13 @@ function ProviderAccordion({
   onDiscoverModels,
 }: {
   provider: ProviderConfig;
-  info: { label: string; description: string; needsApiKey: boolean; needsRegion?: boolean; apiKeyPlaceholder?: string };
+  info: {
+    label: string;
+    description: string;
+    needsApiKey: boolean;
+    needsRegion?: boolean;
+    apiKeyPlaceholder?: string;
+  };
   isExpanded: boolean;
   onToggleExpand: () => void;
   onToggleEnabled: (enabled: boolean) => void;
@@ -485,7 +549,10 @@ function ProviderAccordion({
             >
               {info.label}
             </div>
-            <div className="text-xs" style={{ color: "var(--color-text-muted)" }}>
+            <div
+              className="text-xs"
+              style={{ color: "var(--color-text-muted)" }}
+            >
               {info.description}
             </div>
           </div>
@@ -505,7 +572,9 @@ function ProviderAccordion({
           <span
             className="absolute left-0 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform"
             style={{
-              transform: provider.enabled ? "translateX(18px)" : "translateX(2px)",
+              transform: provider.enabled
+                ? "translateX(18px)"
+                : "translateX(2px)",
             }}
           />
         </button>
@@ -531,7 +600,9 @@ function ProviderAccordion({
                   type={showApiKey ? "text" : "password"}
                   value={provider.apiKey || ""}
                   onChange={(e) => onApiKeyChange(e.target.value)}
-                  placeholder={info.apiKeyPlaceholder || `Enter your ${info.label} API key`}
+                  placeholder={
+                    info.apiKeyPlaceholder || `Enter your ${info.label} API key`
+                  }
                   className="w-full rounded-lg border px-3 py-2 pr-10 text-sm outline-none transition-colors focus:border-[--color-accent]"
                   style={{
                     backgroundColor: "var(--color-bg-tertiary)",
@@ -548,10 +619,16 @@ function ProviderAccordion({
                   {showApiKey ? <IconEyeOff /> : <IconEye />}
                 </button>
               </div>
-              <p className="mt-1 text-xs" style={{ color: "var(--color-text-muted)" }}>
-                {provider.type === "openai" && "Get your API key from platform.openai.com"}
-                {provider.type === "anthropic" && "Get your API key from console.anthropic.com"}
-                {provider.type === "bedrock" && "Format: ACCESS_KEY:SECRET_KEY or leave empty for IAM/env credentials"}
+              <p
+                className="mt-1 text-xs"
+                style={{ color: "var(--color-text-muted)" }}
+              >
+                {provider.type === "openai" &&
+                  "Get your API key from platform.openai.com"}
+                {provider.type === "anthropic" &&
+                  "Get your API key from console.anthropic.com"}
+                {provider.type === "bedrock" &&
+                  "Format: ACCESS_KEY:SECRET_KEY or leave empty for IAM/env credentials"}
               </p>
             </div>
           )}
@@ -583,7 +660,10 @@ function ProviderAccordion({
                 <option value="ap-northeast-1">Asia Pacific (Tokyo)</option>
                 <option value="ap-south-1">Asia Pacific (Mumbai)</option>
               </select>
-              <p className="mt-1 text-xs" style={{ color: "var(--color-text-muted)" }}>
+              <p
+                className="mt-1 text-xs"
+                style={{ color: "var(--color-text-muted)" }}
+              >
                 Select the AWS region where Bedrock is enabled
               </p>
             </div>
@@ -610,7 +690,10 @@ function ProviderAccordion({
                   color: "var(--color-text-primary)",
                 }}
               />
-              <p className="mt-1 text-xs" style={{ color: "var(--color-text-muted)" }}>
+              <p
+                className="mt-1 text-xs"
+                style={{ color: "var(--color-text-muted)" }}
+              >
                 {provider.type === "ollama"
                   ? "Make sure Ollama is running locally"
                   : "Make sure LM Studio is running with local server enabled"}
@@ -627,24 +710,28 @@ function ProviderAccordion({
               >
                 Available Models
               </label>
-              {(provider.type === "ollama" || provider.type === "lmstudio") && onDiscoverModels && (
-                <button
-                  onClick={onDiscoverModels}
-                  disabled={isDiscovering}
-                  className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-medium transition-colors hover:bg-[--color-bg-tertiary] disabled:opacity-50"
-                  style={{ color: "var(--color-accent)" }}
-                >
-                  {isDiscovering ? (
-                    <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                  ) : (
-                    <IconRefresh />
-                  )}
-                  {isDiscovering ? "Discovering..." : "Discover Models"}
-                </button>
-              )}
+              {(provider.type === "ollama" || provider.type === "lmstudio") &&
+                onDiscoverModels && (
+                  <button
+                    onClick={onDiscoverModels}
+                    disabled={isDiscovering}
+                    className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-medium transition-colors hover:bg-[--color-bg-tertiary] disabled:opacity-50"
+                    style={{ color: "var(--color-accent)" }}
+                  >
+                    {isDiscovering ? (
+                      <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                    ) : (
+                      <IconRefresh />
+                    )}
+                    {isDiscovering ? "Discovering..." : "Discover Models"}
+                  </button>
+                )}
             </div>
             {discoveryResult && (
-              <p className="mb-2 text-xs" style={{ color: "var(--color-text-muted)" }}>
+              <p
+                className="mb-2 text-xs"
+                style={{ color: "var(--color-text-muted)" }}
+              >
                 {discoveryResult}
               </p>
             )}
@@ -659,7 +746,9 @@ function ProviderAccordion({
                     <input
                       type="checkbox"
                       checked={model.enabled}
-                      onChange={(e) => onToggleModel(model.id, e.target.checked)}
+                      onChange={(e) =>
+                        onToggleModel(model.id, e.target.checked)
+                      }
                       className="h-3.5 w-3.5 rounded border-gray-300 accent-[--color-accent]"
                     />
                     <span
@@ -728,6 +817,447 @@ function ProviderAccordion({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// Audio / TTS Settings Content
+function AudioSettingsContent() {
+  const {
+    settings,
+    providers,
+    voices,
+    isLoadingProviders,
+    isLoadingVoices,
+    setTtsProvider,
+    setTtsVoice,
+    setTtsApiKey,
+    setTtsBaseUrl,
+    setTtsModel,
+    setTtsSpeed,
+    setPodcastVoiceB,
+    setPodcastLength,
+    loadProviders,
+    loadVoices,
+  } = useAudioStore();
+
+  const [showApiKey, setShowApiKey] = useState(false);
+
+  // Load providers on mount
+  useEffect(() => {
+    loadProviders();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Load voices when provider changes
+  useEffect(() => {
+    loadVoices();
+  }, [settings.ttsProvider]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const TTS_PROVIDER_INFO: Record<
+    TTSProviderType,
+    {
+      label: string;
+      description: string;
+      needsApiKey: boolean;
+      needsBaseUrl: boolean;
+    }
+  > = {
+    openai: {
+      label: "OpenAI TTS",
+      description:
+        "High quality voices (alloy, echo, fable, onyx, nova, shimmer)",
+      needsApiKey: true,
+      needsBaseUrl: false,
+    },
+    elevenlabs: {
+      label: "ElevenLabs",
+      description: "Premium voices with emotion and style control",
+      needsApiKey: true,
+      needsBaseUrl: false,
+    },
+    kokoro: {
+      label: "Kokoro",
+      description: "Local TTS model (82M parameters, runs on CPU)",
+      needsApiKey: false,
+      needsBaseUrl: false,
+    },
+    openai_compatible: {
+      label: "OpenAI-Compatible",
+      description: "Any server exposing /v1/audio/speech endpoint",
+      needsApiKey: false,
+      needsBaseUrl: true,
+    },
+  };
+
+  const currentProviderInfo = TTS_PROVIDER_INFO[settings.ttsProvider];
+
+  return (
+    <div className="space-y-6">
+      {/* TTS Provider */}
+      <div>
+        <label
+          className="mb-2 block text-sm font-medium"
+          style={{ color: "var(--color-text-primary)" }}
+        >
+          TTS Provider
+        </label>
+        <div className="space-y-2">
+          {(Object.keys(TTS_PROVIDER_INFO) as TTSProviderType[]).map(
+            (providerType) => {
+              const info = TTS_PROVIDER_INFO[providerType];
+              const providerData = providers.find((p) => p.id === providerType);
+              const isAvailable =
+                providerData?.available ??
+                (providerType === "openai" ||
+                  providerType === "openai_compatible");
+              const isSelected = settings.ttsProvider === providerType;
+
+              return (
+                <button
+                  key={providerType}
+                  onClick={() => {
+                    if (isAvailable) setTtsProvider(providerType);
+                  }}
+                  disabled={!isAvailable}
+                  className="flex w-full items-center gap-3 rounded-lg border p-3 text-left transition-colors disabled:opacity-50"
+                  style={{
+                    borderColor: isSelected
+                      ? "var(--color-accent)"
+                      : "var(--color-border)",
+                    backgroundColor: isSelected
+                      ? "rgba(139, 92, 246, 0.1)"
+                      : "transparent",
+                  }}
+                >
+                  <div
+                    className="flex h-4 w-4 items-center justify-center rounded-full border-2"
+                    style={{
+                      borderColor: isSelected
+                        ? "var(--color-accent)"
+                        : "var(--color-text-muted)",
+                    }}
+                  >
+                    {isSelected && (
+                      <div
+                        className="h-2 w-2 rounded-full"
+                        style={{ backgroundColor: "var(--color-accent)" }}
+                      />
+                    )}
+                  </div>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="font-medium"
+                        style={{ color: "var(--color-text-primary)" }}
+                      >
+                        {info.label}
+                      </span>
+                      {!isAvailable && (
+                        <span
+                          className="rounded px-1.5 py-0.5 text-xs"
+                          style={{
+                            backgroundColor: "var(--color-bg-tertiary)",
+                            color: "var(--color-text-muted)",
+                          }}
+                        >
+                          Not installed
+                        </span>
+                      )}
+                    </div>
+                    <div
+                      className="text-xs"
+                      style={{ color: "var(--color-text-muted)" }}
+                    >
+                      {info.description}
+                    </div>
+                  </div>
+                </button>
+              );
+            }
+          )}
+        </div>
+        {isLoadingProviders && (
+          <p
+            className="mt-1 text-xs"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            Checking available providers...
+          </p>
+        )}
+      </div>
+
+      {/* API Key (for cloud providers) */}
+      {currentProviderInfo?.needsApiKey && (
+        <div>
+          <label
+            className="mb-2 block text-sm font-medium"
+            style={{ color: "var(--color-text-primary)" }}
+          >
+            API Key
+          </label>
+          <div className="relative">
+            <input
+              type={showApiKey ? "text" : "password"}
+              value={settings.ttsApiKey}
+              onChange={(e) => setTtsApiKey(e.target.value)}
+              placeholder={`Enter your ${currentProviderInfo.label} API key`}
+              className="w-full rounded-lg border px-3 py-2.5 pr-10 text-sm outline-none transition-colors focus:border-[--color-accent]"
+              style={{
+                backgroundColor: "var(--color-bg-secondary)",
+                borderColor: "var(--color-border)",
+                color: "var(--color-text-primary)",
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => setShowApiKey(!showApiKey)}
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 transition-colors hover:bg-[--color-bg-tertiary]"
+              style={{ color: "var(--color-text-muted)" }}
+            >
+              {showApiKey ? <IconEyeOff /> : <IconEye />}
+            </button>
+          </div>
+          <p
+            className="mt-1 text-xs"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            {settings.ttsProvider === "openai"
+              ? "Uses the same key as your OpenAI AI provider if left empty"
+              : "Required for ElevenLabs API access"}
+          </p>
+        </div>
+      )}
+
+      {/* Base URL (for openai_compatible) */}
+      {currentProviderInfo?.needsBaseUrl && (
+        <div>
+          <label
+            className="mb-2 block text-sm font-medium"
+            style={{ color: "var(--color-text-primary)" }}
+          >
+            Server URL
+          </label>
+          <input
+            type="text"
+            value={settings.ttsBaseUrl}
+            onChange={(e) => setTtsBaseUrl(e.target.value)}
+            placeholder="http://localhost:8080"
+            className="w-full rounded-lg border px-3 py-2.5 text-sm outline-none transition-colors focus:border-[--color-accent]"
+            style={{
+              backgroundColor: "var(--color-bg-secondary)",
+              borderColor: "var(--color-border)",
+              color: "var(--color-text-primary)",
+            }}
+          />
+          <p
+            className="mt-1 text-xs"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            Base URL of your OpenAI-compatible TTS server
+          </p>
+        </div>
+      )}
+
+      {/* Voice Selection */}
+      <div>
+        <div className="mb-2 flex items-center justify-between">
+          <label
+            className="text-sm font-medium"
+            style={{ color: "var(--color-text-primary)" }}
+          >
+            Voice
+          </label>
+          <button
+            onClick={() => loadVoices()}
+            disabled={isLoadingVoices}
+            className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-medium transition-colors hover:bg-[--color-bg-tertiary] disabled:opacity-50"
+            style={{ color: "var(--color-accent)" }}
+          >
+            {isLoadingVoices ? (
+              <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+            ) : (
+              <IconRefresh />
+            )}
+            {isLoadingVoices ? "Loading..." : "Refresh"}
+          </button>
+        </div>
+        <select
+          value={settings.ttsVoice}
+          onChange={(e) => setTtsVoice(e.target.value)}
+          className="w-full rounded-lg border px-3 py-2 text-sm outline-none transition-colors focus:border-[--color-accent] dark-select"
+          style={{
+            backgroundColor: "var(--color-bg-secondary)",
+            borderColor: "var(--color-border)",
+            color: "var(--color-text-primary)",
+          }}
+        >
+          {voices.length > 0 ? (
+            voices.map((v) => (
+              <option key={v.id} value={v.id}>
+                {v.name}
+                {v.language ? ` (${v.language})` : ""}
+              </option>
+            ))
+          ) : (
+            <option value={settings.ttsVoice}>{settings.ttsVoice}</option>
+          )}
+        </select>
+      </div>
+
+      {/* Model (optional) */}
+      <div>
+        <label
+          className="mb-2 block text-sm font-medium"
+          style={{ color: "var(--color-text-primary)" }}
+        >
+          Model{" "}
+          <span
+            className="font-normal"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            (optional)
+          </span>
+        </label>
+        <input
+          type="text"
+          value={settings.ttsModel}
+          onChange={(e) => setTtsModel(e.target.value)}
+          placeholder={
+            settings.ttsProvider === "openai"
+              ? "tts-1 (default) or tts-1-hd"
+              : "Leave empty for default"
+          }
+          className="w-full rounded-lg border px-3 py-2.5 text-sm outline-none transition-colors focus:border-[--color-accent]"
+          style={{
+            backgroundColor: "var(--color-bg-secondary)",
+            borderColor: "var(--color-border)",
+            color: "var(--color-text-primary)",
+          }}
+        />
+      </div>
+
+      {/* Speed */}
+      <div>
+        <div className="mb-2 flex items-center justify-between">
+          <label
+            className="text-sm font-medium"
+            style={{ color: "var(--color-text-primary)" }}
+          >
+            Speed
+          </label>
+          <span
+            className="text-sm"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            {settings.ttsSpeed.toFixed(1)}x
+          </span>
+        </div>
+        <input
+          type="range"
+          min="0.5"
+          max="2.0"
+          step="0.1"
+          value={settings.ttsSpeed}
+          onChange={(e) => setTtsSpeed(parseFloat(e.target.value))}
+          className="w-full accent-[--color-accent]"
+        />
+        <div
+          className="mt-1 flex justify-between text-xs"
+          style={{ color: "var(--color-text-muted)" }}
+        >
+          <span>0.5x</span>
+          <span>1.0x</span>
+          <span>2.0x</span>
+        </div>
+      </div>
+
+      {/* Podcast Defaults */}
+      <div
+        className="rounded-lg border p-4"
+        style={{
+          backgroundColor: "var(--color-bg-secondary)",
+          borderColor: "var(--color-border)",
+        }}
+      >
+        <h4
+          className="mb-4 text-sm font-medium"
+          style={{ color: "var(--color-text-primary)" }}
+        >
+          Podcast Defaults
+        </h4>
+        <div className="space-y-4">
+          {/* Second Voice */}
+          <div>
+            <label
+              className="mb-2 block text-xs font-medium"
+              style={{ color: "var(--color-text-muted)" }}
+            >
+              Second Speaker Voice
+            </label>
+            <select
+              value={settings.podcastVoiceB}
+              onChange={(e) => setPodcastVoiceB(e.target.value)}
+              className="w-full rounded-lg border px-3 py-2 text-sm outline-none transition-colors focus:border-[--color-accent] dark-select"
+              style={{
+                backgroundColor: "var(--color-bg-tertiary)",
+                borderColor: "var(--color-border)",
+                color: "var(--color-text-primary)",
+              }}
+            >
+              {voices.length > 0 ? (
+                voices.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.name}
+                    {v.language ? ` (${v.language})` : ""}
+                  </option>
+                ))
+              ) : (
+                <option value={settings.podcastVoiceB}>
+                  {settings.podcastVoiceB}
+                </option>
+              )}
+            </select>
+          </div>
+
+          {/* Default Length */}
+          <div>
+            <label
+              className="mb-2 block text-xs font-medium"
+              style={{ color: "var(--color-text-muted)" }}
+            >
+              Default Length
+            </label>
+            <div className="grid grid-cols-3 gap-2">
+              {(
+                [
+                  { value: "short", label: "Short (~2 min)" },
+                  { value: "medium", label: "Medium (~5 min)" },
+                  { value: "long", label: "Long (~10 min)" },
+                ] as const
+              ).map((opt) => (
+                <button
+                  key={opt.value}
+                  onClick={() => setPodcastLength(opt.value)}
+                  className="rounded-lg border px-3 py-2 text-center text-xs transition-colors"
+                  style={{
+                    borderColor:
+                      settings.podcastLength === opt.value
+                        ? "var(--color-accent)"
+                        : "var(--color-border)",
+                    backgroundColor:
+                      settings.podcastLength === opt.value
+                        ? "rgba(139, 92, 246, 0.1)"
+                        : "transparent",
+                    color: "var(--color-text-primary)",
+                  }}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -909,10 +1439,7 @@ function WebResearchSettingsContent() {
             >
               Include AI Answer
             </label>
-            <p
-              className="text-xs"
-              style={{ color: "var(--color-text-muted)" }}
-            >
+            <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
               Get a direct AI-generated answer with search results
             </p>
           </div>
@@ -972,7 +1499,9 @@ function SystemPromptSettingsContent() {
           borderColor: "var(--color-accent)",
         }}
       >
-        <IconInfo style={{ color: "var(--color-accent)", flexShrink: 0, marginTop: 2 }} />
+        <IconInfo
+          style={{ color: "var(--color-accent)", flexShrink: 0, marginTop: 2 }}
+        />
         <div>
           <p
             className="text-sm font-medium"
@@ -984,9 +1513,10 @@ function SystemPromptSettingsContent() {
             className="mt-1 text-xs"
             style={{ color: "var(--color-text-muted)" }}
           >
-            The system prompt defines the AI assistant's personality and behavior.
-            You can also set custom prompts at the notebook or page level for more
-            specific contexts. Prompts inherit: Page → Notebook → App default.
+            The system prompt defines the AI assistant's personality and
+            behavior. You can also set custom prompts at the notebook or page
+            level for more specific contexts. Prompts inherit: Page → Notebook →
+            App default.
           </p>
         </div>
       </div>
@@ -1035,7 +1565,8 @@ function SystemPromptSettingsContent() {
           className="mt-1.5 text-xs"
           style={{ color: "var(--color-text-muted)" }}
         >
-          This prompt is sent to the AI with every conversation to set context and behavior.
+          This prompt is sent to the AI with every conversation to set context
+          and behavior.
         </p>
       </div>
 
@@ -1046,7 +1577,8 @@ function SystemPromptSettingsContent() {
             onClick={handleSave}
             className="rounded-lg px-4 py-2 text-sm font-medium text-white transition-colors"
             style={{
-              background: "linear-gradient(to bottom right, var(--color-accent), var(--color-accent-secondary))",
+              background:
+                "linear-gradient(to bottom right, var(--color-accent), var(--color-accent-secondary))",
             }}
           >
             Save Changes
@@ -1469,6 +2001,26 @@ function IconBackup() {
       <polyline points="21 8 21 21 3 21 3 8" />
       <rect x="1" y="3" width="22" height="5" />
       <line x1="10" y1="12" x2="14" y2="12" />
+    </svg>
+  );
+}
+
+function IconAudio() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+      <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+      <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
     </svg>
   );
 }

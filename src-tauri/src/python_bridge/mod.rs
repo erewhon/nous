@@ -2320,11 +2320,21 @@ impl PythonAI {
                         .collect()
                 });
 
+            let audio_path = result_dict
+                .get("audio_path")
+                .and_then(|v| v.extract::<String>(py).ok())
+                .unwrap_or_default();
+
+            if audio_path.is_empty() {
+                return Err(PythonError::TypeConversion(
+                    "Audio generation failed: Python returned no audio_path. \
+                     Check that the TTS provider is configured correctly and the API key is valid."
+                        .to_string(),
+                ));
+            }
+
             Ok(AudioGenerationResult {
-                audio_path: result_dict
-                    .get("audio_path")
-                    .and_then(|v| v.extract::<String>(py).ok())
-                    .unwrap_or_default(),
+                audio_path,
                 duration_seconds: result_dict
                     .get("duration_seconds")
                     .and_then(|v| v.extract::<f64>(py).ok())

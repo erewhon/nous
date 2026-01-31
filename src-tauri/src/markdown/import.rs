@@ -514,13 +514,8 @@ fn extract_title_from_blocks(blocks: &[EditorBlock]) -> Option<String> {
 
 /// Generate a unique block ID
 fn generate_block_id() -> String {
-    // Generate a short random ID similar to Editor.js
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_millis();
-    format!("{:x}", timestamp)
+    // Use first 10 hex chars of a UUID for short, unique IDs
+    Uuid::new_v4().simple().to_string()[..10].to_string()
 }
 
 #[cfg(test)]

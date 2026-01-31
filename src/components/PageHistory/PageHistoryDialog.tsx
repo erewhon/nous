@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import type { Page } from "../../types/page";
+import type { EditorBlock } from "../../types/page";
 import {
   gitHistory,
   gitGetPageAtCommit,
@@ -8,11 +9,32 @@ import {
   type CommitInfo,
 } from "../../utils/api";
 import { usePageStore } from "../../stores/pageStore";
+import { HistoryBlockRenderer } from "./HistoryBlockRenderer";
+import { blocksToLines, computeLineDiff, type DiffLine } from "../../utils/diff";
+
+type ViewMode = "preview" | "changes";
+
+interface ParsedPage {
+  title: string;
+  blocks: EditorBlock[];
+}
 
 interface PageHistoryDialogProps {
   isOpen: boolean;
   page: Page | null;
   onClose: () => void;
+}
+
+function parsePage(json: string): ParsedPage | null {
+  try {
+    const page = JSON.parse(json);
+    return {
+      title: page.title || "Untitled",
+      blocks: page.content?.blocks || [],
+    };
+  } catch {
+    return null;
+  }
 }
 
 export function PageHistoryDialog({
@@ -26,9 +48,13 @@ export function PageHistoryDialog({
   const [commits, setCommits] = useState<CommitInfo[]>([]);
   const [selectedCommit, setSelectedCommit] = useState<CommitInfo | null>(null);
   const [previewContent, setPreviewContent] = useState<string | null>(null);
+  const [parsedPage, setParsedPage] = useState<ParsedPage | null>(null);
   const [isLoadingPreview, setIsLoadingPreview] = useState(false);
   const [isRestoring, setIsRestoring] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<ViewMode>("preview");
+  const [diffLines, setDiffLines] = useState<DiffLine[] | null>(null);
+  const [isLoadingDiff, setIsLoadingDiff] = useState(false);
 
   // Load git status and history when dialog opens
   useEffect(() => {
@@ -39,6 +65,9 @@ export function PageHistoryDialog({
       setError(null);
       setSelectedCommit(null);
       setPreviewContent(null);
+      setParsedPage(null);
+      setDiffLines(null);
+      setViewMode("preview");
 
       try {
         const enabled = await gitIsEnabled(page.notebookId);
@@ -75,11 +104,13 @@ export function PageHistoryDialog({
           commit.id
         );
         setPreviewContent(content);
+        setParsedPage(parsePage(content));
       } catch (err) {
         setError(
           err instanceof Error ? err.message : "Failed to load version"
         );
         setPreviewContent(null);
+        setParsedPage(null);
       } finally {
         setIsLoadingPreview(false);
       }
@@ -89,7 +120,58 @@ export function PageHistoryDialog({
 
   const handleSelectCommit = (commit: CommitInfo) => {
     setSelectedCommit(commit);
+    setViewMode("preview");
+    setDiffLines(null);
     loadPreview(commit);
+  };
+
+  // Lazily compute diff when user switches to Changes tab
+  const loadDiff = useCallback(async () => {
+    if (!page || !selectedCommit || !previewContent) return;
+
+    const selectedIndex = commits.findIndex((c) => c.id === selectedCommit.id);
+    // Newest-first: predecessor is next index
+    if (selectedIndex < 0 || selectedIndex >= commits.length - 1) {
+      // This is the oldest commit
+      setDiffLines([]);
+      return;
+    }
+
+    const predecessorCommit = commits[selectedIndex + 1];
+    const currentCommitId = selectedCommit.id;
+    setIsLoadingDiff(true);
+
+    try {
+      const predecessorContent = await gitGetPageAtCommit(
+        page.notebookId,
+        page.id,
+        predecessorCommit.id
+      );
+
+      // Race condition guard
+      if (currentCommitId !== selectedCommit.id) return;
+
+      const oldParsed = parsePage(predecessorContent);
+      const newParsed = parsePage(previewContent);
+
+      const oldLines = oldParsed ? blocksToLines(oldParsed.blocks) : [];
+      const newLines = newParsed ? blocksToLines(newParsed.blocks) : [];
+
+      setDiffLines(computeLineDiff(oldLines, newLines));
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to compute diff"
+      );
+    } finally {
+      setIsLoadingDiff(false);
+    }
+  }, [page, selectedCommit, previewContent, commits]);
+
+  const handleViewModeChange = (mode: ViewMode) => {
+    setViewMode(mode);
+    if (mode === "changes" && diffLines === null && !isLoadingDiff) {
+      loadDiff();
+    }
   };
 
   const handleRestore = async () => {
@@ -131,6 +213,16 @@ export function PageHistoryDialog({
   };
 
   if (!isOpen || !page) return null;
+
+  // Find predecessor for diff header
+  const selectedIndex = selectedCommit
+    ? commits.findIndex((c) => c.id === selectedCommit.id)
+    : -1;
+  const isOldestCommit = selectedIndex >= 0 && selectedIndex >= commits.length - 1;
+  const predecessorCommit =
+    selectedIndex >= 0 && selectedIndex < commits.length - 1
+      ? commits[selectedIndex + 1]
+      : null;
 
   return (
     <div
@@ -271,31 +363,97 @@ export function PageHistoryDialog({
                   </div>
                 ) : (
                   <div className="flex flex-1 flex-col overflow-hidden">
+                    {/* Sub-header with commit info and tab toggle */}
                     <div
                       className="shrink-0 border-b px-4 py-2"
                       style={{ borderColor: "var(--color-border)" }}
                     >
-                      <p
-                        className="text-xs font-medium"
-                        style={{ color: "var(--color-text-secondary)" }}
-                      >
-                        {selectedCommit.message}
-                      </p>
-                      <p
-                        className="text-xs"
-                        style={{ color: "var(--color-text-muted)" }}
-                      >
-                        {formatTimestamp(selectedCommit.timestamp)} by{" "}
-                        {selectedCommit.author}
-                      </p>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p
+                            className="text-xs font-medium"
+                            style={{ color: "var(--color-text-secondary)" }}
+                          >
+                            {selectedCommit.message}
+                          </p>
+                          <p
+                            className="text-xs"
+                            style={{ color: "var(--color-text-muted)" }}
+                          >
+                            {formatTimestamp(selectedCommit.timestamp)} by{" "}
+                            {selectedCommit.author}
+                          </p>
+                        </div>
+                        {/* Tab Toggle */}
+                        <div
+                          className="flex gap-1 rounded-lg p-0.5"
+                          style={{ backgroundColor: "var(--color-bg-tertiary)" }}
+                        >
+                          <button
+                            onClick={() => handleViewModeChange("preview")}
+                            className="rounded-md px-3 py-1 text-xs font-medium transition-colors"
+                            style={{
+                              backgroundColor:
+                                viewMode === "preview"
+                                  ? "rgba(139, 92, 246, 0.15)"
+                                  : "transparent",
+                              color:
+                                viewMode === "preview"
+                                  ? "var(--color-accent)"
+                                  : "var(--color-text-muted)",
+                            }}
+                          >
+                            Preview
+                          </button>
+                          <button
+                            onClick={() => handleViewModeChange("changes")}
+                            className="rounded-md px-3 py-1 text-xs font-medium transition-colors"
+                            style={{
+                              backgroundColor:
+                                viewMode === "changes"
+                                  ? "rgba(139, 92, 246, 0.15)"
+                                  : "transparent",
+                              color:
+                                viewMode === "changes"
+                                  ? "var(--color-accent)"
+                                  : "var(--color-text-muted)",
+                            }}
+                          >
+                            Changes
+                          </button>
+                        </div>
+                      </div>
                     </div>
+
+                    {/* Content area */}
                     <div className="flex-1 overflow-auto p-4">
-                      <pre
-                        className="whitespace-pre-wrap break-words font-mono text-xs"
-                        style={{ color: "var(--color-text-primary)" }}
-                      >
-                        {previewContent || "No content"}
-                      </pre>
+                      {viewMode === "preview" ? (
+                        parsedPage ? (
+                          <div>
+                            <h3
+                              className="mb-3 text-lg font-semibold"
+                              style={{ color: "var(--color-text-primary)" }}
+                            >
+                              {parsedPage.title}
+                            </h3>
+                            <HistoryBlockRenderer blocks={parsedPage.blocks} />
+                          </div>
+                        ) : (
+                          <pre
+                            className="whitespace-pre-wrap break-words font-mono text-xs"
+                            style={{ color: "var(--color-text-primary)" }}
+                          >
+                            {previewContent || "No content"}
+                          </pre>
+                        )
+                      ) : (
+                        <DiffView
+                          diffLines={diffLines}
+                          isLoading={isLoadingDiff}
+                          isOldestCommit={isOldestCommit}
+                          predecessorCommit={predecessorCommit}
+                        />
+                      )}
                     </div>
                   </div>
                 )}
@@ -359,6 +517,113 @@ export function PageHistoryDialog({
   );
 }
 
+// --- Diff View Component ---
+
+function DiffView({
+  diffLines,
+  isLoading,
+  isOldestCommit,
+  predecessorCommit,
+}: {
+  diffLines: DiffLine[] | null;
+  isLoading: boolean;
+  isOldestCommit: boolean;
+  predecessorCommit: CommitInfo | null;
+}) {
+  if (isOldestCommit) {
+    return (
+      <p
+        className="text-sm italic"
+        style={{ color: "var(--color-text-muted)" }}
+      >
+        This is the earliest recorded version.
+      </p>
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <p
+        className="text-sm"
+        style={{ color: "var(--color-text-muted)" }}
+      >
+        Computing changes...
+      </p>
+    );
+  }
+
+  if (!diffLines) return null;
+
+  if (diffLines.length === 0) {
+    return (
+      <p
+        className="text-sm italic"
+        style={{ color: "var(--color-text-muted)" }}
+      >
+        No text changes detected.
+      </p>
+    );
+  }
+
+  const hasChanges = diffLines.some((l) => l.type !== "unchanged");
+
+  return (
+    <div>
+      {predecessorCommit && (
+        <p
+          className="mb-3 text-xs"
+          style={{ color: "var(--color-text-muted)" }}
+        >
+          Comparing with previous version ({predecessorCommit.short_id})
+        </p>
+      )}
+      {!hasChanges ? (
+        <p
+          className="text-sm italic"
+          style={{ color: "var(--color-text-muted)" }}
+        >
+          No text changes detected.
+        </p>
+      ) : (
+        <div
+          className="overflow-x-auto rounded-lg border"
+          style={{ borderColor: "var(--color-border)" }}
+        >
+          {diffLines.map((line, i) => (
+            <div
+              key={i}
+              className="px-3 py-0.5 font-mono text-xs"
+              style={{
+                backgroundColor:
+                  line.type === "added"
+                    ? "rgba(34, 197, 94, 0.1)"
+                    : line.type === "removed"
+                      ? "rgba(239, 68, 68, 0.1)"
+                      : undefined,
+                color:
+                  line.type === "added"
+                    ? "rgb(34, 197, 94)"
+                    : line.type === "removed"
+                      ? "rgb(239, 68, 68)"
+                      : "var(--color-text-secondary)",
+              }}
+            >
+              {line.type === "added"
+                ? "+"
+                : line.type === "removed"
+                  ? "-"
+                  : " "}{" "}
+              {line.text}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// --- Helper Functions ---
+
 function formatTimestamp(timestamp: string): string {
   const date = new Date(timestamp);
   const now = new Date();
@@ -385,6 +650,8 @@ function formatTimestamp(timestamp: string): string {
     });
   }
 }
+
+// --- Icons ---
 
 function IconClose() {
   return (

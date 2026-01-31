@@ -4,6 +4,30 @@ import type { Page, EditorData } from "../types/page";
 import * as api from "../utils/api";
 import { useRAGStore } from "./ragStore";
 
+// Debounced auto-commit for git-versioned notebooks.
+// After auto-saves (commit=false), schedule a git commit with a 30-second delay.
+// This avoids excessive commits during active editing while ensuring changes
+// are eventually committed.
+const _gitCommitTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const GIT_AUTO_COMMIT_DELAY = 30_000; // 30 seconds
+
+function scheduleGitAutoCommit(notebookId: string) {
+  const existing = _gitCommitTimers.get(notebookId);
+  if (existing) clearTimeout(existing);
+
+  _gitCommitTimers.set(
+    notebookId,
+    setTimeout(async () => {
+      _gitCommitTimers.delete(notebookId);
+      try {
+        await api.gitCommit(notebookId, "Auto-save changes");
+      } catch {
+        // Notebook may not have git enabled — ignore silently
+      }
+    }, GIT_AUTO_COMMIT_DELAY)
+  );
+}
+
 // Recent page entry for tracking access history
 export interface RecentPageEntry {
   pageId: string;
@@ -345,6 +369,10 @@ export const usePageStore = create<PageStore>()(
               .getState()
               .indexPage(notebookId, pageId)
               .catch(() => {});
+          } else {
+            // Schedule a debounced git commit for auto-saves so that
+            // git-versioned notebooks don't stay in a perpetually dirty state
+            scheduleGitAutoCommit(notebookId);
           }
         } catch (err) {
           // Only update state on error

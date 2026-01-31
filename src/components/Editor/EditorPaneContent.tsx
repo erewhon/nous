@@ -46,7 +46,16 @@ export function EditorPaneContent({
   showPaneControls,
   zenMode = false,
 }: EditorPaneContentProps) {
-  const { pages, updatePageContent, setPageContentLocal, createPage, pageDataVersion, openTabInPane, closeTabInPane, updateTabTitleInPane } = usePageStore();
+  const {
+    pages,
+    updatePageContent,
+    setPageContentLocal,
+    createPage,
+    pageDataVersion,
+    openTabInPane,
+    closeTabInPane,
+    updateTabTitleInPane,
+  } = usePageStore();
   const { updatePageLinks } = useLinkStore();
   const setZenMode = useThemeStore((state) => state.setZenMode);
   const zenModeSettings = useThemeStore((state) => state.zenModeSettings);
@@ -57,8 +66,11 @@ export function EditorPaneContent({
   const editorRef = useRef<BlockEditorRef>(null);
 
   const selectedPage = pages.find((p) => p.id === pane.pageId);
-  const isStandardPage = selectedPage?.pageType === "standard" || !selectedPage?.pageType;
-  const history = useUndoHistoryStore((state) => state.getHistory(pane.pageId || ""));
+  const isStandardPage =
+    selectedPage?.pageType === "standard" || !selectedPage?.pageType;
+  const history = useUndoHistoryStore((state) =>
+    state.getHistory(pane.pageId || "")
+  );
 
   // Callback when undo/redo changes state - render new data in editor
   const handleUndoRedoStateChange = useCallback((data: OutputData) => {
@@ -96,9 +108,10 @@ export function EditorPaneContent({
     const handleKeyDown = (e: KeyboardEvent) => {
       // Only exit zen mode if no modal/menu is open
       // Check for common modal elements
-      const hasOpenModal = document.querySelector('[role="dialog"]') ||
-        document.querySelector('[data-radix-portal]') ||
-        document.querySelector('.command-palette-backdrop');
+      const hasOpenModal =
+        document.querySelector('[role="dialog"]') ||
+        document.querySelector("[data-radix-portal]") ||
+        document.querySelector(".command-palette-backdrop");
 
       if (e.key === "Escape" && !hasOpenModal) {
         e.preventDefault();
@@ -130,7 +143,13 @@ export function EditorPaneContent({
         updateTabTitleInPane(pane.id, selectedPage.id, selectedPage.title);
       }
     }
-  }, [selectedPage?.title, selectedPage?.id, pane.id, pane.tabs, updateTabTitleInPane]);
+  }, [
+    selectedPage?.title,
+    selectedPage?.id,
+    pane.id,
+    pane.tabs,
+    updateTabTitleInPane,
+  ]);
 
   // Convert page content to Editor.js format
   const editorData: OutputData | undefined = useMemo(() => {
@@ -181,26 +200,25 @@ export function EditorPaneContent({
     async (data: OutputData) => {
       if (!notebookId || !pane.pageId || !selectedPage) return;
 
-      // Deduplicate blocks by ID to prevent corruption from Editor.js bugs
+      // Deduplicate blocks by ID — assign new IDs to duplicates rather than
+      // removing them, since imported markdown can produce blocks with the same ID
       const seenIds = new Set<string>();
-      const uniqueBlocks = data.blocks.filter((block) => {
-        const id = block.id ?? crypto.randomUUID();
-        if (seenIds.has(id)) {
-          console.warn('[EditorPaneContent] Duplicate block ID detected and removed:', id);
-          return false;
-        }
-        seenIds.add(id);
-        return true;
-      });
 
       const editorData: EditorData = {
         time: data.time,
         version: data.version,
-        blocks: uniqueBlocks.map((block) => ({
-          id: block.id ?? crypto.randomUUID(),
-          type: block.type,
-          data: block.data as Record<string, unknown>,
-        })),
+        blocks: data.blocks.map((block) => {
+          let id = block.id ?? crypto.randomUUID();
+          if (seenIds.has(id)) {
+            id = crypto.randomUUID();
+          }
+          seenIds.add(id);
+          return {
+            id,
+            type: block.type,
+            data: block.data as Record<string, unknown>,
+          };
+        }),
       };
 
       // Update local store immediately (optimistic update)
@@ -218,7 +236,14 @@ export function EditorPaneContent({
         setLastSaved(new Date());
       });
     },
-    [notebookId, pane.pageId, selectedPage, updatePageContent, setPageContentLocal, updatePageLinks]
+    [
+      notebookId,
+      pane.pageId,
+      selectedPage,
+      updatePageContent,
+      setPageContentLocal,
+      updatePageLinks,
+    ]
   );
 
   // Handle jump to history state
@@ -226,26 +251,25 @@ export function EditorPaneContent({
     (entryId: string) => {
       const data = jumpTo(entryId);
       if (data && notebookId && pane.pageId && selectedPage) {
-        // Deduplicate blocks by ID to prevent corruption
+        // Deduplicate blocks by ID — assign new IDs to duplicates
         const seenIds = new Set<string>();
-        const uniqueBlocks = data.blocks.filter((block) => {
-          const id = block.id ?? crypto.randomUUID();
-          if (seenIds.has(id)) {
-            return false;
-          }
-          seenIds.add(id);
-          return true;
-        });
 
         // Also save the jumped-to state
         const editorData: EditorData = {
           time: data.time,
           version: data.version,
-          blocks: uniqueBlocks.map((block) => ({
-            id: block.id ?? crypto.randomUUID(),
-            type: block.type,
-            data: block.data as Record<string, unknown>,
-          })),
+          blocks: data.blocks.map((block) => {
+            let id = block.id ?? crypto.randomUUID();
+            if (seenIds.has(id)) {
+              id = crypto.randomUUID();
+            }
+            seenIds.add(id);
+            return {
+              id,
+              type: block.type,
+              data: block.data as Record<string, unknown>,
+            };
+          }),
         };
         updatePageContent(notebookId, pane.pageId, editorData, false);
         updatePageLinks({
@@ -255,7 +279,14 @@ export function EditorPaneContent({
       }
       setShowHistoryPanel(false);
     },
-    [jumpTo, notebookId, pane.pageId, selectedPage, updatePageContent, updatePageLinks]
+    [
+      jumpTo,
+      notebookId,
+      pane.pageId,
+      selectedPage,
+      updatePageContent,
+      updatePageLinks,
+    ]
   );
 
   // Handle explicit save
@@ -265,26 +296,24 @@ export function EditorPaneContent({
 
       setIsSaving(true);
       try {
-        // Deduplicate blocks by ID to prevent corruption from Editor.js bugs
+        // Deduplicate blocks by ID — assign new IDs to duplicates
         const seenIds = new Set<string>();
-        const uniqueBlocks = data.blocks.filter((block) => {
-          const id = block.id ?? crypto.randomUUID();
-          if (seenIds.has(id)) {
-            console.warn('[EditorPaneContent] Duplicate block ID detected and removed:', id);
-            return false;
-          }
-          seenIds.add(id);
-          return true;
-        });
 
         const editorData: EditorData = {
           time: data.time,
           version: data.version,
-          blocks: uniqueBlocks.map((block) => ({
-            id: block.id ?? crypto.randomUUID(),
-            type: block.type,
-            data: block.data as Record<string, unknown>,
-          })),
+          blocks: data.blocks.map((block) => {
+            let id = block.id ?? crypto.randomUUID();
+            if (seenIds.has(id)) {
+              id = crypto.randomUUID();
+            }
+            seenIds.add(id);
+            return {
+              id,
+              type: block.type,
+              data: block.data as Record<string, unknown>,
+            };
+          }),
         };
 
         // Update local store immediately (optimistic update)
@@ -300,7 +329,14 @@ export function EditorPaneContent({
         setIsSaving(false);
       }
     },
-    [notebookId, pane.pageId, selectedPage, updatePageContent, setPageContentLocal, updatePageLinks]
+    [
+      notebookId,
+      pane.pageId,
+      selectedPage,
+      updatePageContent,
+      setPageContentLocal,
+      updatePageLinks,
+    ]
   );
 
   // Handle wiki link clicks
@@ -330,7 +366,9 @@ export function EditorPaneContent({
       className="flex flex-1 flex-col overflow-hidden"
       style={{
         backgroundColor: "var(--color-bg-primary)",
-        borderLeft: isActive ? "2px solid var(--color-accent)" : "1px solid var(--color-border)",
+        borderLeft: isActive
+          ? "2px solid var(--color-accent)"
+          : "1px solid var(--color-border)",
       }}
       onClick={onActivate}
     >
@@ -339,7 +377,9 @@ export function EditorPaneContent({
         <div
           className="flex items-center justify-between px-2 py-1 border-b"
           style={{
-            backgroundColor: isActive ? "var(--color-bg-secondary)" : "var(--color-bg-tertiary)",
+            backgroundColor: isActive
+              ? "var(--color-bg-secondary)"
+              : "var(--color-bg-tertiary)",
             borderColor: "var(--color-border)",
           }}
         >
@@ -361,7 +401,15 @@ export function EditorPaneContent({
                 style={{ color: "var(--color-text-muted)" }}
                 title="Split pane"
               >
-                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
                   <rect x="3" y="3" width="18" height="18" rx="2" />
                   <line x1="12" y1="3" x2="12" y2="21" />
                 </svg>
@@ -378,7 +426,15 @@ export function EditorPaneContent({
                 style={{ color: "var(--color-text-muted)" }}
                 title="Close pane"
               >
-                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                >
                   <line x1="18" y1="6" x2="6" y2="18" />
                   <line x1="6" y1="6" x2="18" y2="18" />
                 </svg>
@@ -409,7 +465,11 @@ export function EditorPaneContent({
               zenMode={zenMode}
               onExitZenMode={() => setZenMode(false)}
               onEnterZenMode={() => setZenMode(true)}
-              onToggleHistory={isStandardPage ? () => setShowHistoryPanel(!showHistoryPanel) : undefined}
+              onToggleHistory={
+                isStandardPage
+                  ? () => setShowHistoryPanel(!showHistoryPanel)
+                  : undefined
+              }
               historyCount={history?.entries.length || 0}
               canUndo={canUndo()}
               canRedo={canRedo()}
@@ -428,12 +488,14 @@ export function EditorPaneContent({
           </div>
           <div
             ref={editorScrollRef}
-            className={`flex-1 overflow-y-auto ${zenMode ? 'zen-editor-scroll' : 'px-8 py-6'}`}
-            style={zenMode ? { padding: '4rem 2rem' } : undefined}
+            className={`flex-1 overflow-y-auto ${zenMode ? "zen-editor-scroll" : "px-8 py-6"}`}
+            style={zenMode ? { padding: "4rem 2rem" } : undefined}
           >
             <div
-              className={`mx-auto ${zenMode ? 'zen-editor-container' : ''}`}
-              style={{ maxWidth: zenMode ? '720px' : 'var(--editor-max-width)' }}
+              className={`mx-auto ${zenMode ? "zen-editor-container" : ""}`}
+              style={{
+                maxWidth: zenMode ? "720px" : "var(--editor-max-width)",
+              }}
             >
               {/* Conditional rendering based on page type */}
               {selectedPage.pageType === "markdown" && (
@@ -484,7 +546,8 @@ export function EditorPaneContent({
                   className="min-h-[calc(100vh-300px)]"
                 />
               )}
-              {(selectedPage.pageType === "standard" || !selectedPage.pageType) && (
+              {(selectedPage.pageType === "standard" ||
+                !selectedPage.pageType) && (
                 <BlockEditor
                   ref={editorRef}
                   key={selectedPage.id}
@@ -494,13 +557,17 @@ export function EditorPaneContent({
                   onExplicitSave={handleExplicitSave}
                   onLinkClick={handleLinkClick}
                   notebookId={notebookId}
-                  pages={notebookPages.map((p) => ({ id: p.id, title: p.title }))}
+                  pages={notebookPages.map((p) => ({
+                    id: p.id,
+                    title: p.title,
+                  }))}
                   className="min-h-[calc(100vh-300px)]"
                 />
               )}
 
               {/* Backlinks panel - only for standard pages */}
-              {(selectedPage.pageType === "standard" || !selectedPage.pageType) && (
+              {(selectedPage.pageType === "standard" ||
+                !selectedPage.pageType) && (
                 <BacklinksPanel
                   pageTitle={selectedPage.title}
                   notebookId={notebookId}
@@ -508,7 +575,8 @@ export function EditorPaneContent({
               )}
 
               {/* Similar Pages panel - only for standard pages */}
-              {(selectedPage.pageType === "standard" || !selectedPage.pageType) && (
+              {(selectedPage.pageType === "standard" ||
+                !selectedPage.pageType) && (
                 <SimilarPagesPanel
                   page={selectedPage}
                   notebookId={notebookId}
