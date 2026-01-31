@@ -2216,6 +2216,220 @@ impl PythonAI {
     }
 
     /// Discover available chat models from a local provider (ollama/lmstudio)
+    // ===== Audio Generation =====
+
+    /// Generate audio from page content (TTS or podcast mode)
+    #[allow(clippy::too_many_arguments)]
+    pub fn generate_page_audio(
+        &self,
+        content: &str,
+        title: &str,
+        output_dir: &str,
+        mode: &str,
+        tts_provider: &str,
+        tts_voice: &str,
+        tts_api_key: Option<&str>,
+        tts_base_url: Option<&str>,
+        tts_model: Option<&str>,
+        tts_speed: Option<f64>,
+        ai_config: Option<&AIConfig>,
+        voice_b: Option<&str>,
+        target_length: Option<&str>,
+        custom_instructions: Option<&str>,
+    ) -> Result<AudioGenerationResult> {
+        Python::attach(|py| {
+            self.setup_python_path(py)?;
+
+            let module = py.import("nous_ai.audio_generate")?;
+            let func = module.getattr("generate_page_audio_sync")?;
+
+            let kwargs = PyDict::new(py);
+            kwargs.set_item("content", content)?;
+            kwargs.set_item("title", title)?;
+            kwargs.set_item("output_dir", output_dir)?;
+            kwargs.set_item("mode", mode)?;
+
+            // Build tts_config dict
+            let tts_config = PyDict::new(py);
+            tts_config.set_item("provider", tts_provider)?;
+            tts_config.set_item("voice", tts_voice)?;
+            if let Some(key) = tts_api_key {
+                tts_config.set_item("api_key", key)?;
+            }
+            if let Some(url) = tts_base_url {
+                tts_config.set_item("base_url", url)?;
+            }
+            if let Some(model) = tts_model {
+                tts_config.set_item("model", model)?;
+            }
+            if let Some(speed) = tts_speed {
+                tts_config.set_item("speed", speed)?;
+            }
+            kwargs.set_item("tts_config", tts_config)?;
+
+            // Build ai_config dict for podcast mode
+            if let Some(ai_cfg) = ai_config {
+                let ai_dict = PyDict::new(py);
+                ai_dict.set_item("provider_type", &ai_cfg.provider_type)?;
+                if let Some(ref key) = ai_cfg.api_key {
+                    ai_dict.set_item("api_key", key)?;
+                }
+                if let Some(ref model) = ai_cfg.model {
+                    ai_dict.set_item("model", model)?;
+                }
+                if let Some(max_tokens) = ai_cfg.max_tokens {
+                    ai_dict.set_item("max_tokens", max_tokens)?;
+                }
+                kwargs.set_item("ai_config", ai_dict)?;
+            }
+
+            if let Some(vb) = voice_b {
+                kwargs.set_item("voice_b", vb)?;
+            }
+            if let Some(length) = target_length {
+                kwargs.set_item("target_length", length)?;
+            }
+            if let Some(instructions) = custom_instructions {
+                kwargs.set_item("custom_instructions", instructions)?;
+            }
+
+            let result = func.call((), Some(&kwargs))?;
+            let result_dict: HashMap<String, Py<PyAny>> = result.extract()?;
+
+            // Extract transcript (list of dicts) if present
+            let transcript = result_dict
+                .get("transcript")
+                .and_then(|v| {
+                    v.extract::<Option<Vec<HashMap<String, Py<PyAny>>>>>(py)
+                        .ok()
+                        .flatten()
+                })
+                .map(|lines| {
+                    lines
+                        .into_iter()
+                        .map(|line| PodcastLine {
+                            speaker: line
+                                .get("speaker")
+                                .and_then(|v| v.extract::<String>(py).ok())
+                                .unwrap_or_default(),
+                            text: line
+                                .get("text")
+                                .and_then(|v| v.extract::<String>(py).ok())
+                                .unwrap_or_default(),
+                        })
+                        .collect()
+                });
+
+            Ok(AudioGenerationResult {
+                audio_path: result_dict
+                    .get("audio_path")
+                    .and_then(|v| v.extract::<String>(py).ok())
+                    .unwrap_or_default(),
+                duration_seconds: result_dict
+                    .get("duration_seconds")
+                    .and_then(|v| v.extract::<f64>(py).ok())
+                    .unwrap_or(0.0),
+                format: result_dict
+                    .get("format")
+                    .and_then(|v| v.extract::<String>(py).ok())
+                    .unwrap_or_else(|| "mp3".to_string()),
+                file_size_bytes: result_dict
+                    .get("file_size_bytes")
+                    .and_then(|v| v.extract::<i64>(py).ok())
+                    .unwrap_or(0),
+                generation_time_seconds: result_dict
+                    .get("generation_time_seconds")
+                    .and_then(|v| v.extract::<f64>(py).ok())
+                    .unwrap_or(0.0),
+                transcript,
+            })
+        })
+    }
+
+    /// List available voices for a TTS provider
+    pub fn list_tts_voices(
+        &self,
+        provider: &str,
+        api_key: Option<&str>,
+        base_url: Option<&str>,
+    ) -> Result<Vec<TTSVoiceInfo>> {
+        Python::attach(|py| {
+            self.setup_python_path(py)?;
+
+            let module = py.import("nous_ai.audio_generate")?;
+            let func = module.getattr("list_tts_voices_sync")?;
+
+            let kwargs = PyDict::new(py);
+            kwargs.set_item("provider", provider)?;
+            if let Some(key) = api_key {
+                kwargs.set_item("api_key", key)?;
+            }
+            if let Some(url) = base_url {
+                kwargs.set_item("base_url", url)?;
+            }
+
+            let result = func.call((), Some(&kwargs))?;
+            let voices_list: Vec<HashMap<String, Py<PyAny>>> = result.extract()?;
+
+            let mut voices = Vec::new();
+            for v in voices_list {
+                voices.push(TTSVoiceInfo {
+                    id: v
+                        .get("id")
+                        .and_then(|v| v.extract::<String>(py).ok())
+                        .unwrap_or_default(),
+                    name: v
+                        .get("name")
+                        .and_then(|v| v.extract::<String>(py).ok())
+                        .unwrap_or_default(),
+                    language: v
+                        .get("language")
+                        .and_then(|v| v.extract::<Option<String>>(py).ok())
+                        .flatten(),
+                    preview_url: v
+                        .get("preview_url")
+                        .and_then(|v| v.extract::<Option<String>>(py).ok())
+                        .flatten(),
+                });
+            }
+
+            Ok(voices)
+        })
+    }
+
+    /// Get available TTS providers and their status
+    pub fn get_tts_providers(&self) -> Result<Vec<TTSProviderInfo>> {
+        Python::attach(|py| {
+            self.setup_python_path(py)?;
+
+            let module = py.import("nous_ai.audio_generate")?;
+            let func = module.getattr("get_tts_providers_sync")?;
+
+            let result = func.call0()?;
+            let providers_list: Vec<HashMap<String, Py<PyAny>>> = result.extract()?;
+
+            let mut providers = Vec::new();
+            for p in providers_list {
+                providers.push(TTSProviderInfo {
+                    id: p
+                        .get("id")
+                        .and_then(|v| v.extract::<String>(py).ok())
+                        .unwrap_or_default(),
+                    name: p
+                        .get("name")
+                        .and_then(|v| v.extract::<String>(py).ok())
+                        .unwrap_or_default(),
+                    available: p
+                        .get("available")
+                        .and_then(|v| v.extract::<bool>(py).ok())
+                        .unwrap_or(false),
+                });
+            }
+
+            Ok(providers)
+        })
+    }
+
     pub fn discover_chat_models(&self, provider: &str, base_url: &str) -> Result<Vec<DiscoveredChatModel>> {
         Python::attach(|py| {
             self.setup_python_path(py)?;
@@ -2243,6 +2457,47 @@ impl PythonAI {
             Ok(models)
         })
     }
+}
+
+// ===== Audio Generation Types =====
+
+/// Result from audio generation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioGenerationResult {
+    pub audio_path: String,
+    pub duration_seconds: f64,
+    pub format: String,
+    pub file_size_bytes: i64,
+    pub generation_time_seconds: f64,
+    pub transcript: Option<Vec<PodcastLine>>,
+}
+
+/// A single line of podcast dialogue
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PodcastLine {
+    pub speaker: String,
+    pub text: String,
+}
+
+/// TTS voice information
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TTSVoiceInfo {
+    pub id: String,
+    pub name: String,
+    pub language: Option<String>,
+    pub preview_url: Option<String>,
+}
+
+/// TTS provider information
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TTSProviderInfo {
+    pub id: String,
+    pub name: String,
+    pub available: bool,
 }
 
 /// Discovered embedding model info

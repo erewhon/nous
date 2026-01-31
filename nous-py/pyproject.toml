@@ -29,6 +29,14 @@ browser = [
 transcription = [
     "faster-whisper>=1.0",
 ]
+audio = [
+    "elevenlabs>=1.0",
+    "pydub>=0.25",
+]
+kokoro = [
+    "kokoro>=0.9",
+    "soundfile>=0.12",
+]
 
 [build-system]
 requires = ["hatchling"]

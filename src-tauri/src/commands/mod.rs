@@ -1,6 +1,7 @@
 mod actions;
 mod ai;
 mod assets;
+mod audio;
 mod backup;
 mod document_convert;
 mod drawing;
@@ -37,6 +38,7 @@ mod window;
 pub use actions::*;
 pub use ai::*;
 pub use assets::*;
+pub use audio::*;
 pub use backup::*;
 pub use document_convert::*;
 pub use drawing::*;

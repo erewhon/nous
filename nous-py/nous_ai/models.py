@@ -170,3 +170,15 @@ class MCPToolResult(BaseModel):
     success: bool
     content: Any = None
     error: str | None = None
+
+
+# ===== Audio / TTS Models =====
+
+
+class TTSProviderType(str, Enum):
+    """Supported TTS provider types."""
+
+    OPENAI = "openai"
+    ELEVENLABS = "elevenlabs"
+    KOKORO = "kokoro"
+    OPENAI_COMPATIBLE = "openai_compatible"

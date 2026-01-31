@@ -608,6 +608,10 @@ pub fn run() {
             commands::lock_all,
             commands::get_encryption_stats,
             commands::cleanup_expired_sessions,
+            // Audio generation commands
+            commands::generate_page_audio,
+            commands::get_tts_providers,
+            commands::list_tts_voices,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
