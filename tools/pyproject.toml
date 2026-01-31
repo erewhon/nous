@@ -1,0 +1,12 @@
+[project]
+name = "onenote-to-nous"
+version = "0.1.0"
+description = "Convert OneNote backup .one files to .nous.zip for import"
+requires-python = ">=3.10"
+dependencies = [
+    "tika>=2.6",
+    "beautifulsoup4>=4.12",
+]
+
+[project.scripts]
+onenote-to-nous = "onenote_to_nous:main"

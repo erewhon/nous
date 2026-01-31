@@ -75,6 +75,84 @@ fn is_checkbox_completed(tag: &NoteTag) -> bool {
     tag.item_status().completed()
 }
 
+/// Known file format GUIDs from MS-ONESTORE specification.
+/// The first 16 bytes of a .one file contain a GUID identifying the packaging format.
+const GUID_PACKAGE_STORE: [u8; 16] = [
+    // {638DE92F-A6D4-4BC1-9A36-B3FC2511A5B7} — legacy package store (OneNote desktop/local)
+    0x2F, 0xE9, 0x8D, 0x63, 0xD4, 0xA6, 0xC1, 0x4B, 0x9A, 0x36, 0xB3, 0xFC, 0x25, 0x11, 0xA5,
+    0xB7,
+];
+const GUID_REVISION_STORE: [u8; 16] = [
+    // {109ADD3F-911B-49F5-A5D0-1791EDC8AED8} — revision store (OneDrive/FSSHTTP)
+    0x3F, 0xDD, 0x9A, 0x10, 0x1B, 0x91, 0xF5, 0x49, 0xA5, 0xD0, 0x17, 0x91, 0xED, 0xC8, 0xAE,
+    0xD8,
+];
+
+/// Detect the file format from the first 16 bytes (the file format GUID).
+/// Returns a human-readable description if the format is known but unsupported.
+fn detect_one_file_format(path: &Path) -> Option<&'static str> {
+    let data = fs::read(path).ok()?;
+    if data.len() < 16 {
+        return Some("File is too small to be a valid OneNote file");
+    }
+    let guid = &data[..16];
+    if guid == GUID_PACKAGE_STORE {
+        // Legacy package store format — used by OneNote desktop app and its backups.
+        // The parser has partial support; backup files often fail.
+        None // Let the parser try — it may work for some files
+    } else if guid == GUID_REVISION_STORE {
+        None // Fully supported
+    } else {
+        Some(
+            "This file does not appear to be a valid OneNote section file \
+             (unrecognized format header)",
+        )
+    }
+}
+
+/// Check if a filename looks like a OneNote automatic backup file.
+/// Pattern: "SectionName.one (On M-DD-YY).one"
+fn is_backup_filename(path: &Path) -> bool {
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    // Match pattern like ".one (On " in the filename
+    name.contains(".one (On ")
+}
+
+/// Build a user-facing error message for a parse failure, adding context about
+/// backup files and the format limitation.
+fn format_parse_error(path: &Path, err: &onenote_parser::errors::Error) -> String {
+    let err_str = err.to_string();
+    let is_backup = is_backup_filename(path);
+    let is_fsshttpb_error = err_str.contains("FSSHTTPB") || err_str.contains("object header");
+
+    if is_fsshttpb_error && is_backup {
+        format!(
+            "Cannot parse OneNote backup file \"{}\". \
+             OneNote's automatic backup files use an internal format that is not fully supported. \
+             Workaround: open the original notebook in OneNote, then use File > Export to save \
+             each section as a .one file, or sync to OneDrive and download from there.",
+            path.file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default()
+        )
+    } else if is_fsshttpb_error {
+        format!(
+            "Cannot parse \"{}\": this .one file uses a local packaging format \
+             that is not fully supported. The importer works with .one files synced via \
+             OneDrive. Workaround: open the notebook in OneNote, then export each section, \
+             or sync to OneDrive and download from there.",
+            path.file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default()
+        )
+    } else {
+        format!("Failed to parse OneNote section: {}", err_str)
+    }
+}
+
 /// Collect all parsed sections from a path (file or directory)
 fn collect_sections(path: &Path) -> Result<Vec<(String, OneNoteSection)>> {
     let parser = Parser::new();
@@ -85,10 +163,18 @@ fn collect_sections(path: &Path) -> Result<Vec<(String, OneNoteSection)>> {
             .extension()
             .map(|e| e.to_string_lossy().to_lowercase());
         if ext.as_deref() == Some("one") {
+            // Check for known-unsupported format before attempting parse
+            if let Some(format_msg) = detect_one_file_format(path) {
+                return Err(StorageError::Io(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format_msg,
+                )));
+            }
+
             let section = parser.parse_section(path).map_err(|e| {
                 StorageError::Io(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
-                    format!("Failed to parse OneNote section: {}", e),
+                    format_parse_error(path, &e),
                 ))
             })?;
             let name = path
@@ -131,10 +217,14 @@ fn collect_sections(path: &Path) -> Result<Vec<(String, OneNoteSection)>> {
 
             one_files.sort_by_key(|e| e.file_name());
 
+            let mut parse_errors: Vec<String> = Vec::new();
+            let mut all_are_backup_format = true;
+
             for entry in one_files {
                 let file_path = entry.path();
                 match parser.parse_section(&file_path) {
                     Ok(section) => {
+                        all_are_backup_format = false;
                         let name = file_path
                             .file_stem()
                             .map(|n| n.to_string_lossy().to_string())
@@ -142,9 +232,44 @@ fn collect_sections(path: &Path) -> Result<Vec<(String, OneNoteSection)>> {
                         sections.push((name, section));
                     }
                     Err(e) => {
+                        let err_str = e.to_string();
+                        let is_format_error = err_str.contains("FSSHTTPB")
+                            || err_str.contains("object header");
+                        if !is_format_error {
+                            all_are_backup_format = false;
+                        }
+                        parse_errors.push(format_parse_error(&file_path, &e));
                         log::warn!("Skipping unparseable .one file {:?}: {}", file_path, e);
                     }
                 }
+            }
+
+            // If all files failed with the same format error, return a single clear message
+            if sections.is_empty() && !parse_errors.is_empty() {
+                let has_backups = path
+                    .to_string_lossy()
+                    .to_lowercase()
+                    .contains("backup");
+                let message = if all_are_backup_format || has_backups {
+                    "None of the .one files could be parsed. These appear to be OneNote \
+                     desktop backup files, which use an internal format not fully supported \
+                     by the importer.\n\n\
+                     Workaround: open the notebooks in OneNote, then either:\n\
+                     \u{2022} Export each section as a .one file (File > Export)\n\
+                     \u{2022} Sync to OneDrive and download from there"
+                        .to_string()
+                } else {
+                    format!(
+                        "No valid .one section files found. {} file(s) could not be parsed.\n\
+                         First error: {}",
+                        parse_errors.len(),
+                        parse_errors.first().unwrap_or(&String::new())
+                    )
+                };
+                return Err(StorageError::Io(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    message,
+                )));
             }
         }
 
