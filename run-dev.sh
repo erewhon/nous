@@ -1,31 +1,10 @@
 #!/usr/bin/env bash
-# Run the Katt development server with proper Python/PyO3 environment
+# Run the Nous development server with proper Python/PyO3 environment
 
 set -e
 
-# Python 3.13 library path for PyO3 (system Python)
-PYTHON_LIB_DIR="/usr/lib/x86_64-linux-gnu"
-PYTHON_PREFIX="/usr"
+source "$(dirname "$0")/setup-python-env.sh"
 
-# Set LD_LIBRARY_PATH so the Rust binary can find libpython
-export LD_LIBRARY_PATH="${PYTHON_LIB_DIR}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-
-# Tell PyO3 which Python to use
-export PYO3_PYTHON="/usr/bin/python3.13"
-
-# Activate the katt-py virtual environment for Python dependencies
-VENV_DIR="$(dirname "$0")/katt-py/.venv"
-if [ -d "$VENV_DIR" ]; then
-    export VIRTUAL_ENV="$VENV_DIR"
-    export PATH="$VENV_DIR/bin:$PATH"
-    export PYTHONPATH="$(dirname "$0")/katt-py/src${PYTHONPATH:+:$PYTHONPATH}"
-fi
-
-echo "Starting Katt dev server..."
-echo "  LD_LIBRARY_PATH: $LD_LIBRARY_PATH"
-echo "  PYO3_PYTHON: $PYO3_PYTHON"
-echo "  VIRTUAL_ENV: $VIRTUAL_ENV"
 echo ""
-
-# Run the Tauri dev server
+echo "Starting Nous dev server..."
 exec pnpm dev

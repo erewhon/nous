@@ -366,6 +366,74 @@ pub struct MCPToolResult {
     pub error: Option<String>,
 }
 
+/// Configure sys.path for the given nous-py directory.
+/// Handles both dev mode (venv at nous-py/.venv) and bundled release mode
+/// (PYTHONHOME set, site-packages inside the bundle).
+#[allow(deprecated)]
+fn configure_python_path(py: Python<'_>, nous_py_path: &std::path::Path) -> Result<()> {
+    let sys = py.import("sys")?;
+    let path = sys.getattr("path")?;
+    let path_list: Bound<'_, PyList> = path.downcast_into().map_err(|e| {
+        PythonError::TypeConversion(format!("Failed to convert sys.path to list: {}", e))
+    })?;
+
+    // Add nous-py source directory
+    let nous_py_str = nous_py_path.to_string_lossy().to_string();
+    let already_added = path_list.iter().any(|p| {
+        p.extract::<String>().ok() == Some(nous_py_str.clone())
+    });
+
+    if !already_added {
+        path_list.insert(0, nous_py_str.clone())?;
+    }
+
+    // When PYTHONHOME is set (bundled mode), site-packages are already
+    // under $PYTHONHOME/lib/pythonX.Y/site-packages/ and accessible via
+    // the normal import machinery. We only need the nous-py source dir.
+    if std::env::var("PYTHONHOME").is_ok() {
+        return Ok(());
+    }
+
+    // Dev mode: add venv site-packages for dependencies (pydantic, httpx, etc.)
+    let venv_lib = format!("{}/.venv/lib", nous_py_str);
+    let mut site_packages = String::new();
+
+    // Look for any pythonX.Y directory in .venv/lib
+    if let Ok(entries) = std::fs::read_dir(&venv_lib) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with("python") {
+                let candidate = format!("{}/{}/site-packages", venv_lib, name);
+                if std::path::Path::new(&candidate).exists() {
+                    site_packages = candidate;
+                    break;
+                }
+            }
+        }
+    }
+
+    // Fallback to current Python version
+    if site_packages.is_empty() {
+        let version_info = sys.getattr("version_info")?;
+        let major: i32 = version_info.getattr("major")?.extract()?;
+        let minor: i32 = version_info.getattr("minor")?.extract()?;
+        site_packages = format!(
+            "{}/.venv/lib/python{}.{}/site-packages",
+            nous_py_str, major, minor
+        );
+    }
+
+    let site_already_added = path_list.iter().any(|p| {
+        p.extract::<String>().ok() == Some(site_packages.clone())
+    });
+
+    if !site_already_added {
+        path_list.insert(0, site_packages)?;
+    }
+
+    Ok(())
+}
+
 /// Python AI bridge for calling Python functions
 pub struct PythonAI {
     nous_py_path: PathBuf,
@@ -377,44 +445,9 @@ impl PythonAI {
         Self { nous_py_path }
     }
 
-    /// Initialize Python path to include nous-py and its venv site-packages
-    #[allow(deprecated)]
+    /// Initialize Python path to include nous-py and its venv/bundled site-packages.
     fn setup_python_path(&self, py: Python<'_>) -> Result<()> {
-        let sys = py.import("sys")?;
-        let path = sys.getattr("path")?;
-        let path_list: Bound<'_, PyList> = path.downcast_into().map_err(|e| {
-            PythonError::TypeConversion(format!("Failed to convert sys.path to list: {}", e))
-        })?;
-
-        // Add nous-py source directory
-        let nous_py_str = self.nous_py_path.to_string_lossy().to_string();
-        let already_added = path_list.iter().any(|p| {
-            p.extract::<String>().ok() == Some(nous_py_str.clone())
-        });
-
-        if !already_added {
-            path_list.insert(0, nous_py_str.clone())?;
-        }
-
-        // Add venv site-packages for dependencies (pydantic, httpx, etc.)
-        // Get Python version for site-packages path
-        let version_info = sys.getattr("version_info")?;
-        let major: i32 = version_info.getattr("major")?.extract()?;
-        let minor: i32 = version_info.getattr("minor")?.extract()?;
-        let site_packages = format!(
-            "{}/.venv/lib/python{}.{}/site-packages",
-            nous_py_str, major, minor
-        );
-
-        let site_already_added = path_list.iter().any(|p| {
-            p.extract::<String>().ok() == Some(site_packages.clone())
-        });
-
-        if !site_already_added {
-            path_list.insert(0, site_packages)?;
-        }
-
-        Ok(())
+        configure_python_path(py, &self.nous_py_path)
     }
 
     /// Send a chat request to the AI provider
@@ -730,95 +763,8 @@ impl PythonAI {
         // Spawn a thread to run the Python code
         std::thread::spawn(move || {
             let result = Python::attach(|py| -> Result<()> {
-                // Setup Python path
-                let sys = py.import("sys")?;
-                let path = sys.getattr("path")?;
-                let path_list: Bound<'_, PyList> = path.downcast_into().map_err(|e| {
-                    PythonError::TypeConversion(format!("Failed to convert sys.path to list: {}", e))
-                })?;
-
-                let nous_py_str = nous_py_path.to_string_lossy().to_string();
-                log::info!("Python bridge: nous_py_path = {}", nous_py_str);
-
-                // Log current sys.path for debugging
-                let current_paths: Vec<String> = path_list.iter()
-                    .filter_map(|p| p.extract::<String>().ok())
-                    .collect();
-                log::info!("Python bridge: initial sys.path = {:?}", current_paths);
-
-                let already_added = path_list.iter().any(|p| {
-                    p.extract::<String>().ok() == Some(nous_py_str.clone())
-                });
-
-                if !already_added {
-                    path_list.insert(0, nous_py_str.clone())?;
-                    log::info!("Python bridge: added {} to sys.path", nous_py_str);
-                }
-
-                // Add venv site-packages
-                // Try to find the actual site-packages directory (venv may use different Python version)
-                let venv_lib = format!("{}/.venv/lib", nous_py_str);
-                let mut site_packages = String::new();
-
-                // Look for any pythonX.Y directory in .venv/lib
-                if let Ok(entries) = std::fs::read_dir(&venv_lib) {
-                    for entry in entries.flatten() {
-                        let name = entry.file_name().to_string_lossy().to_string();
-                        if name.starts_with("python") {
-                            let candidate = format!("{}/{}/site-packages", venv_lib, name);
-                            if std::path::Path::new(&candidate).exists() {
-                                site_packages = candidate;
-                                break;
-                            }
-                        }
-                    }
-                }
-
-                // Fallback to current Python version if no venv found
-                if site_packages.is_empty() {
-                    let version_info = sys.getattr("version_info")?;
-                    let major: i32 = version_info.getattr("major")?.extract()?;
-                    let minor: i32 = version_info.getattr("minor")?.extract()?;
-                    site_packages = format!(
-                        "{}/.venv/lib/python{}.{}/site-packages",
-                        nous_py_str, major, minor
-                    );
-                }
-                log::info!("Python bridge: site_packages = {}", site_packages);
-
-                let site_already_added = path_list.iter().any(|p| {
-                    p.extract::<String>().ok() == Some(site_packages.clone())
-                });
-
-                if !site_already_added {
-                    path_list.insert(0, site_packages.clone())?;
-                    log::info!("Python bridge: added {} to sys.path", site_packages);
-                }
-
-                // Log full sys.path for debugging
-                let sys_path: Vec<String> = path_list.iter()
-                    .filter_map(|p| p.extract::<String>().ok())
-                    .collect();
-                log::info!("Python bridge: sys.path = {:?}", sys_path);
-
-                // Test importing pydantic first to get better error messages
-                log::info!("Python bridge: attempting to import pydantic_core");
-                match py.import("pydantic_core") {
-                    Ok(_) => log::info!("Python bridge: pydantic_core imported successfully"),
-                    Err(e) => {
-                        log::error!("Python bridge: failed to import pydantic_core: {}", e);
-                        // Try to get more details
-                        if let Ok(traceback_module) = py.import("traceback") {
-                            if let Ok(format_exc) = traceback_module.getattr("format_exc") {
-                                if let Ok(tb) = format_exc.call0() {
-                                    if let Ok(tb_str) = tb.extract::<String>() {
-                                        log::error!("Python traceback:\n{}", tb_str);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+                // Setup Python path using shared helper
+                configure_python_path(py, &nous_py_path)?;
 
                 log::info!("Python bridge: attempting to import nous_ai.chat");
                 let chat_module = py.import("nous_ai.chat")?;

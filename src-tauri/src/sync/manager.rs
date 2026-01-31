@@ -10,8 +10,8 @@ use crate::storage::Page;
 use crate::storage::FileStorage;
 
 use super::config::{
-    LibrarySyncConfig, LibrarySyncConfigInput, SyncConfig, SyncConfigInput, SyncCredentials,
-    SyncManifest, SyncState, SyncStatus, SyncResult,
+    Changelog, ChangeOperation, LibrarySyncConfig, LibrarySyncConfigInput, SyncConfig,
+    SyncConfigInput, SyncCredentials, SyncManifest, SyncState, SyncStatus, SyncResult,
 };
 use super::crdt::PageDocument;
 use super::metadata::LocalSyncState;
@@ -399,7 +399,7 @@ impl SyncManager {
         let start = std::time::Instant::now();
         log::info!("Sync: starting notebook {}", notebook_id);
 
-        // Get notebook config (short lock)
+        // 1. Get notebook config + local pages (short lock)
         let (config, local_pages) = {
             let storage_guard = storage.lock().unwrap();
             let notebook = storage_guard.get_notebook(notebook_id)?;
@@ -420,20 +420,22 @@ impl SyncManager {
             config.remote_path,
         );
 
-        // Get client
+        // 2. Get client + local_state
         let client = self.get_client(notebook_id, &config)?;
         let mut local_state = self.get_local_state(notebook_id);
         log::info!(
-            "Sync: local_state has {} tracked pages, last_sync={:?}",
+            "Sync: local_state has {} tracked pages, last_sync={:?}, last_changelog_seq={}",
             local_state.pages.len(),
             local_state.last_sync,
+            local_state.last_changelog_seq,
         );
 
         let mut pages_pulled = 0;
         let mut pages_pushed = 0;
         let mut conflicts_resolved = 0;
+        let mut synced_page_ids: Vec<(Uuid, PageSyncResult)> = Vec::new();
 
-        // Fetch remote manifest
+        // 3. Fetch remote manifest + changelog
         let remote_manifest = self
             .fetch_manifest(&client, &config.remote_path)
             .await;
@@ -441,13 +443,62 @@ impl SyncManager {
             Ok(m) => log::info!("Sync: remote manifest has {} pages", m.pages.len()),
             Err(e) => log::info!("Sync: no remote manifest (first sync?): {}", e),
         }
-        let remote_manifest = remote_manifest.ok();
+        let mut manifest = remote_manifest.unwrap_or_else(|_| {
+            SyncManifest::new(notebook_id, local_state.client_id.clone())
+        });
 
-        // Sync each page
+        let mut changelog = self
+            .fetch_changelog(&client, &config.remote_path, notebook_id)
+            .await;
+        log::info!(
+            "Sync: changelog has {} entries, next_seq={}",
+            changelog.entries.len(),
+            changelog.next_seq,
+        );
+
+        // 4. Determine remote_changed_pages
+        let remote_changed_pages: std::collections::HashSet<Uuid> = if local_state.last_changelog_seq > 0
+            && !changelog.entries.is_empty()
+            && changelog.entries.first().map(|e| e.seq).unwrap_or(0) <= local_state.last_changelog_seq + 1
+        {
+            // Changelog covers our range — use it for fast change detection
+            let new_entries = changelog.entries_since(local_state.last_changelog_seq, &local_state.client_id);
+            let page_ids: std::collections::HashSet<Uuid> = new_entries.iter().map(|e| e.page_id).collect();
+            log::info!(
+                "Sync: changelog-based detection: {} remote changes since seq {}",
+                page_ids.len(),
+                local_state.last_changelog_seq,
+            );
+            page_ids
+        } else {
+            // First sync or changelog compacted past us — fall back to manifest
+            let page_ids: std::collections::HashSet<Uuid> = manifest.pages.keys().copied().collect();
+            log::info!(
+                "Sync: manifest-based detection (fallback): {} potential remote changes",
+                page_ids.len(),
+            );
+            page_ids
+        };
+
+        // 5. Sync each local page (with skip optimization)
         for page in &local_pages {
-            log::info!("Sync: syncing page '{}' ({})", page.title, page.id);
+            let local_needs_sync = local_state.page_needs_sync(page.id);
+            let remote_may_have_changed = remote_changed_pages.contains(&page.id);
+
+            if !local_needs_sync && !remote_may_have_changed {
+                log::debug!("Sync: skipping page '{}' ({}) — no changes", page.title, page.id);
+                continue;
+            }
+
+            log::info!(
+                "Sync: syncing page '{}' ({}) local_needs_sync={} remote_changed={}",
+                page.title,
+                page.id,
+                local_needs_sync,
+                remote_may_have_changed,
+            );
             let result = self
-                .sync_page(&client, &config, &mut local_state, storage, notebook_id, page)
+                .sync_page(&client, &config, &mut local_state, storage, notebook_id, page, &manifest)
                 .await;
             match &result {
                 Ok(r) => log::info!("Sync: page '{}' result: {:?}", page.title, r),
@@ -455,7 +506,7 @@ impl SyncManager {
             }
             let result = result?;
 
-            match result {
+            match &result {
                 PageSyncResult::Pulled => pages_pulled += 1,
                 PageSyncResult::Pushed => pages_pushed += 1,
                 PageSyncResult::Merged => {
@@ -465,25 +516,82 @@ impl SyncManager {
                 }
                 PageSyncResult::Unchanged => {}
             }
+            synced_page_ids.push((page.id, result));
         }
 
-        // Handle remote pages not in local
-        if let Some(manifest) = &remote_manifest {
-            for (page_id, _) in &manifest.pages {
-                if !local_pages.iter().any(|p| p.id == *page_id) {
-                    // Pull remote page
-                    if self
-                        .pull_page(&client, &config, &mut local_state, storage, notebook_id, *page_id)
-                        .await
-                        .is_ok()
-                    {
-                        pages_pulled += 1;
-                    }
+        // 6. Pull remote-only pages (from remote_changed_pages not in local)
+        let local_page_ids: std::collections::HashSet<Uuid> = local_pages.iter().map(|p| p.id).collect();
+        for page_id in &remote_changed_pages {
+            if !local_page_ids.contains(page_id) {
+                log::info!("Sync: pulling remote-only page {}", page_id);
+                if self
+                    .pull_page(&client, &config, &mut local_state, storage, notebook_id, *page_id)
+                    .await
+                    .is_ok()
+                {
+                    pages_pulled += 1;
+                    synced_page_ids.push((*page_id, PageSyncResult::Pulled));
                 }
             }
         }
 
-        // Sync assets
+        // 7. Update manifest with synced pages
+        for (page_id, result) in &synced_page_ids {
+            match result {
+                PageSyncResult::Pushed | PageSyncResult::Merged | PageSyncResult::Pulled => {
+                    if let Some(page_state) = local_state.pages.get(page_id) {
+                        manifest.pages.insert(
+                            *page_id,
+                            super::config::PageSyncState {
+                                etag: page_state.remote_etag.clone().unwrap_or_default(),
+                                last_modified: page_state.last_synced.unwrap_or_else(Utc::now),
+                                size: 0,
+                            },
+                        );
+                        if let Some(sv) = &page_state.synced_state_vector {
+                            manifest.page_state_vectors.insert(*page_id, sv.clone());
+                        }
+                    }
+                }
+                PageSyncResult::Unchanged => {}
+            }
+        }
+
+        if !synced_page_ids.is_empty() {
+            manifest.version += 1;
+            manifest.last_client_id = local_state.client_id.clone();
+            manifest.updated_at = Utc::now();
+
+            if let Err(e) = self.push_manifest(&client, &config.remote_path, &manifest).await {
+                log::error!("Sync: failed to push manifest: {}", e);
+            }
+        }
+
+        // 8. Update changelog with synced pages
+        for (page_id, result) in &synced_page_ids {
+            match result {
+                PageSyncResult::Pushed | PageSyncResult::Merged => {
+                    changelog.append(
+                        local_state.client_id.clone(),
+                        ChangeOperation::Updated,
+                        *page_id,
+                    );
+                }
+                _ => {}
+            }
+        }
+
+        if changelog.entries.len() > 500 {
+            changelog.compact(200);
+        }
+
+        if !synced_page_ids.is_empty() {
+            if let Err(e) = self.push_changelog(&client, &config.remote_path, &changelog).await {
+                log::error!("Sync: failed to push changelog: {}", e);
+            }
+        }
+
+        // 9. Sync assets
         let asset_result = self
             .sync_assets(&client, &config, &mut local_state, notebook_id)
             .await
@@ -492,7 +600,7 @@ impl SyncManager {
                 AssetSyncResult::default()
             });
 
-        // Process queue items
+        // 10. Process queue items
         let queue_items: Vec<_> = {
             let queue = self.queue.lock().unwrap();
             queue.get_notebook_items(notebook_id).iter().map(|i| i.id).collect()
@@ -503,7 +611,13 @@ impl SyncManager {
             queue.complete(item_id);
         }
 
-        // Update local state
+        // 11. Update local state
+        local_state.last_changelog_seq = if changelog.next_seq > 0 {
+            changelog.next_seq - 1
+        } else {
+            0
+        };
+        local_state.remote_version = Some(manifest.version);
         local_state.last_sync = Some(Utc::now());
         self.save_local_state(notebook_id, &local_state)?;
         self.save_queue()?;
@@ -540,6 +654,46 @@ impl SyncManager {
         Ok(manifest)
     }
 
+    /// Push manifest to remote (last-writer-wins, no ETag locking)
+    async fn push_manifest(
+        &self,
+        client: &WebDAVClient,
+        remote_path: &str,
+        manifest: &SyncManifest,
+    ) -> Result<(), SyncError> {
+        let manifest_path = format!("{}/.sync-manifest.json", remote_path);
+        let data = serde_json::to_vec_pretty(manifest)?;
+        client.put(&manifest_path, &data, None).await?;
+        Ok(())
+    }
+
+    /// Fetch changelog from remote. Returns empty changelog on any error.
+    async fn fetch_changelog(
+        &self,
+        client: &WebDAVClient,
+        remote_path: &str,
+        notebook_id: Uuid,
+    ) -> Changelog {
+        let changelog_path = format!("{}/.changelog.json", remote_path);
+        match client.get(&changelog_path).await {
+            Ok(data) => serde_json::from_slice(&data).unwrap_or_else(|_| Changelog::new(notebook_id)),
+            Err(_) => Changelog::new(notebook_id),
+        }
+    }
+
+    /// Push changelog to remote (last-writer-wins)
+    async fn push_changelog(
+        &self,
+        client: &WebDAVClient,
+        remote_path: &str,
+        changelog: &Changelog,
+    ) -> Result<(), SyncError> {
+        let changelog_path = format!("{}/.changelog.json", remote_path);
+        let data = serde_json::to_vec_pretty(changelog)?;
+        client.put(&changelog_path, &data, None).await?;
+        Ok(())
+    }
+
     /// Sync a single page
     async fn sync_page(
         &self,
@@ -549,11 +703,14 @@ impl SyncManager {
         storage: &SharedStorage,
         notebook_id: Uuid,
         page: &Page,
+        // Manifest is passed for future incremental CRDT encoding (encode_diff).
+        // Currently we always push full state for bootstrap compatibility.
+        _manifest: &SyncManifest,
     ) -> Result<PageSyncResult, SyncError> {
         let crdt_path = self.crdt_path(notebook_id, page.id);
         let remote_path = format!("{}/pages/{}.crdt", config.remote_path, page.id);
 
-        // Load or create local CRDT
+        // 1. Load or create local CRDT
         let crdt_existed = crdt_path.exists();
         let local_doc = if crdt_existed {
             let data = std::fs::read(&crdt_path)?;
@@ -567,23 +724,52 @@ impl SyncManager {
             remote_path,
         );
 
-        // Check if remote exists
-        let remote_result = client.get_with_etag(&remote_path).await;
+        // 2. Use HEAD to check remote existence + ETag (cheaper than GET)
+        let (remote_exists, remote_etag) = match client.head(&remote_path).await {
+            Ok(head) if head.exists => {
+                if head.etag.is_some() {
+                    (true, head.etag)
+                } else {
+                    // HEAD returned no ETag — fall back to GET for compatibility
+                    log::debug!("Sync page: HEAD returned no ETag, falling back to GET for ETag");
+                    match client.get_with_etag(&remote_path).await {
+                        Ok((_, etag)) => (true, etag),
+                        Err(WebDAVError::NotFound(_)) => (false, None),
+                        Err(e) => return Err(e.into()),
+                    }
+                }
+            }
+            Ok(_) => (false, None),
+            Err(WebDAVError::NotFound(_)) => (false, None),
+            Err(_) => {
+                // HEAD failed entirely — fall back to GET
+                log::debug!("Sync page: HEAD failed, falling back to GET");
+                match client.get_with_etag(&remote_path).await {
+                    Ok((_, etag)) => (true, etag),
+                    Err(WebDAVError::NotFound(_)) => (false, None),
+                    Err(e) => return Err(e.into()),
+                }
+            }
+        };
 
-        match remote_result {
-            Ok((remote_data, remote_etag)) => {
-                // Remote exists - check if we need to merge
-                let page_state = local_state.pages.get(&page.id);
-                let needs_merge = match page_state {
-                    Some(state) => state.remote_etag.as_deref() != remote_etag.as_deref(),
-                    None => true,
-                };
+        // 3. If remote exists and ETag differs from our last known — remote changed
+        if remote_exists {
+            let page_state = local_state.pages.get(&page.id);
+            let remote_changed = match page_state {
+                Some(state) => state.remote_etag.as_deref() != remote_etag.as_deref(),
+                None => true,
+            };
 
-                if needs_merge {
-                    // Merge remote into local
-                    local_doc.apply_update(&remote_data)?;
+            if remote_changed {
+                // Remote changed — fetch full content
+                let (remote_data, fetched_etag) = client.get_with_etag(&remote_path).await?;
+                let remote_etag = fetched_etag.or(remote_etag);
 
-                    // Convert back to EditorData and save (short lock)
+                // Apply remote update to local CRDT
+                local_doc.apply_update(&remote_data)?;
+
+                if local_state.page_needs_sync(page.id) {
+                    // Merge case: both local and remote changed
                     let merged_content = local_doc.to_editor_data()?;
                     {
                         let storage_guard = storage.lock().unwrap();
@@ -592,43 +778,53 @@ impl SyncManager {
                         storage_guard.update_page(&updated_page)?;
                     } // Lock released before async
 
-                    // Save merged CRDT
+                    // Save merged CRDT locally
                     let merged_state = local_doc.encode_state();
                     std::fs::create_dir_all(crdt_path.parent().unwrap())?;
                     std::fs::write(&crdt_path, &merged_state)?;
 
-                    // Push merged state
+                    // Push merged state back (full state for bootstrap)
                     let result = client.put(&remote_path, &merged_state, None).await?;
 
-                    // Update local state
                     local_state.mark_page_synced(page.id, result.etag, local_doc.state_vector());
-
                     return Ok(PageSyncResult::Merged);
+                } else {
+                    // Pull only — save merged state locally
+                    let merged_content = local_doc.to_editor_data()?;
+                    {
+                        let storage_guard = storage.lock().unwrap();
+                        let mut updated_page = page.clone();
+                        updated_page.content = merged_content;
+                        storage_guard.update_page(&updated_page)?;
+                    }
+
+                    let state = local_doc.encode_state();
+                    std::fs::create_dir_all(crdt_path.parent().unwrap())?;
+                    std::fs::write(&crdt_path, &state)?;
+
+                    local_state.mark_page_synced(page.id, remote_etag, local_doc.state_vector());
+                    return Ok(PageSyncResult::Pulled);
                 }
             }
-            Err(WebDAVError::NotFound(_)) => {
-                // Remote doesn't exist - push local
-            }
-            Err(e) => return Err(e.into()),
         }
 
-        // Check if local needs pushing
+        // 4. If local needs pushing
         if local_state.page_needs_sync(page.id) {
-            // Save local CRDT state
-            let state = local_doc.encode_state();
+            // Always write full state to remote .crdt file (needed for bootstrap)
+            let full_state = local_doc.encode_state();
             std::fs::create_dir_all(crdt_path.parent().unwrap())?;
-            std::fs::write(&crdt_path, &state)?;
+            std::fs::write(&crdt_path, &full_state)?;
 
-            // Push to remote
+            // Push to remote with If-Match for conflict detection
             let local_etag = local_state
                 .pages
                 .get(&page.id)
                 .and_then(|s| s.remote_etag.clone());
 
-            let result = client.put(&remote_path, &state, local_etag.as_deref()).await?;
+            let result = client.put(&remote_path, &full_state, local_etag.as_deref()).await?;
 
             if result.conflict {
-                // Remote changed - need to pull and merge
+                // Remote changed during push — pull, merge, push without ETag
                 let (remote_data, _) = client.get_with_etag(&remote_path).await?;
                 local_doc.apply_update(&remote_data)?;
 

@@ -35,6 +35,14 @@ pub enum WebDAVError {
     Io(#[from] std::io::Error),
 }
 
+/// Response from a HEAD operation
+#[derive(Debug)]
+pub struct HeadResponse {
+    pub etag: Option<String>,
+    pub content_length: Option<u64>,
+    pub exists: bool,
+}
+
 /// Response from a PUT operation
 #[derive(Debug)]
 pub struct PutResponse {
@@ -188,6 +196,55 @@ impl WebDAVClient {
 
         let data = response.bytes().await?.to_vec();
         Ok((data, etag))
+    }
+
+    /// HEAD - Check resource existence and get metadata without downloading content
+    pub async fn head(&self, path: &str) -> Result<HeadResponse, WebDAVError> {
+        let url = self.url(path);
+
+        let response = self.client
+            .head(&url)
+            .basic_auth(&self.credentials.username, Some(&self.credentials.password))
+            .send()
+            .await?;
+
+        match response.status() {
+            StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => {
+                return Err(WebDAVError::AuthFailed);
+            }
+            StatusCode::NOT_FOUND => {
+                return Ok(HeadResponse {
+                    etag: None,
+                    content_length: None,
+                    exists: false,
+                });
+            }
+            status if !status.is_success() => {
+                return Err(WebDAVError::Server {
+                    status: status.as_u16(),
+                    message: String::new(),
+                });
+            }
+            _ => {}
+        }
+
+        let etag = response
+            .headers()
+            .get("etag")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.trim_matches('"').to_string());
+
+        let content_length = response
+            .headers()
+            .get("content-length")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.parse().ok());
+
+        Ok(HeadResponse {
+            etag,
+            content_length,
+            exists: true,
+        })
     }
 
     /// PUT - Upload file with optional ETag checking for conflict detection

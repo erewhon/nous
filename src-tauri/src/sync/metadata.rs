@@ -23,6 +23,9 @@ pub struct LocalSyncState {
     /// Per-asset sync state (keyed by relative path)
     #[serde(default)]
     pub assets: HashMap<String, LocalAssetState>,
+    /// Last changelog sequence number we've processed
+    #[serde(default)]
+    pub last_changelog_seq: u64,
 }
 
 /// Local sync state for a single asset
@@ -68,6 +71,7 @@ impl LocalSyncState {
             pages: HashMap::new(),
             remote_version: None,
             assets: HashMap::new(),
+            last_changelog_seq: 0,
         }
     }
 

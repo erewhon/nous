@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use tauri::Manager;
@@ -60,6 +61,33 @@ pub struct AppState {
     pub encryption_manager: Arc<EncryptionManager>,
 }
 
+/// Look for a bundled Python distribution next to the running binary.
+/// Returns the path to the python-bundle directory if found.
+fn find_python_bundle() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let exe_dir = exe.parent()?;
+
+    // macOS .app: Contents/MacOS/nous → ../Resources/python-bundle
+    let macos = exe_dir.join("../Resources/python-bundle");
+    if macos.join("lib").exists() {
+        return Some(macos.canonicalize().ok()?);
+    }
+
+    // Linux: alongside binary
+    let linux = exe_dir.join("python-bundle");
+    if linux.join("lib").exists() {
+        return Some(linux);
+    }
+
+    // Linux deb: ../lib/nous/python-bundle
+    let deb = exe_dir.join("../lib/nous/python-bundle");
+    if deb.join("lib").exists() {
+        return Some(deb.canonicalize().ok()?);
+    }
+
+    None
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Get base data directory
@@ -85,20 +113,28 @@ pub fn run() {
     let vector_index = VectorIndex::new(vector_db_path).expect("Failed to initialize vector index");
 
     // Initialize Python AI bridge
-    // The nous-py package is in the project root (same level as src-tauri)
-    // When running from src-tauri, we need to go up one level
-    let nous_py_path = std::env::current_dir()
-        .map(|p| {
-            // Check if nous-py exists in current dir or parent
-            let direct = p.join("nous-py");
-            if direct.exists() {
-                direct
-            } else {
-                // Try parent directory (when running from src-tauri)
-                p.parent().map(|parent| parent.join("nous-py")).unwrap_or(direct)
-            }
-        })
-        .unwrap_or_else(|_| std::path::PathBuf::from("nous-py"));
+    // Check for bundled Python first (release builds), then fall back to dev layout
+    #[allow(deprecated)]
+    let nous_py_path = if let Some(bundle_dir) = find_python_bundle() {
+        // Bundled release mode — set PYTHONHOME so libpython finds the stdlib
+        std::env::set_var("PYTHONHOME", &bundle_dir);
+        log::info!("Using bundled Python at {:?}", bundle_dir);
+        bundle_dir.join("nous-py")
+    } else {
+        // Dev mode — find nous-py relative to cwd
+        std::env::current_dir()
+            .map(|p| {
+                let direct = p.join("nous-py");
+                if direct.exists() {
+                    direct
+                } else {
+                    p.parent()
+                        .map(|parent| parent.join("nous-py"))
+                        .unwrap_or(direct)
+                }
+            })
+            .unwrap_or_else(|_| PathBuf::from("nous-py"))
+    };
     log::info!("Python AI bridge path: {:?}", nous_py_path);
     let python_ai = PythonAI::new(nous_py_path);
 

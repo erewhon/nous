@@ -1,3 +1,3 @@
 mod client;
 
-pub use client::{PutResponse, ResourceInfo, WebDAVClient, WebDAVError};
+pub use client::{HeadResponse, PutResponse, ResourceInfo, WebDAVClient, WebDAVError};
