@@ -12,9 +12,11 @@ use crate::library::LibraryStorage;
 use crate::storage::Page;
 use crate::storage::FileStorage;
 
+use crate::storage::{Notebook, NotebookType};
+
 use super::config::{
-    Changelog, ChangeOperation, LibrarySyncConfig, LibrarySyncConfigInput, SyncConfig,
-    SyncConfigInput, SyncCredentials, SyncManifest, SyncState, SyncStatus, SyncResult,
+    Changelog, ChangeOperation, LibrarySyncConfig, LibrarySyncConfigInput, NotebookMeta,
+    SyncConfig, SyncConfigInput, SyncCredentials, SyncManifest, SyncState, SyncStatus, SyncResult,
 };
 use super::crdt::PageDocument;
 use super::metadata::LocalSyncState;
@@ -609,6 +611,17 @@ impl SyncManager {
             }
         }
 
+        // Push notebook metadata for remote discovery
+        {
+            let notebook = {
+                let storage_guard = storage.lock().unwrap();
+                storage_guard.get_notebook(notebook_id)?
+            };
+            if let Err(e) = self.push_notebook_meta(&client, &config.remote_path, &notebook).await {
+                log::warn!("Sync: failed to push notebook-meta.json: {}", e);
+            }
+        }
+
         // 8. Update changelog with synced pages
         for (page_id, result) in &synced_page_ids {
             match result {
@@ -753,6 +766,32 @@ impl SyncManager {
         let data = serde_json::to_vec_pretty(changelog)?;
         client.put(&changelog_path, &data, None).await?;
         Ok(())
+    }
+
+    /// Push notebook metadata to remote for discovery by other clients
+    async fn push_notebook_meta(
+        &self,
+        client: &WebDAVClient,
+        remote_path: &str,
+        notebook: &Notebook,
+    ) -> Result<(), SyncError> {
+        let meta = NotebookMeta::from(notebook);
+        let meta_path = format!("{}/notebook-meta.json", remote_path);
+        let data = serde_json::to_vec_pretty(&meta)?;
+        client.put(&meta_path, &data, None).await?;
+        Ok(())
+    }
+
+    /// Fetch notebook metadata from remote (for discovery)
+    async fn fetch_notebook_meta(
+        &self,
+        client: &WebDAVClient,
+        remote_path: &str,
+    ) -> Result<NotebookMeta, SyncError> {
+        let meta_path = format!("{}/notebook-meta.json", remote_path);
+        let data = client.get(&meta_path).await?;
+        let meta: NotebookMeta = serde_json::from_slice(&data)?;
+        Ok(meta)
     }
 
     /// Sync a single page
@@ -1472,6 +1511,146 @@ impl SyncManager {
         Ok(())
     }
 
+    /// Discover notebooks that exist on the remote but not locally.
+    ///
+    /// PROPFINDs `remote_base_path` with depth=1, filters to UUID-named
+    /// collection entries, and creates local notebooks for any that don't
+    /// exist locally.
+    async fn discover_remote_notebooks(
+        &self,
+        library_id: Uuid,
+        library_config: &LibrarySyncConfig,
+        storage: &SharedStorage,
+    ) -> Result<Vec<Uuid>, SyncError> {
+        let creds = self.get_library_credentials(library_id)?;
+        let client = WebDAVClient::new(library_config.server_url.clone(), creds)?;
+
+        // PROPFIND base path with depth=1 to list child directories
+        let entries = match client.propfind(&library_config.remote_base_path, 1).await {
+            Ok(entries) => entries,
+            Err(e) => {
+                log::warn!(
+                    "discover_remote_notebooks: PROPFIND on '{}' failed: {}. Proceeding with local-only sync.",
+                    library_config.remote_base_path,
+                    e,
+                );
+                return Ok(Vec::new());
+            }
+        };
+
+        // Collect UUIDs from collection entries
+        let remote_notebook_ids: Vec<Uuid> = entries
+            .iter()
+            .filter(|e| e.is_collection)
+            .filter_map(|e| {
+                // Extract the last path component (directory name)
+                let path = e.path.trim_end_matches('/');
+                let name = path.rsplit('/').next()?;
+                Uuid::parse_str(name).ok()
+            })
+            .collect();
+
+        // Get local notebook IDs
+        let local_notebook_ids: std::collections::HashSet<Uuid> = {
+            let storage_guard = storage.lock().unwrap();
+            storage_guard
+                .list_notebooks()
+                .unwrap_or_default()
+                .iter()
+                .map(|n| n.id)
+                .collect()
+        };
+
+        let mut created = Vec::new();
+
+        for notebook_id in remote_notebook_ids {
+            if local_notebook_ids.contains(&notebook_id) {
+                continue;
+            }
+
+            log::info!(
+                "discover_remote_notebooks: found remote-only notebook {}",
+                notebook_id,
+            );
+
+            // Try to fetch notebook-meta.json for name/type/etc
+            let remote_path = format!("{}/{}", library_config.remote_base_path, notebook_id);
+            let creds = self.get_library_credentials(library_id)?;
+            let nb_client = WebDAVClient::new(library_config.server_url.clone(), creds)?;
+
+            let (name, notebook_type, meta) = match self.fetch_notebook_meta(&nb_client, &remote_path).await {
+                Ok(meta) => (meta.name.clone(), meta.notebook_type.clone(), Some(meta)),
+                Err(e) => {
+                    log::info!(
+                        "discover_remote_notebooks: no notebook-meta.json for {}: {}. Using defaults.",
+                        notebook_id,
+                        e,
+                    );
+                    let short_id = &notebook_id.to_string()[..8];
+                    (
+                        format!("Synced Notebook {}", short_id),
+                        NotebookType::default(),
+                        None,
+                    )
+                }
+            };
+
+            // Build a Notebook struct with the remote UUID
+            let now = Utc::now();
+            let mut notebook = Notebook::new(name, notebook_type);
+            notebook.id = notebook_id;
+            notebook.created_at = now;
+            notebook.updated_at = now;
+
+            // Apply metadata fields if available
+            if let Some(meta) = meta {
+                notebook.icon = meta.icon;
+                notebook.color = meta.color;
+                notebook.sections_enabled = meta.sections_enabled;
+                notebook.archived = meta.archived;
+                notebook.system_prompt = meta.system_prompt;
+                notebook.system_prompt_mode = meta.system_prompt_mode;
+                notebook.ai_provider = meta.ai_provider;
+                notebook.ai_model = meta.ai_model;
+            }
+
+            // Create local notebook with the remote's UUID
+            {
+                let storage_guard = storage.lock().unwrap();
+                if let Err(e) = storage_guard.create_notebook_with_id(&notebook) {
+                    log::error!(
+                        "discover_remote_notebooks: failed to create notebook {}: {}",
+                        notebook_id,
+                        e,
+                    );
+                    continue;
+                }
+            }
+
+            // Apply library sync config to the new notebook
+            if let Err(e) = self
+                .apply_library_sync_to_notebook(library_id, notebook_id, library_config, storage)
+                .await
+            {
+                log::error!(
+                    "discover_remote_notebooks: failed to apply sync config to {}: {}",
+                    notebook_id,
+                    e,
+                );
+                continue;
+            }
+
+            log::info!(
+                "discover_remote_notebooks: created local notebook '{}' ({})",
+                notebook.name,
+                notebook_id,
+            );
+            created.push(notebook_id);
+        }
+
+        Ok(created)
+    }
+
     /// Sync all notebooks in a library
     pub async fn sync_library(
         &self,
@@ -1482,7 +1661,7 @@ impl SyncManager {
     ) -> Result<SyncResult, SyncError> {
         let start = std::time::Instant::now();
 
-        // Get library sync config (needed for auto-apply)
+        // Get library sync config (needed for auto-apply and discovery)
         let library_config = {
             let lib_storage = library_storage.lock().unwrap();
             lib_storage
@@ -1491,6 +1670,26 @@ impl SyncManager {
                 .and_then(|lib| lib.sync_config)
         };
 
+        // Discover remote-only notebooks before iterating local ones
+        if let Some(ref lib_config) = library_config {
+            match self
+                .discover_remote_notebooks(library_id, lib_config, storage)
+                .await
+            {
+                Ok(created) if !created.is_empty() => {
+                    log::info!(
+                        "Library sync: discovered {} remote notebooks",
+                        created.len(),
+                    );
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    log::warn!("Library sync: remote notebook discovery failed: {}", e);
+                }
+            }
+        }
+
+        // Re-read notebook list (includes any newly discovered notebooks)
         let notebooks = {
             let storage_guard = storage.lock().unwrap();
             storage_guard.list_notebooks().unwrap_or_default()

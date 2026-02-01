@@ -9,8 +9,8 @@ mod manager;
 
 pub use config::{
     AuthType, Changelog, ChangelogEntry, ChangeOperation, LibrarySyncConfig,
-    LibrarySyncConfigInput, PageSyncState, SyncConfig, SyncConfigInput, SyncCredentials,
-    SyncManifest, SyncMode, SyncResult, SyncState, SyncStatus,
+    LibrarySyncConfigInput, NotebookMeta, PageSyncState, SyncConfig, SyncConfigInput,
+    SyncCredentials, SyncManifest, SyncMode, SyncResult, SyncState, SyncStatus,
 };
 pub use crdt::{CRDTError, PageDocument};
 pub use manager::SyncManager;
