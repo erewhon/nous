@@ -580,7 +580,7 @@ export function LibrarySettingsPanel() {
                       onChange={async (e) => {
                         const newMode = e.target.value as SyncMode;
                         const interval = newMode === "periodic"
-                          ? (currentLibrary.syncConfig.syncInterval || 900)
+                          ? (currentLibrary.syncConfig?.syncInterval || 900)
                           : undefined;
                         try {
                           await api.librarySyncUpdateConfig(currentLibrary.id, newMode, interval);
