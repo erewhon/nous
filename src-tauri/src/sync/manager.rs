@@ -12,10 +12,10 @@ use crate::library::LibraryStorage;
 use crate::storage::Page;
 use crate::storage::FileStorage;
 
-use crate::storage::{Notebook, NotebookType};
+use crate::storage::{Folder, Notebook, NotebookType, Section};
 
 use super::config::{
-    Changelog, ChangeOperation, LibrarySyncConfig, LibrarySyncConfigInput, NotebookMeta,
+    Changelog, ChangeOperation, LibrarySyncConfig, LibrarySyncConfigInput, NotebookMeta, PageMeta,
     SyncConfig, SyncConfigInput, SyncCredentials, SyncManifest, SyncState, SyncStatus, SyncResult,
 };
 use super::crdt::PageDocument;
@@ -482,6 +482,16 @@ impl SyncManager {
             changelog.next_seq,
         );
 
+        // 3b. Fetch remote pages-meta.json for page metadata
+        let remote_pages_meta = self
+            .fetch_pages_meta(&client, &config.remote_path)
+            .await
+            .unwrap_or_else(|e| {
+                log::debug!("Sync: no remote pages-meta.json: {}", e);
+                HashMap::new()
+            });
+        log::info!("Sync: remote pages-meta has {} entries", remote_pages_meta.len());
+
         // 4. Determine remote_changed_pages
         let remote_changed_pages: std::collections::HashSet<Uuid> = if local_state.last_changelog_seq > 0
             && !changelog.entries.is_empty()
@@ -627,6 +637,23 @@ impl SyncManager {
             }
         }
 
+        // 6c. Apply page metadata to all pulled pages
+        let pulled_ids: Vec<Uuid> = synced_page_ids
+            .iter()
+            .filter(|(_, r)| matches!(r, PageSyncResult::Pulled))
+            .map(|(id, _)| *id)
+            .collect();
+        if !pulled_ids.is_empty() {
+            self.apply_pages_meta(storage, notebook_id, &remote_pages_meta, &pulled_ids);
+        }
+
+        // 6d. Pull folders and sections structure from remote
+        if !pulled_ids.is_empty() {
+            if let Err(e) = self.pull_structure(&client, &config.remote_path, storage, notebook_id).await {
+                log::warn!("Sync: failed to pull structure: {}", e);
+            }
+        }
+
         // 7. Update manifest with synced pages
         for (page_id, result) in &synced_page_ids {
             match result {
@@ -669,6 +696,11 @@ impl SyncManager {
             if let Err(e) = self.push_notebook_meta(&client, &config.remote_path, &notebook).await {
                 log::warn!("Sync: failed to push notebook-meta.json: {}", e);
             }
+        }
+
+        // Push structural metadata (pages-meta.json, folders.json, sections.json)
+        if let Err(e) = self.push_structure(&client, &config.remote_path, storage, notebook_id).await {
+            log::warn!("Sync: failed to push structural metadata: {}", e);
         }
 
         // 8. Update changelog with synced pages
@@ -841,6 +873,163 @@ impl SyncManager {
         let data = client.get(&meta_path).await?;
         let meta: NotebookMeta = serde_json::from_slice(&data)?;
         Ok(meta)
+    }
+
+    /// Push structural metadata to remote: pages-meta.json, folders.json, sections.json
+    async fn push_structure(
+        &self,
+        client: &WebDAVClient,
+        remote_path: &str,
+        storage: &SharedStorage,
+        notebook_id: Uuid,
+    ) -> Result<(), SyncError> {
+        let (pages, folders, sections) = {
+            let storage_guard = storage.lock().unwrap();
+            let pages = storage_guard.list_pages(notebook_id)?;
+            let folders = storage_guard.list_folders(notebook_id)?;
+            let sections = storage_guard.list_sections(notebook_id)?;
+            (pages, folders, sections)
+        };
+
+        // Build pages-meta.json: page_id -> PageMeta for every page
+        let pages_meta: HashMap<Uuid, PageMeta> = pages
+            .iter()
+            .map(|p| (p.id, PageMeta::from(p)))
+            .collect();
+
+        let meta_path = format!("{}/pages-meta.json", remote_path);
+        let data = serde_json::to_vec_pretty(&pages_meta)?;
+        client.put(&meta_path, &data, None).await?;
+        log::info!("Sync: pushed pages-meta.json with {} entries", pages_meta.len());
+
+        // Push folders.json
+        let folders_path = format!("{}/folders.json", remote_path);
+        let data = serde_json::to_vec_pretty(&folders)?;
+        client.put(&folders_path, &data, None).await?;
+        log::info!("Sync: pushed folders.json with {} folders", folders.len());
+
+        // Push sections.json
+        let sections_path = format!("{}/sections.json", remote_path);
+        let data = serde_json::to_vec_pretty(&sections)?;
+        client.put(&sections_path, &data, None).await?;
+        log::info!("Sync: pushed sections.json with {} sections", sections.len());
+
+        Ok(())
+    }
+
+    /// Fetch pages-meta.json from remote (page_id -> PageMeta map)
+    async fn fetch_pages_meta(
+        &self,
+        client: &WebDAVClient,
+        remote_path: &str,
+    ) -> Result<HashMap<Uuid, PageMeta>, SyncError> {
+        let meta_path = format!("{}/pages-meta.json", remote_path);
+        let data = client.get(&meta_path).await?;
+        let meta: HashMap<Uuid, PageMeta> = serde_json::from_slice(&data)?;
+        Ok(meta)
+    }
+
+    /// Fetch and apply remote folders.json and sections.json to local storage
+    async fn pull_structure(
+        &self,
+        client: &WebDAVClient,
+        remote_path: &str,
+        storage: &SharedStorage,
+        notebook_id: Uuid,
+    ) -> Result<(), SyncError> {
+        // Pull folders
+        let folders_remote_path = format!("{}/folders.json", remote_path);
+        match client.get(&folders_remote_path).await {
+            Ok(data) => {
+                match serde_json::from_slice::<Vec<Folder>>(&data) {
+                    Ok(folders) => {
+                        log::info!("Sync: pulled {} folders from remote", folders.len());
+                        let storage_guard = storage.lock().unwrap();
+                        let local_folders = storage_guard.list_folders(notebook_id)?;
+                        // If local has no folders, write remote folders directly
+                        if local_folders.is_empty() && !folders.is_empty() {
+                            storage_guard.save_folders_for_sync(notebook_id, &folders)?;
+                        }
+                    }
+                    Err(e) => log::warn!("Sync: failed to parse remote folders.json: {}", e),
+                }
+            }
+            Err(e) => log::debug!("Sync: no remote folders.json: {}", e),
+        }
+
+        // Pull sections
+        let sections_remote_path = format!("{}/sections.json", remote_path);
+        match client.get(&sections_remote_path).await {
+            Ok(data) => {
+                match serde_json::from_slice::<Vec<Section>>(&data) {
+                    Ok(sections) => {
+                        log::info!("Sync: pulled {} sections from remote", sections.len());
+                        let storage_guard = storage.lock().unwrap();
+                        let local_sections = storage_guard.list_sections(notebook_id)?;
+                        // If local has no sections, write remote sections directly
+                        if local_sections.is_empty() && !sections.is_empty() {
+                            storage_guard.save_sections_for_sync(notebook_id, &sections)?;
+                        }
+                    }
+                    Err(e) => log::warn!("Sync: failed to parse remote sections.json: {}", e),
+                }
+            }
+            Err(e) => log::debug!("Sync: no remote sections.json: {}", e),
+        }
+
+        Ok(())
+    }
+
+    /// Apply page metadata from remote pages-meta.json to locally-pulled pages
+    fn apply_pages_meta(
+        &self,
+        storage: &SharedStorage,
+        notebook_id: Uuid,
+        pages_meta: &HashMap<Uuid, PageMeta>,
+        pulled_page_ids: &[Uuid],
+    ) {
+        if pages_meta.is_empty() || pulled_page_ids.is_empty() {
+            return;
+        }
+        let storage_guard = storage.lock().unwrap();
+        for page_id in pulled_page_ids {
+            if let Some(meta) = pages_meta.get(page_id) {
+                match storage_guard.get_page(notebook_id, *page_id) {
+                    Ok(mut page) => {
+                        page.title = meta.title.clone();
+                        page.tags = meta.tags.clone();
+                        page.folder_id = meta.folder_id;
+                        page.parent_page_id = meta.parent_page_id;
+                        page.section_id = meta.section_id;
+                        page.position = meta.position;
+                        page.is_archived = meta.is_archived;
+                        page.is_cover = meta.is_cover;
+                        page.is_favorite = meta.is_favorite;
+                        page.page_type = meta.page_type.clone();
+                        page.source_file = meta.source_file.clone();
+                        page.storage_mode = meta.storage_mode.clone();
+                        page.file_extension = meta.file_extension.clone();
+                        page.deleted_at = meta.deleted_at;
+                        page.system_prompt = meta.system_prompt.clone();
+                        page.system_prompt_mode = meta.system_prompt_mode.clone();
+                        page.ai_model = meta.ai_model.clone();
+                        page.created_at = meta.created_at;
+                        page.updated_at = meta.updated_at;
+                        if let Err(e) = storage_guard.update_page(&page) {
+                            log::warn!("Sync: failed to apply metadata to page {}: {}", page_id, e);
+                        }
+                    }
+                    Err(e) => {
+                        log::warn!("Sync: failed to read page {} for metadata apply: {}", page_id, e);
+                    }
+                }
+            }
+        }
+        log::info!(
+            "Sync: applied metadata to {} of {} pulled pages",
+            pulled_page_ids.iter().filter(|id| pages_meta.contains_key(id)).count(),
+            pulled_page_ids.len(),
+        );
     }
 
     /// Sync a single page
