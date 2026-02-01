@@ -756,6 +756,11 @@ impl FileStorage {
         Ok(())
     }
 
+    /// Replace all folders for a notebook from sync data
+    pub fn save_folders_for_sync(&self, notebook_id: Uuid, folders: &[Folder]) -> Result<()> {
+        self.save_folders(notebook_id, folders)
+    }
+
     /// Create a new folder in a notebook
     pub fn create_folder(
         &self,
@@ -908,6 +913,11 @@ impl FileStorage {
         let content = serde_json::to_string_pretty(sections)?;
         fs::write(&sections_path, content)?;
         Ok(())
+    }
+
+    /// Replace all sections for a notebook from sync data
+    pub fn save_sections_for_sync(&self, notebook_id: Uuid, sections: &[Section]) -> Result<()> {
+        self.save_sections(notebook_id, sections)
     }
 
     /// Create a new section in a notebook

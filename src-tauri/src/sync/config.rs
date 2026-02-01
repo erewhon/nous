@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::storage::{Notebook, NotebookType, SystemPromptMode};
+use crate::storage::{FileStorageMode, Notebook, NotebookType, Page, PageType, SystemPromptMode};
 
 /// Sync configuration for a notebook
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -402,6 +402,77 @@ impl From<&Notebook> for NotebookMeta {
             ai_provider: notebook.ai_provider.clone(),
             ai_model: notebook.ai_model.clone(),
             updated_at: notebook.updated_at,
+        }
+    }
+}
+
+/// Lightweight page metadata for syncing non-CRDT page fields.
+///
+/// The CRDT carries only the Editor.js block content. Everything else
+/// (title, folder_id, section_id, position, tags, etc.) is synced via
+/// a `pages-meta.json` file stored alongside the CRDT files on the remote.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PageMeta {
+    pub title: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub folder_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub parent_page_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub section_id: Option<Uuid>,
+    #[serde(default)]
+    pub position: i32,
+    #[serde(default)]
+    pub is_archived: bool,
+    #[serde(default)]
+    pub is_cover: bool,
+    #[serde(default)]
+    pub is_favorite: bool,
+    #[serde(default)]
+    pub page_type: PageType,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub source_file: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub storage_mode: Option<FileStorageMode>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub file_extension: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub deleted_at: Option<DateTime<Utc>>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub system_prompt: Option<String>,
+    #[serde(default)]
+    pub system_prompt_mode: SystemPromptMode,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub ai_model: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl From<&Page> for PageMeta {
+    fn from(page: &Page) -> Self {
+        Self {
+            title: page.title.clone(),
+            tags: page.tags.clone(),
+            folder_id: page.folder_id,
+            parent_page_id: page.parent_page_id,
+            section_id: page.section_id,
+            position: page.position,
+            is_archived: page.is_archived,
+            is_cover: page.is_cover,
+            is_favorite: page.is_favorite,
+            page_type: page.page_type.clone(),
+            source_file: page.source_file.clone(),
+            storage_mode: page.storage_mode.clone(),
+            file_extension: page.file_extension.clone(),
+            deleted_at: page.deleted_at,
+            system_prompt: page.system_prompt.clone(),
+            system_prompt_mode: page.system_prompt_mode.clone(),
+            ai_model: page.ai_model.clone(),
+            created_at: page.created_at,
+            updated_at: page.updated_at,
         }
     }
 }
