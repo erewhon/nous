@@ -32,6 +32,7 @@ from nous_ai.embeddings import (
     get_embedding_models,
 )
 from nous_ai.inbox import classify_inbox_item, classify_inbox_item_sync
+from nous_ai.organize import suggest_organization, suggest_organization_sync
 from nous_ai.models import (
     ChatMessage,
     ChatResponse,
@@ -63,6 +64,9 @@ __all__ = [
     # Inbox classification
     "classify_inbox_item",
     "classify_inbox_item_sync",
+    # Smart organize
+    "suggest_organization",
+    "suggest_organization_sync",
     # Document conversion
     "convert_document",
     "convert_document_sync",

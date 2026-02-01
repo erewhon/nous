@@ -1453,6 +1453,127 @@ impl PythonAI {
         })
     }
 
+    // ===== Smart Organize =====
+
+    /// Suggest which notebook pages should be organized into using AI
+    pub fn smart_organize(
+        &self,
+        pages: &[serde_json::Value],
+        destinations: &[serde_json::Value],
+    ) -> Result<Vec<serde_json::Value>> {
+        Python::attach(|py| {
+            self.setup_python_path(py)?;
+
+            let organize_module = py.import("nous_ai.organize")?;
+            let suggest_fn = organize_module.getattr("suggest_organization_sync")?;
+
+            // Convert pages to Python list of dicts
+            let py_pages = PyList::empty(py);
+            for page in pages {
+                let dict = PyDict::new(py);
+                if let Some(id) = page.get("id").and_then(|v| v.as_str()) {
+                    dict.set_item("id", id)?;
+                }
+                if let Some(title) = page.get("title").and_then(|v| v.as_str()) {
+                    dict.set_item("title", title)?;
+                }
+                if let Some(content_summary) = page.get("content_summary").and_then(|v| v.as_str()) {
+                    dict.set_item("content_summary", content_summary)?;
+                }
+                if let Some(tags) = page.get("tags").and_then(|v| v.as_array()) {
+                    let py_tags: Vec<String> = tags
+                        .iter()
+                        .filter_map(|t| t.as_str().map(|s| s.to_string()))
+                        .collect();
+                    dict.set_item("tags", py_tags)?;
+                }
+                py_pages.append(dict)?;
+            }
+
+            // Convert destinations to Python list of dicts
+            let py_destinations = PyList::empty(py);
+            for dest in destinations {
+                let dict = PyDict::new(py);
+                if let Some(id) = dest.get("id").and_then(|v| v.as_str()) {
+                    dict.set_item("id", id)?;
+                }
+                if let Some(name) = dest.get("name").and_then(|v| v.as_str()) {
+                    dict.set_item("name", name)?;
+                }
+                if let Some(sample_titles) = dest.get("sample_page_titles").and_then(|v| v.as_array()) {
+                    let titles: Vec<String> = sample_titles
+                        .iter()
+                        .filter_map(|t| t.as_str().map(|s| s.to_string()))
+                        .collect();
+                    dict.set_item("sample_page_titles", titles)?;
+                }
+                py_destinations.append(dict)?;
+            }
+
+            let kwargs = PyDict::new(py);
+            kwargs.set_item("pages", py_pages)?;
+            kwargs.set_item("destinations", py_destinations)?;
+
+            let result = suggest_fn.call((), Some(&kwargs))?;
+            let result_list: Vec<HashMap<String, Py<PyAny>>> = result.extract()?;
+
+            // Convert Python dicts back to serde_json::Value
+            let mut suggestions = Vec::new();
+            for item in result_list {
+                let page_id = item
+                    .get("page_id")
+                    .and_then(|v| v.extract::<String>(py).ok())
+                    .unwrap_or_default();
+
+                let suggested_notebook_id = item
+                    .get("suggested_notebook_id")
+                    .and_then(|v| {
+                        // Handle Python None -> null
+                        if v.is_none(py) {
+                            None
+                        } else {
+                            v.extract::<String>(py).ok()
+                        }
+                    });
+
+                let confidence = item
+                    .get("confidence")
+                    .and_then(|v| v.extract::<f64>(py).ok())
+                    .unwrap_or(0.0);
+
+                let reasoning = item
+                    .get("reasoning")
+                    .and_then(|v| v.extract::<String>(py).ok())
+                    .unwrap_or_default();
+
+                let mut suggestion = serde_json::Map::new();
+                suggestion.insert("page_id".to_string(), serde_json::Value::String(page_id));
+                match suggested_notebook_id {
+                    Some(id) => suggestion.insert(
+                        "suggested_notebook_id".to_string(),
+                        serde_json::Value::String(id),
+                    ),
+                    None => suggestion.insert(
+                        "suggested_notebook_id".to_string(),
+                        serde_json::Value::Null,
+                    ),
+                };
+                suggestion.insert(
+                    "confidence".to_string(),
+                    serde_json::json!(confidence),
+                );
+                suggestion.insert(
+                    "reasoning".to_string(),
+                    serde_json::Value::String(reasoning),
+                );
+
+                suggestions.push(serde_json::Value::Object(suggestion));
+            }
+
+            Ok(suggestions)
+        })
+    }
+
     // ===== Document Conversion (markitdown) =====
 
     /// Convert a document to Markdown using markitdown

@@ -14,6 +14,11 @@ import type {
   QueueItem,
   LibrarySyncConfigInput,
 } from "../types/sync";
+import type {
+  OrganizeSuggestion,
+  OrganizeMove,
+  OrganizeApplyResult,
+} from "../types/organize";
 
 // ===== Notebook API =====
 
@@ -2203,5 +2208,29 @@ export async function listTtsVoices(
     provider,
     apiKey,
     baseUrl,
+  });
+}
+
+// ===== Smart Organize =====
+
+export async function smartOrganizeSuggest(
+  sourceNotebookId: string,
+  pageIds: string[],
+  destinationNotebookIds: string[]
+): Promise<OrganizeSuggestion[]> {
+  return invoke<OrganizeSuggestion[]>("smart_organize_suggest", {
+    sourceNotebookId,
+    pageIds,
+    destinationNotebookIds,
+  });
+}
+
+export async function smartOrganizeApply(
+  sourceNotebookId: string,
+  moves: OrganizeMove[]
+): Promise<OrganizeApplyResult> {
+  return invoke<OrganizeApplyResult>("smart_organize_apply", {
+    sourceNotebookId,
+    moves,
   });
 }

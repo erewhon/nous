@@ -522,6 +522,96 @@ Already implemented with Tantivy, may need refinement:
 
 ---
 
+## iPhone Contact Activity Integration
+
+### 32. Contact Activity Harvester (macOS)
+
+Read iMessage and call history directly from macOS system SQLite databases. The macOS instance harvests data periodically; it syncs to the Linux instance via existing WebDAV/Git infrastructure.
+
+**Approach:** macOS stores iMessage and call history in well-known SQLite databases that can be read directly (no Apple APIs needed, but Full Disk Access permission is required).
+
+**Source databases (macOS):**
+| Database | Path | Contents |
+|----------|------|----------|
+| iMessage/SMS | `~/Library/Messages/chat.db` | All messages, attachments metadata, read receipts |
+| Call History | `~/Library/Application Support/CallHistoryDB/CallHistory.storedata` | Phone + FaceTime calls via Continuity |
+| Contacts | `~/Library/Application Support/AddressBook/AddressBook-v22.abcddb` | Names, phone numbers, emails |
+
+**Implementation phases:**
+
+#### Phase 1: Backend Harvester (Rust, macOS-only)
+- [ ] New module: `src-tauri/src/contacts/`
+  - `harvester.rs` — macOS-only (`#[cfg(target_os = "macos")]`) SQLite reader
+  - `models.rs` — Contact, ContactActivity, ActivityType definitions
+  - `storage.rs` — File-based persistence in library data directory
+  - `mod.rs` — Public API + Tauri commands
+- [ ] Read `chat.db`: query `message` + `handle` + `chat_handle_join` tables
+  - Extract: sender/recipient phone/email, timestamp, text preview (first 100 chars), direction (sent/received)
+  - Resolve handles to contact names via AddressBook DB or handle.id
+  - Normalize phone numbers for matching (strip +1, spaces, dashes)
+- [ ] Read `CallHistory.storedata`: query `ZCALLRECORD` table
+  - Extract: phone number, timestamp, duration, call type (incoming/outgoing/missed), was_answered
+- [ ] Read `AddressBook-v22.abcddb`: query `ZABCDRECORD` + `ZABCDPHONENUMBER` + `ZABCDEMAILADDRESS`
+  - Build local contact directory: name, phone numbers, email addresses
+  - Used to resolve phone numbers/emails in messages and calls to named contacts
+- [ ] Data model:
+  ```
+  Contact { id, name, phone_numbers, emails, tags, notes, last_contacted, created_at }
+  ContactActivity { id, contact_id, activity_type, direction, timestamp, preview, duration_seconds }
+  ActivityType: Message | Call | FaceTimeAudio | FaceTimeVideo | MissedCall
+  ```
+- [ ] Storage: `{library}/contacts/contacts.json` + `{library}/contacts/activity.json`
+  - Append-only activity log with dedup by (contact_id, activity_type, timestamp)
+  - Incremental harvesting: track `last_harvest_timestamp` to only read new rows
+
+#### Phase 2: Polling Scheduler
+- [ ] Reuse existing scheduler pattern (`tokio::time::Interval` + `mpsc` channel)
+  - Configurable poll interval (default: 15 minutes)
+  - Only runs on macOS (no-op on Linux/Windows)
+  - Started at app launch, respects enable/disable toggle
+- [ ] Incremental updates: each poll reads only rows newer than `last_harvest_timestamp`
+- [ ] Settings UI: enable/disable harvester, configure poll interval
+- [ ] TCC permission guidance: prompt user to grant Full Disk Access if `chat.db` read fails with permission error
+
+#### Phase 3: Frontend — People Panel
+- [ ] New store: `src/stores/contactStore.ts` (Zustand)
+  - CRUD for contacts + activity feed
+  - Tauri command bindings for fetching data
+- [ ] Types: `src/types/contact.ts` matching Rust models
+- [ ] People panel (sidebar or dedicated view):
+  - Contact list sorted by `last_contacted` (most recent first)
+  - Per-contact detail view: activity timeline (messages, calls)
+  - "Last contacted" badge (e.g., "3 days ago", "2 weeks ago")
+  - Filter: all / messages only / calls only
+  - Search contacts by name
+- [ ] Contact quick-view: click contact → see recent activity timeline
+  - Message entries: direction arrow, preview text, timestamp
+  - Call entries: incoming/outgoing/missed icon, duration, timestamp
+- [ ] Link contacts to notebook pages (optional): associate a contact with a page for meeting notes, etc.
+
+#### Phase 4: Sync to Linux
+- [ ] Contact and activity data syncs via existing WebDAV/Git sync
+  - `contacts.json` and `activity.json` are regular library files — sync works automatically
+  - On Linux, the frontend reads synced data (read-only, harvester doesn't run)
+  - CRDT merge for contacts (name edits, tags, notes); activity log is append-only (timestamp-ordered, minimal conflicts)
+- [ ] Conflict strategy: contacts use last-write-wins on fields; activities deduplicate by (contact_id, type, timestamp)
+
+#### Future Extensions
+- [ ] AI-powered insights: "You haven't contacted [person] in 30 days" nudges
+- [ ] Link contact activity to journal/daily notes pages automatically
+- [ ] Group contacts by tags (family, work, friends) with per-group views
+- [ ] Apple Notes import integration (contact mentions in notes)
+- [ ] Optional: WhatsApp/Signal message harvesting (separate databases, different formats)
+
+**Privacy & permissions:**
+- Full Disk Access required on macOS (user must grant in System Settings > Privacy)
+- All data stays local — no cloud services involved beyond user's own sync
+- Message previews are truncated (100 chars) — full message text is not stored
+- Feature is opt-in (disabled by default, enabled in Settings)
+- No message content is sent to AI unless user explicitly requests analysis
+
+---
+
 ## Technical Debt & Polish
 
 - [ ] Move video storage from `/tmp/nous-videos` to main data directory

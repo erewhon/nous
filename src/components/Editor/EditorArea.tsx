@@ -18,6 +18,7 @@ import { VideoFullScreen } from "../Video";
 import { DrawingFullScreen, PageAnnotationOverlay } from "../Drawing";
 import { ResizeHandle } from "../Layout/ResizeHandle";
 import { MovePageDialog } from "../Move/MovePageDialog";
+import { SmartOrganizeDialog } from "../SmartOrganize/SmartOrganizeDialog";
 import type { EditorData, Page } from "../../types/page";
 import * as api from "../../utils/api";
 import { downloadTranscript } from "../../utils/videoApi";
@@ -118,6 +119,20 @@ export function EditorArea() {
   // Move page dialog state
   const [movePageDialogOpen, setMovePageDialogOpen] = useState(false);
   const [movePageTarget, setMovePageTarget] = useState<{ pageId: string; pageTitle: string } | null>(null);
+
+  // Smart Organize dialog state
+  const [smartOrganizeOpen, setSmartOrganizeOpen] = useState(false);
+  const [smartOrganizePageContext, setSmartOrganizePageContext] = useState<{ pageId?: string; pageTitle?: string } | null>(null);
+
+  // Listen for smart-organize-open event from Command Palette
+  useEffect(() => {
+    const handleSmartOrganizeOpen = () => {
+      setSmartOrganizePageContext(null);
+      setSmartOrganizeOpen(true);
+    };
+    window.addEventListener("smart-organize-open", handleSmartOrganizeOpen);
+    return () => window.removeEventListener("smart-organize-open", handleSmartOrganizeOpen);
+  }, []);
 
   const selectedNotebook = notebooks.find((n) => n.id === selectedNotebookId);
 
@@ -469,6 +484,10 @@ export function EditorArea() {
                     setMovePageTarget({ pageId, pageTitle });
                     setMovePageDialogOpen(true);
                   }}
+                  onSmartOrganize={(pageId, pageTitle) => {
+                    setSmartOrganizePageContext({ pageId, pageTitle });
+                    setSmartOrganizeOpen(true);
+                  }}
                 />
               </div>
             )}
@@ -531,6 +550,34 @@ export function EditorArea() {
           currentNotebookId={selectedNotebook.id}
           onMoved={() => {
             // Reload pages after moving
+            loadPages(selectedNotebook.id, showArchived);
+          }}
+        />
+      )}
+
+      {/* Smart Organize Dialog */}
+      {selectedNotebook && (
+        <SmartOrganizeDialog
+          isOpen={smartOrganizeOpen}
+          onClose={() => {
+            setSmartOrganizeOpen(false);
+            setSmartOrganizePageContext(null);
+          }}
+          currentNotebookId={selectedNotebook.id}
+          currentPageId={smartOrganizePageContext?.pageId}
+          currentPageTitle={smartOrganizePageContext?.pageTitle}
+          currentSectionId={selectedSectionId}
+          currentSectionName={sections.find((s) => s.id === selectedSectionId)?.name}
+          sectionsEnabled={selectedNotebook.sectionsEnabled}
+          allPageIds={notebookPages.filter((p) => !p.isArchived && !p.deletedAt).map((p) => p.id)}
+          sectionPageIds={
+            selectedSectionId
+              ? notebookPages
+                  .filter((p) => p.sectionId === selectedSectionId && !p.isArchived && !p.deletedAt)
+                  .map((p) => p.id)
+              : undefined
+          }
+          onCompleted={() => {
             loadPages(selectedNotebook.id, showArchived);
           }}
         />

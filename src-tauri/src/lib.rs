@@ -612,6 +612,9 @@ pub fn run() {
             commands::generate_page_audio,
             commands::get_tts_providers,
             commands::list_tts_voices,
+            // Smart organize commands
+            commands::smart_organize_suggest,
+            commands::smart_organize_apply,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -293,6 +293,22 @@ export function CommandPalette({
       keywords: ["actions", "automations", "workflows", "browse", "library"],
     });
 
+    // Smart Organize
+    if (selectedNotebookId) {
+      cmds.push({
+        id: "action-smart-organize",
+        title: "Smart Organize",
+        subtitle: "AI suggests where pages should go",
+        icon: <IconWand />,
+        category: "action",
+        action: () => {
+          onClose();
+          window.dispatchEvent(new CustomEvent("smart-organize-open"));
+        },
+        keywords: ["organize", "sort", "move", "ai", "classify", "smart"],
+      });
+    }
+
     // Add runnable actions (enabled actions with manual trigger)
     const runnableActions = actions.filter(
       (a) => a.enabled && a.triggers.some((t) => t.type === "manual")
@@ -1054,6 +1070,32 @@ function IconZap() {
       strokeLinejoin="round"
     >
       <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+    </svg>
+  );
+}
+
+function IconWand() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M15 4V2" />
+      <path d="M15 16v-2" />
+      <path d="M8 9h2" />
+      <path d="M20 9h2" />
+      <path d="M17.8 11.8 19 13" />
+      <path d="M15 9h.01" />
+      <path d="M17.8 6.2 19 5" />
+      <path d="m3 21 9-9" />
+      <path d="M12.2 6.2 11 5" />
     </svg>
   );
 }

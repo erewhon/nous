@@ -129,6 +129,8 @@ interface FolderTreeProps {
   onReorderPages?: (folderId: string | null, pageIds: string[]) => void;
   // Move page to notebook
   onMoveToNotebook?: (pageId: string, pageTitle: string) => void;
+  // Smart organize
+  onSmartOrganize?: (pageId: string, pageTitle: string) => void;
 }
 
 export function FolderTree({
@@ -148,6 +150,7 @@ export function FolderTree({
   onViewCover,
   onReorderPages,
   onMoveToNotebook,
+  onSmartOrganize,
 }: FolderTreeProps) {
   const { createPage, createSubpage, movePageToFolder, movePageToParent, loadPages, toggleFavorite } = usePageStore();
   const {
@@ -836,6 +839,7 @@ END:VCALENDAR`;
           onMoveToSection={onMovePageToSection}
           onMoveFolderToSection={onMoveFolderToSection}
           onMoveToNotebook={onMoveToNotebook}
+          onSmartOrganize={onSmartOrganize}
         />
       );
     },
@@ -863,6 +867,7 @@ END:VCALENDAR`;
       onMovePageToSection,
       onMoveFolderToSection,
       onMoveToNotebook,
+      onSmartOrganize,
     ]
   );
 
@@ -1367,6 +1372,7 @@ END:VCALENDAR`;
                   sections={sectionsEnabled ? sections : undefined}
                   onMoveToSection={onMovePageToSection}
                   onMoveToNotebook={onMoveToNotebook}
+                  onSmartOrganize={onSmartOrganize}
                   getChildPages={getChildPagesForParent}
                   expandedPageIds={expandedPageIds}
                   onTogglePageExpand={togglePageExpanded}
