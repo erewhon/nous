@@ -1,0 +1,204 @@
+@import "tailwindcss";
+
+/* CSS Custom Properties - needed for arbitrary value syntax like bg-[--color-name] */
+/* Default values are Catppuccin Mocha (dark) - overridden by themeStore.applyTheme() */
+:root {
+  /* Background colors */
+  --color-bg-primary: #1e1e2e;
+  --color-bg-secondary: #181825;
+  --color-bg-tertiary: #313244;
+  --color-bg-elevated: #45475a;
+  --color-bg-sidebar: #11111b;
+  --color-bg-panel: #1e1e2e;
+
+  /* Text colors */
+  --color-text-primary: #cdd6f4;
+  --color-text-secondary: #a6adc8;
+  --color-text-muted: #6c7086;
+
+  /* Accent colors - purple/indigo theme */
+  --color-accent: #8b5cf6;
+  --color-accent-hover: #a78bfa;
+  --color-accent-secondary: #7c3aed;
+  --color-accent-tertiary: #6d28d9;
+
+  /* Semantic colors */
+  --color-success: #a6e3a1;
+  --color-warning: #f9e2af;
+  --color-error: #f38ba8;
+  --color-info: #89b4fa;
+
+  /* Border colors */
+  --color-border: #313244;
+  --color-border-muted: #1e1e2e;
+
+  /* Selection/highlight */
+  --color-selection: rgba(139, 92, 246, 0.3);
+
+  /* Typography - set by themeStore */
+  --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-size-base: 16px;
+  --line-height-base: 1.6;
+
+  /* UI Scale - affects sidebar, titles, page lists, etc. */
+  --ui-scale: 1;
+  --ui-font-size-xs: 10px;
+  --ui-font-size-sm: 12px;
+  --ui-font-size-base: 14px;
+  --ui-font-size-lg: 16px;
+  --ui-font-size-xl: 18px;
+  --ui-font-size-2xl: 20px;
+  --ui-font-size-3xl: 24px;
+
+  /* Editor layout */
+  --editor-max-width: 768px;
+}
+
+/* Base styles - DON'T reset padding/margin as it overrides Tailwind */
+html,
+body,
+#root {
+  height: 100%;
+  font-family: var(--font-family);
+  background-color: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+/* UI Scale - Override Tailwind text size classes to use scaled values */
+/* These use !important to override Tailwind's utility classes */
+.text-xs {
+  font-size: var(--ui-font-size-xs) !important;
+}
+.text-sm {
+  font-size: var(--ui-font-size-sm) !important;
+}
+.text-base {
+  font-size: var(--ui-font-size-base) !important;
+}
+.text-lg {
+  font-size: var(--ui-font-size-lg) !important;
+}
+.text-xl {
+  font-size: var(--ui-font-size-xl) !important;
+}
+.text-2xl {
+  font-size: var(--ui-font-size-2xl) !important;
+}
+.text-3xl {
+  font-size: var(--ui-font-size-3xl) !important;
+}
+
+/* Remove default focus outlines and add custom ones */
+*:focus {
+  outline: none;
+}
+
+*:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Remove blue outline from Editor.js */
+.ce-block:focus,
+.ce-block--focused,
+.cdx-block:focus,
+[contenteditable]:focus {
+  outline: none !important;
+  box-shadow: none !important;
+  border-color: transparent !important;
+}
+
+.ce-toolbar__content,
+.ce-block__content {
+  max-width: none;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-bg-tertiary);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-bg-elevated);
+}
+
+/* Selection styling */
+::selection {
+  background: var(--color-selection);
+}
+
+/* Button base styles */
+button {
+  cursor: pointer;
+  border: none;
+  background: none;
+}
+
+/* Input base styles */
+input, textarea, select {
+  font-family: inherit;
+  font-size: inherit;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+}
+
+/* Select dropdown styling for dark mode */
+select {
+  color-scheme: dark light;
+}
+
+select option {
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  padding: 8px;
+}
+
+/* Force dark mode styling for select in dark themes */
+[data-theme="dark"] select,
+[data-theme="dark"] select option {
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
+/* Custom focus styles for form elements */
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  border-color: var(--color-accent) !important;
+  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.2) !important;
+}
+
+/* Toast animations */
+@keyframes slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.animate-slide-in {
+  animation: slide-in 0.3s ease-out forwards;
+}

@@ -1,0 +1,436 @@
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+use crate::encryption::EncryptionConfig;
+use crate::sync::config::SyncConfig;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum NotebookType {
+    Standard,
+    Zettelkasten,
+}
+
+impl Default for NotebookType {
+    fn default() -> Self {
+        Self::Standard
+    }
+}
+
+/// Type of folder - standard user folders or special system folders
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum FolderType {
+    Standard,
+    Archive,
+}
+
+impl Default for FolderType {
+    fn default() -> Self {
+        Self::Standard
+    }
+}
+
+/// Mode for how system prompts are applied
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum SystemPromptMode {
+    /// Override higher-level prompts (default behavior)
+    Override,
+    /// Concatenate with higher-level prompts
+    Concatenate,
+}
+
+impl Default for SystemPromptMode {
+    fn default() -> Self {
+        Self::Override
+    }
+}
+
+/// Type of page content - determines storage format and viewer/editor
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum PageType {
+    /// Standard Editor.js block-based content (default)
+    Standard,
+    /// Native markdown file (.md)
+    Markdown,
+    /// PDF document
+    Pdf,
+    /// Jupyter notebook (.ipynb)
+    Jupyter,
+    /// E-book (.epub)
+    Epub,
+    /// Calendar file (.ics)
+    Calendar,
+    /// AI Chat conversation page (.chat)
+    Chat,
+}
+
+impl Default for PageType {
+    fn default() -> Self {
+        Self::Standard
+    }
+}
+
+/// How a file-based page's content is stored
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum FileStorageMode {
+    /// File is copied into notebook assets directory
+    Embedded,
+    /// File remains at its original location (path stored as reference)
+    Linked,
+}
+
+/// A section within a notebook for grouping folders and pages (like OneNote)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Section {
+    pub id: Uuid,
+    pub notebook_id: Uuid,
+    pub name: String,
+    /// Description for the section
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Color for the section tab (CSS color string: hex, rgb, etc.)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    /// Custom AI system prompt for this section
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system_prompt: Option<String>,
+    /// How this prompt interacts with higher-level prompts
+    #[serde(default)]
+    pub system_prompt_mode: SystemPromptMode,
+    /// AI model override for this section (e.g., "gpt-4o", "claude-sonnet-4-20250514")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ai_model: Option<String>,
+    /// Position for ordering sections
+    #[serde(default)]
+    pub position: i32,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl Section {
+    pub fn new(notebook_id: Uuid, name: String) -> Self {
+        let now = Utc::now();
+        Self {
+            id: Uuid::new_v4(),
+            notebook_id,
+            name,
+            description: None,
+            color: None,
+            system_prompt: None,
+            system_prompt_mode: SystemPromptMode::default(),
+            ai_model: None,
+            position: 0,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+}
+
+/// A folder within a notebook for organizing pages
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Folder {
+    pub id: Uuid,
+    pub notebook_id: Uuid,
+    pub name: String,
+    /// Parent folder ID, None means root level
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<Uuid>,
+    /// Section this folder belongs to (None means root level when sections disabled)
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub section_id: Option<Uuid>,
+    /// Type of folder (standard or archive)
+    #[serde(default)]
+    pub folder_type: FolderType,
+    /// Color for the folder (CSS color string)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    /// Position for ordering within parent
+    #[serde(default)]
+    pub position: i32,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl Folder {
+    pub fn new(notebook_id: Uuid, name: String, parent_id: Option<Uuid>) -> Self {
+        let now = Utc::now();
+        Self {
+            id: Uuid::new_v4(),
+            notebook_id,
+            name,
+            parent_id,
+            section_id: None,
+            folder_type: FolderType::Standard,
+            color: None,
+            position: 0,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    pub fn new_archive(notebook_id: Uuid) -> Self {
+        let now = Utc::now();
+        Self {
+            id: Uuid::new_v4(),
+            notebook_id,
+            name: "Archive".to_string(),
+            parent_id: None,
+            section_id: None,
+            folder_type: FolderType::Archive,
+            color: None,
+            position: i32::MAX, // Always last
+            created_at: now,
+            updated_at: now,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Notebook {
+    pub id: Uuid,
+    pub name: String,
+    #[serde(rename = "type")]
+    pub notebook_type: NotebookType,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    /// Whether sections are enabled for this notebook
+    #[serde(default)]
+    pub sections_enabled: bool,
+    /// Whether this notebook is archived (hidden from default list)
+    #[serde(default)]
+    pub archived: bool,
+    /// Custom AI system prompt for this notebook (overrides app default)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system_prompt: Option<String>,
+    /// How this prompt interacts with higher-level prompts
+    #[serde(default)]
+    pub system_prompt_mode: SystemPromptMode,
+    /// AI provider override for this notebook (e.g., "openai", "anthropic", "ollama", "lmstudio")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ai_provider: Option<String>,
+    /// AI model override for this notebook (e.g., "gpt-4o", "claude-sonnet-4-20250514")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ai_model: Option<String>,
+    /// Sync configuration for this notebook
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sync_config: Option<SyncConfig>,
+    /// Encryption configuration for this notebook
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub encryption_config: Option<EncryptionConfig>,
+    /// Whether this notebook is pinned to the top
+    #[serde(default)]
+    pub is_pinned: bool,
+    /// Position for ordering notebooks
+    #[serde(default)]
+    pub position: i32,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl Notebook {
+    pub fn new(name: String, notebook_type: NotebookType) -> Self {
+        let now = Utc::now();
+        Self {
+            id: Uuid::new_v4(),
+            name,
+            notebook_type,
+            icon: None,
+            color: None,
+            sections_enabled: false,
+            archived: false,
+            system_prompt: None,
+            system_prompt_mode: SystemPromptMode::default(),
+            ai_provider: None,
+            ai_model: None,
+            sync_config: None,
+            encryption_config: None,
+            is_pinned: false,
+            position: 0,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    /// Check if this notebook is encrypted
+    pub fn is_encrypted(&self) -> bool {
+        self.encryption_config
+            .as_ref()
+            .map(|c| c.enabled)
+            .unwrap_or(false)
+    }
+
+    /// Get encryption password hint if available
+    pub fn encryption_hint(&self) -> Option<&str> {
+        self.encryption_config
+            .as_ref()
+            .and_then(|c| c.password_hint.as_deref())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct EditorBlock {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub block_type: String,
+    pub data: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EditorData {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub time: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    pub blocks: Vec<EditorBlock>,
+}
+
+impl Default for EditorData {
+    fn default() -> Self {
+        Self {
+            time: Some(Utc::now().timestamp_millis()),
+            version: Some("2.28.0".to_string()),
+            blocks: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Page {
+    pub id: Uuid,
+    pub notebook_id: Uuid,
+    pub title: String,
+    pub content: EditorData,
+    pub tags: Vec<String>,
+    /// Folder this page belongs to, None means root level
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub folder_id: Option<Uuid>,
+    /// Parent page for nested pages, None means root level or direct folder child
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub parent_page_id: Option<Uuid>,
+    /// Section this page belongs to (when not in a folder)
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub section_id: Option<Uuid>,
+    /// Whether this page is archived
+    #[serde(default)]
+    pub is_archived: bool,
+    /// Whether this is the cover page of the notebook
+    #[serde(default)]
+    pub is_cover: bool,
+    /// Position for ordering within folder or root
+    #[serde(default)]
+    pub position: i32,
+    /// Custom AI system prompt for this page (overrides notebook and app defaults)
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub system_prompt: Option<String>,
+    /// How this prompt interacts with higher-level prompts
+    #[serde(default)]
+    pub system_prompt_mode: SystemPromptMode,
+    /// AI model override for this page (e.g., "gpt-4o", "claude-sonnet-4-20250514")
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub ai_model: Option<String>,
+    /// Type of page content - determines storage format and viewer/editor
+    #[serde(default)]
+    pub page_type: PageType,
+    /// For non-standard pages: path to the actual content file (relative to notebook or absolute for linked)
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub source_file: Option<String>,
+    /// How the file is stored (embedded in assets or linked externally)
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub storage_mode: Option<FileStorageMode>,
+    /// Original file extension (e.g., "pdf", "md", "ipynb")
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub file_extension: Option<String>,
+    /// Last sync time for linked files (to detect external changes)
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub last_file_sync: Option<DateTime<Utc>>,
+    /// When the page was moved to trash (None = not deleted)
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub deleted_at: Option<DateTime<Utc>>,
+    /// Template this page was created from
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub template_id: Option<String>,
+    /// Whether this page is marked as a favorite
+    #[serde(default)]
+    pub is_favorite: bool,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl Page {
+    pub fn new(notebook_id: Uuid, title: String) -> Self {
+        let now = Utc::now();
+        Self {
+            id: Uuid::new_v4(),
+            notebook_id,
+            title,
+            content: EditorData::default(),
+            tags: Vec::new(),
+            folder_id: None,
+            parent_page_id: None,
+            section_id: None,
+            is_archived: false,
+            is_cover: false,
+            position: 0,
+            system_prompt: None,
+            system_prompt_mode: SystemPromptMode::default(),
+            ai_model: None,
+            page_type: PageType::default(),
+            source_file: None,
+            storage_mode: None,
+            file_extension: None,
+            last_file_sync: None,
+            template_id: None,
+            deleted_at: None,
+            is_favorite: false,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    pub fn new_in_folder(notebook_id: Uuid, title: String, folder_id: Option<Uuid>) -> Self {
+        let mut page = Self::new(notebook_id, title);
+        page.folder_id = folder_id;
+        page
+    }
+
+    pub fn new_cover(notebook_id: Uuid) -> Self {
+        let mut page = Self::new(notebook_id, "Cover".to_string());
+        page.is_cover = true;
+        page
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Zettel {
+    #[serde(flatten)]
+    pub page: Page,
+    pub links: Vec<Uuid>,
+    pub backlinks: Vec<Uuid>,
+    pub zettel_id: String,
+}
+
+impl Zettel {
+    #[allow(dead_code)]
+    pub fn new(notebook_id: Uuid, title: String) -> Self {
+        let now = Utc::now();
+        let zettel_id = now.format("%Y%m%d%H%M%S").to_string();
+        Self {
+            page: Page::new(notebook_id, title),
+            links: Vec::new(),
+            backlinks: Vec::new(),
+            zettel_id,
+        }
+    }
+}

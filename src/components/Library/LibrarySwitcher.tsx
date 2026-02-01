@@ -1,0 +1,252 @@
+/**
+ * LibrarySwitcher component
+ *
+ * Dropdown in sidebar for switching between libraries.
+ */
+
+import { useState, useRef, useEffect } from "react";
+import { useLibraryStore } from "../../stores/libraryStore";
+import { openLibraryWindow } from "../../utils/api";
+import type { Library, LibraryStats } from "../../types/library";
+
+interface LibrarySwitcherProps {
+  onManageLibraries?: () => void;
+}
+
+export function LibrarySwitcher({ onManageLibraries }: LibrarySwitcherProps) {
+  const { libraries, currentLibrary, switchLibrary, fetchLibraries, fetchCurrentLibrary, getLibraryStats } =
+    useLibraryStore();
+  const [isOpen, setIsOpen] = useState(false);
+  const [isSwitching, setIsSwitching] = useState(false);
+  const [stats, setStats] = useState<LibraryStats | null>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Fetch libraries on mount
+  useEffect(() => {
+    fetchLibraries();
+    fetchCurrentLibrary();
+  }, [fetchLibraries, fetchCurrentLibrary]);
+
+  // Fetch stats when current library changes
+  useEffect(() => {
+    if (currentLibrary) {
+      getLibraryStats(currentLibrary.id).then(setStats).catch(console.error);
+    }
+  }, [currentLibrary, getLibraryStats]);
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const handleSwitchLibrary = async (library: Library) => {
+    if (library.id === currentLibrary?.id) {
+      setIsOpen(false);
+      return;
+    }
+
+    setIsSwitching(true);
+    try {
+      await switchLibrary(library.id);
+      // Reload notebooks after switching library
+      window.location.reload();
+    } catch (error) {
+      console.error("Failed to switch library:", error);
+    } finally {
+      setIsSwitching(false);
+      setIsOpen(false);
+    }
+  };
+
+  const handleOpenInNewWindow = async (library: Library, e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent triggering library switch
+    try {
+      await openLibraryWindow(library.id);
+      setIsOpen(false);
+    } catch (error) {
+      console.error("Failed to open library in new window:", error);
+    }
+  };
+
+  if (!currentLibrary) {
+    return null;
+  }
+
+  // Format bytes to human readable
+  const formatSize = (bytes: number): string => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+  };
+
+  return (
+    <div className="relative px-4 pb-2" ref={dropdownRef}>
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        disabled={isSwitching}
+        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-[--color-bg-tertiary]"
+        style={{ color: "var(--color-text-secondary)" }}
+      >
+        <span className="text-base">{currentLibrary.icon || "📚"}</span>
+        <span className="flex-1 truncate font-medium">{currentLibrary.name}</span>
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="12"
+          height="12"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className={`transition-transform ${isOpen ? "rotate-180" : ""}`}
+        >
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </button>
+
+      {/* Library Stats */}
+      {stats && (
+        <div
+          className="flex items-center gap-3 px-2 py-1 text-xs"
+          style={{ color: "var(--color-text-muted)" }}
+        >
+          <span title={`${stats.notebookCount} notebooks${stats.archivedNotebookCount > 0 ? ` (${stats.archivedNotebookCount} archived)` : ""}`}>
+            {stats.notebookCount} notebooks
+          </span>
+          <span>•</span>
+          <span title={`${stats.pageCount} pages`}>{stats.pageCount} pages</span>
+          <span>•</span>
+          <span title={`${stats.assetCount} files, ${formatSize(stats.totalSizeBytes)}`}>
+            {formatSize(stats.totalSizeBytes)}
+          </span>
+        </div>
+      )}
+
+      {isOpen && (
+        <div
+          className="absolute left-4 right-4 z-50 mt-1 rounded-md border shadow-lg"
+          style={{
+            backgroundColor: "var(--color-bg-primary)",
+            borderColor: "var(--color-border)",
+          }}
+        >
+          <div className="py-1">
+            {libraries.map((library) => (
+              <div
+                key={library.id}
+                className="group flex w-full items-center gap-2 px-3 py-2 text-sm transition-colors hover:bg-[--color-bg-tertiary]"
+              >
+                <button
+                  onClick={() => handleSwitchLibrary(library)}
+                  disabled={isSwitching}
+                  className="flex flex-1 items-center gap-2 text-left"
+                  style={{
+                    color:
+                      library.id === currentLibrary?.id
+                        ? "var(--color-accent)"
+                        : "var(--color-text-primary)",
+                  }}
+                >
+                  <span className="text-base">{library.icon || "📚"}</span>
+                  <span className="flex-1 truncate">{library.name}</span>
+                  {library.id === currentLibrary?.id && (
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                  )}
+                  {library.isDefault && library.id !== currentLibrary?.id && (
+                    <span
+                      className="text-xs px-1.5 py-0.5 rounded"
+                      style={{
+                        backgroundColor: "var(--color-bg-tertiary)",
+                        color: "var(--color-text-muted)",
+                      }}
+                    >
+                      Default
+                    </span>
+                  )}
+                </button>
+                {/* Open in New Window button */}
+                <button
+                  onClick={(e) => handleOpenInNewWindow(library, e)}
+                  className="opacity-0 group-hover:opacity-100 p-1 rounded transition-all hover:bg-[--color-bg-secondary]"
+                  style={{ color: "var(--color-text-muted)" }}
+                  title="Open in new window"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                    <polyline points="15 3 21 3 21 9" />
+                    <line x1="10" y1="14" x2="21" y2="3" />
+                  </svg>
+                </button>
+              </div>
+            ))}
+          </div>
+
+          {onManageLibraries && (
+            <>
+              <div
+                className="border-t"
+                style={{ borderColor: "var(--color-border)" }}
+              />
+              <div className="py-1">
+                <button
+                  onClick={() => {
+                    setIsOpen(false);
+                    onManageLibraries();
+                  }}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-[--color-bg-tertiary]"
+                  style={{ color: "var(--color-text-muted)" }}
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <circle cx="12" cy="12" r="3" />
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                  </svg>
+                  <span>Manage Libraries...</span>
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}

@@ -1,0 +1,98 @@
+[package]
+name = "nous"
+version = "0.1.0"
+description = "Personal notebook and data organization tool"
+authors = ["you"]
+license = "ISC"
+repository = ""
+edition = "2021"
+rust-version = "1.77.2"
+
+[lib]
+name = "nous_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.5.3", features = [] }
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+log = "0.4"
+tauri = { version = "2.9.5", features = ["protocol-asset", "devtools"] }
+tauri-plugin-log = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-dialog = "2"
+uuid = { version = "1.0", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+thiserror = "1.0"
+dirs = "5.0"
+tantivy = "0.22"
+
+# Markdown parsing and generation
+pulldown-cmark = "0.10"
+regex = "1.10"
+
+# ZIP backup support
+zip = "4.0"
+walkdir = "2.5"
+
+# Notion import support
+csv = "1.3"
+urlencoding = "2.1"
+
+# Obsidian import support
+serde_yaml = "0.9"
+
+# Evernote import support
+quick-xml = { version = "0.36", features = ["serialize"] }
+html-escape = "0.2"
+base64 = "0.22"
+
+# Joplin import support
+tar = "0.4"
+
+# OneNote import support
+onenote_parser = "1.1"
+
+# PyO3 for Python integration
+pyo3 = { version = "0.27", features = ["auto-initialize"] }
+tokio = { version = "1", features = ["full"] }
+
+# Git integration
+git2 = "0.20"
+
+# SQLite for vector index
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+# Misc utilities
+md5 = "0.7"
+
+# Sync support
+reqwest = { version = "0.12", features = ["json", "rustls-tls", "blocking", "stream"] }
+tokio-util = { version = "0.7", features = ["io"] }
+futures-util = "0.3"
+yrs = "0.22"
+keyring = "3.0"
+hostname = "0.4"
+
+# File watching for external editor
+notify = "6.1"
+
+# Video streaming server
+axum = "0.8"
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors"] }
+rand = "0.8"
+async-stream = "0.3"
+bytes = "1.5"
+
+# Encryption support
+chacha20poly1305 = "0.10"
+argon2 = "0.5"
+hkdf = "0.12"
+sha2 = "0.10"
+zeroize = { version = "1.7", features = ["derive"] }
+
+[dev-dependencies]
+tempfile = "3"
