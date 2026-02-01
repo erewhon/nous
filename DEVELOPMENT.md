@@ -319,6 +319,24 @@ After Phase 1-2 implementation:
 
 ---
 
+## Local CI Build
+
+You can run the GitHub Actions build workflow locally using [`act`](https://github.com/nektos/act), which executes the workflow inside Docker containers.
+
+**Prerequisites:** `act` and Docker must be installed and the Docker daemon running.
+
+```bash
+# Run the Ubuntu build locally
+bash scripts/act-build.sh
+
+# Dry-run (show what would execute without running)
+bash scripts/act-build.sh --dryrun
+```
+
+The script runs the `build` job from `.github/workflows/build.yml` filtered to the `ubuntu-22.04` matrix entry. Build artifacts are written to `/tmp/act-artifacts`.
+
+---
+
 ## Technical Decisions
 
 | Decision | Choice | Rationale |

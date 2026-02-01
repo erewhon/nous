@@ -61,7 +61,9 @@ case "${OS}" in
         # Fix install name so rpath-based loading works
         install_name_tool -id "@rpath/libpython${PYTHON_VERSION}.dylib" "${BUNDLE_DIR}/lib/${BASENAME}"
         cd "${BUNDLE_DIR}/lib"
-        ln -sf "${BASENAME}" "libpython${PYTHON_VERSION}.dylib"
+        if [ "${BASENAME}" != "libpython${PYTHON_VERSION}.dylib" ]; then
+            ln -sf "${BASENAME}" "libpython${PYTHON_VERSION}.dylib"
+        fi
         cd "${PROJECT_ROOT}"
         ;;
     *)
