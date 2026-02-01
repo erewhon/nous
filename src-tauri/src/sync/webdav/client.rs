@@ -558,6 +558,17 @@ fn parse_propfind_response(xml: &str, base_url: &str) -> Result<Vec<ResourceInfo
     // This is a basic implementation; could use quick-xml for more robust parsing
     log::debug!("parse_propfind: xml length={}, base_url={}", xml.len(), base_url);
 
+    // Normalize XML: ensure response element boundaries are on separate lines.
+    // Some servers (including Nextcloud) return compact/minified XML where
+    // multiple <d:response> elements are on a single line. The line-based
+    // parser below uses `line.find()` which only matches the first occurrence
+    // per line, silently dropping subsequent entries.
+    let xml = xml
+        .replace("<D:response>", "\n<D:response>\n")
+        .replace("</D:response>", "\n</D:response>\n")
+        .replace("<d:response>", "\n<d:response>\n")
+        .replace("</d:response>", "\n</d:response>\n");
+
     let mut current_path = String::new();
     let mut current_etag = None;
     let mut current_length = None;
