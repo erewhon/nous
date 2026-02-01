@@ -96,8 +96,11 @@ impl WebDAVClient {
 
     /// Test connection to the WebDAV server
     pub async fn test_connection(&self) -> Result<bool, WebDAVError> {
-        let response = self.propfind("", 0).await?;
-        Ok(!response.is_empty())
+        // If PROPFIND succeeds without error, the connection, auth, and path are valid.
+        // We don't check the resource list — the root entry's relative path is empty
+        // after base-path stripping, so the parser legitimately returns an empty vec.
+        self.propfind("", 0).await?;
+        Ok(true)
     }
 
     /// PROPFIND - List directory or get resource properties
