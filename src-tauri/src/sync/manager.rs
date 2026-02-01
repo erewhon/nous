@@ -519,24 +519,27 @@ impl SyncManager {
                 });
             }
             let local_needs_sync = local_state.page_needs_sync(page.id);
-            // Fallback: also check page.updated_at against last_synced in case
-            // mark_page_modified was never called (e.g., before sync integration was added)
+            // Check page.updated_at against last_synced. If the page has never been
+            // synced (no entry in local_state.pages), it definitely needs syncing —
+            // this covers the first sync after configuring library sync.
+            let never_synced = !local_state.pages.contains_key(&page.id);
             let updated_since_sync = local_state.pages.get(&page.id)
                 .and_then(|s| s.last_synced)
                 .map(|synced| page.updated_at > synced)
-                .unwrap_or(false);
+                .unwrap_or(true);
             let remote_may_have_changed = remote_changed_pages.contains(&page.id);
 
-            if !local_needs_sync && !updated_since_sync && !remote_may_have_changed {
+            if !local_needs_sync && !never_synced && !updated_since_sync && !remote_may_have_changed {
                 log::debug!("Sync: skipping page '{}' ({}) — no changes", page.title, page.id);
                 continue;
             }
 
             log::info!(
-                "Sync: syncing page '{}' ({}) local_needs_sync={} updated_since_sync={} remote_changed={}",
+                "Sync: syncing page '{}' ({}) local_needs_sync={} never_synced={} updated_since_sync={} remote_changed={}",
                 page.title,
                 page.id,
                 local_needs_sync,
+                never_synced,
                 updated_since_sync,
                 remote_may_have_changed,
             );
@@ -562,11 +565,14 @@ impl SyncManager {
             synced_page_ids.push((page.id, result));
         }
 
-        // 6. Pull remote-only pages (from remote_changed_pages not in local)
+        // 6. Pull remote-only pages
         let local_page_ids: std::collections::HashSet<Uuid> = local_pages.iter().map(|p| p.id).collect();
+        // Also track pages already pulled in this sync
+        let mut already_pulled: std::collections::HashSet<Uuid> = std::collections::HashSet::new();
+
         for page_id in &remote_changed_pages {
             if !local_page_ids.contains(page_id) {
-                log::info!("Sync: pulling remote-only page {}", page_id);
+                log::info!("Sync: pulling remote-only page {} (from manifest/changelog)", page_id);
                 if self
                     .pull_page(&client, &config, &mut local_state, storage, notebook_id, *page_id)
                     .await
@@ -574,6 +580,48 @@ impl SyncManager {
                 {
                     pages_pulled += 1;
                     synced_page_ids.push((*page_id, PageSyncResult::Pulled));
+                    already_pulled.insert(*page_id);
+                }
+            }
+        }
+
+        // 6b. On first sync, enumerate the remote pages directory to discover
+        // ALL .crdt files — the manifest may be incomplete if the source client
+        // had the skip-optimization bug.
+        if local_state.last_sync.is_none() {
+            let pages_path = format!("{}/pages", config.remote_path);
+            match client.propfind(&pages_path, 1).await {
+                Ok(entries) => {
+                    let remote_crdt_ids: Vec<Uuid> = entries
+                        .iter()
+                        .filter(|e| !e.is_collection)
+                        .filter_map(|e| {
+                            let path = e.path.trim_end_matches('/');
+                            let filename = path.rsplit('/').next()?;
+                            let stem = filename.strip_suffix(".crdt")?;
+                            Uuid::parse_str(stem).ok()
+                        })
+                        .collect();
+                    log::info!(
+                        "Sync: first-sync enumeration found {} .crdt files on remote",
+                        remote_crdt_ids.len(),
+                    );
+                    for page_id in remote_crdt_ids {
+                        if !local_page_ids.contains(&page_id) && !already_pulled.contains(&page_id) {
+                            log::info!("Sync: pulling remote-only page {} (from enumeration)", page_id);
+                            if self
+                                .pull_page(&client, &config, &mut local_state, storage, notebook_id, page_id)
+                                .await
+                                .is_ok()
+                            {
+                                pages_pulled += 1;
+                                synced_page_ids.push((page_id, PageSyncResult::Pulled));
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    log::info!("Sync: first-sync pages enumeration failed: {}", e);
                 }
             }
         }
@@ -1090,14 +1138,18 @@ impl SyncManager {
 
         let mut result = AssetSyncResult::default();
 
-        // Build a set of remote relative paths for quick lookup
-        let remote_assets_prefix = format!("{}/", remote_assets_base.trim_end_matches('/'));
+        // Build a set of remote relative paths for quick lookup.
+        // ResourceInfo.path never has a leading '/' (stripped by the parser),
+        // but remote_assets_base may have one (from config.remote_path), so
+        // normalize both sides.
+        let normalized_prefix = remote_assets_base.trim_matches('/');
+        let remote_assets_prefix = format!("{}/", normalized_prefix);
         let remote_map: HashMap<String, &super::webdav::ResourceInfo> = remote_assets
             .iter()
             .filter_map(|r| {
                 let path = r.path.trim_end_matches('/');
                 // Extract relative path from the full remote path
-                if let Some(rel) = path.strip_prefix(remote_assets_prefix.trim_end_matches('/')) {
+                if let Some(rel) = path.strip_prefix(normalized_prefix) {
                     let rel = rel.trim_start_matches('/').to_string();
                     if !rel.is_empty() {
                         return Some((rel, r));
