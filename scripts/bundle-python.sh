@@ -55,11 +55,12 @@ case "${OS}" in
             echo "ERROR: Could not find libpython shared library in ${LIBDIR}" >&2
             exit 1
         fi
+        # Fix install name on the ORIGINAL so cargo records @rpath reference when linking
+        echo "  Fixing install name on ${LIBPYTHON}..."
+        install_name_tool -id "@rpath/libpython${PYTHON_VERSION}.dylib" "${LIBPYTHON}"
         echo "  Copying ${LIBPYTHON}..."
         cp -L "${LIBPYTHON}" "${BUNDLE_DIR}/lib/"
         BASENAME="$(basename "${LIBPYTHON}")"
-        # Fix install name so rpath-based loading works
-        install_name_tool -id "@rpath/libpython${PYTHON_VERSION}.dylib" "${BUNDLE_DIR}/lib/${BASENAME}"
         cd "${BUNDLE_DIR}/lib"
         if [ "${BASENAME}" != "libpython${PYTHON_VERSION}.dylib" ]; then
             ln -sf "${BASENAME}" "libpython${PYTHON_VERSION}.dylib"
