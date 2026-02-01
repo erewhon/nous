@@ -1522,6 +1522,12 @@ impl SyncManager {
         library_config: &LibrarySyncConfig,
         storage: &SharedStorage,
     ) -> Result<Vec<Uuid>, SyncError> {
+        log::info!(
+            "discover_remote_notebooks: server_url='{}', remote_base_path='{}'",
+            library_config.server_url,
+            library_config.remote_base_path,
+        );
+
         let creds = self.get_library_credentials(library_id)?;
         let client = WebDAVClient::new(library_config.server_url.clone(), creds)?;
 
@@ -1529,7 +1535,7 @@ impl SyncManager {
         let entries = match client.propfind(&library_config.remote_base_path, 1).await {
             Ok(entries) => entries,
             Err(e) => {
-                log::warn!(
+                log::info!(
                     "discover_remote_notebooks: PROPFIND on '{}' failed: {}. Proceeding with local-only sync.",
                     library_config.remote_base_path,
                     e,
@@ -1537,6 +1543,20 @@ impl SyncManager {
                 return Ok(Vec::new());
             }
         };
+
+        log::info!(
+            "discover_remote_notebooks: PROPFIND returned {} entries",
+            entries.len(),
+        );
+
+        // Log each entry for diagnostics
+        let collections: Vec<&super::webdav::ResourceInfo> =
+            entries.iter().filter(|e| e.is_collection).collect();
+        log::info!(
+            "discover_remote_notebooks: {} collections out of {} entries",
+            collections.len(),
+            entries.len(),
+        );
 
         // Collect UUIDs from collection entries
         let remote_notebook_ids: Vec<Uuid> = entries
@@ -1546,9 +1566,33 @@ impl SyncManager {
                 // Extract the last path component (directory name)
                 let path = e.path.trim_end_matches('/');
                 let name = path.rsplit('/').next()?;
-                Uuid::parse_str(name).ok()
+                let parsed = Uuid::parse_str(name).ok();
+                if parsed.is_none() {
+                    log::debug!(
+                        "discover_remote_notebooks: skipping non-UUID collection entry: path='{}', extracted='{}'",
+                        e.path,
+                        name,
+                    );
+                }
+                parsed
             })
             .collect();
+
+        log::info!(
+            "discover_remote_notebooks: found {} UUID-named remote notebooks",
+            remote_notebook_ids.len(),
+        );
+
+        // If PROPFIND returned entries but no UUIDs, log the paths for diagnosis
+        if remote_notebook_ids.is_empty() && !entries.is_empty() {
+            for entry in &entries {
+                log::info!(
+                    "discover_remote_notebooks: entry path='{}', is_collection={}",
+                    entry.path,
+                    entry.is_collection,
+                );
+            }
+        }
 
         // Get local notebook IDs
         let local_notebook_ids: std::collections::HashSet<Uuid> = {
@@ -1682,9 +1726,11 @@ impl SyncManager {
                         created.len(),
                     );
                 }
-                Ok(_) => {}
+                Ok(_) => {
+                    log::info!("Library sync: remote discovery found no new notebooks");
+                }
                 Err(e) => {
-                    log::warn!("Library sync: remote notebook discovery failed: {}", e);
+                    log::info!("Library sync: remote notebook discovery failed: {}", e);
                 }
             }
         }
