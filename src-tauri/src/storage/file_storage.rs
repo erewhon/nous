@@ -192,6 +192,22 @@ impl FileStorage {
         Ok(notebook)
     }
 
+    /// Create a notebook from an existing Notebook struct with a pre-set UUID.
+    /// Used by sync to create local notebooks discovered on the remote.
+    pub fn create_notebook_with_id(&self, notebook: &Notebook) -> Result<Notebook> {
+        let notebook_dir = self.notebook_dir(notebook.id);
+        let pages_dir = self.pages_dir(notebook.id);
+
+        fs::create_dir_all(&notebook_dir)?;
+        fs::create_dir_all(&pages_dir)?;
+
+        let metadata_path = self.notebook_metadata_path(notebook.id);
+        let content = serde_json::to_string_pretty(notebook)?;
+        fs::write(&metadata_path, content)?;
+
+        Ok(notebook.clone())
+    }
+
     pub fn update_notebook(&self, notebook: &Notebook) -> Result<()> {
         let metadata_path = self.notebook_metadata_path(notebook.id);
 

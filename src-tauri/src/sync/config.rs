@@ -2,6 +2,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::storage::{Notebook, NotebookType, SystemPromptMode};
+
 /// Sync configuration for a notebook
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -352,6 +354,54 @@ impl Changelog {
         if self.entries.len() > keep_last {
             let drain_count = self.entries.len() - keep_last;
             self.entries.drain(..drain_count);
+        }
+    }
+}
+
+/// User-facing notebook metadata stored on the remote for discovery.
+///
+/// Separate from the sync manifest (which tracks sync state). This captures
+/// presentation metadata so a fresh client can create local notebooks with
+/// correct names, types, colors, etc.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotebookMeta {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub notebook_type: NotebookType,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+    #[serde(default)]
+    pub sections_enabled: bool,
+    #[serde(default)]
+    pub archived: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub system_prompt: Option<String>,
+    #[serde(default)]
+    pub system_prompt_mode: SystemPromptMode,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ai_provider: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ai_model: Option<String>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl From<&Notebook> for NotebookMeta {
+    fn from(notebook: &Notebook) -> Self {
+        Self {
+            name: notebook.name.clone(),
+            notebook_type: notebook.notebook_type.clone(),
+            icon: notebook.icon.clone(),
+            color: notebook.color.clone(),
+            sections_enabled: notebook.sections_enabled,
+            archived: notebook.archived,
+            system_prompt: notebook.system_prompt.clone(),
+            system_prompt_mode: notebook.system_prompt_mode.clone(),
+            ai_provider: notebook.ai_provider.clone(),
+            ai_model: notebook.ai_model.clone(),
+            updated_at: notebook.updated_at,
         }
     }
 }
