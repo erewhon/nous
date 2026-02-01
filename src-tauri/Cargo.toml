@@ -69,7 +69,7 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 md5 = "0.7"
 
 # Sync support
-reqwest = { version = "0.12", features = ["json", "rustls-tls", "blocking", "stream"] }
+reqwest = { version = "0.12", features = ["json", "rustls-tls-native-roots", "blocking", "stream"] }
 tokio-util = { version = "0.7", features = ["io"] }
 futures-util = "0.3"
 yrs = "0.22"
