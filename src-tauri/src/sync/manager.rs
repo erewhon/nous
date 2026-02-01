@@ -637,21 +637,14 @@ impl SyncManager {
             }
         }
 
-        // 6c. Apply page metadata to all pulled pages
-        let pulled_ids: Vec<Uuid> = synced_page_ids
-            .iter()
-            .filter(|(_, r)| matches!(r, PageSyncResult::Pulled))
-            .map(|(id, _)| *id)
-            .collect();
-        if !pulled_ids.is_empty() {
-            self.apply_pages_meta(storage, notebook_id, &remote_pages_meta, &pulled_ids);
+        // 6c. Apply remote page metadata to all local pages with stale data
+        if !remote_pages_meta.is_empty() {
+            self.apply_pages_meta(storage, notebook_id, &remote_pages_meta);
         }
 
         // 6d. Pull folders and sections structure from remote
-        if !pulled_ids.is_empty() {
-            if let Err(e) = self.pull_structure(&client, &config.remote_path, storage, notebook_id).await {
-                log::warn!("Sync: failed to pull structure: {}", e);
-            }
+        if let Err(e) = self.pull_structure(&client, &config.remote_path, storage, notebook_id).await {
+            log::warn!("Sync: failed to pull structure: {}", e);
         }
 
         // 7. Update manifest with synced pages
@@ -698,9 +691,14 @@ impl SyncManager {
             }
         }
 
-        // Push structural metadata (pages-meta.json, folders.json, sections.json)
-        if let Err(e) = self.push_structure(&client, &config.remote_path, storage, notebook_id).await {
-            log::warn!("Sync: failed to push structural metadata: {}", e);
+        // Push structural metadata only if we pushed pages (we have authoritative data).
+        // A client that only pulled should not overwrite remote structure with stale/broken data.
+        if pages_pushed > 0 {
+            if let Err(e) = self.push_structure(&client, &config.remote_path, storage, notebook_id).await {
+                log::warn!("Sync: failed to push structural metadata: {}", e);
+            }
+        } else {
+            log::info!("Sync: skipping structure push (no pages pushed)");
         }
 
         // 8. Update changelog with synced pages
@@ -929,7 +927,11 @@ impl SyncManager {
         Ok(meta)
     }
 
-    /// Fetch and apply remote folders.json and sections.json to local storage
+    /// Fetch and apply remote folders.json and sections.json to local storage.
+    ///
+    /// Remote is treated as source of truth: if remote has folders/sections,
+    /// they always overwrite local. This prevents a receiving client (which
+    /// has empty or stale structure) from keeping broken state.
     async fn pull_structure(
         &self,
         client: &WebDAVClient,
@@ -943,13 +945,9 @@ impl SyncManager {
             Ok(data) => {
                 match serde_json::from_slice::<Vec<Folder>>(&data) {
                     Ok(folders) => {
-                        log::info!("Sync: pulled {} folders from remote", folders.len());
+                        log::info!("Sync: pulled {} folders from remote, applying", folders.len());
                         let storage_guard = storage.lock().unwrap();
-                        let local_folders = storage_guard.list_folders(notebook_id)?;
-                        // If local has no folders, write remote folders directly
-                        if local_folders.is_empty() && !folders.is_empty() {
-                            storage_guard.save_folders_for_sync(notebook_id, &folders)?;
-                        }
+                        storage_guard.save_folders_for_sync(notebook_id, &folders)?;
                     }
                     Err(e) => log::warn!("Sync: failed to parse remote folders.json: {}", e),
                 }
@@ -963,13 +961,9 @@ impl SyncManager {
             Ok(data) => {
                 match serde_json::from_slice::<Vec<Section>>(&data) {
                     Ok(sections) => {
-                        log::info!("Sync: pulled {} sections from remote", sections.len());
+                        log::info!("Sync: pulled {} sections from remote, applying", sections.len());
                         let storage_guard = storage.lock().unwrap();
-                        let local_sections = storage_guard.list_sections(notebook_id)?;
-                        // If local has no sections, write remote sections directly
-                        if local_sections.is_empty() && !sections.is_empty() {
-                            storage_guard.save_sections_for_sync(notebook_id, &sections)?;
-                        }
+                        storage_guard.save_sections_for_sync(notebook_id, &sections)?;
                     }
                     Err(e) => log::warn!("Sync: failed to parse remote sections.json: {}", e),
                 }
@@ -980,21 +974,41 @@ impl SyncManager {
         Ok(())
     }
 
-    /// Apply page metadata from remote pages-meta.json to locally-pulled pages
+    /// Apply page metadata from remote pages-meta.json to local pages.
+    ///
+    /// Applies to ALL local pages that have stale metadata (placeholder title
+    /// or remote has newer updated_at), not just newly pulled pages. This fixes
+    /// pages from previous syncs that ran before structural metadata syncing
+    /// was implemented.
     fn apply_pages_meta(
         &self,
         storage: &SharedStorage,
         notebook_id: Uuid,
         pages_meta: &HashMap<Uuid, PageMeta>,
-        pulled_page_ids: &[Uuid],
     ) {
-        if pages_meta.is_empty() || pulled_page_ids.is_empty() {
+        if pages_meta.is_empty() {
             return;
         }
         let storage_guard = storage.lock().unwrap();
-        for page_id in pulled_page_ids {
-            if let Some(meta) = pages_meta.get(page_id) {
-                match storage_guard.get_page(notebook_id, *page_id) {
+        let local_pages = match storage_guard.list_pages(notebook_id) {
+            Ok(pages) => pages,
+            Err(e) => {
+                log::warn!("Sync: failed to list pages for metadata apply: {}", e);
+                return;
+            }
+        };
+
+        let mut applied = 0;
+        for page in local_pages {
+            if let Some(meta) = pages_meta.get(&page.id) {
+                // Apply if: page has placeholder title, or remote metadata is newer
+                let is_placeholder = page.title.starts_with("Synced Page ");
+                let remote_is_newer = meta.updated_at > page.updated_at;
+                if !is_placeholder && !remote_is_newer {
+                    continue;
+                }
+
+                match storage_guard.get_page(notebook_id, page.id) {
                     Ok(mut page) => {
                         page.title = meta.title.clone();
                         page.tags = meta.tags.clone();
@@ -1016,19 +1030,21 @@ impl SyncManager {
                         page.created_at = meta.created_at;
                         page.updated_at = meta.updated_at;
                         if let Err(e) = storage_guard.update_page(&page) {
-                            log::warn!("Sync: failed to apply metadata to page {}: {}", page_id, e);
+                            log::warn!("Sync: failed to apply metadata to page {}: {}", page.id, e);
+                        } else {
+                            applied += 1;
                         }
                     }
                     Err(e) => {
-                        log::warn!("Sync: failed to read page {} for metadata apply: {}", page_id, e);
+                        log::warn!("Sync: failed to read page {} for metadata apply: {}", page.id, e);
                     }
                 }
             }
         }
         log::info!(
-            "Sync: applied metadata to {} of {} pulled pages",
-            pulled_page_ids.iter().filter(|id| pages_meta.contains_key(id)).count(),
-            pulled_page_ids.len(),
+            "Sync: applied remote metadata to {} pages (remote has {} entries)",
+            applied,
+            pages_meta.len(),
         );
     }
 
@@ -1423,7 +1439,28 @@ impl SyncManager {
                             .unwrap_or(false);
                         remote_etag_changed && !local_modified
                     }
-                    None => true,
+                    None => {
+                        // File exists locally but not tracked (e.g. after code upgrade
+                        // or partial sync). Compare sizes to avoid re-downloading.
+                        let local_size = local_assets.get(relative_path).map(|(_, s, _)| *s);
+                        let remote_size = remote_info.content_length;
+                        match (local_size, remote_size) {
+                            (Some(ls), Some(rs)) if ls == rs => {
+                                // Same size — register in state, skip download
+                                let mtime = local_assets.get(relative_path)
+                                    .and_then(|(_, _, m)| *m);
+                                local_state.mark_asset_synced(
+                                    relative_path,
+                                    remote_info.etag.clone(),
+                                    ls,
+                                    mtime,
+                                );
+                                log::debug!("Asset sync: skipping {} (exists locally, size matches)", relative_path);
+                                false
+                            }
+                            _ => true,
+                        }
+                    }
                 }
             };
 
