@@ -40,10 +40,12 @@ case "${OS}" in
         fi
         echo "  Copying ${LIBPYTHON}..."
         cp -L "${LIBPYTHON}" "${BUNDLE_DIR}/lib/"
-        # Create expected symlinks
+        # Create expected symlinks (skip if basename already matches target)
         BASENAME="$(basename "${LIBPYTHON}")"
         cd "${BUNDLE_DIR}/lib"
-        ln -sf "${BASENAME}" "libpython${PYTHON_VERSION}.so.1.0"
+        if [ "${BASENAME}" != "libpython${PYTHON_VERSION}.so.1.0" ]; then
+            ln -sf "${BASENAME}" "libpython${PYTHON_VERSION}.so.1.0"
+        fi
         ln -sf "libpython${PYTHON_VERSION}.so.1.0" "libpython${PYTHON_VERSION}.so"
         cd "${PROJECT_ROOT}"
         ;;
