@@ -585,10 +585,11 @@ impl SyncManager {
             }
         }
 
-        // 6b. On first sync, enumerate the remote pages directory to discover
-        // ALL .crdt files — the manifest may be incomplete if the source client
-        // had the skip-optimization bug.
-        if local_state.last_sync.is_none() {
+        // 6b. Enumerate the remote pages directory to discover ALL .crdt files
+        // that aren't in the manifest or locally present. The manifest may be
+        // incomplete if the source client had the skip-optimization bug, or
+        // pages were pushed after the manifest was last read.
+        {
             let pages_path = format!("{}/pages", config.remote_path);
             match client.propfind(&pages_path, 1).await {
                 Ok(entries) => {
@@ -603,7 +604,7 @@ impl SyncManager {
                         })
                         .collect();
                     log::info!(
-                        "Sync: first-sync enumeration found {} .crdt files on remote",
+                        "Sync: remote enumeration found {} .crdt files on remote",
                         remote_crdt_ids.len(),
                     );
                     for page_id in remote_crdt_ids {
@@ -621,7 +622,7 @@ impl SyncManager {
                     }
                 }
                 Err(e) => {
-                    log::info!("Sync: first-sync pages enumeration failed: {}", e);
+                    log::info!("Sync: remote pages enumeration failed: {}", e);
                 }
             }
         }
