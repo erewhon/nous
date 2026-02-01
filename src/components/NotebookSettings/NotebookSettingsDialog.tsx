@@ -1279,7 +1279,8 @@ export function NotebookSettingsDialog({
                       setSyncError(null);
                       const result = await testConnection(syncServerUrl, syncUsername, syncPassword);
                       if (!result) {
-                        setSyncError("Connection failed. Check your URL and credentials.");
+                        const { error } = useSyncStore.getState();
+                        setSyncError(error || "Connection failed. Check your URL and credentials.");
                       }
                     }}
                     disabled={isTestingConnection || !syncServerUrl || !syncUsername || !syncPassword}
