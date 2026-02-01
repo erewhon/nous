@@ -286,7 +286,16 @@ impl SyncManager {
         };
 
         let client = WebDAVClient::new(server_url.to_string(), credentials)?;
-        Ok(client.test_connection().await?)
+        match client.test_connection().await {
+            Ok(result) => {
+                log::info!("WebDAV connection test to {} succeeded (result={})", server_url, result);
+                Ok(result)
+            }
+            Err(e) => {
+                log::error!("WebDAV connection test to {} failed: {:?}", server_url, e);
+                Err(e.into())
+            }
+        }
     }
 
     /// Configure sync for a notebook
