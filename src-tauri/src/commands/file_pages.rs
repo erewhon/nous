@@ -243,9 +243,7 @@ pub fn update_file_content(
     })?;
 
     // Notify sync manager of the change
-    if let Ok(sync_manager) = state.sync_manager.try_lock() {
-        sync_manager.queue_page_update(notebook_uuid, page_uuid);
-    }
+    state.sync_manager.queue_page_update(notebook_uuid, page_uuid);
 
     // Update search index with file content
     if let Ok(mut search_index) = state.search_index.lock() {

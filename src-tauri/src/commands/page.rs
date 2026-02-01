@@ -110,9 +110,7 @@ pub fn create_page(
     }
 
     // Notify sync manager of the new page
-    if let Ok(sync_manager) = state.sync_manager.try_lock() {
-        sync_manager.queue_page_update(nb_id, page.id);
-    }
+    state.sync_manager.queue_page_update(nb_id, page.id);
 
     // Index the new page
     if let Ok(mut search_index) = state.search_index.lock() {
@@ -231,9 +229,7 @@ pub fn update_page(
     storage.update_page(&page)?;
 
     // Notify sync manager of the change
-    if let Ok(sync_manager) = state.sync_manager.try_lock() {
-        sync_manager.queue_page_update(nb_id, pg_id);
-    }
+    state.sync_manager.queue_page_update(nb_id, pg_id);
 
     // Update the search index
     if let Ok(mut search_index) = state.search_index.lock() {
@@ -279,9 +275,7 @@ pub fn delete_page(
     storage.delete_page(nb_id, pg_id)?;
 
     // Notify sync manager of the deletion
-    if let Ok(sync_manager) = state.sync_manager.try_lock() {
-        sync_manager.queue_page_delete(nb_id, pg_id);
-    }
+    state.sync_manager.queue_page_delete(nb_id, pg_id);
 
     // Remove from search index (page is in trash)
     if let Ok(mut search_index) = state.search_index.lock() {

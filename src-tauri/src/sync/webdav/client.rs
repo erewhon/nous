@@ -9,6 +9,9 @@ use tokio::io::AsyncWriteExt;
 use crate::sync::config::SyncCredentials;
 
 /// WebDAV client for sync operations
+///
+/// Cloning is cheap: `reqwest::Client` shares its connection pool via `Arc`.
+#[derive(Clone)]
 pub struct WebDAVClient {
     client: Client,
     base_url: String,

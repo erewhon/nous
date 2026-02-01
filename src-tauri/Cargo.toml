@@ -70,6 +70,7 @@ md5 = "0.7"
 
 # Sync support
 reqwest = { version = "0.12", features = ["json", "rustls-tls-native-roots", "blocking", "stream"] }
+reqwest-eventsource = "0.6"
 tokio-util = { version = "0.7", features = ["io"] }
 futures-util = "0.3"
 yrs = "0.22"

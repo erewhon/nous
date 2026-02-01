@@ -1,12 +1,15 @@
 use chrono::{DateTime, Utc};
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
 use uuid::Uuid;
 
+use futures_util::StreamExt;
 use tauri::Emitter;
+use tokio::sync::Semaphore;
 
 use crate::library::LibraryStorage;
 use crate::storage::Page;
@@ -15,8 +18,9 @@ use crate::storage::FileStorage;
 use crate::storage::{Folder, Notebook, NotebookType, Section};
 
 use super::config::{
-    Changelog, ChangeOperation, LibrarySyncConfig, LibrarySyncConfigInput, NotebookMeta, PageMeta,
-    SyncConfig, SyncConfigInput, SyncCredentials, SyncManifest, SyncState, SyncStatus, SyncResult,
+    AssetManifest, AssetManifestEntry, Changelog, ChangeOperation, LibrarySyncConfig,
+    LibrarySyncConfigInput, NotebookMeta, PageMeta, ServerType, SyncConfig, SyncConfigInput,
+    SyncCredentials, SyncManifest, SyncState, SyncStatus, SyncResult,
 };
 use super::crdt::PageDocument;
 use super::metadata::LocalSyncState;
@@ -62,6 +66,46 @@ enum PageSyncResult {
     Merged,
 }
 
+/// Snapshot of page sync info for concurrent processing
+#[derive(Debug, Clone)]
+struct PageSyncInfo {
+    needs_sync: bool,
+    remote_etag: Option<String>,
+    _never_synced: bool,
+}
+
+/// Outcome of syncing a single page concurrently
+struct PageSyncOutcome {
+    page_id: Uuid,
+    result: Result<PageSyncResult, SyncError>,
+    /// (etag, state_vector) to pass to mark_page_synced
+    sync_mark: Option<(Option<String>, Vec<u8>)>,
+}
+
+/// Outcome of pulling a remote-only page concurrently
+struct PagePullOutcome {
+    page_id: Uuid,
+    success: bool,
+    /// (etag, state_vector) to pass to mark_page_synced
+    sync_mark: Option<(Option<String>, Vec<u8>)>,
+}
+
+/// Outcome of pushing an asset concurrently
+struct AssetPushOutcome {
+    relative_path: String,
+    success: bool,
+    /// (etag, size, mtime) to pass to mark_asset_synced
+    sync_mark: Option<(Option<String>, u64, Option<DateTime<Utc>>)>,
+}
+
+/// Outcome of pulling an asset concurrently
+struct AssetPullOutcome {
+    relative_path: String,
+    success: bool,
+    /// (etag, size, mtime) to pass to mark_asset_synced
+    sync_mark: Option<(Option<String>, u64, Option<DateTime<Utc>>)>,
+}
+
 /// Result of syncing assets for a notebook
 #[derive(Debug, Default)]
 struct AssetSyncResult {
@@ -79,6 +123,21 @@ pub struct SyncProgress {
     pub phase: String,
 }
 
+/// Sentinel file content written after successful push
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SyncSentinel {
+    client_id: String,
+    timestamp: DateTime<Utc>,
+    counter: u64,
+}
+
+/// Default maximum concurrent WebDAV requests
+const DEFAULT_WEBDAV_CONCURRENCY: usize = 8;
+
+/// Maximum concurrent notebook syncs within a library
+const MAX_NOTEBOOK_CONCURRENCY: usize = 4;
+
 /// Manager for sync operations
 pub struct SyncManager {
     /// Base data directory
@@ -89,6 +148,12 @@ pub struct SyncManager {
     local_states: Arc<Mutex<HashMap<Uuid, LocalSyncState>>>,
     /// Active WebDAV clients
     clients: Arc<Mutex<HashMap<Uuid, WebDAVClient>>>,
+    /// Semaphore bounding total in-flight WebDAV requests
+    webdav_semaphore: Arc<Semaphore>,
+    /// Prevents concurrent sync of the same notebook
+    syncing_notebooks: Arc<Mutex<HashSet<Uuid>>>,
+    /// Monotonic counter for sentinel file
+    sentinel_counter: std::sync::atomic::AtomicU64,
 }
 
 impl SyncManager {
@@ -99,6 +164,9 @@ impl SyncManager {
             queue: Arc::new(Mutex::new(SyncQueue::new())),
             local_states: Arc::new(Mutex::new(HashMap::new())),
             clients: Arc::new(Mutex::new(HashMap::new())),
+            webdav_semaphore: Arc::new(Semaphore::new(DEFAULT_WEBDAV_CONCURRENCY)),
+            syncing_notebooks: Arc::new(Mutex::new(HashSet::new())),
+            sentinel_counter: std::sync::atomic::AtomicU64::new(0),
         }
     }
 
@@ -110,9 +178,12 @@ impl SyncManager {
             .join("sync")
     }
 
-    /// Get the CRDT file path for a page
-    fn crdt_path(&self, notebook_id: Uuid, page_id: Uuid) -> PathBuf {
-        self.sync_dir(notebook_id)
+    /// Get the CRDT file path (standalone, no &self needed)
+    fn crdt_path_for(data_dir: &Path, notebook_id: Uuid, page_id: Uuid) -> PathBuf {
+        data_dir
+            .join("notebooks")
+            .join(notebook_id.to_string())
+            .join("sync")
             .join("pages")
             .join(format!("{}.crdt", page_id))
     }
@@ -181,6 +252,18 @@ impl SyncManager {
         states.insert(notebook_id, state.clone());
 
         Ok(())
+    }
+
+    /// Try to acquire a per-notebook sync guard. Returns false if already syncing.
+    fn try_acquire_notebook_guard(&self, notebook_id: Uuid) -> bool {
+        let mut syncing = self.syncing_notebooks.lock().unwrap();
+        syncing.insert(notebook_id)
+    }
+
+    /// Release the per-notebook sync guard.
+    fn release_notebook_guard(&self, notebook_id: Uuid) {
+        let mut syncing = self.syncing_notebooks.lock().unwrap();
+        syncing.remove(&notebook_id);
     }
 
     // ===== Credential storage (file-based with keyring fallback) =====
@@ -329,6 +412,7 @@ impl SyncManager {
             sync_interval: input.sync_interval,
             last_sync: None,
             managed_by_library: None,
+            server_type: ServerType::default(),
         };
 
         // Update notebook (lock only during synchronous operation)
@@ -358,7 +442,7 @@ impl SyncManager {
 
     /// Get sync status for a notebook
     pub fn get_status(&self, notebook_id: Uuid, config: Option<&SyncConfig>) -> SyncStatus {
-        let config = match config {
+        let _config = match config {
             Some(c) if c.enabled => c,
             _ => {
                 return SyncStatus {
@@ -414,8 +498,218 @@ impl SyncManager {
         queue.enqueue(notebook_id, SyncOperation::UpdateSections);
     }
 
+    // ===== Sentinel file for change notification =====
+
+    /// Write sentinel file after a successful sync that pushed changes
+    async fn push_sentinel(
+        &self,
+        client: &WebDAVClient,
+        library_base_path: &str,
+        client_id: &str,
+    ) {
+        let counter = self.sentinel_counter.fetch_add(1, Ordering::Relaxed);
+        let sentinel = SyncSentinel {
+            client_id: client_id.to_string(),
+            timestamp: Utc::now(),
+            counter,
+        };
+        let sentinel_path = format!("{}/.sync-sentinel", library_base_path);
+        match serde_json::to_vec(&sentinel) {
+            Ok(data) => {
+                if let Err(e) = client.put(&sentinel_path, &data, None).await {
+                    log::debug!("Failed to push sentinel: {}", e);
+                }
+            }
+            Err(e) => log::debug!("Failed to serialize sentinel: {}", e),
+        }
+    }
+
+    /// Check if sentinel file has changed since last check.
+    /// Returns true if changed (or first check), false if unchanged.
+    async fn check_sentinel(
+        &self,
+        client: &WebDAVClient,
+        library_base_path: &str,
+        stored_etag: Option<&str>,
+    ) -> Result<(bool, Option<String>), SyncError> {
+        let sentinel_path = format!("{}/.sync-sentinel", library_base_path);
+        match client.head(&sentinel_path).await {
+            Ok(head) if head.exists => {
+                let current_etag = head.etag;
+                let changed = match (stored_etag, &current_etag) {
+                    (Some(stored), Some(current)) => stored != current,
+                    (None, Some(_)) => true,  // First check
+                    _ => true,                 // No ETag from server, assume changed
+                };
+                Ok((changed, current_etag))
+            }
+            Ok(_) => Ok((true, None)),           // Sentinel doesn't exist yet
+            Err(WebDAVError::NotFound(_)) => Ok((true, None)),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Check sentinel for a library (public, used by scheduler)
+    pub async fn check_sentinel_for_library(
+        &self,
+        library_id: Uuid,
+        library_config: &LibrarySyncConfig,
+    ) -> Result<bool, SyncError> {
+        let creds = self.get_library_credentials(library_id)?;
+        let client = WebDAVClient::new(library_config.server_url.clone(), creds)?;
+
+        // Get stored sentinel ETag from any managed notebook's local_state
+        let stored_etag = {
+            let states = self.local_states.lock().unwrap();
+            states.values()
+                .find_map(|s| s.sentinel_etag.clone())
+        };
+
+        let (changed, new_etag) = self.check_sentinel(
+            &client,
+            &library_config.remote_base_path,
+            stored_etag.as_deref(),
+        ).await?;
+
+        // Update stored ETag if we got a new one
+        if let Some(ref etag) = new_etag {
+            let mut states = self.local_states.lock().unwrap();
+            for state in states.values_mut() {
+                state.sentinel_etag = Some(etag.clone());
+            }
+        }
+
+        Ok(changed)
+    }
+
+    // ===== Server type detection =====
+
+    /// Detect server type (Generic vs Nextcloud with optional notify_push)
+    pub async fn detect_server_type(
+        _client: &WebDAVClient,
+        base_url: &str,
+    ) -> ServerType {
+        // Try Nextcloud status.php
+        let status_url = format!("{}/status.php", base_url.trim_end_matches('/'));
+
+        // Build a temporary reqwest client for the status endpoint
+        let http_client = match reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(10))
+            .build()
+        {
+            Ok(c) => c,
+            Err(_) => return ServerType::Generic,
+        };
+
+        let status_resp = match http_client.get(&status_url).send().await {
+            Ok(r) if r.status().is_success() => r,
+            _ => return ServerType::Generic,
+        };
+
+        let status_json: serde_json::Value = match status_resp.json().await {
+            Ok(j) => j,
+            Err(_) => return ServerType::Generic,
+        };
+
+        // Check if this is Nextcloud
+        let product_name = status_json
+            .get("productname")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        if !product_name.to_lowercase().contains("nextcloud") {
+            return ServerType::Generic;
+        }
+
+        let version = status_json
+            .get("versionstring")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown")
+            .to_string();
+
+        log::info!("Detected Nextcloud server version {}", version);
+
+        // Check for notify_push capability
+        let caps_url = format!(
+            "{}/ocs/v1.php/cloud/capabilities",
+            base_url.trim_end_matches('/')
+        );
+        let has_notify_push = match http_client
+            .get(&caps_url)
+            .header("OCS-APIRequest", "true")
+            .header("Accept", "application/json")
+            .send()
+            .await
+        {
+            Ok(r) if r.status().is_success() => {
+                match r.json::<serde_json::Value>().await {
+                    Ok(caps) => {
+                        let has_push = caps
+                            .pointer("/ocs/data/capabilities/notify_push")
+                            .is_some();
+                        if has_push {
+                            log::info!("Nextcloud server has notify_push capability");
+                        }
+                        has_push
+                    }
+                    Err(_) => false,
+                }
+            }
+            _ => false,
+        };
+
+        ServerType::Nextcloud {
+            version,
+            has_notify_push,
+        }
+    }
+
+    // ===== Content-addressable storage helpers =====
+
+    /// Compute SHA256 hash of a file (streaming, never loads full file into memory)
+    pub fn compute_file_hash(path: &Path) -> Result<String, std::io::Error> {
+        use sha2::{Sha256, Digest};
+        let mut hasher = Sha256::new();
+        let mut file = std::fs::File::open(path)?;
+        std::io::copy(&mut file, &mut hasher)?;
+        Ok(format!("{:x}", hasher.finalize()))
+    }
+
+    /// Get CAS path for a content hash: cas/{prefix_2}/{hash}.{ext}
+    fn cas_remote_path(library_base_path: &str, hash: &str, ext: &str) -> String {
+        let prefix = &hash[..2.min(hash.len())];
+        if ext.is_empty() {
+            format!("{}/cas/{}/{}", library_base_path, prefix, hash)
+        } else {
+            format!("{}/cas/{}/{}.{}", library_base_path, prefix, hash, ext)
+        }
+    }
+
+    // ===== Full notebook sync =====
+
     /// Perform full sync for a notebook
     pub async fn sync_notebook(
+        &self,
+        notebook_id: Uuid,
+        storage: &SharedStorage,
+        app_handle: Option<&tauri::AppHandle>,
+    ) -> Result<SyncResult, SyncError> {
+        // Prevent concurrent sync of the same notebook
+        if !self.try_acquire_notebook_guard(notebook_id) {
+            log::info!("Sync: notebook {} already syncing, skipping", notebook_id);
+            return Ok(SyncResult::success(0, 0, 0, 0, 0, 0));
+        }
+
+        let result = self
+            .sync_notebook_inner(notebook_id, storage, app_handle)
+            .await;
+
+        self.release_notebook_guard(notebook_id);
+        result
+    }
+
+    /// Inner sync implementation (guard already held)
+    async fn sync_notebook_inner(
         &self,
         notebook_id: Uuid,
         storage: &SharedStorage,
@@ -460,46 +754,50 @@ impl SyncManager {
         let mut conflicts_resolved = 0;
         let mut synced_page_ids: Vec<(Uuid, PageSyncResult)> = Vec::new();
 
-        // 3. Fetch remote manifest + changelog
-        let remote_manifest = self
-            .fetch_manifest(&client, &config.remote_path)
-            .await;
-        match &remote_manifest {
+        // 3. Fetch remote manifest + changelog + pages-meta IN PARALLEL
+        let client_m = client.clone();
+        let client_c = client.clone();
+        let client_pm = client.clone();
+        let remote_path_m = config.remote_path.clone();
+        let remote_path_c = config.remote_path.clone();
+        let remote_path_pm = config.remote_path.clone();
+
+        let (manifest_result, changelog, remote_pages_meta) = tokio::join!(
+            Self::fetch_manifest_static(&client_m, &remote_path_m),
+            Self::fetch_changelog_static(&client_c, &remote_path_c, notebook_id),
+            Self::fetch_pages_meta_static(&client_pm, &remote_path_pm),
+        );
+
+        let mut changelog = changelog;
+
+        match &manifest_result {
             Ok(m) => log::info!("Sync: remote manifest has {} pages", m.pages.len()),
             Err(e) => log::debug!("Sync: no remote manifest (first sync?): {}", e),
         }
-        let manifest_existed = remote_manifest.is_ok();
-        let mut manifest = remote_manifest.unwrap_or_else(|_| {
+        let manifest_existed = manifest_result.is_ok();
+        let mut manifest = manifest_result.unwrap_or_else(|_| {
             SyncManifest::new(notebook_id, local_state.client_id.clone())
         });
 
-        let mut changelog = self
-            .fetch_changelog(&client, &config.remote_path, notebook_id)
-            .await;
         log::info!(
             "Sync: changelog has {} entries, next_seq={}",
             changelog.entries.len(),
             changelog.next_seq,
         );
 
-        // 3b. Fetch remote pages-meta.json for page metadata
-        let remote_pages_meta = self
-            .fetch_pages_meta(&client, &config.remote_path)
-            .await
-            .unwrap_or_else(|e| {
-                log::debug!("Sync: no remote pages-meta.json: {}", e);
-                HashMap::new()
-            });
+        let remote_pages_meta = remote_pages_meta.unwrap_or_else(|e| {
+            log::debug!("Sync: no remote pages-meta.json: {}", e);
+            HashMap::new()
+        });
         log::info!("Sync: remote pages-meta has {} entries", remote_pages_meta.len());
 
         // 4. Determine remote_changed_pages
-        let remote_changed_pages: std::collections::HashSet<Uuid> = if local_state.last_changelog_seq > 0
+        let remote_changed_pages: HashSet<Uuid> = if local_state.last_changelog_seq > 0
             && !changelog.entries.is_empty()
             && changelog.entries.first().map(|e| e.seq).unwrap_or(0) <= local_state.last_changelog_seq + 1
         {
-            // Changelog covers our range — use it for fast change detection
             let new_entries = changelog.entries_since(local_state.last_changelog_seq, &local_state.client_id);
-            let page_ids: std::collections::HashSet<Uuid> = new_entries.iter().map(|e| e.page_id).collect();
+            let page_ids: HashSet<Uuid> = new_entries.iter().map(|e| e.page_id).collect();
             log::info!(
                 "Sync: changelog-based detection: {} remote changes since seq {}",
                 page_ids.len(),
@@ -507,8 +805,7 @@ impl SyncManager {
             );
             page_ids
         } else {
-            // First sync or changelog compacted past us — fall back to manifest
-            let page_ids: std::collections::HashSet<Uuid> = manifest.pages.keys().copied().collect();
+            let page_ids: HashSet<Uuid> = manifest.pages.keys().copied().collect();
             log::info!(
                 "Sync: manifest-based detection (fallback): {} potential remote changes",
                 page_ids.len(),
@@ -516,89 +813,145 @@ impl SyncManager {
             page_ids
         };
 
-        // 5. Sync each local page (with skip optimization)
+        // 5. Sync each local page CONCURRENTLY
         let total_pages = local_pages.len();
-        for (page_idx, page) in local_pages.iter().enumerate() {
-            if let Some(app) = app_handle {
-                let _ = app.emit("sync-progress", SyncProgress {
-                    notebook_id: notebook_id.to_string(),
-                    current: page_idx + 1,
-                    total: total_pages,
-                    message: format!("Syncing page: {}", page.title),
-                    phase: "pages".to_string(),
-                });
-            }
-            let local_needs_sync = local_state.page_needs_sync(page.id);
-            // Check page.updated_at against last_synced. If the page has never been
-            // synced (no entry in local_state.pages), it definitely needs syncing —
-            // this covers the first sync after configuring library sync.
-            let never_synced = !local_state.pages.contains_key(&page.id);
-            let updated_since_sync = local_state.pages.get(&page.id)
-                .and_then(|s| s.last_synced)
-                .map(|synced| page.updated_at > synced)
-                .unwrap_or(true);
-            let remote_may_have_changed = remote_changed_pages.contains(&page.id);
+        let progress_counter = Arc::new(AtomicUsize::new(0));
 
-            if !local_needs_sync && !never_synced && !updated_since_sync && !remote_may_have_changed {
-                log::debug!("Sync: skipping page '{}' ({}) — no changes", page.title, page.id);
-                continue;
-            }
+        // Build tasks with sync info snapshots
+        let page_tasks: Vec<(Page, PageSyncInfo)> = local_pages
+            .iter()
+            .filter(|page| {
+                let local_needs_sync = local_state.page_needs_sync(page.id);
+                let never_synced = !local_state.pages.contains_key(&page.id);
+                let updated_since_sync = local_state.pages.get(&page.id)
+                    .and_then(|s| s.last_synced)
+                    .map(|synced| page.updated_at > synced)
+                    .unwrap_or(true);
+                let remote_may_have_changed = remote_changed_pages.contains(&page.id);
 
-            log::info!(
-                "Sync: syncing page '{}' ({}) local_needs_sync={} never_synced={} updated_since_sync={} remote_changed={}",
-                page.title,
-                page.id,
-                local_needs_sync,
-                never_synced,
-                updated_since_sync,
-                remote_may_have_changed,
-            );
-            let result = self
-                .sync_page(&client, &config, &mut local_state, storage, notebook_id, page, &manifest)
+                if !local_needs_sync && !never_synced && !updated_since_sync && !remote_may_have_changed {
+                    log::debug!("Sync: skipping page '{}' ({}) — no changes", page.title, page.id);
+                    return false;
+                }
+                true
+            })
+            .map(|page| {
+                let info = PageSyncInfo {
+                    needs_sync: local_state.page_needs_sync(page.id),
+                    remote_etag: local_state.pages.get(&page.id).and_then(|s| s.remote_etag.clone()),
+                    _never_synced: !local_state.pages.contains_key(&page.id),
+                };
+                (page.clone(), info)
+            })
+            .collect();
+
+        log::info!("Sync: {} pages to sync out of {} total", page_tasks.len(), total_pages);
+
+        // Process pages concurrently with semaphore
+        let outcomes: Vec<PageSyncOutcome> = futures_util::stream::iter(page_tasks)
+            .map(|(page, info)| {
+                let data_dir = self.data_dir.clone();
+                let client = client.clone();
+                let config = config.clone();
+                let storage = Arc::clone(storage);
+                let sem = Arc::clone(&self.webdav_semaphore);
+                let counter = Arc::clone(&progress_counter);
+                let app = app_handle.cloned();
+                let nb_id_str = notebook_id.to_string();
+                let page_title = page.title.clone();
+                async move {
+                    let _permit = sem.acquire().await.unwrap();
+                    let idx = counter.fetch_add(1, Ordering::Relaxed);
+                    if let Some(ref app) = app {
+                        let _ = app.emit("sync-progress", SyncProgress {
+                            notebook_id: nb_id_str,
+                            current: idx + 1,
+                            total: total_pages,
+                            message: format!("Syncing page: {}", page_title),
+                            phase: "pages".to_string(),
+                        });
+                    }
+                    Self::sync_page_concurrent(
+                        &data_dir, &client, &config, &info,
+                        &storage, notebook_id, &page,
+                    ).await
+                }
+            })
+            .buffer_unordered(DEFAULT_WEBDAV_CONCURRENCY)
+            .collect()
+            .await;
+
+        // Apply outcomes sequentially
+        for outcome in outcomes {
+            match &outcome.result {
+                Ok(r) => log::info!("Sync: page {} result: {:?}", outcome.page_id, r),
+                Err(e) => log::error!("Sync: page {} error: {}", outcome.page_id, e),
+            }
+            if let Some((etag, sv)) = outcome.sync_mark {
+                local_state.mark_page_synced(outcome.page_id, etag, sv);
+            }
+            match outcome.result {
+                Ok(ref r) => {
+                    match r {
+                        PageSyncResult::Pulled => pages_pulled += 1,
+                        PageSyncResult::Pushed => pages_pushed += 1,
+                        PageSyncResult::Merged => {
+                            pages_pulled += 1;
+                            pages_pushed += 1;
+                            conflicts_resolved += 1;
+                        }
+                        PageSyncResult::Unchanged => {}
+                    }
+                    synced_page_ids.push((outcome.page_id, outcome.result.unwrap()));
+                }
+                Err(e) => return Err(e),
+            }
+        }
+
+        // 6. Pull remote-only pages CONCURRENTLY
+        let local_page_ids: HashSet<Uuid> = local_pages.iter().map(|p| p.id).collect();
+        let mut already_pulled: HashSet<Uuid> = HashSet::new();
+
+        // From changelog/manifest
+        let remote_only_ids: Vec<Uuid> = remote_changed_pages
+            .iter()
+            .filter(|id| !local_page_ids.contains(id))
+            .copied()
+            .collect();
+
+        if !remote_only_ids.is_empty() {
+            let pull_outcomes: Vec<PagePullOutcome> = futures_util::stream::iter(remote_only_ids)
+                .map(|page_id| {
+                    let data_dir = self.data_dir.clone();
+                    let client = client.clone();
+                    let config = config.clone();
+                    let storage = Arc::clone(storage);
+                    let sem = Arc::clone(&self.webdav_semaphore);
+                    async move {
+                        let _permit = sem.acquire().await.unwrap();
+                        log::info!("Sync: pulling remote-only page {} (from manifest/changelog)", page_id);
+                        Self::pull_page_concurrent(
+                            &data_dir, &client, &config, &storage, notebook_id, page_id,
+                        ).await
+                    }
+                })
+                .buffer_unordered(DEFAULT_WEBDAV_CONCURRENCY)
+                .collect()
                 .await;
-            match &result {
-                Ok(r) => log::info!("Sync: page '{}' result: {:?}", page.title, r),
-                Err(e) => log::error!("Sync: page '{}' error: {}", page.title, e),
-            }
-            let result = result?;
 
-            match &result {
-                PageSyncResult::Pulled => pages_pulled += 1,
-                PageSyncResult::Pushed => pages_pushed += 1,
-                PageSyncResult::Merged => {
+            for outcome in pull_outcomes {
+                if outcome.success {
+                    if let Some((etag, sv)) = outcome.sync_mark {
+                        local_state.mark_page_synced(outcome.page_id, etag, sv);
+                    }
                     pages_pulled += 1;
-                    pages_pushed += 1;
-                    conflicts_resolved += 1;
-                }
-                PageSyncResult::Unchanged => {}
-            }
-            synced_page_ids.push((page.id, result));
-        }
-
-        // 6. Pull remote-only pages
-        let local_page_ids: std::collections::HashSet<Uuid> = local_pages.iter().map(|p| p.id).collect();
-        // Also track pages already pulled in this sync
-        let mut already_pulled: std::collections::HashSet<Uuid> = std::collections::HashSet::new();
-
-        for page_id in &remote_changed_pages {
-            if !local_page_ids.contains(page_id) {
-                log::info!("Sync: pulling remote-only page {} (from manifest/changelog)", page_id);
-                if self
-                    .pull_page(&client, &config, &mut local_state, storage, notebook_id, *page_id)
-                    .await
-                    .is_ok()
-                {
-                    pages_pulled += 1;
-                    synced_page_ids.push((*page_id, PageSyncResult::Pulled));
-                    already_pulled.insert(*page_id);
+                    synced_page_ids.push((outcome.page_id, PageSyncResult::Pulled));
+                    already_pulled.insert(outcome.page_id);
                 }
             }
         }
 
-        // 6b. Enumerate the remote pages directory to discover ALL .crdt files
-        // that aren't in the manifest or locally present. The manifest may be
-        // incomplete if the source client had the skip-optimization bug, or
-        // pages were pushed after the manifest was last read.
+        // 6b. Enumerate remote pages directory for any missed .crdt files
         {
             let pages_path = format!("{}/pages", config.remote_path);
             match client.propfind(&pages_path, 1).await {
@@ -617,16 +970,39 @@ impl SyncManager {
                         "Sync: remote enumeration found {} .crdt files on remote",
                         remote_crdt_ids.len(),
                     );
-                    for page_id in remote_crdt_ids {
-                        if !local_page_ids.contains(&page_id) && !already_pulled.contains(&page_id) {
-                            log::info!("Sync: pulling remote-only page {} (from enumeration)", page_id);
-                            if self
-                                .pull_page(&client, &config, &mut local_state, storage, notebook_id, page_id)
-                                .await
-                                .is_ok()
-                            {
+
+                    let enum_ids: Vec<Uuid> = remote_crdt_ids
+                        .into_iter()
+                        .filter(|id| !local_page_ids.contains(id) && !already_pulled.contains(id))
+                        .collect();
+
+                    if !enum_ids.is_empty() {
+                        let enum_outcomes: Vec<PagePullOutcome> = futures_util::stream::iter(enum_ids)
+                            .map(|page_id| {
+                                let data_dir = self.data_dir.clone();
+                                let client = client.clone();
+                                let config = config.clone();
+                                let storage = Arc::clone(storage);
+                                let sem = Arc::clone(&self.webdav_semaphore);
+                                async move {
+                                    let _permit = sem.acquire().await.unwrap();
+                                    log::info!("Sync: pulling remote-only page {} (from enumeration)", page_id);
+                                    Self::pull_page_concurrent(
+                                        &data_dir, &client, &config, &storage, notebook_id, page_id,
+                                    ).await
+                                }
+                            })
+                            .buffer_unordered(DEFAULT_WEBDAV_CONCURRENCY)
+                            .collect()
+                            .await;
+
+                        for outcome in enum_outcomes {
+                            if outcome.success {
+                                if let Some((etag, sv)) = outcome.sync_mark {
+                                    local_state.mark_page_synced(outcome.page_id, etag, sv);
+                                }
                                 pages_pulled += 1;
-                                synced_page_ids.push((page_id, PageSyncResult::Pulled));
+                                synced_page_ids.push((outcome.page_id, PageSyncResult::Pulled));
                             }
                         }
                     }
@@ -637,7 +1013,7 @@ impl SyncManager {
             }
         }
 
-        // 6c. Apply remote page metadata to all local pages with stale data
+        // 6c. Apply remote page metadata (with per-page locking, not holding lock for entire loop)
         if !remote_pages_meta.is_empty() {
             self.apply_pages_meta(storage, notebook_id, &remote_pages_meta);
         }
@@ -691,8 +1067,7 @@ impl SyncManager {
             }
         }
 
-        // Push structural metadata only if we pushed pages (we have authoritative data).
-        // A client that only pulled should not overwrite remote structure with stale/broken data.
+        // Push structural metadata IN PARALLEL (only if we pushed pages)
         if pages_pushed > 0 {
             if let Err(e) = self.push_structure(&client, &config.remote_path, storage, notebook_id).await {
                 log::warn!("Sync: failed to push structural metadata: {}", e);
@@ -719,13 +1094,15 @@ impl SyncManager {
             changelog.compact(200);
         }
 
+        let any_pushed = pages_pushed > 0;
+
         if !synced_page_ids.is_empty() || !manifest_existed {
             if let Err(e) = self.push_changelog(&client, &config.remote_path, &changelog).await {
                 log::error!("Sync: failed to push changelog: {}", e);
             }
         }
 
-        // 9. Sync assets
+        // 9. Sync assets (with CAS when possible, fallback to legacy)
         if let Some(app) = app_handle {
             let _ = app.emit("sync-progress", SyncProgress {
                 notebook_id: notebook_id.to_string(),
@@ -735,13 +1112,44 @@ impl SyncManager {
                 phase: "assets".to_string(),
             });
         }
-        let asset_result = self
-            .sync_assets(&client, &config, &mut local_state, notebook_id)
-            .await
-            .unwrap_or_else(|e| {
-                log::error!("Asset sync failed for notebook {}: {}", notebook_id, e);
-                AssetSyncResult::default()
-            });
+
+        // Determine library base path for CAS
+        let library_base_path = config.remote_path
+            .rsplit_once('/')
+            .map(|(base, _)| base.to_string());
+
+        let asset_result = if let Some(ref lib_base) = library_base_path {
+            // Try CAS sync first, fall back to legacy
+            match self
+                .sync_assets_cas(&client, &config, &mut local_state, notebook_id, lib_base)
+                .await
+            {
+                Ok(result) => result,
+                Err(e) => {
+                    log::info!("CAS asset sync not available ({}), falling back to legacy", e);
+                    self.sync_assets(&client, &config, &mut local_state, notebook_id)
+                        .await
+                        .unwrap_or_else(|e| {
+                            log::error!("Asset sync failed for notebook {}: {}", notebook_id, e);
+                            AssetSyncResult::default()
+                        })
+                }
+            }
+        } else {
+            self.sync_assets(&client, &config, &mut local_state, notebook_id)
+                .await
+                .unwrap_or_else(|e| {
+                    log::error!("Asset sync failed for notebook {}: {}", notebook_id, e);
+                    AssetSyncResult::default()
+                })
+        };
+
+        // Push sentinel if we pushed anything
+        if any_pushed || asset_result.assets_pushed > 0 {
+            if let Some(ref lib_base) = library_base_path {
+                self.push_sentinel(&client, lib_base, &local_state.client_id).await;
+            }
+        }
 
         // 10. Process queue items
         let queue_items: Vec<_> = {
@@ -795,9 +1203,9 @@ impl SyncManager {
         ))
     }
 
-    /// Fetch manifest from remote
-    async fn fetch_manifest(
-        &self,
+    // ===== Manifest, changelog, pages-meta fetch (static for tokio::join!) =====
+
+    async fn fetch_manifest_static(
         client: &WebDAVClient,
         remote_path: &str,
     ) -> Result<SyncManifest, SyncError> {
@@ -805,6 +1213,28 @@ impl SyncManager {
         let data = client.get(&manifest_path).await?;
         let manifest: SyncManifest = serde_json::from_slice(&data)?;
         Ok(manifest)
+    }
+
+    async fn fetch_changelog_static(
+        client: &WebDAVClient,
+        remote_path: &str,
+        notebook_id: Uuid,
+    ) -> Changelog {
+        let changelog_path = format!("{}/.changelog.json", remote_path);
+        match client.get(&changelog_path).await {
+            Ok(data) => serde_json::from_slice(&data).unwrap_or_else(|_| Changelog::new(notebook_id)),
+            Err(_) => Changelog::new(notebook_id),
+        }
+    }
+
+    async fn fetch_pages_meta_static(
+        client: &WebDAVClient,
+        remote_path: &str,
+    ) -> Result<HashMap<Uuid, PageMeta>, SyncError> {
+        let meta_path = format!("{}/pages-meta.json", remote_path);
+        let data = client.get(&meta_path).await?;
+        let meta: HashMap<Uuid, PageMeta> = serde_json::from_slice(&data)?;
+        Ok(meta)
     }
 
     /// Push manifest to remote (last-writer-wins, no ETag locking)
@@ -818,20 +1248,6 @@ impl SyncManager {
         let data = serde_json::to_vec_pretty(manifest)?;
         client.put(&manifest_path, &data, None).await?;
         Ok(())
-    }
-
-    /// Fetch changelog from remote. Returns empty changelog on any error.
-    async fn fetch_changelog(
-        &self,
-        client: &WebDAVClient,
-        remote_path: &str,
-        notebook_id: Uuid,
-    ) -> Changelog {
-        let changelog_path = format!("{}/.changelog.json", remote_path);
-        match client.get(&changelog_path).await {
-            Ok(data) => serde_json::from_slice(&data).unwrap_or_else(|_| Changelog::new(notebook_id)),
-            Err(_) => Changelog::new(notebook_id),
-        }
     }
 
     /// Push changelog to remote (last-writer-wins)
@@ -874,6 +1290,7 @@ impl SyncManager {
     }
 
     /// Push structural metadata to remote: pages-meta.json, folders.json, sections.json
+    /// Uses tokio::join! for parallel PUTs.
     async fn push_structure(
         &self,
         client: &WebDAVClient,
@@ -889,49 +1306,47 @@ impl SyncManager {
             (pages, folders, sections)
         };
 
-        // Build pages-meta.json: page_id -> PageMeta for every page
+        // Build pages-meta.json
         let pages_meta: HashMap<Uuid, PageMeta> = pages
             .iter()
             .map(|p| (p.id, PageMeta::from(p)))
             .collect();
 
+        let meta_data = serde_json::to_vec_pretty(&pages_meta)?;
+        let folders_data = serde_json::to_vec_pretty(&folders)?;
+        let sections_data = serde_json::to_vec_pretty(&sections)?;
+
         let meta_path = format!("{}/pages-meta.json", remote_path);
-        let data = serde_json::to_vec_pretty(&pages_meta)?;
-        client.put(&meta_path, &data, None).await?;
-        log::info!("Sync: pushed pages-meta.json with {} entries", pages_meta.len());
-
-        // Push folders.json
         let folders_path = format!("{}/folders.json", remote_path);
-        let data = serde_json::to_vec_pretty(&folders)?;
-        client.put(&folders_path, &data, None).await?;
-        log::info!("Sync: pushed folders.json with {} folders", folders.len());
-
-        // Push sections.json
         let sections_path = format!("{}/sections.json", remote_path);
-        let data = serde_json::to_vec_pretty(&sections)?;
-        client.put(&sections_path, &data, None).await?;
-        log::info!("Sync: pushed sections.json with {} sections", sections.len());
+
+        // Three independent PUTs in parallel
+        let (r1, r2, r3) = tokio::join!(
+            client.put(&meta_path, &meta_data, None),
+            client.put(&folders_path, &folders_data, None),
+            client.put(&sections_path, &sections_data, None),
+        );
+
+        if let Err(e) = r1 {
+            log::warn!("Sync: failed to push pages-meta.json: {}", e);
+        } else {
+            log::info!("Sync: pushed pages-meta.json with {} entries", pages_meta.len());
+        }
+        if let Err(e) = r2 {
+            log::warn!("Sync: failed to push folders.json: {}", e);
+        } else {
+            log::info!("Sync: pushed folders.json with {} folders", folders.len());
+        }
+        if let Err(e) = r3 {
+            log::warn!("Sync: failed to push sections.json: {}", e);
+        } else {
+            log::info!("Sync: pushed sections.json with {} sections", sections.len());
+        }
 
         Ok(())
     }
 
-    /// Fetch pages-meta.json from remote (page_id -> PageMeta map)
-    async fn fetch_pages_meta(
-        &self,
-        client: &WebDAVClient,
-        remote_path: &str,
-    ) -> Result<HashMap<Uuid, PageMeta>, SyncError> {
-        let meta_path = format!("{}/pages-meta.json", remote_path);
-        let data = client.get(&meta_path).await?;
-        let meta: HashMap<Uuid, PageMeta> = serde_json::from_slice(&data)?;
-        Ok(meta)
-    }
-
     /// Fetch and apply remote folders.json and sections.json to local storage.
-    ///
-    /// Remote is treated as source of truth: if remote has folders/sections,
-    /// they always overwrite local. This prevents a receiving client (which
-    /// has empty or stale structure) from keeping broken state.
     async fn pull_structure(
         &self,
         client: &WebDAVClient,
@@ -975,11 +1390,7 @@ impl SyncManager {
     }
 
     /// Apply page metadata from remote pages-meta.json to local pages.
-    ///
-    /// Applies to ALL local pages that have stale metadata (placeholder title
-    /// or remote has newer updated_at), not just newly pulled pages. This fixes
-    /// pages from previous syncs that ran before structural metadata syncing
-    /// was implemented.
+    /// Uses per-page locking instead of holding storage lock for the entire loop.
     fn apply_pages_meta(
         &self,
         storage: &SharedStorage,
@@ -989,25 +1400,30 @@ impl SyncManager {
         if pages_meta.is_empty() {
             return;
         }
-        let storage_guard = storage.lock().unwrap();
-        let local_pages = match storage_guard.list_pages(notebook_id) {
-            Ok(pages) => pages,
-            Err(e) => {
-                log::warn!("Sync: failed to list pages for metadata apply: {}", e);
-                return;
+
+        // Read page list under brief lock
+        let local_pages = {
+            let storage_guard = storage.lock().unwrap();
+            match storage_guard.list_pages(notebook_id) {
+                Ok(pages) => pages,
+                Err(e) => {
+                    log::warn!("Sync: failed to list pages for metadata apply: {}", e);
+                    return;
+                }
             }
         };
 
         let mut applied = 0;
         for page in local_pages {
             if let Some(meta) = pages_meta.get(&page.id) {
-                // Apply if: page has placeholder title, or remote metadata is newer
                 let is_placeholder = page.title.starts_with("Synced Page ");
                 let remote_is_newer = meta.updated_at > page.updated_at;
                 if !is_placeholder && !remote_is_newer {
                     continue;
                 }
 
+                // Acquire/release lock per-page update
+                let storage_guard = storage.lock().unwrap();
                 match storage_guard.get_page(notebook_id, page.id) {
                     Ok(mut page) => {
                         page.title = meta.title.clone();
@@ -1048,20 +1464,45 @@ impl SyncManager {
         );
     }
 
-    /// Sync a single page
-    async fn sync_page(
-        &self,
+    // ===== Concurrent page sync (no &mut LocalSyncState needed) =====
+
+    /// Sync a single page concurrently. Returns outcome with sync_mark to apply later.
+    async fn sync_page_concurrent(
+        data_dir: &Path,
         client: &WebDAVClient,
         config: &SyncConfig,
-        local_state: &mut LocalSyncState,
+        sync_info: &PageSyncInfo,
         storage: &SharedStorage,
         notebook_id: Uuid,
         page: &Page,
-        // Manifest is passed for future incremental CRDT encoding (encode_diff).
-        // Currently we always push full state for bootstrap compatibility.
-        _manifest: &SyncManifest,
-    ) -> Result<PageSyncResult, SyncError> {
-        let crdt_path = self.crdt_path(notebook_id, page.id);
+    ) -> PageSyncOutcome {
+        let page_id = page.id;
+        match Self::sync_page_concurrent_inner(
+            data_dir, client, config, sync_info, storage, notebook_id, page,
+        ).await {
+            Ok((result, sync_mark)) => PageSyncOutcome {
+                page_id,
+                result: Ok(result),
+                sync_mark,
+            },
+            Err(e) => PageSyncOutcome {
+                page_id,
+                result: Err(e),
+                sync_mark: None,
+            },
+        }
+    }
+
+    async fn sync_page_concurrent_inner(
+        data_dir: &Path,
+        client: &WebDAVClient,
+        config: &SyncConfig,
+        sync_info: &PageSyncInfo,
+        storage: &SharedStorage,
+        notebook_id: Uuid,
+        page: &Page,
+    ) -> Result<(PageSyncResult, Option<(Option<String>, Vec<u8>)>), SyncError> {
+        let crdt_path = Self::crdt_path_for(data_dir, notebook_id, page.id);
         let remote_path = format!("{}/pages/{}.crdt", config.remote_path, page.id);
 
         // 1. Load or create local CRDT
@@ -1072,20 +1513,13 @@ impl SyncManager {
         } else {
             PageDocument::from_editor_data(&page.content)?
         };
-        log::debug!(
-            "Sync page: crdt_existed={}, remote_path={}",
-            crdt_existed,
-            remote_path,
-        );
 
-        // 2. Use HEAD to check remote existence + ETag (cheaper than GET)
+        // 2. Use HEAD to check remote existence + ETag
         let (remote_exists, remote_etag) = match client.head(&remote_path).await {
             Ok(head) if head.exists => {
                 if head.etag.is_some() {
                     (true, head.etag)
                 } else {
-                    // HEAD returned no ETag — fall back to GET for compatibility
-                    log::debug!("Sync page: HEAD returned no ETag, falling back to GET for ETag");
                     match client.get_with_etag(&remote_path).await {
                         Ok((_, etag)) => (true, etag),
                         Err(WebDAVError::NotFound(_)) => (false, None),
@@ -1096,8 +1530,6 @@ impl SyncManager {
             Ok(_) => (false, None),
             Err(WebDAVError::NotFound(_)) => (false, None),
             Err(_) => {
-                // HEAD failed entirely — fall back to GET
-                log::debug!("Sync page: HEAD failed, falling back to GET");
                 match client.get_with_etag(&remote_path).await {
                     Ok((_, etag)) => (true, etag),
                     Err(WebDAVError::NotFound(_)) => (false, None),
@@ -1106,44 +1538,38 @@ impl SyncManager {
             }
         };
 
-        // 3. If remote exists and ETag differs from our last known — remote changed
+        // 3. If remote exists and ETag differs — remote changed
         if remote_exists {
-            let page_state = local_state.pages.get(&page.id);
-            let remote_changed = match page_state {
-                Some(state) => state.remote_etag.as_deref() != remote_etag.as_deref(),
+            let remote_changed = match &sync_info.remote_etag {
+                Some(stored) => Some(stored.as_str()) != remote_etag.as_deref(),
                 None => true,
             };
 
             if remote_changed {
-                // Remote changed — fetch full content
                 let (remote_data, fetched_etag) = client.get_with_etag(&remote_path).await?;
                 let remote_etag = fetched_etag.or(remote_etag);
 
-                // Apply remote update to local CRDT
                 local_doc.apply_update(&remote_data)?;
 
-                if local_state.page_needs_sync(page.id) {
-                    // Merge case: both local and remote changed
+                if sync_info.needs_sync {
+                    // Merge case
                     let merged_content = local_doc.to_editor_data()?;
                     {
                         let storage_guard = storage.lock().unwrap();
                         let mut updated_page = page.clone();
                         updated_page.content = merged_content;
                         storage_guard.update_page(&updated_page)?;
-                    } // Lock released before async
+                    }
 
-                    // Save merged CRDT locally
                     let merged_state = local_doc.encode_state();
                     std::fs::create_dir_all(crdt_path.parent().unwrap())?;
                     std::fs::write(&crdt_path, &merged_state)?;
 
-                    // Push merged state back (full state for bootstrap)
                     let result = client.put(&remote_path, &merged_state, None).await?;
-
-                    local_state.mark_page_synced(page.id, result.etag, local_doc.state_vector());
-                    return Ok(PageSyncResult::Merged);
+                    let sv = local_doc.state_vector();
+                    return Ok((PageSyncResult::Merged, Some((result.etag, sv))));
                 } else {
-                    // Pull only — save merged state locally
+                    // Pull only
                     let merged_content = local_doc.to_editor_data()?;
                     {
                         let storage_guard = storage.lock().unwrap();
@@ -1156,29 +1582,23 @@ impl SyncManager {
                     std::fs::create_dir_all(crdt_path.parent().unwrap())?;
                     std::fs::write(&crdt_path, &state)?;
 
-                    local_state.mark_page_synced(page.id, remote_etag, local_doc.state_vector());
-                    return Ok(PageSyncResult::Pulled);
+                    let sv = local_doc.state_vector();
+                    return Ok((PageSyncResult::Pulled, Some((remote_etag, sv))));
                 }
             }
         }
 
         // 4. If local needs pushing
-        if local_state.page_needs_sync(page.id) {
-            // Always write full state to remote .crdt file (needed for bootstrap)
+        if sync_info.needs_sync {
             let full_state = local_doc.encode_state();
             std::fs::create_dir_all(crdt_path.parent().unwrap())?;
             std::fs::write(&crdt_path, &full_state)?;
 
-            // Push to remote with If-Match for conflict detection
-            let local_etag = local_state
-                .pages
-                .get(&page.id)
-                .and_then(|s| s.remote_etag.clone());
-
-            let result = client.put(&remote_path, &full_state, local_etag.as_deref()).await?;
+            let result = client
+                .put(&remote_path, &full_state, sync_info.remote_etag.as_deref())
+                .await?;
 
             if result.conflict {
-                // Remote changed during push — pull, merge, push without ETag
                 let (remote_data, _) = client.get_with_etag(&remote_path).await?;
                 local_doc.apply_update(&remote_data)?;
 
@@ -1186,44 +1606,68 @@ impl SyncManager {
                 std::fs::write(&crdt_path, &merged_state)?;
 
                 let result = client.put(&remote_path, &merged_state, None).await?;
-                local_state.mark_page_synced(page.id, result.etag, local_doc.state_vector());
 
-                // Update page content (short lock)
                 let merged_content = local_doc.to_editor_data()?;
                 {
                     let storage_guard = storage.lock().unwrap();
                     let mut updated_page = page.clone();
                     updated_page.content = merged_content;
                     storage_guard.update_page(&updated_page)?;
-                } // Lock released
+                }
 
-                return Ok(PageSyncResult::Merged);
+                let sv = local_doc.state_vector();
+                return Ok((PageSyncResult::Merged, Some((result.etag, sv))));
             }
 
-            local_state.mark_page_synced(page.id, result.etag, local_doc.state_vector());
-            return Ok(PageSyncResult::Pushed);
+            let sv = local_doc.state_vector();
+            return Ok((PageSyncResult::Pushed, Some((result.etag, sv))));
         }
 
-        Ok(PageSyncResult::Unchanged)
+        Ok((PageSyncResult::Unchanged, None))
     }
 
-    /// Pull a page from remote
-    async fn pull_page(
-        &self,
+    /// Pull a page from remote concurrently. Returns outcome with sync_mark.
+    async fn pull_page_concurrent(
+        data_dir: &Path,
         client: &WebDAVClient,
         config: &SyncConfig,
-        local_state: &mut LocalSyncState,
         storage: &SharedStorage,
         notebook_id: Uuid,
         page_id: Uuid,
-    ) -> Result<Page, SyncError> {
+    ) -> PagePullOutcome {
+        match Self::pull_page_concurrent_inner(
+            data_dir, client, config, storage, notebook_id, page_id,
+        ).await {
+            Ok((etag, sv)) => PagePullOutcome {
+                page_id,
+                success: true,
+                sync_mark: Some((etag, sv)),
+            },
+            Err(e) => {
+                log::error!("Sync: failed to pull page {}: {}", page_id, e);
+                PagePullOutcome {
+                    page_id,
+                    success: false,
+                    sync_mark: None,
+                }
+            }
+        }
+    }
+
+    async fn pull_page_concurrent_inner(
+        data_dir: &Path,
+        client: &WebDAVClient,
+        config: &SyncConfig,
+        storage: &SharedStorage,
+        notebook_id: Uuid,
+        page_id: Uuid,
+    ) -> Result<(Option<String>, Vec<u8>), SyncError> {
         let remote_path = format!("{}/pages/{}.crdt", config.remote_path, page_id);
         let (data, etag) = client.get_with_etag(&remote_path).await?;
 
         let doc = PageDocument::from_state(&data)?;
         let content = doc.to_editor_data()?;
 
-        // Create local page
         let page = Page {
             id: page_id,
             notebook_id,
@@ -1255,17 +1699,18 @@ impl SyncManager {
         {
             let storage_guard = storage.lock().unwrap();
             storage_guard.create_page_with_id(notebook_id, &page)?;
-        } // Lock released
+        }
 
         // Save CRDT
-        let crdt_path = self.crdt_path(notebook_id, page_id);
+        let crdt_path = Self::crdt_path_for(data_dir, notebook_id, page_id);
         std::fs::create_dir_all(crdt_path.parent().unwrap())?;
         std::fs::write(&crdt_path, &data)?;
 
-        local_state.mark_page_synced(page_id, etag, doc.state_vector());
-
-        Ok(page)
+        let sv = doc.state_vector();
+        Ok((etag, sv))
     }
+
+    // ===== Asset discovery =====
 
     /// Discover all local asset files under the notebook's assets directory
     fn discover_local_assets(
@@ -1307,7 +1752,9 @@ impl SyncManager {
         assets
     }
 
-    /// Sync assets between local and remote for a notebook
+    // ===== Legacy asset sync (parallel) =====
+
+    /// Sync assets between local and remote for a notebook (parallelized)
     async fn sync_assets(
         &self,
         client: &WebDAVClient,
@@ -1344,17 +1791,13 @@ impl SyncManager {
 
         let mut result = AssetSyncResult::default();
 
-        // Build a set of remote relative paths for quick lookup.
-        // ResourceInfo.path never has a leading '/' (stripped by the parser),
-        // but remote_assets_base may have one (from config.remote_path), so
-        // normalize both sides.
+        // Build remote map
         let normalized_prefix = remote_assets_base.trim_matches('/');
         let remote_assets_prefix = format!("{}/", normalized_prefix);
         let remote_map: HashMap<String, &super::webdav::ResourceInfo> = remote_assets
             .iter()
             .filter_map(|r| {
                 let path = r.path.trim_end_matches('/');
-                // Extract relative path from the full remote path
                 if let Some(rel) = path.strip_prefix(normalized_prefix) {
                     let rel = rel.trim_start_matches('/').to_string();
                     if !rel.is_empty() {
@@ -1365,113 +1808,373 @@ impl SyncManager {
                 None
             })
             .collect();
-        log::info!(
-            "Asset sync: remote_map has {} entries from {} remote assets",
-            remote_map.len(),
-            remote_assets.len(),
-        );
 
-        // 4. Push: local assets that need syncing to remote
-        // Use local sync state as primary indicator — asset_needs_push returns true for
-        // untracked assets (first sync) and for assets modified since last sync.
-        // remote_map is only used as a fallback for assets that were synced but may have
-        // been deleted from the remote.
-        for (relative_path, (abs_path, size, mtime)) in &local_assets {
-            let needs_push = local_state.asset_needs_push(relative_path, *size, *mtime);
+        // 4. Push: collect assets that need pushing
+        let push_tasks: Vec<(String, PathBuf, u64, Option<DateTime<Utc>>, Option<String>)> =
+            local_assets
+                .iter()
+                .filter(|(relative_path, (_, size, mtime))| {
+                    local_state.asset_needs_push(relative_path, *size, *mtime)
+                })
+                .map(|(relative_path, (abs_path, size, mtime))| {
+                    let existing_etag = local_state
+                        .assets
+                        .get(relative_path)
+                        .and_then(|s| s.remote_etag.clone());
+                    (
+                        relative_path.clone(),
+                        abs_path.clone(),
+                        *size,
+                        *mtime,
+                        existing_etag,
+                    )
+                })
+                .collect();
 
-            if !needs_push {
-                continue;
-            }
+        // Push assets concurrently
+        let push_outcomes: Vec<AssetPushOutcome> = futures_util::stream::iter(push_tasks)
+            .map(|(relative_path, abs_path, size, mtime, existing_etag)| {
+                let client = client.clone();
+                let remote_base = remote_assets_base.clone();
+                let sem = Arc::clone(&self.webdav_semaphore);
+                async move {
+                    let _permit = sem.acquire().await.unwrap();
+                    let remote_path = format!("{}/{}", remote_base, relative_path);
+                    log::info!("Asset sync: pushing {}", relative_path);
 
-            let remote_path = format!("{}/{}", remote_assets_base, relative_path);
-            let existing_etag = local_state
-                .assets
-                .get(relative_path)
-                .and_then(|s| s.remote_etag.clone());
+                    let put_result = client
+                        .put_file(&remote_path, &abs_path, existing_etag.as_deref())
+                        .await;
 
-            log::info!("Asset sync: pushing {}", relative_path);
-
-            let put_result = client
-                .put_file(&remote_path, abs_path, existing_etag.as_deref())
-                .await;
-
-            match put_result {
-                Ok(resp) if resp.conflict => {
-                    // Conflict: re-upload without If-Match (last-write-wins)
-                    log::info!("Asset sync: conflict on {}, re-uploading (last-write-wins)", relative_path);
-                    match client.put_file(&remote_path, abs_path, None).await {
-                        Ok(resp2) => {
-                            local_state.mark_asset_synced(relative_path, resp2.etag, *size, *mtime);
-                            result.assets_pushed += 1;
+                    match put_result {
+                        Ok(resp) if resp.conflict => {
+                            log::info!("Asset sync: conflict on {}, re-uploading", relative_path);
+                            match client.put_file(&remote_path, &abs_path, None).await {
+                                Ok(resp2) => AssetPushOutcome {
+                                    relative_path,
+                                    success: true,
+                                    sync_mark: Some((resp2.etag, size, mtime)),
+                                },
+                                Err(e) => {
+                                    log::error!("Asset sync: failed to push {} after conflict: {}", relative_path, e);
+                                    AssetPushOutcome { relative_path, success: false, sync_mark: None }
+                                }
+                            }
                         }
+                        Ok(resp) => AssetPushOutcome {
+                            relative_path,
+                            success: true,
+                            sync_mark: Some((resp.etag, size, mtime)),
+                        },
                         Err(e) => {
-                            log::error!("Asset sync: failed to push {} after conflict: {}", relative_path, e);
+                            log::error!("Asset sync: failed to push {}: {}", relative_path, e);
+                            AssetPushOutcome { relative_path, success: false, sync_mark: None }
                         }
                     }
                 }
-                Ok(resp) => {
-                    local_state.mark_asset_synced(relative_path, resp.etag, *size, *mtime);
-                    result.assets_pushed += 1;
+            })
+            .buffer_unordered(DEFAULT_WEBDAV_CONCURRENCY)
+            .collect()
+            .await;
+
+        // Apply push outcomes
+        for outcome in push_outcomes {
+            if outcome.success {
+                if let Some((etag, size, mtime)) = outcome.sync_mark {
+                    local_state.mark_asset_synced(&outcome.relative_path, etag, size, mtime);
                 }
-                Err(e) => {
-                    log::error!("Asset sync: failed to push {}: {}", relative_path, e);
-                }
+                result.assets_pushed += 1;
             }
         }
 
-        // 5. Pull: remote assets not present locally, or with changed ETags
-        for (relative_path, remote_info) in &remote_map {
-            let local_path = assets_dir.join(relative_path);
-            let is_locally_present = local_path.exists();
+        // 5. Pull: collect assets that need pulling
+        let pull_tasks: Vec<(String, PathBuf, Option<String>)> = remote_map
+            .iter()
+            .filter_map(|(relative_path, remote_info)| {
+                let local_path = assets_dir.join(relative_path);
+                let is_locally_present = local_path.exists();
 
-            let should_pull = if !is_locally_present {
-                true
-            } else {
-                // Check if remote changed and local hasn't been modified since last sync
-                match local_state.assets.get(relative_path) {
-                    Some(asset_state) => {
-                        let remote_etag_changed = remote_info.etag.as_deref()
-                            != asset_state.remote_etag.as_deref();
-                        let local_modified = local_assets.get(relative_path)
-                            .map(|(_, size, mtime)| {
-                                local_state.asset_needs_push(relative_path, *size, *mtime)
-                            })
-                            .unwrap_or(false);
-                        remote_etag_changed && !local_modified
-                    }
-                    None => {
-                        // File exists locally but not tracked (e.g. after code upgrade
-                        // or partial sync). Compare sizes to avoid re-downloading.
-                        let local_size = local_assets.get(relative_path).map(|(_, s, _)| *s);
-                        let remote_size = remote_info.content_length;
-                        match (local_size, remote_size) {
-                            (Some(ls), Some(rs)) if ls == rs => {
-                                // Same size — register in state, skip download
-                                let mtime = local_assets.get(relative_path)
-                                    .and_then(|(_, _, m)| *m);
-                                local_state.mark_asset_synced(
-                                    relative_path,
-                                    remote_info.etag.clone(),
-                                    ls,
-                                    mtime,
-                                );
-                                log::debug!("Asset sync: skipping {} (exists locally, size matches)", relative_path);
-                                false
+                let should_pull = if !is_locally_present {
+                    true
+                } else {
+                    match local_state.assets.get(relative_path) {
+                        Some(asset_state) => {
+                            let remote_etag_changed = remote_info.etag.as_deref()
+                                != asset_state.remote_etag.as_deref();
+                            let local_modified = local_assets.get(relative_path)
+                                .map(|(_, size, mtime)| {
+                                    local_state.asset_needs_push(relative_path, *size, *mtime)
+                                })
+                                .unwrap_or(false);
+                            remote_etag_changed && !local_modified
+                        }
+                        None => {
+                            let local_size = local_assets.get(relative_path).map(|(_, s, _)| *s);
+                            let remote_size = remote_info.content_length;
+                            match (local_size, remote_size) {
+                                (Some(ls), Some(rs)) if ls == rs => false,
+                                _ => true,
                             }
-                            _ => true,
+                        }
+                    }
+                };
+
+                if !should_pull {
+                    // Register untracked same-size files in state
+                    if !local_state.assets.contains_key(relative_path) {
+                        if let Some((_, size, _mtime)) = local_assets.get(relative_path) {
+                            if let Some(remote_size) = remote_info.content_length {
+                                if *size == remote_size {
+                                    // Will handle in apply phase
+                                }
+                            }
+                        }
+                    }
+                    return None;
+                }
+
+                Some((
+                    relative_path.clone(),
+                    local_path,
+                    remote_info.etag.clone(),
+                ))
+            })
+            .collect();
+
+        // Pull assets concurrently
+        let pull_outcomes: Vec<AssetPullOutcome> = futures_util::stream::iter(pull_tasks)
+            .map(|(relative_path, local_path, _remote_etag)| {
+                let client = client.clone();
+                let remote_base = remote_assets_base.clone();
+                let sem = Arc::clone(&self.webdav_semaphore);
+                async move {
+                    let _permit = sem.acquire().await.unwrap();
+                    let remote_path_full = format!("{}/{}", remote_base, relative_path);
+                    log::info!("Asset sync: pulling {}", relative_path);
+
+                    match client.get_to_file(&remote_path_full, &local_path).await {
+                        Ok(etag) => {
+                            let metadata = std::fs::metadata(&local_path).ok();
+                            let size = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
+                            let mtime = metadata
+                                .and_then(|m| m.modified().ok())
+                                .map(|t| DateTime::<Utc>::from(t));
+                            AssetPullOutcome {
+                                relative_path,
+                                success: true,
+                                sync_mark: Some((etag, size, mtime)),
+                            }
+                        }
+                        Err(e) => {
+                            log::error!("Asset sync: failed to pull {}: {}", relative_path, e);
+                            AssetPullOutcome { relative_path, success: false, sync_mark: None }
                         }
                     }
                 }
+            })
+            .buffer_unordered(DEFAULT_WEBDAV_CONCURRENCY)
+            .collect()
+            .await;
+
+        // Apply pull outcomes
+        for outcome in pull_outcomes {
+            if outcome.success {
+                if let Some((etag, size, mtime)) = outcome.sync_mark {
+                    local_state.mark_asset_synced(&outcome.relative_path, etag, size, mtime);
+                }
+                result.assets_pulled += 1;
+            }
+        }
+
+        log::info!(
+            "Asset sync complete: {} pushed, {} pulled",
+            result.assets_pushed,
+            result.assets_pulled,
+        );
+
+        Ok(result)
+    }
+
+    // ===== Content-addressable asset sync =====
+
+    /// Sync assets using content-addressable storage (CAS).
+    /// Falls back gracefully if remote has no asset-manifest.json.
+    async fn sync_assets_cas(
+        &self,
+        client: &WebDAVClient,
+        config: &super::config::SyncConfig,
+        local_state: &mut LocalSyncState,
+        notebook_id: Uuid,
+        library_base_path: &str,
+    ) -> Result<AssetSyncResult, SyncError> {
+        let assets_dir = self.assets_dir(notebook_id);
+        let manifest_path = format!("{}/asset-manifest.json", config.remote_path);
+
+        // 1. Discover local assets with hashes
+        let local_assets = Self::discover_local_assets(&assets_dir);
+        log::info!(
+            "CAS asset sync: discovered {} local assets for notebook {}",
+            local_assets.len(),
+            notebook_id,
+        );
+
+        // 2. Fetch remote asset manifest (if exists)
+        let remote_manifest: AssetManifest = match client.get(&manifest_path).await {
+            Ok(data) => serde_json::from_slice(&data).unwrap_or_default(),
+            Err(WebDAVError::NotFound(_)) => HashMap::new(),
+            Err(e) => {
+                // Can't reach manifest — fall back to legacy
+                return Err(e.into());
+            }
+        };
+
+        let mut result = AssetSyncResult::default();
+        let mut local_manifest: AssetManifest = remote_manifest.clone();
+        let mut manifest_changed = false;
+
+        // Ensure CAS directory exists
+        let _ = client.mkdir_p(&format!("{}/cas", library_base_path)).await;
+
+        // 3. Push: compute hash for each local asset and upload to CAS if missing
+        let push_tasks: Vec<(String, PathBuf, u64, Option<DateTime<Utc>>, String, String)> =
+            local_assets
+                .iter()
+                .filter_map(|(relative_path, (abs_path, size, mtime))| {
+                    // Check if asset needs push
+                    if !local_state.asset_needs_push(relative_path, *size, *mtime) {
+                        return None;
+                    }
+
+                    // Compute or use cached hash
+                    let cached_hash = local_state
+                        .assets
+                        .get(relative_path)
+                        .and_then(|s| s.content_hash.clone());
+
+                    let hash = if let Some(ref h) = cached_hash {
+                        // Re-hash if size changed
+                        let cached_size = local_state
+                            .assets
+                            .get(relative_path)
+                            .map(|s| s.synced_size)
+                            .unwrap_or(0);
+                        if cached_size == *size {
+                            h.clone()
+                        } else {
+                            match Self::compute_file_hash(abs_path) {
+                                Ok(h) => h,
+                                Err(e) => {
+                                    log::error!("CAS: failed to hash {}: {}", relative_path, e);
+                                    return None;
+                                }
+                            }
+                        }
+                    } else {
+                        match Self::compute_file_hash(abs_path) {
+                            Ok(h) => h,
+                            Err(e) => {
+                                log::error!("CAS: failed to hash {}: {}", relative_path, e);
+                                return None;
+                            }
+                        }
+                    };
+
+                    let ext = abs_path
+                        .extension()
+                        .and_then(|e| e.to_str())
+                        .unwrap_or("")
+                        .to_string();
+
+                    Some((relative_path.clone(), abs_path.clone(), *size, *mtime, hash, ext))
+                })
+                .collect();
+
+        // Push to CAS concurrently
+        for (relative_path, abs_path, size, mtime, hash, ext) in &push_tasks {
+            let cas_path = Self::cas_remote_path(library_base_path, hash, ext);
+
+            // Check if already in CAS (HEAD)
+            let _permit = self.webdav_semaphore.acquire().await.unwrap();
+            let exists = match client.head(&cas_path).await {
+                Ok(h) => h.exists,
+                Err(_) => false,
             };
 
-            if !should_pull {
-                continue;
+            if !exists {
+                // Ensure prefix directory exists
+                let prefix = &hash[..2.min(hash.len())];
+                let _ = client.mkdir_p(&format!("{}/cas/{}", library_base_path, prefix)).await;
+
+                log::info!("CAS: uploading {} -> {}", relative_path, cas_path);
+                match client.put_file(&cas_path, abs_path, None).await {
+                    Ok(_) => {
+                        result.assets_pushed += 1;
+                    }
+                    Err(e) => {
+                        log::error!("CAS: failed to upload {}: {}", relative_path, e);
+                        continue;
+                    }
+                }
+            } else {
+                log::debug!("CAS: {} already in store (dedup)", relative_path);
             }
 
-            let remote_path_full = format!("{}/{}", remote_assets_base, relative_path);
-            log::info!("Asset sync: pulling {}", relative_path);
+            // Update manifest
+            local_manifest.insert(
+                relative_path.clone(),
+                AssetManifestEntry {
+                    hash: hash.clone(),
+                    size: *size,
+                    ext: ext.clone(),
+                },
+            );
+            manifest_changed = true;
 
-            match client.get_to_file(&remote_path_full, &local_path).await {
+            // Update local state with hash
+            local_state.mark_asset_synced(relative_path, None, *size, *mtime);
+            if let Some(asset_state) = local_state.assets.get_mut(relative_path) {
+                asset_state.content_hash = Some(hash.clone());
+            }
+        }
+
+        // 4. Pull: check remote manifest entries missing locally
+        for (relative_path, entry) in &remote_manifest {
+            let local_path = assets_dir.join(relative_path);
+
+            if local_path.exists() {
+                // Check if local file hash matches
+                let local_hash = local_state
+                    .assets
+                    .get(relative_path)
+                    .and_then(|s| s.content_hash.clone());
+
+                if local_hash.as_deref() == Some(&entry.hash) {
+                    continue; // Already have the right content
+                }
+
+                // Size check as quick filter
+                if let Ok(meta) = std::fs::metadata(&local_path) {
+                    if meta.len() == entry.size {
+                        // Probably the same, compute hash to verify
+                        if let Ok(hash) = Self::compute_file_hash(&local_path) {
+                            if hash == entry.hash {
+                                // Update cached hash
+                                if let Some(asset_state) = local_state.assets.get_mut(relative_path) {
+                                    asset_state.content_hash = Some(hash);
+                                }
+                                continue;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Need to download from CAS
+            let cas_path = Self::cas_remote_path(library_base_path, &entry.hash, &entry.ext);
+            log::info!("CAS: pulling {} from {}", relative_path, cas_path);
+
+            let _permit = self.webdav_semaphore.acquire().await.unwrap();
+            match client.get_to_file(&cas_path, &local_path).await {
                 Ok(etag) => {
                     let metadata = std::fs::metadata(&local_path).ok();
                     let size = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
@@ -1479,16 +2182,32 @@ impl SyncManager {
                         .and_then(|m| m.modified().ok())
                         .map(|t| DateTime::<Utc>::from(t));
                     local_state.mark_asset_synced(relative_path, etag, size, mtime);
+                    if let Some(asset_state) = local_state.assets.get_mut(relative_path) {
+                        asset_state.content_hash = Some(entry.hash.clone());
+                    }
                     result.assets_pulled += 1;
                 }
                 Err(e) => {
-                    log::error!("Asset sync: failed to pull {}: {}", relative_path, e);
+                    log::error!("CAS: failed to pull {}: {}", relative_path, e);
                 }
             }
         }
 
+        // 5. Push updated manifest if changed
+        if manifest_changed {
+            let data = serde_json::to_vec_pretty(&local_manifest)?;
+            if let Err(e) = client.put(&manifest_path, &data, None).await {
+                log::warn!("CAS: failed to push asset-manifest.json: {}", e);
+            } else {
+                log::info!(
+                    "CAS: pushed asset-manifest.json with {} entries",
+                    local_manifest.len(),
+                );
+            }
+        }
+
         log::info!(
-            "Asset sync complete: {} pushed, {} pulled",
+            "CAS asset sync complete: {} pushed, {} pulled",
             result.assets_pushed,
             result.assets_pulled,
         );
@@ -1626,6 +2345,15 @@ impl SyncManager {
         // Store library credentials in keyring
         self.store_library_credentials(library_id, &input.username, &input.password)?;
 
+        // Detect server type
+        let creds = SyncCredentials {
+            username: input.username.clone(),
+            password: input.password.clone(),
+        };
+        let detect_client = WebDAVClient::new(input.server_url.clone(), creds)?;
+        let server_type = Self::detect_server_type(&detect_client, &input.server_url).await;
+        log::info!("configure_library_sync: detected server type: {:?}", server_type);
+
         // Build library sync config
         let config = LibrarySyncConfig {
             enabled: true,
@@ -1634,6 +2362,7 @@ impl SyncManager {
             auth_type: input.auth_type.clone(),
             sync_mode: input.sync_mode.clone(),
             sync_interval: input.sync_interval,
+            server_type,
         };
 
         // Save config on library
@@ -1643,6 +2372,11 @@ impl SyncManager {
                 .update_library_sync_config(library_id, Some(config.clone()))
                 .map_err(|e| SyncError::IO(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))?;
         }
+
+        // Create library-level CAS directory
+        let creds = self.get_library_credentials(library_id)?;
+        let cas_client = WebDAVClient::new(config.server_url.clone(), creds)?;
+        let _ = cas_client.mkdir_p(&format!("{}/cas", config.remote_base_path)).await;
 
         // Apply to all existing notebooks
         let notebooks = {
@@ -1712,6 +2446,7 @@ impl SyncManager {
             sync_interval: library_config.sync_interval,
             last_sync: None,
             managed_by_library: Some(true),
+            server_type: library_config.server_type.clone(),
         };
 
         // Update notebook
@@ -1791,10 +2526,6 @@ impl SyncManager {
     }
 
     /// Discover notebooks that exist on the remote but not locally.
-    ///
-    /// PROPFINDs `remote_base_path` with depth=1, filters to UUID-named
-    /// collection entries, and creates local notebooks for any that don't
-    /// exist locally.
     async fn discover_remote_notebooks(
         &self,
         library_id: Uuid,
@@ -1828,7 +2559,6 @@ impl SyncManager {
             entries.len(),
         );
 
-        // Log each entry for diagnostics
         let collections: Vec<&super::webdav::ResourceInfo> =
             entries.iter().filter(|e| e.is_collection).collect();
         log::info!(
@@ -1842,7 +2572,6 @@ impl SyncManager {
             .iter()
             .filter(|e| e.is_collection)
             .filter_map(|e| {
-                // Extract the last path component (directory name)
                 let path = e.path.trim_end_matches('/');
                 let name = path.rsplit('/').next()?;
                 let parsed = Uuid::parse_str(name).ok();
@@ -1862,7 +2591,6 @@ impl SyncManager {
             remote_notebook_ids.len(),
         );
 
-        // If PROPFIND returned entries but no UUIDs, log the paths for diagnosis
         if remote_notebook_ids.is_empty() && !entries.is_empty() {
             for entry in &entries {
                 log::info!(
@@ -1874,7 +2602,7 @@ impl SyncManager {
         }
 
         // Get local notebook IDs
-        let local_notebook_ids: std::collections::HashSet<Uuid> = {
+        let local_notebook_ids: HashSet<Uuid> = {
             let storage_guard = storage.lock().unwrap();
             storage_guard
                 .list_notebooks()
@@ -1896,7 +2624,6 @@ impl SyncManager {
                 notebook_id,
             );
 
-            // Try to fetch notebook-meta.json for name/type/etc
             let remote_path = format!("{}/{}", library_config.remote_base_path, notebook_id);
             let creds = self.get_library_credentials(library_id)?;
             let nb_client = WebDAVClient::new(library_config.server_url.clone(), creds)?;
@@ -1918,14 +2645,12 @@ impl SyncManager {
                 }
             };
 
-            // Build a Notebook struct with the remote UUID
             let now = Utc::now();
             let mut notebook = Notebook::new(name, notebook_type);
             notebook.id = notebook_id;
             notebook.created_at = now;
             notebook.updated_at = now;
 
-            // Apply metadata fields if available
             if let Some(meta) = meta {
                 notebook.icon = meta.icon;
                 notebook.color = meta.color;
@@ -1937,7 +2662,6 @@ impl SyncManager {
                 notebook.ai_model = meta.ai_model;
             }
 
-            // Create local notebook with the remote's UUID
             {
                 let storage_guard = storage.lock().unwrap();
                 if let Err(e) = storage_guard.create_notebook_with_id(&notebook) {
@@ -1950,7 +2674,6 @@ impl SyncManager {
                 }
             }
 
-            // Apply library sync config to the new notebook
             if let Err(e) = self
                 .apply_library_sync_to_notebook(library_id, notebook_id, library_config, storage)
                 .await
@@ -1974,7 +2697,7 @@ impl SyncManager {
         Ok(created)
     }
 
-    /// Sync all notebooks in a library
+    /// Sync all notebooks in a library (notebooks synced concurrently)
     pub async fn sync_library(
         &self,
         library_id: Uuid,
@@ -1984,7 +2707,7 @@ impl SyncManager {
     ) -> Result<SyncResult, SyncError> {
         let start = std::time::Instant::now();
 
-        // Get library sync config (needed for auto-apply and discovery)
+        // Get library sync config
         let library_config = {
             let lib_storage = library_storage.lock().unwrap();
             lib_storage
@@ -2026,13 +2749,8 @@ impl SyncManager {
             if library_config.is_some() { "present" } else { "none" },
         );
 
-        let mut total_pulled = 0;
-        let mut total_pushed = 0;
-        let mut total_conflicts = 0;
-        let mut total_assets_pushed = 0;
-        let mut total_assets_pulled = 0;
-        let mut errors = Vec::new();
-        let mut synced_count = 0;
+        // Apply library config to unmanaged notebooks (sequential, as it creates remote dirs)
+        let mut notebook_ids_to_sync: Vec<Uuid> = Vec::new();
 
         for notebook in &notebooks {
             let is_managed = notebook
@@ -2046,7 +2764,6 @@ impl SyncManager {
                 .map(|c| c.enabled)
                 .unwrap_or(false);
 
-            // Auto-apply library config to notebooks missing sync config
             if !is_managed {
                 if let Some(ref lib_config) = library_config {
                     log::info!(
@@ -2068,7 +2785,7 @@ impl SyncManager {
                                 "Library sync: auto-applied to '{}' successfully",
                                 notebook.name,
                             );
-                            // Now this notebook is managed and enabled, sync it
+                            notebook_ids_to_sync.push(notebook.id);
                         }
                         Err(e) => {
                             log::warn!(
@@ -2076,63 +2793,99 @@ impl SyncManager {
                                 notebook.name,
                                 e,
                             );
-                            errors.push(format!("{}: failed to configure: {}", notebook.name, e));
-                            continue;
                         }
                     }
                 } else {
                     log::info!(
-                        "Library sync: notebook '{}' ({}): managed={}, enabled={} — skipping",
+                        "Library sync: notebook '{}' ({}): not managed, no library config — skipping",
                         notebook.name,
                         notebook.id,
-                        is_managed,
-                        is_enabled,
                     );
-                    continue;
                 }
-            } else if !is_enabled {
+            } else if is_enabled {
+                notebook_ids_to_sync.push(notebook.id);
+            } else {
                 log::info!(
                     "Library sync: notebook '{}' ({}): managed but disabled — skipping",
                     notebook.name,
                     notebook.id,
                 );
-                continue;
-            }
-
-            synced_count += 1;
-            log::info!(
-                "Library sync: syncing notebook '{}' ({})",
-                notebook.name,
-                notebook.id,
-            );
-            match self.sync_notebook(notebook.id, storage, app_handle).await {
-                Ok(result) => {
-                    log::info!(
-                        "Library sync: notebook '{}' done: pulled={}, pushed={}, conflicts={}, assets_pushed={}, assets_pulled={}",
-                        notebook.name,
-                        result.pages_pulled,
-                        result.pages_pushed,
-                        result.conflicts_resolved,
-                        result.assets_pushed,
-                        result.assets_pulled,
-                    );
-                    total_pulled += result.pages_pulled;
-                    total_pushed += result.pages_pushed;
-                    total_conflicts += result.conflicts_resolved;
-                    total_assets_pushed += result.assets_pushed;
-                    total_assets_pulled += result.assets_pulled;
-                }
-                Err(e) => {
-                    log::warn!("Failed to sync notebook {}: {}", notebook.id, e);
-                    errors.push(format!("{}: {}", notebook.name, e));
-                }
             }
         }
 
         log::info!(
-            "Library sync complete: {}/{} notebooks synced, pulled={}, pushed={}, conflicts={}, errors={}",
-            synced_count,
-            notebooks.len(),
+            "Library sync: {} notebooks to sync concurrently",
+            notebook_ids_to_sync.len(),
+        );
+
+        // Sync notebooks concurrently with buffer_unordered
+        let total_pulled = Arc::new(AtomicUsize::new(0));
+        let total_pushed = Arc::new(AtomicUsize::new(0));
+        let total_conflicts = Arc::new(AtomicUsize::new(0));
+        let total_assets_pushed = Arc::new(AtomicUsize::new(0));
+        let total_assets_pulled = Arc::new(AtomicUsize::new(0));
+        let errors: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+
+        let results: Vec<()> = futures_util::stream::iter(notebook_ids_to_sync)
+            .map(|notebook_id| {
+                let storage = Arc::clone(storage);
+                let app = app_handle.cloned();
+                let tp = Arc::clone(&total_pulled);
+                let tps = Arc::clone(&total_pushed);
+                let tc = Arc::clone(&total_conflicts);
+                let tap = Arc::clone(&total_assets_pushed);
+                let tapl = Arc::clone(&total_assets_pulled);
+                let errs = Arc::clone(&errors);
+                async move {
+                    let nb_name = {
+                        let sg = storage.lock().unwrap();
+                        sg.get_notebook(notebook_id)
+                            .map(|n| n.name.clone())
+                            .unwrap_or_else(|_| notebook_id.to_string())
+                    };
+
+                    log::info!("Library sync: syncing notebook '{}' ({})", nb_name, notebook_id);
+
+                    match self.sync_notebook(notebook_id, &storage, app.as_ref()).await {
+                        Ok(result) => {
+                            log::info!(
+                                "Library sync: notebook '{}' done: pulled={}, pushed={}, conflicts={}, assets_pushed={}, assets_pulled={}",
+                                nb_name,
+                                result.pages_pulled,
+                                result.pages_pushed,
+                                result.conflicts_resolved,
+                                result.assets_pushed,
+                                result.assets_pulled,
+                            );
+                            tp.fetch_add(result.pages_pulled, Ordering::Relaxed);
+                            tps.fetch_add(result.pages_pushed, Ordering::Relaxed);
+                            tc.fetch_add(result.conflicts_resolved, Ordering::Relaxed);
+                            tap.fetch_add(result.assets_pushed, Ordering::Relaxed);
+                            tapl.fetch_add(result.assets_pulled, Ordering::Relaxed);
+                        }
+                        Err(e) => {
+                            log::warn!("Failed to sync notebook {}: {}", notebook_id, e);
+                            let mut err_list = errs.lock().unwrap();
+                            err_list.push(format!("{}: {}", nb_name, e));
+                        }
+                    }
+                }
+            })
+            .buffer_unordered(MAX_NOTEBOOK_CONCURRENCY)
+            .collect()
+            .await;
+
+        let _ = results; // consumed
+
+        let total_pulled = total_pulled.load(Ordering::Relaxed);
+        let total_pushed = total_pushed.load(Ordering::Relaxed);
+        let total_conflicts = total_conflicts.load(Ordering::Relaxed);
+        let total_assets_pushed = total_assets_pushed.load(Ordering::Relaxed);
+        let total_assets_pulled = total_assets_pulled.load(Ordering::Relaxed);
+        let errors = errors.lock().unwrap().clone();
+
+        log::info!(
+            "Library sync complete: pulled={}, pushed={}, conflicts={}, errors={}",
             total_pulled,
             total_pushed,
             total_conflicts,

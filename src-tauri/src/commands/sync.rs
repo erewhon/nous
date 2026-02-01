@@ -18,8 +18,7 @@ pub async fn sync_test_connection(
     username: String,
     password: String,
 ) -> CommandResult<bool> {
-    let sync_manager = state.sync_manager.lock().await;
-    sync_manager
+    state.sync_manager
         .test_connection(&server_url, &username, &password)
         .await
         .map_err(|e| e.to_string())
@@ -33,10 +32,8 @@ pub async fn sync_configure(
     config: SyncConfigInput,
 ) -> CommandResult<()> {
     let uuid = parse_uuid(&notebook_id)?;
-    let sync_manager = state.sync_manager.lock().await;
 
-    // Pass Arc directly, SyncManager handles internal locking
-    sync_manager
+    state.sync_manager
         .configure(uuid, &state.storage, config)
         .await
         .map_err(|e| e.to_string())
@@ -49,7 +46,6 @@ pub async fn sync_status(
     notebook_id: String,
 ) -> CommandResult<SyncStatus> {
     let uuid = parse_uuid(&notebook_id)?;
-    let sync_manager = state.sync_manager.lock().await;
 
     // Short lock just to get the sync_config
     let sync_config = {
@@ -60,7 +56,7 @@ pub async fn sync_status(
         notebook.sync_config.clone()
     };
 
-    Ok(sync_manager.get_status(uuid, sync_config.as_ref()))
+    Ok(state.sync_manager.get_status(uuid, sync_config.as_ref()))
 }
 
 /// Trigger manual sync
@@ -71,9 +67,8 @@ pub async fn sync_now(
     notebook_id: String,
 ) -> CommandResult<SyncResult> {
     let uuid = parse_uuid(&notebook_id)?;
-    let sync_manager = state.sync_manager.lock().await;
 
-    sync_manager
+    state.sync_manager
         .sync_notebook(uuid, &state.storage, Some(&app))
         .await
         .map_err(|e| e.to_string())
@@ -86,8 +81,7 @@ pub async fn sync_queue_status(
     notebook_id: String,
 ) -> CommandResult<Vec<QueueItem>> {
     let uuid = parse_uuid(&notebook_id)?;
-    let sync_manager = state.sync_manager.lock().await;
-    Ok(sync_manager.get_queue_items(uuid))
+    Ok(state.sync_manager.get_queue_items(uuid))
 }
 
 /// Disable sync for a notebook
@@ -97,10 +91,8 @@ pub async fn sync_disable(
     notebook_id: String,
 ) -> CommandResult<()> {
     let uuid = parse_uuid(&notebook_id)?;
-    let sync_manager = state.sync_manager.lock().await;
 
-    // Pass Arc directly, SyncManager handles internal locking
-    sync_manager
+    state.sync_manager
         .disable_sync(uuid, &state.storage)
         .map_err(|e| e.to_string())
 }
@@ -113,9 +105,8 @@ pub async fn library_sync_configure(
     config: LibrarySyncConfigInput,
 ) -> CommandResult<()> {
     let uuid = parse_uuid(&library_id)?;
-    let sync_manager = state.sync_manager.lock().await;
 
-    sync_manager
+    state.sync_manager
         .configure_library_sync(uuid, &state.library_storage, &state.storage, config)
         .await
         .map_err(|e| e.to_string())
@@ -128,9 +119,8 @@ pub async fn library_sync_disable(
     library_id: String,
 ) -> CommandResult<()> {
     let uuid = parse_uuid(&library_id)?;
-    let sync_manager = state.sync_manager.lock().await;
 
-    sync_manager
+    state.sync_manager
         .disable_library_sync(uuid, &state.library_storage, &state.storage)
         .map_err(|e| e.to_string())
 }
@@ -143,9 +133,8 @@ pub async fn library_sync_now(
     library_id: String,
 ) -> CommandResult<SyncResult> {
     let library_uuid = parse_uuid(&library_id)?;
-    let sync_manager = state.sync_manager.lock().await;
 
-    sync_manager
+    state.sync_manager
         .sync_library(library_uuid, &state.library_storage, &state.storage, Some(&app))
         .await
         .map_err(|e| e.to_string())
@@ -172,9 +161,7 @@ pub async fn library_sync_configure_notebook(
             .ok_or_else(|| "Library sync not configured".to_string())?
     };
 
-    let sync_manager = state.sync_manager.lock().await;
-
-    sync_manager
+    state.sync_manager
         .apply_library_sync_to_notebook(lib_uuid, nb_uuid, &library_config, &state.storage)
         .await
         .map_err(|e| e.to_string())

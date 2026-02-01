@@ -54,7 +54,7 @@ pub struct AppState {
     pub inbox_storage: Mutex<InboxStorage>,
     pub flashcard_storage: Mutex<FlashcardStorage>,
     pub goals_storage: Mutex<GoalsStorage>,
-    pub sync_manager: Arc<tokio::sync::Mutex<SyncManager>>,
+    pub sync_manager: Arc<SyncManager>,
     pub external_editor: Mutex<ExternalEditorManager>,
     pub backup_scheduler: Arc<tokio::sync::Mutex<Option<BackupScheduler>>>,
     pub sync_scheduler: Arc<tokio::sync::Mutex<Option<SyncScheduler>>>,
@@ -156,7 +156,7 @@ pub fn run() {
 
     // Initialize sync manager
     let sync_manager = SyncManager::new(data_dir.clone());
-    let sync_manager_arc = Arc::new(tokio::sync::Mutex::new(sync_manager));
+    let sync_manager_arc = Arc::new(sync_manager);
 
     // Initialize external editor manager
     let external_editor = ExternalEditorManager::new()
