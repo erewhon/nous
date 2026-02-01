@@ -6,12 +6,7 @@ use uuid::Uuid;
 
 use crate::AppState;
 
-#[derive(Debug, serde::Serialize)]
-pub struct CommandError {
-    pub message: String,
-}
-
-type CommandResult<T> = Result<T, CommandError>;
+type CommandResult<T> = Result<T, String>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -94,35 +89,24 @@ pub async fn smart_organize_suggest(
     page_ids: Vec<String>,
     destination_notebook_ids: Vec<String>,
 ) -> CommandResult<Vec<OrganizeSuggestion>> {
-    let source_nb_id = Uuid::parse_str(&source_notebook_id).map_err(|e| CommandError {
-        message: format!("Invalid source notebook ID: {}", e),
-    })?;
+    let source_nb_id = Uuid::parse_str(&source_notebook_id)
+        .map_err(|e| format!("Invalid source notebook ID: {}", e))?;
 
     // Parse destination notebook IDs
     let dest_nb_ids: Vec<Uuid> = destination_notebook_ids
         .iter()
-        .map(|id| {
-            Uuid::parse_str(id).map_err(|e| CommandError {
-                message: format!("Invalid destination notebook ID: {}", e),
-            })
-        })
+        .map(|id| Uuid::parse_str(id).map_err(|e| format!("Invalid destination notebook ID: {}", e)))
         .collect::<Result<Vec<_>, _>>()?;
 
     // Parse page IDs
     let pg_ids: Vec<Uuid> = page_ids
         .iter()
-        .map(|id| {
-            Uuid::parse_str(id).map_err(|e| CommandError {
-                message: format!("Invalid page ID: {}", e),
-            })
-        })
+        .map(|id| Uuid::parse_str(id).map_err(|e| format!("Invalid page ID: {}", e)))
         .collect::<Result<Vec<_>, _>>()?;
 
     // Gather page data and destination context from storage
     let (pages_json, destinations_json) = {
-        let storage = state.storage.lock().map_err(|e| CommandError {
-            message: format!("Failed to acquire storage lock: {}", e),
-        })?;
+        let storage = state.storage.lock().map_err(|e| e.to_string())?;
 
         // Build page data
         let mut pages_data: Vec<serde_json::Value> = Vec::new();
@@ -180,15 +164,11 @@ pub async fn smart_organize_suggest(
     }
 
     // Call Python AI bridge
-    let python_ai = state.python_ai.lock().map_err(|e| CommandError {
-        message: format!("Failed to acquire Python AI lock: {}", e),
-    })?;
+    let python_ai = state.python_ai.lock().map_err(|e| e.to_string())?;
 
     let ai_results = python_ai
         .smart_organize(&pages_json, &destinations_json)
-        .map_err(|e| CommandError {
-            message: format!("AI analysis error: {}", e),
-        })?;
+        .map_err(|e| format!("AI analysis error: {}", e))?;
 
     // Build lookup maps for enriching results
     let page_title_map: std::collections::HashMap<String, String> = pages_json
@@ -265,18 +245,15 @@ pub async fn smart_organize_apply(
     source_notebook_id: String,
     moves: Vec<OrganizeMove>,
 ) -> CommandResult<OrganizeApplyResult> {
-    let source_nb_id = Uuid::parse_str(&source_notebook_id).map_err(|e| CommandError {
-        message: format!("Invalid source notebook ID: {}", e),
-    })?;
+    let source_nb_id = Uuid::parse_str(&source_notebook_id)
+        .map_err(|e| format!("Invalid source notebook ID: {}", e))?;
 
     let mut result = OrganizeApplyResult {
         moved_count: 0,
         errors: Vec::new(),
     };
 
-    let storage = state.storage.lock().map_err(|e| CommandError {
-        message: format!("Failed to acquire storage lock: {}", e),
-    })?;
+    let storage = state.storage.lock().map_err(|e| e.to_string())?;
 
     for mv in &moves {
         let page_id = match Uuid::parse_str(&mv.page_id) {

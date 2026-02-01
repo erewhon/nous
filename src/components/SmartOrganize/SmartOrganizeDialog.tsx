@@ -247,15 +247,6 @@ export function SmartOrganizeDialog({
     }
   };
 
-  // Build a notebook name lookup
-  const notebookNameMap = useMemo(() => {
-    const map: Record<string, string> = {};
-    for (const nb of notebooks) {
-      map[nb.id] = nb.icon ? `${nb.icon} ${nb.name}` : nb.name;
-    }
-    return map;
-  }, [notebooks]);
-
   const confidenceColor = (c: number): string => {
     if (c > 0.8) return "#22c55e";
     if (c > 0.5) return "#eab308";
