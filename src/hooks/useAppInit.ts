@@ -103,6 +103,27 @@ export function useAppInit() {
     };
   }, [refreshPages]);
 
+  // Listen for sync-goals-updated events from the backend.
+  // When sync pulls goal or progress changes from remote, refresh displays.
+  useEffect(() => {
+    let unlisten: UnlistenFn | null = null;
+
+    const setup = async () => {
+      unlisten = await listen("sync-goals-updated", () => {
+        console.log("[sync] Goals updated by sync, refreshing");
+        loadGoals();
+        loadSummary();
+        checkAutoGoals();
+      });
+    };
+
+    setup();
+
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, [loadGoals, loadSummary, checkAutoGoals]);
+
   // Load goals and check auto-detected goals on app init and periodically
   useEffect(() => {
     // Initial load

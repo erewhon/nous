@@ -266,7 +266,7 @@ Already implemented with Tantivy, may need refinement:
   - [x] WebDAV client (Nextcloud, ownCloud, etc.)
   - [x] Per-notebook sync configuration
   - [x] Credential storage in OS keyring
-  - [x] Manual, on-save, and periodic sync modes
+  - [x] Manual and periodic sync modes
   - [x] Sync UI in Notebook Settings
 - [x] CRDT-based conflict resolution (Yrs/Yjs)
   - [x] EditorData <-> Yrs document conversion
@@ -292,6 +292,10 @@ Already implemented with Tantivy, may need refinement:
   - [x] Asset manifest per notebook mapping relative paths to content hashes
   - [x] Deduplication across notebooks (same content = one remote copy)
   - [x] Migration path from legacy per-notebook asset storage
+- [ ] Implement OnSave sync mode (trigger sync when a page is saved)
+- [ ] Sync integration tests
+  - [ ] Nextcloud WebDAV sync validation using testcontainers
+- [ ] Goals synchronization across instances
 
 ### 19. Page Stats & Writing Assistance
 - [x] Page statistics (word count, character count, reading time) - toggleable in page header

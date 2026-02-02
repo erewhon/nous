@@ -53,7 +53,7 @@ pub struct AppState {
     pub action_scheduler: Mutex<ActionScheduler>,
     pub inbox_storage: Mutex<InboxStorage>,
     pub flashcard_storage: Mutex<FlashcardStorage>,
-    pub goals_storage: Mutex<GoalsStorage>,
+    pub goals_storage: Arc<Mutex<GoalsStorage>>,
     pub sync_manager: Arc<SyncManager>,
     pub external_editor: Mutex<ExternalEditorManager>,
     pub backup_scheduler: Arc<tokio::sync::Mutex<Option<BackupScheduler>>>,
@@ -153,6 +153,7 @@ pub fn run() {
     // Initialize goals storage
     let goals_storage = GoalsStorage::new(data_dir.clone())
         .expect("Failed to initialize goals storage");
+    let goals_storage_arc = Arc::new(Mutex::new(goals_storage));
 
     // Initialize sync manager
     let sync_manager = SyncManager::new(data_dir.clone());
@@ -192,6 +193,7 @@ pub fn run() {
         Arc::clone(&sync_manager_arc),
         Arc::clone(&storage_arc),
         Arc::clone(&library_storage_arc),
+        Arc::clone(&goals_storage_arc),
     );
     let sync_scheduler_arc = Arc::new(tokio::sync::Mutex::new(Some(sync_scheduler)));
 
@@ -212,7 +214,7 @@ pub fn run() {
         action_scheduler: Mutex::new(action_scheduler),
         inbox_storage: Mutex::new(inbox_storage),
         flashcard_storage: Mutex::new(flashcard_storage),
-        goals_storage: Mutex::new(goals_storage),
+        goals_storage: goals_storage_arc,
         sync_manager: sync_manager_arc,
         external_editor: Mutex::new(external_editor),
         backup_scheduler: backup_scheduler_arc,

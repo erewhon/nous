@@ -98,6 +98,11 @@ pub struct ReminderConfig {
     pub time: String,
 }
 
+/// Default value for `updated_at` when deserializing goals that lack the field
+fn default_updated_at() -> DateTime<Utc> {
+    DateTime::<Utc>::MIN_UTC
+}
+
 /// A recurring goal to track
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -118,6 +123,9 @@ pub struct Goal {
     pub reminder: Option<ReminderConfig>,
     /// When the goal was created
     pub created_at: DateTime<Utc>,
+    /// When the goal was last updated (for sync conflict resolution)
+    #[serde(default = "default_updated_at")]
+    pub updated_at: DateTime<Utc>,
     /// When the goal was archived (if archived)
     pub archived_at: Option<DateTime<Utc>>,
 }
@@ -125,6 +133,7 @@ pub struct Goal {
 impl Goal {
     /// Create a new manual goal
     pub fn new_manual(name: String, frequency: Frequency) -> Self {
+        let now = Utc::now();
         Self {
             id: Uuid::new_v4(),
             name,
@@ -133,13 +142,15 @@ impl Goal {
             tracking_type: TrackingType::Manual,
             auto_detect: None,
             reminder: None,
-            created_at: Utc::now(),
+            created_at: now,
+            updated_at: now,
             archived_at: None,
         }
     }
 
     /// Create a new auto-detected goal
     pub fn new_auto(name: String, frequency: Frequency, auto_detect: AutoDetectConfig) -> Self {
+        let now = Utc::now();
         Self {
             id: Uuid::new_v4(),
             name,
@@ -148,7 +159,8 @@ impl Goal {
             tracking_type: TrackingType::Auto,
             auto_detect: Some(auto_detect),
             reminder: None,
-            created_at: Utc::now(),
+            created_at: now,
+            updated_at: now,
             archived_at: None,
         }
     }
