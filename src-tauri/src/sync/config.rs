@@ -2,7 +2,38 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use std::collections::HashMap;
+
 use crate::storage::{FileStorageMode, Notebook, NotebookType, Page, PageType, SystemPromptMode};
+
+/// Detected server type for change notification optimization
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum ServerType {
+    /// Generic WebDAV server (sentinel-based change notification only)
+    #[default]
+    Generic,
+    /// Nextcloud server with optional notify_push support
+    Nextcloud {
+        version: String,
+        has_notify_push: bool,
+    },
+}
+
+/// Entry in the per-notebook asset manifest for content-addressable storage
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssetManifestEntry {
+    /// SHA256 hex digest of the file content
+    pub hash: String,
+    /// File size in bytes
+    pub size: u64,
+    /// File extension (e.g., "png", "pdf")
+    pub ext: String,
+}
+
+/// Full asset manifest: relative_path -> AssetManifestEntry
+pub type AssetManifest = HashMap<String, AssetManifestEntry>;
 
 /// Sync configuration for a notebook
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -28,6 +59,9 @@ pub struct SyncConfig {
     /// Whether this sync config is managed by library-level sync
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub managed_by_library: Option<bool>,
+    /// Detected server type (for change notification optimization)
+    #[serde(default)]
+    pub server_type: ServerType,
 }
 
 impl Default for SyncConfig {
@@ -41,6 +75,7 @@ impl Default for SyncConfig {
             sync_interval: None,
             last_sync: None,
             managed_by_library: None,
+            server_type: ServerType::default(),
         }
     }
 }
@@ -217,6 +252,9 @@ pub struct LibrarySyncConfig {
     pub sync_mode: SyncMode,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sync_interval: Option<u64>,
+    /// Detected server type (for change notification optimization)
+    #[serde(default)]
+    pub server_type: ServerType,
 }
 
 /// Input for configuring library-level sync (includes credentials)

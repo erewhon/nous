@@ -264,7 +264,11 @@ impl FileStorage {
             let entry = entry?;
             let path = entry.path();
 
-            if path.is_file() && path.extension().map_or(false, |e| e == "json") {
+            // Only match standard page JSON files, not .metadata.json (file-based pages)
+            if path.is_file()
+                && path.extension().map_or(false, |e| e == "json")
+                && !path.to_string_lossy().ends_with(".metadata.json")
+            {
                 let content = fs::read_to_string(&path)?;
                 let page: Page = serde_json::from_str(&content)?;
                 pages.push(page);

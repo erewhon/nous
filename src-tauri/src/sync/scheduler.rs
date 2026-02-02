@@ -12,6 +12,8 @@ use super::manager::{SharedLibraryStorage, SharedStorage, SyncManager};
 pub enum SyncSchedulerMessage {
     /// Config changed, recalculate next sync times
     Reload,
+    /// Remote changes detected for a specific library — trigger immediate sync
+    RemoteChanged { library_id: Uuid },
     /// App closing
     Shutdown,
 }
@@ -27,9 +29,19 @@ impl SyncScheduler {
         let _ = self.sender.try_send(SyncSchedulerMessage::Reload);
     }
 
+    /// Notify scheduler that remote changes were detected for a library
+    pub fn remote_changed(&self, library_id: Uuid) {
+        let _ = self.sender.try_send(SyncSchedulerMessage::RemoteChanged { library_id });
+    }
+
     /// Shut down the scheduler
     pub fn shutdown(&self) {
         let _ = self.sender.try_send(SyncSchedulerMessage::Shutdown);
+    }
+
+    /// Get a clone of the internal sender for external message producers (e.g., notify_push)
+    pub fn sender_clone(&self) -> mpsc::Sender<SyncSchedulerMessage> {
+        self.sender.clone()
     }
 }
 
@@ -59,7 +71,7 @@ const FALLBACK_POLL_SECS: u64 = 60;
 /// Spawns an async loop that monitors notebooks and libraries with periodic sync
 /// enabled, and triggers syncs when their intervals elapse.
 pub fn start_sync_scheduler(
-    sync_manager: Arc<tokio::sync::Mutex<SyncManager>>,
+    sync_manager: Arc<SyncManager>,
     storage: SharedStorage,
     library_storage: SharedLibraryStorage,
 ) -> SyncScheduler {
@@ -168,9 +180,51 @@ fn find_library_last_sync(
     oldest
 }
 
+/// Check sentinel for a library and decide whether a full sync is needed.
+///
+/// Returns `true` if the sentinel indicates remote changes (or on first check),
+/// `false` if the sentinel ETag matches (no remote changes since last sync).
+async fn should_sync_library(
+    sync_manager: &SyncManager,
+    library_id: Uuid,
+    library_storage: &SharedLibraryStorage,
+) -> bool {
+    let library_config = {
+        let lib_store = library_storage.lock().unwrap();
+        lib_store
+            .get_library(library_id)
+            .ok()
+            .and_then(|lib| lib.sync_config)
+    };
+
+    let Some(lib_config) = library_config else {
+        return true; // No config, let sync_library handle it
+    };
+
+    match sync_manager.check_sentinel_for_library(library_id, &lib_config).await {
+        Ok(changed) => {
+            if !changed {
+                log::info!(
+                    "Sync scheduler: sentinel unchanged for library {}, skipping full sync",
+                    library_id,
+                );
+            }
+            changed
+        }
+        Err(e) => {
+            log::debug!(
+                "Sync scheduler: sentinel check failed for library {}: {} — proceeding with sync",
+                library_id,
+                e,
+            );
+            true // On error, sync anyway
+        }
+    }
+}
+
 /// Main scheduler loop
 async fn sync_scheduler_loop(
-    sync_manager: Arc<tokio::sync::Mutex<SyncManager>>,
+    sync_manager: Arc<SyncManager>,
     storage: SharedStorage,
     library_storage: SharedLibraryStorage,
     mut receiver: mpsc::Receiver<SyncSchedulerMessage>,
@@ -268,9 +322,13 @@ async fn sync_scheduler_loop(
                     }
 
                     if is_library {
+                        // Check sentinel before running full sync
+                        if !should_sync_library(&sync_manager, id, &library_storage).await {
+                            continue;
+                        }
+
                         log::info!("Sync scheduler: running periodic sync for library {}", id);
-                        let manager = sync_manager.lock().await;
-                        match manager
+                        match sync_manager
                             .sync_library(id, &library_storage, &storage, None)
                             .await
                         {
@@ -292,13 +350,9 @@ async fn sync_scheduler_loop(
                                 );
                             }
                         }
-                        // sync_library already updates last_sync on each notebook
-                        // Update the library's managed notebooks' last_sync is handled
-                        // inside sync_notebook which is called by sync_library
                     } else {
                         log::info!("Sync scheduler: running periodic sync for notebook {}", id);
-                        let manager = sync_manager.lock().await;
-                        match manager.sync_notebook(id, &storage, None).await {
+                        match sync_manager.sync_notebook(id, &storage, None).await {
                             Ok(result) => {
                                 log::info!(
                                     "Sync scheduler: notebook {} sync complete — pulled={}, pushed={}",
@@ -315,7 +369,6 @@ async fn sync_scheduler_loop(
                                 );
                             }
                         }
-                        // sync_notebook already updates last_sync in the notebook config
                     }
                 }
             }
@@ -324,6 +377,30 @@ async fn sync_scheduler_loop(
                 match msg {
                     Some(SyncSchedulerMessage::Reload) => {
                         log::info!("Sync scheduler: reload requested, re-scanning configs");
+                        continue;
+                    }
+                    Some(SyncSchedulerMessage::RemoteChanged { library_id }) => {
+                        log::info!("Sync scheduler: remote change detected for library {}, triggering sync", library_id);
+                        match sync_manager
+                            .sync_library(library_id, &library_storage, &storage, None)
+                            .await
+                        {
+                            Ok(result) => {
+                                log::info!(
+                                    "Sync scheduler: library {} (remote-triggered) sync complete — pulled={}, pushed={}",
+                                    library_id,
+                                    result.pages_pulled,
+                                    result.pages_pushed,
+                                );
+                            }
+                            Err(e) => {
+                                log::error!(
+                                    "Sync scheduler: library {} (remote-triggered) sync failed: {}",
+                                    library_id,
+                                    e,
+                                );
+                            }
+                        }
                         continue;
                     }
                     Some(SyncSchedulerMessage::Shutdown) | None => {

@@ -26,6 +26,9 @@ pub struct LocalSyncState {
     /// Last changelog sequence number we've processed
     #[serde(default)]
     pub last_changelog_seq: u64,
+    /// ETag of the .sync-sentinel file (for change notification)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sentinel_etag: Option<String>,
 }
 
 /// Local sync state for a single asset
@@ -42,6 +45,9 @@ pub struct LocalAssetState {
     pub synced_mtime: Option<DateTime<Utc>>,
     /// When this asset was last synced
     pub last_synced: Option<DateTime<Utc>>,
+    /// SHA256 content hash (cached to avoid recomputation)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_hash: Option<String>,
 }
 
 /// Local sync state for a single page
@@ -72,6 +78,7 @@ impl LocalSyncState {
             remote_version: None,
             assets: HashMap::new(),
             last_changelog_seq: 0,
+            sentinel_etag: None,
         }
     }
 
@@ -158,6 +165,7 @@ impl LocalSyncState {
                 synced_size: size,
                 synced_mtime: mtime,
                 last_synced: Some(now),
+                content_hash: None,
             },
         );
     }
