@@ -229,9 +229,16 @@ async fn sync_scheduler_loop(
     library_storage: SharedLibraryStorage,
     mut receiver: mpsc::Receiver<SyncSchedulerMessage>,
 ) {
+    use std::collections::HashMap;
     use std::time::Duration;
 
     log::info!("Sync scheduler started");
+
+    // Track when each item was last checked (sentinel or full sync).
+    // This prevents the scheduler from spinning when the sentinel says
+    // "unchanged" — without this, `last_sync` never advances and the
+    // item remains perpetually overdue.
+    let mut last_checked: HashMap<Uuid, chrono::DateTime<Utc>> = HashMap::new();
 
     loop {
         // 1. Scan for periodic sync items
@@ -251,20 +258,29 @@ async fn sync_scheduler_loop(
         let mut soonest_wait: Option<Duration> = None;
 
         for item in &items {
-            let (interval_secs, last_sync) = match item {
+            let (id, interval_secs, last_sync) = match item {
                 SyncItem::Library {
+                    id,
                     interval_secs,
                     last_sync,
-                    ..
-                } => (*interval_secs, *last_sync),
+                } => (*id, *interval_secs, *last_sync),
                 SyncItem::Notebook {
+                    id,
                     interval_secs,
                     last_sync,
-                    ..
-                } => (*interval_secs, *last_sync),
+                } => (*id, *interval_secs, *last_sync),
             };
 
-            let next_sync = match last_sync {
+            // Use the later of last_sync and last_checked to avoid spinning
+            // when sentinel checks skip the full sync.
+            let effective_last = match (last_sync, last_checked.get(&id)) {
+                (Some(ls), Some(lc)) => Some(ls.max(*lc)),
+                (Some(ls), None) => Some(ls),
+                (None, Some(lc)) => Some(*lc),
+                (None, None) => None,
+            };
+
+            let next_sync = match effective_last {
                 Some(ls) => ls + chrono::Duration::seconds(interval_secs as i64),
                 None => now, // Never synced, due immediately
             };
@@ -312,7 +328,15 @@ async fn sync_scheduler_loop(
                         }
                     };
 
-                    let next_sync = match last_sync {
+                    // Use effective_last (considering last_checked) for due calculation
+                    let effective_last = match (last_sync, last_checked.get(&id)) {
+                        (Some(ls), Some(lc)) => Some(ls.max(*lc)),
+                        (Some(ls), None) => Some(ls),
+                        (None, Some(lc)) => Some(*lc),
+                        (None, None) => None,
+                    };
+
+                    let next_sync = match effective_last {
                         Some(ls) => ls + chrono::Duration::seconds(interval_secs as i64),
                         None => now,
                     };
@@ -324,6 +348,9 @@ async fn sync_scheduler_loop(
                     if is_library {
                         // Check sentinel before running full sync
                         if !should_sync_library(&sync_manager, id, &library_storage).await {
+                            // Sentinel says no changes — record the check time so
+                            // the scheduler waits a full interval before re-checking.
+                            last_checked.insert(id, Utc::now());
                             continue;
                         }
 
@@ -333,6 +360,7 @@ async fn sync_scheduler_loop(
                             .await
                         {
                             Ok(result) => {
+                                last_checked.insert(id, Utc::now());
                                 log::info!(
                                     "Sync scheduler: library {} sync complete — pulled={}, pushed={}, assets_pushed={}, assets_pulled={}",
                                     id,
@@ -343,6 +371,7 @@ async fn sync_scheduler_loop(
                                 );
                             }
                             Err(e) => {
+                                last_checked.insert(id, Utc::now());
                                 log::error!(
                                     "Sync scheduler: library {} sync failed: {}",
                                     id,
@@ -354,6 +383,7 @@ async fn sync_scheduler_loop(
                         log::info!("Sync scheduler: running periodic sync for notebook {}", id);
                         match sync_manager.sync_notebook(id, &storage, None).await {
                             Ok(result) => {
+                                last_checked.insert(id, Utc::now());
                                 log::info!(
                                     "Sync scheduler: notebook {} sync complete — pulled={}, pushed={}",
                                     id,
@@ -362,6 +392,7 @@ async fn sync_scheduler_loop(
                                 );
                             }
                             Err(e) => {
+                                last_checked.insert(id, Utc::now());
                                 log::error!(
                                     "Sync scheduler: notebook {} sync failed: {}",
                                     id,
@@ -386,6 +417,7 @@ async fn sync_scheduler_loop(
                             .await
                         {
                             Ok(result) => {
+                                last_checked.insert(library_id, Utc::now());
                                 log::info!(
                                     "Sync scheduler: library {} (remote-triggered) sync complete — pulled={}, pushed={}",
                                     library_id,
@@ -394,6 +426,7 @@ async fn sync_scheduler_loop(
                                 );
                             }
                             Err(e) => {
+                                last_checked.insert(library_id, Utc::now());
                                 log::error!(
                                     "Sync scheduler: library {} (remote-triggered) sync failed: {}",
                                     library_id,
