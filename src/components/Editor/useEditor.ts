@@ -48,6 +48,9 @@ export function useEditor({
   const isReady = useRef(false);
   // Flag to prevent onChange from firing during render operations
   const isRenderingRef = useRef(false);
+  // Track the initialData used during editor construction so we can skip
+  // the redundant render() call that the render effect would otherwise make.
+  const constructedWithDataRef = useRef<OutputData | undefined>(undefined);
 
   // Initialize editor
   useEffect(() => {
@@ -173,6 +176,12 @@ export function useEditor({
       },
     };
 
+    // Guard against onChange events fired during initial block rendering.
+    // Editor.js fires onChange asynchronously as blocks are set up, even
+    // though the user hasn't edited anything.
+    isRenderingRef.current = true;
+    constructedWithDataRef.current = initialData;
+
     const editor = new EditorJS({
       holder: holderId,
       data: initialData,
@@ -190,6 +199,11 @@ export function useEditor({
       },
       onReady: () => {
         isReady.current = true;
+        // Keep the rendering guard up briefly after ready — block tools
+        // may still fire async DOM mutations that trigger onChange.
+        setTimeout(() => {
+          isRenderingRef.current = false;
+        }, 500);
         onReady?.();
       },
     });
@@ -208,11 +222,22 @@ export function useEditor({
   // Update data when initialData changes (for switching between pages)
   useEffect(() => {
     if (editorRef.current && isReady.current && initialData) {
+      // Skip if this is the same data the editor was just constructed with —
+      // EditorJS already rendered it during initialization.
+      if (initialData === constructedWithDataRef.current) {
+        constructedWithDataRef.current = undefined;
+        return;
+      }
+      constructedWithDataRef.current = undefined;
+
       // Set flag to prevent onChange from firing during render
       isRenderingRef.current = true;
       editorRef.current.render(initialData).finally(() => {
-        // Clear flag after render completes
-        isRenderingRef.current = false;
+        // Keep the guard up briefly — Editor.js block tools may fire
+        // async DOM mutations after the render Promise resolves.
+        setTimeout(() => {
+          isRenderingRef.current = false;
+        }, 500);
       });
     }
   }, [initialData]);
@@ -238,7 +263,9 @@ export function useEditor({
       // Set flag to prevent onChange from firing during render
       isRenderingRef.current = true;
       editorRef.current.render(data).finally(() => {
-        isRenderingRef.current = false;
+        setTimeout(() => {
+          isRenderingRef.current = false;
+        }, 500);
       });
     }
   }, []);
