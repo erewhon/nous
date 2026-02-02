@@ -277,6 +277,21 @@ Already implemented with Tantivy, may need refinement:
   - [x] Offline change queue
   - [x] Queue persistence across app restarts
 - [ ] Mobile companion app (Tauri-based, future)
+- [ ] Parallel sync
+  - [ ] Concurrent page sync with semaphore-bounded WebDAV requests
+  - [ ] Concurrent asset sync
+  - [ ] Parallel notebook sync in sync_library
+  - [ ] Parallel initial fetches (manifest, changelog, pages_meta)
+  - [ ] Remove Arc<Mutex<SyncManager>> wrapper for non-blocking UI
+- [ ] Change notification
+  - [ ] Sideband sentinel file for lightweight remote change detection (single HEAD per poll)
+  - [ ] Nextcloud server detection (status.php + capabilities endpoint)
+  - [ ] Nextcloud notify_push SSE integration for real-time change events
+- [ ] Content-addressable storage for assets
+  - [ ] SHA256-based CAS directory shared across notebooks
+  - [ ] Asset manifest per notebook mapping relative paths to content hashes
+  - [ ] Deduplication across notebooks (same content = one remote copy)
+  - [ ] Migration path from legacy per-notebook asset storage
 
 ### 19. Page Stats & Writing Assistance
 - [x] Page statistics (word count, character count, reading time) - toggleable in page header
