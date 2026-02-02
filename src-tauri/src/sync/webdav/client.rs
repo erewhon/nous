@@ -253,53 +253,76 @@ impl WebDAVClient {
         })
     }
 
-    /// PUT - Upload file with optional ETag checking for conflict detection
+    /// PUT - Upload file with optional ETag checking for conflict detection.
+    /// Retries on 423 Locked (Nextcloud file locking under concurrent writes).
     pub async fn put(&self, path: &str, data: &[u8], etag: Option<&str>) -> Result<PutResponse, WebDAVError> {
         let url = self.url(path);
+        let retry_delays = [
+            std::time::Duration::from_millis(200),
+            std::time::Duration::from_millis(800),
+            std::time::Duration::from_millis(2000),
+        ];
 
-        let mut request = self.client
-            .put(&url)
-            .basic_auth(&self.credentials.username, Some(&self.credentials.password))
-            .body(data.to_vec());
+        for attempt in 0..=retry_delays.len() {
+            let mut request = self.client
+                .put(&url)
+                .basic_auth(&self.credentials.username, Some(&self.credentials.password))
+                .body(data.to_vec());
 
-        // Use If-Match for optimistic locking
-        if let Some(etag) = etag {
-            request = request.header("If-Match", format!("\"{}\"", etag));
+            if let Some(etag) = etag {
+                request = request.header("If-Match", format!("\"{}\"", etag));
+            }
+
+            let response = request.send().await?;
+
+            match response.status() {
+                StatusCode::CREATED | StatusCode::NO_CONTENT | StatusCode::OK => {
+                    let new_etag = response
+                        .headers()
+                        .get("etag")
+                        .and_then(|v| v.to_str().ok())
+                        .map(|s| s.trim_matches('"').to_string());
+
+                    return Ok(PutResponse {
+                        success: true,
+                        etag: new_etag,
+                        conflict: false,
+                    });
+                }
+                StatusCode::PRECONDITION_FAILED => {
+                    return Ok(PutResponse {
+                        success: false,
+                        etag: None,
+                        conflict: true,
+                    });
+                }
+                StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => {
+                    return Err(WebDAVError::AuthFailed);
+                }
+                StatusCode::LOCKED => {
+                    if attempt < retry_delays.len() {
+                        log::debug!(
+                            "PUT {}: 423 Locked, retrying in {:?} (attempt {}/{})",
+                            path, retry_delays[attempt], attempt + 1, retry_delays.len(),
+                        );
+                        tokio::time::sleep(retry_delays[attempt]).await;
+                        continue;
+                    }
+                    return Err(WebDAVError::Server {
+                        status: 423,
+                        message: response.text().await.unwrap_or_default(),
+                    });
+                }
+                status => {
+                    return Err(WebDAVError::Server {
+                        status: status.as_u16(),
+                        message: response.text().await.unwrap_or_default(),
+                    });
+                }
+            }
         }
 
-        let response = request.send().await?;
-
-        match response.status() {
-            StatusCode::CREATED | StatusCode::NO_CONTENT | StatusCode::OK => {
-                let new_etag = response
-                    .headers()
-                    .get("etag")
-                    .and_then(|v| v.to_str().ok())
-                    .map(|s| s.trim_matches('"').to_string());
-
-                Ok(PutResponse {
-                    success: true,
-                    etag: new_etag,
-                    conflict: false,
-                })
-            }
-            StatusCode::PRECONDITION_FAILED => {
-                Ok(PutResponse {
-                    success: false,
-                    etag: None,
-                    conflict: true,
-                })
-            }
-            StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => {
-                Err(WebDAVError::AuthFailed)
-            }
-            status => {
-                Err(WebDAVError::Server {
-                    status: status.as_u16(),
-                    message: response.text().await.unwrap_or_default(),
-                })
-            }
-        }
+        unreachable!()
     }
 
     /// MKCOL - Create a directory
@@ -442,6 +465,8 @@ impl WebDAVClient {
     }
 
     /// PUT streaming - Upload a local file to a remote path
+    /// PUT file from disk with optional ETag checking.
+    /// Retries on 423 Locked (Nextcloud file locking under concurrent writes).
     pub async fn put_file(
         &self,
         remote_path: &str,
@@ -449,52 +474,81 @@ impl WebDAVClient {
         etag: Option<&str>,
     ) -> Result<PutResponse, WebDAVError> {
         let url = self.url(remote_path);
+        let retry_delays = [
+            std::time::Duration::from_millis(200),
+            std::time::Duration::from_millis(800),
+            std::time::Duration::from_millis(2000),
+        ];
 
-        let file = tokio::fs::File::open(local_path).await?;
-        let metadata = file.metadata().await?;
-        let file_size = metadata.len();
+        for attempt in 0..=retry_delays.len() {
+            let file = tokio::fs::File::open(local_path).await?;
+            let metadata = file.metadata().await?;
+            let file_size = metadata.len();
 
-        let stream = tokio_util::io::ReaderStream::new(file);
-        let body = reqwest::Body::wrap_stream(stream);
+            let stream = tokio_util::io::ReaderStream::new(file);
+            let body = reqwest::Body::wrap_stream(stream);
 
-        let mut request = self
-            .client
-            .put(&url)
-            .basic_auth(&self.credentials.username, Some(&self.credentials.password))
-            .header("Content-Length", file_size)
-            .body(body);
+            let mut request = self
+                .client
+                .put(&url)
+                .basic_auth(&self.credentials.username, Some(&self.credentials.password))
+                .header("Content-Length", file_size)
+                .body(body);
 
-        if let Some(etag) = etag {
-            request = request.header("If-Match", format!("\"{}\"", etag));
-        }
-
-        let response = request.send().await?;
-
-        match response.status() {
-            StatusCode::CREATED | StatusCode::NO_CONTENT | StatusCode::OK => {
-                let new_etag = response
-                    .headers()
-                    .get("etag")
-                    .and_then(|v| v.to_str().ok())
-                    .map(|s| s.trim_matches('"').to_string());
-
-                Ok(PutResponse {
-                    success: true,
-                    etag: new_etag,
-                    conflict: false,
-                })
+            if let Some(etag) = etag {
+                request = request.header("If-Match", format!("\"{}\"", etag));
             }
-            StatusCode::PRECONDITION_FAILED => Ok(PutResponse {
-                success: false,
-                etag: None,
-                conflict: true,
-            }),
-            StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => Err(WebDAVError::AuthFailed),
-            status => Err(WebDAVError::Server {
-                status: status.as_u16(),
-                message: response.text().await.unwrap_or_default(),
-            }),
+
+            let response = request.send().await?;
+
+            match response.status() {
+                StatusCode::CREATED | StatusCode::NO_CONTENT | StatusCode::OK => {
+                    let new_etag = response
+                        .headers()
+                        .get("etag")
+                        .and_then(|v| v.to_str().ok())
+                        .map(|s| s.trim_matches('"').to_string());
+
+                    return Ok(PutResponse {
+                        success: true,
+                        etag: new_etag,
+                        conflict: false,
+                    });
+                }
+                StatusCode::PRECONDITION_FAILED => {
+                    return Ok(PutResponse {
+                        success: false,
+                        etag: None,
+                        conflict: true,
+                    });
+                }
+                StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => {
+                    return Err(WebDAVError::AuthFailed);
+                }
+                StatusCode::LOCKED => {
+                    if attempt < retry_delays.len() {
+                        log::debug!(
+                            "PUT {}: 423 Locked, retrying in {:?} (attempt {}/{})",
+                            remote_path, retry_delays[attempt], attempt + 1, retry_delays.len(),
+                        );
+                        tokio::time::sleep(retry_delays[attempt]).await;
+                        continue;
+                    }
+                    return Err(WebDAVError::Server {
+                        status: 423,
+                        message: response.text().await.unwrap_or_default(),
+                    });
+                }
+                status => {
+                    return Err(WebDAVError::Server {
+                        status: status.as_u16(),
+                        message: response.text().await.unwrap_or_default(),
+                    });
+                }
+            }
         }
+
+        unreachable!()
     }
 
     /// List all files recursively under a path using iterative BFS

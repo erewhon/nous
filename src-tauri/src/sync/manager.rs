@@ -728,7 +728,7 @@ impl SyncManager {
                 .filter(|c| c.enabled)
                 .ok_or(SyncError::NotConfigured)?
                 .clone();
-            let pages = storage_guard.list_pages(notebook_id)?;
+            let pages = storage_guard.list_all_pages(notebook_id)?;
             (config, pages)
         }; // Lock released
 
@@ -749,9 +749,14 @@ impl SyncManager {
             local_state.last_changelog_seq,
         );
 
+        // 2b. Ensure remote directory structure exists (idempotent, handles fresh/empty remote)
+        let _ = client.mkdir_p(&format!("{}/pages", config.remote_path)).await;
+        let _ = client.mkdir_p(&format!("{}/assets", config.remote_path)).await;
+
         let mut pages_pulled = 0;
         let mut pages_pushed = 0;
         let mut conflicts_resolved = 0;
+        let mut page_errors = 0usize;
         let mut synced_page_ids: Vec<(Uuid, PageSyncResult)> = Vec::new();
 
         // 3. Fetch remote manifest + changelog + pages-meta IN PARALLEL
@@ -828,8 +833,13 @@ impl SyncManager {
                     .map(|synced| page.updated_at > synced)
                     .unwrap_or(true);
                 let remote_may_have_changed = remote_changed_pages.contains(&page.id);
+                // If page is tracked locally but missing from the remote manifest,
+                // it needs pushing (remote was cleared/reset or first push failed).
+                let missing_from_remote = !manifest.pages.contains_key(&page.id);
 
-                if !local_needs_sync && !never_synced && !updated_since_sync && !remote_may_have_changed {
+                if !local_needs_sync && !never_synced && !updated_since_sync
+                    && !remote_may_have_changed && !missing_from_remote
+                {
                     log::debug!("Sync: skipping page '{}' ({}) — no changes", page.title, page.id);
                     return false;
                 }
@@ -837,7 +847,10 @@ impl SyncManager {
             })
             .map(|page| {
                 let info = PageSyncInfo {
-                    needs_sync: local_state.page_needs_sync(page.id),
+                    // Force needs_sync when the page is missing from the remote manifest,
+                    // even if local state thinks it's up to date.
+                    needs_sync: local_state.page_needs_sync(page.id)
+                        || !manifest.pages.contains_key(&page.id),
                     remote_etag: local_state.pages.get(&page.id).and_then(|s| s.remote_etag.clone()),
                     _never_synced: !local_state.pages.contains_key(&page.id),
                 };
@@ -904,7 +917,11 @@ impl SyncManager {
                     }
                     synced_page_ids.push((outcome.page_id, outcome.result.unwrap()));
                 }
-                Err(e) => return Err(e),
+                Err(_) => {
+                    // Don't abort the entire sync for one page failure.
+                    // The error was already logged above.
+                    page_errors += 1;
+                }
             }
         }
 
@@ -1193,14 +1210,22 @@ impl SyncManager {
             });
         }
 
-        Ok(SyncResult::success(
+        if page_errors > 0 {
+            log::warn!("Sync: completed with {} page error(s)", page_errors);
+        }
+
+        let mut result = SyncResult::success(
             pages_pulled,
             pages_pushed,
             conflicts_resolved,
             start.elapsed().as_millis() as u64,
             asset_result.assets_pushed,
             asset_result.assets_pulled,
-        ))
+        );
+        if page_errors > 0 {
+            result.error = Some(format!("{} page(s) failed to sync", page_errors));
+        }
+        Ok(result)
     }
 
     // ===== Manifest, changelog, pages-meta fetch (static for tokio::join!) =====
@@ -1300,7 +1325,7 @@ impl SyncManager {
     ) -> Result<(), SyncError> {
         let (pages, folders, sections) = {
             let storage_guard = storage.lock().unwrap();
-            let pages = storage_guard.list_pages(notebook_id)?;
+            let pages = storage_guard.list_all_pages(notebook_id)?;
             let folders = storage_guard.list_folders(notebook_id)?;
             let sections = storage_guard.list_sections(notebook_id)?;
             (pages, folders, sections)
@@ -1404,7 +1429,7 @@ impl SyncManager {
         // Read page list under brief lock
         let local_pages = {
             let storage_guard = storage.lock().unwrap();
-            match storage_guard.list_pages(notebook_id) {
+            match storage_guard.list_all_pages(notebook_id) {
                 Ok(pages) => pages,
                 Err(e) => {
                     log::warn!("Sync: failed to list pages for metadata apply: {}", e);
@@ -1558,7 +1583,9 @@ impl SyncManager {
                         let storage_guard = storage.lock().unwrap();
                         let mut updated_page = page.clone();
                         updated_page.content = merged_content;
-                        storage_guard.update_page(&updated_page)?;
+                        // Use update_page_metadata to handle both standard (.json)
+                        // and file-based (.metadata.json) pages correctly.
+                        storage_guard.update_page_metadata(&updated_page)?;
                     }
 
                     let merged_state = local_doc.encode_state();
@@ -1575,7 +1602,9 @@ impl SyncManager {
                         let storage_guard = storage.lock().unwrap();
                         let mut updated_page = page.clone();
                         updated_page.content = merged_content;
-                        storage_guard.update_page(&updated_page)?;
+                        // Use update_page_metadata to handle both standard (.json)
+                        // and file-based (.metadata.json) pages correctly.
+                        storage_guard.update_page_metadata(&updated_page)?;
                     }
 
                     let state = local_doc.encode_state();
@@ -1594,29 +1623,55 @@ impl SyncManager {
             std::fs::create_dir_all(crdt_path.parent().unwrap())?;
             std::fs::write(&crdt_path, &full_state)?;
 
+            // Only use If-Match ETag if the remote file actually exists;
+            // a stale ETag from a previous sync against a now-empty remote
+            // would cause a spurious 412 Precondition Failed.
+            let put_etag = if remote_exists {
+                sync_info.remote_etag.as_deref()
+            } else {
+                None
+            };
+
             let result = client
-                .put(&remote_path, &full_state, sync_info.remote_etag.as_deref())
+                .put(&remote_path, &full_state, put_etag)
                 .await?;
 
             if result.conflict {
-                let (remote_data, _) = client.get_with_etag(&remote_path).await?;
-                local_doc.apply_update(&remote_data)?;
+                // 412 Precondition Failed — remote changed since our last sync.
+                // Try to fetch remote for merge; if the file was deleted (NotFound),
+                // just re-push without ETag.
+                match client.get_with_etag(&remote_path).await {
+                    Ok((remote_data, _)) => {
+                        local_doc.apply_update(&remote_data)?;
 
-                let merged_state = local_doc.encode_state();
-                std::fs::write(&crdt_path, &merged_state)?;
+                        let merged_state = local_doc.encode_state();
+                        std::fs::write(&crdt_path, &merged_state)?;
 
-                let result = client.put(&remote_path, &merged_state, None).await?;
+                        let result = client.put(&remote_path, &merged_state, None).await?;
 
-                let merged_content = local_doc.to_editor_data()?;
-                {
-                    let storage_guard = storage.lock().unwrap();
-                    let mut updated_page = page.clone();
-                    updated_page.content = merged_content;
-                    storage_guard.update_page(&updated_page)?;
+                        let merged_content = local_doc.to_editor_data()?;
+                        {
+                            let storage_guard = storage.lock().unwrap();
+                            let mut updated_page = page.clone();
+                            updated_page.content = merged_content;
+                            storage_guard.update_page(&updated_page)?;
+                        }
+
+                        let sv = local_doc.state_vector();
+                        return Ok((PageSyncResult::Merged, Some((result.etag, sv))));
+                    }
+                    Err(WebDAVError::NotFound(_)) => {
+                        // Remote file was deleted — push without ETag
+                        log::info!(
+                            "Sync: page {} conflict but remote gone, re-pushing",
+                            page.id,
+                        );
+                        let result = client.put(&remote_path, &full_state, None).await?;
+                        let sv = local_doc.state_vector();
+                        return Ok((PageSyncResult::Pushed, Some((result.etag, sv))));
+                    }
+                    Err(e) => return Err(e.into()),
                 }
-
-                let sv = local_doc.state_vector();
-                return Ok((PageSyncResult::Merged, Some((result.etag, sv))));
             }
 
             let sv = local_doc.state_vector();
@@ -1814,7 +1869,9 @@ impl SyncManager {
             local_assets
                 .iter()
                 .filter(|(relative_path, (_, size, mtime))| {
+                    // Push if locally changed OR missing from remote (remote reset/empty)
                     local_state.asset_needs_push(relative_path, *size, *mtime)
+                        || !remote_map.contains_key(relative_path.as_str())
                 })
                 .map(|(relative_path, (abs_path, size, mtime))| {
                     let existing_etag = local_state
@@ -2040,8 +2097,12 @@ impl SyncManager {
             local_assets
                 .iter()
                 .filter_map(|(relative_path, (abs_path, size, mtime))| {
-                    // Check if asset needs push
-                    if !local_state.asset_needs_push(relative_path, *size, *mtime) {
+                    // Check if asset needs push (locally changed)
+                    // OR if it's missing from the remote manifest (remote was reset/empty)
+                    let missing_from_remote = !remote_manifest.contains_key(relative_path);
+                    if !local_state.asset_needs_push(relative_path, *size, *mtime)
+                        && !missing_from_remote
+                    {
                         return None;
                     }
 
