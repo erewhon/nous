@@ -836,12 +836,29 @@ impl SyncManager {
                 // If page is tracked locally but missing from the remote manifest,
                 // it needs pushing (remote was cleared/reset or first push failed).
                 let missing_from_remote = !manifest.pages.contains_key(&page.id);
+                // Fallback: compare manifest ETag with our stored ETag.
+                // Catches remote changes even when changelog entries are missed
+                // (e.g., concurrent syncs overwriting each other's changelog).
+                let manifest_etag_changed = manifest.pages.get(&page.id)
+                    .map(|ms| {
+                        let local_etag = local_state.pages.get(&page.id)
+                            .and_then(|s| s.remote_etag.as_deref());
+                        !ms.etag.is_empty() && local_etag != Some(ms.etag.as_str())
+                    })
+                    .unwrap_or(false);
 
                 if !local_needs_sync && !never_synced && !updated_since_sync
                     && !remote_may_have_changed && !missing_from_remote
+                    && !manifest_etag_changed
                 {
                     log::debug!("Sync: skipping page '{}' ({}) — no changes", page.title, page.id);
                     return false;
+                }
+                if manifest_etag_changed && !remote_may_have_changed {
+                    log::info!(
+                        "Sync: page '{}' ({}) detected via manifest ETag (changelog missed it)",
+                        page.title, page.id,
+                    );
                 }
                 true
             })
@@ -1531,11 +1548,20 @@ impl SyncManager {
         let remote_path = format!("{}/pages/{}.crdt", config.remote_path, page.id);
 
         // 1. Load or create local CRDT
+        //
+        // Key decision: when the page was modified locally (needs_sync), we must
+        // rebuild the CRDT from page.content because edits happen in the JSON file,
+        // not in the CRDT. Loading the old CRDT would push stale content.
+        //
+        // When there are NO local changes, we load the existing CRDT so we can
+        // cleanly apply remote updates (the CRDT state matches what's on disk).
         let crdt_existed = crdt_path.exists();
-        let local_doc = if crdt_existed {
+        let local_doc = if crdt_existed && !sync_info.needs_sync {
+            // No local changes — load existing CRDT for potential merge with remote
             let data = std::fs::read(&crdt_path)?;
             PageDocument::from_state(&data)?
         } else {
+            // Local changes exist, or no CRDT yet — create from current page content
             PageDocument::from_editor_data(&page.content)?
         };
 
@@ -1654,7 +1680,7 @@ impl SyncManager {
                             let storage_guard = storage.lock().unwrap();
                             let mut updated_page = page.clone();
                             updated_page.content = merged_content;
-                            storage_guard.update_page(&updated_page)?;
+                            storage_guard.update_page_metadata(&updated_page)?;
                         }
 
                         let sv = local_doc.state_vector();
