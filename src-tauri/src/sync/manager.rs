@@ -123,6 +123,16 @@ pub struct SyncProgress {
     pub phase: String,
 }
 
+/// Event payload sent after sync pulls/merges pages from remote.
+/// The frontend uses this to refresh stale in-memory page data.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncPagesUpdated {
+    pub notebook_id: String,
+    /// Page IDs that were pulled or merged from remote
+    pub page_ids: Vec<String>,
+}
+
 /// Sentinel file content written after successful push
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -154,6 +164,8 @@ pub struct SyncManager {
     syncing_notebooks: Arc<Mutex<HashSet<Uuid>>>,
     /// Monotonic counter for sentinel file
     sentinel_counter: std::sync::atomic::AtomicU64,
+    /// App handle for emitting events (set after app initialization)
+    app_handle: Arc<Mutex<Option<tauri::AppHandle>>>,
 }
 
 impl SyncManager {
@@ -167,7 +179,14 @@ impl SyncManager {
             webdav_semaphore: Arc::new(Semaphore::new(DEFAULT_WEBDAV_CONCURRENCY)),
             syncing_notebooks: Arc::new(Mutex::new(HashSet::new())),
             sentinel_counter: std::sync::atomic::AtomicU64::new(0),
+            app_handle: Arc::new(Mutex::new(None)),
         }
+    }
+
+    /// Set the app handle for event emission (called after app initialization)
+    pub fn set_app_handle(&self, handle: tauri::AppHandle) {
+        let mut guard = self.app_handle.lock().unwrap();
+        *guard = Some(handle);
     }
 
     /// Get the sync directory for a notebook
@@ -718,6 +737,11 @@ impl SyncManager {
         let start = std::time::Instant::now();
         log::info!("Sync: starting notebook {}", notebook_id);
 
+        // Resolve app handle: use explicit parameter, or fall back to stored handle.
+        // This ensures scheduler-triggered syncs (which pass None) still emit events.
+        let stored_handle = self.app_handle.lock().unwrap().clone();
+        let app_handle = app_handle.or(stored_handle.as_ref());
+
         // 1. Get notebook config + local pages (short lock)
         let (config, local_pages) = {
             let storage_guard = storage.lock().unwrap();
@@ -1217,7 +1241,26 @@ impl SyncManager {
             storage_guard.update_notebook(&notebook)?;
         } // Lock released
 
+        // Notify frontend of pages that were updated from remote so it can
+        // refresh stale in-memory data and prevent editor auto-save from
+        // overwriting the sync'd content.
         if let Some(app) = app_handle {
+            let updated_page_ids: Vec<String> = synced_page_ids
+                .iter()
+                .filter(|(_, result)| matches!(result, PageSyncResult::Pulled | PageSyncResult::Merged))
+                .map(|(id, _)| id.to_string())
+                .collect();
+            if !updated_page_ids.is_empty() {
+                log::info!(
+                    "Sync: notifying frontend of {} updated page(s)",
+                    updated_page_ids.len(),
+                );
+                let _ = app.emit("sync-pages-updated", SyncPagesUpdated {
+                    notebook_id: notebook_id.to_string(),
+                    page_ids: updated_page_ids,
+                });
+            }
+
             let _ = app.emit("sync-progress", SyncProgress {
                 notebook_id: notebook_id.to_string(),
                 current: total_pages,

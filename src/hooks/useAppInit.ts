@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useNotebookStore } from "../stores/notebookStore";
 import { usePageStore } from "../stores/pageStore";
 import { useSectionStore } from "../stores/sectionStore";
@@ -10,7 +11,7 @@ const GOALS_CHECK_INTERVAL = 15 * 60 * 1000;
 
 export function useAppInit() {
   const { loadNotebooks, notebooks, selectedNotebookId, selectNotebook, getNotebookViewState, saveNotebookViewState } = useNotebookStore();
-  const { loadPages, clearPages, selectPage, selectedPageId, pages, isLoading: pagesLoading } = usePageStore();
+  const { loadPages, clearPages, selectPage, selectedPageId, pages, isLoading: pagesLoading, refreshPages } = usePageStore();
   const { sections, selectedSectionId, selectSection } = useSectionStore();
   const { loadGoals, checkAutoGoals, loadSummary } = useGoalsStore();
   const { library } = useWindowLibrary();
@@ -72,6 +73,35 @@ export function useAppInit() {
 
     saveNotebookViewState(selectedNotebookId, selectedSectionId, selectedPageId);
   }, [selectedNotebookId, selectedSectionId, selectedPageId, saveNotebookViewState]);
+
+  // Listen for sync-pages-updated events from the backend.
+  // When sync pulls or merges pages from remote, the editor may have stale
+  // in-memory data. Refreshing from disk prevents the editor's auto-save
+  // from overwriting the sync'd content.
+  useEffect(() => {
+    let unlisten: UnlistenFn | null = null;
+
+    const setup = async () => {
+      unlisten = await listen<{ notebookId: string; pageIds: string[] }>(
+        "sync-pages-updated",
+        (event) => {
+          const { pageIds } = event.payload;
+          if (pageIds.length > 0) {
+            console.log(
+              `[sync] Refreshing ${pageIds.length} page(s) updated by sync`
+            );
+            refreshPages(pageIds);
+          }
+        }
+      );
+    };
+
+    setup();
+
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, [refreshPages]);
 
   // Load goals and check auto-detected goals on app init and periodically
   useEffect(() => {

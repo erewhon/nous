@@ -263,6 +263,10 @@ pub fn run() {
                 log::info!("Action scheduler started");
             }
 
+            // Give the sync manager the app handle so scheduler-triggered syncs
+            // can emit events (e.g., sync-pages-updated) to the frontend.
+            state.sync_manager.set_app_handle(app.handle().clone());
+
             // Start the video streaming server
             let video_server_handle = state.video_server.clone();
             tauri::async_runtime::spawn(async move {
