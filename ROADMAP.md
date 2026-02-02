@@ -277,21 +277,21 @@ Already implemented with Tantivy, may need refinement:
   - [x] Offline change queue
   - [x] Queue persistence across app restarts
 - [ ] Mobile companion app (Tauri-based, future)
-- [ ] Parallel sync
-  - [ ] Concurrent page sync with semaphore-bounded WebDAV requests
-  - [ ] Concurrent asset sync
-  - [ ] Parallel notebook sync in sync_library
-  - [ ] Parallel initial fetches (manifest, changelog, pages_meta)
-  - [ ] Remove Arc<Mutex<SyncManager>> wrapper for non-blocking UI
-- [ ] Change notification
-  - [ ] Sideband sentinel file for lightweight remote change detection (single HEAD per poll)
-  - [ ] Nextcloud server detection (status.php + capabilities endpoint)
-  - [ ] Nextcloud notify_push SSE integration for real-time change events
-- [ ] Content-addressable storage for assets
-  - [ ] SHA256-based CAS directory shared across notebooks
-  - [ ] Asset manifest per notebook mapping relative paths to content hashes
-  - [ ] Deduplication across notebooks (same content = one remote copy)
-  - [ ] Migration path from legacy per-notebook asset storage
+- [x] Parallel sync
+  - [x] Concurrent page sync with semaphore-bounded WebDAV requests
+  - [x] Concurrent asset sync
+  - [x] Parallel notebook sync in sync_library
+  - [x] Parallel initial fetches (manifest, changelog, pages_meta)
+  - [x] Remove Arc<Mutex<SyncManager>> wrapper for non-blocking UI
+- [x] Change notification
+  - [x] Sideband sentinel file for lightweight remote change detection (single HEAD per poll)
+  - [x] Nextcloud server detection (status.php + capabilities endpoint)
+  - [x] Nextcloud notify_push SSE integration for real-time change events
+- [x] Content-addressable storage for assets
+  - [x] SHA256-based CAS directory shared across notebooks
+  - [x] Asset manifest per notebook mapping relative paths to content hashes
+  - [x] Deduplication across notebooks (same content = one remote copy)
+  - [x] Migration path from legacy per-notebook asset storage
 
 ### 19. Page Stats & Writing Assistance
 - [x] Page statistics (word count, character count, reading time) - toggleable in page header
