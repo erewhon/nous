@@ -31,6 +31,9 @@ interface UseEditorOptions {
   placeholder?: string;
   notebookId?: string;
   pages?: Array<{ id: string; title: string }>;
+  /** Called with the latest editor data just before the editor is destroyed on unmount.
+   *  This bypasses Editor.js's onChange debounce and captures the true current state. */
+  onUnmountSave?: (data: OutputData) => void;
 }
 
 export function useEditor({
@@ -43,11 +46,15 @@ export function useEditor({
   placeholder = "Start writing or press '/' for commands...",
   notebookId,
   pages,
+  onUnmountSave,
 }: UseEditorOptions) {
   const editorRef = useRef<EditorJS | null>(null);
   const isReady = useRef(false);
   // Flag to prevent onChange from firing during render operations
   const isRenderingRef = useRef(false);
+  // Ref to the onUnmountSave callback so the cleanup can always access the latest
+  const onUnmountSaveRef = useRef(onUnmountSave);
+  onUnmountSaveRef.current = onUnmountSave;
   // Track the initialData used during editor construction so we can skip
   // the redundant render() call that the render effect would otherwise make.
   const constructedWithDataRef = useRef<OutputData | undefined>(undefined);
@@ -212,9 +219,22 @@ export function useEditor({
 
     return () => {
       if (editorRef.current && isReady.current) {
-        editorRef.current.destroy();
+        const editor = editorRef.current;
         editorRef.current = null;
         isReady.current = false;
+
+        // Save the true current state before destroying. This bypasses
+        // Editor.js's onChange debounce, which can leave the last edit
+        // (e.g. a checklist item deletion) unreported if the user
+        // switches pages quickly.
+        editor.save()
+          .then((data) => {
+            if (data) onUnmountSaveRef.current?.(data);
+          })
+          .catch(() => {})
+          .finally(() => {
+            editor.destroy();
+          });
       }
     };
   }, [holderId]);

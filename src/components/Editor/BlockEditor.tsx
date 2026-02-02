@@ -87,6 +87,17 @@ export const BlockEditor = forwardRef<BlockEditorRef, BlockEditorProps>(function
     readOnly,
     notebookId,
     pages,
+    onUnmountSave: (data) => {
+      // Called by useEditor just before the editor is destroyed.
+      // This captures the true current state, bypassing Editor.js's
+      // onChange debounce which may not have fired yet.
+      pendingDataRef.current = null;
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+        saveTimeoutRef.current = null;
+      }
+      onSaveRef.current?.(data);
+    },
   });
 
   // Expose render and save methods via ref
@@ -138,19 +149,18 @@ export const BlockEditor = forwardRef<BlockEditorRef, BlockEditorProps>(function
     pendingDataRef.current = null;
   }, [initialData]);
 
-  // Cleanup: flush pending save on unmount
+  // Cleanup: clear pending debounce on unmount.
+  // The actual save is handled by useEditor's onUnmountSave callback,
+  // which fires before the editor is destroyed and captures the true state.
   useEffect(() => {
     return () => {
       if (saveTimeoutRef.current) {
         clearTimeout(saveTimeoutRef.current);
+        saveTimeoutRef.current = null;
       }
-      // Flush any pending save immediately before unmounting
-      if (pendingDataRef.current && onSaveRef.current) {
-        onSaveRef.current(pendingDataRef.current);
-        pendingDataRef.current = null;
-      }
+      pendingDataRef.current = null;
     };
-  }, []); // Empty deps - only runs on unmount, uses refs for latest values
+  }, []);
 
   // Save on Ctrl+S - this is an explicit save that should trigger git commit
   useEffect(() => {
