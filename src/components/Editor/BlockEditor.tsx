@@ -58,6 +58,11 @@ export const BlockEditor = forwardRef<BlockEditorRef, BlockEditorProps>(function
   // Track vim mode state for indicator (used by useVimMode callback)
   const [, setCurrentVimMode] = useState<VimMode>("normal");
 
+  // Ref to access the save() function inside the debounce timer.
+  // save() comes from useEditor (defined below), so we use a ref to break the
+  // circular dependency while always getting fresh editor state at save time.
+  const saveRef = useRef<(() => Promise<OutputData | null>) | null>(null);
+
   // Debounced save
   const handleChange = useCallback(
     (data: OutputData) => {
@@ -71,15 +76,25 @@ export const BlockEditor = forwardRef<BlockEditorRef, BlockEditorProps>(function
         clearTimeout(saveTimeoutRef.current);
       }
 
-      saveTimeoutRef.current = setTimeout(() => {
-        onSave?.(data);
-        pendingDataRef.current = null; // Clear after successful save
+      saveTimeoutRef.current = setTimeout(async () => {
+        // Get fresh data from the editor at save time rather than using
+        // stale closure data — the editor state may have changed since
+        // the debounce was scheduled (e.g., checklist item deletion that
+        // didn't trigger Editor.js's onChange).
+        const freshData = await saveRef.current?.();
+        if (freshData) {
+          // onSave updates the store synchronously (setPageContentLocal) before
+          // the async backend write, so markClean is safe to call right after.
+          onSaveRef.current?.(freshData);
+          markClean();
+        }
+        pendingDataRef.current = null;
       }, 2000); // Auto-save after 2 seconds of inactivity
     },
-    [onChange, onSave]
+    [onChange]
   );
 
-  const { editor, save, render } = useEditor({
+  const { editor, save, render, markClean } = useEditor({
     holderId,
     initialData,
     onChange: handleChange,
@@ -99,6 +114,7 @@ export const BlockEditor = forwardRef<BlockEditorRef, BlockEditorProps>(function
       onSaveRef.current?.(data);
     },
   });
+  saveRef.current = save;
 
   // Expose render and save methods via ref
   useImperativeHandle(ref, () => ({
@@ -177,13 +193,14 @@ export const BlockEditor = forwardRef<BlockEditorRef, BlockEditorProps>(function
         if (data) {
           // Use explicit save callback if provided, otherwise fall back to regular save
           (onExplicitSave ?? onSave)?.(data);
+          markClean();
         }
       }
     };
 
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [save, onSave, onExplicitSave]);
+  }, [save, onSave, onExplicitSave, markClean]);
 
   // Mark broken links when pages change or content renders
   useEffect(() => {
@@ -347,6 +364,27 @@ export const BlockEditor = forwardRef<BlockEditorRef, BlockEditorProps>(function
       containerRef.current?.removeEventListener("click", handleWikiLinkClick);
     };
   }, [onLinkClick]);
+
+  // Checklist structural changes (item deletion, reorder) rebuild the DOM
+  // via innerHTML which Editor.js's MutationObserver-based onChange does not
+  // reliably detect.  ChecklistTool dispatches a custom event as a backup;
+  // we catch it here and feed the current editor state into the save pipeline.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || readOnly) return;
+
+    const handleStructuralChange = async () => {
+      const data = await save();
+      if (data) {
+        handleChange(data);
+      }
+    };
+
+    container.addEventListener("checklist-structural-change", handleStructuralChange);
+    return () => {
+      container.removeEventListener("checklist-structural-change", handleStructuralChange);
+    };
+  }, [save, handleChange, readOnly]);
 
   // Handle autocomplete link insertion (trigger save)
   const handleInsertLink = useCallback(() => {

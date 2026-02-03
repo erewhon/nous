@@ -1,6 +1,7 @@
 import type {
   BlockTool,
   BlockToolConstructorOptions,
+  BlockAPI,
 } from "@editorjs/editorjs";
 
 interface ChecklistItem {
@@ -19,6 +20,7 @@ interface ChecklistConfig {
 export class ChecklistTool implements BlockTool {
   private data: ChecklistData;
   private config: ChecklistConfig;
+  private block: BlockAPI;
   private wrapper: HTMLDivElement | null = null;
   private itemsContainer: HTMLDivElement | null = null;
   private draggedItem: HTMLElement | null = null;
@@ -83,13 +85,19 @@ export class ChecklistTool implements BlockTool {
     data,
     config,
     readOnly,
+    block,
   }: BlockToolConstructorOptions<ChecklistData, ChecklistConfig>) {
     this.config = config || {};
     this.readOnly = readOnly || false;
+    this.block = block;
+    // Deep-copy items to avoid sharing mutable references with the Zustand
+    // store (or Editor.js internals).  Without this, moveCheckedToBottom()
+    // replaces the array while item objects stay shared, causing splice
+    // (deletion) to diverge from text edits and producing phantom reverts.
     this.data = {
       items:
         data.items && data.items.length > 0
-          ? data.items
+          ? data.items.map((item) => ({ text: item.text, checked: item.checked }))
           : [{ text: "", checked: false }],
     };
   }
@@ -193,6 +201,9 @@ export class ChecklistTool implements BlockTool {
     const checkbox = itemEl.querySelector(".cdx-checklist__item-checkbox");
     checkbox?.classList.toggle("cdx-checklist__item-checkbox--checked", isChecked);
 
+    // Notify Editor.js — class-only changes are invisible to MutationObserver
+    this.block?.dispatchChange();
+
     // Move checked items to the bottom with a small delay for visual feedback
     if (isChecked) {
       setTimeout(() => {
@@ -221,6 +232,20 @@ export class ChecklistTool implements BlockTool {
     this.data.items.forEach((item, index) => {
       this.createItem(item, index);
     });
+
+    // Explicitly notify Editor.js that the block data changed.
+    // Editor.js's MutationObserver may not detect innerHTML-based rebuilds
+    // as user edits, so onChange wouldn't fire without this.
+    this.block?.dispatchChange();
+
+    // Backup: dispatch a custom DOM event for the editor wrapper to catch.
+    // dispatchChange() relies on Editor.js's internal batching which does
+    // not reliably propagate to onChange for programmatic DOM rebuilds
+    // (innerHTML clear + recreate).  The wrapper listens for this event
+    // and triggers a save directly, ensuring deletions and reorders persist.
+    this.wrapper?.dispatchEvent(
+      new CustomEvent("checklist-structural-change", { bubbles: true })
+    );
   }
 
   private handleKeydown(e: KeyboardEvent, index: number, textEl: HTMLElement): void {
@@ -428,8 +453,33 @@ export class ChecklistTool implements BlockTool {
   }
 
   save(): ChecklistData {
-    // Filter out empty items (except keep at least one)
-    const items = this.data.items.filter((item) => item.text.trim() !== "");
+    // Read from the DOM rather than this.data.items.  External code (e.g. Vim
+    // mode's "dd" command) may manipulate the DOM directly without updating
+    // the internal array.  Reading from DOM ensures saves reflect reality.
+    const items: ChecklistItem[] = [];
+
+    if (this.itemsContainer) {
+      const itemEls = this.itemsContainer.querySelectorAll(".cdx-checklist__item");
+      itemEls.forEach((itemEl) => {
+        const textEl = itemEl.querySelector(".cdx-checklist__item-text");
+        const text = textEl?.innerHTML ?? "";
+        const checked = itemEl.classList.contains("cdx-checklist__item--checked");
+        if (text.trim() !== "") {
+          items.push({ text, checked });
+        }
+      });
+    }
+
+    // Fall back to internal data if DOM not available (shouldn't happen)
+    if (items.length === 0 && this.data.items.length > 0) {
+      const filtered = this.data.items
+        .filter((item) => item.text.trim() !== "")
+        .map((item) => ({ text: item.text, checked: item.checked }));
+      if (filtered.length > 0) {
+        return { items: filtered };
+      }
+    }
+
     return {
       items: items.length > 0 ? items : [{ text: "", checked: false }],
     };

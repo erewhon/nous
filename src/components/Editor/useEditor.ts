@@ -52,6 +52,10 @@ export function useEditor({
   const isReady = useRef(false);
   // Flag to prevent onChange from firing during render operations
   const isRenderingRef = useRef(false);
+  // Tracks whether the editor has unsaved changes.  When dirty, the
+  // initialData effect skips editor.render() to avoid overwriting the
+  // user's live edits with (potentially stale) store data.
+  const isDirtyRef = useRef(false);
   // Ref to the onUnmountSave callback so the cleanup can always access the latest
   const onUnmountSaveRef = useRef(onUnmountSave);
   onUnmountSaveRef.current = onUnmountSave;
@@ -200,6 +204,7 @@ export function useEditor({
       onChange: async () => {
         // Don't save during render operations - this can capture partial/corrupted data
         if (onChange && editorRef.current && isReady.current && !isRenderingRef.current) {
+          isDirtyRef.current = true;
           const data = await editorRef.current.save();
           onChange(data);
         }
@@ -250,6 +255,13 @@ export function useEditor({
       }
       constructedWithDataRef.current = undefined;
 
+      // Skip render if the editor has unsaved changes — the user's live edits
+      // take priority over (potentially stale) store data.  The pending
+      // auto-save will persist the editor's state and update the store.
+      if (isDirtyRef.current) {
+        return;
+      }
+
       // Set flag to prevent onChange from firing during render
       isRenderingRef.current = true;
       editorRef.current.render(initialData).finally(() => {
@@ -290,11 +302,19 @@ export function useEditor({
     }
   }, []);
 
+  // Called after the editor's data has been persisted to the store.
+  // Clears the dirty flag so that future initialData changes (e.g. from
+  // sync) are allowed to render.
+  const markClean = useCallback(() => {
+    isDirtyRef.current = false;
+  }, []);
+
   return {
     editor: editorRef,
     isReady: isReady.current,
     save,
     clear,
     render,
+    markClean,
   };
 }

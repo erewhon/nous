@@ -16,10 +16,18 @@ const GIT_AUTO_COMMIT_DELAY = 30_000; // 30 seconds
  *  returns the same data that's already in the store. */
 function hasContentChanged(current: Page | undefined, fresh: Page): boolean {
   if (!current?.content || !fresh.content) return true;
+
+  // If local content is at least as recent as the fresh data, keep it.
+  // This avoids overwriting optimistic local edits (via setPageContentLocal)
+  // with stale backend data that api.getPage returns before updatePageContent
+  // has finished writing.
+  if (current.content.time && fresh.content.time && current.content.time >= fresh.content.time) {
+    return false;
+  }
+
+  // Fresh data is newer or timestamps missing — check for structural differences
   if (current.content.blocks.length !== fresh.content.blocks.length) return true;
-  // Fast path: compare the Editor.js timestamp set on each save()
   if (current.content.time !== fresh.content.time) return true;
-  // Blocks count and time match — treat as unchanged
   return false;
 }
 
