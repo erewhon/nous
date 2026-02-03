@@ -462,6 +462,7 @@ export function EditorArea() {
               <div style={{ width: `${panelWidths.folderTree}px` }}>
                 <FolderTree
                   notebookId={selectedNotebook.id}
+                  notebook={selectedNotebook}
                   pages={notebookPages}
                   folders={folders}
                   selectedPageId={selectedPageId}

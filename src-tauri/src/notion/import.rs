@@ -636,6 +636,7 @@ pub fn import_notion_zip(
         encryption_config: None,
         is_pinned: false,
         position: 0,
+        page_sort_by: None,
         created_at: now,
         updated_at: now,
     };
@@ -960,6 +961,7 @@ where
         encryption_config: None,
         is_pinned: false,
         position: 0,
+        page_sort_by: None,
         created_at: now,
         updated_at: now,
     };

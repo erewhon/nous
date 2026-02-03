@@ -10,6 +10,15 @@ use crate::actions::variables::VariableResolver;
 use crate::python_bridge::{AIConfig, PageSummaryInput, PythonAI};
 use crate::storage::{EditorBlock, EditorData, FileStorage, NotebookType, StorageError};
 
+/// Represents a checklist item that was carried forward with source tracking
+#[derive(Debug, Clone)]
+struct CarriedItem {
+    text: String,
+    source_page_id: Uuid,
+    block_index: usize,
+    item_index: usize,
+}
+
 /// Error type for action execution
 #[derive(Debug, thiserror::Error)]
 pub enum ExecutionError {
@@ -566,15 +575,15 @@ impl ActionExecutor {
             return Ok(()); // Nothing to carry forward
         }
 
-        // Extract incomplete checklist items from source pages
-        let mut incomplete_items: Vec<String> = Vec::new();
+        // Extract incomplete checklist items from source pages with source tracking
+        let mut items_with_source: Vec<CarriedItem> = Vec::new();
         for page in &source_pages {
             // Also specifically extract unchecked items from under a "Carried Forward"
             // heading, so tasks that were already carried forward but still incomplete
             // are re-carried. We walk all blocks; items under a "Carried Forward"
             // heading are picked up alongside items from other sections.
             let mut in_carried_forward_section = false;
-            for block in &page.content.blocks {
+            for (block_idx, block) in page.content.blocks.iter().enumerate() {
                 // Track whether we're inside a "Carried Forward" section
                 if block.block_type == "header" {
                     if let Some(text) = block.data.get("text").and_then(|t| t.as_str()) {
@@ -588,13 +597,18 @@ impl ActionExecutor {
                 if block.block_type == "checklist" {
                     if let Some(items) = block.data.get("items") {
                         if let Some(items_array) = items.as_array() {
-                            for item in items_array {
+                            for (item_idx, item) in items_array.iter().enumerate() {
                                 if let Some(checked) = item.get("checked") {
                                     if !checked.as_bool().unwrap_or(true) {
                                         if let Some(text) = item.get("text") {
                                             if let Some(text_str) = text.as_str() {
                                                 if !text_str.trim().is_empty() {
-                                                    incomplete_items.push(text_str.to_string());
+                                                    items_with_source.push(CarriedItem {
+                                                        text: text_str.to_string(),
+                                                        source_page_id: page.id,
+                                                        block_index: block_idx,
+                                                        item_index: item_idx,
+                                                    });
                                                 }
                                             }
                                         }
@@ -612,6 +626,9 @@ impl ActionExecutor {
                 );
             }
         }
+
+        // Extract just the text for the incomplete_items list (for deduplication and building blocks)
+        let mut incomplete_items: Vec<String> = items_with_source.iter().map(|i| i.text.clone()).collect();
         log::info!(
             "CarryForward: Extracted {} incomplete items from source pages",
             incomplete_items.len()
@@ -716,6 +733,87 @@ impl ActionExecutor {
                 page.title,
                 incomplete_items.len()
             );
+        }
+
+        // Now update source pages to mark carried items as done with "(carried forward)" suffix
+        // Group items by source page for efficient updates
+        let mut items_by_page: HashMap<Uuid, Vec<&CarriedItem>> = HashMap::new();
+        for item in &items_with_source {
+            items_by_page
+                .entry(item.source_page_id)
+                .or_default()
+                .push(item);
+        }
+
+        for source_page in &source_pages {
+            if let Some(items_to_mark) = items_by_page.get(&source_page.id) {
+                if items_to_mark.is_empty() {
+                    continue;
+                }
+
+                let storage = self.storage.lock().map_err(|e| {
+                    ExecutionError::StepFailed(format!("Failed to lock storage: {}", e))
+                })?;
+
+                let mut updated_page = source_page.clone();
+                let mut marked_count = 0;
+
+                for item in items_to_mark {
+                    // Validate indices are still valid (content may have shifted)
+                    if item.block_index >= updated_page.content.blocks.len() {
+                        continue;
+                    }
+
+                    let block = &mut updated_page.content.blocks[item.block_index];
+                    if block.block_type != "checklist" {
+                        continue;
+                    }
+
+                    if let Some(items_val) = block.data.get_mut("items") {
+                        if let Some(items_array) = items_val.as_array_mut() {
+                            if item.item_index >= items_array.len() {
+                                continue;
+                            }
+
+                            let checklist_item = &mut items_array[item.item_index];
+
+                            // Verify the text still matches (defensive against content changes)
+                            let current_text = checklist_item
+                                .get("text")
+                                .and_then(|t| t.as_str())
+                                .unwrap_or("");
+                            if current_text != item.text {
+                                continue;
+                            }
+
+                            // Skip if already marked as carried forward
+                            if current_text.ends_with("(carried forward)") {
+                                continue;
+                            }
+
+                            // Mark as checked and append suffix
+                            if let Some(obj) = checklist_item.as_object_mut() {
+                                obj.insert("checked".to_string(), serde_json::Value::Bool(true));
+                                let new_text = format!("{} (carried forward)", item.text);
+                                obj.insert("text".to_string(), serde_json::Value::String(new_text));
+                                marked_count += 1;
+                            }
+                        }
+                    }
+                }
+
+                if marked_count > 0 {
+                    updated_page.content.time = Some(chrono::Utc::now().timestamp_millis());
+                    storage.update_page(&updated_page)?;
+                    context.modified_pages.push(updated_page.id.to_string());
+
+                    log::info!(
+                        "CarryForward: Marked {} items as carried forward on source page '{}'",
+                        marked_count,
+                        updated_page.title
+                    );
+                }
+            }
         }
 
         Ok(())

@@ -50,6 +50,7 @@ export async function updateNotebook(
     aiProvider?: string;
     aiModel?: string;
     isPinned?: boolean;
+    pageSortBy?: string;
   }
 ): Promise<Notebook> {
   return invoke<Notebook>("update_notebook", { notebookId, ...updates });

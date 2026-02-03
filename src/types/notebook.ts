@@ -9,6 +9,9 @@ export type NotebookType = z.infer<typeof NotebookTypeSchema>;
 export const AIProviderTypeSchema = z.enum(["openai", "anthropic", "ollama", "lmstudio"]);
 export type AIProviderType = z.infer<typeof AIProviderTypeSchema>;
 
+export const PageSortOptionSchema = z.enum(["position", "name-asc", "name-desc", "updated", "created"]);
+export type PageSortOption = z.infer<typeof PageSortOptionSchema>;
+
 export const NotebookSchema = z.object({
   id: z.string().uuid(),
   name: z.string().min(1),
@@ -25,6 +28,7 @@ export const NotebookSchema = z.object({
   encryptionConfig: EncryptionConfigSchema.optional(),
   isPinned: z.boolean().default(false),
   position: z.number().default(0),
+  pageSortBy: PageSortOptionSchema.optional(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });

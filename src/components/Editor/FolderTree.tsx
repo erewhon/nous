@@ -16,9 +16,11 @@ import { arrayMove } from "@dnd-kit/sortable";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { Folder, Page, Section, FileStorageMode } from "../../types/page";
+import type { Notebook, PageSortOption } from "../../types/notebook";
 import { useFolderStore } from "../../stores/folderStore";
 import { usePageStore } from "../../stores/pageStore";
-import { useThemeStore, type PageSortOption } from "../../stores/themeStore";
+import { useNotebookStore } from "../../stores/notebookStore";
+import { useThemeStore, type PageSortOption as ThemePageSortOption } from "../../stores/themeStore";
 import * as api from "../../utils/api";
 import { FolderTreeItem, DraggablePageItem } from "./FolderTreeItem";
 import { FileImportDialog } from "../Import/FileImportDialog";
@@ -110,6 +112,7 @@ function DroppableUnsorted({ isOver }: { isOver: boolean }) {
 
 interface FolderTreeProps {
   notebookId: string;
+  notebook?: Notebook;
   pages: Page[];
   folders: Folder[];
   selectedPageId: string | null;
@@ -135,6 +138,7 @@ interface FolderTreeProps {
 
 export function FolderTree({
   notebookId,
+  notebook,
   pages,
   folders,
   selectedPageId,
@@ -163,10 +167,13 @@ export function FolderTree({
     updateFolder,
     deleteFolder: deleteFolderApi,
   } = useFolderStore();
+  const { updateNotebook } = useNotebookStore();
   const autoHidePanels = useThemeStore((state) => state.autoHidePanels);
   const setAutoHidePanels = useThemeStore((state) => state.setAutoHidePanels);
-  const pageSortBy = useThemeStore((state) => state.pageSortBy);
-  const setPageSortBy = useThemeStore((state) => state.setPageSortBy);
+  const globalPageSortBy = useThemeStore((state) => state.pageSortBy);
+
+  // Use per-notebook sort setting with fallback to global
+  const pageSortBy = (notebook?.pageSortBy ?? globalPageSortBy) as ThemePageSortOption;
 
   const [isCreatingFolder, setIsCreatingFolder] = useState(false);
   const [showPageSortMenu, setShowPageSortMenu] = useState(false);
@@ -944,7 +951,8 @@ END:VCALENDAR`;
                     <button
                       key={option.value}
                       onClick={() => {
-                        setPageSortBy(option.value);
+                        // Save per-notebook sort preference
+                        updateNotebook(notebookId, { pageSortBy: option.value });
                         setShowPageSortMenu(false);
                       }}
                       className="flex w-full items-center justify-between px-3 py-1.5 text-left text-xs transition-colors hover:bg-[--color-bg-tertiary]"

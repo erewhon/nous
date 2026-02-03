@@ -233,6 +233,9 @@ pub struct Notebook {
     /// Position for ordering notebooks
     #[serde(default)]
     pub position: i32,
+    /// Page sort preference for this notebook (overrides global setting)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page_sort_by: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -256,6 +259,7 @@ impl Notebook {
             encryption_config: None,
             is_pinned: false,
             position: 0,
+            page_sort_by: None,
             created_at: now,
             updated_at: now,
         }

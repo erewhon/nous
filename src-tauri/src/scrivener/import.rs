@@ -607,6 +607,7 @@ pub fn import_scrivener_project(
         encryption_config: None,
         is_pinned: false,
         position: 0,
+        page_sort_by: None,
         created_at: now,
         updated_at: now,
     };
