@@ -3,6 +3,7 @@ import { useActionStore, ACTION_CATEGORY_LABELS } from "../../stores/actionStore
 import type { Action, ActionCategory } from "../../types/action";
 import { ACTION_CATEGORIES } from "../../types/action";
 import { ActionCard } from "./ActionCard";
+import { ActionProgressDialog } from "./ActionProgressDialog";
 
 interface ActionLibraryProps {
   isOpen: boolean;
@@ -20,12 +21,15 @@ export function ActionLibrary({
     isLoading,
     error,
     loadActions,
-    runAction,
     deleteAction,
     setEnabled,
     openActionEditor,
     duplicateAction,
     clearError,
+    runActionWithProgress,
+    executionProgress,
+    showProgressDialog,
+    closeProgressDialog,
   } = useActionStore();
 
   const [selectedCategory, setSelectedCategory] = useState<ActionCategory | "all">("all");
@@ -43,7 +47,9 @@ export function ActionLibrary({
   const handleRun = async (actionId: string) => {
     setRunningActionId(actionId);
     try {
-      await runAction(actionId, { currentNotebookId });
+      await runActionWithProgress(actionId, { currentNotebookId });
+    } catch {
+      // Error is handled by the store and shown in the progress dialog
     } finally {
       setRunningActionId(null);
     }
@@ -112,6 +118,12 @@ export function ActionLibrary({
       : [selectedCategory];
 
   return (
+    <>
+    <ActionProgressDialog
+      isOpen={showProgressDialog}
+      progress={executionProgress}
+      onClose={closeProgressDialog}
+    />
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
       onClick={onClose}
@@ -332,6 +344,7 @@ export function ActionLibrary({
         </div>
       </div>
     </div>
+    </>
   );
 }
 

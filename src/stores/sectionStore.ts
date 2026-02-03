@@ -37,6 +37,13 @@ interface SectionActions {
   // Reordering
   reorderSections: (notebookId: string, sectionIds: string[]) => Promise<void>;
 
+  // Move section
+  moveSectionToNotebook: (
+    sourceNotebookId: string,
+    sectionId: string,
+    targetNotebookId: string
+  ) => Promise<Section | null>;
+
   // Error handling
   clearError: () => void;
 }
@@ -142,6 +149,36 @@ export const useSectionStore = create<SectionStore>()((set, _get) => ({
         error:
           err instanceof Error ? err.message : "Failed to reorder sections",
       });
+    }
+  },
+
+  moveSectionToNotebook: async (
+    sourceNotebookId,
+    sectionId,
+    targetNotebookId
+  ) => {
+    set({ error: null });
+    try {
+      const newSection = await api.moveSectionToNotebook(
+        sourceNotebookId,
+        sectionId,
+        targetNotebookId
+      );
+      // Remove the section from local state (it's now in another notebook)
+      set((state) => ({
+        sections: state.sections.filter((s) => s.id !== sectionId),
+        selectedSectionId:
+          state.selectedSectionId === sectionId
+            ? null
+            : state.selectedSectionId,
+      }));
+      return newSection;
+    } catch (err) {
+      set({
+        error:
+          err instanceof Error ? err.message : "Failed to move section",
+      });
+      return null;
     }
   },
 

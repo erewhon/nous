@@ -1030,6 +1030,147 @@ impl FileStorage {
         Ok(())
     }
 
+    /// Move a section with all its folders and pages to another notebook
+    pub fn move_section_to_notebook(
+        &self,
+        source_notebook_id: Uuid,
+        section_id: Uuid,
+        target_notebook_id: Uuid,
+    ) -> Result<Section> {
+        // Verify source section exists
+        let source_section = self.get_section(source_notebook_id, section_id)?;
+
+        // Verify target notebook exists
+        if !self.notebook_dir(target_notebook_id).exists() {
+            return Err(StorageError::NotebookNotFound(target_notebook_id));
+        }
+
+        // Get all folders that belong to this section
+        let source_folders = self.list_folders(source_notebook_id)?;
+        let section_folders: Vec<_> = source_folders
+            .iter()
+            .filter(|f| f.section_id == Some(section_id))
+            .collect();
+
+        // Get all pages in this section (directly or via folders)
+        let source_pages = self.list_pages(source_notebook_id)?;
+        let section_folder_ids: std::collections::HashSet<_> =
+            section_folders.iter().map(|f| f.id).collect();
+
+        let section_pages: Vec<_> = source_pages
+            .iter()
+            .filter(|p| {
+                // Page is directly in the section
+                p.section_id == Some(section_id)
+                    // Or page is in a folder that belongs to the section
+                    || p.folder_id.map_or(false, |fid| section_folder_ids.contains(&fid))
+            })
+            .collect();
+
+        // Create the section in the target notebook
+        let mut target_sections = self.list_sections(target_notebook_id)?;
+        let max_position = target_sections
+            .iter()
+            .map(|s| s.position)
+            .max()
+            .unwrap_or(-1);
+
+        let mut new_section = Section {
+            id: Uuid::new_v4(),
+            notebook_id: target_notebook_id,
+            name: source_section.name.clone(),
+            description: source_section.description.clone(),
+            color: source_section.color.clone(),
+            system_prompt: source_section.system_prompt.clone(),
+            system_prompt_mode: source_section.system_prompt_mode.clone(),
+            ai_model: source_section.ai_model.clone(),
+            position: max_position + 1,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+
+        target_sections.push(new_section.clone());
+        self.save_sections(target_notebook_id, &target_sections)?;
+
+        // Build old folder ID -> new folder ID mapping
+        let mut folder_id_map: std::collections::HashMap<Uuid, Uuid> =
+            std::collections::HashMap::new();
+
+        // Create folders in target notebook, maintaining hierarchy
+        // First pass: create all folders with new IDs
+        let mut target_folders = self.list_folders(target_notebook_id)?;
+        let mut new_folders: Vec<Folder> = Vec::new();
+
+        for source_folder in &section_folders {
+            let new_folder_id = Uuid::new_v4();
+            folder_id_map.insert(source_folder.id, new_folder_id);
+
+            let new_folder = Folder {
+                id: new_folder_id,
+                notebook_id: target_notebook_id,
+                name: source_folder.name.clone(),
+                parent_id: None, // Will be set in second pass
+                section_id: Some(new_section.id),
+                color: source_folder.color.clone(),
+                position: source_folder.position,
+                folder_type: source_folder.folder_type.clone(),
+                created_at: chrono::Utc::now(),
+                updated_at: chrono::Utc::now(),
+            };
+            new_folders.push(new_folder);
+        }
+
+        // Second pass: fix parent_id references
+        for new_folder in new_folders.iter_mut() {
+            // Find the original folder
+            if let Some(source_folder) = section_folders
+                .iter()
+                .find(|f| folder_id_map.get(&f.id) == Some(&new_folder.id))
+            {
+                if let Some(old_parent_id) = source_folder.parent_id {
+                    // Only map parent if it's also in this section
+                    if let Some(new_parent_id) = folder_id_map.get(&old_parent_id) {
+                        new_folder.parent_id = Some(*new_parent_id);
+                    }
+                }
+            }
+        }
+
+        // Add new folders to target
+        target_folders.extend(new_folders);
+        self.save_folders(target_notebook_id, &target_folders)?;
+
+        // Move each page to the target notebook
+        for page in &section_pages {
+            // Determine the target folder ID
+            let target_folder_id = page.folder_id.and_then(|fid| folder_id_map.get(&fid).copied());
+
+            // Use the existing move_page_to_notebook which handles assets
+            let mut moved_page =
+                self.move_page_to_notebook(source_notebook_id, page.id, target_notebook_id, target_folder_id)?;
+
+            // Update the section_id to the new section
+            moved_page.section_id = Some(new_section.id);
+            moved_page.updated_at = chrono::Utc::now();
+            self.update_page(&moved_page)?;
+        }
+
+        // Delete folders from source notebook
+        let mut remaining_source_folders = self.list_folders(source_notebook_id)?;
+        remaining_source_folders.retain(|f| f.section_id != Some(section_id));
+        self.save_folders(source_notebook_id, &remaining_source_folders)?;
+
+        // Delete section from source notebook
+        let mut remaining_source_sections = self.list_sections(source_notebook_id)?;
+        remaining_source_sections.retain(|s| s.id != section_id);
+        self.save_sections(source_notebook_id, &remaining_source_sections)?;
+
+        // Update the new section with final values
+        new_section.updated_at = chrono::Utc::now();
+
+        Ok(new_section)
+    }
+
     // ===== Cover Page Operations =====
 
     /// Get the cover page for a notebook, if it exists

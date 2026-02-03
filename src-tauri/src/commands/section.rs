@@ -240,3 +240,46 @@ pub fn set_cover_page(
 
     storage.set_cover_page(nb_id, pg_id).map_err(Into::into)
 }
+
+/// Move a section with all its folders and pages to another notebook
+#[tauri::command]
+pub fn move_section_to_notebook(
+    state: State<AppState>,
+    source_notebook_id: String,
+    section_id: String,
+    target_notebook_id: String,
+) -> CommandResult<Section> {
+    let storage = state.storage.lock().unwrap();
+
+    let src_nb_id = Uuid::parse_str(&source_notebook_id).map_err(|e| CommandError {
+        message: format!("Invalid source notebook ID: {}", e),
+    })?;
+    let sec_id = Uuid::parse_str(&section_id).map_err(|e| CommandError {
+        message: format!("Invalid section ID: {}", e),
+    })?;
+    let tgt_nb_id = Uuid::parse_str(&target_notebook_id).map_err(|e| CommandError {
+        message: format!("Invalid target notebook ID: {}", e),
+    })?;
+
+    let section = storage.move_section_to_notebook(src_nb_id, sec_id, tgt_nb_id)?;
+
+    // Auto-commit if git is enabled for source notebook
+    let source_path = storage.get_notebook_path(src_nb_id);
+    if git::is_git_repo(&source_path) {
+        let commit_message = format!("Move section '{}' to another notebook", section.name);
+        if let Err(e) = git::commit_all(&source_path, &commit_message) {
+            log::warn!("Failed to auto-commit section move (source): {}", e);
+        }
+    }
+
+    // Auto-commit if git is enabled for target notebook
+    let target_path = storage.get_notebook_path(tgt_nb_id);
+    if git::is_git_repo(&target_path) {
+        let commit_message = format!("Add section '{}' from another notebook", section.name);
+        if let Err(e) = git::commit_all(&target_path, &commit_message) {
+            log::warn!("Failed to auto-commit section move (target): {}", e);
+        }
+    }
+
+    Ok(section)
+}

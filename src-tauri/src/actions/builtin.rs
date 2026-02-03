@@ -18,6 +18,7 @@ pub fn get_builtin_actions() -> Vec<Action> {
         create_daily_reflection_action(),
         create_weekly_review_action(),
         create_carry_forward_action(),
+        create_weekly_outcomes_carry_forward_action(),
     ]
 }
 
@@ -351,6 +352,61 @@ fn create_carry_forward_action() -> Action {
     }
 }
 
+/// Weekly Outcomes Carry Forward action - copies incomplete outcomes from last week to this week
+fn create_weekly_outcomes_carry_forward_action() -> Action {
+    let id = Uuid::parse_str("00000000-0000-0000-0001-000000000007").unwrap();
+
+    Action {
+        id,
+        name: "Weekly Outcomes Carry Forward".to_string(),
+        description: "Copy incomplete outcomes from last week's Weekly Outcomes page to this week"
+            .to_string(),
+        icon: Some("arrow-right".to_string()),
+        category: ActionCategory::AgileResults,
+        triggers: vec![
+            ActionTrigger::Manual,
+            ActionTrigger::AiChat {
+                keywords: vec![
+                    "weekly carry forward".to_string(),
+                    "carry over outcomes".to_string(),
+                    "last week outcomes".to_string(),
+                    "weekly outcomes carry".to_string(),
+                ],
+            },
+        ],
+        steps: vec![ActionStep::CarryForwardItems {
+            source_selector: PageSelector {
+                notebook: Some(NotebookTarget::Current),
+                title_pattern: Some("*Weekly Outcomes*".to_string()),
+                created_within_days: Some(14), // Look back 2 weeks
+                ..Default::default()
+            },
+            destination: NotebookTarget::Current,
+            title_template: "Week {{weekNumber}} - Weekly Outcomes".to_string(),
+            template_id: Some("agile-results-weekly".to_string()),
+            find_existing: Some(PageSelector {
+                notebook: Some(NotebookTarget::Current),
+                title_pattern: Some("*Week {{weekNumber}}*Weekly Outcomes*".to_string()),
+                created_within_days: Some(7), // This week only
+                ..Default::default()
+            }),
+            insert_after_section: Some("This Week's Outcomes".to_string()),
+        }],
+        enabled: true,
+        is_built_in: true,
+        variables: vec![ActionVariable {
+            name: "weekNumber".to_string(),
+            description: "ISO week number".to_string(),
+            default_value: None,
+            variable_type: VariableType::WeekNumber,
+        }],
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+        last_run: None,
+        next_run: None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -358,7 +414,7 @@ mod tests {
     #[test]
     fn test_builtin_actions_created() {
         let actions = get_builtin_actions();
-        assert_eq!(actions.len(), 6);
+        assert_eq!(actions.len(), 7);
     }
 
     #[test]

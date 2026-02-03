@@ -422,6 +422,7 @@ pub fn run() {
             commands::update_section,
             commands::delete_section,
             commands::reorder_sections,
+            commands::move_section_to_notebook,
             // Cover page commands
             commands::get_cover_page,
             commands::create_cover_page,

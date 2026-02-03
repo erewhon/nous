@@ -1568,6 +1568,18 @@ export async function reorderSections(
   return invoke("reorder_sections", { notebookId, sectionIds });
 }
 
+export async function moveSectionToNotebook(
+  sourceNotebookId: string,
+  sectionId: string,
+  targetNotebookId: string
+): Promise<Section> {
+  return invoke<Section>("move_section_to_notebook", {
+    sourceNotebookId,
+    sectionId,
+    targetNotebookId,
+  });
+}
+
 // ========== Cover Page Operations ==========
 
 export async function getCoverPage(notebookId: string): Promise<Page | null> {

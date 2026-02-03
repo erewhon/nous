@@ -471,6 +471,28 @@ export const ACTION_CATEGORIES: ActionCategoryInfo[] = [
   },
 ];
 
+// ===== Action Execution Progress Types =====
+
+export type StepStatus = "pending" | "running" | "completed" | "error";
+
+export interface StepProgress {
+  index: number;
+  type: ActionStep["type"];
+  name: string;
+  status: StepStatus;
+  error?: string;
+}
+
+export interface ActionExecutionProgress {
+  actionId: string;
+  actionName: string;
+  steps: StepProgress[];
+  currentStepIndex: number;
+  isComplete: boolean;
+  overallSuccess: boolean;
+  result?: ActionExecutionResult;
+}
+
 // ===== Step Type Metadata =====
 
 export interface StepTypeInfo {
