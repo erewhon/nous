@@ -32,6 +32,15 @@ pub enum AutoDetectType {
     YoutubePublish,
 }
 
+/// How multiple checks should be combined
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum CheckCombineMode {
+    #[default]
+    Any, // OR: any check passing = goal complete
+    All, // AND: all checks must pass
+}
+
 /// Scope for auto-detection
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
@@ -51,31 +60,31 @@ pub enum AutoDetectScope {
     },
 }
 
-/// Auto-detection configuration
+/// Individual check configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AutoDetectConfig {
+pub struct AutoDetectCheck {
+    /// Unique identifier for this check
+    pub id: Uuid,
     /// Type of activity to detect
     #[serde(rename = "type")]
     pub detect_type: AutoDetectType,
-    /// Scope of detection
+    /// Scope of detection (for page_edit, page_create)
     pub scope: AutoDetectScope,
     /// Path to repository (for git_commit and jj_commit types) - legacy single repo
     #[serde(skip_serializing_if = "Option::is_none")]
     pub repo_path: Option<String>,
     /// Paths to multiple repositories (for git_commit and jj_commit types)
-    /// Commits are aggregated across all repos
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub repo_paths: Vec<String>,
     /// YouTube channel ID (for youtube_publish type)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub youtube_channel_id: Option<String>,
     /// Minimum count to mark as completed (default: 1)
-    /// For multiple repos, this is the total across all repos
     pub threshold: Option<u32>,
 }
 
-impl AutoDetectConfig {
+impl AutoDetectCheck {
     /// Get all repository paths (handles both legacy single path and multiple paths)
     pub fn get_repo_paths(&self) -> Vec<&str> {
         if !self.repo_paths.is_empty() {
@@ -84,6 +93,86 @@ impl AutoDetectConfig {
             vec![path.as_str()]
         } else {
             vec![]
+        }
+    }
+}
+
+/// Auto-detection configuration with support for multiple checks
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutoDetectConfig {
+    /// List of checks to perform
+    pub checks: Vec<AutoDetectCheck>,
+    /// How to combine multiple checks (default: Any/OR)
+    #[serde(default)]
+    pub combine_mode: CheckCombineMode,
+
+    // Legacy fields for backward compatibility during deserialization
+    // These are migrated to checks on load
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    pub detect_type: Option<AutoDetectType>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scope: Option<AutoDetectScope>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repo_path: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub repo_paths: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub youtube_channel_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub threshold: Option<u32>,
+}
+
+impl AutoDetectConfig {
+    /// Check if this config uses the legacy single-check format
+    pub fn is_legacy(&self) -> bool {
+        self.checks.is_empty() && self.detect_type.is_some()
+    }
+
+    /// Migrate legacy format to new checks format
+    pub fn migrate_legacy(&mut self) {
+        if self.is_legacy() {
+            if let (Some(detect_type), Some(scope)) = (self.detect_type.take(), self.scope.take()) {
+                let check = AutoDetectCheck {
+                    id: Uuid::new_v4(),
+                    detect_type,
+                    scope,
+                    repo_path: self.repo_path.take(),
+                    repo_paths: std::mem::take(&mut self.repo_paths),
+                    youtube_channel_id: self.youtube_channel_id.take(),
+                    threshold: self.threshold.take(),
+                };
+                self.checks.push(check);
+            }
+        }
+    }
+
+    /// Create a new config with a single check (for API compatibility)
+    pub fn new_single(
+        detect_type: AutoDetectType,
+        scope: AutoDetectScope,
+        repo_paths: Vec<String>,
+        youtube_channel_id: Option<String>,
+        threshold: Option<u32>,
+    ) -> Self {
+        let check = AutoDetectCheck {
+            id: Uuid::new_v4(),
+            detect_type,
+            scope,
+            repo_path: None,
+            repo_paths,
+            youtube_channel_id,
+            threshold,
+        };
+        Self {
+            checks: vec![check],
+            combine_mode: CheckCombineMode::Any,
+            detect_type: None,
+            scope: None,
+            repo_path: None,
+            repo_paths: Vec::new(),
+            youtube_channel_id: None,
+            threshold: None,
         }
     }
 }

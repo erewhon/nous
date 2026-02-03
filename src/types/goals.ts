@@ -21,13 +21,32 @@ export const AutoDetectScopeSchema = z.discriminatedUnion("type", [
 ]);
 export type AutoDetectScope = z.infer<typeof AutoDetectScopeSchema>;
 
-// Auto-detection configuration
-export const AutoDetectConfigSchema = z.object({
+// Check combine mode
+export const CheckCombineModeSchema = z.enum(["any", "all"]);
+export type CheckCombineMode = z.infer<typeof CheckCombineModeSchema>;
+
+// Individual check configuration
+export const AutoDetectCheckSchema = z.object({
+  id: z.string().uuid(),
   type: AutoDetectTypeSchema,
   scope: AutoDetectScopeSchema,
-  repoPath: z.string().optional(), // Legacy single repo (for backwards compatibility)
-  repoPaths: z.array(z.string()).optional().default([]), // Multiple repos (commits aggregated)
-  youtubeChannelId: z.string().optional(), // YouTube channel ID for youtube_publish type
+  repoPath: z.string().optional(),
+  repoPaths: z.array(z.string()).optional().default([]),
+  youtubeChannelId: z.string().optional(),
+  threshold: z.number().optional(),
+});
+export type AutoDetectCheck = z.infer<typeof AutoDetectCheckSchema>;
+
+// Auto-detection configuration with multiple checks
+export const AutoDetectConfigSchema = z.object({
+  checks: z.array(AutoDetectCheckSchema).default([]),
+  combineMode: CheckCombineModeSchema.optional().default("any"),
+  // Legacy fields for backward compatibility (all optional)
+  type: AutoDetectTypeSchema.optional(),
+  scope: AutoDetectScopeSchema.optional(),
+  repoPath: z.string().optional(),
+  repoPaths: z.array(z.string()).optional(),
+  youtubeChannelId: z.string().optional(),
   threshold: z.number().optional(),
 });
 export type AutoDetectConfig = z.infer<typeof AutoDetectConfigSchema>;

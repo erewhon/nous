@@ -39,17 +39,47 @@ type TabId =
   | "backup"
   | "audio";
 
-const TABS: { id: TabId; label: string; icon: React.ReactNode }[] = [
-  { id: "theme", label: "Appearance", icon: <IconPalette /> },
-  { id: "keybindings", label: "Shortcuts", icon: <IconKeyboard /> },
-  { id: "libraries", label: "Libraries", icon: <IconLibrary /> },
-  { id: "backup", label: "Backup", icon: <IconBackup /> },
-  { id: "ai", label: "AI Providers", icon: <IconSparkles /> },
-  { id: "rag", label: "Semantic Search", icon: <IconBrain /> },
-  { id: "system-prompt", label: "System Prompt", icon: <IconPrompt /> },
-  { id: "audio", label: "Audio / TTS", icon: <IconAudio /> },
-  { id: "mcp", label: "MCP Servers", icon: <IconPlug /> },
-  { id: "web-research", label: "Web Research", icon: <IconGlobe /> },
+interface TabCategory {
+  name: string;
+  tabs: { id: TabId; label: string; icon: React.ReactNode }[];
+}
+
+const TAB_CATEGORIES: TabCategory[] = [
+  {
+    name: "General",
+    tabs: [
+      { id: "theme", label: "Appearance", icon: <IconPalette /> },
+      { id: "keybindings", label: "Shortcuts", icon: <IconKeyboard /> },
+    ],
+  },
+  {
+    name: "Data",
+    tabs: [
+      { id: "libraries", label: "Libraries", icon: <IconLibrary /> },
+      { id: "backup", label: "Backup", icon: <IconBackup /> },
+    ],
+  },
+  {
+    name: "AI & Search",
+    tabs: [
+      { id: "ai", label: "AI Models", icon: <IconSparkles /> },
+      { id: "system-prompt", label: "System Prompt", icon: <IconPrompt /> },
+      { id: "rag", label: "Knowledge Base", icon: <IconBrain /> },
+      { id: "web-research", label: "Web Research", icon: <IconGlobe /> },
+    ],
+  },
+  {
+    name: "Media",
+    tabs: [
+      { id: "audio", label: "Text-to-Speech", icon: <IconAudio /> },
+    ],
+  },
+  {
+    name: "Integrations",
+    tabs: [
+      { id: "mcp", label: "MCP Servers", icon: <IconPlug /> },
+    ],
+  },
 ];
 
 const PROVIDER_INFO: Record<
@@ -134,28 +164,40 @@ export function SettingsDialog({
             </h2>
           </div>
 
-          <nav className="space-y-1">
-            {TABS.map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
-                  activeTab === tab.id ? "" : "hover:bg-[--color-bg-tertiary]"
-                }`}
-                style={{
-                  backgroundColor:
-                    activeTab === tab.id
-                      ? "rgba(139, 92, 246, 0.15)"
-                      : undefined,
-                  color:
-                    activeTab === tab.id
-                      ? "var(--color-accent)"
-                      : "var(--color-text-secondary)",
-                }}
-              >
-                {tab.icon}
-                {tab.label}
-              </button>
+          <nav className="space-y-4">
+            {TAB_CATEGORIES.map((category) => (
+              <div key={category.name}>
+                <div
+                  className="mb-2 px-3 text-xs font-semibold uppercase tracking-wider"
+                  style={{ color: "var(--color-text-muted)" }}
+                >
+                  {category.name}
+                </div>
+                <div className="space-y-1">
+                  {category.tabs.map((tab) => (
+                    <button
+                      key={tab.id}
+                      onClick={() => setActiveTab(tab.id)}
+                      className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                        activeTab === tab.id ? "" : "hover:bg-[--color-bg-tertiary]"
+                      }`}
+                      style={{
+                        backgroundColor:
+                          activeTab === tab.id
+                            ? "rgba(139, 92, 246, 0.15)"
+                            : undefined,
+                        color:
+                          activeTab === tab.id
+                            ? "var(--color-accent)"
+                            : "var(--color-text-secondary)",
+                      }}
+                    >
+                      {tab.icon}
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
             ))}
           </nav>
         </div>
@@ -171,7 +213,7 @@ export function SettingsDialog({
               className="text-base font-semibold"
               style={{ color: "var(--color-text-primary)" }}
             >
-              {TABS.find((t) => t.id === activeTab)?.label}
+              {TAB_CATEGORIES.flatMap((c) => c.tabs).find((t) => t.id === activeTab)?.label}
             </h3>
             <button
               onClick={onClose}

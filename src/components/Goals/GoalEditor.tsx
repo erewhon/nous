@@ -8,8 +8,373 @@ import type {
   TrackingType,
   AutoDetectType,
   AutoDetectScope,
+  AutoDetectCheck,
+  CheckCombineMode,
   CreateGoalRequest,
 } from "../../types/goals";
+
+// Local check state (without id, which is generated on save)
+interface CheckState {
+  localId: string;
+  type: AutoDetectType;
+  scopeType: "global" | "library" | "notebook" | "section";
+  notebookId: string;
+  sectionId: string;
+  repoPaths: string[];
+  youtubeChannelId: string;
+  threshold: number;
+}
+
+function createEmptyCheck(): CheckState {
+  return {
+    localId: crypto.randomUUID(),
+    type: "page_edit",
+    scopeType: "global",
+    notebookId: "",
+    sectionId: "",
+    repoPaths: [],
+    youtubeChannelId: "",
+    threshold: 1,
+  };
+}
+
+// Get display name for check type
+function getCheckTypeName(type: AutoDetectType): string {
+  switch (type) {
+    case "page_edit": return "Page edits";
+    case "page_create": return "Page creates";
+    case "git_commit": return "Git commits";
+    case "jj_commit": return "Jujutsu commits";
+    case "youtube_publish": return "YouTube publish";
+    default: return type;
+  }
+}
+
+interface CheckEditorProps {
+  check: CheckState;
+  checkIndex: number;
+  notebooks: { id: string; name: string; icon?: string; archived?: boolean }[];
+  sectionsMap: Record<string, Section[]>;
+  canDelete: boolean;
+  onUpdate: (updates: Partial<CheckState>) => void;
+  onDelete: () => void;
+}
+
+function CheckEditor({
+  check,
+  checkIndex,
+  notebooks,
+  sectionsMap,
+  canDelete,
+  onUpdate,
+  onDelete,
+}: CheckEditorProps) {
+  const [newRepoPath, setNewRepoPath] = useState("");
+  const sections = sectionsMap[check.notebookId] || [];
+
+  return (
+    <div
+      className="rounded-lg border p-3 space-y-3"
+      style={{
+        backgroundColor: "var(--color-bg-secondary)",
+        borderColor: "var(--color-border)",
+      }}
+    >
+      {/* Header with delete button */}
+      <div className="flex items-center justify-between">
+        <span
+          className="text-xs font-medium"
+          style={{ color: "var(--color-text-muted)" }}
+        >
+          Check {checkIndex + 1}: {getCheckTypeName(check.type)}
+        </span>
+        {canDelete && (
+          <button
+            type="button"
+            onClick={onDelete}
+            className="p-1 rounded hover:bg-white/10 transition-colors"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M18 6L6 18M6 6l12 12" />
+            </svg>
+          </button>
+        )}
+      </div>
+
+      {/* Check type selector */}
+      <div>
+        <label
+          className="block text-xs font-medium mb-1"
+          style={{ color: "var(--color-text-muted)" }}
+        >
+          Detect
+        </label>
+        <select
+          value={check.type}
+          onChange={(e) => onUpdate({ type: e.target.value as AutoDetectType })}
+          className="w-full rounded-lg border px-3 py-2 text-sm focus:outline-none"
+          style={{
+            backgroundColor: "var(--color-bg-tertiary)",
+            borderColor: "var(--color-border)",
+            color: "var(--color-text-primary)",
+          }}
+        >
+          <option value="page_edit">Page edits</option>
+          <option value="page_create">Page creates</option>
+          <option value="git_commit">Git commits</option>
+          <option value="jj_commit">Jujutsu (jj) commits</option>
+          <option value="youtube_publish">YouTube video/livestream</option>
+        </select>
+      </div>
+
+      {/* YouTube channel ID */}
+      {check.type === "youtube_publish" && (
+        <div>
+          <label
+            className="block text-xs font-medium mb-1"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            YouTube Channel ID
+          </label>
+          <input
+            type="text"
+            value={check.youtubeChannelId}
+            onChange={(e) => onUpdate({ youtubeChannelId: e.target.value })}
+            placeholder="UCxxxxxxxxxxxxxxxx"
+            className="w-full rounded-lg border px-3 py-2 text-sm focus:outline-none"
+            style={{
+              backgroundColor: "var(--color-bg-tertiary)",
+              borderColor: "var(--color-border)",
+              color: "var(--color-text-primary)",
+            }}
+          />
+        </div>
+      )}
+
+      {/* Repository paths */}
+      {(check.type === "git_commit" || check.type === "jj_commit") && (
+        <div>
+          <label
+            className="block text-xs font-medium mb-1"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            Repository paths
+          </label>
+          {check.repoPaths.length > 0 && (
+            <div className="space-y-1 mb-2">
+              {check.repoPaths.map((path, index) => (
+                <div
+                  key={index}
+                  className="flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm"
+                  style={{
+                    backgroundColor: "var(--color-bg-tertiary)",
+                    color: "var(--color-text-primary)",
+                  }}
+                >
+                  <span className="flex-1 truncate">{path}</span>
+                  <button
+                    type="button"
+                    onClick={() => onUpdate({
+                      repoPaths: check.repoPaths.filter((_, i) => i !== index)
+                    })}
+                    className="p-0.5 rounded hover:bg-white/10 transition-colors"
+                    style={{ color: "var(--color-text-muted)" }}
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M18 6L6 18M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={newRepoPath}
+              onChange={(e) => setNewRepoPath(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && newRepoPath.trim()) {
+                  e.preventDefault();
+                  onUpdate({ repoPaths: [...check.repoPaths, newRepoPath.trim()] });
+                  setNewRepoPath("");
+                }
+              }}
+              placeholder="/path/to/repo"
+              className="flex-1 rounded-lg border px-3 py-2 text-sm focus:outline-none"
+              style={{
+                backgroundColor: "var(--color-bg-tertiary)",
+                borderColor: "var(--color-border)",
+                color: "var(--color-text-primary)",
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => {
+                if (newRepoPath.trim()) {
+                  onUpdate({ repoPaths: [...check.repoPaths, newRepoPath.trim()] });
+                  setNewRepoPath("");
+                }
+              }}
+              className="rounded-lg px-3 py-2 text-sm font-medium transition-colors"
+              style={{
+                backgroundColor: "var(--color-bg-tertiary)",
+                color: "var(--color-text-secondary)",
+              }}
+            >
+              Add
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Scope selector for page edits/creates */}
+      {(check.type === "page_edit" || check.type === "page_create") && (
+        <>
+          <div>
+            <label
+              className="block text-xs font-medium mb-1"
+              style={{ color: "var(--color-text-muted)" }}
+            >
+              Scope
+            </label>
+            <select
+              value={check.scopeType}
+              onChange={(e) => {
+                const newType = e.target.value as "global" | "notebook" | "section";
+                onUpdate({
+                  scopeType: newType,
+                  notebookId: newType === "global" ? "" : check.notebookId,
+                  sectionId: "",
+                });
+              }}
+              className="w-full rounded-lg border px-3 py-2 text-sm focus:outline-none"
+              style={{
+                backgroundColor: "var(--color-bg-tertiary)",
+                borderColor: "var(--color-border)",
+                color: "var(--color-text-primary)",
+              }}
+            >
+              <option value="global">All notebooks</option>
+              <option value="notebook">Specific notebook</option>
+              <option value="section">Specific section</option>
+            </select>
+          </div>
+
+          {(check.scopeType === "notebook" || check.scopeType === "section") && (
+            <div>
+              <label
+                className="block text-xs font-medium mb-1"
+                style={{ color: "var(--color-text-muted)" }}
+              >
+                Notebook
+              </label>
+              <select
+                value={check.notebookId}
+                onChange={(e) => onUpdate({ notebookId: e.target.value, sectionId: "" })}
+                className="w-full rounded-lg border px-3 py-2 text-sm focus:outline-none"
+                style={{
+                  backgroundColor: "var(--color-bg-tertiary)",
+                  borderColor: "var(--color-border)",
+                  color: "var(--color-text-primary)",
+                }}
+              >
+                <option value="">Select a notebook...</option>
+                {notebooks
+                  .filter((nb) => !nb.archived)
+                  .map((nb) => (
+                    <option key={nb.id} value={nb.id}>
+                      {nb.icon ? `${nb.icon} ` : ""}{nb.name}
+                    </option>
+                  ))}
+              </select>
+            </div>
+          )}
+
+          {check.scopeType === "section" && check.notebookId && sections.length > 0 && (
+            <div>
+              <label
+                className="block text-xs font-medium mb-1"
+                style={{ color: "var(--color-text-muted)" }}
+              >
+                Section
+              </label>
+              <select
+                value={check.sectionId}
+                onChange={(e) => onUpdate({ sectionId: e.target.value })}
+                className="w-full rounded-lg border px-3 py-2 text-sm focus:outline-none"
+                style={{
+                  backgroundColor: "var(--color-bg-tertiary)",
+                  borderColor: "var(--color-border)",
+                  color: "var(--color-text-primary)",
+                }}
+              >
+                <option value="">Select a section...</option>
+                {sections.map((section) => (
+                  <option key={section.id} value={section.id}>
+                    {section.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {check.scopeType === "section" && check.notebookId && sections.length === 0 && (
+            <p
+              className="text-xs"
+              style={{ color: "var(--color-text-muted)" }}
+            >
+              This notebook has no sections
+            </p>
+          )}
+        </>
+      )}
+
+      {/* Threshold */}
+      <div>
+        <label
+          className="block text-xs font-medium mb-1"
+          style={{ color: "var(--color-text-muted)" }}
+        >
+          Minimum count
+        </label>
+        <input
+          type="number"
+          min="1"
+          value={check.threshold}
+          onChange={(e) => onUpdate({ threshold: parseInt(e.target.value) || 1 })}
+          className="w-full rounded-lg border px-3 py-2 text-sm focus:outline-none"
+          style={{
+            backgroundColor: "var(--color-bg-tertiary)",
+            borderColor: "var(--color-border)",
+            color: "var(--color-text-primary)",
+          }}
+        />
+      </div>
+    </div>
+  );
+}
 
 export function GoalEditor() {
   const { isEditorOpen, editingGoal, closeEditor, createGoal, updateGoal } =
@@ -20,15 +385,9 @@ export function GoalEditor() {
   const [description, setDescription] = useState("");
   const [frequency, setFrequency] = useState<Frequency>("daily");
   const [trackingType, setTrackingType] = useState<TrackingType>("manual");
-  const [autoDetectType, setAutoDetectType] = useState<AutoDetectType>("page_edit");
-  const [scopeType, setScopeType] = useState<"global" | "library" | "notebook" | "section">("global");
-  const [selectedNotebookId, setSelectedNotebookId] = useState<string>("");
-  const [selectedSectionId, setSelectedSectionId] = useState<string>("");
-  const [sections, setSections] = useState<Section[]>([]);
-  const [repoPaths, setRepoPaths] = useState<string[]>([]);
-  const [newRepoPath, setNewRepoPath] = useState("");
-  const [youtubeChannelId, setYoutubeChannelId] = useState("");
-  const [threshold, setThreshold] = useState(1);
+  const [checks, setChecks] = useState<CheckState[]>([createEmptyCheck()]);
+  const [combineMode, setCombineMode] = useState<CheckCombineMode>("any");
+  const [sectionsMap, setSectionsMap] = useState<Record<string, Section[]>>({});
   const [reminderEnabled, setReminderEnabled] = useState(false);
   const [reminderTime, setReminderTime] = useState("09:00");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -41,15 +400,24 @@ export function GoalEditor() {
     }
   }, [isEditorOpen, loadNotebooks]);
 
-  // Load sections when notebook is selected
+  // Load sections for notebooks used in checks
   useEffect(() => {
-    if (selectedNotebookId && (scopeType === "notebook" || scopeType === "section")) {
-      api.listSections(selectedNotebookId).then(setSections).catch(() => setSections([]));
-    } else {
-      setSections([]);
-      setSelectedSectionId("");
-    }
-  }, [selectedNotebookId, scopeType]);
+    const notebookIds = checks
+      .filter((c) => (c.scopeType === "notebook" || c.scopeType === "section") && c.notebookId)
+      .map((c) => c.notebookId);
+
+    const uniqueIds = [...new Set(notebookIds)];
+
+    uniqueIds.forEach((notebookId) => {
+      if (!sectionsMap[notebookId]) {
+        api.listSections(notebookId).then((sections) => {
+          setSectionsMap((prev) => ({ ...prev, [notebookId]: sections }));
+        }).catch(() => {
+          setSectionsMap((prev) => ({ ...prev, [notebookId]: [] }));
+        });
+      }
+    });
+  }, [checks, sectionsMap]);
 
   // Reset form when editing goal changes
   useEffect(() => {
@@ -59,33 +427,54 @@ export function GoalEditor() {
       setFrequency(editingGoal.frequency);
       setTrackingType(editingGoal.trackingType);
       if (editingGoal.autoDetect) {
-        setAutoDetectType(editingGoal.autoDetect.type);
-        const scope = editingGoal.autoDetect.scope;
-        setScopeType(scope.type);
-        if (scope.type === "notebook") {
-          setSelectedNotebookId(scope.id);
-          setSelectedSectionId("");
-        } else if (scope.type === "section") {
-          setSelectedNotebookId(scope.notebookId);
-          setSelectedSectionId(scope.sectionId);
-        } else {
-          setSelectedNotebookId("");
-          setSelectedSectionId("");
+        setCombineMode(editingGoal.autoDetect.combineMode || "any");
+
+        // Handle new checks format
+        if (editingGoal.autoDetect.checks && editingGoal.autoDetect.checks.length > 0) {
+          setChecks(editingGoal.autoDetect.checks.map((check: AutoDetectCheck) => ({
+            localId: check.id || crypto.randomUUID(),
+            type: check.type,
+            scopeType: check.scope.type as "global" | "library" | "notebook" | "section",
+            notebookId: check.scope.type === "notebook" ? check.scope.id :
+                       check.scope.type === "section" ? check.scope.notebookId : "",
+            sectionId: check.scope.type === "section" ? check.scope.sectionId : "",
+            repoPaths: check.repoPaths || (check.repoPath ? [check.repoPath] : []),
+            youtubeChannelId: check.youtubeChannelId || "",
+            threshold: check.threshold || 1,
+          })));
         }
-        // Handle both legacy repoPath and new repoPaths
-        const paths = editingGoal.autoDetect.repoPaths?.length
-          ? editingGoal.autoDetect.repoPaths
-          : editingGoal.autoDetect.repoPath
-            ? [editingGoal.autoDetect.repoPath]
-            : [];
-        setRepoPaths(paths);
-        setNewRepoPath("");
-        setYoutubeChannelId(editingGoal.autoDetect.youtubeChannelId || "");
-        setThreshold(editingGoal.autoDetect.threshold || 1);
+        // Handle legacy single-check format
+        else if (editingGoal.autoDetect.type && editingGoal.autoDetect.scope) {
+          const scope = editingGoal.autoDetect.scope;
+          const paths = editingGoal.autoDetect.repoPaths?.length
+            ? editingGoal.autoDetect.repoPaths
+            : editingGoal.autoDetect.repoPath
+              ? [editingGoal.autoDetect.repoPath]
+              : [];
+          setChecks([{
+            localId: crypto.randomUUID(),
+            type: editingGoal.autoDetect.type,
+            scopeType: scope.type as "global" | "library" | "notebook" | "section",
+            notebookId: scope.type === "notebook" ? scope.id :
+                       scope.type === "section" ? scope.notebookId : "",
+            sectionId: scope.type === "section" ? scope.sectionId : "",
+            repoPaths: paths,
+            youtubeChannelId: editingGoal.autoDetect.youtubeChannelId || "",
+            threshold: editingGoal.autoDetect.threshold || 1,
+          }]);
+        } else {
+          setChecks([createEmptyCheck()]);
+        }
+      } else {
+        setChecks([createEmptyCheck()]);
+        setCombineMode("any");
       }
       if (editingGoal.reminder) {
         setReminderEnabled(editingGoal.reminder.enabled);
         setReminderTime(editingGoal.reminder.time);
+      } else {
+        setReminderEnabled(false);
+        setReminderTime("09:00");
       }
     } else {
       // Reset to defaults for new goal
@@ -93,20 +482,27 @@ export function GoalEditor() {
       setDescription("");
       setFrequency("daily");
       setTrackingType("manual");
-      setAutoDetectType("page_edit");
-      setScopeType("global");
-      setSelectedNotebookId("");
-      setSelectedSectionId("");
-      setSections([]);
-      setRepoPaths([]);
-      setNewRepoPath("");
-      setYoutubeChannelId("");
-      setThreshold(1);
+      setChecks([createEmptyCheck()]);
+      setCombineMode("any");
+      setSectionsMap({});
       setReminderEnabled(false);
       setReminderTime("09:00");
     }
     setError(null);
   }, [editingGoal, isEditorOpen]);
+
+  // Helper to convert check state to scope
+  const checkStateToScope = (check: CheckState): AutoDetectScope => {
+    if (check.scopeType === "global") {
+      return { type: "global" };
+    } else if (check.scopeType === "notebook") {
+      return { type: "notebook", id: check.notebookId };
+    } else if (check.scopeType === "section") {
+      return { type: "section", notebookId: check.notebookId, sectionId: check.sectionId };
+    } else {
+      return { type: "library", id: check.notebookId };
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -115,20 +511,41 @@ export function GoalEditor() {
       return;
     }
 
+    // Validate checks when auto tracking
+    if (trackingType === "auto") {
+      for (const check of checks) {
+        if ((check.type === "git_commit" || check.type === "jj_commit") && check.repoPaths.length === 0) {
+          setError("Repository path is required for commit tracking");
+          return;
+        }
+        if (check.type === "youtube_publish" && !check.youtubeChannelId) {
+          setError("YouTube channel ID is required for YouTube tracking");
+          return;
+        }
+        if ((check.scopeType === "notebook" || check.scopeType === "section") && !check.notebookId) {
+          setError("Please select a notebook");
+          return;
+        }
+        if (check.scopeType === "section" && !check.sectionId) {
+          setError("Please select a section");
+          return;
+        }
+      }
+    }
+
     setIsSubmitting(true);
     setError(null);
 
     try {
-      let scope: AutoDetectScope;
-      if (scopeType === "global") {
-        scope = { type: "global" };
-      } else if (scopeType === "notebook") {
-        scope = { type: "notebook", id: selectedNotebookId };
-      } else if (scopeType === "section") {
-        scope = { type: "section", notebookId: selectedNotebookId, sectionId: selectedSectionId };
-      } else {
-        scope = { type: "library", id: selectedNotebookId };
-      }
+      // Convert check states to API format
+      const autoDetectChecks = checks.map((check) => ({
+        id: check.localId,
+        type: check.type,
+        scope: checkStateToScope(check),
+        repoPaths: (check.type === "git_commit" || check.type === "jj_commit") ? check.repoPaths : [],
+        youtubeChannelId: check.type === "youtube_publish" ? check.youtubeChannelId : undefined,
+        threshold: check.threshold > 1 ? check.threshold : undefined,
+      }));
 
       const request: CreateGoalRequest = {
         name: name.trim(),
@@ -138,11 +555,8 @@ export function GoalEditor() {
         autoDetect:
           trackingType === "auto"
             ? {
-                type: autoDetectType,
-                scope,
-                repoPaths: (autoDetectType === "git_commit" || autoDetectType === "jj_commit") ? repoPaths : [],
-                youtubeChannelId: autoDetectType === "youtube_publish" ? youtubeChannelId : undefined,
-                threshold: threshold > 1 ? threshold : undefined,
+                checks: autoDetectChecks,
+                combineMode,
               }
             : undefined,
         reminder: reminderEnabled
@@ -361,276 +775,103 @@ export function GoalEditor() {
                 className="space-y-3 rounded-lg p-3"
                 style={{ backgroundColor: "var(--color-bg-tertiary)" }}
               >
-                <div>
-                  <label
-                    className="block text-xs font-medium mb-1"
-                    style={{ color: "var(--color-text-muted)" }}
-                  >
-                    Detect
-                  </label>
-                  <select
-                    value={autoDetectType}
-                    onChange={(e) => setAutoDetectType(e.target.value as AutoDetectType)}
-                    className="w-full rounded-lg border px-3 py-2 text-sm focus:outline-none"
-                    style={{
-                      backgroundColor: "var(--color-bg-secondary)",
-                      borderColor: "var(--color-border)",
-                      color: "var(--color-text-primary)",
+                {/* List of checks */}
+                {checks.map((check, checkIndex) => (
+                  <CheckEditor
+                    key={check.localId}
+                    check={check}
+                    checkIndex={checkIndex}
+                    notebooks={notebooks}
+                    sectionsMap={sectionsMap}
+                    canDelete={checks.length > 1}
+                    onUpdate={(updates) => {
+                      setChecks(checks.map((c, i) =>
+                        i === checkIndex ? { ...c, ...updates } : c
+                      ));
                     }}
-                  >
-                    <option value="page_edit">Page edits</option>
-                    <option value="page_create">Page creates</option>
-                    <option value="git_commit">Git commits</option>
-                    <option value="jj_commit">Jujutsu (jj) commits</option>
-                    <option value="youtube_publish">YouTube video/livestream</option>
-                  </select>
-                </div>
-
-                {autoDetectType === "youtube_publish" && (
-                  <div>
-                    <label
-                      className="block text-xs font-medium mb-1"
-                      style={{ color: "var(--color-text-muted)" }}
-                    >
-                      YouTube Channel ID
-                    </label>
-                    <input
-                      type="text"
-                      value={youtubeChannelId}
-                      onChange={(e) => setYoutubeChannelId(e.target.value)}
-                      placeholder="UCxxxxxxxxxxxxxxxx"
-                      className="w-full rounded-lg border px-3 py-2 text-sm focus:outline-none"
-                      style={{
-                        backgroundColor: "var(--color-bg-secondary)",
-                        borderColor: "var(--color-border)",
-                        color: "var(--color-text-primary)",
-                      }}
-                    />
-                    <p
-                      className="mt-1 text-xs"
-                      style={{ color: "var(--color-text-muted)" }}
-                    >
-                      Find your channel ID in YouTube Studio under Settings &gt; Channel &gt; Basic info
-                    </p>
-                  </div>
-                )}
-
-                {(autoDetectType === "git_commit" || autoDetectType === "jj_commit") && (
-                  <div>
-                    <label
-                      className="block text-xs font-medium mb-1"
-                      style={{ color: "var(--color-text-muted)" }}
-                    >
-                      Repository paths
-                    </label>
-                    {/* List of added paths */}
-                    {repoPaths.length > 0 && (
-                      <div className="space-y-1 mb-2">
-                        {repoPaths.map((path, index) => (
-                          <div
-                            key={index}
-                            className="flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm"
-                            style={{
-                              backgroundColor: "var(--color-bg-secondary)",
-                              color: "var(--color-text-primary)",
-                            }}
-                          >
-                            <span className="flex-1 truncate">{path}</span>
-                            <button
-                              type="button"
-                              onClick={() => setRepoPaths(repoPaths.filter((_, i) => i !== index))}
-                              className="p-0.5 rounded hover:bg-white/10 transition-colors"
-                              style={{ color: "var(--color-text-muted)" }}
-                            >
-                              <svg
-                                xmlns="http://www.w3.org/2000/svg"
-                                width="14"
-                                height="14"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="2"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                              >
-                                <path d="M18 6L6 18M6 6l12 12" />
-                              </svg>
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    {/* Add new path */}
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        value={newRepoPath}
-                        onChange={(e) => setNewRepoPath(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" && newRepoPath.trim()) {
-                            e.preventDefault();
-                            setRepoPaths([...repoPaths, newRepoPath.trim()]);
-                            setNewRepoPath("");
-                          }
-                        }}
-                        placeholder="/path/to/repo"
-                        className="flex-1 rounded-lg border px-3 py-2 text-sm focus:outline-none"
-                        style={{
-                          backgroundColor: "var(--color-bg-secondary)",
-                          borderColor: "var(--color-border)",
-                          color: "var(--color-text-primary)",
-                        }}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (newRepoPath.trim()) {
-                            setRepoPaths([...repoPaths, newRepoPath.trim()]);
-                            setNewRepoPath("");
-                          }
-                        }}
-                        className="rounded-lg px-3 py-2 text-sm font-medium transition-colors"
-                        style={{
-                          backgroundColor: "var(--color-bg-secondary)",
-                          color: "var(--color-text-secondary)",
-                        }}
-                      >
-                        Add
-                      </button>
-                    </div>
-                    <p
-                      className="mt-1 text-xs"
-                      style={{ color: "var(--color-text-muted)" }}
-                    >
-                      Commits are counted across all repos
-                    </p>
-                  </div>
-                )}
-
-                {autoDetectType !== "git_commit" && autoDetectType !== "jj_commit" && autoDetectType !== "youtube_publish" && (
-                  <>
-                    <div>
-                      <label
-                        className="block text-xs font-medium mb-1"
-                        style={{ color: "var(--color-text-muted)" }}
-                      >
-                        Scope
-                      </label>
-                      <select
-                        value={scopeType}
-                        onChange={(e) => {
-                          const newType = e.target.value as "global" | "notebook" | "section";
-                          setScopeType(newType);
-                          if (newType === "global") {
-                            setSelectedNotebookId("");
-                            setSelectedSectionId("");
-                          }
-                        }}
-                        className="w-full rounded-lg border px-3 py-2 text-sm focus:outline-none"
-                        style={{
-                          backgroundColor: "var(--color-bg-secondary)",
-                          borderColor: "var(--color-border)",
-                          color: "var(--color-text-primary)",
-                        }}
-                      >
-                        <option value="global">All notebooks</option>
-                        <option value="notebook">Specific notebook</option>
-                        <option value="section">Specific section</option>
-                      </select>
-                    </div>
-
-                    {(scopeType === "notebook" || scopeType === "section") && (
-                      <div>
-                        <label
-                          className="block text-xs font-medium mb-1"
-                          style={{ color: "var(--color-text-muted)" }}
-                        >
-                          Notebook
-                        </label>
-                        <select
-                          value={selectedNotebookId}
-                          onChange={(e) => {
-                            setSelectedNotebookId(e.target.value);
-                            setSelectedSectionId("");
-                          }}
-                          className="w-full rounded-lg border px-3 py-2 text-sm focus:outline-none"
-                          style={{
-                            backgroundColor: "var(--color-bg-secondary)",
-                            borderColor: "var(--color-border)",
-                            color: "var(--color-text-primary)",
-                          }}
-                        >
-                          <option value="">Select a notebook...</option>
-                          {notebooks
-                            .filter((nb) => !nb.archived)
-                            .map((nb) => (
-                              <option key={nb.id} value={nb.id}>
-                                {nb.icon ? `${nb.icon} ` : ""}{nb.name}
-                              </option>
-                            ))}
-                        </select>
-                      </div>
-                    )}
-
-                    {scopeType === "section" && selectedNotebookId && sections.length > 0 && (
-                      <div>
-                        <label
-                          className="block text-xs font-medium mb-1"
-                          style={{ color: "var(--color-text-muted)" }}
-                        >
-                          Section
-                        </label>
-                        <select
-                          value={selectedSectionId}
-                          onChange={(e) => setSelectedSectionId(e.target.value)}
-                          className="w-full rounded-lg border px-3 py-2 text-sm focus:outline-none"
-                          style={{
-                            backgroundColor: "var(--color-bg-secondary)",
-                            borderColor: "var(--color-border)",
-                            color: "var(--color-text-primary)",
-                          }}
-                        >
-                          <option value="">Select a section...</option>
-                          {sections.map((section) => (
-                            <option key={section.id} value={section.id}>
-                              {section.name}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    )}
-
-                    {scopeType === "section" && selectedNotebookId && sections.length === 0 && (
-                      <p
-                        className="text-xs"
-                        style={{ color: "var(--color-text-muted)" }}
-                      >
-                        This notebook has no sections
-                      </p>
-                    )}
-                  </>
-                )}
-
-                <div>
-                  <label
-                    className="block text-xs font-medium mb-1"
-                    style={{ color: "var(--color-text-muted)" }}
-                  >
-                    Minimum count
-                  </label>
-                  <input
-                    type="number"
-                    min="1"
-                    value={threshold}
-                    onChange={(e) => setThreshold(parseInt(e.target.value) || 1)}
-                    className="w-full rounded-lg border px-3 py-2 text-sm focus:outline-none"
-                    style={{
-                      backgroundColor: "var(--color-bg-secondary)",
-                      borderColor: "var(--color-border)",
-                      color: "var(--color-text-primary)",
+                    onDelete={() => {
+                      setChecks(checks.filter((_, i) => i !== checkIndex));
                     }}
                   />
-                </div>
+                ))}
+
+                {/* Add check button */}
+                <button
+                  type="button"
+                  onClick={() => setChecks([...checks, createEmptyCheck()])}
+                  className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-medium transition-colors hover:bg-white/5"
+                  style={{ color: "var(--color-accent)" }}
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M12 5v14M5 12h14" />
+                  </svg>
+                  Add check
+                </button>
+
+                {/* Combine mode (only show if multiple checks) */}
+                {checks.length > 1 && (
+                  <div
+                    className="border-t pt-3"
+                    style={{ borderColor: "var(--color-border)" }}
+                  >
+                    <label
+                      className="block text-xs font-medium mb-2"
+                      style={{ color: "var(--color-text-muted)" }}
+                    >
+                      Combine mode
+                    </label>
+                    <div className="flex gap-4">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="combineMode"
+                          checked={combineMode === "any"}
+                          onChange={() => setCombineMode("any")}
+                          className="h-3.5 w-3.5 accent-violet-500"
+                        />
+                        <span
+                          className="text-xs"
+                          style={{ color: "var(--color-text-secondary)" }}
+                        >
+                          Any passes (OR)
+                        </span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="combineMode"
+                          checked={combineMode === "all"}
+                          onChange={() => setCombineMode("all")}
+                          className="h-3.5 w-3.5 accent-violet-500"
+                        />
+                        <span
+                          className="text-xs"
+                          style={{ color: "var(--color-text-secondary)" }}
+                        >
+                          All pass (AND)
+                        </span>
+                      </label>
+                    </div>
+                    <p
+                      className="mt-1 text-xs"
+                      style={{ color: "var(--color-text-muted)" }}
+                    >
+                      {combineMode === "any"
+                        ? "Goal completes if any check passes"
+                        : "Goal completes only if all checks pass"}
+                    </p>
+                  </div>
+                )}
               </div>
             )}
 

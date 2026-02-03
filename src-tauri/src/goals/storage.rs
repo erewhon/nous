@@ -52,7 +52,26 @@ impl GoalsStorage {
         }
 
         let content = fs::read_to_string(path)?;
-        let goals: Vec<Goal> = serde_json::from_str(&content)?;
+        let mut goals: Vec<Goal> = serde_json::from_str(&content)?;
+
+        // Migrate any legacy auto_detect configs to new format
+        let mut needs_save = false;
+        for goal in &mut goals {
+            if let Some(ref mut auto_detect) = goal.auto_detect {
+                if auto_detect.is_legacy() {
+                    auto_detect.migrate_legacy();
+                    needs_save = true;
+                }
+            }
+        }
+
+        // Save migrated goals
+        if needs_save {
+            if let Err(e) = self.save_goals(&goals) {
+                log::warn!("Failed to save migrated goals: {}", e);
+            }
+        }
+
         Ok(goals)
     }
 
