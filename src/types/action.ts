@@ -247,6 +247,19 @@ export const SetVariableStepSchema = z.object({
   value: z.string(),
 });
 
+export const ProcessExternalSourceStepSchema = z.object({
+  type: z.literal("processExternalSource"),
+  sourceId: z.string().optional(),
+  inlinePath: z.string().optional(),
+  customPrompt: z.string().optional(),
+  notebookTarget: NotebookTargetSchema,
+  folderName: z.string().optional(),
+  titleTemplate: z.string(),
+  includeSourceLink: z.boolean().default(true),
+  incremental: z.boolean().default(false),
+  tags: z.array(z.string()).default([]),
+});
+
 export const ConditionalStepSchema: z.ZodType<ConditionalStep> = z.lazy(() =>
   z.object({
     type: z.literal("conditional"),
@@ -295,6 +308,7 @@ export const ActionStepSchema: z.ZodType<ActionStep> = z.lazy(() =>
       thenSteps: z.array(ActionStepSchema),
       elseSteps: z.array(ActionStepSchema).default([]),
     }),
+    ProcessExternalSourceStepSchema,
   ])
 );
 
@@ -310,7 +324,8 @@ export type ActionStep =
   | z.infer<typeof CarryForwardItemsStepSchema>
   | z.infer<typeof DelayStepSchema>
   | z.infer<typeof SetVariableStepSchema>
-  | ConditionalStep;
+  | ConditionalStep
+  | z.infer<typeof ProcessExternalSourceStepSchema>;
 
 // ===== Variable Types =====
 
@@ -531,5 +546,11 @@ export const STEP_TYPES: StepTypeInfo[] = [
     name: "Set Variable",
     description: "Set a variable for use in later steps",
     icon: "variable",
+  },
+  {
+    type: "processExternalSource",
+    name: "Process External Files",
+    description: "Import and summarize external files with AI",
+    icon: "file-import",
   },
 ];

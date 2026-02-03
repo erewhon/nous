@@ -101,7 +101,8 @@ impl AutoDetectCheck {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AutoDetectConfig {
-    /// List of checks to perform
+    /// List of checks to perform (empty for legacy format)
+    #[serde(default)]
     pub checks: Vec<AutoDetectCheck>,
     /// How to combine multiple checks (default: Any/OR)
     #[serde(default)]

@@ -7,6 +7,9 @@ use uuid::Uuid;
 use crate::actions::models::*;
 use crate::actions::storage::ActionStorage;
 use crate::actions::variables::VariableResolver;
+use crate::external_sources::{
+    read_file_content, ExternalFileFormat, ExternalSourcesError, ExternalSourcesStorage,
+};
 use crate::python_bridge::{AIConfig, PageSummaryInput, PythonAI};
 use crate::storage::{EditorBlock, EditorData, FileStorage, NotebookType, StorageError};
 
@@ -45,6 +48,12 @@ pub enum ExecutionError {
 
     #[error("Action is disabled")]
     ActionDisabled,
+
+    #[error("External sources error: {0}")]
+    ExternalSources(#[from] ExternalSourcesError),
+
+    #[error("File not found: {0}")]
+    FileNotFound(String),
 }
 
 /// Context for action execution
@@ -105,6 +114,7 @@ pub struct ActionExecutor {
     storage: Arc<Mutex<FileStorage>>,
     action_storage: Arc<Mutex<ActionStorage>>,
     python_ai: Arc<Mutex<PythonAI>>,
+    external_sources_storage: Option<Arc<Mutex<ExternalSourcesStorage>>>,
     variable_resolver: VariableResolver,
 }
 
@@ -118,8 +128,17 @@ impl ActionExecutor {
             storage,
             action_storage,
             python_ai,
+            external_sources_storage: None,
             variable_resolver: VariableResolver::new(),
         }
+    }
+
+    /// Set the external sources storage reference
+    pub fn set_external_sources_storage(
+        &mut self,
+        storage: Arc<Mutex<ExternalSourcesStorage>>,
+    ) {
+        self.external_sources_storage = Some(storage);
     }
 
     /// Execute an action by ID
@@ -308,6 +327,31 @@ impl ActionExecutor {
 
             ActionStep::AiSummarize { selector, output_target, custom_prompt } => {
                 self.execute_ai_summarize(selector, output_target, custom_prompt.as_ref(), context)
+            }
+
+            ActionStep::ProcessExternalSource {
+                source_id,
+                inline_path,
+                custom_prompt,
+                notebook_target,
+                folder_name,
+                title_template,
+                include_source_link,
+                incremental,
+                tags,
+            } => {
+                self.execute_process_external_source(
+                    source_id.as_ref(),
+                    inline_path.as_ref(),
+                    custom_prompt.as_ref(),
+                    notebook_target,
+                    folder_name.as_ref(),
+                    title_template,
+                    *include_source_link,
+                    *incremental,
+                    tags,
+                    context,
+                )
             }
         }
     }
@@ -1035,6 +1079,268 @@ impl ActionExecutor {
         }
 
         Ok(())
+    }
+
+    /// Execute process external source step
+    fn execute_process_external_source(
+        &self,
+        source_id: Option<&String>,
+        inline_path: Option<&String>,
+        custom_prompt: Option<&String>,
+        notebook_target: &NotebookTarget,
+        folder_name: Option<&String>,
+        title_template: &str,
+        include_source_link: bool,
+        incremental: bool,
+        tags: &[String],
+        context: &mut ExecutionContext,
+    ) -> Result<(), ExecutionError> {
+        log::info!("ProcessExternalSource: Starting execution");
+
+        // Resolve files to process
+        let (files, source_uuid) = self.resolve_external_files(source_id, inline_path)?;
+        log::info!("ProcessExternalSource: Resolved {} files", files.len());
+
+        if files.is_empty() {
+            log::info!("ProcessExternalSource: No files found to process");
+            return Ok(());
+        }
+
+        let notebook_id = self.resolve_notebook_target(notebook_target, context)?;
+
+        // Get AI config
+        let ai_config = context.ai_config.clone().unwrap_or_default();
+
+        // Process each file
+        for file_info in files {
+            // Check incremental mode
+            if incremental {
+                if let Some(src_id) = &source_uuid {
+                    if let Some(ref es_storage) = self.external_sources_storage {
+                        let es = es_storage.lock().map_err(|e| {
+                            ExecutionError::StepFailed(format!(
+                                "Failed to lock external sources storage: {}",
+                                e
+                            ))
+                        })?;
+                        if !es.needs_processing(*src_id, &file_info.path, file_info.modified_at)? {
+                            log::info!(
+                                "ProcessExternalSource: Skipping {} (already processed)",
+                                file_info.path
+                            );
+                            continue;
+                        }
+                    }
+                }
+            }
+
+            // Read file content
+            let file_path = std::path::Path::new(&file_info.path);
+            let content = read_file_content(file_path, &file_info.format).map_err(|e| {
+                ExecutionError::FileNotFound(format!("{}: {}", file_info.path, e))
+            })?;
+
+            // Extract filename for title template
+            let filename = file_path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("untitled");
+
+            let format_name = match file_info.format {
+                ExternalFileFormat::Json => "json",
+                ExternalFileFormat::Markdown => "markdown",
+                ExternalFileFormat::PlainText => "text",
+            };
+
+            // Build title from template
+            let mut title_vars = context.variables.clone();
+            title_vars.insert("filename".to_string(), filename.to_string());
+            title_vars.insert("format".to_string(), format_name.to_string());
+            let title = self.variable_resolver.substitute(title_template, &title_vars);
+
+            // Call AI for summarization
+            let summary_result = {
+                let python_ai = self.python_ai.lock().map_err(|e| {
+                    ExecutionError::StepFailed(format!("Failed to lock Python AI: {}", e))
+                })?;
+
+                let page_input = PageSummaryInput {
+                    title: filename.to_string(),
+                    content: content.clone(),
+                    tags: vec![],
+                };
+
+                python_ai
+                    .summarize_pages(
+                        vec![page_input],
+                        custom_prompt.cloned(),
+                        Some("concise".to_string()),
+                        ai_config.clone(),
+                    )
+                    .map_err(|e| {
+                        ExecutionError::StepFailed(format!("AI summarization failed: {}", e))
+                    })?
+            };
+
+            // Build page content
+            let mut blocks = Vec::new();
+
+            // Add summary
+            blocks.push(EditorBlock {
+                id: Uuid::new_v4().to_string(),
+                block_type: "paragraph".to_string(),
+                data: serde_json::json!({ "text": summary_result.summary }),
+            });
+
+            // Add key points as a list
+            if !summary_result.key_points.is_empty() {
+                blocks.push(EditorBlock {
+                    id: Uuid::new_v4().to_string(),
+                    block_type: "header".to_string(),
+                    data: serde_json::json!({ "text": "Key Points", "level": 2 }),
+                });
+                blocks.push(EditorBlock {
+                    id: Uuid::new_v4().to_string(),
+                    block_type: "list".to_string(),
+                    data: serde_json::json!({
+                        "style": "unordered",
+                        "items": summary_result.key_points
+                    }),
+                });
+            }
+
+            // Add action items as a checklist
+            if !summary_result.action_items.is_empty() {
+                blocks.push(EditorBlock {
+                    id: Uuid::new_v4().to_string(),
+                    block_type: "header".to_string(),
+                    data: serde_json::json!({ "text": "Action Items", "level": 2 }),
+                });
+                let checklist_items: Vec<_> = summary_result
+                    .action_items
+                    .iter()
+                    .map(|item| serde_json::json!({ "text": item, "checked": false }))
+                    .collect();
+                blocks.push(EditorBlock {
+                    id: Uuid::new_v4().to_string(),
+                    block_type: "checklist".to_string(),
+                    data: serde_json::json!({ "items": checklist_items }),
+                });
+            }
+
+            // Add source link if requested
+            if include_source_link {
+                blocks.push(EditorBlock {
+                    id: Uuid::new_v4().to_string(),
+                    block_type: "header".to_string(),
+                    data: serde_json::json!({ "text": "Source", "level": 2 }),
+                });
+                let file_url = format!("file://{}", file_info.path);
+                blocks.push(EditorBlock {
+                    id: Uuid::new_v4().to_string(),
+                    block_type: "paragraph".to_string(),
+                    data: serde_json::json!({
+                        "text": format!("<a href=\"{}\">{}</a>", file_url, file_info.path)
+                    }),
+                });
+            }
+
+            // Create the page
+            let storage = self.storage.lock().map_err(|e| {
+                ExecutionError::StepFailed(format!("Failed to lock storage: {}", e))
+            })?;
+
+            let mut page = storage.create_page(notebook_id, title.clone())?;
+
+            // Set content
+            page.content = EditorData {
+                time: Some(chrono::Utc::now().timestamp_millis()),
+                blocks,
+                version: Some("2.30.0".to_string()),
+            };
+
+            // Apply tags
+            let mut page_tags = tags.to_vec();
+            page_tags.extend(summary_result.themes.clone());
+            page.tags = page_tags;
+
+            // Move to folder if specified
+            if let Some(folder) = folder_name {
+                let folders = storage.list_folders(notebook_id)?;
+                if let Some(f) = folders.iter().find(|f| &f.name == folder) {
+                    page.folder_id = Some(f.id);
+                }
+            }
+
+            storage.update_page(&page)?;
+            context.created_pages.push(page.id.to_string());
+
+            log::info!(
+                "ProcessExternalSource: Created page '{}' from '{}'",
+                title,
+                file_info.path
+            );
+
+            // Mark file as processed
+            drop(storage); // Release lock before acquiring another
+            if let Some(src_id) = &source_uuid {
+                if let Some(ref es_storage) = self.external_sources_storage {
+                    let mut es = es_storage.lock().map_err(|e| {
+                        ExecutionError::StepFailed(format!(
+                            "Failed to lock external sources storage: {}",
+                            e
+                        ))
+                    })?;
+                    let _ = es.mark_processed(*src_id, &file_info.path, file_info.modified_at, Some(page.id));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Resolve files from source_id or inline_path
+    fn resolve_external_files(
+        &self,
+        source_id: Option<&String>,
+        inline_path: Option<&String>,
+    ) -> Result<(Vec<crate::external_sources::ResolvedFileInfo>, Option<Uuid>), ExecutionError> {
+        use crate::external_sources::ExternalSourcesStorage;
+
+        if let Some(id_str) = source_id {
+            // Use registered source
+            let source_uuid = Uuid::parse_str(id_str).map_err(|_| {
+                ExecutionError::InvalidConfig(format!("Invalid source ID: {}", id_str))
+            })?;
+
+            let es_storage = self.external_sources_storage.as_ref().ok_or_else(|| {
+                ExecutionError::InvalidConfig("External sources storage not configured".to_string())
+            })?;
+
+            let es = es_storage.lock().map_err(|e| {
+                ExecutionError::StepFailed(format!(
+                    "Failed to lock external sources storage: {}",
+                    e
+                ))
+            })?;
+
+            let source = es.get_source(source_uuid)?;
+            let files = es.resolve_files(&source.path_pattern, &source.file_formats)?;
+            Ok((files, Some(source_uuid)))
+        } else if let Some(path) = inline_path {
+            // Use inline path pattern
+            // Create a temporary storage just for resolution
+            let temp_dir = std::env::temp_dir();
+            let temp_storage = ExternalSourcesStorage::new(temp_dir).map_err(|e| {
+                ExecutionError::StepFailed(format!("Failed to create temp storage: {}", e))
+            })?;
+            let files = temp_storage.resolve_files(path, &[])?;
+            Ok((files, None))
+        } else {
+            Err(ExecutionError::InvalidConfig(
+                "Either source_id or inline_path must be specified".to_string(),
+            ))
+        }
     }
 
     /// Find pages matching a selector

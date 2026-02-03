@@ -2957,6 +2957,7 @@ dependencies = [
  "dirs 5.0.1",
  "futures-util",
  "git2",
+ "glob",
  "hkdf",
  "hostname",
  "html-escape",

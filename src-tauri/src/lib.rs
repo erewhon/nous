@@ -8,6 +8,7 @@ mod commands;
 pub mod encryption;
 mod evernote;
 mod external_editor;
+mod external_sources;
 mod flashcards;
 mod git;
 mod goals;
@@ -31,6 +32,7 @@ use actions::{ActionExecutor, ActionScheduler, ActionStorage};
 use commands::BackupScheduler;
 use encryption::EncryptionManager;
 use external_editor::ExternalEditorManager;
+use external_sources::ExternalSourcesStorage;
 use flashcards::FlashcardStorage;
 use goals::GoalsStorage;
 use inbox::InboxStorage;
@@ -51,11 +53,12 @@ pub struct AppState {
     pub action_storage: Arc<Mutex<ActionStorage>>,
     pub action_executor: Arc<Mutex<ActionExecutor>>,
     pub action_scheduler: Mutex<ActionScheduler>,
-    pub inbox_storage: Mutex<InboxStorage>,
+    pub inbox_storage: Arc<Mutex<InboxStorage>>,
     pub flashcard_storage: Mutex<FlashcardStorage>,
     pub goals_storage: Arc<Mutex<GoalsStorage>>,
     pub sync_manager: Arc<SyncManager>,
     pub external_editor: Mutex<ExternalEditorManager>,
+    pub external_sources_storage: Arc<Mutex<ExternalSourcesStorage>>,
     pub backup_scheduler: Arc<tokio::sync::Mutex<Option<BackupScheduler>>>,
     pub sync_scheduler: Arc<tokio::sync::Mutex<Option<SyncScheduler>>>,
     pub video_server: Arc<tokio::sync::Mutex<Option<VideoServer>>>,
@@ -146,6 +149,7 @@ pub fn run() {
     // Initialize inbox storage
     let inbox_storage = InboxStorage::new(data_dir.clone())
         .expect("Failed to initialize inbox storage");
+    let inbox_storage_arc = Arc::new(Mutex::new(inbox_storage));
 
     // Initialize flashcard storage
     let flashcard_storage = FlashcardStorage::new(data_dir.join("notebooks"));
@@ -163,17 +167,24 @@ pub fn run() {
     let external_editor = ExternalEditorManager::new()
         .expect("Failed to initialize external editor manager");
 
+    // Initialize external sources storage
+    let external_sources_storage = ExternalSourcesStorage::new(data_dir.clone())
+        .expect("Failed to initialize external sources storage");
+    let external_sources_storage_arc = Arc::new(Mutex::new(external_sources_storage));
+
     // Wrap storage in Arc<Mutex<>> for sharing with executor
     let storage_arc = Arc::new(Mutex::new(storage));
     let action_storage_arc = Arc::new(Mutex::new(action_storage));
     let python_ai_arc = Arc::new(Mutex::new(python_ai));
 
     // Initialize action executor (needs references to storage, action_storage, and python_ai)
-    let action_executor = ActionExecutor::new(
+    let mut action_executor = ActionExecutor::new(
         Arc::clone(&storage_arc),
         Arc::clone(&action_storage_arc),
         Arc::clone(&python_ai_arc),
     );
+    // Wire up external sources storage to executor
+    action_executor.set_external_sources_storage(Arc::clone(&external_sources_storage_arc));
     let action_executor_arc = Arc::new(Mutex::new(action_executor));
 
     // Initialize action scheduler
@@ -194,6 +205,7 @@ pub fn run() {
         Arc::clone(&storage_arc),
         Arc::clone(&library_storage_arc),
         Arc::clone(&goals_storage_arc),
+        Arc::clone(&inbox_storage_arc),
     );
     let sync_scheduler_arc = Arc::new(tokio::sync::Mutex::new(Some(sync_scheduler)));
 
@@ -212,11 +224,12 @@ pub fn run() {
         action_storage: action_storage_arc,
         action_executor: action_executor_arc,
         action_scheduler: Mutex::new(action_scheduler),
-        inbox_storage: Mutex::new(inbox_storage),
+        inbox_storage: inbox_storage_arc,
         flashcard_storage: Mutex::new(flashcard_storage),
         goals_storage: goals_storage_arc,
         sync_manager: sync_manager_arc,
         external_editor: Mutex::new(external_editor),
+        external_sources_storage: external_sources_storage_arc,
         backup_scheduler: backup_scheduler_arc,
         sync_scheduler: sync_scheduler_arc,
         video_server: video_server_arc,
@@ -425,6 +438,14 @@ pub fn run() {
             commands::get_actions_by_category,
             commands::get_scheduled_actions,
             commands::set_action_enabled,
+            // External sources commands
+            commands::list_external_sources,
+            commands::get_external_source,
+            commands::create_external_source,
+            commands::update_external_source,
+            commands::delete_external_source,
+            commands::preview_external_source_files,
+            commands::preview_path_pattern_files,
             // Inbox commands
             commands::inbox_capture,
             commands::inbox_list,

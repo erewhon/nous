@@ -7,6 +7,7 @@ import { KeybindingsSettings } from "./KeybindingsSettings";
 import { MCPServersSettings } from "./MCPServersSettings";
 import { RAGSettings } from "./RAGSettings";
 import { BackupScheduleSettings } from "./BackupScheduleSettings";
+import { ExternalSourcesSettings } from "./ExternalSourcesSettings";
 import { LibrarySettingsPanel } from "../Library";
 import type { ProviderType, ProviderConfig } from "../../types/ai";
 import type { TTSProviderType } from "../../types/audio";
@@ -24,7 +25,8 @@ interface SettingsDialogProps {
     | "mcp"
     | "rag"
     | "backup"
-    | "audio";
+    | "audio"
+    | "external-sources";
 }
 
 type TabId =
@@ -37,7 +39,8 @@ type TabId =
   | "mcp"
   | "rag"
   | "backup"
-  | "audio";
+  | "audio"
+  | "external-sources";
 
 interface TabCategory {
   name: string;
@@ -57,6 +60,7 @@ const TAB_CATEGORIES: TabCategory[] = [
     tabs: [
       { id: "libraries", label: "Libraries", icon: <IconLibrary /> },
       { id: "backup", label: "Backup", icon: <IconBackup /> },
+      { id: "external-sources", label: "External Sources", icon: <IconFileImport /> },
     ],
   },
   {
@@ -236,6 +240,7 @@ export function SettingsDialog({
             {activeTab === "audio" && <AudioSettingsContent />}
             {activeTab === "mcp" && <MCPServersSettings />}
             {activeTab === "web-research" && <WebResearchSettingsContent />}
+            {activeTab === "external-sources" && <ExternalSourcesSettings />}
           </div>
         </div>
       </div>
@@ -2089,6 +2094,27 @@ function IconBrain() {
       <path d="M19.938 10.5a4 4 0 0 1 .585.396" />
       <path d="M6 18a4 4 0 0 1-1.967-.516" />
       <path d="M19.967 17.484A4 4 0 0 1 18 18" />
+    </svg>
+  );
+}
+
+function IconFileImport() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+      <polyline points="14 2 14 8 20 8" />
+      <path d="M12 18v-6" />
+      <path d="m9 15 3 3 3-3" />
     </svg>
   );
 }

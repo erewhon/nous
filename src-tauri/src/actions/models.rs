@@ -236,6 +236,31 @@ pub enum ActionStep {
     },
     /// Set a variable for later use
     SetVariable { name: String, value: String },
+    /// Process external files (JSON, Markdown, plain text) with AI summarization
+    #[serde(rename_all = "camelCase")]
+    ProcessExternalSource {
+        /// Registered external source ID (use this OR inline_path)
+        source_id: Option<String>,
+        /// Inline path pattern, supports glob (use this OR source_id)
+        inline_path: Option<String>,
+        /// Custom AI prompt for summarization
+        custom_prompt: Option<String>,
+        /// Target notebook for created pages
+        notebook_target: NotebookTarget,
+        /// Optional folder to place pages in
+        folder_name: Option<String>,
+        /// Title template with variables: {{filename}}, {{date}}, {{format}}
+        title_template: String,
+        /// Include file:// link to source file
+        #[serde(default = "default_true")]
+        include_source_link: bool,
+        /// Only process new/modified files (skip already-processed)
+        #[serde(default)]
+        incremental: bool,
+        /// Tags to apply to created pages
+        #[serde(default)]
+        tags: Vec<String>,
+    },
 }
 
 // ===== Variable Types =====

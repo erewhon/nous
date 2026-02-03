@@ -1095,6 +1095,75 @@ export async function setActionEnabled(
   return invoke<Action>("set_action_enabled", { actionId, enabled });
 }
 
+// ===== External Sources API =====
+
+import type {
+  ExternalSource,
+  ExternalFileFormat,
+  ResolvedFileInfo,
+} from "../types/externalSource";
+
+export async function listExternalSources(): Promise<ExternalSource[]> {
+  return invoke<ExternalSource[]>("list_external_sources");
+}
+
+export async function getExternalSource(
+  sourceId: string
+): Promise<ExternalSource> {
+  return invoke<ExternalSource>("get_external_source", { sourceId });
+}
+
+export async function createExternalSource(
+  name: string,
+  pathPattern: string,
+  fileFormats?: ExternalFileFormat[],
+  enabled?: boolean
+): Promise<ExternalSource> {
+  return invoke<ExternalSource>("create_external_source", {
+    name,
+    pathPattern,
+    fileFormats,
+    enabled,
+  });
+}
+
+export async function updateExternalSource(
+  sourceId: string,
+  options: {
+    name?: string;
+    pathPattern?: string;
+    fileFormats?: ExternalFileFormat[];
+    enabled?: boolean;
+  }
+): Promise<ExternalSource> {
+  return invoke<ExternalSource>("update_external_source", {
+    sourceId,
+    ...options,
+  });
+}
+
+export async function deleteExternalSource(sourceId: string): Promise<void> {
+  return invoke<void>("delete_external_source", { sourceId });
+}
+
+export async function previewExternalSourceFiles(
+  sourceId: string
+): Promise<ResolvedFileInfo[]> {
+  return invoke<ResolvedFileInfo[]>("preview_external_source_files", {
+    sourceId,
+  });
+}
+
+export async function previewPathPatternFiles(
+  pathPattern: string,
+  fileFormats?: ExternalFileFormat[]
+): Promise<ResolvedFileInfo[]> {
+  return invoke<ResolvedFileInfo[]>("preview_path_pattern_files", {
+    pathPattern,
+    fileFormats,
+  });
+}
+
 // ===== Inbox API =====
 
 import type {

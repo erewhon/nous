@@ -4,6 +4,11 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+/// Default value for `updated_at` when deserializing items that lack the field
+fn default_updated_at() -> DateTime<Utc> {
+    DateTime::<Utc>::MIN_UTC
+}
+
 /// An item in the inbox awaiting classification
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -18,6 +23,9 @@ pub struct InboxItem {
     pub tags: Vec<String>,
     /// When the item was captured
     pub captured_at: DateTime<Utc>,
+    /// When the item was last updated (for sync conflict resolution)
+    #[serde(default = "default_updated_at")]
+    pub updated_at: DateTime<Utc>,
     /// Source of capture (hotkey, button, api, etc.)
     pub source: CaptureSource,
     /// AI classification result (if classified)
@@ -28,12 +36,14 @@ pub struct InboxItem {
 
 impl InboxItem {
     pub fn new(title: String, content: String) -> Self {
+        let now = Utc::now();
         Self {
             id: Uuid::new_v4(),
             title,
             content,
             tags: Vec::new(),
-            captured_at: Utc::now(),
+            captured_at: now,
+            updated_at: now,
             source: CaptureSource::QuickCapture,
             classification: None,
             is_processed: false,

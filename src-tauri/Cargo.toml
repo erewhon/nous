@@ -27,6 +27,7 @@ uuid = { version = "1.0", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 thiserror = "1.0"
 dirs = "5.0"
+glob = "0.3"
 tantivy = "0.22"
 
 # Markdown parsing and generation

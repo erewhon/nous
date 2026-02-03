@@ -135,7 +135,7 @@ pub async fn library_sync_now(
     let library_uuid = parse_uuid(&library_id)?;
 
     state.sync_manager
-        .sync_library(library_uuid, &state.library_storage, &state.storage, &state.goals_storage, Some(&app))
+        .sync_library(library_uuid, &state.library_storage, &state.storage, &state.goals_storage, &state.inbox_storage, Some(&app))
         .await
         .map_err(|e| e.to_string())
 }

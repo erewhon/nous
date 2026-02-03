@@ -12,6 +12,7 @@ use tauri::Emitter;
 use tokio::sync::Semaphore;
 
 use crate::goals::{Goal, GoalProgress, GoalsStorage};
+use crate::inbox::{InboxItem, InboxStorage};
 use crate::library::LibraryStorage;
 use crate::storage::Page;
 use crate::storage::FileStorage;
@@ -36,6 +37,9 @@ pub type SharedLibraryStorage = Arc<Mutex<LibraryStorage>>;
 
 /// Type alias for shared goals storage
 pub type SharedGoalsStorage = Arc<Mutex<GoalsStorage>>;
+
+/// Type alias for shared inbox storage
+pub type SharedInboxStorage = Arc<Mutex<InboxStorage>>;
 
 #[derive(Error, Debug)]
 pub enum SyncError {
@@ -144,6 +148,14 @@ pub struct SyncPagesUpdated {
 pub struct SyncGoalsUpdated {
     pub goals_changed: bool,
     pub progress_changed: bool,
+}
+
+/// Event payload emitted when inbox sync completes with changes.
+/// The frontend uses this to refresh inbox displays.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncInboxUpdated {
+    pub inbox_changed: bool,
 }
 
 /// Sentinel file content written after successful push
@@ -3033,6 +3045,85 @@ impl SyncManager {
         Ok(any_local_changed)
     }
 
+    // ===== Inbox sync methods =====
+
+    /// Sync inbox items with remote.
+    /// Returns true if local inbox was changed.
+    async fn sync_inbox(
+        &self,
+        client: &WebDAVClient,
+        library_base_path: &str,
+        inbox_storage: &SharedInboxStorage,
+    ) -> Result<bool, SyncError> {
+        let remote_path = format!("{}/inbox/inbox.json", library_base_path);
+
+        // Read local inbox items
+        let local_items = {
+            let is = inbox_storage.lock().unwrap();
+            is.list_items().unwrap_or_default()
+        };
+
+        // Fetch remote inbox items
+        let remote_items: Vec<InboxItem> = match client.get(&remote_path).await {
+            Ok(data) => serde_json::from_slice(&data).unwrap_or_default(),
+            Err(WebDAVError::NotFound(_)) => Vec::new(),
+            Err(e) => return Err(e.into()),
+        };
+
+        // Build maps by ID
+        let mut local_map: HashMap<Uuid, InboxItem> =
+            local_items.iter().map(|i| (i.id, i.clone())).collect();
+        let remote_map: HashMap<Uuid, InboxItem> =
+            remote_items.iter().map(|i| (i.id, i.clone())).collect();
+
+        let mut merged_changed = false;
+
+        // Merge remote-only items into local
+        for (id, remote_item) in &remote_map {
+            match local_map.get(id) {
+                None => {
+                    // Remote only — pull it
+                    local_map.insert(*id, remote_item.clone());
+                    merged_changed = true;
+                }
+                Some(local_item) => {
+                    // Both exist — newer updated_at wins
+                    if remote_item.updated_at > local_item.updated_at {
+                        local_map.insert(*id, remote_item.clone());
+                        merged_changed = true;
+                    }
+                }
+            }
+        }
+
+        // Build merged list (sort by captured_at, newest first)
+        let mut merged: Vec<InboxItem> = local_map.into_values().collect();
+        merged.sort_by(|a, b| b.captured_at.cmp(&a.captured_at));
+
+        // Check if remote needs updating (local-only items or local wins)
+        let remote_needs_update = merged.len() != remote_items.len()
+            || merged.iter().any(|i| !remote_map.contains_key(&i.id))
+            || merged
+                .iter()
+                .any(|i| remote_map.get(&i.id).map_or(false, |r| i.updated_at > r.updated_at));
+
+        // Write back locally if changed
+        if merged_changed {
+            let is = inbox_storage.lock().unwrap();
+            is.replace_items(&merged).map_err(SyncError::Storage)?;
+        }
+
+        // Push merged to remote if remote differs
+        if remote_needs_update || merged_changed {
+            let data = serde_json::to_vec_pretty(&merged)?;
+            // Ensure remote directory exists
+            let _ = client.mkdir_p(&format!("{}/inbox", library_base_path)).await;
+            client.put(&remote_path, &data, None).await?;
+        }
+
+        Ok(merged_changed)
+    }
+
     /// Sync all notebooks in a library (notebooks synced concurrently)
     pub async fn sync_library(
         &self,
@@ -3040,6 +3131,7 @@ impl SyncManager {
         library_storage: &SharedLibraryStorage,
         storage: &SharedStorage,
         goals_storage: &SharedGoalsStorage,
+        inbox_storage: &SharedInboxStorage,
         app_handle: Option<&tauri::AppHandle>,
     ) -> Result<SyncResult, SyncError> {
         let start = std::time::Instant::now();
@@ -3296,6 +3388,58 @@ impl SyncManager {
                 }
                 Err(e) => {
                     log::warn!("Library sync: failed to get credentials for goals: {}", e);
+                }
+            }
+        }
+
+        // Sync inbox after goals
+        if let Some(ref lib_config) = library_config {
+            match self.get_library_credentials(library_id) {
+                Ok(creds) => {
+                    match WebDAVClient::new(lib_config.server_url.clone(), creds) {
+                        Ok(inbox_client) => {
+                            let base_path = &lib_config.remote_base_path;
+
+                            let inbox_changed = match self
+                                .sync_inbox(&inbox_client, base_path, inbox_storage)
+                                .await
+                            {
+                                Ok(changed) => {
+                                    log::info!("Library sync: inbox sync complete, changed={}", changed);
+                                    changed
+                                }
+                                Err(e) => {
+                                    log::warn!("Library sync: inbox sync failed: {}", e);
+                                    false
+                                }
+                            };
+
+                            // Emit event if inbox changed
+                            if inbox_changed {
+                                let event_payload = SyncInboxUpdated { inbox_changed };
+
+                                // Try app_handle parameter first, then stored handle
+                                let emitted = if let Some(app) = app_handle {
+                                    app.emit("sync-inbox-updated", event_payload.clone()).is_ok()
+                                } else {
+                                    false
+                                };
+
+                                if !emitted {
+                                    let handle_guard = self.app_handle.lock().unwrap();
+                                    if let Some(ref handle) = *handle_guard {
+                                        let _ = handle.emit("sync-inbox-updated", event_payload);
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            log::warn!("Library sync: failed to create WebDAV client for inbox: {}", e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    log::warn!("Library sync: failed to get credentials for inbox: {}", e);
                 }
             }
         }
