@@ -4,12 +4,21 @@ import { useStudyToolsStore } from "../../stores/studyToolsStore";
 import { useAudioStore } from "../../stores/audioStore";
 import { useToastStore } from "../../stores/toastStore";
 import { SlideList } from "./SlidePreview";
+import { SlideEditor } from "./SlideEditor";
 import { VideoProgress } from "./VideoProgress";
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { save } from "@tauri-apps/plugin-dialog";
 import { copyFile } from "@tauri-apps/plugin-fs";
 import type { SlideContent, VideoTheme } from "../../types/videoGenerate";
 import { ASPECT_RATIO_PRESETS } from "../../types/videoGenerate";
+
+interface VideoProgressPayload {
+  currentSlide: number;
+  totalSlides: number;
+  status: string;
+  notebookId: string;
+}
 
 interface VideoGeneratorDialogProps {
   isOpen: boolean;
@@ -30,6 +39,35 @@ export function VideoGeneratorDialog({
   const [selectedSlideIndex, setSelectedSlideIndex] = useState(0);
   const [title, setTitle] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+
+  // Progress state from Tauri events
+  const [progressInfo, setProgressInfo] = useState<{
+    currentSlide: number;
+    totalSlides: number;
+    status: string;
+  } | null>(null);
+
+  // Listen for progress events from backend
+  useEffect(() => {
+    if (!videoStore.isGenerating) {
+      setProgressInfo(null);
+      return;
+    }
+
+    const unlisten = listen<VideoProgressPayload>("video-generation-progress", (event) => {
+      if (event.payload.notebookId === notebookId) {
+        setProgressInfo({
+          currentSlide: event.payload.currentSlide,
+          totalSlides: event.payload.totalSlides,
+          status: event.payload.status,
+        });
+      }
+    });
+
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [videoStore.isGenerating, notebookId]);
 
   // Check availability on mount
   useEffect(() => {
@@ -231,10 +269,14 @@ export function VideoGeneratorDialog({
             // Show progress
             <div className="max-w-md mx-auto py-12">
               <VideoProgress
-                progress={videoStore.progress}
-                currentSlide={0}
-                totalSlides={videoStore.slides.length}
-                status="Generating video..."
+                progress={
+                  progressInfo
+                    ? Math.round((progressInfo.currentSlide / progressInfo.totalSlides) * 100)
+                    : videoStore.progress
+                }
+                currentSlide={progressInfo?.currentSlide ?? 0}
+                totalSlides={progressInfo?.totalSlides ?? videoStore.slides.length}
+                status={progressInfo?.status ?? "Starting video generation..."}
               />
             </div>
           ) : videoStore.result ? (
@@ -254,6 +296,36 @@ export function VideoGeneratorDialog({
                 >
                   Generate new
                 </button>
+              </div>
+
+              {/* Saved to notebook indicator */}
+              <div
+                className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm"
+                style={{
+                  backgroundColor: "rgba(34, 197, 94, 0.1)",
+                  color: "#22c55e",
+                }}
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M20 6L9 17l-5-5" />
+                </svg>
+                <span>
+                  Saved to notebook
+                  <span style={{ color: "var(--color-text-muted)" }}>
+                    {" "}
+                    ({videoStore.result.videoPath.split("/").pop() || videoStore.result.videoPath.split("\\").pop()})
+                  </span>
+                </span>
               </div>
 
               {/* Video preview */}
@@ -291,7 +363,7 @@ export function VideoGeneratorDialog({
                     color: "white",
                   }}
                 >
-                  {isSaving ? "Saving..." : "Save Video"}
+                  {isSaving ? "Exporting..." : "Export Video"}
                 </button>
               </div>
             </div>
@@ -356,21 +428,38 @@ export function VideoGeneratorDialog({
 
               {/* Slides preview */}
               {videoStore.slides.length > 0 && (
-                <div>
-                  <div className="flex items-center justify-between mb-3">
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
                     <label
                       className="text-sm font-medium"
                       style={{ color: "var(--color-text-primary)" }}
                     >
                       Slides ({videoStore.slides.length})
                     </label>
-                    <button
-                      onClick={() => videoStore.clearSlides()}
-                      className="text-xs hover:underline"
-                      style={{ color: "var(--color-text-muted)" }}
-                    >
-                      Clear all
-                    </button>
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={() => {
+                          const newSlide = {
+                            title: "New Slide",
+                            body: "",
+                            bulletPoints: [],
+                          };
+                          videoStore.addSlide(newSlide);
+                          setSelectedSlideIndex(videoStore.slides.length);
+                        }}
+                        className="text-xs px-2 py-1 rounded hover:bg-[--color-bg-tertiary] transition-colors"
+                        style={{ color: "var(--color-accent)" }}
+                      >
+                        + Add Slide
+                      </button>
+                      <button
+                        onClick={() => videoStore.clearSlides()}
+                        className="text-xs hover:underline"
+                        style={{ color: "var(--color-text-muted)" }}
+                      >
+                        Clear all
+                      </button>
+                    </div>
                   </div>
                   <SlideList
                     slides={videoStore.slides}
@@ -378,6 +467,35 @@ export function VideoGeneratorDialog({
                     onSelectSlide={setSelectedSlideIndex}
                     theme={videoStore.settings.theme}
                   />
+
+                  {/* Slide Editor */}
+                  {videoStore.slides[selectedSlideIndex] && (
+                    <SlideEditor
+                      slide={videoStore.slides[selectedSlideIndex]}
+                      slideNumber={selectedSlideIndex + 1}
+                      totalSlides={videoStore.slides.length}
+                      theme={videoStore.settings.theme}
+                      onUpdate={(updates) => videoStore.updateSlide(selectedSlideIndex, updates)}
+                      onDelete={() => {
+                        videoStore.removeSlide(selectedSlideIndex);
+                        if (selectedSlideIndex > 0) {
+                          setSelectedSlideIndex(selectedSlideIndex - 1);
+                        }
+                      }}
+                      onMoveUp={() => {
+                        if (selectedSlideIndex > 0) {
+                          videoStore.reorderSlides(selectedSlideIndex, selectedSlideIndex - 1);
+                          setSelectedSlideIndex(selectedSlideIndex - 1);
+                        }
+                      }}
+                      onMoveDown={() => {
+                        if (selectedSlideIndex < videoStore.slides.length - 1) {
+                          videoStore.reorderSlides(selectedSlideIndex, selectedSlideIndex + 1);
+                          setSelectedSlideIndex(selectedSlideIndex + 1);
+                        }
+                      }}
+                    />
+                  )}
                 </div>
               )}
 
@@ -404,7 +522,7 @@ export function VideoGeneratorDialog({
               </div>
 
               {/* Settings row */}
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-4 gap-4">
                 {/* Theme */}
                 <div>
                   <label
@@ -434,6 +552,31 @@ export function VideoGeneratorDialog({
                       </button>
                     ))}
                   </div>
+                </div>
+
+                {/* Transition */}
+                <div>
+                  <label
+                    className="block text-sm font-medium mb-2"
+                    style={{ color: "var(--color-text-primary)" }}
+                  >
+                    Transition
+                  </label>
+                  <select
+                    value={videoStore.settings.transition}
+                    onChange={(e) =>
+                      videoStore.setTransition(e.target.value as "cut" | "fade")
+                    }
+                    className="w-full px-3 py-2 rounded-lg border text-sm"
+                    style={{
+                      backgroundColor: "var(--color-bg-secondary)",
+                      borderColor: "var(--color-border)",
+                      color: "var(--color-text-primary)",
+                    }}
+                  >
+                    <option value="cut">Cut (instant)</option>
+                    <option value="fade">Fade</option>
+                  </select>
                 </div>
 
                 {/* Aspect ratio */}
@@ -498,6 +641,62 @@ export function VideoGeneratorDialog({
                       </option>
                     ))}
                   </select>
+                </div>
+              </div>
+
+              {/* Speed and Model row */}
+              <div className="grid grid-cols-2 gap-4">
+                {/* Speed */}
+                <div>
+                  <label
+                    className="block text-sm font-medium mb-2"
+                    style={{ color: "var(--color-text-primary)" }}
+                  >
+                    Narration Speed
+                  </label>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="range"
+                      min="0.5"
+                      max="2.0"
+                      step="0.1"
+                      value={videoStore.ttsConfig.speed ?? audioStore.settings.ttsSpeed ?? 1.0}
+                      onChange={(e) =>
+                        videoStore.setTTSConfig({ speed: parseFloat(e.target.value) })
+                      }
+                      className="flex-1"
+                    />
+                    <span
+                      className="text-sm font-mono w-12 text-right"
+                      style={{ color: "var(--color-text-secondary)" }}
+                    >
+                      {(videoStore.ttsConfig.speed ?? audioStore.settings.ttsSpeed ?? 1.0).toFixed(1)}x
+                    </span>
+                  </div>
+                </div>
+
+                {/* Model */}
+                <div>
+                  <label
+                    className="block text-sm font-medium mb-2"
+                    style={{ color: "var(--color-text-primary)" }}
+                  >
+                    TTS Model (optional)
+                  </label>
+                  <input
+                    type="text"
+                    value={videoStore.ttsConfig.model ?? audioStore.settings.ttsModel ?? ""}
+                    onChange={(e) =>
+                      videoStore.setTTSConfig({ model: e.target.value || undefined })
+                    }
+                    placeholder="Default model"
+                    className="w-full px-3 py-2 rounded-lg border text-sm"
+                    style={{
+                      backgroundColor: "var(--color-bg-secondary)",
+                      borderColor: "var(--color-border)",
+                      color: "var(--color-text-primary)",
+                    }}
+                  />
                 </div>
               </div>
 

@@ -10,6 +10,7 @@ import { TimelineView } from "./TimelineView";
 import { ConceptMapView } from "./ConceptMapView";
 import { InfographicGenerator } from "../Infographics/InfographicGenerator";
 import { VideoGeneratorDialog } from "../VideoGenerator/VideoGeneratorDialog";
+import { MediaLibrary } from "../MediaLibrary/MediaLibrary";
 import type { StudyToolType, StudyPageContent } from "../../types/studyTools";
 
 interface StudyToolsPanelProps {
@@ -138,6 +139,7 @@ export function StudyToolsPanel({ isOpen, onClose }: StudyToolsPanelProps) {
   const [selectedPages, setSelectedPages] = useState<StudyPageContent[]>([]);
   const [showInfographicGenerator, setShowInfographicGenerator] = useState(false);
   const [showVideoGenerator, setShowVideoGenerator] = useState(false);
+  const [showMediaLibrary, setShowMediaLibrary] = useState(false);
 
   // Initialize with current page if available
   useEffect(() => {
@@ -401,6 +403,42 @@ export function StudyToolsPanel({ isOpen, onClose }: StudyToolsPanelProps) {
                         Narrated presentation
                       </div>
                     </button>
+
+                    {/* Media Library Button */}
+                    <button
+                      onClick={() => setShowMediaLibrary(true)}
+                      className="p-4 rounded-xl border text-left transition-all hover:shadow-md hover:border-[--color-accent]"
+                      style={{
+                        backgroundColor: "var(--color-bg-secondary)",
+                        borderColor: "var(--color-border)",
+                      }}
+                    >
+                      <div
+                        className="w-10 h-10 rounded-lg flex items-center justify-center mb-3"
+                        style={{
+                          backgroundColor: "#6366f120",
+                          color: "#6366f1",
+                        }}
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z" />
+                          <circle cx="8" cy="10" r="2" />
+                          <path d="M22 13l-4-4-6 6" />
+                        </svg>
+                      </div>
+                      <div
+                        className="font-medium"
+                        style={{ color: "var(--color-text-primary)" }}
+                      >
+                        Media Library
+                      </div>
+                      <div
+                        className="text-sm mt-1"
+                        style={{ color: "var(--color-text-muted)" }}
+                      >
+                        Browse generated media
+                      </div>
+                    </button>
                   </div>
                   <p
                     className="text-xs mt-3"
@@ -552,6 +590,15 @@ export function StudyToolsPanel({ isOpen, onClose }: StudyToolsPanelProps) {
         <VideoGeneratorDialog
           isOpen={showVideoGenerator}
           onClose={() => setShowVideoGenerator(false)}
+          notebookId={selectedNotebookId}
+        />
+      )}
+
+      {/* Media library dialog */}
+      {selectedNotebookId && (
+        <MediaLibrary
+          isOpen={showMediaLibrary}
+          onClose={() => setShowMediaLibrary(false)}
           notebookId={selectedNotebookId}
         />
       )}

@@ -33,6 +33,7 @@ export const VideoTTSConfigSchema = z.object({
   apiKey: z.string().nullable().optional(),
   baseUrl: z.string().nullable().optional(),
   model: z.string().nullable().optional(),
+  speed: z.number().nullable().optional(),
 });
 export type VideoTTSConfig = z.infer<typeof VideoTTSConfigSchema>;
 

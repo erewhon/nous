@@ -368,6 +368,8 @@ pub fn run() {
             commands::register_asset_path,
             commands::get_asset_data_url,
             commands::save_video_asset,
+            commands::list_notebook_media_assets,
+            commands::delete_notebook_media_asset,
             // Web research commands
             commands::web_search,
             commands::scrape_url,

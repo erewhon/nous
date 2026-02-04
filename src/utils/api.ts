@@ -2546,3 +2546,26 @@ export async function checkVideoGenerationAvailability(): Promise<{
 }> {
   return invoke("check_video_generation_availability");
 }
+
+// ===== Media Asset Management =====
+
+export interface MediaAssetInfo {
+  path: string;
+  filename: string;
+  mediaType: "video" | "infographic";
+  sizeBytes: number;
+  createdAt: string | null;
+}
+
+export async function listNotebookMediaAssets(
+  notebookId: string
+): Promise<MediaAssetInfo[]> {
+  return invoke<MediaAssetInfo[]>("list_notebook_media_assets", { notebookId });
+}
+
+export async function deleteNotebookMediaAsset(
+  notebookId: string,
+  assetPath: string
+): Promise<void> {
+  return invoke("delete_notebook_media_asset", { notebookId, assetPath });
+}

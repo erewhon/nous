@@ -82,6 +82,7 @@ function getDefaultTTSConfig(): Partial<VideoTTSConfig> {
     apiKey: audioStore.settings.ttsApiKey || undefined,
     baseUrl: audioStore.settings.ttsBaseUrl || undefined,
     model: audioStore.settings.ttsModel || undefined,
+    speed: audioStore.settings.ttsSpeed || undefined,
   };
 }
 
@@ -177,6 +178,7 @@ export const useVideoGenerateStore = create<VideoGenerateStore>()(
             apiKey: ttsConfig.apiKey || defaultTTS.apiKey,
             baseUrl: ttsConfig.baseUrl || defaultTTS.baseUrl,
             model: ttsConfig.model || defaultTTS.model,
+            speed: ttsConfig.speed ?? defaultTTS.speed ?? 1.0,
           };
 
           const result = await api.generateStudyVideo(

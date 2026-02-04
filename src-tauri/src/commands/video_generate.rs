@@ -1,14 +1,25 @@
 //! Video generation Tauri commands — narrated presentations from study content.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::fs;
-use tauri::State;
+use std::sync::mpsc;
+use tauri::{AppHandle, Emitter, State};
 use uuid::Uuid;
 
 use crate::python_bridge::{SlideContent, VideoGenerationResult};
 use crate::AppState;
 
 use super::notebook::CommandError;
+
+/// Progress event payload for video generation
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VideoProgressPayload {
+    pub current_slide: i32,
+    pub total_slides: i32,
+    pub status: String,
+    pub notebook_id: String,
+}
 
 /// TTS configuration for video narration
 #[derive(Debug, Clone, Deserialize)]
@@ -19,6 +30,7 @@ pub struct VideoTTSConfig {
     pub api_key: Option<String>,
     pub base_url: Option<String>,
     pub model: Option<String>,
+    pub speed: Option<f64>,
 }
 
 /// Video configuration from the frontend
@@ -55,6 +67,7 @@ fn default_transition() -> String {
 /// Generate a narrated video from study content slides
 #[tauri::command]
 pub async fn generate_study_video(
+    app_handle: AppHandle,
     state: State<'_, AppState>,
     notebook_id: String,
     slides: Vec<SlideContent>,
@@ -102,13 +115,31 @@ pub async fn generate_study_video(
         title: None,
     });
 
+    // Create a channel for progress updates
+    let (progress_tx, progress_rx) = mpsc::channel::<(i32, i32, String)>();
+    let notebook_id_clone = notebook_id.clone();
+
+    // Spawn a task to emit progress events
+    let app_handle_clone = app_handle.clone();
+    std::thread::spawn(move || {
+        while let Ok((current, total, status)) = progress_rx.recv() {
+            let payload = VideoProgressPayload {
+                current_slide: current,
+                total_slides: total,
+                status,
+                notebook_id: notebook_id_clone.clone(),
+            };
+            let _ = app_handle_clone.emit("video-generation-progress", payload);
+        }
+    });
+
     tauri::async_runtime::spawn_blocking(move || {
         let python_ai = python_ai.lock().map_err(|e| CommandError {
             message: format!("Failed to acquire Python AI lock: {}", e),
         })?;
 
         python_ai
-            .generate_video(
+            .generate_video_with_progress(
                 slides,
                 &output_dir,
                 &tts_config.provider,
@@ -116,11 +147,13 @@ pub async fn generate_study_video(
                 tts_config.api_key.as_deref(),
                 tts_config.base_url.as_deref(),
                 tts_config.model.as_deref(),
+                tts_config.speed,
                 config.width,
                 config.height,
                 &config.theme,
                 &config.transition,
                 config.title.as_deref(),
+                progress_tx,
             )
             .map_err(|e| CommandError {
                 message: format!("Video generation error: {}", e),

@@ -1,7 +1,7 @@
 //! Python bridge module for AI operations via PyO3.
 
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyList};
+use pyo3::types::{PyCFunction, PyDict, PyList, PyTuple};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -3398,6 +3398,118 @@ impl PythonAI {
                 video_config.set_item("title", t)?;
             }
             kwargs.set_item("config", video_config)?;
+
+            let result = func.call((), Some(&kwargs))?;
+            let result_dict: HashMap<String, Py<PyAny>> = result.extract()?;
+
+            Ok(VideoGenerationResult {
+                video_path: result_dict
+                    .get("video_path")
+                    .and_then(|v| v.extract::<String>(py).ok())
+                    .unwrap_or_default(),
+                duration_seconds: result_dict
+                    .get("duration_seconds")
+                    .and_then(|v| v.extract::<f64>(py).ok())
+                    .unwrap_or(0.0),
+                slide_count: result_dict
+                    .get("slide_count")
+                    .and_then(|v| v.extract::<i32>(py).ok())
+                    .unwrap_or(0),
+                generation_time_seconds: result_dict
+                    .get("generation_time_seconds")
+                    .and_then(|v| v.extract::<f64>(py).ok())
+                    .unwrap_or(0.0),
+            })
+        })
+    }
+
+    /// Generate a video with progress reporting via channel
+    pub fn generate_video_with_progress(
+        &self,
+        slides: Vec<SlideContent>,
+        output_dir: &str,
+        tts_provider: &str,
+        tts_voice: &str,
+        tts_api_key: Option<&str>,
+        tts_base_url: Option<&str>,
+        tts_model: Option<&str>,
+        tts_speed: Option<f64>,
+        width: i32,
+        height: i32,
+        theme: &str,
+        transition: &str,
+        title: Option<&str>,
+        progress_tx: std::sync::mpsc::Sender<(i32, i32, String)>,
+    ) -> Result<VideoGenerationResult> {
+        Python::attach(|py| {
+            self.setup_python_path(py)?;
+
+            let module = py.import("nous_ai.video_generate")?;
+            let func = module.getattr("generate_video_sync")?;
+
+            let kwargs = PyDict::new(py);
+            kwargs.set_item("output_dir", output_dir)?;
+
+            // Convert slides to Python list of dicts
+            let py_slides = PyList::empty(py);
+            for slide in slides {
+                let dict = PyDict::new(py);
+                dict.set_item("title", slide.title)?;
+                dict.set_item("body", slide.body)?;
+                dict.set_item("bullet_points", slide.bullet_points)?;
+                if let Some(duration) = slide.duration_hint {
+                    dict.set_item("duration_hint", duration)?;
+                }
+                py_slides.append(dict)?;
+            }
+            kwargs.set_item("slides", py_slides)?;
+
+            // Build TTS config dict
+            let tts_config = PyDict::new(py);
+            tts_config.set_item("provider", tts_provider)?;
+            tts_config.set_item("voice", tts_voice)?;
+            if let Some(key) = tts_api_key {
+                tts_config.set_item("api_key", key)?;
+            }
+            if let Some(url) = tts_base_url {
+                tts_config.set_item("base_url", url)?;
+            }
+            if let Some(model) = tts_model {
+                tts_config.set_item("model", model)?;
+            }
+            if let Some(speed) = tts_speed {
+                tts_config.set_item("speed", speed)?;
+            }
+            kwargs.set_item("tts_config", tts_config)?;
+
+            // Build video config dict
+            let video_config = PyDict::new(py);
+            video_config.set_item("width", width)?;
+            video_config.set_item("height", height)?;
+            video_config.set_item("theme", theme)?;
+            video_config.set_item("transition", transition)?;
+            if let Some(t) = title {
+                video_config.set_item("title", t)?;
+            }
+            kwargs.set_item("config", video_config)?;
+
+            // Create progress callback using PyCFunction
+            let progress_callback = PyCFunction::new_closure(
+                py,
+                None,
+                None,
+                move |args: &Bound<'_, PyTuple>, _kwargs: Option<&Bound<'_, PyDict>>| -> PyResult<()> {
+                    if args.len() >= 3 {
+                        let current: i32 = args.get_item(0)?.extract()?;
+                        let total: i32 = args.get_item(1)?.extract()?;
+                        let status: String = args.get_item(2)?.extract()?;
+                        // Ignore send errors (receiver might be dropped)
+                        let _ = progress_tx.send((current, total, status));
+                    }
+                    Ok(())
+                },
+            )?;
+            kwargs.set_item("progress_callback", progress_callback)?;
 
             let result = func.call((), Some(&kwargs))?;
             let result_dict: HashMap<String, Py<PyAny>> = result.extract()?;

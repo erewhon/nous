@@ -390,18 +390,7 @@ def assemble_video_ffmpeg(
             "FFmpeg is not available. Please install FFmpeg to generate videos."
         )
 
-    # Create a concat file for FFmpeg
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
-        concat_file = f.name
-        for i, (img, duration) in enumerate(zip(slide_images, durations)):
-            f.write(f"file '{img}'\n")
-            f.write(f"duration {duration}\n")
-        # Add last image again for FFmpeg concat demuxer
-        if slide_images:
-            f.write(f"file '{slide_images[-1]}'\n")
-
-    # Concatenate audio files
-    audio_concat_file = None
+    # Concatenate audio files first
     combined_audio = None
 
     if audio_files and PYDUB_AVAILABLE:
@@ -418,11 +407,50 @@ def assemble_video_ffmpeg(
         combined_audio = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False).name
         combined.export(combined_audio, format="mp3")
 
+    concat_file = None
+
     try:
-        # Build FFmpeg command
+        if config.transition == "fade" and len(slide_images) > 1:
+            # Use xfade filter for fade transitions
+            return _assemble_with_fade(
+                slide_images, durations, output_path, config, combined_audio
+            )
+        else:
+            # Use concat demuxer for cut transitions (faster)
+            return _assemble_with_cut(
+                slide_images, durations, output_path, config, combined_audio
+            )
+    finally:
+        # Clean up temp files
+        if combined_audio:
+            try:
+                os.unlink(combined_audio)
+            except Exception:
+                pass
+
+
+def _assemble_with_cut(
+    slide_images: list[str],
+    durations: list[float],
+    output_path: str,
+    config: VideoConfig,
+    combined_audio: str | None,
+) -> float:
+    """Assemble video using concat demuxer (cut transitions)."""
+    # Create a concat file for FFmpeg
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
+        concat_file = f.name
+        for img, duration in zip(slide_images, durations):
+            f.write(f"file '{img}'\n")
+            f.write(f"duration {duration}\n")
+        # Add last image again for FFmpeg concat demuxer
+        if slide_images:
+            f.write(f"file '{slide_images[-1]}'\n")
+
+    try:
         cmd = [
             "ffmpeg",
-            "-y",  # Overwrite output
+            "-y",
             "-f", "concat",
             "-safe", "0",
             "-i", concat_file,
@@ -450,26 +478,113 @@ def assemble_video_ffmpeg(
         result = subprocess.run(
             cmd,
             capture_output=True,
-            timeout=300,  # 5 minute timeout
+            timeout=300,
         )
 
         if result.returncode != 0:
             error_msg = result.stderr.decode("utf-8", errors="replace")
             raise RuntimeError(f"FFmpeg failed: {error_msg[:500]}")
 
+        return sum(durations)
+
     finally:
-        # Clean up temp files
         try:
             os.unlink(concat_file)
         except Exception:
             pass
-        if combined_audio:
-            try:
-                os.unlink(combined_audio)
-            except Exception:
-                pass
 
-    return sum(durations)
+
+def _assemble_with_fade(
+    slide_images: list[str],
+    durations: list[float],
+    output_path: str,
+    config: VideoConfig,
+    combined_audio: str | None,
+) -> float:
+    """Assemble video using xfade filter for fade transitions."""
+    fade_duration = 0.5  # Half second fade
+
+    # Build filter_complex for xfade transitions
+    # Each image needs to be looped and trimmed to its duration
+    inputs = []
+    filter_parts = []
+
+    for i, (img, duration) in enumerate(zip(slide_images, durations)):
+        inputs.extend(["-loop", "1", "-t", str(duration), "-i", img])
+        # Scale and set pixel format for each input
+        filter_parts.append(
+            f"[{i}:v]scale={config.width}:{config.height}:force_original_aspect_ratio=decrease,"
+            f"pad={config.width}:{config.height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={config.fps}[v{i}]"
+        )
+
+    # Chain xfade filters
+    if len(slide_images) == 1:
+        # Single slide, no transition needed
+        filter_complex = filter_parts[0].replace(f"[v0]", "[vout]")
+    else:
+        # Build xfade chain
+        # First transition: [v0][v1]xfade=...[xf0]
+        # Second transition: [xf0][v2]xfade=...[xf1]
+        # etc.
+        offset = durations[0] - fade_duration
+        xfade_parts = []
+
+        for i in range(len(slide_images) - 1):
+            if i == 0:
+                in1 = f"[v0]"
+                in2 = f"[v1]"
+            else:
+                in1 = f"[xf{i-1}]"
+                in2 = f"[v{i+1}]"
+
+            if i == len(slide_images) - 2:
+                out = "[vout]"
+            else:
+                out = f"[xf{i}]"
+
+            xfade_parts.append(
+                f"{in1}{in2}xfade=transition=fade:duration={fade_duration}:offset={offset}{out}"
+            )
+
+            # Update offset for next transition
+            if i + 1 < len(durations) - 1:
+                offset += durations[i + 1] - fade_duration
+
+        filter_complex = ";".join(filter_parts + xfade_parts)
+
+    # Build full command
+    cmd = ["ffmpeg", "-y"]
+    cmd.extend(inputs)
+
+    if combined_audio:
+        cmd.extend(["-i", combined_audio])
+
+    cmd.extend(["-filter_complex", filter_complex])
+    cmd.extend(["-map", "[vout]"])
+
+    if combined_audio:
+        cmd.extend(["-map", f"{len(slide_images)}:a"])
+        cmd.extend(["-c:a", "aac", "-shortest"])
+
+    cmd.extend([
+        "-c:v", "libx264",
+        "-pix_fmt", "yuv420p",
+        output_path,
+    ])
+
+    result = subprocess.run(
+        cmd,
+        capture_output=True,
+        timeout=600,  # Longer timeout for complex filter
+    )
+
+    if result.returncode != 0:
+        error_msg = result.stderr.decode("utf-8", errors="replace")
+        raise RuntimeError(f"FFmpeg failed: {error_msg[:500]}")
+
+    # Calculate total duration accounting for fade overlaps
+    total_duration = sum(durations) - (fade_duration * (len(slide_images) - 1))
+    return max(total_duration, 0)
 
 
 # ===== Main Entry Points =====
@@ -480,6 +595,7 @@ async def generate_video(
     output_dir: str,
     tts_config: dict[str, Any] | None = None,
     config: dict[str, Any] | None = None,
+    progress_callback: Any | None = None,
 ) -> dict[str, Any]:
     """Generate a narrated video from slides.
 
@@ -488,10 +604,18 @@ async def generate_video(
         output_dir: Directory to save output video
         tts_config: TTS configuration dict
         config: Video configuration dict
+        progress_callback: Optional callback function(current_slide, total_slides, status)
 
     Returns:
         VideoResult as a dict
     """
+    def report_progress(current: int, total: int, status: str) -> None:
+        """Report progress if callback is available."""
+        if progress_callback:
+            try:
+                progress_callback(current, total, status)
+            except Exception:
+                pass  # Ignore callback errors
     start_time = time.time()
 
     if not PILLOW_AVAILABLE:
@@ -548,6 +672,7 @@ async def generate_video(
         total_slides = len(slide_contents)
         if video_config.title:
             total_slides += 1
+            report_progress(0, total_slides, "Rendering title slide")
             title_img = render_title_slide(
                 video_config.title, video_config, len(slide_contents)
             )
@@ -558,6 +683,9 @@ async def generate_video(
 
         # Render slides and generate audio
         for i, slide in enumerate(slide_contents):
+            current_slide = i + 1
+            report_progress(current_slide, total_slides, f"Rendering slide {current_slide}")
+
             # Render slide
             img = render_slide(slide, video_config, i + 1, len(slide_contents))
             img_path = os.path.join(temp_dir, f"slide_{i + 1:03d}.png")
@@ -565,6 +693,7 @@ async def generate_video(
             slide_images.append(img_path)
 
             # Generate audio
+            report_progress(current_slide, total_slides, f"Generating audio for slide {current_slide}")
             audio_path = os.path.join(temp_dir, f"audio_{i + 1:03d}.mp3")
             try:
                 duration = await generate_slide_audio(slide, tts, audio_path)
@@ -577,6 +706,7 @@ async def generate_video(
                 print(f"Warning: Audio generation failed for slide {i + 1}: {e}")
 
         # Assemble video
+        report_progress(total_slides, total_slides, "Assembling video with FFmpeg")
         timestamp = int(time.time())
         video_filename = f"presentation_{timestamp}.mp4"
         video_path = os.path.join(output_dir, video_filename)
@@ -589,6 +719,7 @@ async def generate_video(
             video_config,
         )
 
+    report_progress(total_slides, total_slides, "Complete")
     generation_time = time.time() - start_time
 
     result = VideoResult(
@@ -606,9 +737,10 @@ def generate_video_sync(
     output_dir: str,
     tts_config: dict[str, Any] | None = None,
     config: dict[str, Any] | None = None,
+    progress_callback: Any | None = None,
 ) -> dict[str, Any]:
     """Synchronous wrapper for generate_video."""
-    return asyncio.run(generate_video(slides, output_dir, tts_config, config))
+    return asyncio.run(generate_video(slides, output_dir, tts_config, config, progress_callback))
 
 
 # ===== Availability Check =====
