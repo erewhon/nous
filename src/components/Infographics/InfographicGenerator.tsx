@@ -8,6 +8,7 @@ import type {
   InfographicTemplate,
   InfographicTheme,
 } from "../../types/infographic";
+import { INFOGRAPHIC_SIZE_PRESETS } from "../../types/infographic";
 
 interface InfographicGeneratorProps {
   isOpen: boolean;
@@ -25,6 +26,7 @@ export function InfographicGenerator({
   const toast = useToastStore();
 
   const [title, setTitle] = useState("");
+  const [selectedPreset, setSelectedPreset] = useState("presentation");
 
   // Check availability on mount
   useEffect(() => {
@@ -185,7 +187,7 @@ export function InfographicGenerator({
           ) : (
             // Configuration form
             <div className="space-y-6">
-              {/* Availability warning */}
+              {/* Availability warnings */}
               {availability && !availability.svgGeneration && (
                 <div
                   className="p-3 rounded-lg text-sm"
@@ -196,6 +198,43 @@ export function InfographicGenerator({
                 >
                   SVG generation is not available. Please install the svgwrite
                   package.
+                </div>
+              )}
+
+              {availability && availability.svgGeneration && !availability.pngExport && (
+                <div
+                  className="p-3 rounded-lg text-sm flex items-start gap-2"
+                  style={{
+                    backgroundColor: "rgba(245, 158, 11, 0.1)",
+                    color: "#f59e0b",
+                  }}
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="flex-shrink-0 mt-0.5"
+                  >
+                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                    <line x1="12" y1="9" x2="12" y2="13" />
+                    <line x1="12" y1="17" x2="12.01" y2="17" />
+                  </svg>
+                  <span>
+                    <strong>PNG export unavailable.</strong> Install cairosvg to enable PNG export:{" "}
+                    <code
+                      className="px-1 rounded text-xs"
+                      style={{ backgroundColor: "rgba(245, 158, 11, 0.2)" }}
+                    >
+                      pip install cairosvg
+                    </code>
+                    . SVG export will still work.
+                  </span>
                 </div>
               )}
 
@@ -309,58 +348,108 @@ export function InfographicGenerator({
                 </div>
               </div>
 
-              {/* Size */}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label
-                    className="block text-sm font-medium mb-2"
-                    style={{ color: "var(--color-text-primary)" }}
-                  >
-                    Width
-                  </label>
-                  <input
-                    type="number"
-                    value={infographicStore.settings.width}
-                    onChange={(e) =>
-                      infographicStore.setWidth(parseInt(e.target.value) || 1200)
-                    }
-                    min={800}
-                    max={2400}
-                    step={100}
-                    disabled={infographicStore.isGenerating}
-                    className="w-full px-3 py-2 rounded-lg border text-sm"
-                    style={{
-                      backgroundColor: "var(--color-bg-secondary)",
-                      borderColor: "var(--color-border)",
-                      color: "var(--color-text-primary)",
-                    }}
-                  />
+              {/* Size Presets */}
+              <div>
+                <label
+                  className="block text-sm font-medium mb-2"
+                  style={{ color: "var(--color-text-primary)" }}
+                >
+                  Size
+                </label>
+                <div className="grid grid-cols-3 gap-2 mb-3">
+                  {INFOGRAPHIC_SIZE_PRESETS.map((preset) => (
+                    <button
+                      key={preset.id}
+                      onClick={() => {
+                        setSelectedPreset(preset.id);
+                        if (preset.id !== "custom") {
+                          infographicStore.setWidth(preset.width);
+                          infographicStore.setHeight(preset.height);
+                        }
+                      }}
+                      disabled={infographicStore.isGenerating}
+                      className={`p-2 rounded-lg text-left transition-colors ${
+                        selectedPreset === preset.id
+                          ? "ring-2 ring-[--color-accent]"
+                          : ""
+                      }`}
+                      style={{
+                        backgroundColor: "var(--color-bg-secondary)",
+                        borderColor: "var(--color-border)",
+                        border: "1px solid var(--color-border)",
+                      }}
+                    >
+                      <div
+                        className="text-sm font-medium"
+                        style={{ color: "var(--color-text-primary)" }}
+                      >
+                        {preset.name}
+                      </div>
+                      <div
+                        className="text-xs"
+                        style={{ color: "var(--color-text-muted)" }}
+                      >
+                        {preset.width}x{preset.height}
+                      </div>
+                    </button>
+                  ))}
                 </div>
-                <div>
-                  <label
-                    className="block text-sm font-medium mb-2"
-                    style={{ color: "var(--color-text-primary)" }}
-                  >
-                    Height
-                  </label>
-                  <input
-                    type="number"
-                    value={infographicStore.settings.height}
-                    onChange={(e) =>
-                      infographicStore.setHeight(parseInt(e.target.value) || 800)
-                    }
-                    min={600}
-                    max={1600}
-                    step={100}
-                    disabled={infographicStore.isGenerating}
-                    className="w-full px-3 py-2 rounded-lg border text-sm"
-                    style={{
-                      backgroundColor: "var(--color-bg-secondary)",
-                      borderColor: "var(--color-border)",
-                      color: "var(--color-text-primary)",
-                    }}
-                  />
-                </div>
+
+                {/* Custom size inputs */}
+                {selectedPreset === "custom" && (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label
+                        className="block text-xs font-medium mb-1"
+                        style={{ color: "var(--color-text-secondary)" }}
+                      >
+                        Width
+                      </label>
+                      <input
+                        type="number"
+                        value={infographicStore.settings.width}
+                        onChange={(e) =>
+                          infographicStore.setWidth(parseInt(e.target.value) || 1200)
+                        }
+                        min={400}
+                        max={3000}
+                        step={100}
+                        disabled={infographicStore.isGenerating}
+                        className="w-full px-3 py-2 rounded-lg border text-sm"
+                        style={{
+                          backgroundColor: "var(--color-bg-primary)",
+                          borderColor: "var(--color-border)",
+                          color: "var(--color-text-primary)",
+                        }}
+                      />
+                    </div>
+                    <div>
+                      <label
+                        className="block text-xs font-medium mb-1"
+                        style={{ color: "var(--color-text-secondary)" }}
+                      >
+                        Height
+                      </label>
+                      <input
+                        type="number"
+                        value={infographicStore.settings.height}
+                        onChange={(e) =>
+                          infographicStore.setHeight(parseInt(e.target.value) || 800)
+                        }
+                        min={400}
+                        max={3000}
+                        step={100}
+                        disabled={infographicStore.isGenerating}
+                        className="w-full px-3 py-2 rounded-lg border text-sm"
+                        style={{
+                          backgroundColor: "var(--color-bg-primary)",
+                          borderColor: "var(--color-border)",
+                          color: "var(--color-text-primary)",
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Error display */}

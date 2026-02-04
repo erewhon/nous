@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useVideoGenerateStore } from "../../stores/videoGenerateStore";
 import { useStudyToolsStore } from "../../stores/studyToolsStore";
 import { useAudioStore } from "../../stores/audioStore";
@@ -93,6 +93,65 @@ export function VideoGeneratorDialog({
       setSelectedSlideIndex(0);
     }
   }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Keyboard shortcuts for slide navigation
+  const handleKeyDown = useCallback(
+    (e: KeyboardEvent) => {
+      // Don't handle if we're in an input/textarea
+      const target = e.target as HTMLElement;
+      if (
+        target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.isContentEditable
+      ) {
+        return;
+      }
+
+      // Don't handle if no slides or showing result/generating
+      if (
+        videoStore.slides.length === 0 ||
+        videoStore.result ||
+        videoStore.isGenerating
+      ) {
+        return;
+      }
+
+      switch (e.key) {
+        case "ArrowUp":
+        case "ArrowLeft":
+          e.preventDefault();
+          setSelectedSlideIndex((prev) => Math.max(0, prev - 1));
+          break;
+        case "ArrowDown":
+        case "ArrowRight":
+          e.preventDefault();
+          setSelectedSlideIndex((prev) =>
+            Math.min(videoStore.slides.length - 1, prev + 1)
+          );
+          break;
+        case "Delete":
+        case "Backspace":
+          if (e.metaKey || e.ctrlKey) {
+            e.preventDefault();
+            if (videoStore.slides.length > 0) {
+              videoStore.removeSlide(selectedSlideIndex);
+              if (selectedSlideIndex > 0) {
+                setSelectedSlideIndex(selectedSlideIndex - 1);
+              }
+            }
+          }
+          break;
+      }
+    },
+    [videoStore.slides.length, videoStore.result, videoStore.isGenerating, selectedSlideIndex]
+  );
+
+  useEffect(() => {
+    if (isOpen) {
+      window.addEventListener("keydown", handleKeyDown);
+      return () => window.removeEventListener("keydown", handleKeyDown);
+    }
+  }, [isOpen, handleKeyDown]);
 
   if (!isOpen) return null;
 
@@ -493,6 +552,15 @@ export function VideoGeneratorDialog({
                           videoStore.reorderSlides(selectedSlideIndex, selectedSlideIndex + 1);
                           setSelectedSlideIndex(selectedSlideIndex + 1);
                         }
+                      }}
+                      onDuplicate={() => {
+                        const currentSlide = videoStore.slides[selectedSlideIndex];
+                        const duplicatedSlide = {
+                          ...currentSlide,
+                          title: `${currentSlide.title} (copy)`,
+                        };
+                        videoStore.addSlide(duplicatedSlide);
+                        setSelectedSlideIndex(videoStore.slides.length);
                       }}
                     />
                   )}

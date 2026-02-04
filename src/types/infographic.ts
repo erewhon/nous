@@ -82,6 +82,25 @@ export const INFOGRAPHIC_TEMPLATES: InfographicTemplateInfo[] = [
   },
 ];
 
+// ===== Size Presets =====
+
+export interface InfographicSizePreset {
+  id: string;
+  name: string;
+  width: number;
+  height: number;
+  description: string;
+}
+
+export const INFOGRAPHIC_SIZE_PRESETS: InfographicSizePreset[] = [
+  { id: "social", name: "Social Media", width: 1080, height: 1080, description: "Square (Instagram, Facebook)" },
+  { id: "story", name: "Story/Reel", width: 1080, height: 1920, description: "Vertical (Stories, TikTok)" },
+  { id: "presentation", name: "Presentation", width: 1920, height: 1080, description: "16:9 (Slides, YouTube)" },
+  { id: "poster", name: "Poster", width: 1200, height: 1600, description: "3:4 Portrait" },
+  { id: "wide", name: "Wide Banner", width: 1600, height: 600, description: "Horizontal banner" },
+  { id: "custom", name: "Custom", width: 1200, height: 800, description: "Set your own dimensions" },
+];
+
 // ===== State Types =====
 
 export interface InfographicState {

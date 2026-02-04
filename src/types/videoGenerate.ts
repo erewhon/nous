@@ -7,6 +7,7 @@ export const SlideContentSchema = z.object({
   body: z.string().default(""),
   bulletPoints: z.array(z.string()).default([]),
   durationHint: z.number().nullable().optional(),
+  notes: z.string().optional(), // Speaker notes - not shown in video
 });
 export type SlideContent = z.infer<typeof SlideContentSchema>;
 

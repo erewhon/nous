@@ -10,6 +10,7 @@ interface SlideEditorProps {
   onDelete: () => void;
   onMoveUp: () => void;
   onMoveDown: () => void;
+  onDuplicate: () => void;
 }
 
 export function SlideEditor({
@@ -21,16 +22,23 @@ export function SlideEditor({
   onDelete,
   onMoveUp,
   onMoveDown,
+  onDuplicate,
 }: SlideEditorProps) {
   const [localTitle, setLocalTitle] = useState(slide.title);
   const [localBody, setLocalBody] = useState(slide.body);
   const [localBullets, setLocalBullets] = useState(slide.bulletPoints.join("\n"));
+  const [localDuration, setLocalDuration] = useState<string>(
+    slide.durationHint?.toString() ?? ""
+  );
+  const [localNotes, setLocalNotes] = useState(slide.notes ?? "");
 
   // Update local state when slide changes
   useEffect(() => {
     setLocalTitle(slide.title);
     setLocalBody(slide.body);
     setLocalBullets(slide.bulletPoints.join("\n"));
+    setLocalDuration(slide.durationHint?.toString() ?? "");
+    setLocalNotes(slide.notes ?? "");
   }, [slide]);
 
   // Debounced update
@@ -40,14 +48,17 @@ export function SlideEditor({
         .split("\n")
         .map((b) => b.trim())
         .filter((b) => b.length > 0);
+      const duration = localDuration ? parseFloat(localDuration) : undefined;
       onUpdate({
         title: localTitle,
         body: localBody,
         bulletPoints: bullets,
+        durationHint: duration && !isNaN(duration) ? duration : undefined,
+        notes: localNotes || undefined,
       });
     }, 300);
     return () => clearTimeout(timeout);
-  }, [localTitle, localBody, localBullets, onUpdate]);
+  }, [localTitle, localBody, localBullets, localDuration, localNotes, onUpdate]);
 
   const colors =
     theme === "dark"
@@ -123,6 +134,27 @@ export function SlideEditor({
               style={{ color: "var(--color-text-muted)" }}
             >
               <path d="M6 9l6 6 6-6" />
+            </svg>
+          </button>
+          <button
+            onClick={onDuplicate}
+            className="p-1.5 rounded hover:bg-[--color-bg-tertiary]"
+            title="Duplicate slide"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              style={{ color: "var(--color-text-muted)" }}
+            >
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
             </svg>
           </button>
           <button
@@ -215,6 +247,67 @@ export function SlideEditor({
                 color: "var(--color-text-primary)",
               }}
               placeholder="Enter bullet points, one per line..."
+            />
+          </div>
+
+          {/* Duration */}
+          <div>
+            <label
+              className="block text-xs font-medium mb-1"
+              style={{ color: "var(--color-text-secondary)" }}
+            >
+              Duration (seconds)
+            </label>
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                value={localDuration}
+                onChange={(e) => setLocalDuration(e.target.value)}
+                min="1"
+                max="60"
+                step="0.5"
+                className="w-24 px-3 py-2 rounded-lg border text-sm"
+                style={{
+                  backgroundColor: "var(--color-bg-primary)",
+                  borderColor: "var(--color-border)",
+                  color: "var(--color-text-primary)",
+                }}
+                placeholder="Auto"
+              />
+              <span
+                className="text-xs"
+                style={{ color: "var(--color-text-muted)" }}
+              >
+                Leave empty for auto (based on narration)
+              </span>
+            </div>
+          </div>
+
+          {/* Notes */}
+          <div>
+            <label
+              className="block text-xs font-medium mb-1"
+              style={{ color: "var(--color-text-secondary)" }}
+            >
+              Speaker Notes
+              <span
+                className="font-normal ml-1"
+                style={{ color: "var(--color-text-muted)" }}
+              >
+                (not shown in video)
+              </span>
+            </label>
+            <textarea
+              value={localNotes}
+              onChange={(e) => setLocalNotes(e.target.value)}
+              rows={2}
+              className="w-full px-3 py-2 rounded-lg border text-sm resize-none"
+              style={{
+                backgroundColor: "var(--color-bg-primary)",
+                borderColor: "var(--color-border)",
+                color: "var(--color-text-primary)",
+              }}
+              placeholder="Add notes for your reference..."
             />
           </div>
         </div>
