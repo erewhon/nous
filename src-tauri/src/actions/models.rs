@@ -210,6 +210,74 @@ pub enum ActionStep {
         /// Custom prompt for summarization
         custom_prompt: Option<String>,
     },
+    /// Generate a study guide from pages
+    #[serde(rename_all = "camelCase")]
+    GenerateStudyGuide {
+        selector: PageSelector,
+        /// Target notebook for the study guide page
+        notebook_target: NotebookTarget,
+        /// Title template (e.g., "Study Guide - {{date}}")
+        title_template: String,
+        /// Depth: "brief", "standard", "comprehensive"
+        #[serde(default)]
+        depth: Option<String>,
+        /// Focus areas for the study guide
+        #[serde(default)]
+        focus_areas: Vec<String>,
+    },
+    /// Generate FAQ from pages
+    #[serde(rename_all = "camelCase")]
+    GenerateFaq {
+        selector: PageSelector,
+        /// Where to output the FAQ
+        output_target: SummaryOutput,
+        /// Number of Q&A pairs to generate
+        num_questions: Option<i32>,
+    },
+    /// Generate flashcards from pages and add to a deck
+    #[serde(rename_all = "camelCase")]
+    GenerateFlashcards {
+        selector: PageSelector,
+        /// ID of the flashcard deck to add to
+        deck_id: String,
+        /// Number of flashcards to generate
+        num_cards: Option<i32>,
+        /// Card types to generate: "basic", "cloze", "reversible"
+        #[serde(default)]
+        card_types: Vec<String>,
+    },
+    /// Generate briefing document from pages
+    #[serde(rename_all = "camelCase")]
+    GenerateBriefing {
+        selector: PageSelector,
+        /// Target notebook for the briefing page
+        notebook_target: NotebookTarget,
+        /// Title template
+        title_template: String,
+        /// Include action items section
+        #[serde(default = "default_true")]
+        include_action_items: bool,
+    },
+    /// Extract timeline events from pages
+    #[serde(rename_all = "camelCase")]
+    ExtractTimeline {
+        selector: PageSelector,
+        /// Target notebook for the timeline page
+        notebook_target: NotebookTarget,
+        /// Title template
+        title_template: String,
+    },
+    /// Extract concept map from pages
+    #[serde(rename_all = "camelCase")]
+    ExtractConceptMap {
+        selector: PageSelector,
+        /// Target notebook for the concept map page
+        notebook_target: NotebookTarget,
+        /// Title template
+        title_template: String,
+        /// Maximum number of concept nodes
+        max_nodes: Option<i32>,
+    },
     /// Carry forward incomplete checklist items
     #[serde(rename_all = "camelCase")]
     CarryForwardItems {

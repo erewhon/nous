@@ -10,7 +10,7 @@ use crate::actions::variables::VariableResolver;
 use crate::external_sources::{
     read_file_content, ExternalFileFormat, ExternalSourcesError, ExternalSourcesStorage,
 };
-use crate::python_bridge::{AIConfig, PageSummaryInput, PythonAI};
+use crate::python_bridge::{AIConfig, PageSummaryInput, PythonAI, StudyPageContent, StudyGuideOptions};
 use crate::storage::{EditorBlock, EditorData, FileStorage, NotebookType, StorageError};
 
 /// Represents a checklist item that was carried forward with source tracking
@@ -327,6 +327,78 @@ impl ActionExecutor {
 
             ActionStep::AiSummarize { selector, output_target, custom_prompt } => {
                 self.execute_ai_summarize(selector, output_target, custom_prompt.as_ref(), context)
+            }
+
+            ActionStep::GenerateStudyGuide {
+                selector,
+                notebook_target,
+                title_template,
+                depth,
+                focus_areas,
+            } => {
+                self.execute_generate_study_guide(
+                    selector,
+                    notebook_target,
+                    title_template,
+                    depth.as_ref(),
+                    focus_areas,
+                    context,
+                )
+            }
+
+            ActionStep::GenerateFaq {
+                selector,
+                output_target,
+                num_questions,
+            } => {
+                self.execute_generate_faq(selector, output_target, *num_questions, context)
+            }
+
+            ActionStep::GenerateFlashcards {
+                selector,
+                deck_id,
+                num_cards,
+                card_types,
+            } => {
+                self.execute_generate_flashcards(selector, deck_id, *num_cards, card_types, context)
+            }
+
+            ActionStep::GenerateBriefing {
+                selector,
+                notebook_target,
+                title_template,
+                include_action_items,
+            } => {
+                self.execute_generate_briefing(
+                    selector,
+                    notebook_target,
+                    title_template,
+                    *include_action_items,
+                    context,
+                )
+            }
+
+            ActionStep::ExtractTimeline {
+                selector,
+                notebook_target,
+                title_template,
+            } => {
+                self.execute_extract_timeline(selector, notebook_target, title_template, context)
+            }
+
+            ActionStep::ExtractConceptMap {
+                selector,
+                notebook_target,
+                title_template,
+                max_nodes,
+            } => {
+                self.execute_extract_concept_map(
+                    selector,
+                    notebook_target,
+                    title_template,
+                    *max_nodes,
+                    context,
+                )
             }
 
             ActionStep::ProcessExternalSource {
@@ -1078,6 +1150,723 @@ impl ActionExecutor {
             }
         }
 
+        Ok(())
+    }
+
+    /// Convert pages to StudyPageContent for Python bridge
+    fn pages_to_study_content(
+        &self,
+        pages: &[crate::storage::Page],
+    ) -> Vec<StudyPageContent> {
+        pages
+            .iter()
+            .map(|p| {
+                // Extract text content from EditorJS blocks
+                let content = p.content.blocks.iter()
+                    .filter_map(|block| {
+                        match block.block_type.as_str() {
+                            "paragraph" | "header" | "quote" => {
+                                block.data.get("text").and_then(|t| t.as_str()).map(String::from)
+                            }
+                            "list" | "checklist" => {
+                                block.data.get("items").and_then(|items| {
+                                    items.as_array().map(|arr| {
+                                        arr.iter()
+                                            .filter_map(|item| {
+                                                if let Some(text) = item.get("text").and_then(|t| t.as_str()) {
+                                                    Some(format!("- {}", text))
+                                                } else if let Some(text) = item.as_str() {
+                                                    Some(format!("- {}", text))
+                                                } else {
+                                                    None
+                                                }
+                                            })
+                                            .collect::<Vec<_>>()
+                                            .join("\n")
+                                    })
+                                })
+                            }
+                            _ => None,
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n\n");
+
+                StudyPageContent {
+                    page_id: p.id.to_string(),
+                    title: p.title.clone(),
+                    content,
+                    tags: p.tags.clone(),
+                }
+            })
+            .collect()
+    }
+
+    /// Execute generate study guide step
+    fn execute_generate_study_guide(
+        &self,
+        selector: &PageSelector,
+        notebook_target: &NotebookTarget,
+        title_template: &str,
+        depth: Option<&String>,
+        focus_areas: &[String],
+        context: &mut ExecutionContext,
+    ) -> Result<(), ExecutionError> {
+        let pages = self.find_pages(selector, context)?;
+        if pages.is_empty() {
+            log::info!("GenerateStudyGuide: No pages found matching selector");
+            return Ok(());
+        }
+
+        let ai_config = context.ai_config.clone().unwrap_or_default();
+        let study_content = self.pages_to_study_content(&pages);
+
+        let options = StudyGuideOptions {
+            depth: depth.cloned().unwrap_or_else(|| "standard".to_string()),
+            focus_areas: focus_areas.to_vec(),
+            num_practice_questions: 5,
+        };
+
+        let python_ai = self.python_ai.lock().map_err(|e| {
+            ExecutionError::StepFailed(format!("Failed to lock Python AI: {}", e))
+        })?;
+
+        let study_guide = python_ai
+            .generate_study_guide(study_content, ai_config, Some(options))
+            .map_err(|e| ExecutionError::StepFailed(format!("Study guide generation failed: {}", e)))?;
+
+        drop(python_ai);
+
+        // Create page with study guide content
+        let notebook_id = self.resolve_notebook_target(notebook_target, context)?;
+        let storage = self.storage.lock().map_err(|e| {
+            ExecutionError::StepFailed(format!("Failed to lock storage: {}", e))
+        })?;
+
+        let title = self.variable_resolver.substitute(title_template, &context.variables);
+        let page = storage.create_page(notebook_id, title.clone())?;
+
+        // Build EditorJS blocks
+        let mut blocks = Vec::new();
+
+        // Title
+        blocks.push(EditorBlock {
+            id: Uuid::new_v4().to_string(),
+            block_type: "header".to_string(),
+            data: serde_json::json!({ "text": study_guide.title, "level": 1 }),
+        });
+
+        // Learning objectives
+        if !study_guide.learning_objectives.is_empty() {
+            blocks.push(EditorBlock {
+                id: Uuid::new_v4().to_string(),
+                block_type: "header".to_string(),
+                data: serde_json::json!({ "text": "Learning Objectives", "level": 2 }),
+            });
+            blocks.push(EditorBlock {
+                id: Uuid::new_v4().to_string(),
+                block_type: "list".to_string(),
+                data: serde_json::json!({
+                    "style": "ordered",
+                    "items": study_guide.learning_objectives
+                }),
+            });
+        }
+
+        // Key concepts
+        if !study_guide.key_concepts.is_empty() {
+            blocks.push(EditorBlock {
+                id: Uuid::new_v4().to_string(),
+                block_type: "header".to_string(),
+                data: serde_json::json!({ "text": "Key Concepts", "level": 2 }),
+            });
+            for concept in &study_guide.key_concepts {
+                blocks.push(EditorBlock {
+                    id: Uuid::new_v4().to_string(),
+                    block_type: "paragraph".to_string(),
+                    data: serde_json::json!({ "text": format!("<b>{}</b>: {}", concept.term, concept.definition) }),
+                });
+            }
+        }
+
+        // Sections
+        for section in &study_guide.sections {
+            blocks.push(EditorBlock {
+                id: Uuid::new_v4().to_string(),
+                block_type: "header".to_string(),
+                data: serde_json::json!({ "text": section.heading, "level": 2 }),
+            });
+            blocks.push(EditorBlock {
+                id: Uuid::new_v4().to_string(),
+                block_type: "paragraph".to_string(),
+                data: serde_json::json!({ "text": section.content }),
+            });
+            if !section.key_points.is_empty() {
+                blocks.push(EditorBlock {
+                    id: Uuid::new_v4().to_string(),
+                    block_type: "list".to_string(),
+                    data: serde_json::json!({
+                        "style": "unordered",
+                        "items": section.key_points
+                    }),
+                });
+            }
+        }
+
+        // Practice questions
+        if !study_guide.practice_questions.is_empty() {
+            blocks.push(EditorBlock {
+                id: Uuid::new_v4().to_string(),
+                block_type: "header".to_string(),
+                data: serde_json::json!({ "text": "Practice Questions", "level": 2 }),
+            });
+            for (i, q) in study_guide.practice_questions.iter().enumerate() {
+                blocks.push(EditorBlock {
+                    id: Uuid::new_v4().to_string(),
+                    block_type: "paragraph".to_string(),
+                    data: serde_json::json!({ "text": format!("<b>Q{}</b>: {}", i + 1, q.question) }),
+                });
+                blocks.push(EditorBlock {
+                    id: Uuid::new_v4().to_string(),
+                    block_type: "paragraph".to_string(),
+                    data: serde_json::json!({ "text": format!("<i>Answer: {}</i>", q.answer) }),
+                });
+            }
+        }
+
+        // Summary
+        if !study_guide.summary.is_empty() {
+            blocks.push(EditorBlock {
+                id: Uuid::new_v4().to_string(),
+                block_type: "header".to_string(),
+                data: serde_json::json!({ "text": "Summary", "level": 2 }),
+            });
+            blocks.push(EditorBlock {
+                id: Uuid::new_v4().to_string(),
+                block_type: "paragraph".to_string(),
+                data: serde_json::json!({ "text": study_guide.summary }),
+            });
+        }
+
+        let mut updated_page = page.clone();
+        updated_page.content = EditorData {
+            time: Some(chrono::Utc::now().timestamp_millis()),
+            blocks,
+            version: Some("2.30.0".to_string()),
+        };
+        storage.update_page(&updated_page)?;
+        context.created_pages.push(page.id.to_string());
+
+        log::info!("GenerateStudyGuide: Created study guide page '{}'", title);
+        Ok(())
+    }
+
+    /// Execute generate FAQ step
+    fn execute_generate_faq(
+        &self,
+        selector: &PageSelector,
+        output_target: &SummaryOutput,
+        num_questions: Option<i32>,
+        context: &mut ExecutionContext,
+    ) -> Result<(), ExecutionError> {
+        let pages = self.find_pages(selector, context)?;
+        if pages.is_empty() {
+            log::info!("GenerateFaq: No pages found matching selector");
+            return Ok(());
+        }
+
+        let ai_config = context.ai_config.clone().unwrap_or_default();
+        let study_content = self.pages_to_study_content(&pages);
+
+        let python_ai = self.python_ai.lock().map_err(|e| {
+            ExecutionError::StepFailed(format!("Failed to lock Python AI: {}", e))
+        })?;
+
+        let faq = python_ai
+            .generate_faq(study_content, ai_config, num_questions)
+            .map_err(|e| ExecutionError::StepFailed(format!("FAQ generation failed: {}", e)))?;
+
+        drop(python_ai);
+
+        // Build EditorJS blocks for FAQ
+        let mut blocks = Vec::new();
+        blocks.push(EditorBlock {
+            id: Uuid::new_v4().to_string(),
+            block_type: "header".to_string(),
+            data: serde_json::json!({ "text": "Frequently Asked Questions", "level": 1 }),
+        });
+
+        for (i, item) in faq.questions.iter().enumerate() {
+            blocks.push(EditorBlock {
+                id: Uuid::new_v4().to_string(),
+                block_type: "header".to_string(),
+                data: serde_json::json!({ "text": format!("Q{}: {}", i + 1, item.question), "level": 3 }),
+            });
+            blocks.push(EditorBlock {
+                id: Uuid::new_v4().to_string(),
+                block_type: "paragraph".to_string(),
+                data: serde_json::json!({ "text": item.answer }),
+            });
+        }
+
+        match output_target {
+            SummaryOutput::NewPage { notebook_target, title_template } => {
+                let notebook_id = self.resolve_notebook_target(notebook_target, context)?;
+                let storage = self.storage.lock().map_err(|e| {
+                    ExecutionError::StepFailed(format!("Failed to lock storage: {}", e))
+                })?;
+
+                let title = self.variable_resolver.substitute(title_template, &context.variables);
+                let page = storage.create_page(notebook_id, title.clone())?;
+
+                let mut updated_page = page.clone();
+                updated_page.content = EditorData {
+                    time: Some(chrono::Utc::now().timestamp_millis()),
+                    blocks,
+                    version: Some("2.30.0".to_string()),
+                };
+                storage.update_page(&updated_page)?;
+                context.created_pages.push(page.id.to_string());
+
+                log::info!("GenerateFaq: Created FAQ page '{}'", title);
+            }
+            SummaryOutput::PrependToPage { page_selector } => {
+                let target_pages = self.find_pages(page_selector, context)?;
+                if let Some(target_page) = target_pages.first() {
+                    let storage = self.storage.lock().map_err(|e| {
+                        ExecutionError::StepFailed(format!("Failed to lock storage: {}", e))
+                    })?;
+
+                    let mut updated_page = target_page.clone();
+                    let mut new_blocks = blocks;
+                    new_blocks.extend(updated_page.content.blocks.clone());
+                    updated_page.content.blocks = new_blocks;
+                    storage.update_page(&updated_page)?;
+                    context.modified_pages.push(updated_page.id.to_string());
+
+                    log::info!("GenerateFaq: Prepended FAQ to page '{}'", updated_page.title);
+                }
+            }
+            SummaryOutput::Result => {
+                // Store FAQ in context variables
+                let faq_text = faq.questions.iter()
+                    .map(|q| format!("Q: {}\nA: {}", q.question, q.answer))
+                    .collect::<Vec<_>>()
+                    .join("\n\n");
+                context.variables.insert("_faq".to_string(), faq_text);
+                log::info!("GenerateFaq: Stored {} FAQ items in context", faq.questions.len());
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Execute generate flashcards step
+    fn execute_generate_flashcards(
+        &self,
+        selector: &PageSelector,
+        deck_id: &str,
+        num_cards: Option<i32>,
+        card_types: &[String],
+        context: &mut ExecutionContext,
+    ) -> Result<(), ExecutionError> {
+        let pages = self.find_pages(selector, context)?;
+        if pages.is_empty() {
+            log::info!("GenerateFlashcards: No pages found matching selector");
+            return Ok(());
+        }
+
+        let ai_config = context.ai_config.clone().unwrap_or_default();
+        let study_content = self.pages_to_study_content(&pages);
+
+        let types = if card_types.is_empty() {
+            vec!["basic".to_string()]
+        } else {
+            card_types.to_vec()
+        };
+
+        let python_ai = self.python_ai.lock().map_err(|e| {
+            ExecutionError::StepFailed(format!("Failed to lock Python AI: {}", e))
+        })?;
+
+        let flashcards = python_ai
+            .generate_flashcards(study_content, ai_config, num_cards, Some(types))
+            .map_err(|e| ExecutionError::StepFailed(format!("Flashcard generation failed: {}", e)))?;
+
+        drop(python_ai);
+
+        log::info!(
+            "GenerateFlashcards: Generated {} flashcards for deck {}",
+            flashcards.cards.len(),
+            deck_id
+        );
+
+        // Note: Actually adding flashcards to the deck would require access to FlashcardStorage
+        // For now, store the generated flashcards in context variables
+        let flashcard_text = flashcards.cards.iter()
+            .map(|c| format!("Front: {}\nBack: {}", c.front, c.back))
+            .collect::<Vec<_>>()
+            .join("\n---\n");
+        context.variables.insert("_flashcards".to_string(), flashcard_text);
+        context.variables.insert("_flashcard_count".to_string(), flashcards.cards.len().to_string());
+
+        Ok(())
+    }
+
+    /// Execute generate briefing step
+    fn execute_generate_briefing(
+        &self,
+        selector: &PageSelector,
+        notebook_target: &NotebookTarget,
+        title_template: &str,
+        include_action_items: bool,
+        context: &mut ExecutionContext,
+    ) -> Result<(), ExecutionError> {
+        let pages = self.find_pages(selector, context)?;
+        if pages.is_empty() {
+            log::info!("GenerateBriefing: No pages found matching selector");
+            return Ok(());
+        }
+
+        let ai_config = context.ai_config.clone().unwrap_or_default();
+        let study_content = self.pages_to_study_content(&pages);
+
+        let python_ai = self.python_ai.lock().map_err(|e| {
+            ExecutionError::StepFailed(format!("Failed to lock Python AI: {}", e))
+        })?;
+
+        let briefing = python_ai
+            .generate_briefing(study_content, ai_config, Some(include_action_items))
+            .map_err(|e| ExecutionError::StepFailed(format!("Briefing generation failed: {}", e)))?;
+
+        drop(python_ai);
+
+        let notebook_id = self.resolve_notebook_target(notebook_target, context)?;
+        let storage = self.storage.lock().map_err(|e| {
+            ExecutionError::StepFailed(format!("Failed to lock storage: {}", e))
+        })?;
+
+        let title = self.variable_resolver.substitute(title_template, &context.variables);
+        let page = storage.create_page(notebook_id, title.clone())?;
+
+        // Build EditorJS blocks
+        let mut blocks = Vec::new();
+
+        // Title and executive summary
+        blocks.push(EditorBlock {
+            id: Uuid::new_v4().to_string(),
+            block_type: "header".to_string(),
+            data: serde_json::json!({ "text": briefing.title, "level": 1 }),
+        });
+        blocks.push(EditorBlock {
+            id: Uuid::new_v4().to_string(),
+            block_type: "paragraph".to_string(),
+            data: serde_json::json!({ "text": format!("<b>Executive Summary:</b> {}", briefing.executive_summary) }),
+        });
+
+        // Key findings
+        if !briefing.key_findings.is_empty() {
+            blocks.push(EditorBlock {
+                id: Uuid::new_v4().to_string(),
+                block_type: "header".to_string(),
+                data: serde_json::json!({ "text": "Key Findings", "level": 2 }),
+            });
+            blocks.push(EditorBlock {
+                id: Uuid::new_v4().to_string(),
+                block_type: "list".to_string(),
+                data: serde_json::json!({
+                    "style": "unordered",
+                    "items": briefing.key_findings
+                }),
+            });
+        }
+
+        // Recommendations
+        if !briefing.recommendations.is_empty() {
+            blocks.push(EditorBlock {
+                id: Uuid::new_v4().to_string(),
+                block_type: "header".to_string(),
+                data: serde_json::json!({ "text": "Recommendations", "level": 2 }),
+            });
+            blocks.push(EditorBlock {
+                id: Uuid::new_v4().to_string(),
+                block_type: "list".to_string(),
+                data: serde_json::json!({
+                    "style": "ordered",
+                    "items": briefing.recommendations
+                }),
+            });
+        }
+
+        // Action items
+        if include_action_items && !briefing.action_items.is_empty() {
+            blocks.push(EditorBlock {
+                id: Uuid::new_v4().to_string(),
+                block_type: "header".to_string(),
+                data: serde_json::json!({ "text": "Action Items", "level": 2 }),
+            });
+            let checklist_items: Vec<_> = briefing.action_items.iter()
+                .map(|item| {
+                    let mut text = item.description.clone();
+                    if let Some(owner) = &item.owner {
+                        text.push_str(&format!(" (@{})", owner));
+                    }
+                    if let Some(deadline) = &item.deadline {
+                        text.push_str(&format!(" [Due: {}]", deadline));
+                    }
+                    serde_json::json!({ "text": text, "checked": false })
+                })
+                .collect();
+            blocks.push(EditorBlock {
+                id: Uuid::new_v4().to_string(),
+                block_type: "checklist".to_string(),
+                data: serde_json::json!({ "items": checklist_items }),
+            });
+        }
+
+        // Detailed sections
+        for section in &briefing.detailed_sections {
+            blocks.push(EditorBlock {
+                id: Uuid::new_v4().to_string(),
+                block_type: "header".to_string(),
+                data: serde_json::json!({ "text": section.heading, "level": 2 }),
+            });
+            blocks.push(EditorBlock {
+                id: Uuid::new_v4().to_string(),
+                block_type: "paragraph".to_string(),
+                data: serde_json::json!({ "text": section.content }),
+            });
+        }
+
+        let mut updated_page = page.clone();
+        updated_page.content = EditorData {
+            time: Some(chrono::Utc::now().timestamp_millis()),
+            blocks,
+            version: Some("2.30.0".to_string()),
+        };
+        storage.update_page(&updated_page)?;
+        context.created_pages.push(page.id.to_string());
+
+        log::info!("GenerateBriefing: Created briefing page '{}'", title);
+        Ok(())
+    }
+
+    /// Execute extract timeline step
+    fn execute_extract_timeline(
+        &self,
+        selector: &PageSelector,
+        notebook_target: &NotebookTarget,
+        title_template: &str,
+        context: &mut ExecutionContext,
+    ) -> Result<(), ExecutionError> {
+        let pages = self.find_pages(selector, context)?;
+        if pages.is_empty() {
+            log::info!("ExtractTimeline: No pages found matching selector");
+            return Ok(());
+        }
+
+        let ai_config = context.ai_config.clone().unwrap_or_default();
+        let study_content = self.pages_to_study_content(&pages);
+
+        let python_ai = self.python_ai.lock().map_err(|e| {
+            ExecutionError::StepFailed(format!("Failed to lock Python AI: {}", e))
+        })?;
+
+        let timeline = python_ai
+            .extract_timeline(study_content, ai_config)
+            .map_err(|e| ExecutionError::StepFailed(format!("Timeline extraction failed: {}", e)))?;
+
+        drop(python_ai);
+
+        if timeline.events.is_empty() {
+            log::info!("ExtractTimeline: No dated events found in pages");
+            return Ok(());
+        }
+
+        let notebook_id = self.resolve_notebook_target(notebook_target, context)?;
+        let storage = self.storage.lock().map_err(|e| {
+            ExecutionError::StepFailed(format!("Failed to lock storage: {}", e))
+        })?;
+
+        let title = self.variable_resolver.substitute(title_template, &context.variables);
+        let page = storage.create_page(notebook_id, title.clone())?;
+
+        // Build EditorJS blocks
+        let mut blocks = Vec::new();
+
+        blocks.push(EditorBlock {
+            id: Uuid::new_v4().to_string(),
+            block_type: "header".to_string(),
+            data: serde_json::json!({ "text": "Timeline", "level": 1 }),
+        });
+
+        if let (Some(start), Some(end)) = (&timeline.date_range_start, &timeline.date_range_end) {
+            blocks.push(EditorBlock {
+                id: Uuid::new_v4().to_string(),
+                block_type: "paragraph".to_string(),
+                data: serde_json::json!({ "text": format!("<i>Date range: {} to {}</i>", start, end) }),
+            });
+        }
+
+        for event in &timeline.events {
+            blocks.push(EditorBlock {
+                id: Uuid::new_v4().to_string(),
+                block_type: "header".to_string(),
+                data: serde_json::json!({ "text": format!("{} - {}", event.date, event.title), "level": 3 }),
+            });
+            blocks.push(EditorBlock {
+                id: Uuid::new_v4().to_string(),
+                block_type: "paragraph".to_string(),
+                data: serde_json::json!({ "text": event.description }),
+            });
+            if let Some(category) = &event.category {
+                blocks.push(EditorBlock {
+                    id: Uuid::new_v4().to_string(),
+                    block_type: "paragraph".to_string(),
+                    data: serde_json::json!({ "text": format!("<i>Category: {}</i>", category) }),
+                });
+            }
+        }
+
+        let mut updated_page = page.clone();
+        updated_page.content = EditorData {
+            time: Some(chrono::Utc::now().timestamp_millis()),
+            blocks,
+            version: Some("2.30.0".to_string()),
+        };
+        storage.update_page(&updated_page)?;
+        context.created_pages.push(page.id.to_string());
+
+        log::info!(
+            "ExtractTimeline: Created timeline page '{}' with {} events",
+            title,
+            timeline.events.len()
+        );
+        Ok(())
+    }
+
+    /// Execute extract concept map step
+    fn execute_extract_concept_map(
+        &self,
+        selector: &PageSelector,
+        notebook_target: &NotebookTarget,
+        title_template: &str,
+        max_nodes: Option<i32>,
+        context: &mut ExecutionContext,
+    ) -> Result<(), ExecutionError> {
+        let pages = self.find_pages(selector, context)?;
+        if pages.is_empty() {
+            log::info!("ExtractConceptMap: No pages found matching selector");
+            return Ok(());
+        }
+
+        let ai_config = context.ai_config.clone().unwrap_or_default();
+        let study_content = self.pages_to_study_content(&pages);
+
+        let python_ai = self.python_ai.lock().map_err(|e| {
+            ExecutionError::StepFailed(format!("Failed to lock Python AI: {}", e))
+        })?;
+
+        let concept_graph = python_ai
+            .extract_concepts(study_content, ai_config, max_nodes)
+            .map_err(|e| ExecutionError::StepFailed(format!("Concept extraction failed: {}", e)))?;
+
+        drop(python_ai);
+
+        if concept_graph.nodes.is_empty() {
+            log::info!("ExtractConceptMap: No concepts found in pages");
+            return Ok(());
+        }
+
+        let notebook_id = self.resolve_notebook_target(notebook_target, context)?;
+        let storage = self.storage.lock().map_err(|e| {
+            ExecutionError::StepFailed(format!("Failed to lock storage: {}", e))
+        })?;
+
+        let title = self.variable_resolver.substitute(title_template, &context.variables);
+        let page = storage.create_page(notebook_id, title.clone())?;
+
+        // Build EditorJS blocks - textual representation of concept map
+        let mut blocks = Vec::new();
+
+        blocks.push(EditorBlock {
+            id: Uuid::new_v4().to_string(),
+            block_type: "header".to_string(),
+            data: serde_json::json!({ "text": "Concept Map", "level": 1 }),
+        });
+
+        blocks.push(EditorBlock {
+            id: Uuid::new_v4().to_string(),
+            block_type: "paragraph".to_string(),
+            data: serde_json::json!({
+                "text": format!("<i>{} concepts, {} connections</i>",
+                    concept_graph.nodes.len(),
+                    concept_graph.links.len()
+                )
+            }),
+        });
+
+        // Group nodes by type
+        blocks.push(EditorBlock {
+            id: Uuid::new_v4().to_string(),
+            block_type: "header".to_string(),
+            data: serde_json::json!({ "text": "Concepts", "level": 2 }),
+        });
+
+        for node in &concept_graph.nodes {
+            let type_label = match node.node_type.as_str() {
+                "concept" => "[Concept]",
+                "example" => "[Example]",
+                "definition" => "[Definition]",
+                _ => "",
+            };
+            let mut text = format!("<b>{}</b> {}", node.label, type_label);
+            if let Some(desc) = &node.description {
+                text.push_str(&format!(" - {}", desc));
+            }
+            blocks.push(EditorBlock {
+                id: Uuid::new_v4().to_string(),
+                block_type: "paragraph".to_string(),
+                data: serde_json::json!({ "text": text }),
+            });
+        }
+
+        // Relationships
+        if !concept_graph.links.is_empty() {
+            blocks.push(EditorBlock {
+                id: Uuid::new_v4().to_string(),
+                block_type: "header".to_string(),
+                data: serde_json::json!({ "text": "Relationships", "level": 2 }),
+            });
+
+            let relationship_items: Vec<String> = concept_graph.links.iter()
+                .map(|link| format!("{} → {} ({})", link.source, link.target, link.relationship))
+                .collect();
+
+            blocks.push(EditorBlock {
+                id: Uuid::new_v4().to_string(),
+                block_type: "list".to_string(),
+                data: serde_json::json!({
+                    "style": "unordered",
+                    "items": relationship_items
+                }),
+            });
+        }
+
+        let mut updated_page = page.clone();
+        updated_page.content = EditorData {
+            time: Some(chrono::Utc::now().timestamp_millis()),
+            blocks,
+            version: Some("2.30.0".to_string()),
+        };
+        storage.update_page(&updated_page)?;
+        context.created_pages.push(page.id.to_string());
+
+        log::info!(
+            "ExtractConceptMap: Created concept map page '{}' with {} concepts",
+            title,
+            concept_graph.nodes.len()
+        );
         Ok(())
     }
 
