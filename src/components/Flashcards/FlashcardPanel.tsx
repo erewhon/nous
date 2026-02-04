@@ -1,12 +1,15 @@
 import { useState, useCallback, useEffect } from "react";
 import { useFlashcardStore } from "../../stores/flashcardStore";
 import { useNotebookStore } from "../../stores/notebookStore";
+import { usePageStore } from "../../stores/pageStore";
 import { DeckManager } from "./DeckManager";
 import { DeckDialog } from "./DeckDialog";
 import { CardEditor } from "./CardEditor";
 import { ReviewMode } from "./ReviewMode";
 import { ReviewPanel } from "./ReviewPanel";
+import { FlashcardGenerator } from "../StudyTools/FlashcardGenerator";
 import type { Deck, Flashcard } from "../../types/flashcard";
+import type { StudyPageContent } from "../../types/studyTools";
 
 export function FlashcardPanel() {
   const { selectedNotebookId } = useNotebookStore();
@@ -38,6 +41,11 @@ export function FlashcardPanel() {
   const [editingCard, setEditingCard] = useState<Flashcard | null>(null);
   const [reviewDeckId, setReviewDeckId] = useState<string | undefined>();
   const [reviewDeckName, setReviewDeckName] = useState<string | undefined>();
+  const [showAIGenerator, setShowAIGenerator] = useState(false);
+  const [aiGeneratorDeckId, setAiGeneratorDeckId] = useState<string | null>(null);
+
+  // Get current page for AI generation
+  const { selectedPageId, pages } = usePageStore();
 
   // Load stats when panel opens
   useEffect(() => {
@@ -188,6 +196,50 @@ export function FlashcardPanel() {
     loadStats(selectedNotebookId);
   }, [selectedNotebookId, editingCard, deleteCard, loadStats]);
 
+  // AI Generation handlers
+  const handleOpenAIGenerator = useCallback((deckId: string) => {
+    setAiGeneratorDeckId(deckId);
+    setShowAIGenerator(true);
+  }, []);
+
+  const handleAIGeneratorSuccess = useCallback((_count: number) => {
+    if (selectedNotebookId) {
+      loadStats(selectedNotebookId);
+      if (aiGeneratorDeckId) {
+        loadCards(selectedNotebookId, aiGeneratorDeckId);
+      }
+    }
+  }, [selectedNotebookId, aiGeneratorDeckId, loadStats, loadCards]);
+
+  // Get pages for AI generation
+  const getAIGeneratorPages = useCallback((): StudyPageContent[] => {
+    // Use selected page if available, otherwise use all pages
+    const selectedPage = selectedPageId ? pages.find((p) => p.id === selectedPageId) : null;
+    if (selectedPage) {
+      // Extract plain text from Editor.js blocks
+      const content = selectedPage.content?.blocks
+        ?.map((block: { data?: { text?: string } }) => block.data?.text || "")
+        .filter(Boolean)
+        .join("\n\n") || "";
+      return [{
+        pageId: selectedPage.id,
+        title: selectedPage.title,
+        content,
+        tags: selectedPage.tags || [],
+      }];
+    }
+    // Fallback to all pages in notebook
+    return pages.map((page) => ({
+      pageId: page.id,
+      title: page.title,
+      content: page.content?.blocks
+        ?.map((block: { data?: { text?: string } }) => block.data?.text || "")
+        .filter(Boolean)
+        .join("\n\n") || "",
+      tags: page.tags || [],
+    }));
+  }, [selectedPageId, pages]);
+
   if (!selectedNotebookId) return null;
 
   // Full-screen review mode
@@ -264,6 +316,7 @@ export function FlashcardPanel() {
               onStartReview={handleStartReview}
               onCreateDeck={handleCreateDeck}
               onEditDeck={handleEditDeck}
+              onAIGenerate={handleOpenAIGenerator}
             />
           </div>
         </div>
@@ -286,6 +339,19 @@ export function FlashcardPanel() {
         onSave={handleSaveCard}
         onDelete={editingCard ? handleDeleteCard : undefined}
       />
+
+      {/* AI Flashcard Generator */}
+      {showAIGenerator && aiGeneratorDeckId && (
+        <FlashcardGenerator
+          pages={getAIGeneratorPages()}
+          deckId={aiGeneratorDeckId}
+          onClose={() => {
+            setShowAIGenerator(false);
+            setAiGeneratorDeckId(null);
+          }}
+          onSuccess={handleAIGeneratorSuccess}
+        />
+      )}
     </>
   );
 }

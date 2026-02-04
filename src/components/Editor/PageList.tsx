@@ -1,7 +1,9 @@
 import { useState, useMemo, useEffect, memo, useCallback } from "react";
 import type { Page, PageType } from "../../types/page";
+import type { StudyPageContent } from "../../types/studyTools";
 import { usePageStore } from "../../stores/pageStore";
 import { useTagStore } from "../../stores/tagStore";
+import { PageContextMenu } from "./PageContextMenu";
 
 // Icon component for different page types
 function PageTypeIcon({ pageType }: { pageType: PageType }) {
@@ -67,21 +69,32 @@ interface PageListItemProps {
   page: Page;
   isSelected: boolean;
   onSelect: (pageId: string) => void;
+  onContextMenu: (page: Page, position: { x: number; y: number }) => void;
 }
 
 const PageListItem = memo(function PageListItem({
   page,
   isSelected,
   onSelect,
+  onContextMenu,
 }: PageListItemProps) {
   const handleClick = useCallback(() => {
     onSelect(page.id);
   }, [onSelect, page.id]);
 
+  const handleContextMenu = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      onContextMenu(page, { x: e.clientX, y: e.clientY });
+    },
+    [page, onContextMenu]
+  );
+
   return (
     <li>
       <button
         onClick={handleClick}
+        onContextMenu={handleContextMenu}
         className="flex w-full items-center gap-3 rounded-lg text-left transition-all p-3"
         style={{
           backgroundColor: isSelected ? "var(--color-bg-tertiary)" : "transparent",
@@ -139,6 +152,7 @@ interface PageListProps {
   selectedPageId: string | null;
   onSelectPage: (pageId: string) => void;
   notebookId: string;
+  onOpenStudyTools?: (pages: StudyPageContent[]) => void;
 }
 
 export function PageList({
@@ -146,6 +160,7 @@ export function PageList({
   selectedPageId,
   onSelectPage,
   notebookId,
+  onOpenStudyTools,
 }: PageListProps) {
   const { createPage } = usePageStore();
   const {
@@ -157,6 +172,33 @@ export function PageList({
     filterPagesByTags,
   } = useTagStore();
   const [showTagFilter, setShowTagFilter] = useState(false);
+
+  // Context menu state
+  const [contextMenu, setContextMenu] = useState<{
+    page: Page;
+    position: { x: number; y: number };
+  } | null>(null);
+
+  const handleContextMenu = useCallback(
+    (page: Page, position: { x: number; y: number }) => {
+      setContextMenu({ page, position });
+    },
+    []
+  );
+
+  const handleCloseContextMenu = useCallback(() => {
+    setContextMenu(null);
+  }, []);
+
+  const handleOpenStudyTools = useCallback(
+    (studyPages: StudyPageContent[]) => {
+      if (onOpenStudyTools) {
+        onOpenStudyTools(studyPages);
+      }
+      setContextMenu(null);
+    },
+    [onOpenStudyTools]
+  );
 
   // Build tags from pages when pages change
   useEffect(() => {
@@ -349,11 +391,22 @@ export function PageList({
                 page={page}
                 isSelected={selectedPageId === page.id}
                 onSelect={onSelectPage}
+                onContextMenu={handleContextMenu}
               />
             ))}
           </ul>
         )}
       </div>
+
+      {/* Context menu */}
+      {contextMenu && onOpenStudyTools && (
+        <PageContextMenu
+          page={contextMenu.page}
+          position={contextMenu.position}
+          onClose={handleCloseContextMenu}
+          onOpenStudyTools={handleOpenStudyTools}
+        />
+      )}
     </div>
   );
 }

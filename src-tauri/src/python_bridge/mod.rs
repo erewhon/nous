@@ -337,6 +337,233 @@ fn default_timeout() -> i64 {
     30
 }
 
+// ===== Study Tools Types =====
+
+/// Page content for study tools generation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StudyPageContent {
+    pub page_id: String,
+    pub title: String,
+    pub content: String,
+    #[serde(default)]
+    pub tags: Vec<String>,
+}
+
+/// Key concept in study guide
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KeyConcept {
+    pub term: String,
+    pub definition: String,
+}
+
+/// Section in study guide
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StudyGuideSection {
+    pub heading: String,
+    pub content: String,
+    #[serde(default)]
+    pub key_points: Vec<String>,
+}
+
+/// Practice question with answer
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PracticeQuestion {
+    pub question: String,
+    pub answer: String,
+}
+
+/// Study guide generated from content
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StudyGuide {
+    pub title: String,
+    #[serde(default)]
+    pub learning_objectives: Vec<String>,
+    #[serde(default)]
+    pub key_concepts: Vec<KeyConcept>,
+    #[serde(default)]
+    pub sections: Vec<StudyGuideSection>,
+    #[serde(default)]
+    pub practice_questions: Vec<PracticeQuestion>,
+    #[serde(default)]
+    pub summary: String,
+}
+
+/// Options for study guide generation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StudyGuideOptions {
+    #[serde(default = "default_depth")]
+    pub depth: String, // "brief", "standard", "comprehensive"
+    #[serde(default)]
+    pub focus_areas: Vec<String>,
+    #[serde(default = "default_num_questions")]
+    pub num_practice_questions: i32,
+}
+
+fn default_depth() -> String {
+    "standard".to_string()
+}
+
+fn default_num_questions() -> i32 {
+    5
+}
+
+/// FAQ item
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FAQItem {
+    pub question: String,
+    pub answer: String,
+    pub source_page_id: Option<String>,
+}
+
+/// FAQ collection
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FAQ {
+    #[serde(default)]
+    pub questions: Vec<FAQItem>,
+}
+
+/// Generated flashcard
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GeneratedFlashcard {
+    pub front: String,
+    pub back: String,
+    #[serde(default = "default_card_type")]
+    pub card_type: String, // "basic", "cloze", "reversible"
+    #[serde(default)]
+    pub tags: Vec<String>,
+}
+
+fn default_card_type() -> String {
+    "basic".to_string()
+}
+
+/// Result of flashcard generation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FlashcardGenerationResult {
+    #[serde(default)]
+    pub cards: Vec<GeneratedFlashcard>,
+    #[serde(default)]
+    pub source_page_ids: Vec<String>,
+}
+
+/// Action item in briefing
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActionItem {
+    pub description: String,
+    pub owner: Option<String>,
+    pub deadline: Option<String>,
+    pub priority: Option<String>, // "low", "medium", "high"
+}
+
+/// Briefing document
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BriefingDocument {
+    pub title: String,
+    pub executive_summary: String,
+    #[serde(default)]
+    pub key_findings: Vec<String>,
+    #[serde(default)]
+    pub recommendations: Vec<String>,
+    #[serde(default)]
+    pub action_items: Vec<ActionItem>,
+    #[serde(default)]
+    pub detailed_sections: Vec<StudyGuideSection>,
+}
+
+/// Timeline event
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TimelineEvent {
+    pub id: String,
+    pub date: String,
+    pub title: String,
+    pub description: String,
+    pub source_page_id: String,
+    pub category: Option<String>,
+}
+
+/// Timeline of events
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Timeline {
+    #[serde(default)]
+    pub events: Vec<TimelineEvent>,
+    pub date_range_start: Option<String>,
+    pub date_range_end: Option<String>,
+}
+
+/// Concept node in concept graph
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConceptNode {
+    pub id: String,
+    pub label: String,
+    #[serde(default = "default_node_type")]
+    pub node_type: String, // "concept", "example", "definition"
+    pub description: Option<String>,
+}
+
+fn default_node_type() -> String {
+    "concept".to_string()
+}
+
+/// Link between concepts
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConceptLink {
+    pub source: String,
+    pub target: String,
+    pub relationship: String,
+}
+
+/// Concept graph
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConceptGraph {
+    #[serde(default)]
+    pub nodes: Vec<ConceptNode>,
+    #[serde(default)]
+    pub links: Vec<ConceptLink>,
+}
+
+/// RAG chunk with source information for citations
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RAGChunk {
+    pub chunk_id: String,
+    pub page_id: String,
+    pub notebook_id: String,
+    pub title: String,
+    pub content: String,
+    pub score: f32,
+}
+
+/// A citation reference in a response
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Citation {
+    pub id: i32,
+    pub page_id: String,
+    pub page_title: String,
+    pub excerpt: String,
+    pub relevance_score: f32,
+}
+
+/// Response with inline citations
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CitedResponse {
+    pub content: String,
+    #[serde(default)]
+    pub citations: Vec<Citation>,
+}
+
 /// Configuration for all MCP servers in a library
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -2586,6 +2813,432 @@ impl PythonAI {
             }
 
             Ok(models)
+        })
+    }
+
+    // ===== Study Tools Methods =====
+
+    /// Generate a study guide from pages
+    pub fn generate_study_guide(
+        &self,
+        pages: Vec<StudyPageContent>,
+        config: AIConfig,
+        options: Option<StudyGuideOptions>,
+    ) -> Result<StudyGuide> {
+        Python::attach(|py| {
+            self.setup_python_path(py)?;
+
+            let study_module = py.import("nous_ai.study_tools")?;
+            let generate_fn = study_module.getattr("generate_study_guide_sync")?;
+
+            // Convert pages to Python list of dicts
+            let py_pages = PyList::empty(py);
+            for page in pages {
+                let dict = PyDict::new(py);
+                dict.set_item("page_id", page.page_id)?;
+                dict.set_item("title", page.title)?;
+                dict.set_item("content", page.content)?;
+                dict.set_item("tags", page.tags)?;
+                py_pages.append(dict)?;
+            }
+
+            // Build config dict
+            let config_dict = PyDict::new(py);
+            config_dict.set_item("provider_type", config.provider_type)?;
+            if let Some(api_key) = config.api_key {
+                config_dict.set_item("api_key", api_key)?;
+            }
+            if let Some(model) = config.model {
+                config_dict.set_item("model", model)?;
+            }
+            if let Some(temp) = config.temperature {
+                config_dict.set_item("temperature", temp)?;
+            }
+            if let Some(max_tokens) = config.max_tokens {
+                config_dict.set_item("max_tokens", max_tokens)?;
+            }
+
+            // Build kwargs
+            let kwargs = PyDict::new(py);
+            kwargs.set_item("pages", py_pages)?;
+            kwargs.set_item("config", config_dict)?;
+
+            // Add options if provided
+            if let Some(opts) = options {
+                let opts_dict = PyDict::new(py);
+                opts_dict.set_item("depth", opts.depth)?;
+                opts_dict.set_item("focus_areas", opts.focus_areas)?;
+                opts_dict.set_item("num_practice_questions", opts.num_practice_questions)?;
+                kwargs.set_item("options", opts_dict)?;
+            }
+
+            let result = generate_fn.call((), Some(&kwargs))?;
+
+            // Convert Python result to JSON string then parse
+            let json_module = py.import("json")?;
+            let dumps = json_module.getattr("dumps")?;
+            let json_str: String = dumps.call1((result,))?.extract()?;
+            let study_guide: StudyGuide = serde_json::from_str(&json_str)?;
+
+            Ok(study_guide)
+        })
+    }
+
+    /// Generate FAQ from pages
+    pub fn generate_faq(
+        &self,
+        pages: Vec<StudyPageContent>,
+        config: AIConfig,
+        num_questions: Option<i32>,
+    ) -> Result<FAQ> {
+        Python::attach(|py| {
+            self.setup_python_path(py)?;
+
+            let study_module = py.import("nous_ai.study_tools")?;
+            let generate_fn = study_module.getattr("generate_faq_sync")?;
+
+            // Convert pages to Python list of dicts
+            let py_pages = PyList::empty(py);
+            for page in pages {
+                let dict = PyDict::new(py);
+                dict.set_item("page_id", page.page_id)?;
+                dict.set_item("title", page.title)?;
+                dict.set_item("content", page.content)?;
+                dict.set_item("tags", page.tags)?;
+                py_pages.append(dict)?;
+            }
+
+            // Build config dict
+            let config_dict = PyDict::new(py);
+            config_dict.set_item("provider_type", config.provider_type)?;
+            if let Some(api_key) = config.api_key {
+                config_dict.set_item("api_key", api_key)?;
+            }
+            if let Some(model) = config.model {
+                config_dict.set_item("model", model)?;
+            }
+            if let Some(temp) = config.temperature {
+                config_dict.set_item("temperature", temp)?;
+            }
+            if let Some(max_tokens) = config.max_tokens {
+                config_dict.set_item("max_tokens", max_tokens)?;
+            }
+
+            // Build kwargs
+            let kwargs = PyDict::new(py);
+            kwargs.set_item("pages", py_pages)?;
+            kwargs.set_item("config", config_dict)?;
+            if let Some(num) = num_questions {
+                kwargs.set_item("num_questions", num)?;
+            }
+
+            let result = generate_fn.call((), Some(&kwargs))?;
+
+            let json_module = py.import("json")?;
+            let dumps = json_module.getattr("dumps")?;
+            let json_str: String = dumps.call1((result,))?.extract()?;
+            let faq: FAQ = serde_json::from_str(&json_str)?;
+
+            Ok(faq)
+        })
+    }
+
+    /// Generate flashcards from pages
+    pub fn generate_flashcards(
+        &self,
+        pages: Vec<StudyPageContent>,
+        config: AIConfig,
+        num_cards: Option<i32>,
+        card_types: Option<Vec<String>>,
+    ) -> Result<FlashcardGenerationResult> {
+        Python::attach(|py| {
+            self.setup_python_path(py)?;
+
+            let study_module = py.import("nous_ai.study_tools")?;
+            let generate_fn = study_module.getattr("generate_flashcards_sync")?;
+
+            // Convert pages to Python list of dicts
+            let py_pages = PyList::empty(py);
+            for page in pages {
+                let dict = PyDict::new(py);
+                dict.set_item("page_id", page.page_id)?;
+                dict.set_item("title", page.title)?;
+                dict.set_item("content", page.content)?;
+                dict.set_item("tags", page.tags)?;
+                py_pages.append(dict)?;
+            }
+
+            // Build config dict
+            let config_dict = PyDict::new(py);
+            config_dict.set_item("provider_type", config.provider_type)?;
+            if let Some(api_key) = config.api_key {
+                config_dict.set_item("api_key", api_key)?;
+            }
+            if let Some(model) = config.model {
+                config_dict.set_item("model", model)?;
+            }
+            if let Some(temp) = config.temperature {
+                config_dict.set_item("temperature", temp)?;
+            }
+            if let Some(max_tokens) = config.max_tokens {
+                config_dict.set_item("max_tokens", max_tokens)?;
+            }
+
+            // Build kwargs
+            let kwargs = PyDict::new(py);
+            kwargs.set_item("pages", py_pages)?;
+            kwargs.set_item("config", config_dict)?;
+            if let Some(num) = num_cards {
+                kwargs.set_item("num_cards", num)?;
+            }
+            if let Some(types) = card_types {
+                kwargs.set_item("card_types", types)?;
+            }
+
+            let result = generate_fn.call((), Some(&kwargs))?;
+
+            let json_module = py.import("json")?;
+            let dumps = json_module.getattr("dumps")?;
+            let json_str: String = dumps.call1((result,))?.extract()?;
+            let flashcards: FlashcardGenerationResult = serde_json::from_str(&json_str)?;
+
+            Ok(flashcards)
+        })
+    }
+
+    /// Generate briefing document from pages
+    pub fn generate_briefing(
+        &self,
+        pages: Vec<StudyPageContent>,
+        config: AIConfig,
+        include_action_items: Option<bool>,
+    ) -> Result<BriefingDocument> {
+        Python::attach(|py| {
+            self.setup_python_path(py)?;
+
+            let study_module = py.import("nous_ai.study_tools")?;
+            let generate_fn = study_module.getattr("generate_briefing_sync")?;
+
+            // Convert pages to Python list of dicts
+            let py_pages = PyList::empty(py);
+            for page in pages {
+                let dict = PyDict::new(py);
+                dict.set_item("page_id", page.page_id)?;
+                dict.set_item("title", page.title)?;
+                dict.set_item("content", page.content)?;
+                dict.set_item("tags", page.tags)?;
+                py_pages.append(dict)?;
+            }
+
+            // Build config dict
+            let config_dict = PyDict::new(py);
+            config_dict.set_item("provider_type", config.provider_type)?;
+            if let Some(api_key) = config.api_key {
+                config_dict.set_item("api_key", api_key)?;
+            }
+            if let Some(model) = config.model {
+                config_dict.set_item("model", model)?;
+            }
+            if let Some(temp) = config.temperature {
+                config_dict.set_item("temperature", temp)?;
+            }
+            if let Some(max_tokens) = config.max_tokens {
+                config_dict.set_item("max_tokens", max_tokens)?;
+            }
+
+            // Build kwargs
+            let kwargs = PyDict::new(py);
+            kwargs.set_item("pages", py_pages)?;
+            kwargs.set_item("config", config_dict)?;
+            if let Some(include) = include_action_items {
+                kwargs.set_item("include_action_items", include)?;
+            }
+
+            let result = generate_fn.call((), Some(&kwargs))?;
+
+            let json_module = py.import("json")?;
+            let dumps = json_module.getattr("dumps")?;
+            let json_str: String = dumps.call1((result,))?.extract()?;
+            let briefing: BriefingDocument = serde_json::from_str(&json_str)?;
+
+            Ok(briefing)
+        })
+    }
+
+    /// Extract timeline from pages
+    pub fn extract_timeline(
+        &self,
+        pages: Vec<StudyPageContent>,
+        config: AIConfig,
+    ) -> Result<Timeline> {
+        Python::attach(|py| {
+            self.setup_python_path(py)?;
+
+            let study_module = py.import("nous_ai.study_tools")?;
+            let extract_fn = study_module.getattr("extract_timeline_sync")?;
+
+            // Convert pages to Python list of dicts
+            let py_pages = PyList::empty(py);
+            for page in pages {
+                let dict = PyDict::new(py);
+                dict.set_item("page_id", page.page_id)?;
+                dict.set_item("title", page.title)?;
+                dict.set_item("content", page.content)?;
+                dict.set_item("tags", page.tags)?;
+                py_pages.append(dict)?;
+            }
+
+            // Build config dict
+            let config_dict = PyDict::new(py);
+            config_dict.set_item("provider_type", config.provider_type)?;
+            if let Some(api_key) = config.api_key {
+                config_dict.set_item("api_key", api_key)?;
+            }
+            if let Some(model) = config.model {
+                config_dict.set_item("model", model)?;
+            }
+            if let Some(temp) = config.temperature {
+                config_dict.set_item("temperature", temp)?;
+            }
+            if let Some(max_tokens) = config.max_tokens {
+                config_dict.set_item("max_tokens", max_tokens)?;
+            }
+
+            // Build kwargs
+            let kwargs = PyDict::new(py);
+            kwargs.set_item("pages", py_pages)?;
+            kwargs.set_item("config", config_dict)?;
+
+            let result = extract_fn.call((), Some(&kwargs))?;
+
+            let json_module = py.import("json")?;
+            let dumps = json_module.getattr("dumps")?;
+            let json_str: String = dumps.call1((result,))?.extract()?;
+            let timeline: Timeline = serde_json::from_str(&json_str)?;
+
+            Ok(timeline)
+        })
+    }
+
+    /// Extract concept graph from pages
+    pub fn extract_concepts(
+        &self,
+        pages: Vec<StudyPageContent>,
+        config: AIConfig,
+        max_nodes: Option<i32>,
+    ) -> Result<ConceptGraph> {
+        Python::attach(|py| {
+            self.setup_python_path(py)?;
+
+            let study_module = py.import("nous_ai.study_tools")?;
+            let extract_fn = study_module.getattr("extract_concepts_sync")?;
+
+            // Convert pages to Python list of dicts
+            let py_pages = PyList::empty(py);
+            for page in pages {
+                let dict = PyDict::new(py);
+                dict.set_item("page_id", page.page_id)?;
+                dict.set_item("title", page.title)?;
+                dict.set_item("content", page.content)?;
+                dict.set_item("tags", page.tags)?;
+                py_pages.append(dict)?;
+            }
+
+            // Build config dict
+            let config_dict = PyDict::new(py);
+            config_dict.set_item("provider_type", config.provider_type)?;
+            if let Some(api_key) = config.api_key {
+                config_dict.set_item("api_key", api_key)?;
+            }
+            if let Some(model) = config.model {
+                config_dict.set_item("model", model)?;
+            }
+            if let Some(temp) = config.temperature {
+                config_dict.set_item("temperature", temp)?;
+            }
+            if let Some(max_tokens) = config.max_tokens {
+                config_dict.set_item("max_tokens", max_tokens)?;
+            }
+
+            // Build kwargs
+            let kwargs = PyDict::new(py);
+            kwargs.set_item("pages", py_pages)?;
+            kwargs.set_item("config", config_dict)?;
+            if let Some(max) = max_nodes {
+                kwargs.set_item("max_nodes", max)?;
+            }
+
+            let result = extract_fn.call((), Some(&kwargs))?;
+
+            let json_module = py.import("json")?;
+            let dumps = json_module.getattr("dumps")?;
+            let json_str: String = dumps.call1((result,))?.extract()?;
+            let concepts: ConceptGraph = serde_json::from_str(&json_str)?;
+
+            Ok(concepts)
+        })
+    }
+
+    /// Chat with RAG context and return response with citations
+    pub fn chat_with_citations(
+        &self,
+        query: String,
+        context_chunks: Vec<RAGChunk>,
+        config: AIConfig,
+        max_citations: Option<i32>,
+    ) -> Result<CitedResponse> {
+        Python::attach(|py| {
+            self.setup_python_path(py)?;
+
+            let study_module = py.import("nous_ai.study_tools")?;
+            let chat_fn = study_module.getattr("chat_with_citations_sync")?;
+
+            // Convert chunks to Python list of dicts
+            let py_chunks = PyList::empty(py);
+            for chunk in context_chunks {
+                let dict = PyDict::new(py);
+                dict.set_item("chunk_id", chunk.chunk_id)?;
+                dict.set_item("page_id", chunk.page_id)?;
+                dict.set_item("notebook_id", chunk.notebook_id)?;
+                dict.set_item("title", chunk.title)?;
+                dict.set_item("content", chunk.content)?;
+                dict.set_item("score", chunk.score)?;
+                py_chunks.append(dict)?;
+            }
+
+            // Build config dict
+            let config_dict = PyDict::new(py);
+            config_dict.set_item("provider_type", config.provider_type)?;
+            if let Some(api_key) = config.api_key {
+                config_dict.set_item("api_key", api_key)?;
+            }
+            if let Some(model) = config.model {
+                config_dict.set_item("model", model)?;
+            }
+            if let Some(temp) = config.temperature {
+                config_dict.set_item("temperature", temp)?;
+            }
+            if let Some(max_tokens) = config.max_tokens {
+                config_dict.set_item("max_tokens", max_tokens)?;
+            }
+
+            // Build kwargs
+            let kwargs = PyDict::new(py);
+            kwargs.set_item("query", query)?;
+            kwargs.set_item("context_chunks", py_chunks)?;
+            kwargs.set_item("config", config_dict)?;
+            if let Some(max) = max_citations {
+                kwargs.set_item("max_citations", max)?;
+            }
+
+            let result = chat_fn.call((), Some(&kwargs))?;
+
+            let json_module = py.import("json")?;
+            let dumps = json_module.getattr("dumps")?;
+            let json_str: String = dumps.call1((result,))?.extract()?;
+            let response: CitedResponse = serde_json::from_str(&json_str)?;
+
+            Ok(response)
         })
     }
 }

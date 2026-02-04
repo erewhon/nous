@@ -2316,3 +2316,137 @@ export async function smartOrganizeApply(
     moves,
   });
 }
+
+// ===== Study Tools =====
+
+import type {
+  StudyGuide,
+  StudyPageContent,
+  FAQ,
+  FlashcardGenerationResult,
+  BriefingDocument,
+  Timeline,
+  ConceptGraph,
+  RAGChunk,
+  CitedResponse,
+  StudyToolsGenerationOptions,
+} from "../types/studyTools";
+
+export async function generateStudyGuide(
+  pages: StudyPageContent[],
+  options?: StudyToolsGenerationOptions & {
+    depth?: string;
+    focusAreas?: string[];
+    numPracticeQuestions?: number;
+  }
+): Promise<StudyGuide> {
+  return invoke<StudyGuide>("generate_study_guide", {
+    pages,
+    providerType: options?.providerType,
+    apiKey: options?.apiKey,
+    model: options?.model,
+    temperature: options?.temperature,
+    maxTokens: options?.maxTokens,
+    depth: options?.depth,
+    focusAreas: options?.focusAreas,
+    numPracticeQuestions: options?.numPracticeQuestions,
+  });
+}
+
+export async function generateFaq(
+  pages: StudyPageContent[],
+  numQuestions?: number,
+  options?: StudyToolsGenerationOptions
+): Promise<FAQ> {
+  return invoke<FAQ>("generate_faq", {
+    pages,
+    numQuestions,
+    providerType: options?.providerType,
+    apiKey: options?.apiKey,
+    model: options?.model,
+    temperature: options?.temperature,
+    maxTokens: options?.maxTokens,
+  });
+}
+
+export async function aiGenerateFlashcards(
+  pages: StudyPageContent[],
+  numCards?: number,
+  cardTypes?: string[],
+  options?: StudyToolsGenerationOptions
+): Promise<FlashcardGenerationResult> {
+  return invoke<FlashcardGenerationResult>("ai_generate_flashcards", {
+    pages,
+    numCards,
+    cardTypes,
+    providerType: options?.providerType,
+    apiKey: options?.apiKey,
+    model: options?.model,
+    temperature: options?.temperature,
+    maxTokens: options?.maxTokens,
+  });
+}
+
+export async function generateBriefing(
+  pages: StudyPageContent[],
+  includeActionItems?: boolean,
+  options?: StudyToolsGenerationOptions
+): Promise<BriefingDocument> {
+  return invoke<BriefingDocument>("generate_briefing", {
+    pages,
+    includeActionItems,
+    providerType: options?.providerType,
+    apiKey: options?.apiKey,
+    model: options?.model,
+    temperature: options?.temperature,
+    maxTokens: options?.maxTokens,
+  });
+}
+
+export async function extractTimeline(
+  pages: StudyPageContent[],
+  options?: StudyToolsGenerationOptions
+): Promise<Timeline> {
+  return invoke<Timeline>("extract_timeline", {
+    pages,
+    providerType: options?.providerType,
+    apiKey: options?.apiKey,
+    model: options?.model,
+    temperature: options?.temperature,
+    maxTokens: options?.maxTokens,
+  });
+}
+
+export async function extractConcepts(
+  pages: StudyPageContent[],
+  maxNodes?: number,
+  options?: StudyToolsGenerationOptions
+): Promise<ConceptGraph> {
+  return invoke<ConceptGraph>("extract_concepts", {
+    pages,
+    maxNodes,
+    providerType: options?.providerType,
+    apiKey: options?.apiKey,
+    model: options?.model,
+    temperature: options?.temperature,
+    maxTokens: options?.maxTokens,
+  });
+}
+
+export async function chatWithCitations(
+  query: string,
+  contextChunks: RAGChunk[],
+  maxCitations?: number,
+  options?: StudyToolsGenerationOptions
+): Promise<CitedResponse> {
+  return invoke<CitedResponse>("chat_with_citations", {
+    query,
+    contextChunks,
+    maxCitations,
+    providerType: options?.providerType,
+    apiKey: options?.apiKey,
+    model: options?.model,
+    temperature: options?.temperature,
+    maxTokens: options?.maxTokens,
+  });
+}

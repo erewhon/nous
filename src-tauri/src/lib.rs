@@ -349,6 +349,14 @@ pub fn run() {
             commands::ai_summarize_pages,
             commands::browser_run_task,
             commands::discover_ai_models,
+            // Study tools commands
+            commands::generate_study_guide,
+            commands::generate_faq,
+            commands::ai_generate_flashcards,
+            commands::generate_briefing,
+            commands::extract_timeline,
+            commands::extract_concepts,
+            commands::chat_with_citations,
             // Markdown commands
             commands::export_page_markdown,
             commands::import_markdown,
