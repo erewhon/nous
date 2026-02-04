@@ -541,6 +541,102 @@ Already implemented with Tantivy, may need refinement:
 
 ---
 
+## NotebookLM-like Study Tools
+
+### 33. AI-Powered Study Tools (Complete)
+
+NotebookLM-inspired features for generating study materials from notebook content.
+
+#### Content Generation
+- [x] **Study Guide Generation** - Structured learning materials from pages
+  - Learning objectives, key concepts with definitions
+  - Section summaries with key points
+  - Practice questions with answers
+  - Configurable depth (brief, standard, comprehensive)
+  - Focus areas selection
+- [x] **FAQ Generation** - Extract Q&A pairs from content
+  - Configurable number of questions
+  - Source page tracking
+  - Output to new page, prepend, or variable
+- [x] **Briefing Documents** - Executive summaries with action items
+  - Executive summary paragraph
+  - Key findings and recommendations
+  - Action items with owner, deadline, priority
+  - Detailed sections
+- [x] **Flashcard Auto-Generation** - AI-generated flashcards
+  - Integration with existing FlashcardStorage
+  - Card types: basic, cloze, reversible
+  - Configurable number of cards
+
+#### Source-Grounded Intelligence
+- [x] **Source-Cited Chat** - Q&A with clickable source citations
+  - Inline citation badges [1], [2] in responses
+  - Citation component with expandable excerpts
+  - Click to navigate to source page
+  - Relevance scoring per citation
+
+#### Visualizations (D3.js)
+- [x] **Timeline Visualization** - Chronological event display
+  - D3.js horizontal timeline with zoom/pan
+  - Category color coding
+  - Hover tooltips and click-to-select events
+  - Navigate to source pages
+- [x] **Concept Map Visualization** - Visual relationship mapping
+  - D3.js force-directed graph
+  - Node types: concept (circle), example (rectangle), definition (diamond)
+  - Draggable nodes with connection highlighting
+  - Relationship labels on edges
+
+#### UI Integration
+- [x] **Study Tools Panel** - Dedicated modal for all study tools
+  - Page selector for source content
+  - Tool grid with descriptions
+  - Generation progress and error handling
+- [x] **Page Context Menu** - Right-click menu for quick access
+  - Generate Study Guide, FAQ, Flashcards, Briefing
+  - Extract Timeline, Concept Map
+
+#### Actions System Integration
+- [x] **New ActionStep types** for automated workflows
+  - `GenerateStudyGuide` - Create study guide from page selector
+  - `GenerateFaq` - Generate FAQ with output options
+  - `GenerateFlashcards` - Add AI cards to deck
+  - `GenerateBriefing` - Executive summary with action items
+  - `ExtractTimeline` - Timeline page from dated content
+  - `ExtractConceptMap` - Concept map page from content
+
+### 34. Study Tools Enhancements (Future)
+
+#### Advanced Media Generation
+- [ ] **Infographic Generation** - Visual summaries
+  - SVG-based layout of key points and statistics
+  - AI image generation integration (DALL-E, Stable Diffusion)
+  - Export as PNG/SVG
+- [ ] **Video Generation** - Narrated presentations
+  - Auto-generate slides from study guides/briefings
+  - Integration with existing TTS infrastructure
+  - Timeline/concept map walkthroughs
+
+#### Visualization Enhancements
+- [ ] **Timeline Export** - Save as SVG/PNG/PDF
+- [ ] **Concept Map Export** - SVG/PNG and Mermaid/GraphViz formats
+- [ ] **Vertical Timeline** - Alternative layout option
+- [ ] **Hierarchical Concept Map** - Tree layout mode
+- [ ] **Cross-Notebook Knowledge Graph** - Concepts across all notebooks
+
+#### UI Enhancements
+- [ ] **Text Selection Context Menu** - Generate from highlighted text
+- [ ] **Quick Generate Dialog** - Minimal UI for fast generation
+- [ ] **AIChatPanel Citation Integration** - Citations in regular chat
+- [ ] **FlashcardStorage Direct Integration** - Add cards to decks automatically
+
+#### Built-in Action Templates
+- [ ] **Weekly Study Review** - Summarize week's notes + flashcards
+- [ ] **Exam Prep Workflow** - Study Guide → Flashcards → Practice Questions
+- [ ] **Daily Learning Summary** - Combine multiple study tools
+
+---
+
 ## iPhone Contact Activity Integration
 
 ### 32. Contact Activity Harvester (macOS)
