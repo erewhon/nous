@@ -18,6 +18,7 @@ interface KeyboardShortcuts {
   onInbox?: () => void;
   onFlashcards?: () => void;
   onZenMode?: () => void;
+  onDailyNote?: () => void;
 }
 
 // Map action names to callback property names
@@ -38,6 +39,7 @@ const ACTION_TO_CALLBACK: Record<KeybindingAction, keyof KeyboardShortcuts> = {
   inbox: "onInbox",
   flashcards: "onFlashcards",
   zenMode: "onZenMode",
+  dailyNote: "onDailyNote",
 };
 
 export function useKeyboardShortcuts(callbacks: KeyboardShortcuts) {

@@ -88,6 +88,10 @@ export const PageSelectorSchema = z.object({
   archivedOnly: z.boolean().default(false),
   inFolder: z.string().optional(),
   fromTemplate: z.string().optional(),
+  /** Filter to only Daily Notes (true) or only non-Daily Notes (false) */
+  isDailyNote: z.boolean().optional(),
+  /** Filter by specific daily note date (YYYY-MM-DD format, or "today"/"yesterday") */
+  dailyNoteDate: z.string().optional(),
 });
 
 export type PageSelector = z.infer<typeof PageSelectorSchema>;

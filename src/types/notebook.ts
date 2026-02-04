@@ -2,6 +2,7 @@ import { z } from "zod";
 import { EncryptionConfigSchema } from "./encryption";
 import { SyncConfigSchema } from "./sync";
 import { SystemPromptModeSchema } from "./page";
+import { DailyNotesConfigSchema } from "./dailyNotes";
 
 export const NotebookTypeSchema = z.enum(["standard", "zettelkasten"]);
 export type NotebookType = z.infer<typeof NotebookTypeSchema>;
@@ -29,6 +30,7 @@ export const NotebookSchema = z.object({
   isPinned: z.boolean().default(false),
   position: z.number().default(0),
   pageSortBy: PageSortOptionSchema.optional(),
+  dailyNotesConfig: DailyNotesConfigSchema.optional(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });

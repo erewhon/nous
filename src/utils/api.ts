@@ -118,6 +118,8 @@ export async function updatePage(
       | "chat";
     fileExtension?: string | null;
     isFavorite?: boolean;
+    isDailyNote?: boolean;
+    dailyNoteDate?: string | null; // "YYYY-MM-DD" format, null to clear
   },
   commit?: boolean // Whether to create a git commit (default: false, use true for explicit saves)
 ): Promise<Page> {
@@ -139,6 +141,10 @@ export async function updatePage(
   if (updates.fileExtension !== undefined)
     params.fileExtension = updates.fileExtension;
   if (updates.isFavorite !== undefined) params.isFavorite = updates.isFavorite;
+  if (updates.isDailyNote !== undefined)
+    params.isDailyNote = updates.isDailyNote;
+  if (updates.dailyNoteDate !== undefined)
+    params.dailyNoteDate = updates.dailyNoteDate;
 
   return invoke<Page>("update_page", params);
 }
@@ -2568,4 +2574,69 @@ export async function deleteNotebookMediaAsset(
   assetPath: string
 ): Promise<void> {
   return invoke("delete_notebook_media_asset", { notebookId, assetPath });
+}
+
+// ===== Daily Notes API =====
+
+/**
+ * Get the daily note for a specific date in a notebook
+ */
+export async function getDailyNote(
+  notebookId: string,
+  date: string // "YYYY-MM-DD" format
+): Promise<Page | null> {
+  return invoke<Page | null>("get_daily_note", { notebookId, date });
+}
+
+/**
+ * Create a daily note for a specific date
+ */
+export async function createDailyNote(
+  notebookId: string,
+  date: string, // "YYYY-MM-DD" format
+  templateId?: string
+): Promise<Page> {
+  return invoke<Page>("create_daily_note", { notebookId, date, templateId });
+}
+
+/**
+ * List all daily notes in a notebook, optionally filtered by date range
+ */
+export async function listDailyNotes(
+  notebookId: string,
+  startDate?: string, // "YYYY-MM-DD" format
+  endDate?: string // "YYYY-MM-DD" format
+): Promise<Page[]> {
+  return invoke<Page[]>("list_daily_notes", { notebookId, startDate, endDate });
+}
+
+/**
+ * Get or create today's daily note
+ */
+export async function getOrCreateTodayDailyNote(
+  notebookId: string,
+  templateId?: string
+): Promise<Page> {
+  return invoke<Page>("get_or_create_today_daily_note", { notebookId, templateId });
+}
+
+/**
+ * Mark an existing page as a daily note
+ */
+export async function markAsDailyNote(
+  notebookId: string,
+  pageId: string,
+  date: string // "YYYY-MM-DD" format
+): Promise<Page> {
+  return invoke<Page>("mark_as_daily_note", { notebookId, pageId, date });
+}
+
+/**
+ * Unmark a page as a daily note
+ */
+export async function unmarkDailyNote(
+  notebookId: string,
+  pageId: string
+): Promise<Page> {
+  return invoke<Page>("unmark_daily_note", { notebookId, pageId });
 }

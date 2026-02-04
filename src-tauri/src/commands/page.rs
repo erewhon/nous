@@ -143,6 +143,8 @@ pub fn update_page(
     page_type: Option<String>,
     file_extension: Option<String>,
     is_favorite: Option<bool>,
+    is_daily_note: Option<bool>,
+    daily_note_date: Option<Option<String>>, // Some(Some("YYYY-MM-DD")) to set, Some(None) to clear
     #[allow(unused_variables)]
     commit: Option<bool>, // Whether to create a git commit (default: false)
 ) -> CommandResult<Page> {
@@ -223,6 +225,14 @@ pub fn update_page(
     // Set is_favorite if provided
     if let Some(favorite) = is_favorite {
         page.is_favorite = favorite;
+    }
+    // Set daily note fields if provided
+    if let Some(is_daily) = is_daily_note {
+        page.is_daily_note = is_daily;
+    }
+    // Allow setting daily_note_date (Some(Some(date)) to set, Some(None) to clear)
+    if let Some(date) = daily_note_date {
+        page.daily_note_date = date;
     }
     page.updated_at = chrono::Utc::now();
 

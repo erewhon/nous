@@ -1461,6 +1461,8 @@ impl FileStorage {
             template_id: None,
             deleted_at: None,
             is_favorite: false,
+            is_daily_note: false,
+            daily_note_date: None,
             created_at: now,
             updated_at: now,
         };

@@ -102,6 +102,11 @@ pub struct PageSelector {
     pub in_folder: Option<String>,
     /// Filter by template ID the page was created from
     pub from_template: Option<String>,
+    /// Filter to only Daily Notes (true) or only non-Daily Notes (false)
+    pub is_daily_note: Option<bool>,
+    /// Filter by specific daily note date (YYYY-MM-DD format)
+    /// Use "today", "yesterday", or specific date string
+    pub daily_note_date: Option<String>,
 }
 
 // ===== Page Destination =====

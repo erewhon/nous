@@ -1,0 +1,422 @@
+import { useEffect, useCallback } from "react";
+import { useDailyNotesStore } from "../../stores/dailyNotesStore";
+import { useNotebookStore } from "../../stores/notebookStore";
+import { usePageStore } from "../../stores/pageStore";
+import { useTemplateStore } from "../../stores/templateStore";
+import { DailyNotesCalendar } from "./DailyNotesCalendar";
+import { DailyNotesList } from "./DailyNotesList";
+import type { Page, EditorData } from "../../types/page";
+
+interface DailyNotesPanelProps {
+  isOpen?: boolean;
+  onClose?: () => void;
+}
+
+const MONTH_NAMES = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
+
+function formatSelectedDate(dateStr: string): string {
+  const [year, month, day] = dateStr.split("-");
+  const monthIndex = parseInt(month, 10) - 1;
+  return `${MONTH_NAMES[monthIndex]} ${parseInt(day, 10)}, ${year}`;
+}
+
+export function DailyNotesPanel({ isOpen: isOpenProp, onClose: onCloseProp }: DailyNotesPanelProps) {
+  const {
+    isPanelOpen,
+    isLoading,
+    selectedDate,
+    dailyNotes,
+    datesWithNotes,
+    closePanel,
+    selectDate,
+    goToToday,
+    goToPreviousDay,
+    goToNextDay,
+    loadDailyNotes,
+    openOrCreateDailyNote,
+  } = useDailyNotesStore();
+
+  const { selectedNotebookId } = useNotebookStore();
+  const { selectPage } = usePageStore();
+
+  const isOpen = isOpenProp !== undefined ? isOpenProp : isPanelOpen;
+  const handleClose = onCloseProp || closePanel;
+
+  // Load daily notes when panel opens or notebook changes
+  useEffect(() => {
+    if (isOpen && selectedNotebookId) {
+      loadDailyNotes(selectedNotebookId);
+    }
+  }, [isOpen, selectedNotebookId, loadDailyNotes]);
+
+  // Reload when month changes
+  const handleMonthChange = useCallback(
+    (month: string) => {
+      if (selectedNotebookId) {
+        loadDailyNotes(selectedNotebookId, month);
+      }
+      selectDate(month);
+    },
+    [selectedNotebookId, loadDailyNotes, selectDate]
+  );
+
+  // Open or create note for selected date
+  const handleOpenNote = useCallback(async () => {
+    if (!selectedNotebookId) return;
+
+    try {
+      // Check if note already exists before creating
+      const existingNote = datesWithNotes.has(selectedDate);
+      const note = await openOrCreateDailyNote(selectedNotebookId, selectedDate);
+
+      // Add the note to the page store if not already present, then select it
+      const { pages, panes, activePaneId, updatePageContent } = usePageStore.getState();
+      const existingPage = pages.find((p) => p.id === note.id);
+
+      if (!existingPage) {
+        // Add the new page to the store and open it in the active pane
+        const activePaneIdToUse = activePaneId || panes[0]?.id;
+        usePageStore.setState((state) => {
+          const newPages = [note, ...state.pages.filter((p) => p.id !== note.id)];
+          const newPanes = state.panes.map((pane) => {
+            if (pane.id !== activePaneIdToUse) return pane;
+            // Add to tabs if not already there
+            if (pane.tabs.find((t) => t.pageId === note.id)) {
+              return { ...pane, pageId: note.id };
+            }
+            return {
+              ...pane,
+              pageId: note.id,
+              tabs: [...pane.tabs, { pageId: note.id, title: note.title, isPinned: false }],
+            };
+          });
+          return { pages: newPages, panes: newPanes, selectedPageId: note.id };
+        });
+
+        // If this is a newly created note (not existing), apply template content
+        if (!existingNote && note.templateId) {
+          const template = useTemplateStore.getState().templates.find(
+            (t) => t.id === note.templateId
+          );
+          if (template && template.content.blocks.length > 0) {
+            // Deep clone the content and generate new block IDs
+            const contentWithNewIds: EditorData = {
+              time: Date.now(),
+              version: template.content.version,
+              blocks: template.content.blocks.map((block) => ({
+                ...block,
+                id: crypto.randomUUID(),
+                data: { ...block.data },
+              })),
+            };
+            // Apply the template content
+            await updatePageContent(selectedNotebookId, note.id, contentWithNewIds);
+            // Update the local page with the new content
+            usePageStore.setState((state) => ({
+              pages: state.pages.map((p) =>
+                p.id === note.id ? { ...p, content: contentWithNewIds } : p
+              ),
+            }));
+          }
+        }
+      } else {
+        selectPage(note.id);
+      }
+    } catch (err) {
+      console.error("Failed to open daily note:", err);
+    }
+  }, [selectedNotebookId, selectedDate, openOrCreateDailyNote, selectPage, datesWithNotes]);
+
+  // Handle clicking on a note in the list
+  const handleNoteSelect = useCallback(
+    (note: Page) => {
+      if (note.dailyNoteDate) {
+        selectDate(note.dailyNoteDate);
+      }
+
+      // Ensure the note is in the page store before selecting
+      const { pages, panes, activePaneId } = usePageStore.getState();
+      const existingPage = pages.find((p) => p.id === note.id);
+
+      if (!existingPage) {
+        // Add the page to the store and open it in the active pane
+        const activePaneIdToUse = activePaneId || panes[0]?.id;
+        usePageStore.setState((state) => {
+          const newPages = [note, ...state.pages.filter((p) => p.id !== note.id)];
+          const newPanes = state.panes.map((pane) => {
+            if (pane.id !== activePaneIdToUse) return pane;
+            if (pane.tabs.find((t) => t.pageId === note.id)) {
+              return { ...pane, pageId: note.id };
+            }
+            return {
+              ...pane,
+              pageId: note.id,
+              tabs: [...pane.tabs, { pageId: note.id, title: note.title, isPinned: false }],
+            };
+          });
+          return { pages: newPages, panes: newPanes, selectedPageId: note.id };
+        });
+      } else {
+        selectPage(note.id);
+      }
+    },
+    [selectDate, selectPage]
+  );
+
+  const today = new Date().toISOString().split("T")[0];
+  const isToday = selectedDate === today;
+  const hasNoteForSelectedDate = datesWithNotes.has(selectedDate);
+
+  if (!isOpen) return null;
+
+  return (
+    <div
+      className="fixed bottom-0 right-0 top-0 z-40 flex flex-col border-l shadow-lg"
+      style={{
+        width: "320px",
+        backgroundColor: "var(--color-bg-primary)",
+        borderColor: "var(--color-border)",
+      }}
+    >
+      {/* Header */}
+      <div
+        className="flex items-center justify-between border-b px-4 py-3"
+        style={{ borderColor: "var(--color-border)" }}
+      >
+        <div className="flex items-center gap-2">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            style={{ color: "var(--color-accent)" }}
+          >
+            <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+            <line x1="16" y1="2" x2="16" y2="6" />
+            <line x1="8" y1="2" x2="8" y2="6" />
+            <line x1="3" y1="10" x2="21" y2="10" />
+          </svg>
+          <span
+            className="text-sm font-semibold"
+            style={{ color: "var(--color-text-primary)" }}
+          >
+            Daily Notes
+          </span>
+        </div>
+        <button
+          onClick={handleClose}
+          className="flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
+          style={{ color: "var(--color-text-muted)" }}
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
+      </div>
+
+      {/* Date navigation */}
+      <div
+        className="flex items-center justify-between border-b px-4 py-2"
+        style={{ borderColor: "var(--color-border)" }}
+      >
+        <button
+          onClick={goToPreviousDay}
+          className="flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
+          style={{ color: "var(--color-text-muted)" }}
+          title="Previous day"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <polyline points="15 18 9 12 15 6" />
+          </svg>
+        </button>
+
+        <div className="flex items-center gap-2">
+          <span
+            className="text-sm font-medium"
+            style={{ color: "var(--color-text-primary)" }}
+          >
+            {formatSelectedDate(selectedDate)}
+          </span>
+          {!isToday && (
+            <button
+              onClick={goToToday}
+              className="rounded-md px-2 py-0.5 text-xs transition-colors hover:bg-[--color-bg-tertiary]"
+              style={{ color: "var(--color-accent)" }}
+            >
+              Today
+            </button>
+          )}
+        </div>
+
+        <button
+          onClick={goToNextDay}
+          className="flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
+          style={{ color: "var(--color-text-muted)" }}
+          title="Next day"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <polyline points="9 18 15 12 9 6" />
+          </svg>
+        </button>
+      </div>
+
+      {/* Calendar */}
+      <div className="border-b px-4 py-3" style={{ borderColor: "var(--color-border)" }}>
+        <DailyNotesCalendar
+          selectedDate={selectedDate}
+          datesWithNotes={datesWithNotes}
+          onSelectDate={selectDate}
+          onMonthChange={handleMonthChange}
+        />
+      </div>
+
+      {/* Open/Create button */}
+      <div className="border-b px-4 py-3" style={{ borderColor: "var(--color-border)" }}>
+        <button
+          onClick={handleOpenNote}
+          disabled={isLoading || !selectedNotebookId}
+          className="flex w-full items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-medium text-white transition-colors disabled:opacity-50"
+          style={{ backgroundColor: "var(--color-accent)" }}
+        >
+          {isLoading ? (
+            <>
+              <svg
+                className="h-4 w-4 animate-spin"
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+              >
+                <circle
+                  className="opacity-25"
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  strokeWidth="4"
+                />
+                <path
+                  className="opacity-75"
+                  fill="currentColor"
+                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                />
+              </svg>
+              Loading...
+            </>
+          ) : hasNoteForSelectedDate ? (
+            <>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+                <polyline points="14,2 14,8 20,8" />
+              </svg>
+              Open Note
+            </>
+          ) : (
+            <>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+              Create Daily Note
+            </>
+          )}
+        </button>
+      </div>
+
+      {/* Recent notes list */}
+      <div className="flex-1 overflow-y-auto px-3 py-3">
+        <div
+          className="mb-2 px-1 text-xs font-medium uppercase tracking-wide"
+          style={{ color: "var(--color-text-muted)" }}
+        >
+          Recent Daily Notes
+        </div>
+        <DailyNotesList
+          notes={dailyNotes}
+          selectedDate={selectedDate}
+          onSelectNote={handleNoteSelect}
+        />
+      </div>
+
+      {/* Footer with hint */}
+      {!selectedNotebookId && (
+        <div
+          className="border-t px-4 py-2 text-center text-xs"
+          style={{
+            borderColor: "var(--color-border)",
+            color: "var(--color-text-muted)",
+          }}
+        >
+          Select a notebook to use daily notes
+        </div>
+      )}
+    </div>
+  );
+}

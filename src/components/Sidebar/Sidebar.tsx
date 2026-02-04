@@ -6,6 +6,7 @@ import { useInboxStore } from "../../stores/inboxStore";
 import { useFlashcardStore } from "../../stores/flashcardStore";
 import { useGoalsStore } from "../../stores/goalsStore";
 import { useThemeStore } from "../../stores/themeStore";
+import { useDailyNotesStore } from "../../stores/dailyNotesStore";
 import { NotebookList } from "../NotebookList/NotebookList";
 import { LibrarySwitcher } from "../Library";
 
@@ -22,6 +23,7 @@ export function Sidebar({ width = 256 }: SidebarProps) {
   const { summary, openQuickCapture, openInboxPanel } = useInboxStore();
   const { togglePanel: toggleFlashcards, stats: flashcardStats } = useFlashcardStore();
   const { summary: goalsSummary, togglePanel: toggleGoals } = useGoalsStore();
+  const { togglePanel: toggleDailyNotes } = useDailyNotesStore();
   const autoHidePanels = useThemeStore((state) => state.autoHidePanels);
   const setAutoHidePanels = useThemeStore((state) => state.setAutoHidePanels);
   const showRecentPages = useThemeStore((state) => state.showRecentPages);
@@ -367,12 +369,12 @@ export function Sidebar({ width = 256 }: SidebarProps) {
         className="border-t px-4 py-3"
         style={{ borderColor: "var(--color-border)" }}
       >
-        {/* Tool buttons - arranged in a grid */}
-        <div className="grid grid-cols-8 gap-1">
+        {/* Tool buttons - arranged in a flex grid */}
+        <div className="flex flex-wrap justify-center gap-1">
           {/* Quick Capture */}
           <button
             onClick={openQuickCapture}
-            className="flex h-8 w-full items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
+            className="flex h-8 w-8 items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
             style={{ color: "var(--color-text-muted)" }}
             title="Quick Capture (⌘⇧C)"
           >
@@ -393,7 +395,7 @@ export function Sidebar({ width = 256 }: SidebarProps) {
           {/* Inbox */}
           <button
             onClick={openInboxPanel}
-            className="relative flex h-8 w-full items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
+            className="relative flex h-8 w-8 items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
             style={{ color: "var(--color-text-muted)" }}
             title="Inbox (⌘⇧I)"
           >
@@ -432,7 +434,7 @@ export function Sidebar({ width = 256 }: SidebarProps) {
                 })
               );
             }}
-            className="flex h-8 w-full items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
+            className="flex h-8 w-8 items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
             style={{ color: "var(--color-text-muted)" }}
             title="AI Chat (⌘⇧A)"
           >
@@ -453,7 +455,7 @@ export function Sidebar({ width = 256 }: SidebarProps) {
           {/* Actions */}
           <button
             onClick={openActionLibrary}
-            className="flex h-8 w-full items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
+            className="flex h-8 w-8 items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
             style={{ color: "var(--color-text-muted)" }}
             title="Actions (⌘⇧X)"
           >
@@ -474,7 +476,7 @@ export function Sidebar({ width = 256 }: SidebarProps) {
           {/* Flashcards */}
           <button
             onClick={toggleFlashcards}
-            className="relative flex h-8 w-full items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
+            className="relative flex h-8 w-8 items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
             style={{ color: "var(--color-text-muted)" }}
             title="Flashcards (⌘⇧F)"
           >
@@ -504,7 +506,7 @@ export function Sidebar({ width = 256 }: SidebarProps) {
           {/* Goals */}
           <button
             onClick={toggleGoals}
-            className="relative flex h-8 w-full items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
+            className="relative flex h-8 w-8 items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
             style={{ color: "var(--color-text-muted)" }}
             title="Goals"
           >
@@ -536,6 +538,30 @@ export function Sidebar({ width = 256 }: SidebarProps) {
               </span>
             )}
           </button>
+          {/* Daily Notes */}
+          <button
+            onClick={toggleDailyNotes}
+            className="flex h-8 w-8 items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
+            style={{ color: "var(--color-text-muted)" }}
+            title="Daily Notes (⌘⇧D)"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="15"
+              height="15"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+              <line x1="16" y1="2" x2="16" y2="6" />
+              <line x1="8" y1="2" x2="8" y2="6" />
+              <line x1="3" y1="10" x2="21" y2="10" />
+            </svg>
+          </button>
           {/* Graph View */}
           <button
             onClick={() => {
@@ -547,7 +573,7 @@ export function Sidebar({ width = 256 }: SidebarProps) {
                 })
               );
             }}
-            className="flex h-8 w-full items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
+            className="flex h-8 w-8 items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
             style={{ color: "var(--color-text-muted)" }}
             title="Graph View (⌘G)"
           >
@@ -580,7 +606,7 @@ export function Sidebar({ width = 256 }: SidebarProps) {
                 })
               );
             }}
-            className="flex h-8 w-full items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
+            className="flex h-8 w-8 items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
             style={{ color: "var(--color-text-muted)" }}
             title="Settings (⌘,)"
           >

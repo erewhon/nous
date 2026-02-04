@@ -659,6 +659,13 @@ pub fn run() {
             // Smart organize commands
             commands::smart_organize_suggest,
             commands::smart_organize_apply,
+            // Daily notes commands
+            commands::get_daily_note,
+            commands::create_daily_note,
+            commands::list_daily_notes,
+            commands::get_or_create_today_daily_note,
+            commands::mark_as_daily_note,
+            commands::unmark_daily_note,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

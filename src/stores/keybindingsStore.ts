@@ -18,7 +18,8 @@ export type KeybindingAction =
   | "quickCapture"
   | "inbox"
   | "flashcards"
-  | "zenMode";
+  | "zenMode"
+  | "dailyNote";
 
 // Keybinding definition
 export interface Keybinding {
@@ -145,6 +146,13 @@ export const DEFAULT_KEYBINDINGS: Keybinding[] = [
     label: "Zen Mode",
     description: "Toggle distraction-free writing mode",
     key: ".",
+    modifiers: { ctrl: true, shift: true, alt: false },
+  },
+  {
+    action: "dailyNote",
+    label: "Daily Note",
+    description: "Open today's daily note",
+    key: "d",
     modifiers: { ctrl: true, shift: true, alt: false },
   },
 ];

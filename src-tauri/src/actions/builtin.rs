@@ -19,6 +19,7 @@ pub fn get_builtin_actions() -> Vec<Action> {
         create_weekly_review_action(),
         create_carry_forward_action(),
         create_weekly_outcomes_carry_forward_action(),
+        create_carry_forward_daily_notes_action(),
     ]
 }
 
@@ -407,6 +408,71 @@ fn create_weekly_outcomes_carry_forward_action() -> Action {
     }
 }
 
+/// Carry Forward Daily Notes action - copies incomplete items from yesterday's daily note to today's
+fn create_carry_forward_daily_notes_action() -> Action {
+    let id = Uuid::parse_str("00000000-0000-0000-0001-000000000008").unwrap();
+
+    Action {
+        id,
+        name: "Carry Forward Daily Notes".to_string(),
+        description: "Copy incomplete checklist items from yesterday's daily note to today's daily note"
+            .to_string(),
+        icon: Some("calendar-arrow-right".to_string()),
+        category: ActionCategory::DailyRoutines,
+        triggers: vec![
+            ActionTrigger::Manual,
+            ActionTrigger::AiChat {
+                keywords: vec![
+                    "carry forward daily".to_string(),
+                    "daily note carry".to_string(),
+                    "yesterday daily note".to_string(),
+                    "carry tasks from yesterday".to_string(),
+                ],
+            },
+        ],
+        steps: vec![ActionStep::CarryForwardItems {
+            source_selector: PageSelector {
+                notebook: Some(NotebookTarget::Current),
+                is_daily_note: Some(true),
+                daily_note_date: Some("yesterday".to_string()),
+                ..Default::default()
+            },
+            destination: NotebookTarget::Current,
+            title_template: "{{dayOfWeek}}, {{date}}".to_string(),
+            template_id: Some("daily-journal".to_string()),
+            find_existing: Some(PageSelector {
+                notebook: Some(NotebookTarget::Current),
+                is_daily_note: Some(true),
+                daily_note_date: Some("today".to_string()),
+                ..Default::default()
+            }),
+            insert_after_section: Some("Today's Goals".to_string()),
+        }],
+        enabled: true,
+        is_built_in: true,
+        variables: vec![
+            ActionVariable {
+                name: "date".to_string(),
+                description: "Today's date".to_string(),
+                default_value: None,
+                variable_type: VariableType::CurrentDateFormatted {
+                    format: "%B %d, %Y".to_string(),
+                },
+            },
+            ActionVariable {
+                name: "dayOfWeek".to_string(),
+                description: "Day of the week".to_string(),
+                default_value: None,
+                variable_type: VariableType::DayOfWeek,
+            },
+        ],
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+        last_run: None,
+        next_run: None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -414,7 +480,7 @@ mod tests {
     #[test]
     fn test_builtin_actions_created() {
         let actions = get_builtin_actions();
-        assert_eq!(actions.len(), 7);
+        assert_eq!(actions.len(), 8);
     }
 
     #[test]

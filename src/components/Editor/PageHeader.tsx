@@ -12,6 +12,8 @@ import {
   checkExternalChanges,
   syncFromExternalEditor,
   endExternalEditSession,
+  markAsDailyNote,
+  unmarkDailyNote,
   type EditorConfig,
   type EditSession,
 } from "../../utils/api";
@@ -74,6 +76,10 @@ export function PageHeader({
   const [showEditorPicker, setShowEditorPicker] = useState(false);
   const [hasExternalChanges, setHasExternalChanges] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [showDailyNoteDialog, setShowDailyNoteDialog] = useState(false);
+  const [dailyNoteDate, setDailyNoteDate] = useState(
+    new Date().toISOString().split("T")[0]
+  );
   const inputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const {
@@ -221,6 +227,36 @@ export function PageHeader({
   const handleUnarchive = async () => {
     setIsMenuOpen(false);
     await unarchivePage(page.notebookId, page.id);
+  };
+
+  const handleMarkAsDailyNote = async () => {
+    try {
+      await markAsDailyNote(page.notebookId, page.id, dailyNoteDate);
+      toast.success(`Marked as daily note for ${dailyNoteDate}`);
+      setShowDailyNoteDialog(false);
+      // Refresh the page to show updated state
+      selectPage(page.id);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to mark as daily note";
+      toast.error(message);
+    }
+  };
+
+  const handleUnmarkDailyNote = async () => {
+    setIsMenuOpen(false);
+    try {
+      await unmarkDailyNote(page.notebookId, page.id);
+      toast.success("Removed daily note marking");
+      // Refresh the page to show updated state
+      selectPage(page.id);
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Failed to unmark as daily note";
+      toast.error(message);
+    }
   };
 
   const handleOpenInEditor = async (editor?: EditorConfig) => {
@@ -473,6 +509,18 @@ export function PageHeader({
                     <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
                   </svg>
                   AI Prompt
+                </span>
+              )}
+              {page.isDailyNote && (
+                <span
+                  className="rounded-full px-2.5 py-0.5 text-xs font-medium"
+                  style={{
+                    backgroundColor: "rgba(34, 197, 94, 0.15)",
+                    color: "rgb(34, 197, 94)",
+                  }}
+                  title={`Daily Note: ${page.dailyNoteDate}`}
+                >
+                  Daily Note
                 </span>
               )}
               {page.isArchived && (
@@ -967,6 +1015,60 @@ export function PageHeader({
                   Archive Page
                 </button>
               )}
+              {/* Daily Note options */}
+              {page.isDailyNote ? (
+                <button
+                  onClick={handleUnmarkDailyNote}
+                  className="flex w-full items-center gap-3 px-4 py-2 text-left text-sm transition-colors hover:opacity-80"
+                  style={{ color: "var(--color-text-muted)" }}
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+                    <line x1="16" y1="2" x2="16" y2="6" />
+                    <line x1="8" y1="2" x2="8" y2="6" />
+                    <line x1="3" y1="10" x2="21" y2="10" />
+                    <line x1="9" y1="16" x2="15" y2="16" />
+                  </svg>
+                  Unmark as Daily Note
+                </button>
+              ) : (
+                <button
+                  onClick={() => {
+                    setIsMenuOpen(false);
+                    setShowDailyNoteDialog(true);
+                  }}
+                  className="flex w-full items-center gap-3 px-4 py-2 text-left text-sm transition-colors hover:opacity-80"
+                  style={{ color: "var(--color-text-secondary)" }}
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+                    <line x1="16" y1="2" x2="16" y2="6" />
+                    <line x1="8" y1="2" x2="8" y2="6" />
+                    <line x1="3" y1="10" x2="21" y2="10" />
+                  </svg>
+                  Mark as Daily Note
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -1273,6 +1375,67 @@ export function PageHeader({
         pageId={page.id}
         pageTitle={page.title || "Untitled"}
       />
+
+      {/* Mark as Daily Note Dialog */}
+      {showDailyNoteDialog && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center"
+          onClick={() => setShowDailyNoteDialog(false)}
+        >
+          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
+          <div
+            className="relative w-full max-w-sm rounded-xl border p-6 shadow-2xl"
+            style={{
+              backgroundColor: "var(--color-bg-panel)",
+              borderColor: "var(--color-border)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3
+              className="mb-4 text-lg font-semibold"
+              style={{ color: "var(--color-text-primary)" }}
+            >
+              Mark as Daily Note
+            </h3>
+            <p
+              className="mb-4 text-sm"
+              style={{ color: "var(--color-text-muted)" }}
+            >
+              Select the date for this daily note:
+            </p>
+            <input
+              type="date"
+              value={dailyNoteDate}
+              onChange={(e) => setDailyNoteDate(e.target.value)}
+              className="mb-4 w-full rounded-lg border px-3 py-2 text-sm outline-none transition-colors focus:border-[--color-accent]"
+              style={{
+                backgroundColor: "var(--color-bg-secondary)",
+                borderColor: "var(--color-border)",
+                color: "var(--color-text-primary)",
+              }}
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setShowDailyNoteDialog(false)}
+                className="rounded-lg px-4 py-2 text-sm font-medium transition-colors hover:opacity-80"
+                style={{
+                  backgroundColor: "var(--color-bg-tertiary)",
+                  color: "var(--color-text-secondary)",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleMarkAsDailyNote}
+                className="rounded-lg px-4 py-2 text-sm font-medium text-white transition-colors hover:opacity-90"
+                style={{ backgroundColor: "var(--color-accent)" }}
+              >
+                Mark as Daily Note
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

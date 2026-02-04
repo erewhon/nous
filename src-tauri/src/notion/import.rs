@@ -637,6 +637,7 @@ pub fn import_notion_zip(
         is_pinned: false,
         position: 0,
         page_sort_by: None,
+        daily_notes_config: None,
         created_at: now,
         updated_at: now,
     };
@@ -962,6 +963,7 @@ where
         is_pinned: false,
         position: 0,
         page_sort_by: None,
+        daily_notes_config: None,
         created_at: now,
         updated_at: now,
     };

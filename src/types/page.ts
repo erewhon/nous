@@ -105,6 +105,9 @@ export const PageSchema = z.object({
   deletedAt: z.string().datetime().nullable().optional(), // When page was moved to trash (null = not deleted)
   // Favorites
   isFavorite: z.boolean().default(false),
+  // Daily notes
+  isDailyNote: z.boolean().default(false),
+  dailyNoteDate: z.string().nullable().optional(), // "YYYY-MM-DD" format
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });

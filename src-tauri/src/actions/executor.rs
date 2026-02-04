@@ -2241,6 +2241,26 @@ impl ActionExecutor {
                     }
                 }
 
+                // Daily Notes filter
+                if let Some(is_daily) = selector.is_daily_note {
+                    if p.is_daily_note != is_daily {
+                        return false;
+                    }
+                }
+
+                // Daily Note date filter
+                if let Some(date_filter) = &selector.daily_note_date {
+                    // Resolve special values
+                    let target_date = match date_filter.to_lowercase().as_str() {
+                        "today" => now.format("%Y-%m-%d").to_string(),
+                        "yesterday" => (now - chrono::Duration::days(1)).format("%Y-%m-%d").to_string(),
+                        _ => date_filter.clone(),
+                    };
+                    if p.daily_note_date.as_ref() != Some(&target_date) {
+                        return false;
+                    }
+                }
+
                 true
             })
             .collect();

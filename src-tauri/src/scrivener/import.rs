@@ -608,6 +608,7 @@ pub fn import_scrivener_project(
         is_pinned: false,
         position: 0,
         page_sort_by: None,
+        daily_notes_config: None,
         created_at: now,
         updated_at: now,
     };
@@ -680,6 +681,8 @@ pub fn import_scrivener_project(
             template_id: None,
             deleted_at: None,
             is_favorite: false,
+            is_daily_note: false,
+            daily_note_date: None,
             created_at: now,
             updated_at: now,
         };

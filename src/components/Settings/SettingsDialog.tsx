@@ -8,6 +8,7 @@ import { MCPServersSettings } from "./MCPServersSettings";
 import { RAGSettings } from "./RAGSettings";
 import { BackupScheduleSettings } from "./BackupScheduleSettings";
 import { ExternalSourcesSettings } from "./ExternalSourcesSettings";
+import { DailyNotesSettings } from "./DailyNotesSettings";
 import { LibrarySettingsPanel } from "../Library";
 import type { ProviderType, ProviderConfig } from "../../types/ai";
 import type { TTSProviderType } from "../../types/audio";
@@ -26,7 +27,8 @@ interface SettingsDialogProps {
     | "rag"
     | "backup"
     | "audio"
-    | "external-sources";
+    | "external-sources"
+    | "daily-notes";
 }
 
 type TabId =
@@ -40,7 +42,8 @@ type TabId =
   | "rag"
   | "backup"
   | "audio"
-  | "external-sources";
+  | "external-sources"
+  | "daily-notes";
 
 interface TabCategory {
   name: string;
@@ -53,6 +56,7 @@ const TAB_CATEGORIES: TabCategory[] = [
     tabs: [
       { id: "theme", label: "Appearance", icon: <IconPalette /> },
       { id: "keybindings", label: "Shortcuts", icon: <IconKeyboard /> },
+      { id: "daily-notes", label: "Daily Notes", icon: <IconCalendarSettings /> },
     ],
   },
   {
@@ -232,6 +236,7 @@ export function SettingsDialog({
           <div className="flex-1 overflow-y-auto p-6">
             {activeTab === "theme" && <ThemeSettings />}
             {activeTab === "keybindings" && <KeybindingsSettings />}
+            {activeTab === "daily-notes" && <DailyNotesSettings />}
             {activeTab === "libraries" && <LibrarySettingsPanel />}
             {activeTab === "backup" && <BackupScheduleSettings />}
             {activeTab === "ai" && <AISettingsContent />}
@@ -2115,6 +2120,28 @@ function IconFileImport() {
       <polyline points="14 2 14 8 20 8" />
       <path d="M12 18v-6" />
       <path d="m9 15 3 3 3-3" />
+    </svg>
+  );
+}
+
+function IconCalendarSettings() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+      <line x1="16" y1="2" x2="16" y2="6" />
+      <line x1="8" y1="2" x2="8" y2="6" />
+      <line x1="3" y1="10" x2="21" y2="10" />
+      <circle cx="12" cy="15" r="2" />
     </svg>
   );
 }

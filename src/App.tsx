@@ -14,6 +14,7 @@ import { ActionLibrary, ActionEditor } from "./components/Actions";
 import { QuickCapture, InboxPanel } from "./components/Inbox";
 import { FlashcardPanel } from "./components/Flashcards";
 import { GoalsPanel, GoalsDashboard } from "./components/Goals";
+import { DailyNotesPanel } from "./components/DailyNotes";
 import { ToastContainer } from "./components/Toast";
 import { useAppInit } from "./hooks/useAppInit";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
@@ -24,6 +25,7 @@ import { useActionStore } from "./stores/actionStore";
 import { useInboxStore } from "./stores/inboxStore";
 import { useAIStore } from "./stores/aiStore";
 import { useFlashcardStore } from "./stores/flashcardStore";
+import { useDailyNotesStore } from "./stores/dailyNotesStore";
 import { useWindowLibrary } from "./contexts/WindowContext";
 import { exportPageToFile } from "./utils/api";
 import { save } from "@tauri-apps/plugin-dialog";
@@ -85,6 +87,7 @@ function App() {
     closePanel: closeAIPanel,
   } = useAIStore();
   const toggleFlashcardPanel = useFlashcardStore((state) => state.togglePanel);
+  const openTodayNote = useDailyNotesStore((state) => state.openTodayNote);
   const { pages, selectedPageId, selectPage, deletePage, duplicatePage } = usePageStore();
 
   // Get the selected page
@@ -139,6 +142,17 @@ function App() {
     setShowDeleteConfirm(true);
   }, [selectedPage]);
 
+  // Open today's daily note
+  const handleDailyNote = useCallback(async () => {
+    if (!selectedNotebookId) return;
+    try {
+      const note = await openTodayNote(selectedNotebookId);
+      selectPage(note.id);
+    } catch (err) {
+      console.error("Failed to open daily note:", err);
+    }
+  }, [selectedNotebookId, openTodayNote, selectPage]);
+
   // Confirm delete
   const handleConfirmDelete = useCallback(() => {
     if (!selectedPage || !selectedNotebookId) return;
@@ -164,6 +178,7 @@ function App() {
     onInbox: openInboxPanel,
     onFlashcards: toggleFlashcardPanel,
     onZenMode: toggleZenMode,
+    onDailyNote: handleDailyNote,
   });
 
   return (
@@ -268,6 +283,9 @@ function App() {
 
       {/* Goals Dashboard */}
       <GoalsDashboard />
+
+      {/* Daily Notes Panel */}
+      <DailyNotesPanel />
 
       {/* Toast Notifications */}
       <ToastContainer />

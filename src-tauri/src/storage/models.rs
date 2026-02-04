@@ -5,6 +5,18 @@ use uuid::Uuid;
 use crate::encryption::EncryptionConfig;
 use crate::sync::config::SyncConfig;
 
+/// Configuration for daily notes in a notebook
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct DailyNotesConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub template_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub folder_id: Option<Uuid>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum NotebookType {
@@ -236,6 +248,9 @@ pub struct Notebook {
     /// Page sort preference for this notebook (overrides global setting)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub page_sort_by: Option<String>,
+    /// Daily notes configuration
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub daily_notes_config: Option<DailyNotesConfig>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -260,6 +275,7 @@ impl Notebook {
             is_pinned: false,
             position: 0,
             page_sort_by: None,
+            daily_notes_config: None,
             created_at: now,
             updated_at: now,
         }
@@ -367,6 +383,12 @@ pub struct Page {
     /// Whether this page is marked as a favorite
     #[serde(default)]
     pub is_favorite: bool,
+    /// Whether this is a daily note
+    #[serde(default)]
+    pub is_daily_note: bool,
+    /// Date for daily notes in "YYYY-MM-DD" format
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub daily_note_date: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -397,6 +419,8 @@ impl Page {
             template_id: None,
             deleted_at: None,
             is_favorite: false,
+            is_daily_note: false,
+            daily_note_date: None,
             created_at: now,
             updated_at: now,
         }
