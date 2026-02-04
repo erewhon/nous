@@ -2450,3 +2450,99 @@ export async function chatWithCitations(
     maxTokens: options?.maxTokens,
   });
 }
+
+// ===== Infographic Generation API =====
+
+export interface InfographicConfig {
+  template: string;
+  width?: number;
+  height?: number;
+  theme?: string;
+  title?: string | null;
+}
+
+export interface InfographicResult {
+  svgContent: string;
+  pngPath: string | null;
+  width: number;
+  height: number;
+  generationTimeSeconds: number;
+}
+
+export async function generateInfographic(
+  notebookId: string,
+  template: string,
+  data: Record<string, unknown>,
+  config?: InfographicConfig,
+  exportPng?: boolean
+): Promise<InfographicResult> {
+  return invoke<InfographicResult>("generate_infographic", {
+    notebookId,
+    template,
+    data,
+    config,
+    exportPng,
+  });
+}
+
+export async function checkInfographicAvailability(): Promise<{
+  svg_generation: boolean;
+  png_export: boolean;
+}> {
+  return invoke("check_infographic_availability");
+}
+
+// ===== Video Generation API =====
+
+export interface SlideContent {
+  title: string;
+  body?: string;
+  bulletPoints?: string[];
+  durationHint?: number | null;
+}
+
+export interface VideoTTSConfig {
+  provider: string;
+  voice: string;
+  apiKey?: string | null;
+  baseUrl?: string | null;
+  model?: string | null;
+}
+
+export interface VideoConfig {
+  width?: number;
+  height?: number;
+  theme?: string;
+  transition?: string;
+  title?: string | null;
+}
+
+export interface VideoGenerationResult {
+  videoPath: string;
+  durationSeconds: number;
+  slideCount: number;
+  generationTimeSeconds: number;
+}
+
+export async function generateStudyVideo(
+  notebookId: string,
+  slides: SlideContent[],
+  ttsConfig: VideoTTSConfig,
+  videoConfig?: VideoConfig
+): Promise<VideoGenerationResult> {
+  return invoke<VideoGenerationResult>("generate_study_video", {
+    notebookId,
+    slides,
+    ttsConfig,
+    videoConfig,
+  });
+}
+
+export async function checkVideoGenerationAvailability(): Promise<{
+  pillow: boolean;
+  ffmpeg: boolean;
+  pydub: boolean;
+  fully_available: boolean;
+}> {
+  return invoke("check_video_generation_availability");
+}

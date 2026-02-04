@@ -648,6 +648,12 @@ pub fn run() {
             commands::generate_page_audio,
             commands::get_tts_providers,
             commands::list_tts_voices,
+            // Infographic generation commands
+            commands::generate_infographic,
+            commands::check_infographic_availability,
+            // Video generation commands
+            commands::generate_study_video,
+            commands::check_video_generation_availability,
             // Smart organize commands
             commands::smart_organize_suggest,
             commands::smart_organize_apply,

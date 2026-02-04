@@ -3241,6 +3241,207 @@ impl PythonAI {
             Ok(response)
         })
     }
+
+    // ===== Infographic Generation Methods =====
+
+    /// Generate an infographic from study tools data
+    pub fn generate_infographic(
+        &self,
+        template: &str,
+        data: serde_json::Value,
+        output_dir: &str,
+        config: Option<&crate::commands::InfographicConfig>,
+        export_png: bool,
+    ) -> Result<InfographicResult> {
+        Python::attach(|py| {
+            self.setup_python_path(py)?;
+
+            let module = py.import("nous_ai.infographic_generate")?;
+            let func = module.getattr("generate_infographic_sync")?;
+
+            let kwargs = PyDict::new(py);
+            kwargs.set_item("template", template)?;
+            kwargs.set_item("output_dir", output_dir)?;
+            kwargs.set_item("export_png", export_png)?;
+
+            // Convert serde_json::Value to Python dict
+            let json_module = py.import("json")?;
+            let loads = json_module.getattr("loads")?;
+            let data_str = serde_json::to_string(&data).map_err(PythonError::Serialization)?;
+            let py_data = loads.call1((data_str,))?;
+            kwargs.set_item("data", py_data)?;
+
+            // Build config dict if provided
+            if let Some(cfg) = config {
+                let config_dict = PyDict::new(py);
+                config_dict.set_item("width", cfg.width)?;
+                config_dict.set_item("height", cfg.height)?;
+                config_dict.set_item("theme", &cfg.theme)?;
+                if let Some(ref title) = cfg.title {
+                    config_dict.set_item("title", title)?;
+                }
+                kwargs.set_item("config", config_dict)?;
+            }
+
+            let result = func.call((), Some(&kwargs))?;
+            let result_dict: HashMap<String, Py<PyAny>> = result.extract()?;
+
+            Ok(InfographicResult {
+                svg_content: result_dict
+                    .get("svg_content")
+                    .and_then(|v| v.extract::<String>(py).ok())
+                    .unwrap_or_default(),
+                png_path: result_dict
+                    .get("png_path")
+                    .and_then(|v| v.extract::<Option<String>>(py).ok())
+                    .flatten(),
+                width: result_dict
+                    .get("width")
+                    .and_then(|v| v.extract::<i32>(py).ok())
+                    .unwrap_or(1200),
+                height: result_dict
+                    .get("height")
+                    .and_then(|v| v.extract::<i32>(py).ok())
+                    .unwrap_or(800),
+                generation_time_seconds: result_dict
+                    .get("generation_time_seconds")
+                    .and_then(|v| v.extract::<f64>(py).ok())
+                    .unwrap_or(0.0),
+            })
+        })
+    }
+
+    /// Check availability of infographic features
+    pub fn check_infographic_availability(&self) -> Result<serde_json::Value> {
+        Python::attach(|py| {
+            self.setup_python_path(py)?;
+
+            let module = py.import("nous_ai.infographic_generate")?;
+            let func = module.getattr("check_infographic_availability")?;
+
+            let result = func.call0()?;
+
+            // Convert to JSON
+            let json_module = py.import("json")?;
+            let dumps = json_module.getattr("dumps")?;
+            let json_str: String = dumps.call1((result,))?.extract()?;
+            let value: serde_json::Value = serde_json::from_str(&json_str)?;
+
+            Ok(value)
+        })
+    }
+
+    // ===== Video Generation Methods =====
+
+    /// Generate a narrated video from study content
+    #[allow(clippy::too_many_arguments)]
+    pub fn generate_video(
+        &self,
+        slides: Vec<SlideContent>,
+        output_dir: &str,
+        tts_provider: &str,
+        tts_voice: &str,
+        tts_api_key: Option<&str>,
+        tts_base_url: Option<&str>,
+        tts_model: Option<&str>,
+        width: i32,
+        height: i32,
+        theme: &str,
+        transition: &str,
+        title: Option<&str>,
+    ) -> Result<VideoGenerationResult> {
+        Python::attach(|py| {
+            self.setup_python_path(py)?;
+
+            let module = py.import("nous_ai.video_generate")?;
+            let func = module.getattr("generate_video_sync")?;
+
+            let kwargs = PyDict::new(py);
+            kwargs.set_item("output_dir", output_dir)?;
+
+            // Convert slides to Python list of dicts
+            let py_slides = PyList::empty(py);
+            for slide in slides {
+                let dict = PyDict::new(py);
+                dict.set_item("title", slide.title)?;
+                dict.set_item("body", slide.body)?;
+                dict.set_item("bullet_points", slide.bullet_points)?;
+                if let Some(duration) = slide.duration_hint {
+                    dict.set_item("duration_hint", duration)?;
+                }
+                py_slides.append(dict)?;
+            }
+            kwargs.set_item("slides", py_slides)?;
+
+            // Build TTS config dict
+            let tts_config = PyDict::new(py);
+            tts_config.set_item("provider", tts_provider)?;
+            tts_config.set_item("voice", tts_voice)?;
+            if let Some(key) = tts_api_key {
+                tts_config.set_item("api_key", key)?;
+            }
+            if let Some(url) = tts_base_url {
+                tts_config.set_item("base_url", url)?;
+            }
+            if let Some(model) = tts_model {
+                tts_config.set_item("model", model)?;
+            }
+            kwargs.set_item("tts_config", tts_config)?;
+
+            // Build video config dict
+            let video_config = PyDict::new(py);
+            video_config.set_item("width", width)?;
+            video_config.set_item("height", height)?;
+            video_config.set_item("theme", theme)?;
+            video_config.set_item("transition", transition)?;
+            if let Some(t) = title {
+                video_config.set_item("title", t)?;
+            }
+            kwargs.set_item("config", video_config)?;
+
+            let result = func.call((), Some(&kwargs))?;
+            let result_dict: HashMap<String, Py<PyAny>> = result.extract()?;
+
+            Ok(VideoGenerationResult {
+                video_path: result_dict
+                    .get("video_path")
+                    .and_then(|v| v.extract::<String>(py).ok())
+                    .unwrap_or_default(),
+                duration_seconds: result_dict
+                    .get("duration_seconds")
+                    .and_then(|v| v.extract::<f64>(py).ok())
+                    .unwrap_or(0.0),
+                slide_count: result_dict
+                    .get("slide_count")
+                    .and_then(|v| v.extract::<i32>(py).ok())
+                    .unwrap_or(0),
+                generation_time_seconds: result_dict
+                    .get("generation_time_seconds")
+                    .and_then(|v| v.extract::<f64>(py).ok())
+                    .unwrap_or(0.0),
+            })
+        })
+    }
+
+    /// Check availability of video generation features
+    pub fn check_video_generation_availability(&self) -> Result<serde_json::Value> {
+        Python::attach(|py| {
+            self.setup_python_path(py)?;
+
+            let module = py.import("nous_ai.video_generate")?;
+            let func = module.getattr("check_video_availability")?;
+
+            let result = func.call0()?;
+
+            // Convert to JSON
+            let json_module = py.import("json")?;
+            let dumps = json_module.getattr("dumps")?;
+            let json_str: String = dumps.call1((result,))?.extract()?;
+            let value: serde_json::Value = serde_json::from_str(&json_str)?;
+
+            Ok(value)
+        })
+    }
 }
 
 // ===== Audio Generation Types =====
@@ -3299,6 +3500,42 @@ pub struct DiscoveredModel {
 pub struct DiscoveredChatModel {
     pub id: String,
     pub name: String,
+}
+
+// ===== Infographic Generation Types =====
+
+/// Result from infographic generation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InfographicResult {
+    pub svg_content: String,
+    pub png_path: Option<String>,
+    pub width: i32,
+    pub height: i32,
+    pub generation_time_seconds: f64,
+}
+
+// ===== Video Generation Types =====
+
+/// Slide content for video generation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SlideContent {
+    pub title: String,
+    pub body: String,
+    #[serde(default)]
+    pub bullet_points: Vec<String>,
+    pub duration_hint: Option<f64>,
+}
+
+/// Result from video generation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VideoGenerationResult {
+    pub video_path: String,
+    pub duration_seconds: f64,
+    pub slide_count: i32,
+    pub generation_time_seconds: f64,
 }
 
 #[cfg(test)]

@@ -1,12 +1,15 @@
 import { useState, useCallback, useEffect } from "react";
 import { useStudyToolsStore } from "../../stores/studyToolsStore";
 import { usePageStore } from "../../stores/pageStore";
+import { useNotebookStore } from "../../stores/notebookStore";
 import { PageSelector } from "./PageSelector";
 import { StudyGuidePanel } from "./StudyGuidePanel";
 import { FAQPanel } from "./FAQPanel";
 import { BriefingPanel } from "./BriefingPanel";
 import { TimelineView } from "./TimelineView";
 import { ConceptMapView } from "./ConceptMapView";
+import { InfographicGenerator } from "../Infographics/InfographicGenerator";
+import { VideoGeneratorDialog } from "../VideoGenerator/VideoGeneratorDialog";
 import type { StudyToolType, StudyPageContent } from "../../types/studyTools";
 
 interface StudyToolsPanelProps {
@@ -129,9 +132,12 @@ export function StudyToolsPanel({ isOpen, onClose }: StudyToolsPanelProps) {
   } = useStudyToolsStore();
 
   const { pages, selectedPageId } = usePageStore();
+  const { selectedNotebookId } = useNotebookStore();
 
   const [showPageSelector, setShowPageSelector] = useState(false);
   const [selectedPages, setSelectedPages] = useState<StudyPageContent[]>([]);
+  const [showInfographicGenerator, setShowInfographicGenerator] = useState(false);
+  const [showVideoGenerator, setShowVideoGenerator] = useState(false);
 
   // Initialize with current page if available
   useEffect(() => {
@@ -313,6 +319,96 @@ export function StudyToolsPanel({ isOpen, onClose }: StudyToolsPanelProps) {
                     </button>
                   ))}
                 </div>
+
+                {/* Media Generation Section */}
+                <div className="mt-8 pt-6 border-t" style={{ borderColor: "var(--color-border)" }}>
+                  <h3
+                    className="text-sm font-semibold mb-4"
+                    style={{ color: "var(--color-text-primary)" }}
+                  >
+                    Media Generation
+                  </h3>
+                  <div className="grid grid-cols-2 gap-4">
+                    {/* Infographic Button */}
+                    <button
+                      onClick={() => setShowInfographicGenerator(true)}
+                      disabled={!studyGuide && !briefing && !timeline && !conceptGraph}
+                      className="p-4 rounded-xl border text-left transition-all hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed hover:border-[--color-accent]"
+                      style={{
+                        backgroundColor: "var(--color-bg-secondary)",
+                        borderColor: "var(--color-border)",
+                      }}
+                    >
+                      <div
+                        className="w-10 h-10 rounded-lg flex items-center justify-center mb-3"
+                        style={{
+                          backgroundColor: "#e11d4820",
+                          color: "#e11d48",
+                        }}
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                          <circle cx="8.5" cy="8.5" r="1.5" />
+                          <polyline points="21 15 16 10 5 21" />
+                        </svg>
+                      </div>
+                      <div
+                        className="font-medium"
+                        style={{ color: "var(--color-text-primary)" }}
+                      >
+                        Infographic
+                      </div>
+                      <div
+                        className="text-sm mt-1"
+                        style={{ color: "var(--color-text-muted)" }}
+                      >
+                        Visual summaries (SVG/PNG)
+                      </div>
+                    </button>
+
+                    {/* Video Button */}
+                    <button
+                      onClick={() => setShowVideoGenerator(true)}
+                      disabled={!studyGuide && !briefing}
+                      className="p-4 rounded-xl border text-left transition-all hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed hover:border-[--color-accent]"
+                      style={{
+                        backgroundColor: "var(--color-bg-secondary)",
+                        borderColor: "var(--color-border)",
+                      }}
+                    >
+                      <div
+                        className="w-10 h-10 rounded-lg flex items-center justify-center mb-3"
+                        style={{
+                          backgroundColor: "#7c3aed20",
+                          color: "#7c3aed",
+                        }}
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <polygon points="23 7 16 12 23 17 23 7" />
+                          <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+                        </svg>
+                      </div>
+                      <div
+                        className="font-medium"
+                        style={{ color: "var(--color-text-primary)" }}
+                      >
+                        Video
+                      </div>
+                      <div
+                        className="text-sm mt-1"
+                        style={{ color: "var(--color-text-muted)" }}
+                      >
+                        Narrated presentation
+                      </div>
+                    </button>
+                  </div>
+                  <p
+                    className="text-xs mt-3"
+                    style={{ color: "var(--color-text-muted)" }}
+                  >
+                    Generate study content first using the tools above, then create media from it.
+                  </p>
+                </div>
               </div>
             ) : (
               // Active tool panel
@@ -441,6 +537,24 @@ export function StudyToolsPanel({ isOpen, onClose }: StudyToolsPanelProps) {
         title="Select Pages"
         description="Choose pages to use for content generation"
       />
+
+      {/* Infographic generator dialog */}
+      {selectedNotebookId && (
+        <InfographicGenerator
+          isOpen={showInfographicGenerator}
+          onClose={() => setShowInfographicGenerator(false)}
+          notebookId={selectedNotebookId}
+        />
+      )}
+
+      {/* Video generator dialog */}
+      {selectedNotebookId && (
+        <VideoGeneratorDialog
+          isOpen={showVideoGenerator}
+          onClose={() => setShowVideoGenerator(false)}
+          notebookId={selectedNotebookId}
+        />
+      )}
     </>
   );
 }
