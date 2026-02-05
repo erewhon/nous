@@ -78,6 +78,8 @@ pub enum PageType {
     Calendar,
     /// AI Chat conversation page (.chat)
     Chat,
+    /// Infinite canvas/whiteboard (.canvas)
+    Canvas,
 }
 
 impl Default for PageType {

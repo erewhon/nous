@@ -16,6 +16,7 @@ import { JupyterViewer } from "../Jupyter";
 import { EpubReader } from "../Epub";
 import { CalendarViewer } from "../Calendar";
 import { ChatEditor } from "../Chat";
+import { CanvasEditor } from "../Canvas";
 import { BacklinksPanel } from "./BacklinksPanel";
 import { SimilarPagesPanel } from "./SimilarPagesPanel";
 import type { EditorData, Page } from "../../types/page";
@@ -544,6 +545,17 @@ export function EditorPaneContent({
                   page={selectedPage}
                   notebookId={notebookId}
                   className="min-h-[calc(100vh-300px)]"
+                />
+              )}
+              {selectedPage.pageType === "canvas" && (
+                <CanvasEditor
+                  key={selectedPage.id}
+                  page={selectedPage}
+                  notebookId={notebookId}
+                  className="min-h-[calc(100vh-300px)]"
+                  onNavigateToPage={(pageId) => {
+                    usePageStore.getState().openPageInPane(pane.id, pageId);
+                  }}
                 />
               )}
               {(selectedPage.pageType === "standard" ||

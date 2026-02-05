@@ -34,6 +34,7 @@ export const PageTypeSchema = z.enum([
   "epub", // E-book (.epub)
   "calendar", // Calendar file (.ics)
   "chat", // AI Chat conversation page (.chat)
+  "canvas", // Infinite canvas/whiteboard (.canvas)
 ]);
 export type PageType = z.infer<typeof PageTypeSchema>;
 

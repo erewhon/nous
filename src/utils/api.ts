@@ -115,7 +115,8 @@ export async function updatePage(
       | "jupyter"
       | "epub"
       | "calendar"
-      | "chat";
+      | "chat"
+      | "canvas";
     fileExtension?: string | null;
     isFavorite?: boolean;
     isDailyNote?: boolean;

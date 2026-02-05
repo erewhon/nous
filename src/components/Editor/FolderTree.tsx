@@ -211,7 +211,7 @@ export function FolderTree({
   const treeContainerRef = useRef<HTMLDivElement>(null);
 
   // Supported file extensions for import
-  const SUPPORTED_EXTENSIONS = ["md", "pdf", "ipynb", "epub", "ics"];
+  const SUPPORTED_EXTENSIONS = ["md", "pdf", "ipynb", "epub", "ics", "canvas"];
 
   // Listen for Tauri file drop events
   useEffect(() => {
@@ -478,6 +478,41 @@ END:VCALENDAR`;
       await api.updateFileContent(notebookId, pageData.id, icsContent);
     } catch (err) {
       console.error("Failed to create calendar page:", err);
+    }
+  }, [notebookId, sectionsEnabled, selectedSectionId, createPage]);
+
+  // Handle creating a canvas page
+  const handleCreateCanvasPage = useCallback(async () => {
+    try {
+      const title = "New Canvas";
+      const sectionId = sectionsEnabled && selectedSectionId ? selectedSectionId : undefined;
+      const pageData = await createPage(notebookId, title, undefined, undefined, sectionId);
+      if (!pageData) {
+        console.error("Failed to create canvas page");
+        return;
+      }
+      // Update the page to have .canvas extension which will set pageType to canvas
+      const { updatePage: storeUpdatePage } = usePageStore.getState();
+      await storeUpdatePage(notebookId, pageData.id, {
+        fileExtension: "canvas",
+        pageType: "canvas",
+      });
+      // Initialize with empty canvas content
+      const canvasContent = JSON.stringify({
+        version: "1.0",
+        fabricData: null,
+        viewport: { panX: 0, panY: 0, zoom: 1 },
+        elements: {},
+        settings: {
+          gridEnabled: true,
+          gridSize: 20,
+          snapToGrid: false,
+          backgroundColor: "#1e1e2e",
+        },
+      }, null, 2);
+      await api.updateFileContent(notebookId, pageData.id, canvasContent);
+    } catch (err) {
+      console.error("Failed to create canvas page:", err);
     }
   }, [notebookId, sectionsEnabled, selectedSectionId, createPage]);
 
@@ -1183,6 +1218,33 @@ END:VCALENDAR`;
                       <line x1="3" y1="10" x2="21" y2="10" />
                     </svg>
                     Calendar Page
+                  </button>
+                  <button
+                    onClick={() => {
+                      handleCreateCanvasPage();
+                      setShowNewPageMenu(false);
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors hover:bg-[--color-bg-tertiary]"
+                    style={{ color: "var(--color-text-primary)" }}
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <rect x="3" y="3" width="18" height="18" rx="2" />
+                      <circle cx="9" cy="9" r="2" />
+                      <circle cx="15" cy="15" r="2" />
+                      <line x1="9" y1="11" x2="9" y2="15" />
+                      <line x1="11" y1="9" x2="15" y2="9" />
+                    </svg>
+                    Canvas/Whiteboard
                   </button>
                   <div
                     className="my-1 mx-2 border-t"

@@ -1382,6 +1382,7 @@ impl FileStorage {
             "epub" => Some(PageType::Epub),
             "ics" | "ical" => Some(PageType::Calendar),
             "chat" => Some(PageType::Chat),
+            "canvas" => Some(PageType::Canvas),
             _ => None,
         }
     }

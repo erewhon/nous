@@ -21,6 +21,7 @@ fn page_type_to_str(page_type: &PageType) -> &'static str {
         PageType::Epub => "epub",
         PageType::Calendar => "calendar",
         PageType::Chat => "chat",
+        PageType::Canvas => "canvas",
     }
 }
 

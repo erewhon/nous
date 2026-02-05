@@ -791,7 +791,7 @@ Inspired by other note-taking and organization software (Notion, Obsidian, Roam,
 
 These features are recommended as high-priority additions:
 
-1. **Daily notes** - Central to many workflows, leverages existing templates
+1. ~~**Daily notes** - Central to many workflows, leverages existing templates~~ ✅ Complete
 2. **Canvas/whiteboard** - Visual thinking, very popular in Obsidian
 3. **Block references** - Major upgrade to linking capabilities
 4. **Web clipper** - Key capture workflow currently missing
@@ -871,12 +871,15 @@ These features are recommended as high-priority additions:
 
 ### 38. Daily Notes & Journaling (Logseq, Roam, Capacities)
 
-- [ ] **Daily notes** - Date-based pages ⭐ TOP RECOMMENDATION
+- [x] **Daily notes** - Date-based pages ⭐ TOP RECOMMENDATION
   - Auto-create page for today's date
-  - Quick access button/shortcut (Cmd+D)
+  - Quick access button/shortcut (Cmd+Shift+D)
   - Calendar picker for past dates
-  - Customizable daily note template
+  - Customizable daily note template (optional daily-journal template)
   - Forward/back navigation between days
+  - Mark existing pages as daily notes
+  - Daily Notes panel with calendar view
+  - Carry Forward Daily Notes action
 - [ ] **Weekly/monthly rollups** - Aggregate journals
   - Auto-generate weekly summary from daily notes
   - Monthly overview with key highlights
