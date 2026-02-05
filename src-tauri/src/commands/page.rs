@@ -193,6 +193,7 @@ pub fn update_page(
             "epub" => crate::storage::PageType::Epub,
             "calendar" => crate::storage::PageType::Calendar,
             "chat" => crate::storage::PageType::Chat,
+            "canvas" => crate::storage::PageType::Canvas,
             _ => crate::storage::PageType::Standard,
         };
     }
@@ -208,6 +209,7 @@ pub fn update_page(
                     | crate::storage::PageType::Calendar
                     | crate::storage::PageType::Chat
                     | crate::storage::PageType::Jupyter
+                    | crate::storage::PageType::Canvas
             );
             if is_file_based {
                 // Set source_file to files/{page_id}.{ext}
