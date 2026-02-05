@@ -340,6 +340,27 @@ export function EditorPaneContent({
     ]
   );
 
+  // Handle block reference clicks — navigate to the target page and scroll to block
+  const handleBlockRefClick = useCallback(
+    (blockId: string, pageId: string) => {
+      // Navigate to the target page
+      usePageStore.getState().openPageInPane(pane.id, pageId);
+
+      // After a delay for the editor to render, scroll to the target block
+      setTimeout(() => {
+        const el = document.querySelector(
+          `[data-block-id="${CSS.escape(blockId)}"]`
+        );
+        if (el) {
+          el.scrollIntoView({ behavior: "smooth", block: "center" });
+          el.classList.add("block-ref-highlight");
+          setTimeout(() => el.classList.remove("block-ref-highlight"), 2000);
+        }
+      }, 500);
+    },
+    [pane.id]
+  );
+
   // Handle wiki link clicks
   const handleLinkClick = useCallback(
     async (pageTitle: string) => {
@@ -570,6 +591,7 @@ export function EditorPaneContent({
                       onSave={handleSave}
                       onExplicitSave={handleExplicitSave}
                       onLinkClick={handleLinkClick}
+                      onBlockRefClick={handleBlockRefClick}
                       notebookId={notebookId}
                       pages={notebookPages.map((p) => ({
                         id: p.id,
@@ -584,7 +606,9 @@ export function EditorPaneContent({
                     !selectedPage.pageType) && (
                     <BacklinksPanel
                       pageTitle={selectedPage.title}
+                      pageId={selectedPage.id}
                       notebookId={notebookId}
+                      onBlockRefClick={handleBlockRefClick}
                     />
                   )}
 

@@ -9,7 +9,10 @@ import { useHeaderCollapse } from "./useHeaderCollapse";
 import { VimModeIndicator } from "./VimModeIndicator";
 import { WikiLinkAutocomplete } from "./WikiLinkAutocomplete";
 import { WikiLinkTool } from "./WikiLinkTool";
+import { BlockRefAutocomplete } from "./BlockRefAutocomplete";
+import { BlockRefTool } from "./BlockRefTool";
 import { LinkPreview } from "./LinkPreview";
+import { usePageStore } from "../../stores/pageStore";
 import { useThemeStore } from "../../stores/themeStore";
 
 interface BlockEditorProps {
@@ -18,6 +21,7 @@ interface BlockEditorProps {
   onSave?: (data: OutputData) => void;
   onExplicitSave?: (data: OutputData) => void; // Called on Ctrl+S - should trigger git commit
   onLinkClick?: (pageTitle: string) => void;
+  onBlockRefClick?: (blockId: string, pageId: string) => void;
   readOnly?: boolean;
   className?: string;
   notebookId?: string;
@@ -35,6 +39,7 @@ export const BlockEditor = forwardRef<BlockEditorRef, BlockEditorProps>(function
   onSave,
   onExplicitSave,
   onLinkClick,
+  onBlockRefClick,
   readOnly = false,
   className = "",
   notebookId,
@@ -99,6 +104,7 @@ export const BlockEditor = forwardRef<BlockEditorRef, BlockEditorProps>(function
     initialData,
     onChange: handleChange,
     onLinkClick,
+    onBlockRefClick,
     readOnly,
     notebookId,
     pages,
@@ -202,15 +208,18 @@ export const BlockEditor = forwardRef<BlockEditorRef, BlockEditorProps>(function
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [save, onSave, onExplicitSave, markClean]);
 
-  // Mark broken links when pages change or content renders
+  // Mark broken links and block refs when pages change or content renders
   useEffect(() => {
     if (!containerRef.current || pages.length === 0) return;
 
-    // Use MutationObserver to mark broken links after editor renders
+    // Use MutationObserver to mark broken links/refs after editor renders
     const markLinks = () => {
       if (containerRef.current) {
         const pageTitles = pages.map((p) => p.title);
         WikiLinkTool.markBrokenLinks(containerRef.current, pageTitles);
+        // Mark broken block refs using full page data from store
+        const allPages = usePageStore.getState().pages;
+        BlockRefTool.markBrokenBlockRefs(containerRef.current, allPages);
       }
     };
 
@@ -365,6 +374,32 @@ export const BlockEditor = forwardRef<BlockEditorRef, BlockEditorProps>(function
     };
   }, [onLinkClick]);
 
+  // Handle block-ref clicks via event delegation
+  useEffect(() => {
+    if (!containerRef.current || !onBlockRefClick) return;
+
+    const handleBlockRefClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      const blockRef = target.closest("block-ref");
+
+      if (blockRef) {
+        e.preventDefault();
+        e.stopPropagation();
+        const blockId = blockRef.getAttribute("data-block-id");
+        const pageId = blockRef.getAttribute("data-page-id");
+        if (blockId && pageId) {
+          onBlockRefClick(blockId, pageId);
+        }
+      }
+    };
+
+    containerRef.current.addEventListener("click", handleBlockRefClick);
+
+    return () => {
+      containerRef.current?.removeEventListener("click", handleBlockRefClick);
+    };
+  }, [onBlockRefClick]);
+
   // Checklist structural changes (item deletion, reorder) rebuild the DOM
   // via innerHTML which Editor.js's MutationObserver-based onChange does not
   // reliably detect.  ChecklistTool dispatches a custom event as a backup;
@@ -397,6 +432,16 @@ export const BlockEditor = forwardRef<BlockEditorRef, BlockEditorProps>(function
     }, 50);
   }, [save, onChange]);
 
+  // Handle autocomplete block ref insertion (trigger save)
+  const handleInsertBlockRef = useCallback(() => {
+    setTimeout(async () => {
+      const data = await save();
+      if (data) {
+        onChange?.(data);
+      }
+    }, 50);
+  }, [save, onChange]);
+
   return (
     <div ref={containerRef} className="relative">
       <div
@@ -408,6 +453,13 @@ export const BlockEditor = forwardRef<BlockEditorRef, BlockEditorProps>(function
           containerRef={containerRef}
           pages={pages}
           onInsertLink={handleInsertLink}
+        />
+      )}
+      {!readOnly && notebookId && (
+        <BlockRefAutocomplete
+          containerRef={containerRef}
+          notebookId={notebookId}
+          onInsertRef={handleInsertBlockRef}
         />
       )}
       {/* Link preview tooltip for external URLs */}

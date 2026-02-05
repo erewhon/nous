@@ -9,6 +9,7 @@ import Delimiter from "@editorjs/delimiter";
 import Table from "@editorjs/table";
 import Image from "@editorjs/image";
 import { WikiLinkTool } from "./WikiLinkTool";
+import { BlockRefTool } from "./BlockRefTool";
 import { CodeBlockTool } from "./CodeBlockTool";
 import { CalloutTool } from "./CalloutTool";
 import { ChecklistTool } from "./ChecklistTool";
@@ -21,12 +22,29 @@ import { EmbedTool } from "./EmbedTool";
 import { ColumnsTool } from "./ColumnsTool";
 import { createImageUploader } from "./imageUploader";
 
+/** Assign data-block-id attributes to each .ce-block holder for scroll targeting */
+function assignBlockIdAttributes(editor: EditorJS | null) {
+  if (!editor) return;
+  try {
+    const blocks = editor.blocks;
+    for (let i = 0; i < blocks.getBlocksCount(); i++) {
+      const block = blocks.getBlockByIndex(i);
+      if (block) {
+        block.holder.setAttribute("data-block-id", block.id);
+      }
+    }
+  } catch {
+    // Editor may not be ready yet
+  }
+}
+
 interface UseEditorOptions {
   holderId: string;
   initialData?: OutputData;
   onChange?: (data: OutputData) => void;
   onReady?: () => void;
   onLinkClick?: (pageTitle: string) => void;
+  onBlockRefClick?: (blockId: string, pageId: string) => void;
   readOnly?: boolean;
   placeholder?: string;
   notebookId?: string;
@@ -42,6 +60,7 @@ export function useEditor({
   onChange,
   onReady,
   onLinkClick,
+  onBlockRefClick,
   readOnly = false,
   placeholder = "Start writing or press '/' for commands...",
   notebookId,
@@ -173,6 +192,12 @@ export function useEditor({
           onLinkClick: onLinkClick,
         },
       },
+      blockRef: {
+        class: BlockRefTool,
+        config: {
+          onBlockRefClick: onBlockRefClick,
+        },
+      },
     };
 
     // Full tools config including columns (columns use baseTools for nested editors)
@@ -216,6 +241,10 @@ export function useEditor({
         setTimeout(() => {
           isRenderingRef.current = false;
         }, 500);
+        // Assign data-block-id attributes to block holders for scroll targeting
+        setTimeout(() => {
+          assignBlockIdAttributes(editorRef.current);
+        }, 100);
         onReady?.();
       },
     });
@@ -269,6 +298,7 @@ export function useEditor({
         // async DOM mutations after the render Promise resolves.
         setTimeout(() => {
           isRenderingRef.current = false;
+          assignBlockIdAttributes(editorRef.current);
         }, 500);
       });
     }
