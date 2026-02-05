@@ -1023,7 +1023,7 @@ These features are recommended as high-priority additions:
   - Save current panel arrangement, open pages
   - Switch between workspaces (e.g., "Writing", "Research", "Review")
   - Per-project workspaces
-- [ ] **Starred/pinned pages** - Quick access ⭐ TOP RECOMMENDATION
+- [x] **Starred/pinned pages** - Quick access ⭐ TOP RECOMMENDATION
   - Star frequently used pages
   - Starred section in sidebar
   - Keyboard shortcut to toggle star

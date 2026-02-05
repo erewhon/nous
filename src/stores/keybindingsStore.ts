@@ -19,7 +19,8 @@ export type KeybindingAction =
   | "inbox"
   | "flashcards"
   | "zenMode"
-  | "dailyNote";
+  | "dailyNote"
+  | "toggleFavorite";
 
 // Keybinding definition
 export interface Keybinding {
@@ -153,6 +154,13 @@ export const DEFAULT_KEYBINDINGS: Keybinding[] = [
     label: "Daily Note",
     description: "Open today's daily note",
     key: "d",
+    modifiers: { ctrl: true, shift: true, alt: false },
+  },
+  {
+    action: "toggleFavorite",
+    label: "Toggle Star",
+    description: "Star or unstar the current page",
+    key: "s",
     modifiers: { ctrl: true, shift: true, alt: false },
   },
 ];

@@ -89,6 +89,7 @@ export function PageHeader({
     unarchivePage,
     createPage,
     updatePageContent,
+    toggleFavorite,
   } = usePageStore();
   const { loadFolders } = useFolderStore();
   const { getTemplateForPage } = useTemplateStore();
@@ -565,6 +566,45 @@ export function PageHeader({
             Use Template
           </button>
         )}
+
+        {/* Star/Favorite button */}
+        <button
+          onClick={() => toggleFavorite(page.notebookId, page.id)}
+          className="ml-4 rounded-lg p-2 transition-colors hover:opacity-80"
+          style={{ backgroundColor: "var(--color-bg-tertiary)" }}
+          title={page.isFavorite ? "Unstar page (Ctrl+Shift+S)" : "Star page (Ctrl+Shift+S)"}
+        >
+          {page.isFavorite ? (
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="rgb(250, 204, 21)"
+              stroke="rgb(250, 204, 21)"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+            </svg>
+          ) : (
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              style={{ color: "var(--color-text-muted)" }}
+            >
+              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+            </svg>
+          )}
+        </button>
 
         {/* Undo/Redo buttons */}
         <div className="ml-4 flex items-center">

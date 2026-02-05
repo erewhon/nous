@@ -88,7 +88,7 @@ function App() {
   } = useAIStore();
   const toggleFlashcardPanel = useFlashcardStore((state) => state.togglePanel);
   const openTodayNote = useDailyNotesStore((state) => state.openTodayNote);
-  const { pages, selectedPageId, selectPage, deletePage, duplicatePage } = usePageStore();
+  const { pages, selectedPageId, selectPage, deletePage, duplicatePage, toggleFavorite } = usePageStore();
 
   // Get the selected page
   const selectedPage = pages.find((p) => p.id === selectedPageId);
@@ -153,6 +153,12 @@ function App() {
     }
   }, [selectedNotebookId, openTodayNote, selectPage]);
 
+  // Toggle favorite on current page
+  const handleToggleFavorite = useCallback(() => {
+    if (!selectedPage || !selectedNotebookId) return;
+    toggleFavorite(selectedNotebookId, selectedPage.id);
+  }, [selectedPage, selectedNotebookId, toggleFavorite]);
+
   // Confirm delete
   const handleConfirmDelete = useCallback(() => {
     if (!selectedPage || !selectedNotebookId) return;
@@ -179,6 +185,7 @@ function App() {
     onFlashcards: toggleFlashcardPanel,
     onZenMode: toggleZenMode,
     onDailyNote: handleDailyNote,
+    onToggleFavorite: handleToggleFavorite,
   });
 
   return (

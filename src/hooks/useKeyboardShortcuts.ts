@@ -19,6 +19,7 @@ interface KeyboardShortcuts {
   onFlashcards?: () => void;
   onZenMode?: () => void;
   onDailyNote?: () => void;
+  onToggleFavorite?: () => void;
 }
 
 // Map action names to callback property names
@@ -40,6 +41,7 @@ const ACTION_TO_CALLBACK: Record<KeybindingAction, keyof KeyboardShortcuts> = {
   flashcards: "onFlashcards",
   zenMode: "onZenMode",
   dailyNote: "onDailyNote",
+  toggleFavorite: "onToggleFavorite",
 };
 
 export function useKeyboardShortcuts(callbacks: KeyboardShortcuts) {
