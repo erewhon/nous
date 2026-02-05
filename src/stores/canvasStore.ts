@@ -28,6 +28,9 @@ interface CanvasStore {
   canUndo: boolean;
   canRedo: boolean;
 
+  // Connection tool state
+  connectionState: "idle" | "source-selected";
+
   // Loading state
   isLoaded: boolean;
 
@@ -56,6 +59,9 @@ interface CanvasStore {
   addToSelection: (id: string) => void;
   removeFromSelection: (id: string) => void;
   clearSelection: () => void;
+
+  // Actions - Connection
+  setConnectionState: (state: "idle" | "source-selected") => void;
 
   // Actions - History
   setHistoryState: (canUndo: boolean, canRedo: boolean) => void;
@@ -90,6 +96,7 @@ export const useCanvasStore = create<CanvasStore>((set) => ({
   viewport: initialViewport,
   settings: initialSettings,
   selectedElementIds: [],
+  connectionState: "idle",
   canUndo: false,
   canRedo: false,
   isLoaded: false,
@@ -175,6 +182,9 @@ export const useCanvasStore = create<CanvasStore>((set) => ({
 
   clearSelection: () => set({ selectedElementIds: [] }),
 
+  // Connection
+  setConnectionState: (connectionState) => set({ connectionState }),
+
   // History
   setHistoryState: (canUndo, canRedo) => set({ canUndo, canRedo }),
 
@@ -192,6 +202,7 @@ export const useCanvasStore = create<CanvasStore>((set) => ({
       viewport: initialViewport,
       settings: initialSettings,
       selectedElementIds: [],
+      connectionState: "idle",
       canUndo: false,
       canRedo: false,
       isLoaded: false,

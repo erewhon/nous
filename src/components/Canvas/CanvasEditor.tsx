@@ -2,6 +2,7 @@ import { useRef, useCallback, useEffect, useState } from "react";
 import { useCanvasStore } from "../../stores/canvasStore";
 import { InfiniteCanvas, type InfiniteCanvasRef } from "./InfiniteCanvas";
 import { CanvasToolbar } from "./CanvasToolbar";
+import { PagePickerDialog } from "./PagePickerDialog";
 import type { CanvasPageContent } from "../../types/canvas";
 import type { Page } from "../../types/page";
 import * as api from "../../utils/api";
@@ -22,9 +23,12 @@ export function CanvasEditor({
   const canvasRef = useRef<InfiniteCanvasRef>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
-  const [initialContent, setInitialContent] = useState<CanvasPageContent | null>(null);
+  const [initialContent, setInitialContent] =
+    useState<CanvasPageContent | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showPagePicker, setShowPagePicker] = useState(false);
+  const pageCardCoordsRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { reset, setHistoryState } = useCanvasStore();
@@ -149,23 +153,19 @@ export function CanvasEditor({
 
   // Toolbar actions
   const handleZoomIn = useCallback(() => {
-    // Implemented in useCanvasPanZoom hook
-    // This is a placeholder - the actual zoom is handled by the hook
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    // The hook handles this via the canvas instance
+    canvasRef.current?.zoomIn();
   }, []);
 
   const handleZoomOut = useCallback(() => {
-    // Implemented in useCanvasPanZoom hook
+    canvasRef.current?.zoomOut();
   }, []);
 
   const handleResetView = useCallback(() => {
-    // Implemented in useCanvasPanZoom hook
+    canvasRef.current?.resetView();
   }, []);
 
   const handleFitToContent = useCallback(() => {
-    // Implemented in useCanvasPanZoom hook
+    canvasRef.current?.fitToContent();
   }, []);
 
   const handleUndo = useCallback(() => {
@@ -192,6 +192,20 @@ export function CanvasEditor({
       link.click();
     }
   }, [page.title]);
+
+  // Page card creation via picker
+  const handleRequestPageCard = useCallback((x: number, y: number) => {
+    pageCardCoordsRef.current = { x, y };
+    setShowPagePicker(true);
+  }, []);
+
+  const handlePageSelected = useCallback(
+    (pageId: string, pageTitle: string, nbId: string) => {
+      const { x, y } = pageCardCoordsRef.current;
+      canvasRef.current?.addPageCard(pageId, pageTitle, nbId, x, y);
+    },
+    []
+  );
 
   if (isLoading) {
     return (
@@ -264,6 +278,7 @@ export function CanvasEditor({
             onContentChange={handleContentChange}
             onHistoryChange={handleHistoryChange}
             onNavigateToPage={onNavigateToPage}
+            onRequestPageCard={handleRequestPageCard}
           />
         )}
       </div>
@@ -288,6 +303,15 @@ export function CanvasEditor({
           <span>Zoom: Mouse Wheel</span>
         </div>
       </div>
+
+      {/* Page picker dialog for PageCard creation */}
+      <PagePickerDialog
+        isOpen={showPagePicker}
+        onClose={() => setShowPagePicker(false)}
+        onSelect={handlePageSelected}
+        notebookId={notebookId}
+        excludePageId={page.id}
+      />
     </div>
   );
 }

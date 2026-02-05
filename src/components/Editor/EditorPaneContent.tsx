@@ -456,147 +456,151 @@ export function EditorPaneContent({
 
       {selectedPage ? (
         <>
-          <div className="relative">
-            <PageHeader
+          {selectedPage.pageType === "canvas" ? (
+            /* Canvas gets full-bleed layout without scroll constraints */
+            <CanvasEditor
+              key={selectedPage.id}
               page={selectedPage}
-              isSaving={isSaving}
-              lastSaved={lastSaved}
-              stats={zenMode ? null : pageStats}
-              pageText={pageStats?.text}
-              zenMode={zenMode}
-              onExitZenMode={() => setZenMode(false)}
-              onEnterZenMode={() => setZenMode(true)}
-              onToggleHistory={
-                isStandardPage
-                  ? () => setShowHistoryPanel(!showHistoryPanel)
-                  : undefined
-              }
-              historyCount={history?.entries.length || 0}
-              canUndo={canUndo()}
-              canRedo={canRedo()}
-              onUndo={undo}
-              onRedo={redo}
-            />
-            {/* Undo History Panel */}
-            {isStandardPage && pane.pageId && (
-              <UndoHistoryPanel
-                pageId={pane.pageId}
-                isOpen={showHistoryPanel}
-                onClose={() => setShowHistoryPanel(false)}
-                onJumpToState={handleJumpToState}
-              />
-            )}
-          </div>
-          <div
-            ref={editorScrollRef}
-            className={`flex-1 overflow-y-auto ${zenMode ? "zen-editor-scroll" : "px-8 py-6"}`}
-            style={zenMode ? { padding: "4rem 2rem" } : undefined}
-          >
-            <div
-              className={`mx-auto ${zenMode ? "zen-editor-container" : ""}`}
-              style={{
-                maxWidth: zenMode ? "720px" : "var(--editor-max-width)",
+              notebookId={notebookId}
+              className="flex-1"
+              onNavigateToPage={(pageId) => {
+                usePageStore.getState().openPageInPane(pane.id, pageId);
               }}
-            >
-              {/* Conditional rendering based on page type */}
-              {selectedPage.pageType === "markdown" && (
-                <MarkdownEditor
-                  key={selectedPage.id}
+            />
+          ) : (
+            <>
+              <div className="relative">
+                <PageHeader
                   page={selectedPage}
-                  notebookId={notebookId}
-                  className="min-h-[calc(100vh-300px)]"
+                  isSaving={isSaving}
+                  lastSaved={lastSaved}
+                  stats={zenMode ? null : pageStats}
+                  pageText={pageStats?.text}
+                  zenMode={zenMode}
+                  onExitZenMode={() => setZenMode(false)}
+                  onEnterZenMode={() => setZenMode(true)}
+                  onToggleHistory={
+                    isStandardPage
+                      ? () => setShowHistoryPanel(!showHistoryPanel)
+                      : undefined
+                  }
+                  historyCount={history?.entries.length || 0}
+                  canUndo={canUndo()}
+                  canRedo={canRedo()}
+                  onUndo={undo}
+                  onRedo={redo}
                 />
-              )}
-              {selectedPage.pageType === "pdf" && (
-                <PDFPageViewer
-                  key={selectedPage.id}
-                  page={selectedPage}
-                  notebookId={notebookId}
-                  className="min-h-[calc(100vh-300px)]"
-                />
-              )}
-              {selectedPage.pageType === "jupyter" && (
-                <JupyterViewer
-                  key={selectedPage.id}
-                  page={selectedPage}
-                  notebookId={notebookId}
-                  className="min-h-[calc(100vh-300px)]"
-                />
-              )}
-              {selectedPage.pageType === "epub" && (
-                <EpubReader
-                  key={selectedPage.id}
-                  page={selectedPage}
-                  notebookId={notebookId}
-                  className="min-h-[calc(100vh-300px)]"
-                />
-              )}
-              {selectedPage.pageType === "calendar" && (
-                <CalendarViewer
-                  key={selectedPage.id}
-                  page={selectedPage}
-                  notebookId={notebookId}
-                  className="min-h-[calc(100vh-300px)]"
-                />
-              )}
-              {selectedPage.pageType === "chat" && (
-                <ChatEditor
-                  key={selectedPage.id}
-                  page={selectedPage}
-                  notebookId={notebookId}
-                  className="min-h-[calc(100vh-300px)]"
-                />
-              )}
-              {selectedPage.pageType === "canvas" && (
-                <CanvasEditor
-                  key={selectedPage.id}
-                  page={selectedPage}
-                  notebookId={notebookId}
-                  className="min-h-[calc(100vh-300px)]"
-                  onNavigateToPage={(pageId) => {
-                    usePageStore.getState().openPageInPane(pane.id, pageId);
+                {/* Undo History Panel */}
+                {isStandardPage && pane.pageId && (
+                  <UndoHistoryPanel
+                    pageId={pane.pageId}
+                    isOpen={showHistoryPanel}
+                    onClose={() => setShowHistoryPanel(false)}
+                    onJumpToState={handleJumpToState}
+                  />
+                )}
+              </div>
+              <div
+                ref={editorScrollRef}
+                className={`flex-1 overflow-y-auto ${zenMode ? "zen-editor-scroll" : "px-8 py-6"}`}
+                style={zenMode ? { padding: "4rem 2rem" } : undefined}
+              >
+                <div
+                  className={`mx-auto ${zenMode ? "zen-editor-container" : ""}`}
+                  style={{
+                    maxWidth: zenMode ? "720px" : "var(--editor-max-width)",
                   }}
-                />
-              )}
-              {(selectedPage.pageType === "standard" ||
-                !selectedPage.pageType) && (
-                <BlockEditor
-                  ref={editorRef}
-                  key={selectedPage.id}
-                  initialData={editorData}
-                  onChange={handleChange}
-                  onSave={handleSave}
-                  onExplicitSave={handleExplicitSave}
-                  onLinkClick={handleLinkClick}
-                  notebookId={notebookId}
-                  pages={notebookPages.map((p) => ({
-                    id: p.id,
-                    title: p.title,
-                  }))}
-                  className="min-h-[calc(100vh-300px)]"
-                />
-              )}
+                >
+                  {/* Conditional rendering based on page type */}
+                  {selectedPage.pageType === "markdown" && (
+                    <MarkdownEditor
+                      key={selectedPage.id}
+                      page={selectedPage}
+                      notebookId={notebookId}
+                      className="min-h-[calc(100vh-300px)]"
+                    />
+                  )}
+                  {selectedPage.pageType === "pdf" && (
+                    <PDFPageViewer
+                      key={selectedPage.id}
+                      page={selectedPage}
+                      notebookId={notebookId}
+                      className="min-h-[calc(100vh-300px)]"
+                    />
+                  )}
+                  {selectedPage.pageType === "jupyter" && (
+                    <JupyterViewer
+                      key={selectedPage.id}
+                      page={selectedPage}
+                      notebookId={notebookId}
+                      className="min-h-[calc(100vh-300px)]"
+                    />
+                  )}
+                  {selectedPage.pageType === "epub" && (
+                    <EpubReader
+                      key={selectedPage.id}
+                      page={selectedPage}
+                      notebookId={notebookId}
+                      className="min-h-[calc(100vh-300px)]"
+                    />
+                  )}
+                  {selectedPage.pageType === "calendar" && (
+                    <CalendarViewer
+                      key={selectedPage.id}
+                      page={selectedPage}
+                      notebookId={notebookId}
+                      className="min-h-[calc(100vh-300px)]"
+                    />
+                  )}
+                  {selectedPage.pageType === "chat" && (
+                    <ChatEditor
+                      key={selectedPage.id}
+                      page={selectedPage}
+                      notebookId={notebookId}
+                      className="min-h-[calc(100vh-300px)]"
+                    />
+                  )}
+                  {(selectedPage.pageType === "standard" ||
+                    !selectedPage.pageType) && (
+                    <BlockEditor
+                      ref={editorRef}
+                      key={selectedPage.id}
+                      initialData={editorData}
+                      onChange={handleChange}
+                      onSave={handleSave}
+                      onExplicitSave={handleExplicitSave}
+                      onLinkClick={handleLinkClick}
+                      notebookId={notebookId}
+                      pages={notebookPages.map((p) => ({
+                        id: p.id,
+                        title: p.title,
+                      }))}
+                      className="min-h-[calc(100vh-300px)]"
+                    />
+                  )}
 
-              {/* Backlinks panel - only for standard pages */}
-              {(selectedPage.pageType === "standard" ||
-                !selectedPage.pageType) && (
-                <BacklinksPanel
-                  pageTitle={selectedPage.title}
-                  notebookId={notebookId}
-                />
-              )}
+                  {/* Backlinks panel - only for standard pages */}
+                  {(selectedPage.pageType === "standard" ||
+                    !selectedPage.pageType) && (
+                    <BacklinksPanel
+                      pageTitle={selectedPage.title}
+                      notebookId={notebookId}
+                    />
+                  )}
 
-              {/* Similar Pages panel - only for standard pages */}
-              {(selectedPage.pageType === "standard" ||
-                !selectedPage.pageType) && (
-                <SimilarPagesPanel
-                  page={selectedPage}
-                  notebookId={notebookId}
-                  allPages={notebookPages}
-                />
-              )}
-            </div>
-          </div>
+                  {/* Similar Pages panel - only for standard pages */}
+                  {(selectedPage.pageType === "standard" ||
+                    !selectedPage.pageType) && (
+                    <SimilarPagesPanel
+                      page={selectedPage}
+                      notebookId={notebookId}
+                      allPages={notebookPages}
+                    />
+                  )}
+                </div>
+              </div>
+            </>
+          )}
         </>
       ) : (
         <div className="flex h-full items-center justify-center">
