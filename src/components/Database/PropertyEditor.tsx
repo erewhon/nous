@@ -18,6 +18,7 @@ const PROPERTY_TYPE_LABELS: Record<PropertyType, string> = {
   date: "Date",
   url: "URL",
   relation: "Relation",
+  rollup: "Rollup",
 };
 
 export function PropertyEditor({ property, onUpdate, onDelete, onClose }: PropertyEditorProps) {
@@ -90,15 +91,25 @@ export function PropertyEditor({ property, onUpdate, onDelete, onClose }: Proper
       {/* Type */}
       <div className="db-pe-section">
         <label className="db-pe-label">Type</label>
-        <select
-          className="db-pe-select"
-          value={property.type}
-          onChange={(e) => handleTypeChange(e.target.value as PropertyType)}
-        >
-          {Object.entries(PROPERTY_TYPE_LABELS).map(([val, label]) => (
-            <option key={val} value={val}>{label}</option>
-          ))}
-        </select>
+        {property.relationConfig?.direction === "back" ? (
+          <div className="db-pe-readonly">
+            Relation (back-link)
+          </div>
+        ) : property.type === "rollup" ? (
+          <div className="db-pe-readonly">
+            Rollup
+          </div>
+        ) : (
+          <select
+            className="db-pe-select"
+            value={property.type}
+            onChange={(e) => handleTypeChange(e.target.value as PropertyType)}
+          >
+            {Object.entries(PROPERTY_TYPE_LABELS).map(([val, label]) => (
+              <option key={val} value={val}>{label}</option>
+            ))}
+          </select>
+        )}
       </div>
 
       {/* Options for select/multiSelect */}
@@ -141,9 +152,15 @@ export function PropertyEditor({ property, onUpdate, onDelete, onClose }: Proper
 
       {/* Delete */}
       <div className="db-pe-section">
-        <button className="db-pe-delete" onClick={onDelete}>
-          Delete Property
-        </button>
+        {property.relationConfig?.direction === "back" ? (
+          <div className="db-pe-readonly" style={{ fontSize: 11, color: "var(--color-text-tertiary)" }}>
+            Delete the source relation in the other database to remove this back-relation.
+          </div>
+        ) : (
+          <button className="db-pe-delete" onClick={onDelete}>
+            Delete Property
+          </button>
+        )}
       </div>
     </div>
   );
@@ -199,6 +216,12 @@ export function PropertyTypeIcon({ type }: { type: PropertyType }) {
       return (
         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M4 12h8" /><path d="M12 4v16" /><circle cx="18" cy="6" r="3" /><circle cx="18" cy="18" r="3" />
+        </svg>
+      );
+    case "rollup":
+      return (
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M12 2v20" /><path d="M2 12h20" /><path d="m4 4 4 4" /><path d="m4 20 4-4" /><path d="m20 4-4 4" /><path d="m20 20-4-4" />
         </svg>
       );
   }

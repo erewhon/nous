@@ -7,6 +7,7 @@ import type {
   PropertyType,
   DatabaseSort,
   DatabaseFilter,
+  RollupConfig,
 } from "../../types/database";
 import {
   migrateDatabaseContent,
@@ -19,7 +20,7 @@ import { DatabaseList } from "./DatabaseList";
 import { DatabaseBoard } from "./DatabaseBoard";
 import { DatabaseGallery } from "./DatabaseGallery";
 import { DatabaseCalendar } from "./DatabaseCalendar";
-import { useRelationData } from "./useRelationData";
+import { useRelationContext } from "./useRelationContext";
 import * as api from "../../utils/api";
 import "./database-styles.css";
 
@@ -157,23 +158,165 @@ export function DatabaseEditor({
     [handleUpdateContent, activeViewId]
   );
 
-  // Add property
+  // Add property — supports relation (with bidirectional setup) and rollup
   const handleAddProperty = useCallback(
-    (name: string, type: PropertyType, relationConfig?: { databasePageId: string }) => {
+    async (
+      name: string,
+      type: PropertyType,
+      relationConfig?: { databasePageId: string },
+      rollupConfig?: RollupConfig
+    ) => {
+      if (type === "relation" && relationConfig && notebookId && page) {
+        // Bidirectional: create forward property in this DB, then back-relation in target DB
+        const forwardPropId = crypto.randomUUID();
+        const backPropId = crypto.randomUUID();
+
+        // 1. Create forward property with backRelationPropertyId
+        handleUpdateContent((prev) => ({
+          ...prev,
+          properties: [
+            ...prev.properties,
+            {
+              id: forwardPropId,
+              name,
+              type: "relation" as const,
+              relationConfig: {
+                databasePageId: relationConfig.databasePageId,
+                backRelationPropertyId: backPropId,
+                direction: "forward" as const,
+              },
+            },
+          ],
+        }));
+
+        // 2. Load target DB and add back-relation property
+        try {
+          const result = await api.getFileContent(
+            notebookId,
+            relationConfig.databasePageId
+          );
+          if (result.content) {
+            const targetContent = migrateDatabaseContent(
+              JSON.parse(result.content)
+            );
+            const thisDbTitle = page.title || "Untitled";
+            const updatedTarget: DatabaseContentV2 = {
+              ...targetContent,
+              properties: [
+                ...targetContent.properties,
+                {
+                  id: backPropId,
+                  name: thisDbTitle,
+                  type: "relation" as const,
+                  relationConfig: {
+                    databasePageId: page.id,
+                    backRelationPropertyId: forwardPropId,
+                    direction: "back" as const,
+                  },
+                },
+              ],
+            };
+            await api.updateFileContent(
+              notebookId,
+              relationConfig.databasePageId,
+              JSON.stringify(updatedTarget, null, 2)
+            );
+          }
+        } catch (err) {
+          console.error("Failed to create back-relation:", err);
+        }
+      } else if (type === "rollup" && rollupConfig) {
+        handleUpdateContent((prev) => ({
+          ...prev,
+          properties: [
+            ...prev.properties,
+            {
+              id: crypto.randomUUID(),
+              name,
+              type: "rollup" as const,
+              rollupConfig,
+            },
+          ],
+        }));
+      } else {
+        handleUpdateContent((prev) => ({
+          ...prev,
+          properties: [
+            ...prev.properties,
+            {
+              id: crypto.randomUUID(),
+              name,
+              type,
+              ...(relationConfig ? { relationConfig } : {}),
+            },
+          ],
+        }));
+      }
+    },
+    [handleUpdateContent, notebookId, page]
+  );
+
+  // Delete property — handles bidirectional cleanup for relations
+  const handleDeleteProperty = useCallback(
+    async (propertyId: string) => {
+      if (!content) return;
+      const prop = content.properties.find((p) => p.id === propertyId);
+
+      // If it's a back-relation, don't allow direct deletion
+      if (prop?.relationConfig?.direction === "back") {
+        alert(
+          "This is a back-relation. Delete the source relation in the other database instead."
+        );
+        return;
+      }
+
+      // If forward relation with a back-relation counterpart, remove the back-relation from the target DB
+      if (
+        prop?.type === "relation" &&
+        prop.relationConfig?.backRelationPropertyId &&
+        notebookId
+      ) {
+        try {
+          const targetPageId = prop.relationConfig.databasePageId;
+          const backPropId = prop.relationConfig.backRelationPropertyId;
+          const result = await api.getFileContent(notebookId, targetPageId);
+          if (result.content) {
+            const targetContent = migrateDatabaseContent(
+              JSON.parse(result.content)
+            );
+            const updatedTarget: DatabaseContentV2 = {
+              ...targetContent,
+              properties: targetContent.properties.filter(
+                (p) => p.id !== backPropId
+              ),
+            };
+            await api.updateFileContent(
+              notebookId,
+              targetPageId,
+              JSON.stringify(updatedTarget, null, 2)
+            );
+          }
+        } catch (err) {
+          console.error("Failed to remove back-relation from target DB:", err);
+        }
+      }
+
       handleUpdateContent((prev) => ({
         ...prev,
-        properties: [
-          ...prev.properties,
-          {
-            id: crypto.randomUUID(),
-            name,
-            type,
-            ...(relationConfig ? { relationConfig } : {}),
-          },
-        ],
+        properties: prev.properties.filter((p) => p.id !== propertyId),
+        rows: prev.rows.map((r) => {
+          const cells = { ...r.cells };
+          delete cells[propertyId];
+          return { ...r, cells };
+        }),
+        views: prev.views.map((v) => ({
+          ...v,
+          sorts: v.sorts.filter((s) => s.propertyId !== propertyId),
+          filters: v.filters.filter((f) => f.propertyId !== propertyId),
+        })),
       }));
     },
-    [handleUpdateContent]
+    [content, notebookId, handleUpdateContent]
   );
 
   // Update sorts on active view
@@ -190,6 +333,15 @@ export function DatabaseEditor({
       handleUpdateView((prev) => ({ ...prev, filters }));
     },
     [handleUpdateView]
+  );
+
+  // Hooks must be called before any conditional returns
+  const relationContext = useRelationContext(notebookId, page?.id, content);
+
+  // Get list of database pages for relation property picker
+  const allPages = usePageStore((s) => s.pages);
+  const databasePages = allPages.filter(
+    (p) => p.pageType === "database" && p.id !== page?.id
   );
 
   if (isLoading) {
@@ -209,15 +361,6 @@ export function DatabaseEditor({
     );
   }
 
-  // Resolve relation targets for all relation properties
-  const relationData = useRelationData(notebookId, content?.properties ?? []);
-
-  // Get list of database pages for relation property picker
-  const allPages = usePageStore((s) => s.pages);
-  const databasePages = allPages.filter(
-    (p) => p.pageType === "database" && p.id !== page?.id
-  );
-
   if (!content) return null;
 
   const activeView =
@@ -233,7 +376,7 @@ export function DatabaseEditor({
             view={activeView}
             onUpdateContent={handleUpdateContent}
             onUpdateView={handleUpdateView}
-            relationData={relationData}
+            relationContext={relationContext}
           />
         );
       case "list":
@@ -243,7 +386,7 @@ export function DatabaseEditor({
             view={activeView}
             onUpdateContent={handleUpdateContent}
             onUpdateView={handleUpdateView}
-            relationData={relationData}
+            relationContext={relationContext}
           />
         );
       case "board":
@@ -253,7 +396,7 @@ export function DatabaseEditor({
             view={activeView}
             onUpdateContent={handleUpdateContent}
             onUpdateView={handleUpdateView}
-            relationData={relationData}
+            relationContext={relationContext}
           />
         );
       case "gallery":
@@ -263,7 +406,7 @@ export function DatabaseEditor({
             view={activeView}
             onUpdateContent={handleUpdateContent}
             onUpdateView={handleUpdateView}
-            relationData={relationData}
+            relationContext={relationContext}
           />
         );
       case "calendar":
@@ -273,7 +416,7 @@ export function DatabaseEditor({
             view={activeView}
             onUpdateContent={handleUpdateContent}
             onUpdateView={handleUpdateView}
-            relationData={relationData}
+            relationContext={relationContext}
           />
         );
       default:
@@ -309,6 +452,8 @@ export function DatabaseEditor({
         onUpdateFilters={handleUpdateFilters}
         onUpdateView={handleUpdateView}
         databasePages={databasePages}
+        targetContents={relationContext.targetContents}
+        onDeleteProperty={handleDeleteProperty}
       />
       {renderActiveView()}
     </div>

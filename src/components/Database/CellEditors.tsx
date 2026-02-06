@@ -456,6 +456,23 @@ export function RelationCell({
   );
 }
 
+// Rollup cell — read-only display of computed values
+export function RollupCell({ value }: { value: CellValue }) {
+  if (value == null || value === "") {
+    return <div className="db-rollup-cell db-cell-placeholder">-</div>;
+  }
+
+  if (typeof value === "number") {
+    // Detect percentage aggregations
+    const display = String(value);
+    return (
+      <div className="db-rollup-cell db-rollup-cell-number">{display}</div>
+    );
+  }
+
+  return <div className="db-rollup-cell">{String(value)}</div>;
+}
+
 // Helper: pick a color for a new select option
 export function pickNextColor(existingOptions: SelectOption[]): string {
   const usedColors = new Set(existingOptions.map((o) => o.color));

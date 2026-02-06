@@ -7,6 +7,9 @@ import type {
   DatabaseFilter,
   DatabaseView,
   TableViewConfig,
+  DatabaseContentV2,
+  RollupConfig,
+  RollupAggregation,
 } from "../../types/database";
 import { PropertyTypeIcon } from "./PropertyEditor";
 
@@ -14,11 +17,18 @@ interface DatabaseToolbarProps {
   properties: PropertyDef[];
   view: DatabaseView;
   rowCount: number;
-  onAddProperty: (name: string, type: PropertyType, relationConfig?: { databasePageId: string }) => void;
+  onAddProperty: (
+    name: string,
+    type: PropertyType,
+    relationConfig?: { databasePageId: string },
+    rollupConfig?: RollupConfig
+  ) => void;
   onUpdateSorts: (sorts: DatabaseSort[]) => void;
   onUpdateFilters: (filters: DatabaseFilter[]) => void;
   onUpdateView: (updater: (prev: DatabaseView) => DatabaseView) => void;
   databasePages?: Page[];
+  targetContents?: Map<string, DatabaseContentV2>;
+  onDeleteProperty?: (propertyId: string) => void;
 }
 
 const TYPE_OPTIONS: { value: PropertyType; label: string }[] = [
@@ -30,6 +40,7 @@ const TYPE_OPTIONS: { value: PropertyType; label: string }[] = [
   { value: "date", label: "Date" },
   { value: "url", label: "URL" },
   { value: "relation", label: "Relation" },
+  { value: "rollup", label: "Rollup" },
 ];
 
 export function DatabaseToolbar({
@@ -41,6 +52,7 @@ export function DatabaseToolbar({
   onUpdateFilters,
   onUpdateView,
   databasePages,
+  targetContents,
 }: DatabaseToolbarProps) {
   const [showAddProp, setShowAddProp] = useState(false);
   const [showSort, setShowSort] = useState(false);
@@ -96,9 +108,14 @@ export function DatabaseToolbar({
               setNewPropName={setNewPropName}
               newPropType={newPropType}
               setNewPropType={setNewPropType}
-              onAdd={(relationConfig) => {
+              onAdd={(relationConfig, rollupConfig) => {
                 if (newPropName.trim()) {
-                  onAddProperty(newPropName.trim(), newPropType, relationConfig);
+                  onAddProperty(
+                    newPropName.trim(),
+                    newPropType,
+                    relationConfig,
+                    rollupConfig
+                  );
                   setNewPropName("");
                   setNewPropType("text");
                   setShowAddProp(false);
@@ -106,6 +123,8 @@ export function DatabaseToolbar({
               }}
               onClose={() => setShowAddProp(false)}
               databasePages={databasePages}
+              properties={properties}
+              targetContents={targetContents}
             />
           )}
         </div>
@@ -216,6 +235,20 @@ export function DatabaseToolbar({
   );
 }
 
+const AGGREGATION_OPTIONS: { value: RollupAggregation; label: string }[] = [
+  { value: "show_original", label: "Show original" },
+  { value: "count", label: "Count" },
+  { value: "countValues", label: "Count values" },
+  { value: "countUnique", label: "Count unique" },
+  { value: "sum", label: "Sum" },
+  { value: "average", label: "Average" },
+  { value: "min", label: "Min" },
+  { value: "max", label: "Max" },
+  { value: "range", label: "Range" },
+  { value: "percent_empty", label: "% empty" },
+  { value: "percent_not_empty", label: "% not empty" },
+];
+
 // Add Property Popover
 function AddPropertyPopover({
   newPropName,
@@ -225,16 +258,29 @@ function AddPropertyPopover({
   onAdd,
   onClose,
   databasePages,
+  properties,
+  targetContents,
 }: {
   newPropName: string;
   setNewPropName: (v: string) => void;
   newPropType: PropertyType;
   setNewPropType: (v: PropertyType) => void;
-  onAdd: (relationConfig?: { databasePageId: string }) => void;
+  onAdd: (
+    relationConfig?: { databasePageId: string },
+    rollupConfig?: RollupConfig
+  ) => void;
   onClose: () => void;
   databasePages?: Page[];
+  properties?: PropertyDef[];
+  targetContents?: Map<string, DatabaseContentV2>;
 }) {
   const [relationTargetPageId, setRelationTargetPageId] = useState<string>("");
+  // Rollup config state
+  const [rollupRelationId, setRollupRelationId] = useState<string>("");
+  const [rollupTargetPropId, setRollupTargetPropId] = useState<string>("");
+  const [rollupAggregation, setRollupAggregation] =
+    useState<RollupAggregation>("count");
+
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const handle = (e: MouseEvent) => {
@@ -244,14 +290,47 @@ function AddPropertyPopover({
     return () => document.removeEventListener("mousedown", handle);
   }, [onClose]);
 
+  // For rollup: get relation properties in this DB
+  const relationProperties = (properties ?? []).filter(
+    (p) => p.type === "relation" && p.relationConfig?.databasePageId
+  );
+
+  // Get the selected relation's target DB properties
+  const selectedRelation = relationProperties.find(
+    (p) => p.id === rollupRelationId
+  );
+  const linkedDbContent = selectedRelation?.relationConfig?.databasePageId
+    ? targetContents?.get(selectedRelation.relationConfig.databasePageId)
+    : null;
+  const linkedDbProperties = linkedDbContent?.properties ?? [];
+
   const handleAdd = () => {
     if (newPropType === "relation" && relationTargetPageId) {
       onAdd({ databasePageId: relationTargetPageId });
+    } else if (
+      newPropType === "rollup" &&
+      rollupRelationId &&
+      rollupTargetPropId &&
+      rollupAggregation
+    ) {
+      onAdd(undefined, {
+        relationPropertyId: rollupRelationId,
+        targetPropertyId: rollupTargetPropId,
+        aggregation: rollupAggregation,
+      });
     } else {
       onAdd();
     }
     setRelationTargetPageId("");
+    setRollupRelationId("");
+    setRollupTargetPropId("");
+    setRollupAggregation("count");
   };
+
+  const isAddDisabled =
+    (newPropType === "relation" && !relationTargetPageId) ||
+    (newPropType === "rollup" &&
+      (!rollupRelationId || !rollupTargetPropId || !rollupAggregation));
 
   return (
     <div ref={ref} className="db-popover">
@@ -262,7 +341,7 @@ function AddPropertyPopover({
         value={newPropName}
         onChange={(e) => setNewPropName(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === "Enter") handleAdd();
+          if (e.key === "Enter" && !isAddDisabled) handleAdd();
         }}
         autoFocus
       />
@@ -295,14 +374,77 @@ function AddPropertyPopover({
               ))}
             </select>
           ) : (
-            <div className="db-relation-empty">No other databases in this notebook</div>
+            <div className="db-relation-empty">
+              No other databases in this notebook
+            </div>
+          )}
+        </div>
+      )}
+      {newPropType === "rollup" && (
+        <div className="db-rollup-config">
+          <label className="db-pe-label">Relation</label>
+          {relationProperties.length > 0 ? (
+            <select
+              className="db-pe-select"
+              value={rollupRelationId}
+              onChange={(e) => {
+                setRollupRelationId(e.target.value);
+                setRollupTargetPropId("");
+              }}
+            >
+              <option value="">Select a relation...</option>
+              {relationProperties.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <div className="db-relation-empty">
+              No relation properties found. Add a relation first.
+            </div>
+          )}
+          {rollupRelationId && linkedDbProperties.length > 0 && (
+            <>
+              <label className="db-pe-label">Property</label>
+              <select
+                className="db-pe-select"
+                value={rollupTargetPropId}
+                onChange={(e) => setRollupTargetPropId(e.target.value)}
+              >
+                <option value="">Select a property...</option>
+                {linkedDbProperties.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} ({p.type})
+                  </option>
+                ))}
+              </select>
+            </>
+          )}
+          {rollupRelationId && rollupTargetPropId && (
+            <>
+              <label className="db-pe-label">Aggregation</label>
+              <select
+                className="db-pe-select"
+                value={rollupAggregation}
+                onChange={(e) =>
+                  setRollupAggregation(e.target.value as RollupAggregation)
+                }
+              >
+                {AGGREGATION_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </>
           )}
         </div>
       )}
       <button
         className="db-popover-action"
         onClick={handleAdd}
-        disabled={newPropType === "relation" && !relationTargetPageId}
+        disabled={isAddDisabled}
       >
         Add
       </button>

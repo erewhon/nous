@@ -14,8 +14,9 @@ import {
   SelectCell,
   MultiSelectCell,
   RelationCell,
-  type RelationTarget,
+  RollupCell,
 } from "./CellEditors";
+import type { RelationContext } from "./useRelationContext";
 
 interface DatabaseRowDetailProps {
   row: DatabaseRow;
@@ -24,7 +25,7 @@ interface DatabaseRowDetailProps {
   onAddSelectOption: (propertyId: string, label: string) => SelectOption;
   onClose: () => void;
   onDelete: () => void;
-  relationData?: Map<string, RelationTarget[]>;
+  relationContext?: RelationContext;
 }
 
 export function DatabaseRowDetail({
@@ -34,7 +35,7 @@ export function DatabaseRowDetail({
   onAddSelectOption,
   onClose,
   onDelete,
-  relationData,
+  relationContext,
 }: DatabaseRowDetailProps) {
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -60,6 +61,48 @@ export function DatabaseRowDetail({
     (prop: PropertyDef) => {
       const value = row.cells[prop.id] ?? null;
       const onChange = (v: CellValue) => onCellChange(prop.id, v);
+
+      // Rollup — read-only
+      if (prop.type === "rollup") {
+        const rollupVal =
+          relationContext?.rollupValues.get(prop.id)?.get(row.id) ?? null;
+        return <RollupCell value={rollupVal} />;
+      }
+
+      // Back-relation
+      if (
+        prop.type === "relation" &&
+        prop.relationConfig?.direction === "back"
+      ) {
+        const backValues =
+          relationContext?.backRelationValues.get(prop.id)?.get(row.id) ?? [];
+        const sourcePageId = prop.relationConfig.databasePageId;
+        const sourceContent =
+          relationContext?.targetContents.get(sourcePageId);
+        const targets = sourceContent
+          ? sourceContent.rows.map((r) => {
+              const titleProp = sourceContent.properties.find(
+                (p) => p.type === "text"
+              );
+              return {
+                id: r.id,
+                title: titleProp
+                  ? String(r.cells[titleProp.id] ?? "")
+                  : "",
+              };
+            })
+          : [];
+        return (
+          <RelationCell
+            value={backValues.length > 0 ? backValues : null}
+            onChange={(newVal) => {
+              const newIds = Array.isArray(newVal) ? newVal : [];
+              relationContext?.updateBackRelation(prop.id, row.id, newIds);
+            }}
+            targets={targets}
+          />
+        );
+      }
 
       switch (prop.type) {
         case "text":
@@ -95,14 +138,14 @@ export function DatabaseRowDetail({
             <RelationCell
               value={value}
               onChange={onChange}
-              targets={relationData?.get(prop.id) ?? []}
+              targets={relationContext?.targets.get(prop.id) ?? []}
             />
           );
         default:
           return <TextCell value={value} onChange={onChange} />;
       }
     },
-    [row, onCellChange, onAddSelectOption, relationData]
+    [row, onCellChange, onAddSelectOption, relationContext]
   );
 
   // Title: first text property value

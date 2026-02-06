@@ -7,7 +7,8 @@ import type {
   ListViewConfig,
   SelectOption,
 } from "../../types/database";
-import { pickNextColor, type RelationTarget } from "./CellEditors";
+import { pickNextColor } from "./CellEditors";
+import type { RelationContext } from "./useRelationContext";
 import { DatabaseRowDetail } from "./DatabaseRowDetail";
 import { compareCellValues, applyFilter } from "./DatabaseTable";
 
@@ -18,14 +19,14 @@ interface DatabaseListProps {
     updater: (prev: DatabaseContentV2) => DatabaseContentV2
   ) => void;
   onUpdateView: (updater: (prev: DatabaseView) => DatabaseView) => void;
-  relationData?: Map<string, RelationTarget[]>;
+  relationContext?: RelationContext;
 }
 
 export function DatabaseList({
   content,
   view,
   onUpdateContent,
-  relationData,
+  relationContext,
 }: DatabaseListProps) {
   const [selectedRowId, setSelectedRowId] = useState<string | null>(null);
 
@@ -133,6 +134,34 @@ export function DatabaseList({
   const getDisplayValue = (row: DatabaseRow, propertyId: string): string => {
     const prop = content.properties.find((p) => p.id === propertyId);
     if (!prop) return "";
+
+    // Rollup
+    if (prop.type === "rollup") {
+      const v = relationContext?.rollupValues.get(prop.id)?.get(row.id);
+      return v != null ? String(v) : "";
+    }
+
+    // Back-relation
+    if (prop.type === "relation" && prop.relationConfig?.direction === "back") {
+      const backIds =
+        relationContext?.backRelationValues.get(prop.id)?.get(row.id) ?? [];
+      if (backIds.length === 0) return "";
+      const sourcePageId = prop.relationConfig.databasePageId;
+      const sourceContent =
+        relationContext?.targetContents.get(sourcePageId);
+      if (!sourceContent) return backIds.length + " linked";
+      const titleProp = sourceContent.properties.find(
+        (p) => p.type === "text"
+      );
+      return backIds
+        .map((id) => {
+          const r = sourceContent.rows.find((r) => r.id === id);
+          return r && titleProp ? String(r.cells[titleProp.id] ?? "") : "";
+        })
+        .filter(Boolean)
+        .join(", ");
+    }
+
     const val = row.cells[propertyId];
     if (val == null) return "";
     if (prop.type === "select") {
@@ -146,7 +175,7 @@ export function DatabaseList({
     }
     if (prop.type === "checkbox") return val ? "Yes" : "No";
     if (prop.type === "relation" && Array.isArray(val)) {
-      const targets = relationData?.get(prop.id) ?? [];
+      const targets = relationContext?.targets.get(prop.id) ?? [];
       return val
         .map((id) => targets.find((t) => t.id === id)?.title ?? "")
         .filter(Boolean)
@@ -234,7 +263,7 @@ export function DatabaseList({
           onAddSelectOption={handleAddSelectOption}
           onClose={() => setSelectedRowId(null)}
           onDelete={() => handleDeleteRow(selectedRow.id)}
-          relationData={relationData}
+          relationContext={relationContext}
         />
       )}
     </div>

@@ -8,7 +8,8 @@ import type {
   SelectOption,
   PropertyDef,
 } from "../../types/database";
-import { pickNextColor, type RelationTarget } from "./CellEditors";
+import { pickNextColor } from "./CellEditors";
+import type { RelationContext } from "./useRelationContext";
 import { DatabaseRowDetail } from "./DatabaseRowDetail";
 import { compareCellValues, applyFilter } from "./DatabaseTable";
 
@@ -19,14 +20,14 @@ interface DatabaseGalleryProps {
     updater: (prev: DatabaseContentV2) => DatabaseContentV2
   ) => void;
   onUpdateView: (updater: (prev: DatabaseView) => DatabaseView) => void;
-  relationData?: Map<string, RelationTarget[]>;
+  relationContext?: RelationContext;
 }
 
 export function DatabaseGallery({
   content,
   view,
   onUpdateContent,
-  relationData,
+  relationContext,
 }: DatabaseGalleryProps) {
   const [selectedRowId, setSelectedRowId] = useState<string | null>(null);
 
@@ -142,6 +143,43 @@ export function DatabaseGallery({
   );
 
   const renderPropValue = (prop: PropertyDef, row: DatabaseRow) => {
+    // Rollup
+    if (prop.type === "rollup") {
+      const v = relationContext?.rollupValues.get(prop.id)?.get(row.id);
+      if (v == null || v === "") return null;
+      return <span className="db-rollup-cell">{String(v)}</span>;
+    }
+
+    // Back-relation
+    if (prop.type === "relation" && prop.relationConfig?.direction === "back") {
+      const backIds =
+        relationContext?.backRelationValues.get(prop.id)?.get(row.id) ?? [];
+      if (backIds.length === 0) return null;
+      const sourcePageId = prop.relationConfig.databasePageId;
+      const sourceContent =
+        relationContext?.targetContents.get(sourcePageId);
+      if (!sourceContent) return <span>{backIds.length} linked</span>;
+      const titleProp = sourceContent.properties.find(
+        (p) => p.type === "text"
+      );
+      const names = backIds
+        .map((id) => {
+          const r = sourceContent.rows.find((r) => r.id === id);
+          return r && titleProp ? String(r.cells[titleProp.id] ?? "") : "";
+        })
+        .filter(Boolean);
+      if (names.length === 0) return null;
+      return (
+        <span className="db-gallery-card-pills">
+          {names.map((name, i) => (
+            <span key={i} className="db-relation-pill">
+              {name}
+            </span>
+          ))}
+        </span>
+      );
+    }
+
     const val = row.cells[prop.id];
     if (val == null || val === "") return null;
 
@@ -195,7 +233,7 @@ export function DatabaseGallery({
       );
     }
     if (prop.type === "relation" && Array.isArray(val)) {
-      const targets = relationData?.get(prop.id) ?? [];
+      const targets = relationContext?.targets.get(prop.id) ?? [];
       const names = val
         .map((id) => targets.find((t) => t.id === id)?.title ?? "")
         .filter(Boolean);
@@ -203,7 +241,9 @@ export function DatabaseGallery({
       return (
         <span className="db-gallery-card-pills">
           {names.map((name, i) => (
-            <span key={i} className="db-relation-pill">{name}</span>
+            <span key={i} className="db-relation-pill">
+              {name}
+            </span>
           ))}
         </span>
       );
@@ -274,7 +314,7 @@ export function DatabaseGallery({
           onAddSelectOption={handleAddSelectOption}
           onClose={() => setSelectedRowId(null)}
           onDelete={() => handleDeleteRow(selectedRow.id)}
-          relationData={relationData}
+          relationContext={relationContext}
         />
       )}
     </div>

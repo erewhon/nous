@@ -18,9 +18,10 @@ import {
   SelectCell,
   MultiSelectCell,
   RelationCell,
+  RollupCell,
   pickNextColor,
-  type RelationTarget,
 } from "./CellEditors";
+import type { RelationContext } from "./useRelationContext";
 import { PropertyEditor, PropertyTypeIcon } from "./PropertyEditor";
 
 interface DatabaseTableProps {
@@ -30,7 +31,7 @@ interface DatabaseTableProps {
     updater: (prev: DatabaseContentV2) => DatabaseContentV2
   ) => void;
   onUpdateView: (updater: (prev: DatabaseView) => DatabaseView) => void;
-  relationData?: Map<string, RelationTarget[]>;
+  relationContext?: RelationContext;
 }
 
 export function DatabaseTable({
@@ -38,7 +39,7 @@ export function DatabaseTable({
   view,
   onUpdateContent,
   onUpdateView,
-  relationData,
+  relationContext,
 }: DatabaseTableProps) {
   const [editingProperty, setEditingProperty] = useState<string | null>(null);
 
@@ -341,6 +342,44 @@ export function DatabaseTable({
     const value = row.cells[prop.id] ?? null;
     const onChange = (v: CellValue) => handleCellChange(row.id, prop.id, v);
 
+    // Rollup — read-only computed value
+    if (prop.type === "rollup") {
+      const rollupVal =
+        relationContext?.rollupValues.get(prop.id)?.get(row.id) ?? null;
+      return <RollupCell value={rollupVal} />;
+    }
+
+    // Back-relation — computed reverse links, editable via updateBackRelation
+    if (prop.type === "relation" && prop.relationConfig?.direction === "back") {
+      const backValues =
+        relationContext?.backRelationValues.get(prop.id)?.get(row.id) ?? [];
+      // Get targets from the source DB (which is the "target" for this back-relation)
+      const sourcePageId = prop.relationConfig.databasePageId;
+      const sourceContent =
+        relationContext?.targetContents.get(sourcePageId);
+      const targets = sourceContent
+        ? sourceContent.rows.map((r) => {
+            const titleProp = sourceContent.properties.find(
+              (p) => p.type === "text"
+            );
+            return {
+              id: r.id,
+              title: titleProp ? String(r.cells[titleProp.id] ?? "") : "",
+            };
+          })
+        : [];
+      return (
+        <RelationCell
+          value={backValues.length > 0 ? backValues : null}
+          onChange={(newVal) => {
+            const newIds = Array.isArray(newVal) ? newVal : [];
+            relationContext?.updateBackRelation(prop.id, row.id, newIds);
+          }}
+          targets={targets}
+        />
+      );
+    }
+
     switch (prop.type) {
       case "text":
         return <TextCell value={value} onChange={onChange} />;
@@ -375,7 +414,7 @@ export function DatabaseTable({
           <RelationCell
             value={value}
             onChange={onChange}
-            targets={relationData?.get(prop.id) ?? []}
+            targets={relationContext?.targets.get(prop.id) ?? []}
           />
         );
       default:

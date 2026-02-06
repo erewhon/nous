@@ -10,6 +10,7 @@ export const PropertyTypeSchema = z.enum([
   "date",
   "url",
   "relation",
+  "rollup",
 ]);
 export type PropertyType = z.infer<typeof PropertyTypeSchema>;
 
@@ -24,8 +25,34 @@ export type SelectOption = z.infer<typeof SelectOptionSchema>;
 // Relation configuration — links to another database page
 export const RelationConfigSchema = z.object({
   databasePageId: z.string(), // Page ID of the target database
+  backRelationPropertyId: z.string().optional(), // ID of the mirror property in the other DB
+  direction: z.enum(["forward", "back"]).optional(), // undefined = legacy forward
 });
 export type RelationConfig = z.infer<typeof RelationConfigSchema>;
+
+// Rollup aggregation functions
+export const RollupAggregationSchema = z.enum([
+  "show_original",
+  "count",
+  "countValues",
+  "countUnique",
+  "sum",
+  "average",
+  "min",
+  "max",
+  "range",
+  "percent_empty",
+  "percent_not_empty",
+]);
+export type RollupAggregation = z.infer<typeof RollupAggregationSchema>;
+
+// Rollup configuration — aggregates data via a relation
+export const RollupConfigSchema = z.object({
+  relationPropertyId: z.string(), // which relation/back-relation to follow
+  targetPropertyId: z.string(), // which property in the linked DB to aggregate
+  aggregation: RollupAggregationSchema,
+});
+export type RollupConfig = z.infer<typeof RollupConfigSchema>;
 
 // Property (column) definition
 export const PropertyDefSchema = z.object({
@@ -35,6 +62,7 @@ export const PropertyDefSchema = z.object({
   options: z.array(SelectOptionSchema).optional(),
   width: z.number().optional(),
   relationConfig: RelationConfigSchema.optional(),
+  rollupConfig: RollupConfigSchema.optional(),
 });
 export type PropertyDef = z.infer<typeof PropertyDefSchema>;
 

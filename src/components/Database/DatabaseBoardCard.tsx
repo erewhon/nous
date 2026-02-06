@@ -76,6 +76,11 @@ export function DatabaseBoardCard({
       );
     }
 
+    if (prop.type === "rollup") {
+      // Rollup values are not available in card context (no relation context passed)
+      return null;
+    }
+
     return <span className="db-board-card-text">{String(val)}</span>;
   };
 
