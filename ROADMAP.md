@@ -794,9 +794,9 @@ These features are recommended as high-priority additions:
 1. ~~**Daily notes** - Central to many workflows, leverages existing templates~~ ✅ Complete
 2. ~~**Canvas/whiteboard** - Visual thinking, very popular in Obsidian~~ ✅ Complete
 3. ~~**Block references** - Major upgrade to linking capabilities~~ ✅ Complete
-4. **Web clipper** - Key capture workflow currently missing
+4. ~~**Web clipper** - Key capture workflow currently missing~~ ✅ Complete
 5. ~~**Starred/recent pages** - Simple but impactful navigation improvement~~ ✅ Complete (starred/pinned)
-6. **Live queries** - Power feature for dynamic organization
+6. ~~**Live queries** - Power feature for dynamic organization~~ ✅ Complete
 7. **Publish to web** - Sharing capability many users want
 
 ---
@@ -827,17 +827,20 @@ These features are recommended as high-priority additions:
   - [x] Custom type creation, editing, and deletion
   - [x] Object type picker when creating database pages
   - [x] Object type management UI
-  - [ ] Templates per object type
-  - [ ] Type-specific views and queries
+  - [x] Templates per object type (default cell values for new rows, per-property default value editor in PropertyEditor and ObjectTypeManager)
+  - [x] Type-specific views and queries (default sorts, filters, group-by, date property per object type; auto-applied when creating database from type)
 - [x] **Relations & rollups** - Link and aggregate data
   - [x] Relate database items to each other
   - [x] Rollup properties (count, sum, average, min, max, range, percent empty/not empty, show original, count values, count unique)
   - [x] Bidirectional relations (auto-created back-relation in target DB, editable from both sides, cascade delete)
-- [ ] **Live queries** - Dynamic embedded lists
-  - Query syntax for filtering pages/blocks
-  - Embed query results inline (e.g., "all pages tagged #project with incomplete tasks")
-  - Auto-updating as content changes
-  - Inspired by Logseq and Tana
+- [x] **Live queries** - Dynamic embedded lists
+  - Editor.js block tool with React component (LiveQueryBlockTool + LiveQueryBlock)
+  - Filter pages by title, tag, pageType, folder, or content (contains, equals, not_equals, starts_with)
+  - Sort by title, createdAt, or updatedAt with configurable limit
+  - Three display modes: list (default), table, compact
+  - Auto-updating via Zustand page store subscription
+  - Inline config editor for filters, sort, and limit
+  - Click result to navigate to page
 
 ---
 
@@ -964,11 +967,14 @@ These features are recommended as high-priority additions:
 
 ### 41. Capture & Input (Evernote, Apple Notes)
 
-- [ ] **Web clipper** - Browser extension ⭐ TOP RECOMMENDATION
-  - Save full page, selection, or simplified article
-  - Choose target notebook/page
-  - Add tags and notes
-  - Works offline, syncs later
+- [x] **Web clipper** - In-app URL clipper ⭐ TOP RECOMMENDATION
+  - Clip any URL via dialog (sidebar button or editor trigger)
+  - Readability-based article extraction (Rust `readability` crate)
+  - Metadata capture (title, favicon, site name via OpenGraph)
+  - Block preview with title editing before save
+  - Notebook and folder selection for target page
+  - Source attribution block auto-added
+  - Smart URL normalization (auto-adds https://)
 - [ ] **Document scanning** - Camera-based capture
   - Scan documents with device camera
   - Auto-crop and perspective correction

@@ -20,6 +20,7 @@ mod notion;
 mod obsidian;
 mod onenote;
 mod orgmode;
+mod publish;
 mod python_bridge;
 mod rag;
 mod scrivener;
@@ -661,6 +662,10 @@ pub fn run() {
             // Smart organize commands
             commands::smart_organize_suggest,
             commands::smart_organize_apply,
+            // Publish commands
+            commands::publish_notebook,
+            commands::publish_selected_pages,
+            commands::preview_publish_page,
             // Daily notes commands
             commands::get_daily_note,
             commands::create_daily_note,

@@ -10,6 +10,7 @@ import { ConfirmDialog } from "./components/ConfirmDialog";
 import { TemplateDialog } from "./components/TemplateDialog";
 import { TagManager } from "./components/Tags";
 import { BackupDialog } from "./components/Backup";
+import { PublishDialog } from "./components/Publish";
 import { ActionLibrary, ActionEditor } from "./components/Actions";
 import { QuickCapture, InboxPanel } from "./components/Inbox";
 import { FlashcardPanel } from "./components/Flashcards";
@@ -54,12 +55,20 @@ function App() {
 
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [showBackup, setShowBackup] = useState(false);
+  const [showPublish, setShowPublish] = useState(false);
 
   // Listen for custom event to open backup dialog
   useEffect(() => {
     const handleOpenBackup = () => setShowBackup(true);
     window.addEventListener("open-backup-dialog", handleOpenBackup);
     return () => window.removeEventListener("open-backup-dialog", handleOpenBackup);
+  }, []);
+
+  // Listen for custom event to open publish dialog
+  useEffect(() => {
+    const handleOpenPublish = () => setShowPublish(true);
+    window.addEventListener("open-publish-dialog", handleOpenPublish);
+    return () => window.removeEventListener("open-publish-dialog", handleOpenPublish);
   }, []);
 
   // Listen for custom event to open web clipper (optionally with a URL)
@@ -275,6 +284,12 @@ function App() {
       <BackupDialog
         isOpen={showBackup}
         onClose={() => setShowBackup(false)}
+      />
+
+      {/* Publish Dialog */}
+      <PublishDialog
+        isOpen={showPublish}
+        onClose={() => setShowPublish(false)}
       />
 
       {/* Action Library */}
