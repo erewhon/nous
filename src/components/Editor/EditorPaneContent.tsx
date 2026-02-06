@@ -18,6 +18,7 @@ import { CalendarViewer } from "../Calendar";
 import { ChatEditor } from "../Chat";
 import { CanvasEditor } from "../Canvas";
 import { DatabaseEditor } from "../Database";
+import { OutlinePanel } from "./OutlinePanel";
 import { BacklinksPanel } from "./BacklinksPanel";
 import { SimilarPagesPanel } from "./SimilarPagesPanel";
 import type { EditorData, Page } from "../../types/page";
@@ -61,6 +62,8 @@ export function EditorPaneContent({
   const { updatePageLinks } = useLinkStore();
   const setZenMode = useThemeStore((state) => state.setZenMode);
   const zenModeSettings = useThemeStore((state) => state.zenModeSettings);
+  const showOutline = useThemeStore((state) => state.showOutline);
+  const toggleOutline = useThemeStore((state) => state.toggleOutline);
   const [isSaving, setIsSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [showHistoryPanel, setShowHistoryPanel] = useState(false);
@@ -547,6 +550,8 @@ export function EditorPaneContent({
                   canRedo={canRedo()}
                   onUndo={undo}
                   onRedo={redo}
+                  onToggleOutline={toggleOutline}
+                  showOutline={showOutline}
                 />
                 {/* Undo History Panel */}
                 {isStandardPage && pane.pageId && (
@@ -558,107 +563,115 @@ export function EditorPaneContent({
                   />
                 )}
               </div>
-              <div
-                ref={editorScrollRef}
-                className={`flex-1 overflow-y-auto ${zenMode ? "zen-editor-scroll" : "px-8 py-6"}`}
-                style={zenMode ? { padding: "4rem 2rem" } : undefined}
-              >
+              <div className="flex flex-1 overflow-hidden">
                 <div
-                  className={`mx-auto ${zenMode ? "zen-editor-container" : ""}`}
-                  style={{
-                    maxWidth: zenMode ? "720px" : "var(--editor-max-width)",
-                  }}
+                  ref={editorScrollRef}
+                  className={`flex-1 overflow-y-auto ${zenMode ? "zen-editor-scroll" : "px-8 py-6"}`}
+                  style={zenMode ? { padding: "4rem 2rem" } : undefined}
                 >
-                  {/* Conditional rendering based on page type */}
-                  {selectedPage.pageType === "markdown" && (
-                    <MarkdownEditor
-                      key={selectedPage.id}
-                      page={selectedPage}
-                      notebookId={notebookId}
-                      className="min-h-[calc(100vh-300px)]"
-                    />
-                  )}
-                  {selectedPage.pageType === "pdf" && (
-                    <PDFPageViewer
-                      key={selectedPage.id}
-                      page={selectedPage}
-                      notebookId={notebookId}
-                      className="min-h-[calc(100vh-300px)]"
-                    />
-                  )}
-                  {selectedPage.pageType === "jupyter" && (
-                    <JupyterViewer
-                      key={selectedPage.id}
-                      page={selectedPage}
-                      notebookId={notebookId}
-                      className="min-h-[calc(100vh-300px)]"
-                    />
-                  )}
-                  {selectedPage.pageType === "epub" && (
-                    <EpubReader
-                      key={selectedPage.id}
-                      page={selectedPage}
-                      notebookId={notebookId}
-                      className="min-h-[calc(100vh-300px)]"
-                    />
-                  )}
-                  {selectedPage.pageType === "calendar" && (
-                    <CalendarViewer
-                      key={selectedPage.id}
-                      page={selectedPage}
-                      notebookId={notebookId}
-                      className="min-h-[calc(100vh-300px)]"
-                    />
-                  )}
-                  {selectedPage.pageType === "chat" && (
-                    <ChatEditor
-                      key={selectedPage.id}
-                      page={selectedPage}
-                      notebookId={notebookId}
-                      className="min-h-[calc(100vh-300px)]"
-                    />
-                  )}
-                  {(selectedPage.pageType === "standard" ||
-                    !selectedPage.pageType) && (
-                    <BlockEditor
-                      ref={editorRef}
-                      key={selectedPage.id}
-                      initialData={editorData}
-                      onChange={handleChange}
-                      onSave={handleSave}
-                      onExplicitSave={handleExplicitSave}
-                      onLinkClick={handleLinkClick}
-                      onBlockRefClick={handleBlockRefClick}
-                      notebookId={notebookId}
-                      pages={notebookPages.map((p) => ({
-                        id: p.id,
-                        title: p.title,
-                      }))}
-                      className="min-h-[calc(100vh-300px)]"
-                    />
-                  )}
+                  <div
+                    className={`mx-auto ${zenMode ? "zen-editor-container" : ""}`}
+                    style={{
+                      maxWidth: zenMode ? "720px" : "var(--editor-max-width)",
+                    }}
+                  >
+                    {/* Conditional rendering based on page type */}
+                    {selectedPage.pageType === "markdown" && (
+                      <MarkdownEditor
+                        key={selectedPage.id}
+                        page={selectedPage}
+                        notebookId={notebookId}
+                        className="min-h-[calc(100vh-300px)]"
+                      />
+                    )}
+                    {selectedPage.pageType === "pdf" && (
+                      <PDFPageViewer
+                        key={selectedPage.id}
+                        page={selectedPage}
+                        notebookId={notebookId}
+                        className="min-h-[calc(100vh-300px)]"
+                      />
+                    )}
+                    {selectedPage.pageType === "jupyter" && (
+                      <JupyterViewer
+                        key={selectedPage.id}
+                        page={selectedPage}
+                        notebookId={notebookId}
+                        className="min-h-[calc(100vh-300px)]"
+                      />
+                    )}
+                    {selectedPage.pageType === "epub" && (
+                      <EpubReader
+                        key={selectedPage.id}
+                        page={selectedPage}
+                        notebookId={notebookId}
+                        className="min-h-[calc(100vh-300px)]"
+                      />
+                    )}
+                    {selectedPage.pageType === "calendar" && (
+                      <CalendarViewer
+                        key={selectedPage.id}
+                        page={selectedPage}
+                        notebookId={notebookId}
+                        className="min-h-[calc(100vh-300px)]"
+                      />
+                    )}
+                    {selectedPage.pageType === "chat" && (
+                      <ChatEditor
+                        key={selectedPage.id}
+                        page={selectedPage}
+                        notebookId={notebookId}
+                        className="min-h-[calc(100vh-300px)]"
+                      />
+                    )}
+                    {(selectedPage.pageType === "standard" ||
+                      !selectedPage.pageType) && (
+                      <BlockEditor
+                        ref={editorRef}
+                        key={selectedPage.id}
+                        initialData={editorData}
+                        onChange={handleChange}
+                        onSave={handleSave}
+                        onExplicitSave={handleExplicitSave}
+                        onLinkClick={handleLinkClick}
+                        onBlockRefClick={handleBlockRefClick}
+                        notebookId={notebookId}
+                        pages={notebookPages.map((p) => ({
+                          id: p.id,
+                          title: p.title,
+                        }))}
+                        className="min-h-[calc(100vh-300px)]"
+                      />
+                    )}
 
-                  {/* Backlinks panel - only for standard pages */}
-                  {(selectedPage.pageType === "standard" ||
-                    !selectedPage.pageType) && (
-                    <BacklinksPanel
-                      pageTitle={selectedPage.title}
-                      pageId={selectedPage.id}
-                      notebookId={notebookId}
-                      onBlockRefClick={handleBlockRefClick}
-                    />
-                  )}
+                    {/* Backlinks panel - only for standard pages */}
+                    {(selectedPage.pageType === "standard" ||
+                      !selectedPage.pageType) && (
+                      <BacklinksPanel
+                        pageTitle={selectedPage.title}
+                        pageId={selectedPage.id}
+                        notebookId={notebookId}
+                        onBlockRefClick={handleBlockRefClick}
+                      />
+                    )}
 
-                  {/* Similar Pages panel - only for standard pages */}
-                  {(selectedPage.pageType === "standard" ||
-                    !selectedPage.pageType) && (
-                    <SimilarPagesPanel
-                      page={selectedPage}
-                      notebookId={notebookId}
-                      allPages={notebookPages}
-                    />
-                  )}
+                    {/* Similar Pages panel - only for standard pages */}
+                    {(selectedPage.pageType === "standard" ||
+                      !selectedPage.pageType) && (
+                      <SimilarPagesPanel
+                        page={selectedPage}
+                        notebookId={notebookId}
+                        allPages={notebookPages}
+                      />
+                    )}
+                  </div>
                 </div>
+                {showOutline && isStandardPage && !zenMode && (
+                  <OutlinePanel
+                    blocks={selectedPage.content.blocks}
+                    editorScrollRef={editorScrollRef}
+                  />
+                )}
               </div>
             </>
           )}

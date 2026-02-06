@@ -23,7 +23,7 @@ pub fn render_page_html(
 }
 
 /// Render a single EditorBlock to HTML.
-fn render_block(
+pub fn render_block(
     block: &EditorBlock,
     page_slugs: &HashMap<String, String>,
     block_texts: &HashMap<String, String>,

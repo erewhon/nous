@@ -2,6 +2,8 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
 use uuid::Uuid;
 
+use crate::publish::presentation::{self, PresentationOptions};
+use crate::publish::print::{self, PrintOptions};
 use crate::publish::site::{self, PublishOptions, PublishResult};
 use crate::AppState;
 
@@ -109,4 +111,50 @@ pub fn preview_publish_page(
     let storage = state.storage.lock().map_err(|e| e.to_string())?;
 
     site::preview_page(&storage, nb_id, pg_id, &theme)
+}
+
+/// Generate a Reveal.js presentation HTML string for a page.
+#[tauri::command]
+pub fn generate_presentation(
+    state: State<AppState>,
+    notebook_id: String,
+    page_id: String,
+    options: PresentationOptions,
+) -> Result<String, String> {
+    let nb_id =
+        Uuid::parse_str(&notebook_id).map_err(|e| format!("Invalid notebook ID: {}", e))?;
+    let pg_id = Uuid::parse_str(&page_id).map_err(|e| format!("Invalid page ID: {}", e))?;
+    let storage = state.storage.lock().map_err(|e| e.to_string())?;
+
+    let page = storage
+        .get_page(nb_id, pg_id)
+        .map_err(|e| format!("Failed to get page: {}", e))?;
+    let all_pages = storage
+        .list_pages(nb_id)
+        .map_err(|e| format!("Failed to list pages: {}", e))?;
+
+    Ok(presentation::render_presentation_html(&page, &all_pages, &options))
+}
+
+/// Generate print-friendly HTML for a page.
+#[tauri::command]
+pub fn generate_print_html(
+    state: State<AppState>,
+    notebook_id: String,
+    page_id: String,
+    options: PrintOptions,
+) -> Result<String, String> {
+    let nb_id =
+        Uuid::parse_str(&notebook_id).map_err(|e| format!("Invalid notebook ID: {}", e))?;
+    let pg_id = Uuid::parse_str(&page_id).map_err(|e| format!("Invalid page ID: {}", e))?;
+    let storage = state.storage.lock().map_err(|e| e.to_string())?;
+
+    let page = storage
+        .get_page(nb_id, pg_id)
+        .map_err(|e| format!("Failed to get page: {}", e))?;
+    let all_pages = storage
+        .list_pages(nb_id)
+        .map_err(|e| format!("Failed to list pages: {}", e))?;
+
+    Ok(print::render_print_html(&page, &all_pages, &options))
 }

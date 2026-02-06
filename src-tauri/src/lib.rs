@@ -666,6 +666,8 @@ pub fn run() {
             commands::publish_notebook,
             commands::publish_selected_pages,
             commands::preview_publish_page,
+            commands::generate_presentation,
+            commands::generate_print_html,
             // Daily notes commands
             commands::get_daily_note,
             commands::create_daily_note,

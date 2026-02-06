@@ -797,7 +797,7 @@ These features are recommended as high-priority additions:
 4. ~~**Web clipper** - Key capture workflow currently missing~~ ✅ Complete
 5. ~~**Starred/recent pages** - Simple but impactful navigation improvement~~ ✅ Complete (starred/pinned)
 6. ~~**Live queries** - Power feature for dynamic organization~~ ✅ Complete
-7. **Publish to web** - Sharing capability many users want
+7. ~~**Publish to web** - Sharing capability many users want~~ ✅ Complete
 
 ---
 
@@ -876,11 +876,13 @@ These features are recommended as high-priority additions:
   - Freeform spatial organization
   - Group and frame elements
   - Export as image
-- [ ] **Outline/TOC panel** - Table of contents
+- [x] **Outline/TOC panel** - Table of contents
   - Auto-generated from page headers
-  - Click to jump to section
-  - Collapsible hierarchy
-  - Floating or sidebar position
+  - Click to jump to section with highlight animation
+  - Active heading tracking on scroll
+  - Right sidebar panel (220px, toggle button in page header)
+  - Hidden in zen mode and for non-standard page types
+  - Preference persisted via themeStore
 - [ ] **Mind map view** - Visual hierarchy
   - Convert page structure to interactive mind map
   - Expand/collapse branches
@@ -943,12 +945,13 @@ These features are recommended as high-priority additions:
 
 ### 40. Publishing & Sharing (Obsidian, Craft, Notion)
 
-- [ ] **Publish to web** - Static site generation ⭐ TOP RECOMMENDATION
-  - One-click publish pages as website
-  - Custom domain support
-  - Theme/styling options
-  - Choose which pages to publish
-  - Password protection option
+- [x] **Publish to web** - Static site generation ⭐ TOP RECOMMENDATION
+  - One-click publish pages as website (4 themes: Minimal, Documentation, Blog, Academic)
+  - Theme/styling options with preview
+  - Choose whole notebook or selected pages to publish
+  - Wiki-link resolution and backlinks support
+  - Image asset copying
+  - Command Palette integration ("Publish to Web")
 - [ ] **Share as link** - Single page sharing
   - Generate shareable link for any page
   - Optional expiration date
