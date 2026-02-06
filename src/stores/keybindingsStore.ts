@@ -20,7 +20,8 @@ export type KeybindingAction =
   | "flashcards"
   | "zenMode"
   | "dailyNote"
-  | "toggleFavorite";
+  | "toggleFavorite"
+  | "webClipper";
 
 // Keybinding definition
 export interface Keybinding {
@@ -161,6 +162,13 @@ export const DEFAULT_KEYBINDINGS: Keybinding[] = [
     label: "Toggle Star",
     description: "Star or unstar the current page",
     key: "s",
+    modifiers: { ctrl: true, shift: true, alt: false },
+  },
+  {
+    action: "webClipper",
+    label: "Web Clipper",
+    description: "Clip a web page",
+    key: "l",
     modifiers: { ctrl: true, shift: true, alt: false },
   },
 ];

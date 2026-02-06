@@ -376,6 +376,8 @@ pub fn run() {
             commands::summarize_research,
             commands::fetch_link_metadata,
             commands::fetch_url_content,
+            // Web clipper commands
+            commands::clip_web_page,
             // Tag management commands
             commands::get_all_tags,
             commands::get_notebook_tags,

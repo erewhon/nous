@@ -679,6 +679,21 @@ export async function summarizeResearch(
   });
 }
 
+// ===== Web Clipper API =====
+
+export interface ClippedContent {
+  title: string;
+  content: string;
+  text: string;
+  url: string;
+  siteName: string | null;
+  favicon: string | null;
+}
+
+export async function clipWebPage(url: string): Promise<ClippedContent> {
+  return invoke<ClippedContent>("clip_web_page", { url });
+}
+
 // ===== Browser Automation API =====
 
 export async function runBrowserTask(

@@ -792,10 +792,10 @@ Inspired by other note-taking and organization software (Notion, Obsidian, Roam,
 These features are recommended as high-priority additions:
 
 1. ~~**Daily notes** - Central to many workflows, leverages existing templates~~ ✅ Complete
-2. **Canvas/whiteboard** - Visual thinking, very popular in Obsidian
-3. **Block references** - Major upgrade to linking capabilities
+2. ~~**Canvas/whiteboard** - Visual thinking, very popular in Obsidian~~ ✅ Complete
+3. ~~**Block references** - Major upgrade to linking capabilities~~ ✅ Complete
 4. **Web clipper** - Key capture workflow currently missing
-5. **Starred/recent pages** - Simple but impactful navigation improvement
+5. ~~**Starred/recent pages** - Simple but impactful navigation improvement~~ ✅ Complete (starred/pinned)
 6. **Live queries** - Power feature for dynamic organization
 7. **Publish to web** - Sharing capability many users want
 
@@ -826,10 +826,13 @@ These features are recommended as high-priority additions:
 
 ### 36. Block-Level Features (Roam, Logseq)
 
-- [ ] **Block references** - Reference individual blocks
+- [x] **Block references** - Reference individual blocks
   - `((block-id))` syntax to reference any block
   - Backlinks panel shows block-level references
-  - Click to navigate to source block
+  - Click to navigate to source block (with highlight animation)
+  - Block ref preview text auto-updates when target block changes
+  - Broken ref detection when target block is deleted
+  - Graph view integration (purple dashed edges)
 - [ ] **Block embedding** - Embed blocks inline
   - Embed referenced blocks with live sync
   - Edit embedded block in place, updates original

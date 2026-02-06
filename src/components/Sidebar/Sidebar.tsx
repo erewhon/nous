@@ -392,6 +392,31 @@ export function Sidebar({ width = 256 }: SidebarProps) {
               <path d="M12 5v14M5 12h14" />
             </svg>
           </button>
+          {/* Web Clipper */}
+          <button
+            onClick={() => {
+              window.dispatchEvent(new CustomEvent("open-web-clipper"));
+            }}
+            className="flex h-8 w-8 items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
+            style={{ color: "var(--color-text-muted)" }}
+            title="Web Clipper (⌘⇧L)"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="15"
+              height="15"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <circle cx="12" cy="12" r="10" />
+              <path d="M2 12h20" />
+              <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+            </svg>
+          </button>
           {/* Inbox */}
           <button
             onClick={openInboxPanel}

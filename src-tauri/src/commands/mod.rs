@@ -38,6 +38,7 @@ mod sync;
 mod tags;
 mod video;
 mod video_generate;
+mod web_clipper;
 mod web_research;
 mod window;
 
@@ -81,5 +82,6 @@ pub use sync::*;
 pub use tags::*;
 pub use video::*;
 pub use video_generate::*;
+pub use web_clipper::*;
 pub use web_research::*;
 pub use window::*;

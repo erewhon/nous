@@ -16,6 +16,7 @@ import { FlashcardPanel } from "./components/Flashcards";
 import { GoalsPanel, GoalsDashboard } from "./components/Goals";
 import { DailyNotesPanel } from "./components/DailyNotes";
 import { ToastContainer } from "./components/Toast";
+import { WebClipperDialog } from "./components/WebClipper/WebClipperDialog";
 import { useAppInit } from "./hooks/useAppInit";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useNotebookStore } from "./stores/notebookStore";
@@ -60,6 +61,13 @@ function App() {
     window.addEventListener("open-backup-dialog", handleOpenBackup);
     return () => window.removeEventListener("open-backup-dialog", handleOpenBackup);
   }, []);
+
+  // Listen for custom event to open web clipper
+  useEffect(() => {
+    const handleOpenClipper = () => setShowWebClipper(true);
+    window.addEventListener("open-web-clipper", handleOpenClipper);
+    return () => window.removeEventListener("open-web-clipper", handleOpenClipper);
+  }, []);
   const [showGraph, setShowGraph] = useState(false);
   const [showWebResearch, setShowWebResearch] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -67,6 +75,7 @@ function App() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showTemplateDialog, setShowTemplateDialog] = useState(false);
   const [showTagManager, setShowTagManager] = useState(false);
+  const [showWebClipper, setShowWebClipper] = useState(false);
 
   const { selectedNotebookId, createNotebook } = useNotebookStore();
   const {
@@ -186,6 +195,7 @@ function App() {
     onZenMode: toggleZenMode,
     onDailyNote: handleDailyNote,
     onToggleFavorite: handleToggleFavorite,
+    onWebClipper: () => setShowWebClipper(true),
   });
 
   return (
@@ -293,6 +303,12 @@ function App() {
 
       {/* Daily Notes Panel */}
       <DailyNotesPanel />
+
+      {/* Web Clipper */}
+      <WebClipperDialog
+        isOpen={showWebClipper}
+        onClose={() => setShowWebClipper(false)}
+      />
 
       {/* Toast Notifications */}
       <ToastContainer />

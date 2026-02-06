@@ -21,7 +21,7 @@ pub struct LinkMetadata {
 }
 
 /// Extract content of a meta tag from HTML
-fn extract_meta_content(html: &str, property: &str) -> Option<String> {
+pub(crate) fn extract_meta_content(html: &str, property: &str) -> Option<String> {
     // Try OpenGraph property
     let og_pattern = format!(
         r#"<meta[^>]+property=["']{}["'][^>]+content=["']([^"']+)["']"#,
@@ -70,7 +70,7 @@ fn extract_meta_content(html: &str, property: &str) -> Option<String> {
 }
 
 /// Extract the title from HTML
-fn extract_title(html: &str) -> Option<String> {
+pub(crate) fn extract_title(html: &str) -> Option<String> {
     let title_pattern = r#"<title[^>]*>([^<]+)</title>"#;
     if let Ok(re) = Regex::new(title_pattern) {
         if let Some(caps) = re.captures(html) {
@@ -83,7 +83,7 @@ fn extract_title(html: &str) -> Option<String> {
 }
 
 /// Extract favicon URL from HTML
-fn extract_favicon(html: &str, base_url: &str) -> Option<String> {
+pub(crate) fn extract_favicon(html: &str, base_url: &str) -> Option<String> {
     // Try to find apple-touch-icon first (usually higher quality)
     let apple_icon_pattern = r#"<link[^>]+rel=["']apple-touch-icon["'][^>]+href=["']([^"']+)["']"#;
     if let Ok(re) = Regex::new(apple_icon_pattern) {
@@ -109,7 +109,7 @@ fn extract_favicon(html: &str, base_url: &str) -> Option<String> {
 }
 
 /// Resolve a potentially relative URL against a base URL
-fn resolve_url(href: &str, base_url: &str) -> String {
+pub(crate) fn resolve_url(href: &str, base_url: &str) -> String {
     if href.starts_with("http://") || href.starts_with("https://") {
         return href.to_string();
     }
