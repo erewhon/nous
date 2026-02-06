@@ -208,18 +208,26 @@ export const BlockEditor = forwardRef<BlockEditorRef, BlockEditorProps>(function
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [save, onSave, onExplicitSave, markClean]);
 
-  // Mark broken links and block refs when pages change or content renders
+  // Mark broken links/refs and update block-ref previews when pages change or content renders
   useEffect(() => {
     if (!containerRef.current || pages.length === 0) return;
 
+    // Guard to prevent infinite loop: updateBlockRefPreviews changes textContent
+    // which triggers characterData mutations, which would re-enter markLinks.
+    let isUpdatingPreviews = false;
+
     // Use MutationObserver to mark broken links/refs after editor renders
     const markLinks = () => {
+      if (isUpdatingPreviews) return;
       if (containerRef.current) {
         const pageTitles = pages.map((p) => p.title);
         WikiLinkTool.markBrokenLinks(containerRef.current, pageTitles);
-        // Mark broken block refs using full page data from store
+        // Mark broken block refs and refresh preview text using full page data
         const allPages = usePageStore.getState().pages;
         BlockRefTool.markBrokenBlockRefs(containerRef.current, allPages);
+        isUpdatingPreviews = true;
+        BlockRefTool.updateBlockRefPreviews(containerRef.current, allPages);
+        isUpdatingPreviews = false;
       }
     };
 

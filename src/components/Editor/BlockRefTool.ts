@@ -162,6 +162,62 @@ export class BlockRefTool implements InlineTool {
   }
 
   /**
+   * Update block-ref preview text to match the current content of target blocks.
+   * Keeps inline previews fresh when the referenced block is edited elsewhere.
+   */
+  static updateBlockRefPreviews(
+    container: HTMLElement,
+    pages: Array<{
+      id: string;
+      content?: { blocks: Array<{ id: string; type: string; data: Record<string, unknown> }> };
+    }>
+  ): void {
+    const refs = container.querySelectorAll("block-ref");
+    if (refs.length === 0) return;
+
+    // Build a map of blockId -> plain text preview
+    const blockTextMap = new Map<string, string>();
+    for (const page of pages) {
+      if (!page.content?.blocks) continue;
+      for (const block of page.content.blocks) {
+        let text = "";
+        if (
+          (block.type === "paragraph" || block.type === "header") &&
+          typeof block.data.text === "string"
+        ) {
+          const tmp = document.createElement("div");
+          tmp.innerHTML = block.data.text;
+          text = tmp.textContent || tmp.innerText || "";
+        } else if (block.type === "list" && Array.isArray(block.data.items)) {
+          text = block.data.items
+            .map((item: unknown) => {
+              if (typeof item !== "string") return "";
+              const tmp = document.createElement("div");
+              tmp.innerHTML = item;
+              return tmp.textContent || tmp.innerText || "";
+            })
+            .join(" ");
+        }
+        if (text) {
+          blockTextMap.set(
+            block.id,
+            text.length > 120 ? text.slice(0, 120) + "..." : text
+          );
+        }
+      }
+    }
+
+    refs.forEach((ref) => {
+      const blockId = ref.getAttribute("data-block-id");
+      if (!blockId) return;
+      const freshText = blockTextMap.get(blockId);
+      if (freshText && ref.textContent !== freshText) {
+        ref.textContent = freshText;
+      }
+    });
+  }
+
+  /**
    * Mark block references as broken if their target block no longer exists
    */
   static markBrokenBlockRefs(

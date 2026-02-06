@@ -230,6 +230,8 @@ export function useEditor({
         // Don't save during render operations - this can capture partial/corrupted data
         if (onChange && editorRef.current && isReady.current && !isRenderingRef.current) {
           isDirtyRef.current = true;
+          // Sync data-block-id attributes for any newly added blocks
+          assignBlockIdAttributes(editorRef.current);
           const data = await editorRef.current.save();
           onChange(data);
         }
