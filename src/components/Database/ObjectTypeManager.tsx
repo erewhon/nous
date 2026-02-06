@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { ObjectType, PropertyType } from "../../types/database";
+import type { ObjectType, PropertyType, DatabaseViewType, CellValue } from "../../types/database";
 import { useObjectTypeStore } from "../../stores/objectTypeStore";
 import { PropertyTypeIcon } from "./PropertyEditor";
 import "./database-styles.css";
@@ -19,7 +19,7 @@ interface ObjectTypeManagerProps {
 }
 
 export function ObjectTypeManager({ onClose }: ObjectTypeManagerProps) {
-  const { addType, updateType, deleteType, addPropertyToType, removePropertyFromType } =
+  const { addType, updateType, deleteType, addPropertyToType, removePropertyFromType, updatePropertyInType } =
     useObjectTypeStore();
   const allTypes = useObjectTypeStore((s) => s.getAllTypes());
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -98,14 +98,20 @@ export function ObjectTypeManager({ onClose }: ObjectTypeManagerProps) {
                   <span className="db-object-type-prop-name">{prop.name}</span>
                   <span className="db-object-type-prop-type">{prop.type}</span>
                   {!editingType.builtIn && (
-                    <button
-                      className="db-pe-option-remove"
-                      onClick={() => removePropertyFromType(editingType.id, idx)}
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-                      </svg>
-                    </button>
+                    <>
+                      <OTDefaultValueInput
+                        prop={prop}
+                        onChange={(val) => updatePropertyInType(editingType.id, idx, { defaultValue: val ?? undefined })}
+                      />
+                      <button
+                        className="db-pe-option-remove"
+                        onClick={() => removePropertyFromType(editingType.id, idx)}
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                        </svg>
+                      </button>
+                    </>
                   )}
                 </div>
               ))}
@@ -133,6 +139,104 @@ export function ObjectTypeManager({ onClose }: ObjectTypeManagerProps) {
               </div>
             )}
           </div>
+
+          {/* View configuration (custom types only) */}
+          {!editingType.builtIn && (
+            <div className="db-pe-section">
+              <label className="db-pe-label">Default View</label>
+              <div className="db-ot-view-config">
+                <select
+                  className="db-pe-select"
+                  value={editingType.defaultViewType ?? "table"}
+                  onChange={(e) => updateType(editingType.id, { defaultViewType: (e.target.value || undefined) as DatabaseViewType })}
+                >
+                  <option value="table">Table</option>
+                  <option value="board">Board</option>
+                  <option value="gallery">Gallery</option>
+                  <option value="list">List</option>
+                  <option value="calendar">Calendar</option>
+                </select>
+
+                {/* Group-by property (for board/table) */}
+                {(editingType.defaultViewType === "board" || editingType.defaultViewType === "table") && (
+                  <div className="db-ot-view-field">
+                    <label className="db-pe-label-sm">Group by</label>
+                    <select
+                      className="db-pe-select"
+                      value={editingType.defaultGroupByPropertyName ?? ""}
+                      onChange={(e) => updateType(editingType.id, { defaultGroupByPropertyName: e.target.value || undefined })}
+                    >
+                      <option value="">None</option>
+                      {editingType.properties
+                        .filter((p) => p.type === "select" || p.type === "multiSelect")
+                        .map((p, i) => (
+                          <option key={i} value={p.name}>{p.name}</option>
+                        ))}
+                    </select>
+                  </div>
+                )}
+
+                {/* Date property (for calendar) */}
+                {editingType.defaultViewType === "calendar" && (
+                  <div className="db-ot-view-field">
+                    <label className="db-pe-label-sm">Date property</label>
+                    <select
+                      className="db-pe-select"
+                      value={editingType.defaultDatePropertyName ?? ""}
+                      onChange={(e) => updateType(editingType.id, { defaultDatePropertyName: e.target.value || undefined })}
+                    >
+                      <option value="">None</option>
+                      {editingType.properties
+                        .filter((p) => p.type === "date")
+                        .map((p, i) => (
+                          <option key={i} value={p.name}>{p.name}</option>
+                        ))}
+                    </select>
+                  </div>
+                )}
+
+                {/* Default sort */}
+                <div className="db-ot-view-field">
+                  <label className="db-pe-label-sm">Default sort</label>
+                  <div className="db-ot-sort-row">
+                    <select
+                      className="db-pe-select"
+                      value={editingType.defaultSorts?.[0]?.propertyName ?? ""}
+                      onChange={(e) => {
+                        const name = e.target.value;
+                        if (!name) {
+                          updateType(editingType.id, { defaultSorts: undefined });
+                        } else {
+                          const dir = editingType.defaultSorts?.[0]?.direction ?? "asc";
+                          updateType(editingType.id, { defaultSorts: [{ propertyName: name, direction: dir }] });
+                        }
+                      }}
+                    >
+                      <option value="">None</option>
+                      {editingType.properties.map((p, i) => (
+                        <option key={i} value={p.name}>{p.name}</option>
+                      ))}
+                    </select>
+                    {editingType.defaultSorts?.[0] && (
+                      <select
+                        className="db-pe-select"
+                        value={editingType.defaultSorts[0].direction}
+                        onChange={(e) => {
+                          const dir = e.target.value as "asc" | "desc";
+                          updateType(editingType.id, {
+                            defaultSorts: [{ propertyName: editingType.defaultSorts![0].propertyName, direction: dir }],
+                          });
+                        }}
+                      >
+                        <option value="asc">Ascending</option>
+                        <option value="desc">Descending</option>
+                      </select>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
 
           {!editingType.builtIn && (
             <button
@@ -216,6 +320,69 @@ export function ObjectTypeManager({ onClose }: ObjectTypeManagerProps) {
         </>
       )}
     </div>
+  );
+}
+
+// Inline default value input for a property in the ObjectTypeManager
+function OTDefaultValueInput({
+  prop,
+  onChange,
+}: {
+  prop: { name: string; type: PropertyType; options?: { id: string; label: string; color: string }[]; defaultValue?: CellValue };
+  onChange: (val: CellValue) => void;
+}) {
+  const val = prop.defaultValue ?? null;
+
+  if (prop.type === "checkbox") {
+    return (
+      <input
+        type="checkbox"
+        className="db-ot-default-checkbox"
+        checked={val === true}
+        onChange={(e) => onChange(e.target.checked)}
+        title="Default value"
+      />
+    );
+  }
+  if (prop.type === "select" || prop.type === "multiSelect") {
+    return (
+      <select
+        className="db-ot-default-select"
+        value={typeof val === "string" ? val : ""}
+        onChange={(e) => onChange(e.target.value || null)}
+        title="Default value"
+      >
+        <option value="">No default</option>
+        {(prop.options ?? []).map((opt) => (
+          <option key={opt.id} value={opt.id}>{opt.label}</option>
+        ))}
+      </select>
+    );
+  }
+  if (prop.type === "number") {
+    return (
+      <input
+        className="db-ot-default-input"
+        type="number"
+        placeholder="Default"
+        value={typeof val === "number" ? val : ""}
+        onChange={(e) => onChange(e.target.value === "" ? null : Number(e.target.value))}
+        title="Default value"
+      />
+    );
+  }
+  if (prop.type === "relation" || prop.type === "rollup") {
+    return null;
+  }
+  return (
+    <input
+      className="db-ot-default-input"
+      type={prop.type === "date" ? "date" : "text"}
+      placeholder="Default"
+      value={typeof val === "string" ? val : ""}
+      onChange={(e) => onChange(e.target.value || null)}
+      title="Default value"
+    />
   );
 }
 

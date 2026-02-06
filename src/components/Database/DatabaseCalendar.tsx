@@ -7,6 +7,7 @@ import type {
   CalendarViewConfig,
   SelectOption,
 } from "../../types/database";
+import { createDefaultRow } from "../../types/database";
 import { pickNextColor } from "./CellEditors";
 import type { RelationContext } from "./useRelationContext";
 import { DatabaseRowDetail } from "./DatabaseRowDetail";
@@ -149,18 +150,14 @@ export function DatabaseCalendar({
 
   const handleAddRowOnDate = useCallback(
     (dateStr: string) => {
-      const now = new Date().toISOString();
-      const cells: Record<string, CellValue> = {};
-      if (dateProp) {
-        cells[config.datePropertyId] = dateStr;
-      }
-      onUpdateContent((prev) => ({
-        ...prev,
-        rows: [
-          ...prev.rows,
-          { id: crypto.randomUUID(), cells, createdAt: now, updatedAt: now },
-        ],
-      }));
+      onUpdateContent((prev) => {
+        const row = createDefaultRow(prev.properties);
+        // Merge date cell on top of defaults
+        if (dateProp) {
+          row.cells[config.datePropertyId] = dateStr;
+        }
+        return { ...prev, rows: [...prev.rows, row] };
+      });
     },
     [onUpdateContent, config.datePropertyId, dateProp]
   );

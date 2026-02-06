@@ -18,6 +18,7 @@ import { HighlighterTool } from "./HighlighterTool";
 import { PDFTool } from "./PDFTool";
 import { VideoTool } from "./VideoTool";
 import { DatabaseBlockTool } from "./DatabaseBlockTool";
+import { LiveQueryBlockTool } from "./LiveQueryBlockTool";
 import { DrawingTool } from "./DrawingTool";
 import { EmbedTool } from "./EmbedTool";
 import { ColumnsTool } from "./ColumnsTool";
@@ -150,6 +151,10 @@ export function useEditor({
       },
       database: {
         class: DatabaseBlockTool as unknown as ToolConstructable,
+      },
+      liveQuery: {
+        class: LiveQueryBlockTool as unknown as ToolConstructable,
+        config: { notebookId },
       },
       ...(notebookId
         ? {

@@ -9,6 +9,7 @@ import type {
   DatabaseSort,
   TableViewConfig,
 } from "../../types/database";
+import { createDefaultRow } from "../../types/database";
 import {
   TextCell,
   NumberCell,
@@ -201,16 +202,12 @@ export function DatabaseTable({
     [onUpdateContent]
   );
 
-  // Add new row
+  // Add new row with default values from property definitions
   const handleAddRow = useCallback(() => {
-    const now = new Date().toISOString();
-    const newRow: DatabaseRow = {
-      id: crypto.randomUUID(),
-      cells: {},
-      createdAt: now,
-      updatedAt: now,
-    };
-    onUpdateContent((prev) => ({ ...prev, rows: [...prev.rows, newRow] }));
+    onUpdateContent((prev) => ({
+      ...prev,
+      rows: [...prev.rows, createDefaultRow(prev.properties)],
+    }));
   }, [onUpdateContent]);
 
   // Delete row

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { PropertyDef, PropertyType, SelectOption } from "../../types/database";
+import type { PropertyDef, PropertyType, SelectOption, CellValue } from "../../types/database";
 import { pickNextColor } from "./CellEditors";
 
 interface PropertyEditorProps {
@@ -150,6 +150,19 @@ export function PropertyEditor({ property, onUpdate, onDelete, onClose }: Proper
         </div>
       )}
 
+      {/* Default value */}
+      {property.type !== "relation" && property.type !== "rollup" && (
+        <div className="db-pe-section">
+          <label className="db-pe-label">Default value</label>
+          <DefaultValueEditor
+            type={property.type}
+            options={property.options ?? []}
+            value={property.defaultValue ?? null}
+            onChange={(val) => onUpdate({ defaultValue: val ?? undefined })}
+          />
+        </div>
+      )}
+
       {/* Delete */}
       <div className="db-pe-section">
         {property.relationConfig?.direction === "back" ? (
@@ -164,6 +177,92 @@ export function PropertyEditor({ property, onUpdate, onDelete, onClose }: Proper
       </div>
     </div>
   );
+}
+
+// Default value editor per property type
+function DefaultValueEditor({
+  type,
+  options,
+  value,
+  onChange,
+}: {
+  type: PropertyType;
+  options: SelectOption[];
+  value: CellValue;
+  onChange: (val: CellValue) => void;
+}) {
+  switch (type) {
+    case "checkbox":
+      return (
+        <label className="db-pe-default-checkbox">
+          <input
+            type="checkbox"
+            checked={value === true}
+            onChange={(e) => onChange(e.target.checked)}
+          />
+          <span>Checked by default</span>
+        </label>
+      );
+    case "select":
+      return (
+        <select
+          className="db-pe-select"
+          value={typeof value === "string" ? value : ""}
+          onChange={(e) => onChange(e.target.value || null)}
+        >
+          <option value="">None</option>
+          {options.map((opt) => (
+            <option key={opt.id} value={opt.id}>{opt.label}</option>
+          ))}
+        </select>
+      );
+    case "multiSelect":
+      return (
+        <select
+          className="db-pe-select"
+          value={typeof value === "string" ? value : ""}
+          onChange={(e) => onChange(e.target.value || null)}
+        >
+          <option value="">None</option>
+          {options.map((opt) => (
+            <option key={opt.id} value={opt.id}>{opt.label}</option>
+          ))}
+        </select>
+      );
+    case "number":
+      return (
+        <input
+          className="db-pe-input"
+          type="number"
+          placeholder="Default number"
+          value={typeof value === "number" ? value : ""}
+          onChange={(e) => {
+            const v = e.target.value;
+            onChange(v === "" ? null : Number(v));
+          }}
+        />
+      );
+    case "date":
+      return (
+        <input
+          className="db-pe-input"
+          type="date"
+          value={typeof value === "string" ? value : ""}
+          onChange={(e) => onChange(e.target.value || null)}
+        />
+      );
+    default:
+      // text, url
+      return (
+        <input
+          className="db-pe-input"
+          type="text"
+          placeholder={`Default ${type} value`}
+          value={typeof value === "string" ? value : ""}
+          onChange={(e) => onChange(e.target.value || null)}
+        />
+      );
+  }
 }
 
 // Type icon component for column headers

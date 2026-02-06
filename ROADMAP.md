@@ -829,10 +829,10 @@ These features are recommended as high-priority additions:
   - [x] Object type management UI
   - [ ] Templates per object type
   - [ ] Type-specific views and queries
-- [ ] **Relations & rollups** - Link and aggregate data
+- [x] **Relations & rollups** - Link and aggregate data
   - [x] Relate database items to each other
-  - [ ] Rollup properties (count, sum, average of related items)
-  - [ ] Bidirectional relations
+  - [x] Rollup properties (count, sum, average, min, max, range, percent empty/not empty, show original, count values, count unique)
+  - [x] Bidirectional relations (auto-created back-relation in target DB, editable from both sides, cascade delete)
 - [ ] **Live queries** - Dynamic embedded lists
   - Query syntax for filtering pages/blocks
   - Embed query results inline (e.g., "all pages tagged #project with incomplete tasks")

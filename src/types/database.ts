@@ -54,18 +54,6 @@ export const RollupConfigSchema = z.object({
 });
 export type RollupConfig = z.infer<typeof RollupConfigSchema>;
 
-// Property (column) definition
-export const PropertyDefSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  type: PropertyTypeSchema,
-  options: z.array(SelectOptionSchema).optional(),
-  width: z.number().optional(),
-  relationConfig: RelationConfigSchema.optional(),
-  rollupConfig: RollupConfigSchema.optional(),
-});
-export type PropertyDef = z.infer<typeof PropertyDefSchema>;
-
 // Cell value can be various types
 export const CellValueSchema = z.union([
   z.string(),
@@ -75,6 +63,19 @@ export const CellValueSchema = z.union([
   z.null(),
 ]);
 export type CellValue = z.infer<typeof CellValueSchema>;
+
+// Property (column) definition
+export const PropertyDefSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  type: PropertyTypeSchema,
+  options: z.array(SelectOptionSchema).optional(),
+  width: z.number().optional(),
+  relationConfig: RelationConfigSchema.optional(),
+  rollupConfig: RollupConfigSchema.optional(),
+  defaultValue: CellValueSchema.optional(),
+});
+export type PropertyDef = z.infer<typeof PropertyDefSchema>;
 
 // A single row in the database
 export const DatabaseRowSchema = z.object({
@@ -264,6 +265,7 @@ export const ObjectTypePropertySchema = z.object({
   name: z.string(),
   type: PropertyTypeSchema,
   options: z.array(SelectOptionSchema).optional(),
+  defaultValue: CellValueSchema.optional(),
 });
 export type ObjectTypeProperty = z.infer<typeof ObjectTypePropertySchema>;
 
@@ -276,6 +278,17 @@ export const ObjectTypeSchema = z.object({
   properties: z.array(ObjectTypePropertySchema),
   defaultViewType: DatabaseViewTypeSchema.optional(),
   builtIn: z.boolean().optional(), // true for system-provided types
+  defaultSorts: z.array(z.object({
+    propertyName: z.string(),
+    direction: z.enum(["asc", "desc"]),
+  })).optional(),
+  defaultFilters: z.array(z.object({
+    propertyName: z.string(),
+    operator: z.string(),
+    value: CellValueSchema,
+  })).optional(),
+  defaultGroupByPropertyName: z.string().optional(),
+  defaultDatePropertyName: z.string().optional(),
 });
 export type ObjectType = z.infer<typeof ObjectTypeSchema>;
 
@@ -287,6 +300,7 @@ export const BUILT_IN_OBJECT_TYPES: ObjectType[] = [
     icon: "\ud83d\udcd6",
     description: "Track books with author, genre, rating, and reading status",
     builtIn: true,
+    defaultSorts: [{ propertyName: "Status", direction: "asc" }],
     properties: [
       { name: "Title", type: "text" },
       { name: "Author", type: "text" },
@@ -302,7 +316,7 @@ export const BUILT_IN_OBJECT_TYPES: ObjectType[] = [
         { id: "status-reading", label: "Reading", color: "#3b82f6" },
         { id: "status-finished", label: "Finished", color: "#22c55e" },
         { id: "status-abandoned", label: "Abandoned", color: "#ef4444" },
-      ]},
+      ], defaultValue: "status-to-read" },
       { name: "Rating", type: "number" },
       { name: "Date Read", type: "date" },
       { name: "URL", type: "url" },
@@ -334,6 +348,9 @@ export const BUILT_IN_OBJECT_TYPES: ObjectType[] = [
     icon: "\ud83d\udcc1",
     description: "Project tracker with status, priority, dates, and ownership",
     builtIn: true,
+    defaultViewType: "board",
+    defaultGroupByPropertyName: "Status",
+    defaultSorts: [{ propertyName: "Priority", direction: "desc" }],
     properties: [
       { name: "Name", type: "text" },
       { name: "Status", type: "select", options: [
@@ -342,17 +359,17 @@ export const BUILT_IN_OBJECT_TYPES: ObjectType[] = [
         { id: "proj-on-hold", label: "On Hold", color: "#eab308" },
         { id: "proj-completed", label: "Completed", color: "#22c55e" },
         { id: "proj-cancelled", label: "Cancelled", color: "#ef4444" },
-      ]},
+      ], defaultValue: "proj-planning" },
       { name: "Priority", type: "select", options: [
         { id: "pri-low", label: "Low", color: "#6b7280" },
         { id: "pri-medium", label: "Medium", color: "#eab308" },
         { id: "pri-high", label: "High", color: "#f97316" },
         { id: "pri-urgent", label: "Urgent", color: "#ef4444" },
-      ]},
+      ], defaultValue: "pri-medium" },
       { name: "Start Date", type: "date" },
       { name: "Due Date", type: "date" },
       { name: "Owner", type: "text" },
-      { name: "Completed", type: "checkbox" },
+      { name: "Completed", type: "checkbox", defaultValue: false },
     ],
   },
   {
@@ -361,6 +378,9 @@ export const BUILT_IN_OBJECT_TYPES: ObjectType[] = [
     icon: "\ud83d\udcc5",
     description: "Meeting log with date, attendees, agenda, and action items",
     builtIn: true,
+    defaultViewType: "calendar",
+    defaultDatePropertyName: "Date",
+    defaultSorts: [{ propertyName: "Date", direction: "asc" }],
     properties: [
       { name: "Title", type: "text" },
       { name: "Date", type: "date" },
@@ -378,28 +398,79 @@ export const BUILT_IN_OBJECT_TYPES: ObjectType[] = [
   },
 ];
 
+// Create a new row pre-populated with default values from property definitions
+export function createDefaultRow(properties: PropertyDef[]): DatabaseRow {
+  const now = new Date().toISOString();
+  const cells: Record<string, CellValue> = {};
+  for (const prop of properties) {
+    if (prop.defaultValue != null) {
+      cells[prop.id] = prop.defaultValue;
+    }
+  }
+  return { id: crypto.randomUUID(), cells, createdAt: now, updatedAt: now };
+}
+
 // Create database content from an object type
 export function createDatabaseFromObjectType(objectType: ObjectType): DatabaseContentV2 {
+  const properties: PropertyDef[] = objectType.properties.map((p) => ({
+    id: crypto.randomUUID(),
+    name: p.name,
+    type: p.type,
+    ...(p.options ? { options: p.options } : {}),
+    ...(p.defaultValue != null ? { defaultValue: p.defaultValue } : {}),
+  }));
+
+  // Helper: property name → generated id
+  const propIdByName = new Map(properties.map((p) => [p.name, p.id]));
+
+  // Resolve sorts from property names to IDs
+  const sorts = (objectType.defaultSorts ?? [])
+    .filter((s) => propIdByName.has(s.propertyName))
+    .map((s) => ({ propertyId: propIdByName.get(s.propertyName)!, direction: s.direction }));
+
+  // Resolve filters from property names to IDs
+  const filters = (objectType.defaultFilters ?? [])
+    .filter((f) => propIdByName.has(f.propertyName))
+    .map((f) => ({ propertyId: propIdByName.get(f.propertyName)!, operator: f.operator, value: f.value }));
+
+  // Resolve group-by
+  const groupByPropertyId = objectType.defaultGroupByPropertyName
+    ? propIdByName.get(objectType.defaultGroupByPropertyName) ?? null
+    : null;
+
+  // Resolve date property (calendar)
+  const datePropertyId = objectType.defaultDatePropertyName
+    ? propIdByName.get(objectType.defaultDatePropertyName) ?? null
+    : null;
+
+  // Build view config
+  const viewType = objectType.defaultViewType ?? "table";
+  let config: Record<string, unknown> = {};
+  if (viewType === "board" && groupByPropertyId) {
+    config = { groupByPropertyId };
+  } else if (viewType === "table" && groupByPropertyId) {
+    config = { groupByPropertyId };
+  } else if (viewType === "calendar" && datePropertyId) {
+    config = { datePropertyId };
+  }
+
+  const viewName = viewType === "board" ? "Board" :
+    viewType === "gallery" ? "Gallery" :
+    viewType === "list" ? "List" :
+    viewType === "calendar" ? "Calendar" : "Table";
+
   return {
     version: 2,
-    properties: objectType.properties.map((p) => ({
-      id: crypto.randomUUID(),
-      name: p.name,
-      type: p.type,
-      ...(p.options ? { options: p.options } : {}),
-    })),
+    properties,
     rows: [],
     views: [
       {
         id: crypto.randomUUID(),
-        name: objectType.defaultViewType === "board" ? "Board" :
-              objectType.defaultViewType === "gallery" ? "Gallery" :
-              objectType.defaultViewType === "list" ? "List" :
-              objectType.defaultViewType === "calendar" ? "Calendar" : "Table",
-        type: objectType.defaultViewType ?? "table",
-        sorts: [],
-        filters: [],
-        config: {},
+        name: viewName,
+        type: viewType,
+        sorts,
+        filters,
+        config,
       },
     ],
   };

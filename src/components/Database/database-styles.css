@@ -1776,3 +1776,67 @@
 .db-object-type-picker-option:hover {
   background-color: var(--color-bg-tertiary);
 }
+
+/* Default value inputs in ObjectTypeManager */
+.db-ot-default-input {
+  font-size: 11px;
+  padding: 2px 6px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  width: 80px;
+  margin-left: auto;
+}
+
+.db-ot-default-select {
+  font-size: 11px;
+  padding: 2px 4px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  max-width: 100px;
+  margin-left: auto;
+}
+
+.db-ot-default-checkbox {
+  margin-left: auto;
+}
+
+/* View config section in ObjectTypeManager */
+.db-ot-view-config {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.db-ot-view-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.db-pe-label-sm {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}
+
+.db-ot-sort-row {
+  display: flex;
+  gap: 6px;
+}
+
+/* Default value checkbox in PropertyEditor */
+.db-pe-default-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.db-pe-default-checkbox input {
+  cursor: pointer;
+}

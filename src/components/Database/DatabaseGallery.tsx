@@ -8,6 +8,7 @@ import type {
   SelectOption,
   PropertyDef,
 } from "../../types/database";
+import { createDefaultRow } from "../../types/database";
 import { pickNextColor } from "./CellEditors";
 import type { RelationContext } from "./useRelationContext";
 import { DatabaseRowDetail } from "./DatabaseRowDetail";
@@ -81,13 +82,9 @@ export function DatabaseGallery({
   }, [content.rows, view.sorts, view.filters, content.properties]);
 
   const handleAddRow = useCallback(() => {
-    const now = new Date().toISOString();
     onUpdateContent((prev) => ({
       ...prev,
-      rows: [
-        ...prev.rows,
-        { id: crypto.randomUUID(), cells: {}, createdAt: now, updatedAt: now },
-      ],
+      rows: [...prev.rows, createDefaultRow(prev.properties)],
     }));
   }, [onUpdateContent]);
 
