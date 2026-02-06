@@ -1,11 +1,13 @@
 import { useState, useCallback, useMemo } from "react";
 import type {
-  DatabaseContent,
+  DatabaseContentV2,
+  DatabaseView,
   PropertyDef,
   DatabaseRow,
   CellValue,
   SelectOption,
   DatabaseSort,
+  TableViewConfig,
 } from "../../types/database";
 import {
   TextCell,
@@ -20,19 +22,35 @@ import {
 import { PropertyEditor, PropertyTypeIcon } from "./PropertyEditor";
 
 interface DatabaseTableProps {
-  content: DatabaseContent;
-  onUpdateContent: (updater: (prev: DatabaseContent) => DatabaseContent) => void;
+  content: DatabaseContentV2;
+  view: DatabaseView;
+  onUpdateContent: (
+    updater: (prev: DatabaseContentV2) => DatabaseContentV2
+  ) => void;
+  onUpdateView: (updater: (prev: DatabaseView) => DatabaseView) => void;
 }
 
-export function DatabaseTable({ content, onUpdateContent }: DatabaseTableProps) {
+export function DatabaseTable({
+  content,
+  view,
+  onUpdateContent,
+  onUpdateView,
+}: DatabaseTableProps) {
   const [editingProperty, setEditingProperty] = useState<string | null>(null);
+
+  const sorts = view.sorts;
+  const filters = view.filters;
+  const propertyWidths = view.propertyWidths ?? {};
+  const tableConfig = view.config as TableViewConfig;
+  const groupByPropertyId = tableConfig.groupByPropertyId ?? null;
+  const collapsedGroups = tableConfig.collapsedGroups ?? [];
 
   // Sort and filter rows
   const displayRows = useMemo(() => {
     let rows = [...content.rows];
 
     // Apply filters
-    for (const filter of content.filters) {
+    for (const filter of filters) {
       const prop = content.properties.find((p) => p.id === filter.propertyId);
       if (!prop) continue;
       rows = rows.filter((row) => {
@@ -42,9 +60,9 @@ export function DatabaseTable({ content, onUpdateContent }: DatabaseTableProps) 
     }
 
     // Apply sorts
-    if (content.sorts.length > 0) {
+    if (sorts.length > 0) {
       rows.sort((a, b) => {
-        for (const sort of content.sorts) {
+        for (const sort of sorts) {
           const aVal = a.cells[sort.propertyId];
           const bVal = b.cells[sort.propertyId];
           const cmp = compareCellValues(aVal, bVal);
@@ -55,7 +73,109 @@ export function DatabaseTable({ content, onUpdateContent }: DatabaseTableProps) 
     }
 
     return rows;
-  }, [content.rows, content.sorts, content.filters, content.properties]);
+  }, [content.rows, sorts, filters, content.properties]);
+
+  // Group rows
+  const groupedRows = useMemo(() => {
+    if (!groupByPropertyId) return null;
+
+    const prop = content.properties.find((p) => p.id === groupByPropertyId);
+    if (!prop) return null;
+
+    const groups = new Map<string, DatabaseRow[]>();
+    const noValueKey = "__no_value__";
+
+    for (const row of displayRows) {
+      const cellVal = row.cells[groupByPropertyId];
+      let key: string;
+
+      if (
+        cellVal == null ||
+        cellVal === "" ||
+        (Array.isArray(cellVal) && cellVal.length === 0)
+      ) {
+        key = noValueKey;
+      } else if (Array.isArray(cellVal)) {
+        // multiSelect — put row in each group
+        for (const id of cellVal) {
+          const existing = groups.get(id) ?? [];
+          existing.push(row);
+          groups.set(id, existing);
+        }
+        continue;
+      } else {
+        key = String(cellVal);
+      }
+
+      const existing = groups.get(key) ?? [];
+      existing.push(row);
+      groups.set(key, existing);
+    }
+
+    // Build ordered group list
+    const result: {
+      key: string;
+      label: string;
+      color?: string;
+      rows: DatabaseRow[];
+    }[] = [];
+
+    if (prop.type === "select" || prop.type === "multiSelect") {
+      for (const opt of prop.options ?? []) {
+        const rows = groups.get(opt.id);
+        if (rows) {
+          result.push({
+            key: opt.id,
+            label: opt.label,
+            color: opt.color,
+            rows,
+          });
+          groups.delete(opt.id);
+        }
+      }
+    }
+
+    // Remaining groups (non-option values or text/number groups)
+    for (const [key, rows] of groups) {
+      if (key === noValueKey) continue;
+      // For select types, try to find the option
+      if (prop.type === "select" || prop.type === "multiSelect") {
+        const opt = prop.options?.find((o) => o.id === key);
+        result.push({ key, label: opt?.label ?? key, color: opt?.color, rows });
+      } else {
+        result.push({ key, label: key, rows });
+      }
+    }
+
+    // "No value" group at end
+    const noValueRows = groups.get(noValueKey);
+    if (noValueRows) {
+      result.push({ key: noValueKey, label: "No value", rows: noValueRows });
+    }
+
+    return result;
+  }, [displayRows, groupByPropertyId, content.properties]);
+
+  // Toggle group collapse
+  const toggleGroupCollapse = useCallback(
+    (groupKey: string) => {
+      onUpdateView((prev) => {
+        const cfg = prev.config as TableViewConfig;
+        const current = cfg.collapsedGroups ?? [];
+        const isCollapsed = current.includes(groupKey);
+        return {
+          ...prev,
+          config: {
+            ...prev.config,
+            collapsedGroups: isCollapsed
+              ? current.filter((k) => k !== groupKey)
+              : [...current, groupKey],
+          },
+        };
+      });
+    },
+    [onUpdateView]
+  );
 
   // Cell update handler
   const handleCellChange = useCallback(
@@ -123,8 +243,11 @@ export function DatabaseTable({ content, onUpdateContent }: DatabaseTableProps) 
           delete cells[propertyId];
           return { ...r, cells };
         }),
-        sorts: prev.sorts.filter((s) => s.propertyId !== propertyId),
-        filters: prev.filters.filter((f) => f.propertyId !== propertyId),
+        views: prev.views.map((v) => ({
+          ...v,
+          sorts: v.sorts.filter((s) => s.propertyId !== propertyId),
+          filters: v.filters.filter((f) => f.propertyId !== propertyId),
+        })),
       }));
       setEditingProperty(null);
     },
@@ -157,8 +280,10 @@ export function DatabaseTable({ content, onUpdateContent }: DatabaseTableProps) 
   // Column header sort toggle
   const handleHeaderClick = useCallback(
     (propertyId: string) => {
-      onUpdateContent((prev) => {
-        const existingSort = prev.sorts.find((s) => s.propertyId === propertyId);
+      onUpdateView((prev) => {
+        const existingSort = prev.sorts.find(
+          (s) => s.propertyId === propertyId
+        );
         let newSorts: DatabaseSort[];
         if (!existingSort) {
           newSorts = [{ propertyId, direction: "asc" }];
@@ -170,7 +295,7 @@ export function DatabaseTable({ content, onUpdateContent }: DatabaseTableProps) 
         return { ...prev, sorts: newSorts };
       });
     },
-    [onUpdateContent]
+    [onUpdateView]
   );
 
   // Column resize handlers
@@ -178,18 +303,18 @@ export function DatabaseTable({ content, onUpdateContent }: DatabaseTableProps) 
     (e: React.MouseEvent, propertyId: string) => {
       e.preventDefault();
       e.stopPropagation();
-      const prop = content.properties.find((p) => p.id === propertyId);
       const startX = e.clientX;
-      const startWidth = prop?.width ?? 150;
+      const startWidth =
+        propertyWidths[propertyId] ??
+        content.properties.find((p) => p.id === propertyId)?.width ??
+        150;
 
       const handleMove = (moveE: MouseEvent) => {
         const delta = moveE.clientX - startX;
         const newWidth = Math.max(80, startWidth + delta);
-        onUpdateContent((prev) => ({
+        onUpdateView((prev) => ({
           ...prev,
-          properties: prev.properties.map((p) =>
-            p.id === propertyId ? { ...p, width: newWidth } : p
-          ),
+          propertyWidths: { ...prev.propertyWidths, [propertyId]: newWidth },
         }));
       };
 
@@ -201,8 +326,11 @@ export function DatabaseTable({ content, onUpdateContent }: DatabaseTableProps) 
       document.addEventListener("mousemove", handleMove);
       document.addEventListener("mouseup", handleUp);
     },
-    [content.properties, onUpdateContent]
+    [propertyWidths, content.properties, onUpdateView]
   );
+
+  const getColWidth = (prop: PropertyDef) =>
+    propertyWidths[prop.id] ?? prop.width ?? 150;
 
   // Render cell based on property type
   const renderCell = (prop: PropertyDef, row: DatabaseRow) => {
@@ -243,6 +371,43 @@ export function DatabaseTable({ content, onUpdateContent }: DatabaseTableProps) 
     }
   };
 
+  const colCount = content.properties.length + 1; // +1 for row num column
+
+  const renderRowGroup = (rows: DatabaseRow[], startIdx: number) =>
+    rows.map((row, idx) => (
+      <tr key={row.id} className="db-row">
+        <td className="db-row-num">
+          <span className="db-row-num-text">{startIdx + idx + 1}</span>
+          <button
+            className="db-row-delete"
+            onClick={() => handleDeleteRow(row.id)}
+            title="Delete row"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+            >
+              <path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+            </svg>
+          </button>
+        </td>
+        {content.properties.map((prop) => (
+          <td
+            key={prop.id}
+            className="db-cell"
+            style={{ width: getColWidth(prop) }}
+          >
+            {renderCell(prop, row)}
+          </td>
+        ))}
+      </tr>
+    ));
+
   return (
     <div className="db-table-wrapper">
       <table className="db-table">
@@ -250,12 +415,12 @@ export function DatabaseTable({ content, onUpdateContent }: DatabaseTableProps) 
           <tr>
             <th className="db-row-num-header">#</th>
             {content.properties.map((prop) => {
-              const sort = content.sorts.find((s) => s.propertyId === prop.id);
+              const sort = sorts.find((s) => s.propertyId === prop.id);
               return (
                 <th
                   key={prop.id}
                   className="db-col-header"
-                  style={{ width: prop.width ?? 150 }}
+                  style={{ width: getColWidth(prop) }}
                 >
                   <div
                     className="db-col-header-content"
@@ -282,7 +447,9 @@ export function DatabaseTable({ content, onUpdateContent }: DatabaseTableProps) 
                   {editingProperty === prop.id && (
                     <PropertyEditor
                       property={prop}
-                      onUpdate={(updates) => handlePropertyUpdate(prop.id, updates)}
+                      onUpdate={(updates) =>
+                        handlePropertyUpdate(prop.id, updates)
+                      }
                       onDelete={() => handleDeleteProperty(prop.id)}
                       onClose={() => setEditingProperty(null)}
                     />
@@ -293,39 +460,82 @@ export function DatabaseTable({ content, onUpdateContent }: DatabaseTableProps) 
           </tr>
         </thead>
         <tbody>
-          {displayRows.map((row, idx) => (
-            <tr key={row.id} className="db-row">
-              <td className="db-row-num">
-                <span className="db-row-num-text">{idx + 1}</span>
-                <button
-                  className="db-row-delete"
-                  onClick={() => handleDeleteRow(row.id)}
-                  title="Delete row"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
-                  </svg>
-                </button>
-              </td>
-              {content.properties.map((prop) => (
-                <td key={prop.id} className="db-cell" style={{ width: prop.width ?? 150 }}>
-                  {renderCell(prop, row)}
-                </td>
-              ))}
-            </tr>
-          ))}
+          {groupedRows ? (
+            <>
+              {groupedRows.map((group) => {
+                const isCollapsed = collapsedGroups.includes(group.key);
+                return (
+                  <GroupRows key={group.key}>
+                    <tr className="db-group-header-row">
+                      <td colSpan={colCount} className="db-group-header-cell">
+                        <button
+                          className="db-group-toggle"
+                          onClick={() => toggleGroupCollapse(group.key)}
+                        >
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            width="12"
+                            height="12"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            className={`db-group-chevron ${isCollapsed ? "" : "db-group-chevron-open"}`}
+                          >
+                            <path d="M9 18l6-6-6-6" />
+                          </svg>
+                        </button>
+                        {group.color ? (
+                          <span
+                            className="db-select-pill"
+                            style={{
+                              backgroundColor: group.color + "30",
+                              color: group.color,
+                            }}
+                          >
+                            {group.label}
+                          </span>
+                        ) : (
+                          <span className="db-group-label">{group.label}</span>
+                        )}
+                        <span className="db-group-count">
+                          {group.rows.length}
+                        </span>
+                      </td>
+                    </tr>
+                    {!isCollapsed && renderRowGroup(group.rows, 0)}
+                  </GroupRows>
+                );
+              })}
+            </>
+          ) : (
+            renderRowGroup(displayRows, 0)
+          )}
         </tbody>
       </table>
 
       {/* Add row button */}
       <button className="db-add-row" onClick={handleAddRow}>
-        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+        >
           <path d="M12 5v14M5 12h14" />
         </svg>
         New row
       </button>
     </div>
   );
+}
+
+// Fragment wrapper for grouped rows to avoid extra DOM nodes
+function GroupRows({ children }: { children: React.ReactNode }) {
+  return <>{children}</>;
 }
 
 // Helper: compare cell values for sorting
@@ -335,8 +545,10 @@ function compareCellValues(a: CellValue, b: CellValue): number {
   if (b == null) return 1;
 
   if (typeof a === "number" && typeof b === "number") return a - b;
-  if (typeof a === "boolean" && typeof b === "boolean") return Number(a) - Number(b);
-  if (Array.isArray(a) && Array.isArray(b)) return a.join(",").localeCompare(b.join(","));
+  if (typeof a === "boolean" && typeof b === "boolean")
+    return Number(a) - Number(b);
+  if (Array.isArray(a) && Array.isArray(b))
+    return a.join(",").localeCompare(b.join(","));
 
   return String(a).localeCompare(String(b));
 }
@@ -350,13 +562,23 @@ function applyFilter(
 ): boolean {
   switch (operator) {
     case "isEmpty":
-      return cellVal == null || cellVal === "" || (Array.isArray(cellVal) && cellVal.length === 0);
+      return (
+        cellVal == null ||
+        cellVal === "" ||
+        (Array.isArray(cellVal) && cellVal.length === 0)
+      );
     case "isNotEmpty":
-      return cellVal != null && cellVal !== "" && !(Array.isArray(cellVal) && cellVal.length === 0);
+      return (
+        cellVal != null &&
+        cellVal !== "" &&
+        !(Array.isArray(cellVal) && cellVal.length === 0)
+      );
     case "equals":
       return String(cellVal ?? "") === String(filterVal ?? "");
     case "contains":
-      return String(cellVal ?? "").toLowerCase().includes(String(filterVal ?? "").toLowerCase());
+      return String(cellVal ?? "")
+        .toLowerCase()
+        .includes(String(filterVal ?? "").toLowerCase());
     case "gt":
       return Number(cellVal) > Number(filterVal);
     case "lt":
@@ -365,3 +587,6 @@ function applyFilter(
       return true;
   }
 }
+
+// Export helpers for reuse in other views
+export { compareCellValues, applyFilter };

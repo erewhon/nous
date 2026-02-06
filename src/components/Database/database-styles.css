@@ -697,3 +697,718 @@
   color: var(--color-accent);
   background-color: rgba(139, 92, 246, 0.08);
 }
+
+/* ============================================
+   View Tabs
+   ============================================ */
+.db-view-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--color-border);
+  overflow-x: auto;
+}
+
+.db-view-tab {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  position: relative;
+  user-select: none;
+  transition: background-color 0.15s;
+}
+
+.db-view-tab:hover {
+  background-color: var(--color-bg-tertiary);
+}
+
+.db-view-tab-active {
+  color: var(--color-accent);
+  background-color: rgba(139, 92, 246, 0.1);
+  font-weight: 500;
+}
+
+.db-view-tab-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 120px;
+}
+
+.db-view-tab-rename {
+  width: 80px;
+  padding: 1px 4px;
+  border: 1px solid var(--color-accent);
+  border-radius: 3px;
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  font-size: 12px;
+  outline: none;
+}
+
+.db-view-tab-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 30;
+  min-width: 120px;
+  background-color: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  padding: 4px;
+}
+
+.db-view-tab-menu-item {
+  display: block;
+  width: 100%;
+  padding: 5px 10px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-primary);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.db-view-tab-menu-item:hover {
+  background-color: var(--color-bg-tertiary);
+}
+
+.db-view-tab-menu-item-danger {
+  color: var(--color-error, #ef4444);
+}
+
+.db-view-tab-menu-item-danger:hover {
+  background-color: rgba(239, 68, 68, 0.1);
+}
+
+.db-view-tabs-add {
+  position: relative;
+  margin-left: 4px;
+}
+
+.db-view-tabs-add-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.db-view-tabs-add-btn:hover {
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
+.db-view-tabs-add-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 30;
+  min-width: 180px;
+  background-color: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  padding: 4px;
+}
+
+.db-view-tabs-add-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-primary);
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 4px;
+  text-align: left;
+}
+
+.db-view-tabs-add-option:hover {
+  background-color: var(--color-bg-tertiary);
+}
+
+.db-view-tabs-add-option-disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.db-view-tabs-add-option-disabled:hover {
+  background: transparent;
+}
+
+.db-view-tabs-add-hint {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  margin-left: auto;
+}
+
+/* ============================================
+   Row Detail Modal
+   ============================================ */
+.db-row-detail-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(0, 0, 0, 0.5);
+}
+
+.db-row-detail-panel {
+  width: 480px;
+  max-width: 90vw;
+  max-height: 80vh;
+  overflow-y: auto;
+  background-color: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
+.db-row-detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.db-row-detail-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.db-row-detail-body {
+  padding: 12px 20px;
+}
+
+.db-row-detail-prop {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--color-border);
+  min-height: 36px;
+}
+
+.db-row-detail-prop:last-child {
+  border-bottom: none;
+}
+
+.db-row-detail-prop-label {
+  width: 120px;
+  min-width: 120px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.db-row-detail-prop-value {
+  flex: 1;
+  min-width: 0;
+}
+
+.db-row-detail-footer {
+  padding: 12px 20px 16px;
+  border-top: 1px solid var(--color-border);
+}
+
+/* ============================================
+   Group By (Table View)
+   ============================================ */
+.db-group-header-row {
+  background-color: var(--color-bg-secondary) !important;
+}
+
+.db-group-header-cell {
+  padding: 6px 10px !important;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.db-group-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.db-group-toggle:hover {
+  background-color: var(--color-bg-tertiary);
+}
+
+.db-group-chevron {
+  transition: transform 0.15s;
+}
+
+.db-group-chevron-open {
+  transform: rotate(90deg);
+}
+
+.db-group-label {
+  color: var(--color-text-secondary);
+}
+
+.db-group-count {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--color-text-muted);
+  background-color: var(--color-bg-tertiary);
+  padding: 0 6px;
+  border-radius: 10px;
+  line-height: 18px;
+}
+
+/* ============================================
+   List View
+   ============================================ */
+.db-list-container {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.db-list-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--color-border);
+  cursor: pointer;
+  transition: background-color 0.1s;
+}
+
+.db-list-item:last-child {
+  border-bottom: none;
+}
+
+.db-list-item:hover {
+  background-color: var(--color-bg-tertiary);
+}
+
+.db-list-item-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.db-list-item-primary {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.db-list-item-secondary {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.db-list-item-delete {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.db-list-item:hover .db-list-item-delete {
+  display: flex;
+}
+
+.db-list-item-delete:hover {
+  color: var(--color-error, #ef4444);
+  background-color: rgba(239, 68, 68, 0.1);
+}
+
+/* ============================================
+   Board (Kanban) View
+   ============================================ */
+.db-board-container {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  padding: 8px 0 16px;
+  min-height: 200px;
+}
+
+.db-board-empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
+.db-board-column {
+  min-width: 240px;
+  max-width: 280px;
+  flex-shrink: 0;
+  background-color: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  transition: border-color 0.15s;
+}
+
+.db-board-column-over {
+  border-color: var(--color-accent);
+  background-color: rgba(139, 92, 246, 0.04);
+}
+
+.db-board-column-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.db-board-column-count {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  margin-left: auto;
+}
+
+.db-board-column-cards {
+  flex: 1;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 40px;
+}
+
+.db-board-card {
+  padding: 8px 10px;
+  background-color: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: box-shadow 0.15s, border-color 0.15s;
+}
+
+.db-board-card:hover {
+  border-color: var(--color-accent);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+}
+
+.db-board-card-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-primary);
+  margin-bottom: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.db-board-card-prop {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  margin-top: 3px;
+}
+
+.db-board-card-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.db-board-card-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: block;
+}
+
+.db-board-card-more {
+  font-size: 10px;
+  color: var(--color-text-muted);
+}
+
+.db-board-add-card {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 6px;
+  margin: 0 8px 8px;
+  border: 1px dashed var(--color-border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.db-board-add-card:hover {
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
+/* ============================================
+   Gallery View
+   ============================================ */
+.db-gallery-wrapper {
+  padding: 8px 0;
+}
+
+.db-gallery-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.db-gallery-grid-small {
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+}
+
+.db-gallery-grid-medium {
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+}
+
+.db-gallery-grid-large {
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+}
+
+.db-gallery-card {
+  padding: 12px;
+  background-color: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.db-gallery-card:hover {
+  border-color: var(--color-accent);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.db-gallery-card-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin-bottom: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.db-gallery-card-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.db-gallery-card-label {
+  color: var(--color-text-muted);
+  min-width: 60px;
+  flex-shrink: 0;
+}
+
+.db-gallery-card-value {
+  color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.db-gallery-card-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+/* ============================================
+   Calendar View
+   ============================================ */
+.db-calendar-wrapper {
+  padding: 8px 0;
+}
+
+.db-calendar-empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
+.db-calendar-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.db-calendar-month-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin-left: 8px;
+}
+
+.db-calendar-grid-header {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+  margin-bottom: 4px;
+}
+
+.db-calendar-day-name {
+  text-align: center;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  padding: 4px;
+}
+
+.db-calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+}
+
+.db-calendar-cell {
+  min-height: 90px;
+  padding: 4px 6px;
+  background-color: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.1s;
+}
+
+.db-calendar-cell:hover {
+  background-color: var(--color-bg-tertiary);
+}
+
+.db-calendar-cell-empty {
+  background: transparent;
+  border: none;
+  cursor: default;
+}
+
+.db-calendar-cell-empty:hover {
+  background: transparent;
+}
+
+.db-calendar-cell-today {
+  border-color: var(--color-accent);
+}
+
+.db-calendar-cell-date {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  margin-bottom: 4px;
+}
+
+.db-calendar-cell-today .db-calendar-cell-date {
+  color: var(--color-accent);
+  font-weight: 700;
+}
+
+.db-calendar-cell-items {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.db-calendar-item {
+  font-size: 11px;
+  padding: 2px 4px;
+  border-radius: 3px;
+  background-color: rgba(139, 92, 246, 0.1);
+  color: var(--color-accent);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.db-calendar-item:hover {
+  background-color: rgba(139, 92, 246, 0.2);
+}
+
+.db-calendar-more {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  padding: 1px 4px;
+}
+
+.db-calendar-unscheduled {
+  margin-top: 16px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.db-calendar-unscheduled-header {
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  background-color: var(--color-bg-secondary);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.db-calendar-unscheduled-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 8px 12px;
+}

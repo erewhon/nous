@@ -803,11 +803,18 @@ These features are recommended as high-priority additions:
 
 ### 35. Databases & Structured Data (Notion, Tana, Capacities)
 
-- [ ] **Database pages** - Structured data with views
-  - Table, board (kanban), gallery, list, calendar views
-  - Properties: text, number, date, select, multi-select, checkbox, URL, relation
-  - Filter, sort, and group by any property
-  - Inline databases within pages
+- [x] **Database pages** - Structured data with table view
+  - [x] Table view with editable cells, column resize, row add/delete
+  - [x] Properties: text, number, select, multi-select, checkbox, date, URL
+  - [x] Filter and sort by any property
+  - [x] Property editor (rename, change type, manage select options, delete)
+  - [x] Toolbar with add property, filter, sort popovers
+  - [x] Notion CSV import creates database pages with type inference
+  - [x] Full-text search indexing of database content
+  - [ ] Board (kanban), gallery, list, calendar views
+  - [ ] Relation property type
+  - [ ] Group by any property
+  - [ ] Inline databases within pages
 - [ ] **Object types** - Custom content types
   - Define types like Book, Person, Project, Meeting with typed fields
   - Templates per object type

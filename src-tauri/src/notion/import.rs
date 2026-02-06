@@ -509,14 +509,20 @@ fn csv_to_database_content(csv_content: &str) -> Option<String> {
         }));
     }
 
-    // Build final DatabaseContent
+    // Build final DatabaseContent (v2 with views)
     let property_defs: Vec<serde_json::Value> = properties.iter().map(|(_, _, p, _)| p.clone()).collect();
     let db_content = serde_json::json!({
-        "version": 1,
+        "version": 2,
         "properties": property_defs,
         "rows": rows,
-        "sorts": [],
-        "filters": [],
+        "views": [{
+            "id": uuid::Uuid::new_v4().to_string(),
+            "name": "Table",
+            "type": "table",
+            "sorts": [],
+            "filters": [],
+            "config": {},
+        }],
     });
 
     serde_json::to_string_pretty(&db_content).ok()
