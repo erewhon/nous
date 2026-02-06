@@ -1412,3 +1412,52 @@
   gap: 4px;
   padding: 8px 12px;
 }
+
+/* ============================================
+   Compact Mode (inline database blocks)
+   ============================================ */
+.db-editor-compact {
+  max-height: 500px;
+  overflow-y: auto;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 4px 8px;
+}
+
+.db-editor-compact .db-view-tabs {
+  padding: 2px 0;
+  gap: 1px;
+}
+
+.db-editor-compact .db-view-tab {
+  padding: 3px 8px;
+  font-size: 11px;
+}
+
+.db-editor-compact .db-toolbar {
+  padding: 2px 0;
+}
+
+.db-editor-compact .db-toolbar-btn {
+  padding: 3px 8px;
+  font-size: 11px;
+}
+
+.db-editor-compact .db-table {
+  font-size: 12px;
+}
+
+.db-editor-compact .db-cell-display {
+  font-size: 12px;
+  min-height: 24px;
+  padding: 2px 6px;
+}
+
+.db-editor-compact .db-cell-input {
+  font-size: 12px;
+  padding: 2px 6px;
+}
+
+.db-editor-compact .db-calendar-cell {
+  min-height: 70px;
+}

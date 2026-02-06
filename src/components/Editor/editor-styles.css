@@ -3481,3 +3481,9 @@ block-ref.broken {
 .ce-block--section-collapsed {
   display: none !important;
 }
+
+/* Inline database block */
+.database-block {
+  width: 100%;
+  margin: 8px 0;
+}

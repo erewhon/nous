@@ -22,16 +22,26 @@ import * as api from "../../utils/api";
 import "./database-styles.css";
 
 interface DatabaseEditorProps {
-  page: Page;
-  notebookId: string;
+  // File-based mode (full-page database)
+  page?: Page;
+  notebookId?: string;
+  // Inline mode (embedded in Editor.js block)
+  initialContent?: DatabaseContentV2;
+  onContentChange?: (content: DatabaseContentV2) => void;
+  // Shared
   className?: string;
+  compact?: boolean;
 }
 
 export function DatabaseEditor({
   page,
   notebookId,
+  initialContent,
+  onContentChange,
   className,
+  compact,
 }: DatabaseEditorProps) {
+  const isInlineMode = !!initialContent;
   const [content, setContent] = useState<DatabaseContentV2 | null>(null);
   const [activeViewId, setActiveViewId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -42,6 +52,14 @@ export function DatabaseEditor({
 
   // Load content
   useEffect(() => {
+    if (isInlineMode) {
+      // Inline mode: content comes from props, no API loading
+      setContent(initialContent!);
+      setActiveViewId(initialContent!.views[0]?.id ?? null);
+      setIsLoading(false);
+      return;
+    }
+    if (!notebookId || !page) return;
     const loadContent = async () => {
       setIsLoading(true);
       setError(null);
@@ -74,11 +92,17 @@ export function DatabaseEditor({
       }
     };
     loadContent();
-  }, [notebookId, page.id]);
+  }, [isInlineMode, initialContent, notebookId, page]);
 
   // Debounced save
   const saveContent = useCallback(
     async (newContent: DatabaseContentV2) => {
+      if (isInlineMode) {
+        // Inline mode: notify parent directly, no debouncing
+        onContentChange?.(newContent);
+        return;
+      }
+      if (!notebookId || !page) return;
       if (saveTimeoutRef.current) {
         clearTimeout(saveTimeoutRef.current);
       }
@@ -98,7 +122,7 @@ export function DatabaseEditor({
         }
       }, 800);
     },
-    [notebookId, page.id]
+    [isInlineMode, onContentChange, notebookId, page]
   );
 
   useEffect(() => {
@@ -237,15 +261,17 @@ export function DatabaseEditor({
   };
 
   return (
-    <div className={`db-editor ${className ?? ""}`}>
-      <div className="db-save-indicator">
-        {isSaving && <span className="db-saving">Saving...</span>}
-        {!isSaving && lastSaved && (
-          <span className="db-saved">
-            Saved at {lastSaved.toLocaleTimeString()}
-          </span>
-        )}
-      </div>
+    <div className={`db-editor ${compact ? "db-editor-compact" : ""} ${className ?? ""}`}>
+      {!isInlineMode && (
+        <div className="db-save-indicator">
+          {isSaving && <span className="db-saving">Saving...</span>}
+          {!isSaving && lastSaved && (
+            <span className="db-saved">
+              Saved at {lastSaved.toLocaleTimeString()}
+            </span>
+          )}
+        </div>
+      )}
       <DatabaseViewTabs
         views={content.views}
         activeViewId={activeView.id}

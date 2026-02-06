@@ -17,6 +17,7 @@ import { FlashcardTool } from "./FlashcardTool";
 import { HighlighterTool } from "./HighlighterTool";
 import { PDFTool } from "./PDFTool";
 import { VideoTool } from "./VideoTool";
+import { DatabaseBlockTool } from "./DatabaseBlockTool";
 import { DrawingTool } from "./DrawingTool";
 import { EmbedTool } from "./EmbedTool";
 import { ColumnsTool } from "./ColumnsTool";
@@ -146,6 +147,9 @@ export function useEditor({
           frontPlaceholder: "Enter question...",
           backPlaceholder: "Enter answer...",
         },
+      },
+      database: {
+        class: DatabaseBlockTool as unknown as ToolConstructable,
       },
       ...(notebookId
         ? {

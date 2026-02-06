@@ -811,9 +811,16 @@ These features are recommended as high-priority additions:
   - [x] Toolbar with add property, filter, sort popovers
   - [x] Notion CSV import creates database pages with type inference
   - [x] Full-text search indexing of database content
-  - [ ] Board (kanban), gallery, list, calendar views
+  - [x] Multi-view architecture (V2 schema with per-view sorts/filters/config)
+  - [x] View tabs (add, rename, duplicate, delete views)
+  - [x] Group by any property (table view, collapsible groups with counts)
+  - [x] Board (kanban) view with drag-and-drop via @dnd-kit
+  - [x] Gallery view (CSS grid cards with configurable size)
+  - [x] List view (compact rows with primary/secondary properties)
+  - [x] Calendar view (month grid with date navigation, unscheduled section)
+  - [x] Row detail modal (shared property editor for non-table views)
+  - [x] V1→V2 automatic migration (existing databases upgrade seamlessly)
   - [ ] Relation property type
-  - [ ] Group by any property
   - [ ] Inline databases within pages
 - [ ] **Object types** - Custom content types
   - Define types like Book, Person, Project, Meeting with typed fields
