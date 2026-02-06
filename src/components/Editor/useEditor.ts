@@ -44,7 +44,6 @@ interface UseEditorOptions {
   onChange?: (data: OutputData) => void;
   onReady?: () => void;
   onLinkClick?: (pageTitle: string) => void;
-  onBlockRefClick?: (blockId: string, pageId: string) => void;
   readOnly?: boolean;
   placeholder?: string;
   notebookId?: string;
@@ -60,7 +59,6 @@ export function useEditor({
   onChange,
   onReady,
   onLinkClick,
-  onBlockRefClick,
   readOnly = false,
   placeholder = "Start writing or press '/' for commands...",
   notebookId,
@@ -194,9 +192,6 @@ export function useEditor({
       },
       blockRef: {
         class: BlockRefTool,
-        config: {
-          onBlockRefClick: onBlockRefClick,
-        },
       },
     };
 

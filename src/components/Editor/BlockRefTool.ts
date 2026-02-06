@@ -1,17 +1,14 @@
 import type { InlineTool, API } from "@editorjs/editorjs";
 
-interface BlockRefToolConfig {
-  onBlockRefClick?: (blockId: string, pageId: string) => void;
-}
-
 /**
  * BlockRef Inline Tool for Editor.js
- * Creates ((block-ref)) references for block-level bi-directional linking
+ * Creates ((block-ref)) references for block-level bi-directional linking.
+ * Insertion is handled by BlockRefAutocomplete (triggered by "((").
+ * Click handling is done via event delegation in BlockEditor.
  */
 export class BlockRefTool implements InlineTool {
   private api: API;
   private button: HTMLButtonElement | null = null;
-  private config: BlockRefToolConfig;
   private _state: boolean = false;
 
   static get isInline() {
@@ -31,9 +28,8 @@ export class BlockRefTool implements InlineTool {
     return "Block Reference";
   }
 
-  constructor({ api, config }: { api: API; config?: BlockRefToolConfig }) {
+  constructor({ api }: { api: API }) {
     this.api = api;
-    this.config = config || {};
   }
 
   render(): HTMLButtonElement {
@@ -52,38 +48,20 @@ export class BlockRefTool implements InlineTool {
     return this.button;
   }
 
-  surround(range: Range): void {
+  surround(_range: Range): void {
     if (this._state) {
-      this.unwrap(range);
+      this.unwrap();
     } else {
-      this.wrap(range);
+      // Block refs are inserted via the (( autocomplete, not the toolbar button.
+      // Show a hint so the user knows how to use it.
+      this.api.notifier.show({
+        message: 'Type (( to insert a block reference',
+        style: 'info',
+      });
     }
   }
 
-  private wrap(range: Range): void {
-    const selectedText = range.extractContents();
-    const text = selectedText.textContent || "";
-
-    const blockRef = document.createElement("block-ref");
-    blockRef.setAttribute("data-block-id", "");
-    blockRef.setAttribute("data-page-id", "");
-    blockRef.textContent = text;
-
-    blockRef.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const blockId = blockRef.getAttribute("data-block-id");
-      const pageId = blockRef.getAttribute("data-page-id");
-      if (blockId && pageId && this.config.onBlockRefClick) {
-        this.config.onBlockRefClick(blockId, pageId);
-      }
-    });
-
-    range.insertNode(blockRef);
-    this.api.selection.expandToTag(blockRef);
-  }
-
-  private unwrap(_range: Range): void {
+  private unwrap(): void {
     const blockRef = this.api.selection.findParentTag("BLOCK-REF");
     if (!blockRef) return;
 

@@ -343,11 +343,7 @@ export function EditorPaneContent({
   // Handle block reference clicks — navigate to the target page and scroll to block
   const handleBlockRefClick = useCallback(
     (blockId: string, pageId: string) => {
-      // Navigate to the target page
-      usePageStore.getState().openPageInPane(pane.id, pageId);
-
-      // After a delay for the editor to render, scroll to the target block
-      setTimeout(() => {
+      const scrollToBlock = () => {
         const el = document.querySelector(
           `[data-block-id="${CSS.escape(blockId)}"]`
         );
@@ -356,9 +352,19 @@ export function EditorPaneContent({
           el.classList.add("block-ref-highlight");
           setTimeout(() => el.classList.remove("block-ref-highlight"), 2000);
         }
-      }, 500);
+      };
+
+      const isCurrentPage = pane.pageId === pageId;
+      if (isCurrentPage) {
+        // Already on the target page — scroll immediately
+        scrollToBlock();
+      } else {
+        // Navigate to the target page, then scroll after editor renders
+        usePageStore.getState().openPageInPane(pane.id, pageId);
+        setTimeout(scrollToBlock, 500);
+      }
     },
-    [pane.id]
+    [pane.id, pane.pageId]
   );
 
   // Handle wiki link clicks

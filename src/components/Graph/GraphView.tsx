@@ -17,6 +17,7 @@ interface GraphLink extends d3.SimulationLinkDatum<GraphNode> {
   source: string | GraphNode;
   target: string | GraphNode;
   bidirectional: boolean;
+  isBlockRef?: boolean;
 }
 
 interface GraphStats {
@@ -40,7 +41,7 @@ export function GraphView({ onClose, onNodeClick }: GraphViewProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const { pages, selectedPageId } = usePageStore();
-  const { outgoingLinks, backlinks } = useLinkStore();
+  const { outgoingLinks, backlinks, blockRefBacklinks } = useLinkStore();
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
 
   // UI state
@@ -100,11 +101,29 @@ export function GraphView({ onClose, onNodeClick }: GraphViewProps) {
       }
     }
 
+    // Count block-ref connections per page (as source or target page)
+    const blockRefConnectionCount = new Map<string, number>();
+    for (const [, refs] of blockRefBacklinks) {
+      for (const ref of refs) {
+        if (ref.sourcePageId !== ref.targetPageId) {
+          blockRefConnectionCount.set(
+            ref.sourcePageId,
+            (blockRefConnectionCount.get(ref.sourcePageId) || 0) + 1
+          );
+          blockRefConnectionCount.set(
+            ref.targetPageId,
+            (blockRefConnectionCount.get(ref.targetPageId) || 0) + 1
+          );
+        }
+      }
+    }
+
     // Create nodes with type classification
     for (const page of pages) {
       const outgoing = outgoingLinks.get(page.id) || [];
       const incoming = backlinks.get(page.title) || [];
-      const totalConnections = outgoing.length + incoming.length;
+      const blockRefCount = blockRefConnectionCount.get(page.id) || 0;
+      const totalConnections = outgoing.length + incoming.length + blockRefCount;
 
       let nodeType: GraphNode["nodeType"] = "normal";
       if (totalConnections === 0) {
@@ -145,8 +164,25 @@ export function GraphView({ onClose, onNodeClick }: GraphViewProps) {
       }
     }
 
+    // Add block-ref edges (source page -> target page, deduplicated against existing links)
+    for (const [, refs] of blockRefBacklinks) {
+      for (const ref of refs) {
+        if (ref.sourcePageId === ref.targetPageId) continue;
+        const key = [ref.sourcePageId, ref.targetPageId].sort().join("-");
+        if (!addedLinks.has(key)) {
+          addedLinks.add(key);
+          links.push({
+            source: ref.sourcePageId,
+            target: ref.targetPageId,
+            bidirectional: false,
+            isBlockRef: true,
+          });
+        }
+      }
+    }
+
     return { nodes, links, titleToId };
-  }, [pages, outgoingLinks, backlinks, selectedPageId]);
+  }, [pages, outgoingLinks, backlinks, blockRefBacklinks, selectedPageId]);
 
   // Compute graph statistics
   const stats = useMemo<GraphStats>(() => {
@@ -297,6 +333,19 @@ export function GraphView({ onClose, onNodeClick }: GraphViewProps) {
       .attr("d", "M 0,-5 L 10,0 L 0,5")
       .attr("fill", "#22c55e");
 
+    defs
+      .append("marker")
+      .attr("id", "arrowhead-blockref")
+      .attr("viewBox", "-0 -5 10 10")
+      .attr("refX", 20)
+      .attr("refY", 0)
+      .attr("orient", "auto")
+      .attr("markerWidth", 6)
+      .attr("markerHeight", 6)
+      .append("path")
+      .attr("d", "M 0,-5 L 10,0 L 0,5")
+      .attr("fill", "#8b5cf6");
+
     // Add zoom behavior
     const g = svg.append("g");
 
@@ -330,10 +379,11 @@ export function GraphView({ onClose, onNodeClick }: GraphViewProps) {
       .selectAll("line")
       .data(linksCopy)
       .join("line")
-      .attr("stroke", (d) => d.bidirectional ? "#22c55e" : "#313244")
+      .attr("stroke", (d) => d.isBlockRef ? "#8b5cf6" : d.bidirectional ? "#22c55e" : "#313244")
       .attr("stroke-opacity", 0.6)
       .attr("stroke-width", (d) => d.bidirectional ? 2 : 1.5)
-      .attr("marker-end", (d) => d.bidirectional ? "url(#arrowhead-bidirectional)" : "url(#arrowhead)");
+      .attr("stroke-dasharray", (d) => d.isBlockRef ? "4 3" : null)
+      .attr("marker-end", (d) => d.isBlockRef ? "url(#arrowhead-blockref)" : d.bidirectional ? "url(#arrowhead-bidirectional)" : "url(#arrowhead)");
 
     // Create drag behavior
     const dragBehavior = d3
@@ -813,6 +863,10 @@ export function GraphView({ onClose, onNodeClick }: GraphViewProps) {
           <div className="flex items-center gap-2">
             <div className="h-px w-6 bg-green-500" style={{ height: "2px" }} />
             <span>Bidirectional</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-6" style={{ height: "2px", backgroundImage: "repeating-linear-gradient(to right, #8b5cf6 0, #8b5cf6 4px, transparent 4px, transparent 7px)" }} />
+            <span>Block ref</span>
           </div>
           <span className="ml-auto">
             Scroll: zoom | Drag: move nodes | Click: navigate | Double-click: focus

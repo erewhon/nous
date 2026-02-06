@@ -104,7 +104,6 @@ export const BlockEditor = forwardRef<BlockEditorRef, BlockEditorProps>(function
     initialData,
     onChange: handleChange,
     onLinkClick,
-    onBlockRefClick,
     readOnly,
     notebookId,
     pages,
