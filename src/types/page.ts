@@ -35,6 +35,7 @@ export const PageTypeSchema = z.enum([
   "calendar", // Calendar file (.ics)
   "chat", // AI Chat conversation page (.chat)
   "canvas", // Infinite canvas/whiteboard (.canvas)
+  "database", // Database/table view (.database)
 ]);
 export type PageType = z.infer<typeof PageTypeSchema>;
 

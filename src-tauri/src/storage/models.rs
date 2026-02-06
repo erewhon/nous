@@ -80,6 +80,8 @@ pub enum PageType {
     Chat,
     /// Infinite canvas/whiteboard (.canvas)
     Canvas,
+    /// Database/table view (.database)
+    Database,
 }
 
 impl Default for PageType {

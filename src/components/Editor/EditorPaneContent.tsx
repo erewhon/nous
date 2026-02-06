@@ -17,6 +17,7 @@ import { EpubReader } from "../Epub";
 import { CalendarViewer } from "../Calendar";
 import { ChatEditor } from "../Chat";
 import { CanvasEditor } from "../Canvas";
+import { DatabaseEditor } from "../Database";
 import { BacklinksPanel } from "./BacklinksPanel";
 import { SimilarPagesPanel } from "./SimilarPagesPanel";
 import type { EditorData, Page } from "../../types/page";
@@ -494,6 +495,36 @@ export function EditorPaneContent({
                 usePageStore.getState().openPageInPane(pane.id, pageId);
               }}
             />
+          ) : selectedPage.pageType === "database" ? (
+            /* Database gets its own scrollable container */
+            <>
+              <div className="relative">
+                <PageHeader
+                  page={selectedPage}
+                  isSaving={false}
+                  lastSaved={null}
+                  stats={null}
+                  zenMode={zenMode}
+                  onExitZenMode={() => setZenMode(false)}
+                  onEnterZenMode={() => setZenMode(true)}
+                  historyCount={0}
+                  canUndo={false}
+                  canRedo={false}
+                  onUndo={() => {}}
+                  onRedo={() => {}}
+                />
+              </div>
+              <div className="flex-1 overflow-y-auto px-8 py-6">
+                <div className="mx-auto" style={{ maxWidth: "var(--editor-max-width)" }}>
+                  <DatabaseEditor
+                    key={selectedPage.id}
+                    page={selectedPage}
+                    notebookId={notebookId}
+                    className="min-h-[calc(100vh-300px)]"
+                  />
+                </div>
+              </div>
+            </>
           ) : (
             <>
               <div className="relative">

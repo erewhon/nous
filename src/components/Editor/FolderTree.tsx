@@ -481,6 +481,30 @@ END:VCALENDAR`;
     }
   }, [notebookId, sectionsEnabled, selectedSectionId, createPage]);
 
+  // Handle creating a database page
+  const handleCreateDatabasePage = useCallback(async () => {
+    try {
+      const title = "New Database";
+      const sectionId = sectionsEnabled && selectedSectionId ? selectedSectionId : undefined;
+      const pageData = await createPage(notebookId, title, undefined, undefined, sectionId);
+      if (!pageData) {
+        console.error("Failed to create database page");
+        return;
+      }
+      const { updatePage: storeUpdatePage } = usePageStore.getState();
+      await storeUpdatePage(notebookId, pageData.id, {
+        fileExtension: "database",
+        pageType: "database",
+      });
+      // Initialize with empty database content
+      const { createDefaultDatabaseContent } = await import("../../types/database");
+      const defaultContent = JSON.stringify(createDefaultDatabaseContent(), null, 2);
+      await api.updateFileContent(notebookId, pageData.id, defaultContent);
+    } catch (err) {
+      console.error("Failed to create database page:", err);
+    }
+  }, [notebookId, sectionsEnabled, selectedSectionId, createPage]);
+
   // Handle creating a canvas page
   const handleCreateCanvasPage = useCallback(async () => {
     try {
@@ -1218,6 +1242,32 @@ END:VCALENDAR`;
                       <line x1="3" y1="10" x2="21" y2="10" />
                     </svg>
                     Calendar Page
+                  </button>
+                  <button
+                    onClick={() => {
+                      handleCreateDatabasePage();
+                      setShowNewPageMenu(false);
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors hover:bg-[--color-bg-tertiary]"
+                    style={{ color: "var(--color-text-primary)" }}
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <rect x="3" y="3" width="18" height="18" rx="2" />
+                      <path d="M3 9h18" />
+                      <path d="M3 15h18" />
+                      <path d="M9 3v18" />
+                    </svg>
+                    Database Page
                   </button>
                   <button
                     onClick={() => {

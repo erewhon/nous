@@ -116,7 +116,8 @@ export async function updatePage(
       | "epub"
       | "calendar"
       | "chat"
-      | "canvas";
+      | "canvas"
+      | "database";
     fileExtension?: string | null;
     isFavorite?: boolean;
     isDailyNote?: boolean;
