@@ -228,40 +228,44 @@ function processElement(el: HTMLElement, baseUrl: string): EditorBlock[] {
   }
 }
 
+interface NestedListItem {
+  content: string;
+  items: NestedListItem[];
+}
+
 function processListElement(
   el: HTMLElement,
   style: "ordered" | "unordered",
   baseUrl: string
 ): EditorBlock {
-  const items: string[] = [];
-
-  function collectItems(listEl: HTMLElement) {
+  function collectItems(listEl: HTMLElement): NestedListItem[] {
+    const items: NestedListItem[] = [];
     for (const li of Array.from(listEl.children)) {
       if (li.tagName === "LI") {
-        // Get direct text content (not nested lists)
         let text = "";
+        let nestedItems: NestedListItem[] = [];
         for (const child of Array.from(li.childNodes)) {
           if (child.nodeType === Node.TEXT_NODE) {
             text += child.textContent ?? "";
           } else if (child.nodeType === Node.ELEMENT_NODE) {
             const childEl = child as HTMLElement;
             if (childEl.tagName === "UL" || childEl.tagName === "OL") {
-              // Flatten nested list items
-              collectItems(childEl);
+              nestedItems = collectItems(childEl);
             } else {
               text += getTextContent(childEl, baseUrl);
             }
           }
         }
         const trimmed = text.trim();
-        if (trimmed) {
-          items.push(trimmed);
+        if (trimmed || nestedItems.length > 0) {
+          items.push({ content: trimmed, items: nestedItems });
         }
       }
     }
+    return items;
   }
 
-  collectItems(el);
+  const items = collectItems(el);
   return makeBlock("list", { style, items });
 }
 

@@ -7,6 +7,7 @@ export interface Toast {
   type: ToastType;
   message: string;
   duration?: number; // ms, default 4000
+  action?: { label: string; onClick: () => void };
 }
 
 interface ToastState {

@@ -11,9 +11,10 @@ import type { EditorBlock, EditorData, Folder } from "../../types/page";
 interface WebClipperDialogProps {
   isOpen: boolean;
   onClose: () => void;
+  initialUrl?: string;
 }
 
-export function WebClipperDialog({ isOpen, onClose }: WebClipperDialogProps) {
+export function WebClipperDialog({ isOpen, onClose, initialUrl }: WebClipperDialogProps) {
   const titleId = useId();
   const focusTrapRef = useFocusTrap(isOpen);
   const urlInputRef = useRef<HTMLInputElement>(null);
@@ -67,6 +68,22 @@ export function WebClipperDialog({ isOpen, onClose }: WebClipperDialogProps) {
     }
   }, [isOpen]);
 
+  // Pre-fill and auto-clip when initialUrl is provided
+  const autoClipTriggeredRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (isOpen && initialUrl && autoClipTriggeredRef.current !== initialUrl) {
+      autoClipTriggeredRef.current = initialUrl;
+      setUrl(initialUrl);
+      // Pass URL directly to avoid stale state
+      requestAnimationFrame(() => {
+        handleClipRef.current(initialUrl);
+      });
+    }
+    if (!isOpen) {
+      autoClipTriggeredRef.current = null;
+    }
+  }, [isOpen, initialUrl]);
+
   // Reset state on close
   const handleClose = useCallback(() => {
     setUrl("");
@@ -92,8 +109,8 @@ export function WebClipperDialog({ isOpen, onClose }: WebClipperDialogProps) {
     return () => window.removeEventListener("keydown", handler);
   }, [isOpen, handleClose]);
 
-  const handleClip = async () => {
-    const trimmed = url.trim();
+  const handleClip = async (urlOverride?: string) => {
+    const trimmed = (urlOverride ?? url).trim();
     if (!trimmed) return;
 
     // Normalize URL
@@ -121,6 +138,8 @@ export function WebClipperDialog({ isOpen, onClose }: WebClipperDialogProps) {
       setIsClipping(false);
     }
   };
+  const handleClipRef = useRef(handleClip);
+  handleClipRef.current = handleClip;
 
   const handleSave = async () => {
     if (!selectedNotebookId || !clippedContent || previewBlocks.length === 0)
@@ -268,7 +287,7 @@ export function WebClipperDialog({ isOpen, onClose }: WebClipperDialogProps) {
               }}
             />
             <button
-              onClick={handleClip}
+              onClick={() => handleClip()}
               disabled={!url.trim() || isClipping}
               className="rounded-lg px-4 py-2 text-sm font-medium text-white transition-colors disabled:opacity-50"
               style={{ backgroundColor: "var(--color-accent)" }}
@@ -537,18 +556,9 @@ function BlockPreviewItem({ block }: { block: EditorBlock }) {
       );
 
     case "list": {
-      const ListTag = data.style === "ordered" ? "ol" : "ul";
-      const listClass =
-        data.style === "ordered"
-          ? "list-decimal pl-5 text-sm space-y-0.5"
-          : "list-disc pl-5 text-sm space-y-0.5";
-      return (
-        <ListTag className={listClass}>
-          {(data.items as string[]).map((item, i) => (
-            <li key={i} dangerouslySetInnerHTML={{ __html: item }} />
-          ))}
-        </ListTag>
-      );
+      const items = (data.items as Array<string | { content?: string; items?: unknown[] }>) || [];
+      const listStyle = (data.style as string) || "unordered";
+      return <NestedPreviewList items={items} style={listStyle} />;
     }
 
     case "code":
@@ -647,4 +657,27 @@ function BlockPreviewItem({ block }: { block: EditorBlock }) {
       }
       return null;
   }
+}
+
+function NestedPreviewList({ items, style }: { items: Array<string | { content?: string; items?: unknown[] }>; style: string }) {
+  const ListTag = style === "ordered" ? "ol" : "ul";
+  const listClass = style === "ordered"
+    ? "list-decimal pl-5 text-sm space-y-0.5"
+    : "list-disc pl-5 text-sm space-y-0.5";
+  return (
+    <ListTag className={listClass}>
+      {items.map((item, i) => {
+        const text = typeof item === "string" ? item : item.content || "";
+        const children = typeof item === "object" && Array.isArray(item.items) && item.items.length > 0
+          ? item.items as Array<string | { content?: string; items?: unknown[] }>
+          : null;
+        return (
+          <li key={i}>
+            <span dangerouslySetInnerHTML={{ __html: text }} />
+            {children && <NestedPreviewList items={children} style={style} />}
+          </li>
+        );
+      })}
+    </ListTag>
+  );
 }

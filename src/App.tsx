@@ -62,9 +62,14 @@ function App() {
     return () => window.removeEventListener("open-backup-dialog", handleOpenBackup);
   }, []);
 
-  // Listen for custom event to open web clipper
+  // Listen for custom event to open web clipper (optionally with a URL)
+  const [clipperUrl, setClipperUrl] = useState<string | undefined>(undefined);
   useEffect(() => {
-    const handleOpenClipper = () => setShowWebClipper(true);
+    const handleOpenClipper = (e: Event) => {
+      const detail = (e as CustomEvent<{ url?: string }>).detail;
+      setClipperUrl(detail?.url);
+      setShowWebClipper(true);
+    };
     window.addEventListener("open-web-clipper", handleOpenClipper);
     return () => window.removeEventListener("open-web-clipper", handleOpenClipper);
   }, []);
@@ -307,7 +312,11 @@ function App() {
       {/* Web Clipper */}
       <WebClipperDialog
         isOpen={showWebClipper}
-        onClose={() => setShowWebClipper(false)}
+        onClose={() => {
+          setShowWebClipper(false);
+          setClipperUrl(undefined);
+        }}
+        initialUrl={clipperUrl}
       />
 
       {/* Toast Notifications */}

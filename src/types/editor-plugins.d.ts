@@ -29,9 +29,14 @@ declare module "@editorjs/list" {
     defaultStyle?: "ordered" | "unordered";
   }
 
+  interface NestedListItem {
+    content: string;
+    items: NestedListItem[];
+  }
+
   interface ListData {
     style: "ordered" | "unordered";
-    items: string[];
+    items: NestedListItem[];
   }
 
   export default class List implements BlockTool {

@@ -38,11 +38,23 @@ export function blocksToLines(blocks: EditorBlock[]): string[] {
       }
 
       case "list": {
-        const items = (block.data.items as Array<string | { content?: string }>) || [];
-        for (const item of items) {
-          const text = typeof item === "string" ? item : item.content || "";
-          lines.push(`- ${stripHtml(text)}`);
+        const items = (block.data.items as Array<string | { content?: string; items?: unknown[] }>) || [];
+        function collectListLines(
+          listItems: Array<string | { content?: string; items?: unknown[] }>,
+          indent: number
+        ) {
+          for (const item of listItems) {
+            const text = typeof item === "string" ? item : item.content || "";
+            lines.push(`${"  ".repeat(indent)}- ${stripHtml(text)}`);
+            if (typeof item === "object" && Array.isArray(item.items) && item.items.length > 0) {
+              collectListLines(
+                item.items as Array<string | { content?: string; items?: unknown[] }>,
+                indent + 1
+              );
+            }
+          }
         }
+        collectListLines(items, 0);
         break;
       }
 

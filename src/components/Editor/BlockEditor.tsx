@@ -14,6 +14,7 @@ import { BlockRefTool } from "./BlockRefTool";
 import { LinkPreview } from "./LinkPreview";
 import { usePageStore } from "../../stores/pageStore";
 import { useThemeStore } from "../../stores/themeStore";
+import { useToastStore } from "../../stores/toastStore";
 
 interface BlockEditorProps {
   initialData?: OutputData;
@@ -427,6 +428,35 @@ export const BlockEditor = forwardRef<BlockEditorRef, BlockEditorProps>(function
       container.removeEventListener("checklist-structural-change", handleStructuralChange);
     };
   }, [save, handleChange, readOnly]);
+
+  // Detect URL paste and offer to clip
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || readOnly) return;
+
+    const handlePaste = (e: ClipboardEvent) => {
+      const text = e.clipboardData?.getData("text/plain")?.trim();
+      if (!text) return;
+      if (/^https?:\/\/\S+$/.test(text)) {
+        useToastStore.getState().addToast({
+          type: "info",
+          message: "URL pasted \u2014 Clip as page?",
+          duration: 6000,
+          action: {
+            label: "Clip",
+            onClick: () => {
+              window.dispatchEvent(
+                new CustomEvent("open-web-clipper", { detail: { url: text } })
+              );
+            },
+          },
+        });
+      }
+    };
+
+    container.addEventListener("paste", handlePaste);
+    return () => container.removeEventListener("paste", handlePaste);
+  }, [readOnly]);
 
   // Handle autocomplete link insertion (trigger save)
   const handleInsertLink = useCallback(() => {
