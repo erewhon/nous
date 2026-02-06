@@ -9,6 +9,7 @@ export const PropertyTypeSchema = z.enum([
   "checkbox",
   "date",
   "url",
+  "relation",
 ]);
 export type PropertyType = z.infer<typeof PropertyTypeSchema>;
 
@@ -20,6 +21,12 @@ export const SelectOptionSchema = z.object({
 });
 export type SelectOption = z.infer<typeof SelectOptionSchema>;
 
+// Relation configuration — links to another database page
+export const RelationConfigSchema = z.object({
+  databasePageId: z.string(), // Page ID of the target database
+});
+export type RelationConfig = z.infer<typeof RelationConfigSchema>;
+
 // Property (column) definition
 export const PropertyDefSchema = z.object({
   id: z.string(),
@@ -27,6 +34,7 @@ export const PropertyDefSchema = z.object({
   type: PropertyTypeSchema,
   options: z.array(SelectOptionSchema).optional(),
   width: z.number().optional(),
+  relationConfig: RelationConfigSchema.optional(),
 });
 export type PropertyDef = z.infer<typeof PropertyDefSchema>;
 
@@ -213,6 +221,154 @@ export function createDefaultDatabaseContent(): DatabaseContentV2 {
         id: crypto.randomUUID(),
         name: "Table",
         type: "table",
+        sorts: [],
+        filters: [],
+        config: {},
+      },
+    ],
+  };
+}
+
+// --- Object Types ---
+
+// Property template for object type definitions
+export const ObjectTypePropertySchema = z.object({
+  name: z.string(),
+  type: PropertyTypeSchema,
+  options: z.array(SelectOptionSchema).optional(),
+});
+export type ObjectTypeProperty = z.infer<typeof ObjectTypePropertySchema>;
+
+// Object type definition
+export const ObjectTypeSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  icon: z.string(), // emoji or SVG string
+  description: z.string().optional(),
+  properties: z.array(ObjectTypePropertySchema),
+  defaultViewType: DatabaseViewTypeSchema.optional(),
+  builtIn: z.boolean().optional(), // true for system-provided types
+});
+export type ObjectType = z.infer<typeof ObjectTypeSchema>;
+
+// Built-in object types
+export const BUILT_IN_OBJECT_TYPES: ObjectType[] = [
+  {
+    id: "builtin-book",
+    name: "Book",
+    icon: "\ud83d\udcd6",
+    description: "Track books with author, genre, rating, and reading status",
+    builtIn: true,
+    properties: [
+      { name: "Title", type: "text" },
+      { name: "Author", type: "text" },
+      { name: "Genre", type: "select", options: [
+        { id: "genre-fiction", label: "Fiction", color: "#3b82f6" },
+        { id: "genre-nonfiction", label: "Non-fiction", color: "#22c55e" },
+        { id: "genre-sci-fi", label: "Sci-fi", color: "#8b5cf6" },
+        { id: "genre-biography", label: "Biography", color: "#f97316" },
+        { id: "genre-self-help", label: "Self-help", color: "#eab308" },
+      ]},
+      { name: "Status", type: "select", options: [
+        { id: "status-to-read", label: "To Read", color: "#6b7280" },
+        { id: "status-reading", label: "Reading", color: "#3b82f6" },
+        { id: "status-finished", label: "Finished", color: "#22c55e" },
+        { id: "status-abandoned", label: "Abandoned", color: "#ef4444" },
+      ]},
+      { name: "Rating", type: "number" },
+      { name: "Date Read", type: "date" },
+      { name: "URL", type: "url" },
+    ],
+  },
+  {
+    id: "builtin-person",
+    name: "Person",
+    icon: "\ud83d\udc64",
+    description: "Contact directory with roles, company, and communication details",
+    builtIn: true,
+    properties: [
+      { name: "Name", type: "text" },
+      { name: "Company", type: "text" },
+      { name: "Role", type: "text" },
+      { name: "Email", type: "url" },
+      { name: "Tags", type: "multiSelect", options: [
+        { id: "tag-work", label: "Work", color: "#3b82f6" },
+        { id: "tag-personal", label: "Personal", color: "#22c55e" },
+        { id: "tag-client", label: "Client", color: "#f97316" },
+        { id: "tag-mentor", label: "Mentor", color: "#8b5cf6" },
+      ]},
+      { name: "Last Contacted", type: "date" },
+    ],
+  },
+  {
+    id: "builtin-project",
+    name: "Project",
+    icon: "\ud83d\udcc1",
+    description: "Project tracker with status, priority, dates, and ownership",
+    builtIn: true,
+    properties: [
+      { name: "Name", type: "text" },
+      { name: "Status", type: "select", options: [
+        { id: "proj-planning", label: "Planning", color: "#6b7280" },
+        { id: "proj-active", label: "Active", color: "#3b82f6" },
+        { id: "proj-on-hold", label: "On Hold", color: "#eab308" },
+        { id: "proj-completed", label: "Completed", color: "#22c55e" },
+        { id: "proj-cancelled", label: "Cancelled", color: "#ef4444" },
+      ]},
+      { name: "Priority", type: "select", options: [
+        { id: "pri-low", label: "Low", color: "#6b7280" },
+        { id: "pri-medium", label: "Medium", color: "#eab308" },
+        { id: "pri-high", label: "High", color: "#f97316" },
+        { id: "pri-urgent", label: "Urgent", color: "#ef4444" },
+      ]},
+      { name: "Start Date", type: "date" },
+      { name: "Due Date", type: "date" },
+      { name: "Owner", type: "text" },
+      { name: "Completed", type: "checkbox" },
+    ],
+  },
+  {
+    id: "builtin-meeting",
+    name: "Meeting",
+    icon: "\ud83d\udcc5",
+    description: "Meeting log with date, attendees, agenda, and action items",
+    builtIn: true,
+    properties: [
+      { name: "Title", type: "text" },
+      { name: "Date", type: "date" },
+      { name: "Type", type: "select", options: [
+        { id: "mtg-standup", label: "Standup", color: "#22c55e" },
+        { id: "mtg-planning", label: "Planning", color: "#3b82f6" },
+        { id: "mtg-review", label: "Review", color: "#8b5cf6" },
+        { id: "mtg-1on1", label: "1:1", color: "#f97316" },
+        { id: "mtg-other", label: "Other", color: "#6b7280" },
+      ]},
+      { name: "Attendees", type: "text" },
+      { name: "Agenda", type: "text" },
+      { name: "Action Items", type: "text" },
+    ],
+  },
+];
+
+// Create database content from an object type
+export function createDatabaseFromObjectType(objectType: ObjectType): DatabaseContentV2 {
+  return {
+    version: 2,
+    properties: objectType.properties.map((p) => ({
+      id: crypto.randomUUID(),
+      name: p.name,
+      type: p.type,
+      ...(p.options ? { options: p.options } : {}),
+    })),
+    rows: [],
+    views: [
+      {
+        id: crypto.randomUUID(),
+        name: objectType.defaultViewType === "board" ? "Board" :
+              objectType.defaultViewType === "gallery" ? "Gallery" :
+              objectType.defaultViewType === "list" ? "List" :
+              objectType.defaultViewType === "calendar" ? "Calendar" : "Table",
+        type: objectType.defaultViewType ?? "table",
         sorts: [],
         filters: [],
         config: {},

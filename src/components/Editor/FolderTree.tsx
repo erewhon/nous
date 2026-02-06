@@ -17,6 +17,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { Folder, Page, Section, FileStorageMode } from "../../types/page";
 import type { Notebook, PageSortOption } from "../../types/notebook";
+import type { ObjectType } from "../../types/database";
 import { useFolderStore } from "../../stores/folderStore";
 import { usePageStore } from "../../stores/pageStore";
 import { useNotebookStore } from "../../stores/notebookStore";
@@ -24,6 +25,7 @@ import { useThemeStore, type PageSortOption as ThemePageSortOption } from "../..
 import * as api from "../../utils/api";
 import { FolderTreeItem, DraggablePageItem } from "./FolderTreeItem";
 import { FileImportDialog } from "../Import/FileImportDialog";
+import { ObjectTypePicker, ObjectTypeManager } from "../Database/ObjectTypeManager";
 
 const PAGE_SORT_OPTIONS: { value: PageSortOption; label: string }[] = [
   { value: "position", label: "Manual" },
@@ -208,6 +210,8 @@ export function FolderTree({
   const [pendingImportPath, setPendingImportPath] = useState<string | null>(null);
   const [isImporting, setIsImporting] = useState(false);
   const [isFileDragOver, setIsFileDragOver] = useState(false);
+  const [showDatabaseTypePicker, setShowDatabaseTypePicker] = useState(false);
+  const [showObjectTypeManager, setShowObjectTypeManager] = useState(false);
   const treeContainerRef = useRef<HTMLDivElement>(null);
 
   // Supported file extensions for import
@@ -481,10 +485,10 @@ END:VCALENDAR`;
     }
   }, [notebookId, sectionsEnabled, selectedSectionId, createPage]);
 
-  // Handle creating a database page
-  const handleCreateDatabasePage = useCallback(async () => {
+  // Handle creating a database page (optionally from an object type template)
+  const handleCreateDatabasePage = useCallback(async (objectType?: ObjectType | null) => {
     try {
-      const title = "New Database";
+      const title = objectType ? `New ${objectType.name}` : "New Database";
       const sectionId = sectionsEnabled && selectedSectionId ? selectedSectionId : undefined;
       const pageData = await createPage(notebookId, title, undefined, undefined, sectionId);
       if (!pageData) {
@@ -496,10 +500,12 @@ END:VCALENDAR`;
         fileExtension: "database",
         pageType: "database",
       });
-      // Initialize with empty database content
-      const { createDefaultDatabaseContent } = await import("../../types/database");
-      const defaultContent = JSON.stringify(createDefaultDatabaseContent(), null, 2);
-      await api.updateFileContent(notebookId, pageData.id, defaultContent);
+      // Initialize database content — from template or empty
+      const { createDefaultDatabaseContent, createDatabaseFromObjectType } = await import("../../types/database");
+      const content = objectType
+        ? createDatabaseFromObjectType(objectType)
+        : createDefaultDatabaseContent();
+      await api.updateFileContent(notebookId, pageData.id, JSON.stringify(content, null, 2));
     } catch (err) {
       console.error("Failed to create database page:", err);
     }
@@ -970,6 +976,42 @@ END:VCALENDAR`;
         onCancel={handleCancelImport}
         isImporting={isImporting}
       />
+
+      {/* Database type picker modal */}
+      {showDatabaseTypePicker && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center"
+          style={{ backgroundColor: "rgba(0, 0, 0, 0.5)" }}
+          onClick={() => setShowDatabaseTypePicker(false)}
+        >
+          <div
+            className="rounded-xl shadow-2xl"
+            style={{
+              backgroundColor: "var(--color-bg-secondary)",
+              border: "1px solid var(--color-border)",
+              width: "380px",
+              maxHeight: "500px",
+              overflowY: "auto",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {showObjectTypeManager ? (
+              <ObjectTypeManager
+                onClose={() => setShowObjectTypeManager(false)}
+              />
+            ) : (
+              <ObjectTypePicker
+                onSelect={(objectType) => {
+                  setShowDatabaseTypePicker(false);
+                  handleCreateDatabasePage(objectType);
+                }}
+                onManageTypes={() => setShowObjectTypeManager(true)}
+              />
+            )}
+          </div>
+        </div>
+      )}
+
       <DndContext
         sensors={sensors}
         collisionDetection={closestCenter}
@@ -1245,8 +1287,8 @@ END:VCALENDAR`;
                   </button>
                   <button
                     onClick={() => {
-                      handleCreateDatabasePage();
                       setShowNewPageMenu(false);
+                      setShowDatabaseTypePicker(true);
                     }}
                     className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors hover:bg-[--color-bg-tertiary]"
                     style={{ color: "var(--color-text-primary)" }}

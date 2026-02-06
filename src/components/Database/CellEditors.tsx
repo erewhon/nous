@@ -351,6 +351,111 @@ export function MultiSelectCell({ value, onChange, options = [], onAddOption }: 
   );
 }
 
+// Relation cell — displays linked rows as pills, dropdown picker
+export interface RelationTarget {
+  id: string;
+  title: string;
+}
+
+export function RelationCell({
+  value,
+  onChange,
+  targets = [],
+}: {
+  value: CellValue;
+  onChange: (value: CellValue) => void;
+  targets?: RelationTarget[];
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  const selectedIds = Array.isArray(value) ? value : [];
+  const selectedTargets = selectedIds
+    .map((id) => targets.find((t) => t.id === id))
+    .filter((t): t is RelationTarget => t != null);
+
+  const filteredTargets = search
+    ? targets.filter((t) => t.title.toLowerCase().includes(search.toLowerCase()))
+    : targets;
+
+  const toggleTarget = useCallback(
+    (targetId: string) => {
+      if (selectedIds.includes(targetId)) {
+        const next = selectedIds.filter((id) => id !== targetId);
+        onChange(next.length > 0 ? next : null);
+      } else {
+        onChange([...selectedIds, targetId]);
+      }
+    },
+    [selectedIds, onChange]
+  );
+
+  useEffect(() => {
+    if (!open) return;
+    const handle = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setOpen(false);
+        setSearch("");
+      }
+    };
+    document.addEventListener("mousedown", handle);
+    return () => document.removeEventListener("mousedown", handle);
+  }, [open]);
+
+  useEffect(() => {
+    if (open) searchRef.current?.focus();
+  }, [open]);
+
+  return (
+    <div className="db-cell-select" ref={dropdownRef}>
+      <div className="db-cell-display db-cell-multi" onClick={() => setOpen(!open)}>
+        {selectedTargets.length > 0 ? (
+          selectedTargets.map((t) => (
+            <span key={t.id} className="db-relation-pill">
+              {t.title || "Untitled"}
+            </span>
+          ))
+        ) : (
+          <span className="db-cell-placeholder">Link...</span>
+        )}
+      </div>
+      {open && (
+        <div className="db-select-dropdown db-relation-dropdown">
+          <div className="db-relation-search">
+            <input
+              ref={searchRef}
+              type="text"
+              placeholder="Search rows..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="db-select-add-input"
+            />
+          </div>
+          {filteredTargets.length === 0 ? (
+            <div className="db-relation-empty">No rows found</div>
+          ) : (
+            filteredTargets.map((t) => {
+              const checked = selectedIds.includes(t.id);
+              return (
+                <button
+                  key={t.id}
+                  className={`db-select-option ${checked ? "db-select-option-checked" : ""}`}
+                  onClick={() => toggleTarget(t.id)}
+                >
+                  <input type="checkbox" checked={checked} readOnly className="db-select-checkbox" />
+                  <span className="db-relation-target-title">{t.title || "Untitled"}</span>
+                </button>
+              );
+            })
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Helper: pick a color for a new select option
 export function pickNextColor(existingOptions: SelectOption[]): string {
   const usedColors = new Set(existingOptions.map((o) => o.color));

@@ -820,16 +820,19 @@ These features are recommended as high-priority additions:
   - [x] Calendar view (month grid with date navigation, unscheduled section)
   - [x] Row detail modal (shared property editor for non-table views)
   - [x] V1→V2 automatic migration (existing databases upgrade seamlessly)
-  - [ ] Relation property type
-  - [ ] Inline databases within pages
-- [ ] **Object types** - Custom content types
-  - Define types like Book, Person, Project, Meeting with typed fields
-  - Templates per object type
-  - Type-specific views and queries
+  - [x] Relation property type
+  - [x] Inline databases within pages
+- [x] **Object types** - Custom content types
+  - [x] Built-in types (Book, Person, Project, Meeting) with typed fields
+  - [x] Custom type creation, editing, and deletion
+  - [x] Object type picker when creating database pages
+  - [x] Object type management UI
+  - [ ] Templates per object type
+  - [ ] Type-specific views and queries
 - [ ] **Relations & rollups** - Link and aggregate data
-  - Relate database items to each other
-  - Rollup properties (count, sum, average of related items)
-  - Bidirectional relations
+  - [x] Relate database items to each other
+  - [ ] Rollup properties (count, sum, average of related items)
+  - [ ] Bidirectional relations
 - [ ] **Live queries** - Dynamic embedded lists
   - Query syntax for filtering pages/blocks
   - Embed query results inline (e.g., "all pages tagged #project with incomplete tasks")

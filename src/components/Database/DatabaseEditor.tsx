@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import type { Page } from "../../types/page";
+import { usePageStore } from "../../stores/pageStore";
 import type {
   DatabaseContentV2,
   DatabaseView,
@@ -18,6 +19,7 @@ import { DatabaseList } from "./DatabaseList";
 import { DatabaseBoard } from "./DatabaseBoard";
 import { DatabaseGallery } from "./DatabaseGallery";
 import { DatabaseCalendar } from "./DatabaseCalendar";
+import { useRelationData } from "./useRelationData";
 import * as api from "../../utils/api";
 import "./database-styles.css";
 
@@ -157,12 +159,17 @@ export function DatabaseEditor({
 
   // Add property
   const handleAddProperty = useCallback(
-    (name: string, type: PropertyType) => {
+    (name: string, type: PropertyType, relationConfig?: { databasePageId: string }) => {
       handleUpdateContent((prev) => ({
         ...prev,
         properties: [
           ...prev.properties,
-          { id: crypto.randomUUID(), name, type },
+          {
+            id: crypto.randomUUID(),
+            name,
+            type,
+            ...(relationConfig ? { relationConfig } : {}),
+          },
         ],
       }));
     },
@@ -202,6 +209,15 @@ export function DatabaseEditor({
     );
   }
 
+  // Resolve relation targets for all relation properties
+  const relationData = useRelationData(notebookId, content?.properties ?? []);
+
+  // Get list of database pages for relation property picker
+  const allPages = usePageStore((s) => s.pages);
+  const databasePages = allPages.filter(
+    (p) => p.pageType === "database" && p.id !== page?.id
+  );
+
   if (!content) return null;
 
   const activeView =
@@ -217,6 +233,7 @@ export function DatabaseEditor({
             view={activeView}
             onUpdateContent={handleUpdateContent}
             onUpdateView={handleUpdateView}
+            relationData={relationData}
           />
         );
       case "list":
@@ -226,6 +243,7 @@ export function DatabaseEditor({
             view={activeView}
             onUpdateContent={handleUpdateContent}
             onUpdateView={handleUpdateView}
+            relationData={relationData}
           />
         );
       case "board":
@@ -235,6 +253,7 @@ export function DatabaseEditor({
             view={activeView}
             onUpdateContent={handleUpdateContent}
             onUpdateView={handleUpdateView}
+            relationData={relationData}
           />
         );
       case "gallery":
@@ -244,6 +263,7 @@ export function DatabaseEditor({
             view={activeView}
             onUpdateContent={handleUpdateContent}
             onUpdateView={handleUpdateView}
+            relationData={relationData}
           />
         );
       case "calendar":
@@ -253,6 +273,7 @@ export function DatabaseEditor({
             view={activeView}
             onUpdateContent={handleUpdateContent}
             onUpdateView={handleUpdateView}
+            relationData={relationData}
           />
         );
       default:
@@ -287,6 +308,7 @@ export function DatabaseEditor({
         onUpdateSorts={handleUpdateSorts}
         onUpdateFilters={handleUpdateFilters}
         onUpdateView={handleUpdateView}
+        databasePages={databasePages}
       />
       {renderActiveView()}
     </div>

@@ -7,7 +7,7 @@ import type {
   ListViewConfig,
   SelectOption,
 } from "../../types/database";
-import { pickNextColor } from "./CellEditors";
+import { pickNextColor, type RelationTarget } from "./CellEditors";
 import { DatabaseRowDetail } from "./DatabaseRowDetail";
 import { compareCellValues, applyFilter } from "./DatabaseTable";
 
@@ -18,12 +18,14 @@ interface DatabaseListProps {
     updater: (prev: DatabaseContentV2) => DatabaseContentV2
   ) => void;
   onUpdateView: (updater: (prev: DatabaseView) => DatabaseView) => void;
+  relationData?: Map<string, RelationTarget[]>;
 }
 
 export function DatabaseList({
   content,
   view,
   onUpdateContent,
+  relationData,
 }: DatabaseListProps) {
   const [selectedRowId, setSelectedRowId] = useState<string | null>(null);
 
@@ -143,6 +145,13 @@ export function DatabaseList({
         .join(", ");
     }
     if (prop.type === "checkbox") return val ? "Yes" : "No";
+    if (prop.type === "relation" && Array.isArray(val)) {
+      const targets = relationData?.get(prop.id) ?? [];
+      return val
+        .map((id) => targets.find((t) => t.id === id)?.title ?? "")
+        .filter(Boolean)
+        .join(", ");
+    }
     return String(val);
   };
 
@@ -225,6 +234,7 @@ export function DatabaseList({
           onAddSelectOption={handleAddSelectOption}
           onClose={() => setSelectedRowId(null)}
           onDelete={() => handleDeleteRow(selectedRow.id)}
+          relationData={relationData}
         />
       )}
     </div>

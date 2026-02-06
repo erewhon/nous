@@ -65,6 +65,17 @@ export function DatabaseBoardCard({
       return <span>{val ? "\u2611" : "\u2610"}</span>;
     }
 
+    if (prop.type === "relation" && Array.isArray(val)) {
+      return (
+        <span className="db-board-card-pills">
+          {val.slice(0, 2).map((id, i) => (
+            <span key={i} className="db-relation-pill">{id.slice(0, 8)}...</span>
+          ))}
+          {val.length > 2 && <span className="db-board-card-more">+{val.length - 2}</span>}
+        </span>
+      );
+    }
+
     return <span className="db-board-card-text">{String(val)}</span>;
   };
 

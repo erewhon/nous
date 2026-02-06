@@ -17,6 +17,7 @@ const PROPERTY_TYPE_LABELS: Record<PropertyType, string> = {
   checkbox: "Checkbox",
   date: "Date",
   url: "URL",
+  relation: "Relation",
 };
 
 export function PropertyEditor({ property, onUpdate, onDelete, onClose }: PropertyEditorProps) {
@@ -192,6 +193,12 @@ export function PropertyTypeIcon({ type }: { type: PropertyType }) {
         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
           <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+        </svg>
+      );
+    case "relation":
+      return (
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M4 12h8" /><path d="M12 4v16" /><circle cx="18" cy="6" r="3" /><circle cx="18" cy="18" r="3" />
         </svg>
       );
   }

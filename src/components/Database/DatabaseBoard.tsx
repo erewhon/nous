@@ -19,7 +19,7 @@ import type {
   SelectOption,
   PropertyDef,
 } from "../../types/database";
-import { pickNextColor } from "./CellEditors";
+import { pickNextColor, type RelationTarget } from "./CellEditors";
 import { DatabaseBoardCard } from "./DatabaseBoardCard";
 import { DatabaseRowDetail } from "./DatabaseRowDetail";
 import { compareCellValues, applyFilter } from "./DatabaseTable";
@@ -31,6 +31,7 @@ interface DatabaseBoardProps {
     updater: (prev: DatabaseContentV2) => DatabaseContentV2
   ) => void;
   onUpdateView: (updater: (prev: DatabaseView) => DatabaseView) => void;
+  relationData?: Map<string, RelationTarget[]>;
 }
 
 const NO_VALUE_COLUMN = "__no_value__";
@@ -39,6 +40,7 @@ export function DatabaseBoard({
   content,
   view,
   onUpdateContent,
+  relationData,
 }: DatabaseBoardProps) {
   const [selectedRowId, setSelectedRowId] = useState<string | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -332,6 +334,7 @@ export function DatabaseBoard({
           onAddSelectOption={handleAddSelectOption}
           onClose={() => setSelectedRowId(null)}
           onDelete={() => handleDeleteRow(selectedRow.id)}
+          relationData={relationData}
         />
       )}
     </>

@@ -13,6 +13,8 @@ import {
   UrlCell,
   SelectCell,
   MultiSelectCell,
+  RelationCell,
+  type RelationTarget,
 } from "./CellEditors";
 
 interface DatabaseRowDetailProps {
@@ -22,6 +24,7 @@ interface DatabaseRowDetailProps {
   onAddSelectOption: (propertyId: string, label: string) => SelectOption;
   onClose: () => void;
   onDelete: () => void;
+  relationData?: Map<string, RelationTarget[]>;
 }
 
 export function DatabaseRowDetail({
@@ -31,6 +34,7 @@ export function DatabaseRowDetail({
   onAddSelectOption,
   onClose,
   onDelete,
+  relationData,
 }: DatabaseRowDetailProps) {
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -86,11 +90,19 @@ export function DatabaseRowDetail({
               onAddOption={(label) => onAddSelectOption(prop.id, label)}
             />
           );
+        case "relation":
+          return (
+            <RelationCell
+              value={value}
+              onChange={onChange}
+              targets={relationData?.get(prop.id) ?? []}
+            />
+          );
         default:
           return <TextCell value={value} onChange={onChange} />;
       }
     },
-    [row, onCellChange, onAddSelectOption]
+    [row, onCellChange, onAddSelectOption, relationData]
   );
 
   // Title: first text property value

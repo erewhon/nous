@@ -17,7 +17,9 @@ import {
   UrlCell,
   SelectCell,
   MultiSelectCell,
+  RelationCell,
   pickNextColor,
+  type RelationTarget,
 } from "./CellEditors";
 import { PropertyEditor, PropertyTypeIcon } from "./PropertyEditor";
 
@@ -28,6 +30,7 @@ interface DatabaseTableProps {
     updater: (prev: DatabaseContentV2) => DatabaseContentV2
   ) => void;
   onUpdateView: (updater: (prev: DatabaseView) => DatabaseView) => void;
+  relationData?: Map<string, RelationTarget[]>;
 }
 
 export function DatabaseTable({
@@ -35,6 +38,7 @@ export function DatabaseTable({
   view,
   onUpdateContent,
   onUpdateView,
+  relationData,
 }: DatabaseTableProps) {
   const [editingProperty, setEditingProperty] = useState<string | null>(null);
 
@@ -364,6 +368,14 @@ export function DatabaseTable({
             onChange={onChange}
             options={prop.options ?? []}
             onAddOption={(label) => handleAddSelectOption(prop.id, label)}
+          />
+        );
+      case "relation":
+        return (
+          <RelationCell
+            value={value}
+            onChange={onChange}
+            targets={relationData?.get(prop.id) ?? []}
           />
         );
       default:

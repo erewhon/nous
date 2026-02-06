@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import type { Page } from "../../types/page";
 import type {
   PropertyDef,
   PropertyType,
@@ -13,10 +14,11 @@ interface DatabaseToolbarProps {
   properties: PropertyDef[];
   view: DatabaseView;
   rowCount: number;
-  onAddProperty: (name: string, type: PropertyType) => void;
+  onAddProperty: (name: string, type: PropertyType, relationConfig?: { databasePageId: string }) => void;
   onUpdateSorts: (sorts: DatabaseSort[]) => void;
   onUpdateFilters: (filters: DatabaseFilter[]) => void;
   onUpdateView: (updater: (prev: DatabaseView) => DatabaseView) => void;
+  databasePages?: Page[];
 }
 
 const TYPE_OPTIONS: { value: PropertyType; label: string }[] = [
@@ -27,6 +29,7 @@ const TYPE_OPTIONS: { value: PropertyType; label: string }[] = [
   { value: "checkbox", label: "Checkbox" },
   { value: "date", label: "Date" },
   { value: "url", label: "URL" },
+  { value: "relation", label: "Relation" },
 ];
 
 export function DatabaseToolbar({
@@ -37,6 +40,7 @@ export function DatabaseToolbar({
   onUpdateSorts,
   onUpdateFilters,
   onUpdateView,
+  databasePages,
 }: DatabaseToolbarProps) {
   const [showAddProp, setShowAddProp] = useState(false);
   const [showSort, setShowSort] = useState(false);
@@ -92,15 +96,16 @@ export function DatabaseToolbar({
               setNewPropName={setNewPropName}
               newPropType={newPropType}
               setNewPropType={setNewPropType}
-              onAdd={() => {
+              onAdd={(relationConfig) => {
                 if (newPropName.trim()) {
-                  onAddProperty(newPropName.trim(), newPropType);
+                  onAddProperty(newPropName.trim(), newPropType, relationConfig);
                   setNewPropName("");
                   setNewPropType("text");
                   setShowAddProp(false);
                 }
               }}
               onClose={() => setShowAddProp(false)}
+              databasePages={databasePages}
             />
           )}
         </div>
@@ -219,14 +224,17 @@ function AddPropertyPopover({
   setNewPropType,
   onAdd,
   onClose,
+  databasePages,
 }: {
   newPropName: string;
   setNewPropName: (v: string) => void;
   newPropType: PropertyType;
   setNewPropType: (v: PropertyType) => void;
-  onAdd: () => void;
+  onAdd: (relationConfig?: { databasePageId: string }) => void;
   onClose: () => void;
+  databasePages?: Page[];
 }) {
+  const [relationTargetPageId, setRelationTargetPageId] = useState<string>("");
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const handle = (e: MouseEvent) => {
@@ -235,6 +243,15 @@ function AddPropertyPopover({
     document.addEventListener("mousedown", handle);
     return () => document.removeEventListener("mousedown", handle);
   }, [onClose]);
+
+  const handleAdd = () => {
+    if (newPropType === "relation" && relationTargetPageId) {
+      onAdd({ databasePageId: relationTargetPageId });
+    } else {
+      onAdd();
+    }
+    setRelationTargetPageId("");
+  };
 
   return (
     <div ref={ref} className="db-popover">
@@ -245,7 +262,7 @@ function AddPropertyPopover({
         value={newPropName}
         onChange={(e) => setNewPropName(e.target.value)}
         onKeyDown={(e) => {
-          if (e.key === "Enter") onAdd();
+          if (e.key === "Enter") handleAdd();
         }}
         autoFocus
       />
@@ -261,7 +278,32 @@ function AddPropertyPopover({
           </button>
         ))}
       </div>
-      <button className="db-popover-action" onClick={onAdd}>
+      {newPropType === "relation" && (
+        <div className="db-relation-config">
+          <label className="db-pe-label">Target Database</label>
+          {databasePages && databasePages.length > 0 ? (
+            <select
+              className="db-pe-select"
+              value={relationTargetPageId}
+              onChange={(e) => setRelationTargetPageId(e.target.value)}
+            >
+              <option value="">Select a database...</option>
+              {databasePages.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.title}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <div className="db-relation-empty">No other databases in this notebook</div>
+          )}
+        </div>
+      )}
+      <button
+        className="db-popover-action"
+        onClick={handleAdd}
+        disabled={newPropType === "relation" && !relationTargetPageId}
+      >
         Add
       </button>
     </div>

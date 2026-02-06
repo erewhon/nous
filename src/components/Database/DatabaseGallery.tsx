@@ -8,7 +8,7 @@ import type {
   SelectOption,
   PropertyDef,
 } from "../../types/database";
-import { pickNextColor } from "./CellEditors";
+import { pickNextColor, type RelationTarget } from "./CellEditors";
 import { DatabaseRowDetail } from "./DatabaseRowDetail";
 import { compareCellValues, applyFilter } from "./DatabaseTable";
 
@@ -19,12 +19,14 @@ interface DatabaseGalleryProps {
     updater: (prev: DatabaseContentV2) => DatabaseContentV2
   ) => void;
   onUpdateView: (updater: (prev: DatabaseView) => DatabaseView) => void;
+  relationData?: Map<string, RelationTarget[]>;
 }
 
 export function DatabaseGallery({
   content,
   view,
   onUpdateContent,
+  relationData,
 }: DatabaseGalleryProps) {
   const [selectedRowId, setSelectedRowId] = useState<string | null>(null);
 
@@ -192,6 +194,20 @@ export function DatabaseGallery({
         </a>
       );
     }
+    if (prop.type === "relation" && Array.isArray(val)) {
+      const targets = relationData?.get(prop.id) ?? [];
+      const names = val
+        .map((id) => targets.find((t) => t.id === id)?.title ?? "")
+        .filter(Boolean);
+      if (names.length === 0) return null;
+      return (
+        <span className="db-gallery-card-pills">
+          {names.map((name, i) => (
+            <span key={i} className="db-relation-pill">{name}</span>
+          ))}
+        </span>
+      );
+    }
     return String(val);
   };
 
@@ -258,6 +274,7 @@ export function DatabaseGallery({
           onAddSelectOption={handleAddSelectOption}
           onClose={() => setSelectedRowId(null)}
           onDelete={() => handleDeleteRow(selectedRow.id)}
+          relationData={relationData}
         />
       )}
     </div>

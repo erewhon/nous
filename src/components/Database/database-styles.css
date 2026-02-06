@@ -1461,3 +1461,287 @@
 .db-editor-compact .db-calendar-cell {
   min-height: 70px;
 }
+
+/* ============================================
+   Relation Property Styles
+   ============================================ */
+.db-relation-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  background-color: rgba(139, 92, 246, 0.08);
+  color: var(--color-accent);
+  border: 1px solid rgba(139, 92, 246, 0.2);
+}
+
+.db-relation-dropdown {
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.db-relation-search {
+  padding: 4px;
+  border-bottom: 1px solid var(--color-border);
+  margin-bottom: 4px;
+}
+
+.db-relation-empty {
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  text-align: center;
+}
+
+.db-relation-target-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.db-relation-config {
+  margin: 8px 0;
+}
+
+.db-relation-config .db-pe-label {
+  margin-bottom: 4px;
+}
+
+/* ============================================
+   Object Type Manager
+   ============================================ */
+.db-object-type-manager {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  max-width: 480px;
+}
+
+.db-object-type-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.db-object-type-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.db-object-type-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.db-object-type-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 0.15s, border-color 0.15s;
+  width: 100%;
+}
+
+.db-object-type-card:hover {
+  background-color: var(--color-bg-tertiary);
+  border-color: var(--color-accent);
+}
+
+.db-object-type-card-icon {
+  font-size: 20px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+}
+
+.db-object-type-card-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.db-object-type-card-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.db-object-type-badge {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  background-color: var(--color-bg-tertiary);
+  padding: 1px 6px;
+  border-radius: 10px;
+}
+
+.db-object-type-card-desc {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.db-object-type-card-props {
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+/* Object Type Edit View */
+.db-object-type-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.db-object-type-edit-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.db-object-type-icon-large {
+  font-size: 28px;
+}
+
+.db-object-type-name-display {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.db-object-type-name-input {
+  font-size: 16px;
+  font-weight: 600;
+  flex: 1;
+}
+
+.db-object-type-description {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  margin: 0;
+}
+
+.db-object-type-props {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.db-object-type-prop-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background-color: var(--color-bg-secondary);
+}
+
+.db-object-type-prop-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-primary);
+  flex: 1;
+}
+
+.db-object-type-prop-type {
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.db-object-type-add-prop {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.db-object-type-add-prop .db-pe-input {
+  flex: 1;
+}
+
+.db-object-type-add-prop .db-pe-select {
+  width: 120px;
+}
+
+/* Create Form */
+.db-object-type-create-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+
+.db-object-type-create-row {
+  display: flex;
+  gap: 8px;
+}
+
+.db-object-type-icon-input {
+  width: 44px !important;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.db-object-type-create-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+/* Object Type Picker (database creation) */
+.db-object-type-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  min-width: 300px;
+}
+
+.db-object-type-picker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 4px 8px;
+  border-bottom: 1px solid var(--color-border);
+  margin-bottom: 4px;
+}
+
+.db-object-type-picker-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 0.15s;
+  width: 100%;
+}
+
+.db-object-type-picker-option:hover {
+  background-color: var(--color-bg-tertiary);
+}
