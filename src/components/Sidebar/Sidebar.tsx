@@ -17,7 +17,7 @@ interface SidebarProps {
 
 export function Sidebar({ width = 256 }: SidebarProps) {
   const { selectedNotebookId, selectNotebook, createNotebook, getVisibleNotebooks, showArchived, toggleShowArchived, getArchivedNotebooks } = useNotebookStore();
-  const { getRecentPages, clearRecentPages, getFavoritePages, selectPage } = usePageStore();
+  const { pages, selectedPageId, getRecentPages, clearRecentPages, getFavoritePages, selectPage } = usePageStore();
   const visibleNotebooks = getVisibleNotebooks();
   const archivedCount = getArchivedNotebooks().length;
   const openActionLibrary = useActionStore((state) => state.openActionLibrary);
@@ -657,6 +657,42 @@ export function Sidebar({ width = 256 }: SidebarProps) {
               <circle cx="5" cy="19" r="2" />
               <line x1="14.5" y1="9.5" x2="17.5" y2="6.5" />
               <line x1="9.5" y1="14.5" x2="6.5" y2="17.5" />
+            </svg>
+          </button>
+          {/* Random Note */}
+          <button
+            onClick={() => {
+              const candidates = pages.filter(
+                (p) =>
+                  p.notebookId === selectedNotebookId &&
+                  !p.deletedAt &&
+                  p.id !== selectedPageId
+              );
+              if (candidates.length > 0) {
+                const pick = candidates[Math.floor(Math.random() * candidates.length)];
+                selectPage(pick.id);
+              }
+            }}
+            className="flex h-8 w-8 items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
+            style={{ color: "var(--color-text-muted)" }}
+            title="Random Note"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="15"
+              height="15"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M2 18h1.4c1.3 0 2.5-.6 3.3-1.7l6.1-8.6c.7-1.1 2-1.7 3.3-1.7H22" />
+              <path d="m18 2 4 4-4 4" />
+              <path d="M2 6h1.9c1.5 0 2.9.9 3.6 2.2" />
+              <path d="M22 18h-5.9c-1.3 0-2.6-.7-3.3-1.8l-.5-.8" />
+              <path d="m18 14 4 4-4 4" />
             </svg>
           </button>
           {/* Settings */}

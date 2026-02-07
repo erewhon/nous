@@ -1004,23 +1004,25 @@ These features are recommended as high-priority additions:
 
 ### 42. Task Management (Notion, Todoist)
 
-- [ ] **Task database** - Centralized task list
-  - Aggregate all tasks/checklists from pages
-  - Filter by notebook, tag, due date, status
-  - Quick add tasks
-- [ ] **Due date reminders** - Notifications
-  - Set due dates on tasks
-  - System notifications for upcoming deadlines
-  - Overdue task highlighting
-- [ ] **Recurring tasks** - Repeating items
-  - Daily, weekly, monthly, custom recurrence
-  - Regenerate on completion or on schedule
-  - Skip/postpone options
-- [ ] **Task views** - Multiple perspectives
+- [x] **Task database** - Centralized task list
+  - Zustand+persist store with full CRUD
+  - Priority levels (low/medium/high/urgent), due dates, projects, tags
+  - Quick add tasks via modal editor
+  - Sidebar button with overdue/due-today badge
+- [x] **Due date reminders** - Notifications
+  - Set due dates and times on tasks
+  - Browser notifications for overdue/due-today (15-min check interval)
+  - Overdue task highlighting (red badge) and due-today (orange badge)
+- [x] **Recurring tasks** - Repeating items
+  - Daily, weekly, monthly, yearly recurrence with configurable interval
+  - Days-of-week selection for weekly, optional end date
+  - Regenerate on completion (creates next instance linked via parentTaskId)
+- [x] **Task views** - Multiple perspectives
   - Today view (due today + overdue)
-  - Upcoming view (next 7 days)
-  - By project/notebook
-  - By priority
+  - Upcoming view (future tasks)
+  - By project (with project dropdown filter)
+  - By priority (sorted urgent → low)
+  - All tasks view
 
 ---
 
@@ -1043,7 +1045,7 @@ These features are recommended as high-priority additions:
   - Summary of what you wrote/learned today
   - Connections to past notes
   - Suggested follow-ups
-- [ ] **Inline AI assistance** - Writing helpers
+- [x] **Inline AI assistance** - Writing helpers
   - Summarize selection
   - Expand bullet points
   - Translate text
@@ -1066,7 +1068,7 @@ These features are recommended as high-priority additions:
   - List of recently viewed pages
   - Quick switcher with recent pages first
   - Clear history option
-- [ ] **Random note** - Rediscovery
+- [x] **Random note** - Rediscovery
   - Surface a random page for review
   - Filter by notebook, age, or tag
   - "Surprise me" feature

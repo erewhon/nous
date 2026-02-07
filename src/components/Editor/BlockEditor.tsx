@@ -12,6 +12,7 @@ import { WikiLinkTool } from "./WikiLinkTool";
 import { BlockRefAutocomplete } from "./BlockRefAutocomplete";
 import { BlockRefTool } from "./BlockRefTool";
 import { LinkPreview } from "./LinkPreview";
+import { AIAssistToolbar } from "./AIAssistToolbar";
 import { usePageStore } from "../../stores/pageStore";
 import { useThemeStore } from "../../stores/themeStore";
 import { useToastStore } from "../../stores/toastStore";
@@ -501,6 +502,7 @@ export const BlockEditor = forwardRef<BlockEditorRef, BlockEditorProps>(function
       )}
       {/* Link preview tooltip for external URLs */}
       <LinkPreview containerRef={containerRef} />
+      {!readOnly && <AIAssistToolbar containerRef={containerRef as React.RefObject<HTMLElement | null>} />}
       {isVimModeEnabled && (
         <div className="pointer-events-none fixed bottom-4 left-4 z-50">
           <VimModeIndicator mode={vimMode} pendingKeys={pendingKeys} />
