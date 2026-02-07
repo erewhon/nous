@@ -2,13 +2,25 @@ import { useState, useCallback, useEffect } from "react";
 import { usePageStore } from "../../stores/pageStore";
 import { useLinkStore } from "../../stores/linkStore";
 import { useAIStore } from "../../stores/aiStore";
+import { useRAGStore } from "../../stores/ragStore";
 import { aiSuggestRelatedPages, type RelatedPageSuggestion } from "../../utils/api";
 import type { Page } from "../../types/page";
+import type { SemanticSearchResult } from "../../types/rag";
 
 interface SimilarPagesPanelProps {
   page: Page;
   notebookId: string;
   allPages: Page[];
+}
+
+type SearchMode = "ai" | "semantic";
+
+// Unified result type for display
+interface SimilarPageResult {
+  id: string;
+  title: string;
+  detail: string; // "reason" for AI, "content snippet" for semantic
+  score?: number;
 }
 
 // Helper to extract plain text from Editor.js content
@@ -39,74 +51,124 @@ function extractPlainText(content?: Page["content"]): string {
 }
 
 export function SimilarPagesPanel({ page, notebookId, allPages }: SimilarPagesPanelProps) {
-  const [suggestions, setSuggestions] = useState<RelatedPageSuggestion[]>([]);
+  const [results, setResults] = useState<SimilarPageResult[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasLoaded, setHasLoaded] = useState(false);
+  const [mode, setMode] = useState<SearchMode>("semantic");
 
   const { selectPage } = usePageStore();
   const { outgoingLinks } = useLinkStore();
   const { getActiveProviderType, getActiveApiKey, getActiveModel } = useAIStore();
+  const { findSimilarPages, isConfigured: ragConfigured, settings: ragSettings } = useRAGStore();
 
-  // Get active API key for UI checks
   const activeApiKey = getActiveApiKey();
+  const ragAvailable = ragConfigured && ragSettings.ragEnabled;
+
+  // Auto-select mode based on availability
+  useEffect(() => {
+    if (mode === "semantic" && !ragAvailable && activeApiKey) {
+      setMode("ai");
+    } else if (mode === "ai" && !activeApiKey && ragAvailable) {
+      setMode("semantic");
+    }
+  }, [ragAvailable, activeApiKey, mode]);
 
   const fetchSuggestions = useCallback(async () => {
-    const apiKey = getActiveApiKey();
-    if (!apiKey) {
-      setError("Configure AI in Settings to get suggestions");
-      return;
-    }
-
-    const content = extractPlainText(page.content);
-    if (!content || content.length < 50) {
-      setSuggestions([]);
-      return;
-    }
-
     setIsLoading(true);
     setError(null);
 
     try {
-      // Get existing links from this page
-      const existingLinks = outgoingLinks.get(page.id) || [];
+      if (mode === "semantic") {
+        if (!ragAvailable) {
+          setError("Configure embeddings in Settings to use semantic search");
+          return;
+        }
 
-      // Prepare available pages (excluding current page)
-      const availablePages = allPages
-        .filter((p) => p.id !== page.id && p.notebookId === notebookId)
-        .map((p) => ({
-          id: p.id,
-          title: p.title,
-          summary: extractPlainText(p.content).slice(0, 200),
-        }));
+        const semanticResults: SemanticSearchResult[] = await findSimilarPages(page.id, undefined, 10);
 
-      if (availablePages.length === 0) {
-        setSuggestions([]);
-        return;
+        setResults(
+          semanticResults.map((r) => ({
+            id: r.pageId,
+            title: r.title || "Untitled",
+            detail: r.content.slice(0, 150) + (r.content.length > 150 ? "..." : ""),
+            score: r.score,
+          }))
+        );
+      } else {
+        // AI mode
+        const apiKey = getActiveApiKey();
+        if (!apiKey) {
+          setError("Configure AI in Settings to get suggestions");
+          return;
+        }
+
+        const content = extractPlainText(page.content);
+        if (!content || content.length < 50) {
+          setResults([]);
+          return;
+        }
+
+        const existingLinks = outgoingLinks.get(page.id) || [];
+
+        const availablePages = allPages
+          .filter((p) => p.id !== page.id && p.notebookId === notebookId)
+          .map((p) => ({
+            id: p.id,
+            title: p.title,
+            summary: extractPlainText(p.content).slice(0, 200),
+          }));
+
+        if (availablePages.length === 0) {
+          setResults([]);
+          return;
+        }
+
+        const aiResults: RelatedPageSuggestion[] = await aiSuggestRelatedPages(
+          content,
+          page.title,
+          availablePages,
+          {
+            existingLinks,
+            maxSuggestions: 5,
+            providerType: getActiveProviderType(),
+            apiKey,
+            model: getActiveModel() || undefined,
+          }
+        );
+
+        setResults(
+          aiResults.map((r) => ({
+            id: r.id,
+            title: r.title,
+            detail: r.reason,
+          }))
+        );
       }
 
-      const result = await aiSuggestRelatedPages(content, page.title, availablePages, {
-        existingLinks,
-        maxSuggestions: 5,
-        providerType: getActiveProviderType(),
-        apiKey: apiKey,
-        model: getActiveModel() || undefined,
-      });
-
-      setSuggestions(result);
       setHasLoaded(true);
     } catch (err) {
-      console.error("Failed to get related page suggestions:", err);
+      console.error("Failed to get similar pages:", err);
       setError(err instanceof Error ? err.message : "Failed to get suggestions");
     } finally {
       setIsLoading(false);
     }
-  }, [page, notebookId, allPages, outgoingLinks, getActiveProviderType, getActiveApiKey, getActiveModel]);
+  }, [
+    mode,
+    page,
+    notebookId,
+    allPages,
+    outgoingLinks,
+    ragAvailable,
+    findSimilarPages,
+    getActiveProviderType,
+    getActiveApiKey,
+    getActiveModel,
+  ]);
 
-  // Refresh suggestions when page content changes significantly
+  // Reset when page changes
   useEffect(() => {
-    // Reset when page changes
-    setSuggestions([]);
+    setResults([]);
     setHasLoaded(false);
     setError(null);
   }, [page.id]);
@@ -115,10 +177,12 @@ export function SimilarPagesPanel({ page, notebookId, allPages }: SimilarPagesPa
     selectPage(pageId);
   };
 
-  // Don't show anything if no API key configured
-  if (!activeApiKey && !hasLoaded) {
+  // Don't show if neither mode is available
+  if (!activeApiKey && !ragAvailable && !hasLoaded) {
     return null;
   }
+
+  const canSearch = mode === "semantic" ? ragAvailable : !!activeApiKey;
 
   return (
     <div className="mt-6 border-t pt-6" style={{ borderColor: "var(--color-border)" }}>
@@ -144,53 +208,100 @@ export function SimilarPagesPanel({ page, notebookId, allPages }: SimilarPagesPa
           </svg>
           Similar Pages
         </h3>
-        <button
-          onClick={fetchSuggestions}
-          disabled={isLoading || !activeApiKey}
-          className="rounded px-2 py-1 text-xs transition-colors hover:bg-white/10 disabled:opacity-50"
-          style={{ color: "var(--color-accent)" }}
-          title="Find similar pages using AI"
-        >
-          {isLoading ? (
-            <span className="flex items-center gap-1">
-              <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24">
-                <circle
-                  className="opacity-25"
-                  cx="12"
-                  cy="12"
-                  r="10"
-                  stroke="currentColor"
-                  strokeWidth="4"
-                  fill="none"
-                />
-                <path
-                  className="opacity-75"
-                  fill="currentColor"
-                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                />
-              </svg>
-              Analyzing...
-            </span>
-          ) : (
-            <span className="flex items-center gap-1">
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="12"
-                height="12"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
+        <div className="flex items-center gap-1">
+          {/* Mode toggle */}
+          {ragAvailable && activeApiKey && (
+            <div
+              className="mr-1 flex rounded text-xs"
+              style={{ border: "1px solid var(--color-border)" }}
+            >
+              <button
+                onClick={() => {
+                  setMode("semantic");
+                  setResults([]);
+                  setHasLoaded(false);
+                }}
+                className="rounded-l px-2 py-0.5 transition-colors"
+                style={{
+                  backgroundColor:
+                    mode === "semantic" ? "var(--color-accent)" : "transparent",
+                  color:
+                    mode === "semantic" ? "white" : "var(--color-text-muted)",
+                }}
+                title="Vector similarity (fast, requires indexed pages)"
               >
-                <path d="M12 2a4 4 0 0 1 4 4c0 1.1-.5 2-1 3l6 6-3 3-6-6c-1 .5-1.9 1-3 1a4 4 0 1 1 0-8" />
-                <circle cx="8" cy="8" r="2" />
-              </svg>
-              Find Similar
-            </span>
+                Semantic
+              </button>
+              <button
+                onClick={() => {
+                  setMode("ai");
+                  setResults([]);
+                  setHasLoaded(false);
+                }}
+                className="rounded-r px-2 py-0.5 transition-colors"
+                style={{
+                  backgroundColor:
+                    mode === "ai" ? "var(--color-accent)" : "transparent",
+                  color: mode === "ai" ? "white" : "var(--color-text-muted)",
+                }}
+                title="AI analysis (slower, more contextual)"
+              >
+                AI
+              </button>
+            </div>
           )}
-        </button>
+          <button
+            onClick={fetchSuggestions}
+            disabled={isLoading || !canSearch}
+            className="rounded px-2 py-1 text-xs transition-colors hover:bg-white/10 disabled:opacity-50"
+            style={{ color: "var(--color-accent)" }}
+            title={
+              mode === "semantic"
+                ? "Find similar pages using vector similarity"
+                : "Find similar pages using AI"
+            }
+          >
+            {isLoading ? (
+              <span className="flex items-center gap-1">
+                <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24">
+                  <circle
+                    className="opacity-25"
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                    fill="none"
+                  />
+                  <path
+                    className="opacity-75"
+                    fill="currentColor"
+                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                  />
+                </svg>
+                {mode === "semantic" ? "Searching..." : "Analyzing..."}
+              </span>
+            ) : (
+              <span className="flex items-center gap-1">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M12 2a4 4 0 0 1 4 4c0 1.1-.5 2-1 3l6 6-3 3-6-6c-1 .5-1.9 1-3 1a4 4 0 1 1 0-8" />
+                  <circle cx="8" cy="8" r="2" />
+                </svg>
+                Find Similar
+              </span>
+            )}
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -199,18 +310,20 @@ export function SimilarPagesPanel({ page, notebookId, allPages }: SimilarPagesPa
         </p>
       )}
 
-      {suggestions.length === 0 && hasLoaded && !isLoading && !error && (
+      {results.length === 0 && hasLoaded && !isLoading && !error && (
         <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
-          No related pages found. Add more content to get suggestions.
+          {mode === "semantic"
+            ? "No similar pages found. Ensure pages are indexed in Settings > Embeddings."
+            : "No related pages found. Add more content to get suggestions."}
         </p>
       )}
 
-      {suggestions.length > 0 && (
+      {results.length > 0 && (
         <ul className="space-y-2">
-          {suggestions.map((suggestion) => (
-            <li key={suggestion.id}>
+          {results.map((result) => (
+            <li key={result.id}>
               <button
-                onClick={() => handlePageClick(suggestion.id)}
+                onClick={() => handlePageClick(result.id)}
                 className="flex w-full flex-col gap-1 rounded px-3 py-2 text-left transition-colors hover:bg-white/5"
                 style={{ backgroundColor: "rgba(139, 92, 246, 0.05)" }}
               >
@@ -234,14 +347,22 @@ export function SimilarPagesPanel({ page, notebookId, allPages }: SimilarPagesPa
                     className="truncate text-sm font-medium"
                     style={{ color: "var(--color-text-primary)" }}
                   >
-                    {suggestion.title}
+                    {result.title}
                   </span>
+                  {result.score !== undefined && (
+                    <span
+                      className="ml-auto shrink-0 text-xs"
+                      style={{ color: "var(--color-text-muted)" }}
+                    >
+                      {Math.round(result.score * 100)}%
+                    </span>
+                  )}
                 </div>
                 <p
                   className="text-xs leading-relaxed"
                   style={{ color: "var(--color-text-muted)" }}
                 >
-                  {suggestion.reason}
+                  {result.detail}
                 </p>
               </button>
             </li>

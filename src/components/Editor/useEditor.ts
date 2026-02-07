@@ -20,6 +20,7 @@ import { PDFTool } from "./PDFTool";
 import { VideoTool } from "./VideoTool";
 import { DatabaseBlockTool } from "./DatabaseBlockTool";
 import { LiveQueryBlockTool } from "./LiveQueryBlockTool";
+import { BlockEmbedTool } from "./BlockEmbedTool";
 import { DrawingTool } from "./DrawingTool";
 import { EmbedTool } from "./EmbedTool";
 import { ColumnsTool } from "./ColumnsTool";
@@ -158,6 +159,10 @@ export function useEditor({
       },
       liveQuery: {
         class: LiveQueryBlockTool as unknown as ToolConstructable,
+        config: { notebookId },
+      },
+      blockEmbed: {
+        class: BlockEmbedTool as unknown as ToolConstructable,
         config: { notebookId },
       },
       ...(notebookId

@@ -853,7 +853,7 @@ These features are recommended as high-priority additions:
   - Block ref preview text auto-updates when target block changes
   - Broken ref detection when target block is deleted
   - Graph view integration (purple dashed edges)
-- [ ] **Block embedding** - Embed blocks inline
+- [x] **Block embedding** - Embed blocks inline
   - Embed referenced blocks with live sync
   - Edit embedded block in place, updates original
   - Visual indicator for embedded vs. native blocks
@@ -1028,7 +1028,7 @@ These features are recommended as high-priority additions:
 
 ### 43. AI Enhancements (Mem, Notion AI, Reflect)
 
-- [ ] **Smart collections** - AI-curated groups
+- [x] **Smart collections** - AI-curated groups
   - Automatically group related pages
   - "Notes about X" collections
   - Update as content changes
@@ -1037,7 +1037,7 @@ These features are recommended as high-priority additions:
   - Auto-create meeting pages
   - Pull attendees, agenda from invite
   - Post-meeting summary generation
-- [ ] **Semantic search** - Beyond keywords
+- [x] **Semantic search** - Beyond keywords
   - "Find similar" to current page
   - Natural language queries ("notes from last week about project X")
   - Conceptual matching, not just text
@@ -1064,7 +1064,7 @@ These features are recommended as high-priority additions:
   - Star frequently used pages
   - Starred section in sidebar
   - Keyboard shortcut to toggle star
-- [ ] **Recent pages** - History
+- [x] **Recent pages** - History
   - List of recently viewed pages
   - Quick switcher with recent pages first
   - Clear history option

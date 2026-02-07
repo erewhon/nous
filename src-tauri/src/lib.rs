@@ -619,6 +619,7 @@ pub fn run() {
             commands::get_rag_context,
             commands::index_page_embedding,
             commands::remove_page_embedding,
+            commands::find_similar_pages,
             commands::get_page_chunks,
             commands::rebuild_vector_index,
             commands::get_vector_index_stats,

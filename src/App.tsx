@@ -19,6 +19,7 @@ import { DailyNotesPanel } from "./components/DailyNotes";
 import { TasksPanel } from "./components/Tasks";
 import { ToastContainer } from "./components/Toast";
 import { WebClipperDialog } from "./components/WebClipper/WebClipperDialog";
+import { SmartCollectionsPanel } from "./components/SmartCollections/SmartCollectionsPanel";
 import { useAppInit } from "./hooks/useAppInit";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useNotebookStore } from "./stores/notebookStore";
@@ -93,6 +94,15 @@ function App() {
     window.addEventListener("open-web-clipper", handleOpenClipper);
     return () => window.removeEventListener("open-web-clipper", handleOpenClipper);
   }, []);
+  const [showSmartCollections, setShowSmartCollections] = useState(false);
+
+  // Listen for custom event to open smart collections
+  useEffect(() => {
+    const handleOpenCollections = () => setShowSmartCollections(true);
+    window.addEventListener("open-smart-collections", handleOpenCollections);
+    return () => window.removeEventListener("open-smart-collections", handleOpenCollections);
+  }, []);
+
   const [showGraph, setShowGraph] = useState(false);
   const [showWebResearch, setShowWebResearch] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -346,6 +356,12 @@ function App() {
           setClipperUrl(undefined);
         }}
         initialUrl={clipperUrl}
+      />
+
+      {/* Smart Collections */}
+      <SmartCollectionsPanel
+        isOpen={showSmartCollections}
+        onClose={() => setShowSmartCollections(false)}
       />
 
       {/* Toast Notifications */}

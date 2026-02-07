@@ -75,6 +75,11 @@ interface RAGActions {
     notebookId?: string,
     maxChunks?: number
   ) => Promise<SemanticSearchResult[]>;
+  findSimilarPages: (
+    pageId: string,
+    notebookId?: string,
+    limit?: number
+  ) => Promise<SemanticSearchResult[]>;
 
   // Index operations
   indexPage: (notebookId: string, pageId: string) => Promise<void>;
@@ -298,6 +303,28 @@ export const useRAGStore = create<RAGStore>()(
           return results;
         } catch (error) {
           console.error("Get RAG context failed:", error);
+          set({ lastError: String(error) });
+          return [];
+        }
+      },
+
+      // Find similar pages using vector embeddings
+      findSimilarPages: async (pageId, notebookId, limit = 10) => {
+        const state = get();
+        if (!state.isConfigured || !state.settings.ragEnabled) {
+          return [];
+        }
+
+        try {
+          const results = await invoke<SemanticSearchResult[]>("find_similar_pages", {
+            pageId,
+            notebookId,
+            limit,
+          });
+
+          return results;
+        } catch (error) {
+          console.error("Find similar pages failed:", error);
           set({ lastError: String(error) });
           return [];
         }

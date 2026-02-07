@@ -22,7 +22,7 @@ interface Command {
   subtitle?: string;
   snippet?: string;
   icon: React.ReactNode;
-  category: "page" | "action" | "notebook" | "search" | "recent" | "automation";
+  category: "page" | "action" | "notebook" | "search" | "recent" | "recent-page" | "automation";
   action: () => void;
   keywords?: string[];
   score?: number;
@@ -53,7 +53,7 @@ export function CommandPalette({
 
   const { notebooks, selectedNotebookId, selectNotebook, createNotebook } =
     useNotebookStore();
-  const { pages, selectPage, createPage } = usePageStore();
+  const { pages, selectPage, createPage, getRecentPages } = usePageStore();
   const { recentSearches, searchScope, searchMode, addRecentSearch, setSearchScope, setSearchMode, clearRecentSearches } =
     useSearchStore();
   const { actions, runAction: executeAction, openActionLibrary } = useActionStore();
@@ -345,6 +345,22 @@ export function CommandPalette({
       });
     }
 
+    // Smart Collections
+    if (selectedNotebookId) {
+      cmds.push({
+        id: "action-smart-collections",
+        title: "Smart Collections",
+        subtitle: "AI groups related pages into collections",
+        icon: <IconWand />,
+        category: "action",
+        action: () => {
+          onClose();
+          window.dispatchEvent(new CustomEvent("open-smart-collections"));
+        },
+        keywords: ["collections", "groups", "topics", "ai", "cluster", "smart"],
+      });
+    }
+
     // Add runnable actions (enabled actions with manual trigger)
     const runnableActions = actions.filter(
       (a) => a.enabled && a.triggers.some((t) => t.type === "manual")
@@ -473,6 +489,29 @@ export function CommandPalette({
     }));
   }, [recentSearches, query]);
 
+  // Recent pages as commands (shown when no query)
+  const recentPageCommands = useMemo<Command[]>(() => {
+    if (query.trim()) return [];
+
+    return getRecentPages(10).map((entry) => {
+      const notebook = notebooks.find((n) => n.id === entry.notebookId);
+      return {
+        id: `recent-page-${entry.pageId}`,
+        title: entry.title || "Untitled",
+        subtitle: notebook?.name || "Unknown notebook",
+        icon: <IconHistory />,
+        category: "recent-page" as const,
+        action: () => {
+          if (entry.notebookId !== selectedNotebookId) {
+            selectNotebook(entry.notebookId);
+          }
+          selectPage(entry.pageId);
+          onClose();
+        },
+      };
+    });
+  }, [query, getRecentPages, notebooks, selectedNotebookId, selectNotebook, selectPage, onClose]);
+
   // Filter commands based on query
   const filteredCommands = useMemo(() => {
     if (!query.trim()) {
@@ -492,13 +531,14 @@ export function CommandPalette({
 
   // Combine filtered commands with search results and recent searches
   const allCommands = useMemo(() => {
-    return [...recentCommands, ...filteredCommands, ...searchCommands];
-  }, [recentCommands, filteredCommands, searchCommands]);
+    return [...recentPageCommands, ...recentCommands, ...filteredCommands, ...searchCommands];
+  }, [recentPageCommands, recentCommands, filteredCommands, searchCommands]);
 
   // Group filtered commands by category
   const groupedCommands = useMemo(() => {
     const groups: { category: string; commands: Command[] }[] = [];
 
+    const recentPageMatches = allCommands.filter((c) => c.category === "recent-page");
     const recentMatches = allCommands.filter((c) => c.category === "recent");
     const searchMatches = allCommands.filter((c) => c.category === "search");
     const actionCommands = allCommands.filter((c) => c.category === "action");
@@ -506,6 +546,10 @@ export function CommandPalette({
     const pageResults = allCommands.filter((c) => c.category === "page");
     const notebookResults = allCommands.filter((c) => c.category === "notebook");
 
+    // Show recent pages first when there's no query
+    if (recentPageMatches.length > 0) {
+      groups.push({ category: "Recent Pages", commands: recentPageMatches });
+    }
     // Show recent searches when there's no query
     if (recentMatches.length > 0) {
       groups.push({ category: "Recent Searches", commands: recentMatches });

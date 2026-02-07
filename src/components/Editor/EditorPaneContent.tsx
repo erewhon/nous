@@ -390,6 +390,24 @@ export function EditorPaneContent({
     [pane.id, pane.pageId]
   );
 
+  // Handle blockembed:navigate and livequery:navigate custom events
+  useEffect(() => {
+    const handleEmbedNav = (e: Event) => {
+      const detail = (e as CustomEvent<{ pageId: string }>).detail;
+      if (detail?.pageId) {
+        usePageStore.getState().openPageInPane(pane.id, detail.pageId);
+      }
+    };
+
+    // These events bubble from Editor.js block tools through the DOM
+    document.addEventListener("blockembed:navigate", handleEmbedNav);
+    document.addEventListener("livequery:navigate", handleEmbedNav);
+    return () => {
+      document.removeEventListener("blockembed:navigate", handleEmbedNav);
+      document.removeEventListener("livequery:navigate", handleEmbedNav);
+    };
+  }, [pane.id]);
+
   // Handle wiki link clicks
   const handleLinkClick = useCallback(
     async (pageTitle: string) => {
