@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use crate::actions::models::{
     Action, ActionCategory, ActionStep, ActionTrigger, ActionVariable, NotebookTarget, PageSelector,
-    Schedule, VariableType,
+    Schedule, SummaryOutput, VariableType,
 };
 
 /// Create all built-in actions
@@ -20,6 +20,9 @@ pub fn get_builtin_actions() -> Vec<Action> {
         create_carry_forward_action(),
         create_weekly_outcomes_carry_forward_action(),
         create_carry_forward_daily_notes_action(),
+        create_weekly_study_review_action(),
+        create_exam_prep_workflow_action(),
+        create_daily_learning_summary_action(),
     ]
 }
 
@@ -473,6 +476,214 @@ fn create_carry_forward_daily_notes_action() -> Action {
     }
 }
 
+/// Weekly Study Review action - summarizes the week's notes and generates flashcards
+fn create_weekly_study_review_action() -> Action {
+    let id = Uuid::parse_str("00000000-0000-0000-0001-000000000009").unwrap();
+
+    Action {
+        id,
+        name: "Weekly Study Review".to_string(),
+        description: "Summarize this week's study notes and generate review flashcards".to_string(),
+        icon: Some("book-open".to_string()),
+        category: ActionCategory::WeeklyReviews,
+        triggers: vec![
+            ActionTrigger::Manual,
+            ActionTrigger::AiChat {
+                keywords: vec![
+                    "weekly study review".to_string(),
+                    "study review".to_string(),
+                    "review study notes".to_string(),
+                ],
+            },
+            ActionTrigger::Scheduled {
+                schedule: Schedule::Weekly {
+                    days: vec!["friday".to_string()],
+                    time: "17:00".to_string(),
+                },
+            },
+        ],
+        steps: vec![
+            ActionStep::AiSummarize {
+                selector: PageSelector {
+                    notebook: Some(NotebookTarget::Current),
+                    created_within_days: Some(7),
+                    ..Default::default()
+                },
+                output_target: SummaryOutput::NewPage {
+                    notebook_target: NotebookTarget::Current,
+                    title_template: "Week {{weekNumber}} - Study Review".to_string(),
+                },
+                custom_prompt: Some(
+                    "Focus on key concepts learned this week, connections between topics, and areas that need further review."
+                        .to_string(),
+                ),
+            },
+            ActionStep::GenerateFlashcards {
+                selector: PageSelector {
+                    notebook: Some(NotebookTarget::Current),
+                    created_within_days: Some(7),
+                    ..Default::default()
+                },
+                deck_id: "weekly-review".to_string(),
+                num_cards: Some(20),
+                card_types: vec!["basic".to_string(), "cloze".to_string()],
+            },
+        ],
+        enabled: true,
+        is_built_in: true,
+        variables: vec![ActionVariable {
+            name: "weekNumber".to_string(),
+            description: "ISO week number".to_string(),
+            default_value: None,
+            variable_type: VariableType::WeekNumber,
+        }],
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+        last_run: None,
+        next_run: None,
+    }
+}
+
+/// Exam Prep Workflow action - generates study guide, flashcards, and practice questions
+fn create_exam_prep_workflow_action() -> Action {
+    let id = Uuid::parse_str("00000000-0000-0000-0001-00000000000a").unwrap();
+
+    Action {
+        id,
+        name: "Exam Prep Workflow".to_string(),
+        description: "Generate a comprehensive study guide, flashcards, and practice questions for exam preparation".to_string(),
+        icon: Some("graduation-cap".to_string()),
+        category: ActionCategory::Organization,
+        triggers: vec![
+            ActionTrigger::Manual,
+            ActionTrigger::AiChat {
+                keywords: vec![
+                    "exam prep".to_string(),
+                    "prepare for exam".to_string(),
+                    "study for test".to_string(),
+                    "test preparation".to_string(),
+                ],
+            },
+        ],
+        steps: vec![
+            ActionStep::GenerateStudyGuide {
+                selector: PageSelector {
+                    notebook: Some(NotebookTarget::Current),
+                    ..Default::default()
+                },
+                notebook_target: NotebookTarget::Current,
+                title_template: "Exam Prep - Study Guide ({{date}})".to_string(),
+                depth: Some("comprehensive".to_string()),
+                focus_areas: Vec::new(),
+            },
+            ActionStep::GenerateFlashcards {
+                selector: PageSelector {
+                    notebook: Some(NotebookTarget::Current),
+                    ..Default::default()
+                },
+                deck_id: "exam-prep".to_string(),
+                num_cards: Some(30),
+                card_types: vec![
+                    "basic".to_string(),
+                    "cloze".to_string(),
+                    "reversible".to_string(),
+                ],
+            },
+            ActionStep::GenerateFaq {
+                selector: PageSelector {
+                    notebook: Some(NotebookTarget::Current),
+                    ..Default::default()
+                },
+                output_target: SummaryOutput::NewPage {
+                    notebook_target: NotebookTarget::Current,
+                    title_template: "Exam Prep - Practice Questions ({{date}})".to_string(),
+                },
+                num_questions: Some(15),
+            },
+        ],
+        enabled: true,
+        is_built_in: true,
+        variables: vec![ActionVariable {
+            name: "date".to_string(),
+            description: "Today's date".to_string(),
+            default_value: None,
+            variable_type: VariableType::CurrentDateFormatted {
+                format: "%B %d, %Y".to_string(),
+            },
+        }],
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+        last_run: None,
+        next_run: None,
+    }
+}
+
+/// Daily Learning Summary action - summarizes today's learning with concepts and follow-ups
+fn create_daily_learning_summary_action() -> Action {
+    let id = Uuid::parse_str("00000000-0000-0000-0001-00000000000b").unwrap();
+
+    Action {
+        id,
+        name: "Daily Learning Summary".to_string(),
+        description: "Create a summary of today's learning with key concepts, connections, and follow-up suggestions".to_string(),
+        icon: Some("lightbulb".to_string()),
+        category: ActionCategory::DailyRoutines,
+        triggers: vec![
+            ActionTrigger::Manual,
+            ActionTrigger::AiChat {
+                keywords: vec![
+                    "daily learning summary".to_string(),
+                    "what did I learn".to_string(),
+                    "today's learning".to_string(),
+                ],
+            },
+            ActionTrigger::Scheduled {
+                schedule: Schedule::Daily {
+                    time: "18:00".to_string(),
+                    skip_weekends: false,
+                },
+            },
+        ],
+        steps: vec![ActionStep::AiSummarize {
+            selector: PageSelector {
+                notebook: Some(NotebookTarget::Current),
+                created_within_days: Some(0),
+                ..Default::default()
+            },
+            output_target: SummaryOutput::NewPage {
+                notebook_target: NotebookTarget::Current,
+                title_template: "{{date}} - Learning Summary".to_string(),
+            },
+            custom_prompt: Some(
+                "Summarize the key concepts learned today, highlight connections between topics, and suggest follow-up areas to explore."
+                    .to_string(),
+            ),
+        }],
+        enabled: true,
+        is_built_in: true,
+        variables: vec![
+            ActionVariable {
+                name: "date".to_string(),
+                description: "Today's date".to_string(),
+                default_value: None,
+                variable_type: VariableType::CurrentDateFormatted {
+                    format: "%B %d, %Y".to_string(),
+                },
+            },
+            ActionVariable {
+                name: "dayOfWeek".to_string(),
+                description: "Day of the week".to_string(),
+                default_value: None,
+                variable_type: VariableType::DayOfWeek,
+            },
+        ],
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+        last_run: None,
+        next_run: None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -480,7 +691,7 @@ mod tests {
     #[test]
     fn test_builtin_actions_created() {
         let actions = get_builtin_actions();
-        assert_eq!(actions.len(), 8);
+        assert_eq!(actions.len(), 11);
     }
 
     #[test]

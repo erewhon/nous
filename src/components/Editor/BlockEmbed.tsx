@@ -1,11 +1,13 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { usePageStore } from "../../stores/pageStore";
+import { useLinkStore } from "../../stores/linkStore";
 import type { EditorBlock } from "../../types/page";
 
 interface BlockEmbedProps {
   targetBlockId?: string;
   targetPageId?: string;
   notebookId: string;
+  embeddingPageId?: string;
   readOnly: boolean;
   onBlockSelect: (blockId: string, pageId: string) => void;
   onNavigate: (pageId: string) => void;
@@ -181,6 +183,7 @@ export function BlockEmbed({
   targetBlockId,
   targetPageId,
   notebookId,
+  embeddingPageId,
   readOnly,
   onBlockSelect,
   onNavigate,
@@ -188,6 +191,24 @@ export function BlockEmbed({
   const pages = usePageStore((s) => s.pages);
   const updatePageContent = usePageStore((s) => s.updatePageContent);
   const setPageContentLocal = usePageStore((s) => s.setPageContentLocal);
+
+  const registerBlockEmbed = useLinkStore((s) => s.registerBlockEmbed);
+  const unregisterBlockEmbed = useLinkStore((s) => s.unregisterBlockEmbed);
+  const isBlockSynced = useLinkStore((s) => s.isBlockSynced);
+  const getBlockEmbedPages = useLinkStore((s) => s.getBlockEmbedPages);
+
+  // Register/unregister this embed for transclusion tracking
+  useEffect(() => {
+    if (targetBlockId && embeddingPageId) {
+      registerBlockEmbed(targetBlockId, embeddingPageId);
+      return () => {
+        unregisterBlockEmbed(targetBlockId, embeddingPageId);
+      };
+    }
+  }, [targetBlockId, embeddingPageId, registerBlockEmbed, unregisterBlockEmbed]);
+
+  const embedCount = targetBlockId ? getBlockEmbedPages(targetBlockId).length : 0;
+  const isSynced = targetBlockId ? isBlockSynced(targetBlockId) : false;
 
   // Track local editable text to avoid clobbering during live sync
   const editingRef = useRef(false);
@@ -311,6 +332,11 @@ export function BlockEmbed({
           {sourcePage.title || "Untitled"}
         </span>
         <span className="block-embed-header__label">Synced</span>
+        {isSynced && embedCount > 1 && (
+          <span className="block-embed-synced-badge" title={`Embedded in ${embedCount} pages`}>
+            {embedCount}
+          </span>
+        )}
       </div>
       <div className="block-embed-content">
         {isEditable ? (

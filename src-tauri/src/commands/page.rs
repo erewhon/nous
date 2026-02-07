@@ -243,6 +243,9 @@ pub fn update_page(
     // Notify sync manager of the change
     state.sync_manager.queue_page_update(nb_id, pg_id);
 
+    // Trigger on-save sync if configured
+    state.sync_manager.trigger_onsave_sync_if_needed(nb_id, &state.storage);
+
     // Update the search index
     if let Ok(mut search_index) = state.search_index.lock() {
         let _ = search_index.index_page(&page);

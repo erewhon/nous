@@ -8,6 +8,7 @@ import { DailyNotesList } from "./DailyNotesList";
 import { MoodHabitChart } from "./MoodHabitChart";
 import { RollupDialog } from "./RollupDialog";
 import { ReflectionPrompts } from "./ReflectionPrompts";
+import { DigestPanel } from "./DigestPanel";
 import type { Page, EditorData } from "../../types/page";
 
 interface DailyNotesPanelProps {
@@ -457,6 +458,13 @@ export function DailyNotesPanel({ isOpen: isOpenProp, onClose: onCloseProp }: Da
         {/* Reflection Prompts */}
         {selectedNotebookId && (
           <ReflectionPrompts notebookId={selectedNotebookId} />
+        )}
+
+        {/* AI Digest */}
+        {selectedNotebookId && (
+          <div className="mb-3">
+            <DigestPanel notebookId={selectedNotebookId} date={selectedDate} />
+          </div>
         )}
 
         <div

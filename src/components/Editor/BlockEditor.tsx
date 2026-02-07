@@ -27,6 +27,7 @@ interface BlockEditorProps {
   readOnly?: boolean;
   className?: string;
   notebookId?: string;
+  pageId?: string;
   pages?: Array<{ id: string; title: string }>;
 }
 
@@ -45,6 +46,7 @@ export const BlockEditor = forwardRef<BlockEditorRef, BlockEditorProps>(function
   readOnly = false,
   className = "",
   notebookId,
+  pageId,
   pages = [],
 }, ref) {
   const editorId = useId().replace(/:/g, "-");
@@ -108,6 +110,7 @@ export const BlockEditor = forwardRef<BlockEditorRef, BlockEditorProps>(function
     onLinkClick,
     readOnly,
     notebookId,
+    pageId,
     pages,
     onUnmountSave: (data) => {
       // Called by useEditor just before the editor is destroyed.

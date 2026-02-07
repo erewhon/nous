@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import * as d3 from "d3";
+import { save } from "@tauri-apps/plugin-dialog";
+import { writeTextFile } from "@tauri-apps/plugin-fs";
 import type { ConceptGraph, ConceptNode } from "../../types/studyTools";
+import { useToastStore } from "../../stores/toastStore";
 
 interface D3ConceptNode extends d3.SimulationNodeDatum {
   id: string;
@@ -339,6 +342,29 @@ export function ConceptMapView({ conceptGraph, onClose: _onClose }: ConceptMapVi
     };
   }, [conceptGraph, dimensions, nodeColors, getConnectedNodes]);
 
+  const handleExportSvg = useCallback(async () => {
+    if (!svgRef.current) return;
+    const { success, error } = useToastStore.getState();
+    try {
+      const clone = svgRef.current.cloneNode(true) as SVGSVGElement;
+      clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+      clone.setAttribute("width", String(dimensions.width));
+      clone.setAttribute("height", String(dimensions.height));
+      const svgContent = '<?xml version="1.0" encoding="UTF-8"?>\n' + clone.outerHTML;
+
+      const path = await save({
+        defaultPath: "concept-map.svg",
+        filters: [{ name: "SVG", extensions: ["svg"] }],
+      });
+      if (!path) return;
+
+      await writeTextFile(path, svgContent);
+      success("Concept map exported as SVG");
+    } catch (e) {
+      error(`Export failed: ${e}`);
+    }
+  }, [dimensions]);
+
   if (conceptGraph.nodes.length === 0) {
     return (
       <div
@@ -373,7 +399,7 @@ export function ConceptMapView({ conceptGraph, onClose: _onClose }: ConceptMapVi
 
   return (
     <div className="flex flex-col h-full">
-      {/* Legend */}
+      {/* Legend + export */}
       <div className="flex flex-wrap items-center gap-4 mb-4">
         <div className="flex items-center gap-1.5 text-xs">
           <div
@@ -397,11 +423,27 @@ export function ConceptMapView({ conceptGraph, onClose: _onClose }: ConceptMapVi
           <span style={{ color: "var(--color-text-muted)" }}>Definition</span>
         </div>
         <span
-          className="ml-auto text-xs"
+          className="text-xs"
           style={{ color: "var(--color-text-muted)" }}
         >
           {conceptGraph.nodes.length} concepts, {conceptGraph.links.length} connections
         </span>
+        <button
+          onClick={handleExportSvg}
+          className="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded text-xs hover:opacity-80 transition-opacity"
+          style={{
+            backgroundColor: "var(--color-bg-tertiary)",
+            color: "var(--color-text-secondary)",
+            border: "1px solid var(--color-border)",
+          }}
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="7 10 12 15 17 10" />
+            <line x1="12" y1="15" x2="12" y2="3" />
+          </svg>
+          Export SVG
+        </button>
       </div>
 
       {/* Graph visualization */}

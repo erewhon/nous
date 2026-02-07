@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import * as d3 from "d3";
+import { save } from "@tauri-apps/plugin-dialog";
+import { writeTextFile } from "@tauri-apps/plugin-fs";
 import type { Timeline, TimelineEvent } from "../../types/studyTools";
+import { useToastStore } from "../../stores/toastStore";
 
 interface TimelineViewProps {
   timeline: Timeline;
@@ -238,6 +241,29 @@ export function TimelineView({
     [onNavigateToPage, onClose]
   );
 
+  const handleExportSvg = useCallback(async () => {
+    if (!svgRef.current) return;
+    const { success, error } = useToastStore.getState();
+    try {
+      const clone = svgRef.current.cloneNode(true) as SVGSVGElement;
+      clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+      clone.setAttribute("width", String(dimensions.width));
+      clone.setAttribute("height", String(dimensions.height));
+      const svgContent = '<?xml version="1.0" encoding="UTF-8"?>\n' + clone.outerHTML;
+
+      const path = await save({
+        defaultPath: "timeline.svg",
+        filters: [{ name: "SVG", extensions: ["svg"] }],
+      });
+      if (!path) return;
+
+      await writeTextFile(path, svgContent);
+      success("Timeline exported as SVG");
+    } catch (e) {
+      error(`Export failed: ${e}`);
+    }
+  }, [dimensions]);
+
   if (processedEvents.length === 0) {
     return (
       <div
@@ -271,22 +297,40 @@ export function TimelineView({
 
   return (
     <div className="flex flex-col h-full">
-      {/* Category legend */}
-      {categories.length > 1 && (
-        <div className="flex flex-wrap gap-3 mb-4">
-          {categories.map((category) => (
-            <div key={category} className="flex items-center gap-1.5 text-xs">
-              <div
-                className="w-3 h-3 rounded-full"
-                style={{ backgroundColor: colorScale(category) }}
-              />
-              <span style={{ color: "var(--color-text-muted)" }}>
-                {category === "default" ? "Other" : category}
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
+      {/* Category legend + export */}
+      <div className="flex items-center justify-between mb-4">
+        {categories.length > 1 && (
+          <div className="flex flex-wrap gap-3">
+            {categories.map((category) => (
+              <div key={category} className="flex items-center gap-1.5 text-xs">
+                <div
+                  className="w-3 h-3 rounded-full"
+                  style={{ backgroundColor: colorScale(category) }}
+                />
+                <span style={{ color: "var(--color-text-muted)" }}>
+                  {category === "default" ? "Other" : category}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+        <button
+          onClick={handleExportSvg}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs hover:opacity-80 transition-opacity"
+          style={{
+            backgroundColor: "var(--color-bg-tertiary)",
+            color: "var(--color-text-secondary)",
+            border: "1px solid var(--color-border)",
+          }}
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="7 10 12 15 17 10" />
+            <line x1="12" y1="15" x2="12" y2="3" />
+          </svg>
+          Export SVG
+        </button>
+      </div>
 
       {/* Timeline visualization */}
       <div ref={containerRef} className="flex-1 min-h-[300px] relative">

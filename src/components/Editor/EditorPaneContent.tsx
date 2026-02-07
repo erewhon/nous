@@ -673,6 +673,7 @@ export function EditorPaneContent({
                         onLinkClick={handleLinkClick}
                         onBlockRefClick={handleBlockRefClick}
                         notebookId={notebookId}
+                        pageId={selectedPage.id}
                         pages={notebookPages.map((p) => ({
                           id: p.id,
                           title: p.title,

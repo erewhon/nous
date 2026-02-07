@@ -173,6 +173,9 @@ const DEFAULT_WEBDAV_CONCURRENCY: usize = 8;
 /// Maximum concurrent notebook syncs within a library
 const MAX_NOTEBOOK_CONCURRENCY: usize = 4;
 
+/// Minimum interval between on-save sync triggers for the same notebook
+const ONSAVE_DEBOUNCE_SECS: u64 = 2;
+
 /// Manager for sync operations
 pub struct SyncManager {
     /// Base data directory
@@ -191,6 +194,8 @@ pub struct SyncManager {
     sentinel_counter: std::sync::atomic::AtomicU64,
     /// App handle for emitting events (set after app initialization)
     app_handle: Arc<Mutex<Option<tauri::AppHandle>>>,
+    /// Debounce tracking for on-save sync triggers
+    onsave_debounce: Arc<Mutex<HashMap<Uuid, std::time::Instant>>>,
 }
 
 impl SyncManager {
@@ -205,6 +210,7 @@ impl SyncManager {
             syncing_notebooks: Arc::new(Mutex::new(HashSet::new())),
             sentinel_counter: std::sync::atomic::AtomicU64::new(0),
             app_handle: Arc::new(Mutex::new(None)),
+            onsave_debounce: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -522,6 +528,65 @@ impl SyncManager {
         let mut state = self.get_local_state(notebook_id);
         state.mark_page_modified(page_id);
         let _ = self.save_local_state(notebook_id, &state);
+    }
+
+    /// Trigger an on-save sync if the notebook is configured for OnSave mode.
+    /// Debounces to avoid rapid consecutive syncs.
+    pub fn trigger_onsave_sync_if_needed(
+        self: &Arc<Self>,
+        notebook_id: Uuid,
+        storage: &SharedStorage,
+    ) {
+        // Check notebook's sync_config for OnSave mode
+        let should_sync = {
+            let storage_guard = storage.lock().unwrap();
+            storage_guard
+                .get_notebook(notebook_id)
+                .ok()
+                .and_then(|nb| nb.sync_config)
+                .map(|cfg| cfg.enabled && cfg.sync_mode == super::config::SyncMode::OnSave)
+                .unwrap_or(false)
+        };
+
+        if !should_sync {
+            return;
+        }
+
+        // Debounce: skip if last trigger was less than ONSAVE_DEBOUNCE_SECS ago
+        {
+            let mut debounce = self.onsave_debounce.lock().unwrap();
+            let now = std::time::Instant::now();
+            if let Some(last) = debounce.get(&notebook_id) {
+                if now.duration_since(*last).as_secs() < ONSAVE_DEBOUNCE_SECS {
+                    return;
+                }
+            }
+            debounce.insert(notebook_id, now);
+        }
+
+        let manager = Arc::clone(self);
+        let storage = Arc::clone(storage);
+        let app_handle = self.app_handle.lock().unwrap().clone();
+
+        tauri::async_runtime::spawn(async move {
+            log::info!("OnSave sync triggered for notebook {}", notebook_id);
+            match manager
+                .sync_notebook(notebook_id, &storage, app_handle.as_ref())
+                .await
+            {
+                Ok(result) => {
+                    log::info!(
+                        "OnSave sync completed for notebook {}: {} pushed, {} pulled",
+                        notebook_id,
+                        result.pages_pushed,
+                        result.pages_pulled
+                    );
+                }
+                Err(e) => {
+                    log::warn!("OnSave sync failed for notebook {}: {}", notebook_id, e);
+                }
+            }
+        });
     }
 
     /// Queue a page deletion for sync

@@ -641,8 +641,8 @@ NotebookLM-inspired features for generating study materials from notebook conten
 - [ ] **Custom accent colors** - User-defined accent color for slides and infographics
 
 #### Visualization Enhancements
-- [ ] **Timeline Export** - Save as SVG/PNG/PDF
-- [ ] **Concept Map Export** - SVG/PNG and Mermaid/GraphViz formats
+- [x] **Timeline Export** - Save as SVG/PNG/PDF
+- [x] **Concept Map Export** - SVG/PNG and Mermaid/GraphViz formats
 - [ ] **Vertical Timeline** - Alternative layout option
 - [ ] **Hierarchical Concept Map** - Tree layout mode
 - [ ] **Cross-Notebook Knowledge Graph** - Concepts across all notebooks
@@ -654,9 +654,9 @@ NotebookLM-inspired features for generating study materials from notebook conten
 - [ ] **FlashcardStorage Direct Integration** - Add cards to decks automatically
 
 #### Built-in Action Templates
-- [ ] **Weekly Study Review** - Summarize week's notes + flashcards
-- [ ] **Exam Prep Workflow** - Study Guide → Flashcards → Practice Questions
-- [ ] **Daily Learning Summary** - Combine multiple study tools
+- [x] **Weekly Study Review** - Summarize week's notes + flashcards
+- [x] **Exam Prep Workflow** - Study Guide → Flashcards → Practice Questions
+- [x] **Daily Learning Summary** - Combine multiple study tools
 
 ---
 
@@ -857,7 +857,7 @@ These features are recommended as high-priority additions:
   - Embed referenced blocks with live sync
   - Edit embedded block in place, updates original
   - Visual indicator for embedded vs. native blocks
-- [ ] **Transclusion** - Same content in multiple places
+- [x] **Transclusion** - Same content in multiple places
   - Synced blocks that appear in multiple pages
   - Single source of truth, all instances update together
   - Notion-style synced blocks
@@ -1041,7 +1041,7 @@ These features are recommended as high-priority additions:
   - "Find similar" to current page
   - Natural language queries ("notes from last week about project X")
   - Conceptual matching, not just text
-- [ ] **Daily AI digest** - Automated summaries
+- [x] **Daily AI digest** - Automated summaries
   - Summary of what you wrote/learned today
   - Connections to past notes
   - Suggested follow-ups

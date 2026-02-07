@@ -12,11 +12,13 @@ interface BlockEmbedData {
 
 interface BlockEmbedToolConfig {
   notebookId?: string;
+  pageId?: string;
 }
 
 export class BlockEmbedTool implements BlockTool {
   private data: BlockEmbedData;
   private notebookId: string;
+  private pageId: string;
   private wrapper: HTMLDivElement | null = null;
   private root: Root | null = null;
   private readOnly: boolean;
@@ -46,6 +48,7 @@ export class BlockEmbedTool implements BlockTool {
       targetPageId: data.targetPageId || undefined,
     };
     this.notebookId = config?.notebookId || "";
+    this.pageId = config?.pageId || "";
     this.readOnly = readOnly;
   }
 
@@ -86,6 +89,7 @@ export class BlockEmbedTool implements BlockTool {
           targetBlockId: this.data.targetBlockId,
           targetPageId: this.data.targetPageId,
           notebookId: this.notebookId,
+          embeddingPageId: this.pageId,
           readOnly: this.readOnly,
           onBlockSelect: (blockId: string, pageId: string) => {
             this.data.targetBlockId = blockId;

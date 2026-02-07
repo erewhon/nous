@@ -23,6 +23,8 @@ interface LinkState {
   backlinks: Map<string, LinkInfo[]>;
   // Map of target block ID -> block refs pointing to it
   blockRefBacklinks: Map<string, BlockRefInfo[]>;
+  // Map of block ID -> Set of page IDs where the block is embedded (transclusion tracking)
+  syncedBlocks: Map<string, Set<string>>;
 }
 
 interface LinkActions {
@@ -40,6 +42,18 @@ interface LinkActions {
 
   // Build links from all pages
   buildLinksFromPages: (pages: Page[]) => void;
+
+  // Register a block embed (transclusion tracking)
+  registerBlockEmbed: (blockId: string, embeddingPageId: string) => void;
+
+  // Unregister a block embed
+  unregisterBlockEmbed: (blockId: string, embeddingPageId: string) => void;
+
+  // Check if a block is synced (embedded in at least one other page)
+  isBlockSynced: (blockId: string) => boolean;
+
+  // Get all page IDs where a block is embedded
+  getBlockEmbedPages: (blockId: string) => string[];
 }
 
 type LinkStore = LinkState & LinkActions;
@@ -48,6 +62,7 @@ export const useLinkStore = create<LinkStore>((set, get) => ({
   outgoingLinks: new Map(),
   backlinks: new Map(),
   blockRefBacklinks: new Map(),
+  syncedBlocks: new Map(),
 
   updatePageLinks: (page) => {
     // Skip pages without content or blocks
@@ -146,6 +161,7 @@ export const useLinkStore = create<LinkStore>((set, get) => ({
       outgoingLinks: new Map(),
       backlinks: new Map(),
       blockRefBacklinks: new Map(),
+      syncedBlocks: new Map(),
     });
   },
 
@@ -153,6 +169,7 @@ export const useLinkStore = create<LinkStore>((set, get) => ({
     const outgoingLinks = new Map<string, string[]>();
     const backlinks = new Map<string, LinkInfo[]>();
     const blockRefBacklinks = new Map<string, BlockRefInfo[]>();
+    const syncedBlocks = new Map<string, Set<string>>();
 
     for (const page of pages) {
       // Skip pages without content or blocks
@@ -195,8 +212,62 @@ export const useLinkStore = create<LinkStore>((set, get) => ({
           },
         ]);
       }
+
+      // Scan for blockEmbed blocks to populate syncedBlocks
+      for (const block of page.content.blocks) {
+        if (
+          block.type === "blockEmbed" &&
+          block.data.targetBlockId &&
+          typeof block.data.targetBlockId === "string"
+        ) {
+          const targetBlockId = block.data.targetBlockId as string;
+          const existing = syncedBlocks.get(targetBlockId) || new Set<string>();
+          existing.add(page.id);
+          syncedBlocks.set(targetBlockId, existing);
+        }
+      }
     }
 
-    set({ outgoingLinks, backlinks, blockRefBacklinks });
+    set({ outgoingLinks, backlinks, blockRefBacklinks, syncedBlocks });
+  },
+
+  registerBlockEmbed: (blockId, embeddingPageId) => {
+    set((state) => {
+      const newSyncedBlocks = new Map(state.syncedBlocks);
+      const existing = newSyncedBlocks.get(blockId) || new Set<string>();
+      const updated = new Set(existing);
+      updated.add(embeddingPageId);
+      newSyncedBlocks.set(blockId, updated);
+      return { syncedBlocks: newSyncedBlocks };
+    });
+  },
+
+  unregisterBlockEmbed: (blockId, embeddingPageId) => {
+    set((state) => {
+      const newSyncedBlocks = new Map(state.syncedBlocks);
+      const existing = newSyncedBlocks.get(blockId);
+      if (existing) {
+        const updated = new Set(existing);
+        updated.delete(embeddingPageId);
+        if (updated.size === 0) {
+          newSyncedBlocks.delete(blockId);
+        } else {
+          newSyncedBlocks.set(blockId, updated);
+        }
+      }
+      return { syncedBlocks: newSyncedBlocks };
+    });
+  },
+
+  isBlockSynced: (blockId) => {
+    const state = get();
+    const pages = state.syncedBlocks.get(blockId);
+    return pages !== undefined && pages.size > 0;
+  },
+
+  getBlockEmbedPages: (blockId) => {
+    const state = get();
+    const pages = state.syncedBlocks.get(blockId);
+    return pages ? Array.from(pages) : [];
   },
 }));

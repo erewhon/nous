@@ -51,6 +51,7 @@ interface UseEditorOptions {
   readOnly?: boolean;
   placeholder?: string;
   notebookId?: string;
+  pageId?: string;
   pages?: Array<{ id: string; title: string }>;
   /** Called with the latest editor data just before the editor is destroyed on unmount.
    *  This bypasses Editor.js's onChange debounce and captures the true current state. */
@@ -66,6 +67,7 @@ export function useEditor({
   readOnly = false,
   placeholder = "Start writing or press '/' for commands...",
   notebookId,
+  pageId,
   pages,
   onUnmountSave,
 }: UseEditorOptions) {
@@ -163,7 +165,7 @@ export function useEditor({
       },
       blockEmbed: {
         class: BlockEmbedTool as unknown as ToolConstructable,
-        config: { notebookId },
+        config: { notebookId, pageId },
       },
       ...(notebookId
         ? {
