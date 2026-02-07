@@ -29,6 +29,8 @@ import { PrintDialog } from "../Print";
 import { useFolderStore } from "../../stores/folderStore";
 import { useToastStore } from "../../stores/toastStore";
 import { useDrawingStore } from "../../stores/drawingStore";
+import { WritingGoalProgress } from "./WritingGoalProgress";
+import { WritingGoalSettings } from "./WritingGoalSettings";
 import type { PageStats } from "../../utils/pageStats";
 
 interface PageHeaderProps {
@@ -84,6 +86,7 @@ export function PageHeader({
   const [showEditorPicker, setShowEditorPicker] = useState(false);
   const [hasExternalChanges, setHasExternalChanges] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [showWritingGoalSettings, setShowWritingGoalSettings] = useState(false);
   const [showDailyNoteDialog, setShowDailyNoteDialog] = useState(false);
   const [dailyNoteDate, setDailyNoteDate] = useState(
     new Date().toISOString().split("T")[0]
@@ -1202,6 +1205,32 @@ export function PageHeader({
                   Mark as Daily Note
                 </button>
               )}
+
+              {/* Writing Goal */}
+              <button
+                onClick={() => {
+                  setIsMenuOpen(false);
+                  setShowWritingGoalSettings(true);
+                }}
+                className="flex w-full items-center gap-3 px-4 py-2 text-left text-sm transition-colors hover:opacity-80"
+                style={{ color: "var(--color-text-secondary)" }}
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                  <polyline points="22 4 12 14.01 9 11.01" />
+                </svg>
+                Writing Goal
+              </button>
             </div>
           )}
         </div>
@@ -1275,6 +1304,11 @@ export function PageHeader({
             </button>
           </div>
         )}
+
+        {/* Writing goal progress */}
+        <div className="ml-2">
+          <WritingGoalProgress onOpenSettings={() => setShowWritingGoalSettings(true)} />
+        </div>
 
         {/* Save status */}
         <div
@@ -1521,6 +1555,12 @@ export function PageHeader({
         isOpen={showPrint}
         onClose={() => setShowPrint(false)}
         page={page}
+      />
+
+      {/* Writing Goal Settings */}
+      <WritingGoalSettings
+        isOpen={showWritingGoalSettings}
+        onClose={() => setShowWritingGoalSettings(false)}
       />
 
       {/* Mark as Daily Note Dialog */}

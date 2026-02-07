@@ -10,9 +10,12 @@ export type NotebookSortOption = "position" | "name-asc" | "name-desc" | "update
 export type PageSortOption = "position" | "name-asc" | "name-desc" | "updated" | "created";
 export type EditorKeymap = "standard" | "vim" | "emacs";
 
+export type FocusHighlightMode = "sentence" | "paragraph" | "none";
+
 export interface ZenModeSettings {
   typewriterScrolling: boolean;
   showPageTitle: boolean;
+  focusHighlight: FocusHighlightMode;
 }
 
 export interface PanelWidths {
@@ -374,6 +377,7 @@ function getSystemTheme(): "light" | "dark" {
 const DEFAULT_ZEN_MODE_SETTINGS: ZenModeSettings = {
   typewriterScrolling: false,
   showPageTitle: true,
+  focusHighlight: "none",
 };
 
 export const useThemeStore = create<ThemeState>()(
@@ -590,6 +594,10 @@ export const useThemeStore = create<ThemeState>()(
             state.zenModeSettings = DEFAULT_ZEN_MODE_SETTINGS;
           } else {
             state.zenModeSettings = { ...DEFAULT_ZEN_MODE_SETTINGS, ...state.zenModeSettings };
+          }
+          // Migration: ensure focusHighlight exists
+          if (!state.zenModeSettings.focusHighlight) {
+            state.zenModeSettings.focusHighlight = "none";
           }
           // Migration: ensure uiScale exists with default
           if (state.settings.uiScale === undefined) {

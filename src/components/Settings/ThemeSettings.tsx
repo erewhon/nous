@@ -378,6 +378,40 @@ export function ThemeSettings() {
               />
             </button>
           </div>
+          <div className="flex items-center justify-between">
+            <div>
+              <span
+                className="block text-sm font-medium"
+                style={{ color: "var(--color-text-primary)" }}
+              >
+                Focus Highlight
+              </span>
+              <span
+                className="block text-xs"
+                style={{ color: "var(--color-text-muted)" }}
+              >
+                Dim non-active text to focus on current content
+              </span>
+            </div>
+            <select
+              value={zenModeSettings.focusHighlight || "none"}
+              onChange={(e) =>
+                setZenModeSettings({
+                  focusHighlight: e.target.value as "none" | "paragraph" | "sentence",
+                })
+              }
+              className="rounded-md border px-2 py-1 text-sm"
+              style={{
+                backgroundColor: "var(--color-bg-tertiary)",
+                borderColor: "var(--color-border)",
+                color: "var(--color-text-primary)",
+              }}
+            >
+              <option value="none">None</option>
+              <option value="paragraph">Paragraph</option>
+              <option value="sentence">Sentence</option>
+            </select>
+          </div>
         </div>
       </div>
 

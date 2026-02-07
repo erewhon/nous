@@ -5,6 +5,7 @@ import { useLinkStore } from "../../stores/linkStore";
 import { useThemeStore } from "../../stores/themeStore";
 import { useUndoHistoryStore } from "../../stores/undoHistoryStore";
 import { useTypewriterScroll } from "../../hooks/useTypewriterScroll";
+import { useFocusHighlight } from "../../hooks/useFocusHighlight";
 import { useUndoHistory } from "../../hooks/useUndoHistory";
 import { BlockEditor, type BlockEditorRef } from "./BlockEditor";
 import { PageHeader } from "./PageHeader";
@@ -19,10 +20,12 @@ import { ChatEditor } from "../Chat";
 import { CanvasEditor } from "../Canvas";
 import { DatabaseEditor } from "../Database";
 import { OutlinePanel } from "./OutlinePanel";
+import { PomodoroTimer } from "./PomodoroTimer";
 import { BacklinksPanel } from "./BacklinksPanel";
 import { SimilarPagesPanel } from "./SimilarPagesPanel";
 import type { EditorData, Page } from "../../types/page";
 import { calculatePageStats, type PageStats } from "../../utils/pageStats";
+import { useWritingGoalsStore } from "../../stores/writingGoalsStore";
 
 interface EditorPaneContentProps {
   pane: EditorPane;
@@ -106,6 +109,13 @@ export function EditorPaneContent({
     offset: 0.4,
   });
 
+  // Focus highlight for zen mode (paragraph/sentence dimming)
+  useFocusHighlight({
+    enabled: zenMode && zenModeSettings.focusHighlight !== "none" && isStandardPage,
+    mode: zenModeSettings.focusHighlight,
+    containerRef: editorScrollRef,
+  });
+
   // Handle ESC key to exit zen mode
   useEffect(() => {
     if (!zenMode) return;
@@ -176,6 +186,15 @@ export function EditorPaneContent({
     if (!selectedPage?.content?.blocks?.length) return null;
     return calculatePageStats(selectedPage.content.blocks);
   }, [selectedPage?.content?.blocks]);
+
+  // Update writing goals progress when word count changes
+  const writingGoalsEnabled = useWritingGoalsStore((s) => s.enabled);
+  const updateWritingProgress = useWritingGoalsStore((s) => s.updateProgress);
+  useEffect(() => {
+    if (writingGoalsEnabled && pageStats) {
+      updateWritingProgress(pageStats.words);
+    }
+  }, [writingGoalsEnabled, pageStats?.words, updateWritingProgress]);
 
   // Capture initial state when page loads (for undo history)
   useEffect(() => {
@@ -705,6 +724,9 @@ export function EditorPaneContent({
           </div>
         </div>
       )}
+
+      {/* Pomodoro Timer */}
+      {isActive && <PomodoroTimer />}
     </div>
   );
 }

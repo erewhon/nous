@@ -956,15 +956,16 @@ These features are recommended as high-priority additions:
   - Generate shareable link for any page
   - Optional expiration date
   - View-only or allow comments
-- [ ] **Export as presentation** - Slides from pages
-  - Convert page to slide deck (Marp-style)
-  - Header = new slide
-  - Export as PDF or present in-app
-- [ ] **Print-friendly export** - PDF with proper formatting
-  - Clean PDF export
-  - Page breaks at headers
-  - Include/exclude metadata
-  - Table of contents option
+- [x] **Export as presentation** - Slides from pages
+  - Convert page to Reveal.js slide deck (H1/H2 headers split slides)
+  - 5 themes (white, black, moon, solarized, dracula) + 4 transitions
+  - Fullscreen in-app presenter with ESC to exit
+  - Export as standalone HTML with CDN assets
+- [x] **Print-friendly export** - PDF with proper formatting
+  - Clean print-optimized HTML (serif font, A4 page breaks)
+  - Optional table of contents from headers
+  - Optional metadata (tags, dates)
+  - Preview iframe with browser print dialog (Ctrl+P for PDF)
 
 ---
 

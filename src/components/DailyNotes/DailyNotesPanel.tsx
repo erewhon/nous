@@ -1,10 +1,13 @@
-import { useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useDailyNotesStore } from "../../stores/dailyNotesStore";
 import { useNotebookStore } from "../../stores/notebookStore";
 import { usePageStore } from "../../stores/pageStore";
 import { useTemplateStore } from "../../stores/templateStore";
 import { DailyNotesCalendar } from "./DailyNotesCalendar";
 import { DailyNotesList } from "./DailyNotesList";
+import { MoodHabitChart } from "./MoodHabitChart";
+import { RollupDialog } from "./RollupDialog";
+import { ReflectionPrompts } from "./ReflectionPrompts";
 import type { Page, EditorData } from "../../types/page";
 
 interface DailyNotesPanelProps {
@@ -51,6 +54,9 @@ export function DailyNotesPanel({ isOpen: isOpenProp, onClose: onCloseProp }: Da
 
   const { selectedNotebookId } = useNotebookStore();
   const { selectPage } = usePageStore();
+
+  const [showMoodChart, setShowMoodChart] = useState(false);
+  const [showRollup, setShowRollup] = useState(false);
 
   const isOpen = isOpenProp !== undefined ? isOpenProp : isPanelOpen;
   const handleClose = onCloseProp || closePanel;
@@ -390,8 +396,69 @@ export function DailyNotesPanel({ isOpen: isOpenProp, onClose: onCloseProp }: Da
         </button>
       </div>
 
+      {/* Action buttons */}
+      <div
+        className="flex gap-2 border-b px-4 py-2"
+        style={{ borderColor: "var(--color-border)" }}
+      >
+        <button
+          onClick={() => setShowMoodChart(true)}
+          className="flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs transition-colors hover:bg-[--color-bg-tertiary]"
+          style={{
+            borderColor: "var(--color-border)",
+            color: "var(--color-text-secondary)",
+          }}
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <circle cx="12" cy="12" r="10" />
+            <path d="M8 14s1.5 2 4 2 4-2 4-2" />
+          </svg>
+          Mood & Habits
+        </button>
+        <button
+          onClick={() => setShowRollup(true)}
+          className="flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs transition-colors hover:bg-[--color-bg-tertiary]"
+          style={{
+            borderColor: "var(--color-border)",
+            color: "var(--color-text-secondary)",
+          }}
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="17 8 12 3 7 8" />
+            <line x1="12" y1="3" x2="12" y2="15" />
+          </svg>
+          Rollup
+        </button>
+      </div>
+
       {/* Recent notes list */}
       <div className="flex-1 overflow-y-auto px-3 py-3">
+        {/* Reflection Prompts */}
+        {selectedNotebookId && (
+          <ReflectionPrompts notebookId={selectedNotebookId} />
+        )}
+
         <div
           className="mb-2 px-1 text-xs font-medium uppercase tracking-wide"
           style={{ color: "var(--color-text-muted)" }}
@@ -404,6 +471,19 @@ export function DailyNotesPanel({ isOpen: isOpenProp, onClose: onCloseProp }: Da
           onSelectNote={handleNoteSelect}
         />
       </div>
+
+      {/* Dialogs */}
+      <MoodHabitChart
+        isOpen={showMoodChart}
+        onClose={() => setShowMoodChart(false)}
+      />
+      {selectedNotebookId && (
+        <RollupDialog
+          isOpen={showRollup}
+          onClose={() => setShowRollup(false)}
+          notebookId={selectedNotebookId}
+        />
+      )}
 
       {/* Footer with hint */}
       {!selectedNotebookId && (
