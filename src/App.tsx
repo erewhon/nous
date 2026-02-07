@@ -16,6 +16,7 @@ import { QuickCapture, InboxPanel } from "./components/Inbox";
 import { FlashcardPanel } from "./components/Flashcards";
 import { GoalsPanel, GoalsDashboard } from "./components/Goals";
 import { DailyNotesPanel } from "./components/DailyNotes";
+import { TasksPanel } from "./components/Tasks";
 import { ToastContainer } from "./components/Toast";
 import { WebClipperDialog } from "./components/WebClipper/WebClipperDialog";
 import { useAppInit } from "./hooks/useAppInit";
@@ -28,6 +29,7 @@ import { useInboxStore } from "./stores/inboxStore";
 import { useAIStore } from "./stores/aiStore";
 import { useFlashcardStore } from "./stores/flashcardStore";
 import { useDailyNotesStore } from "./stores/dailyNotesStore";
+import { useTasksStore } from "./stores/tasksStore";
 import { useWindowLibrary } from "./contexts/WindowContext";
 import { exportPageToFile } from "./utils/api";
 import { save } from "@tauri-apps/plugin-dialog";
@@ -44,6 +46,15 @@ function App() {
   useEffect(() => {
     applyTheme();
   }, [applyTheme]);
+
+  // Task reminders check
+  useEffect(() => {
+    useTasksStore.getState().checkReminders();
+    const interval = setInterval(() => {
+      useTasksStore.getState().checkReminders();
+    }, 15 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Set window title based on library
   useEffect(() => {
@@ -323,6 +334,9 @@ function App() {
 
       {/* Daily Notes Panel */}
       <DailyNotesPanel />
+
+      {/* Tasks Panel */}
+      <TasksPanel />
 
       {/* Web Clipper */}
       <WebClipperDialog

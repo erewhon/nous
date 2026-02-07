@@ -7,6 +7,7 @@ import { useFlashcardStore } from "../../stores/flashcardStore";
 import { useGoalsStore } from "../../stores/goalsStore";
 import { useThemeStore } from "../../stores/themeStore";
 import { useDailyNotesStore } from "../../stores/dailyNotesStore";
+import { useTasksStore } from "../../stores/tasksStore";
 import { NotebookList } from "../NotebookList/NotebookList";
 import { LibrarySwitcher } from "../Library";
 
@@ -24,6 +25,7 @@ export function Sidebar({ width = 256 }: SidebarProps) {
   const { togglePanel: toggleFlashcards, stats: flashcardStats } = useFlashcardStore();
   const { summary: goalsSummary, togglePanel: toggleGoals } = useGoalsStore();
   const { togglePanel: toggleDailyNotes } = useDailyNotesStore();
+  const { summary: tasksSummary, togglePanel: toggleTasks } = useTasksStore();
   const autoHidePanels = useThemeStore((state) => state.autoHidePanels);
   const setAutoHidePanels = useThemeStore((state) => state.setAutoHidePanels);
   const showRecentPages = useThemeStore((state) => state.showRecentPages);
@@ -562,6 +564,43 @@ export function Sidebar({ width = 256 }: SidebarProps) {
                 {goalsSummary.highestStreak}
               </span>
             )}
+          </button>
+          {/* Tasks */}
+          <button
+            onClick={toggleTasks}
+            className="relative flex h-8 w-8 items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
+            style={{ color: "var(--color-text-muted)" }}
+            title="Tasks"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="15"
+              height="15"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M9 11l3 3L22 4" />
+              <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+            </svg>
+            {tasksSummary.overdueCount > 0 ? (
+              <span
+                className="absolute right-0.5 top-0.5 flex h-3.5 min-w-[14px] items-center justify-center rounded-full px-0.5 text-[9px] font-bold"
+                style={{ backgroundColor: "rgba(239, 68, 68, 0.2)", color: "#ef4444" }}
+              >
+                {tasksSummary.overdueCount}
+              </span>
+            ) : tasksSummary.dueTodayCount > 0 ? (
+              <span
+                className="absolute right-0.5 top-0.5 flex h-3.5 min-w-[14px] items-center justify-center rounded-full px-0.5 text-[9px] font-bold"
+                style={{ backgroundColor: "var(--color-accent)", color: "white" }}
+              >
+                {tasksSummary.dueTodayCount}
+              </span>
+            ) : null}
           </button>
           {/* Daily Notes */}
           <button

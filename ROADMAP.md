@@ -905,19 +905,24 @@ These features are recommended as high-priority additions:
   - Mark existing pages as daily notes
   - Daily Notes panel with calendar view
   - Carry Forward Daily Notes action
-- [ ] **Weekly/monthly rollups** - Aggregate journals
-  - Auto-generate weekly summary from daily notes
-  - Monthly overview with key highlights
-  - Carry forward incomplete tasks
-- [ ] **Reflection prompts** - AI-generated prompts
-  - "What did you learn today?"
-  - Prompts based on past entries and patterns
-  - Gratitude, goals, review prompts
-- [ ] **Mood/habit tracking** - Quick daily check-ins
-  - Mood selector (emoji or scale)
-  - Habit checkboxes (exercise, reading, etc.)
-  - Charts and trends over time
-  - Streak tracking
+- [x] **Weekly/monthly rollups** - Aggregate journals
+  - Auto-generate weekly/monthly summary from daily notes via AI
+  - Period selector (this/last week/month)
+  - Summary style options (concise, detailed, bullets, narrative)
+  - Custom prompt support
+  - Save rollup as new page
+- [x] **Reflection prompts** - AI-generated prompts
+  - Category tabs (Gratitude, Learning, Goals, Review, Free)
+  - AI-generated prompts based on recent journal entries
+  - Static fallback prompts when AI unavailable
+  - "Use" button to insert prompt into daily note
+  - Collapsible card in Daily Notes panel
+- [x] **Mood/habit tracking** - Quick daily check-ins
+  - Editor.js block tool with emoji mood selector (5 levels)
+  - Configurable habit checkboxes (add/remove habits)
+  - D3 mood line chart and habit completion bars
+  - Date range filtering (7/14/30 days)
+  - Habits persisted via Zustand store
 
 ---
 
@@ -1074,24 +1079,26 @@ These features are recommended as high-priority additions:
 
 ### 45. Writing Tools
 
-- [ ] **Word count goals** - Writing targets
-  - Set target word count per page or session
-  - Progress bar indicator
-  - Daily/weekly writing goals
-  - Streak tracking
-- [ ] **Focus mode enhancements** - Concentration aids
-  - Highlight current sentence, dim rest
-  - Single paragraph focus
-  - Ambient sounds/music
-- [ ] **Typewriter scrolling** - Centered cursor
+- [x] **Word count goals** - Writing targets
+  - Set target word count per page or session (daily/session period)
+  - Progress bar in page header
+  - Streak tracking from daily history (last 90 days)
+  - Settings modal with target, period toggle, and recent history
+- [x] **Focus mode enhancements** - Concentration aids
+  - Paragraph mode: dim non-active blocks (opacity 0.25)
+  - Sentence mode: highlight active sentence via Range API
+  - Configurable in Settings > Zen Mode (none/paragraph/sentence)
+  - 50ms debounced selectionchange listener with cleanup
+- [x] **Typewriter scrolling** - Centered cursor
   - Keep cursor vertically centered while typing
   - Reduces eye movement
-  - Toggle in Zen mode
-- [ ] **Pomodoro timer** - Focus sessions
-  - Built-in 25/5 minute timer
-  - Session tracking and stats
-  - Break reminders
-  - Integration with daily notes
+  - Toggle in Zen mode settings
+- [x] **Pomodoro timer** - Focus sessions
+  - 25/5/15 min work/short break/long break with configurable durations
+  - Floating pill (minimized) and expanded view with arc progress
+  - Session tracking (sessions before long break, today's count)
+  - Browser notifications on session end
+  - Auto-start breaks toggle, pause/resume/skip/reset controls
 
 ---
 
