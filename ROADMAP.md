@@ -292,7 +292,7 @@ Already implemented with Tantivy, may need refinement:
   - [x] Asset manifest per notebook mapping relative paths to content hashes
   - [x] Deduplication across notebooks (same content = one remote copy)
   - [x] Migration path from legacy per-notebook asset storage
-- [ ] Implement OnSave sync mode (trigger sync when a page is saved)
+- [x] Implement OnSave sync mode (trigger sync when a page is saved)
 - [ ] Sync integration tests
   - [ ] Nextcloud WebDAV sync validation using testcontainers
 - [ ] Goals synchronization across instances
@@ -632,8 +632,8 @@ NotebookLM-inspired features for generating study materials from notebook conten
 
 #### Media Generation Enhancements (Not Yet Implemented)
 - [ ] **Drag-and-drop slide reordering** - Reorder slides via drag-and-drop in slide list
-- [ ] **Export from Media Library** - Open/export media files directly from library
-- [ ] **Batch delete in Media Library** - Select and delete multiple media files at once
+- [x] **Export from Media Library** - Open/export media files directly from library
+- [x] **Batch delete in Media Library** - Select and delete multiple media files at once
 - [ ] **Slide templates** - Pre-built slide layouts (title slide, bullet points, image, quote)
 - [ ] **Undo/redo for slides** - History stack for slide edits with keyboard shortcuts
 - [ ] **Video thumbnails** - Generate and display thumbnails in Media Library
@@ -649,9 +649,9 @@ NotebookLM-inspired features for generating study materials from notebook conten
 
 #### UI Enhancements
 - [x] **Text Selection Context Menu** - Generate from highlighted text
-- [ ] **Quick Generate Dialog** - Minimal UI for fast generation
+- [x] **Quick Generate Dialog** - Minimal UI for fast generation
 - [ ] **AIChatPanel Citation Integration** - Citations in regular chat
-- [ ] **FlashcardStorage Direct Integration** - Add cards to decks automatically
+- [x] **FlashcardStorage Direct Integration** - Add cards to decks automatically
 
 #### Built-in Action Templates
 - [x] **Weekly Study Review** - Summarize week's notes + flashcards

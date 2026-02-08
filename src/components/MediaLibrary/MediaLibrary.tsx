@@ -1,5 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { save } from "@tauri-apps/plugin-dialog";
+import { copyFile } from "@tauri-apps/plugin-fs";
 import * as api from "../../utils/api";
 import type { MediaAssetInfo } from "../../utils/api";
 import { useToastStore } from "../../stores/toastStore";
@@ -15,6 +17,9 @@ export function MediaLibrary({ notebookId, isOpen, onClose }: MediaLibraryProps)
   const [isLoading, setIsLoading] = useState(false);
   const [selectedAsset, setSelectedAsset] = useState<MediaAssetInfo | null>(null);
   const [filter, setFilter] = useState<"all" | "video" | "infographic">("all");
+  const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
+  const [isBatchMode, setIsBatchMode] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
   const toast = useToastStore();
 
   useEffect(() => {
@@ -51,6 +56,72 @@ export function MediaLibrary({ notebookId, isOpen, onClose }: MediaLibraryProps)
       toast.error("Failed to delete asset");
     }
   };
+
+  const toggleSelect = useCallback((path: string) => {
+    setSelectedPaths((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) {
+        next.delete(path);
+      } else {
+        next.add(path);
+      }
+      return next;
+    });
+  }, []);
+
+  const toggleSelectAll = useCallback(() => {
+    const visible = assets.filter((a) => filter === "all" || a.mediaType === filter);
+    setSelectedPaths((prev) => {
+      if (prev.size === visible.length && visible.every((a) => prev.has(a.path))) {
+        return new Set();
+      }
+      return new Set(visible.map((a) => a.path));
+    });
+  }, [assets, filter]);
+
+  const handleBatchDelete = useCallback(async () => {
+    if (selectedPaths.size === 0) return;
+    if (!confirm(`Delete ${selectedPaths.size} selected item${selectedPaths.size !== 1 ? "s" : ""}?`)) return;
+
+    let deleted = 0;
+    for (const path of selectedPaths) {
+      try {
+        await api.deleteNotebookMediaAsset(notebookId, path);
+        deleted++;
+      } catch {
+        // continue deleting others
+      }
+    }
+    setAssets((prev) => prev.filter((a) => !selectedPaths.has(a.path)));
+    if (selectedAsset && selectedPaths.has(selectedAsset.path)) {
+      setSelectedAsset(null);
+    }
+    setSelectedPaths(new Set());
+    toast.success(`${deleted} item${deleted !== 1 ? "s" : ""} deleted`);
+    if (deleted < selectedPaths.size) {
+      toast.error(`Failed to delete ${selectedPaths.size - deleted} item(s)`);
+    }
+  }, [selectedPaths, notebookId, selectedAsset, toast]);
+
+  const handleExport = useCallback(async (asset: MediaAssetInfo) => {
+    const ext = asset.filename.split(".").pop() || "";
+    const filterName = asset.mediaType === "video" ? "Video" : "Image";
+    const path = await save({
+      defaultPath: asset.filename,
+      filters: [{ name: filterName, extensions: ext ? [ext] : [] }],
+    });
+    if (path) {
+      setIsExporting(true);
+      try {
+        await copyFile(asset.path, path);
+        toast.success("File exported successfully");
+      } catch {
+        toast.error("Failed to export file");
+      } finally {
+        setIsExporting(false);
+      }
+    }
+  }, [toast]);
 
   const filteredAssets = assets.filter((asset) => {
     if (filter === "all") return true;
@@ -151,12 +222,48 @@ export function MediaLibrary({ notebookId, isOpen, onClose }: MediaLibraryProps)
               {f === "all" ? "All" : f === "video" ? "Videos" : "Infographics"}
             </button>
           ))}
-          <span
-            className="ml-auto text-sm self-center"
-            style={{ color: "var(--color-text-muted)" }}
-          >
-            {filteredAssets.length} item{filteredAssets.length !== 1 ? "s" : ""}
-          </span>
+          <div className="ml-auto flex items-center gap-2">
+            {isBatchMode && selectedPaths.size > 0 && (
+              <button
+                onClick={handleBatchDelete}
+                className="px-2.5 py-1 rounded-lg text-xs font-medium text-red-500 hover:bg-red-500/10 transition-colors"
+              >
+                Delete {selectedPaths.size}
+              </button>
+            )}
+            {isBatchMode && (
+              <button
+                onClick={toggleSelectAll}
+                className="px-2.5 py-1 rounded-lg text-xs font-medium transition-colors hover:bg-[--color-bg-tertiary]"
+                style={{ color: "var(--color-text-secondary)" }}
+              >
+                {selectedPaths.size === filteredAssets.length && filteredAssets.length > 0
+                  ? "Deselect all"
+                  : "Select all"}
+              </button>
+            )}
+            <button
+              onClick={() => {
+                setIsBatchMode(!isBatchMode);
+                if (isBatchMode) setSelectedPaths(new Set());
+              }}
+              className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
+                isBatchMode ? "ring-1 ring-[--color-accent]" : ""
+              }`}
+              style={{
+                backgroundColor: isBatchMode ? "rgba(139, 92, 246, 0.1)" : "transparent",
+                color: isBatchMode ? "var(--color-accent)" : "var(--color-text-muted)",
+              }}
+            >
+              Select
+            </button>
+            <span
+              className="text-sm"
+              style={{ color: "var(--color-text-muted)" }}
+            >
+              {filteredAssets.length} item{filteredAssets.length !== 1 ? "s" : ""}
+            </span>
+          </div>
         </div>
 
         {/* Content */}
@@ -203,18 +310,43 @@ export function MediaLibrary({ notebookId, isOpen, onClose }: MediaLibraryProps)
                     selectedAsset?.path === asset.path
                       ? "ring-2 ring-[--color-accent]"
                       : ""
+                  } ${
+                    isBatchMode && selectedPaths.has(asset.path)
+                      ? "ring-2 ring-[--color-accent]"
+                      : ""
                   }`}
                   style={{
                     backgroundColor: "var(--color-bg-secondary)",
                     borderColor: "var(--color-border)",
                   }}
-                  onClick={() => setSelectedAsset(asset)}
+                  onClick={() =>
+                    isBatchMode
+                      ? toggleSelect(asset.path)
+                      : setSelectedAsset(asset)
+                  }
                 >
                   {/* Preview */}
                   <div
-                    className="h-32 flex items-center justify-center"
+                    className="h-32 flex items-center justify-center relative"
                     style={{ backgroundColor: "var(--color-bg-tertiary)" }}
                   >
+                    {isBatchMode && (
+                      <div className="absolute top-2 left-2 z-10">
+                        <div
+                          className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
+                            selectedPaths.has(asset.path)
+                              ? "border-[--color-accent] bg-[--color-accent]"
+                              : "border-white/70 bg-black/20"
+                          }`}
+                        >
+                          {selectedPaths.has(asset.path) && (
+                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="20 6 9 17 4 12" />
+                            </svg>
+                          )}
+                        </div>
+                      </div>
+                    )}
                     {asset.mediaType === "video" ? (
                       <video
                         src={convertFileSrc(asset.path)}
@@ -262,16 +394,29 @@ export function MediaLibrary({ notebookId, isOpen, onClose }: MediaLibraryProps)
                       <span>{formatDate(asset.createdAt)}</span>
                     </div>
 
-                    {/* Delete button */}
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDelete(asset);
-                      }}
-                      className="mt-2 w-full px-2 py-1 rounded text-xs text-red-500 hover:bg-red-500/10 transition-colors"
-                    >
-                      Delete
-                    </button>
+                    {/* Action buttons */}
+                    <div className="flex gap-1 mt-2">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleExport(asset);
+                        }}
+                        disabled={isExporting}
+                        className="flex-1 px-2 py-1 rounded text-xs transition-colors hover:bg-[--color-bg-tertiary]"
+                        style={{ color: "var(--color-text-secondary)" }}
+                      >
+                        Export
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDelete(asset);
+                        }}
+                        className="flex-1 px-2 py-1 rounded text-xs text-red-500 hover:bg-red-500/10 transition-colors"
+                      >
+                        Delete
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}

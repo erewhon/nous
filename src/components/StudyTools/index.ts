@@ -7,3 +7,5 @@ export { SourceCitations, CitationBadge, CitedContent } from "./SourceCitation";
 export { TimelineView } from "./TimelineView";
 export { ConceptMapView } from "./ConceptMapView";
 export { StudyToolsPanel } from "./StudyToolsPanel";
+export { QuickGenerateDialog } from "./QuickGenerateDialog";
+export { CrossNotebookGraph } from "./CrossNotebookGraph";

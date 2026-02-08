@@ -2,6 +2,8 @@ import { useState, useCallback, useEffect } from "react";
 import { useStudyToolsStore } from "../../stores/studyToolsStore";
 import { usePageStore } from "../../stores/pageStore";
 import { useNotebookStore } from "../../stores/notebookStore";
+import { useFlashcardStore } from "../../stores/flashcardStore";
+import { useToastStore } from "../../stores/toastStore";
 import { PageSelector } from "./PageSelector";
 import { StudyGuidePanel } from "./StudyGuidePanel";
 import { FAQPanel } from "./FAQPanel";
@@ -9,6 +11,7 @@ import { BriefingPanel } from "./BriefingPanel";
 import { TimelineView } from "./TimelineView";
 import { ConceptMapView } from "./ConceptMapView";
 import { CrossNotebookGraph } from "./CrossNotebookGraph";
+import { FlashcardGenerator } from "./FlashcardGenerator";
 import { InfographicGenerator } from "../Infographics/InfographicGenerator";
 import { VideoGeneratorDialog } from "../VideoGenerator/VideoGeneratorDialog";
 import { MediaLibrary } from "../MediaLibrary/MediaLibrary";
@@ -515,15 +518,9 @@ export function StudyToolsPanel({ isOpen, onClose }: StudyToolsPanelProps) {
                 )}
 
                 {activeTool === "flashcards" && (
-                  <div
-                    className="text-center py-12"
-                    style={{ color: "var(--color-text-muted)" }}
-                  >
-                    <p>Flashcard generation is available in the Flashcards panel.</p>
-                    <p className="text-sm mt-2">
-                      Open the Flashcards panel and click the AI button on a deck.
-                    </p>
-                  </div>
+                  <FlashcardsDirectPanel
+                    pages={selectedPages}
+                  />
                 )}
 
                 {activeTool === "briefing" && (
@@ -785,6 +782,162 @@ function ConceptMapPanel({
       <div className="h-[400px]">
         <ConceptMapView conceptGraph={conceptGraph} />
       </div>
+    </div>
+  );
+}
+
+function FlashcardsDirectPanel({ pages }: { pages: StudyPageContent[] }) {
+  const { selectedNotebookId } = useNotebookStore();
+  const { decks, loadDecks, createDeck } = useFlashcardStore();
+  const toast = useToastStore();
+
+  const [selectedDeckId, setSelectedDeckId] = useState<string | null>(null);
+  const [isGeneratorOpen, setIsGeneratorOpen] = useState(false);
+  const [isCreatingDeck, setIsCreatingDeck] = useState(false);
+  const [newDeckName, setNewDeckName] = useState("");
+
+  // Load decks on mount
+  useEffect(() => {
+    if (selectedNotebookId) {
+      loadDecks(selectedNotebookId);
+    }
+  }, [selectedNotebookId, loadDecks]);
+
+  // Auto-select first deck if none selected
+  useEffect(() => {
+    if (decks.length > 0 && !selectedDeckId) {
+      setSelectedDeckId(decks[0].id);
+    }
+  }, [decks, selectedDeckId]);
+
+  const handleCreateDeck = useCallback(async () => {
+    if (!selectedNotebookId || !newDeckName.trim()) return;
+    const deck = await createDeck(selectedNotebookId, newDeckName.trim());
+    if (deck) {
+      setSelectedDeckId(deck.id);
+      setNewDeckName("");
+      setIsCreatingDeck(false);
+      toast.success(`Deck "${deck.name}" created`);
+    }
+  }, [selectedNotebookId, newDeckName, createDeck, toast]);
+
+  const handleSuccess = useCallback(
+    (count: number) => {
+      toast.success(`${count} flashcard${count !== 1 ? "s" : ""} added to deck`);
+    },
+    [toast]
+  );
+
+  return (
+    <div className="space-y-4">
+      <h3 className="font-semibold" style={{ color: "var(--color-text-primary)" }}>
+        Flashcard Generator
+      </h3>
+
+      <p className="text-sm" style={{ color: "var(--color-text-secondary)" }}>
+        Generate AI flashcards from selected pages and save them directly to a deck.
+      </p>
+
+      {/* Deck selector */}
+      <div className="space-y-2">
+        <label
+          className="block text-sm font-medium"
+          style={{ color: "var(--color-text-primary)" }}
+        >
+          Target Deck
+        </label>
+
+        {decks.length > 0 ? (
+          <select
+            value={selectedDeckId || ""}
+            onChange={(e) => setSelectedDeckId(e.target.value)}
+            className="w-full px-3 py-2 rounded-lg border text-sm"
+            style={{
+              backgroundColor: "var(--color-bg-primary)",
+              borderColor: "var(--color-border)",
+              color: "var(--color-text-primary)",
+            }}
+          >
+            {decks.map((d) => (
+              <option key={d.id} value={d.id}>
+                {d.name} ({d.cardCount} cards)
+              </option>
+            ))}
+          </select>
+        ) : (
+          <p className="text-sm" style={{ color: "var(--color-text-muted)" }}>
+            No decks yet. Create one to get started.
+          </p>
+        )}
+
+        {/* Create new deck */}
+        {isCreatingDeck ? (
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={newDeckName}
+              onChange={(e) => setNewDeckName(e.target.value)}
+              placeholder="Deck name..."
+              className="flex-1 px-3 py-1.5 rounded-lg border text-sm"
+              style={{
+                backgroundColor: "var(--color-bg-primary)",
+                borderColor: "var(--color-border)",
+                color: "var(--color-text-primary)",
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleCreateDeck();
+                if (e.key === "Escape") setIsCreatingDeck(false);
+              }}
+              autoFocus
+            />
+            <button
+              onClick={handleCreateDeck}
+              disabled={!newDeckName.trim()}
+              className="px-3 py-1.5 rounded-lg text-sm font-medium text-white disabled:opacity-50"
+              style={{ backgroundColor: "var(--color-accent)" }}
+            >
+              Create
+            </button>
+            <button
+              onClick={() => { setIsCreatingDeck(false); setNewDeckName(""); }}
+              className="px-3 py-1.5 rounded-lg text-sm hover:bg-[--color-bg-tertiary]"
+              style={{ color: "var(--color-text-muted)" }}
+            >
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => setIsCreatingDeck(true)}
+            className="text-sm hover:underline"
+            style={{ color: "var(--color-accent)" }}
+          >
+            + New Deck
+          </button>
+        )}
+      </div>
+
+      {/* Generate button */}
+      <button
+        onClick={() => setIsGeneratorOpen(true)}
+        disabled={!selectedDeckId || pages.length === 0}
+        className="w-full py-2.5 rounded-lg text-sm font-medium text-white transition-colors hover:opacity-90 disabled:opacity-50"
+        style={{ backgroundColor: "var(--color-accent)" }}
+      >
+        {pages.length === 0
+          ? "Select pages above to generate"
+          : `Generate Flashcards from ${pages.length} page${pages.length !== 1 ? "s" : ""}`}
+      </button>
+
+      {/* Generator modal */}
+      {isGeneratorOpen && selectedDeckId && (
+        <FlashcardGenerator
+          pages={pages}
+          deckId={selectedDeckId}
+          onClose={() => setIsGeneratorOpen(false)}
+          onSuccess={handleSuccess}
+        />
+      )}
     </div>
   );
 }
