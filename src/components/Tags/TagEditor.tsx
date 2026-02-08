@@ -1,7 +1,8 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import type { Page } from "../../types/page";
 import { usePageStore } from "../../stores/pageStore";
 import { useAIStore } from "../../stores/aiStore";
+import { useTagStore } from "../../stores/tagStore";
 import { aiSuggestTags } from "../../utils/api";
 
 interface TagEditorProps {
@@ -47,11 +48,26 @@ export function TagEditor({ page, onTagsChange }: TagEditorProps) {
 
   const { updatePage } = usePageStore();
   const { getActiveProviderType, getActiveApiKey, getActiveModel } = useAIStore();
+  const allStoreTags = useTagStore((s) => s.getTagsByFrequency);
 
   // Get active API key for UI checks
   const activeApiKey = getActiveApiKey();
 
   const tags = page.tags || [];
+
+  // Autocomplete matches from existing tags
+  const autocompleteMatches = useMemo(() => {
+    if (!inputValue.trim()) return [];
+    const query = inputValue.toLowerCase().trim();
+    const existingLower = tags.map((t) => t.toLowerCase());
+    return allStoreTags()
+      .filter(
+        (t) =>
+          t.name.toLowerCase().startsWith(query) &&
+          !existingLower.includes(t.name.toLowerCase())
+      )
+      .slice(0, 6);
+  }, [inputValue, tags, allStoreTags]);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -202,6 +218,34 @@ export function TagEditor({ page, onTagsChange }: TagEditorProps) {
               color: "var(--color-text-primary)",
             }}
           />
+          {autocompleteMatches.length > 0 && inputValue.trim() && (
+            <div
+              className="absolute left-0 top-full z-50 mt-1 min-w-36 rounded-lg border shadow-lg"
+              style={{
+                backgroundColor: "var(--color-bg-secondary)",
+                borderColor: "var(--color-border)",
+              }}
+            >
+              {autocompleteMatches.map((match) => (
+                <button
+                  key={match.name}
+                  onClick={() => {
+                    handleAddTag(match.name);
+                  }}
+                  className="flex w-full items-center justify-between px-2 py-1 text-xs transition-colors hover:bg-white/10"
+                  style={{ color: "var(--color-text-primary)" }}
+                >
+                  <span>{match.name}</span>
+                  <span
+                    className="ml-2"
+                    style={{ color: "var(--color-text-muted)" }}
+                  >
+                    {match.count}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       ) : (
         <button

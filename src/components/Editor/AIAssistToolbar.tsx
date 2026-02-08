@@ -45,6 +45,18 @@ const AI_ACTIONS = [
     prompt:
       "Rewrite in a more professional tone. Return only the rewritten text.",
   },
+  {
+    label: "Explain",
+    icon: "💡",
+    prompt:
+      "Explain the following text in simple terms, as if teaching it to someone new to the topic. Return only the explanation.",
+  },
+  {
+    label: "Flashcard",
+    icon: "🗂️",
+    prompt:
+      "Create a flashcard from the following text. Format as:\nQ: [question]\nA: [answer]\nReturn only the flashcard.",
+  },
 ] as const;
 
 export function AIAssistToolbar({ containerRef }: AIAssistToolbarProps) {

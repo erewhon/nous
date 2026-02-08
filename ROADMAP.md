@@ -643,12 +643,12 @@ NotebookLM-inspired features for generating study materials from notebook conten
 #### Visualization Enhancements
 - [x] **Timeline Export** - Save as SVG/PNG/PDF
 - [x] **Concept Map Export** - SVG/PNG and Mermaid/GraphViz formats
-- [ ] **Vertical Timeline** - Alternative layout option
+- [x] **Vertical Timeline** - Alternative layout option
 - [ ] **Hierarchical Concept Map** - Tree layout mode
-- [ ] **Cross-Notebook Knowledge Graph** - Concepts across all notebooks
+- [x] **Cross-Notebook Knowledge Graph** - Concepts across all notebooks
 
 #### UI Enhancements
-- [ ] **Text Selection Context Menu** - Generate from highlighted text
+- [x] **Text Selection Context Menu** - Generate from highlighted text
 - [ ] **Quick Generate Dialog** - Minimal UI for fast generation
 - [ ] **AIChatPanel Citation Integration** - Citations in regular chat
 - [ ] **FlashcardStorage Direct Integration** - Add cards to decks automatically
@@ -1072,7 +1072,7 @@ These features are recommended as high-priority additions:
   - Surface a random page for review
   - Filter by notebook, age, or tag
   - "Surprise me" feature
-- [ ] **Nested tags** - Tag hierarchy
+- [x] **Nested tags** - Tag hierarchy
   - Hierarchical tags (`#work/project-a/tasks`)
   - Browse tag tree
   - Filter by parent or child tags

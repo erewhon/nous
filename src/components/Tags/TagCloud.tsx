@@ -33,10 +33,17 @@ export function TagCloud({
       const fontSize = minSize + normalized * (maxSize - minSize);
       const opacity = 0.6 + normalized * 0.4; // 0.6 to 1.0
 
+      // For nested tags, split into prefix and leaf
+      const parts = tag.name.split("/");
+      const leaf = parts[parts.length - 1];
+      const prefix = parts.length > 1 ? parts.slice(0, -1).join("/") + " / " : null;
+
       return {
         ...tag,
         fontSize: `${fontSize}rem`,
         opacity,
+        leaf,
+        prefix,
       };
     });
   }, [tags, maxTags]);
@@ -75,9 +82,12 @@ export function TagCloud({
                 ? "1px solid var(--color-accent)"
                 : "1px solid transparent",
             }}
-            title={`${tag.count} page${tag.count === 1 ? "" : "s"}`}
+            title={`${tag.name} (${tag.count} page${tag.count === 1 ? "" : "s"})`}
           >
-            {tag.name}
+            {tag.prefix && (
+              <span style={{ opacity: 0.5, fontSize: "0.85em" }}>{tag.prefix}</span>
+            )}
+            {tag.leaf}
           </button>
         );
       })}

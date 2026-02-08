@@ -136,18 +136,23 @@ const PageListItem = memo(function PageListItem({
           </span>
           {page.tags.length > 0 && (
             <div className="mt-1 flex flex-wrap gap-1">
-              {page.tags.slice(0, 2).map((tag) => (
-                <span
-                  key={tag}
-                  className="rounded-full text-xs px-2 py-0.5"
-                  style={{
-                    backgroundColor: "rgba(139, 92, 246, 0.1)",
-                    color: "var(--color-accent)",
-                  }}
-                >
-                  {tag}
-                </span>
-              ))}
+              {page.tags.slice(0, 2).map((tag) => {
+                const parts = tag.split("/");
+                const leaf = parts[parts.length - 1];
+                return (
+                  <span
+                    key={tag}
+                    className="rounded-full text-xs px-2 py-0.5"
+                    style={{
+                      backgroundColor: "rgba(139, 92, 246, 0.1)",
+                      color: "var(--color-accent)",
+                    }}
+                    title={tag}
+                  >
+                    {leaf}
+                  </span>
+                );
+              })}
               {page.tags.length > 2 && (
                 <span
                   className="text-xs"

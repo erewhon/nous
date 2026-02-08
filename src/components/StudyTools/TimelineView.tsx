@@ -21,6 +21,7 @@ export function TimelineView({
   const [dimensions, setDimensions] = useState({ width: 800, height: 400 });
   const [selectedEvent, setSelectedEvent] = useState<TimelineEvent | null>(null);
   const [hoveredEvent, setHoveredEvent] = useState<TimelineEvent | null>(null);
+  const [layout, setLayout] = useState<"horizontal" | "vertical">("horizontal");
 
   // Update dimensions on resize
   useEffect(() => {
@@ -74,9 +75,6 @@ export function TimelineView({
     if (!svgRef.current || processedEvents.length === 0) return;
 
     const { width, height } = dimensions;
-    const margin = { top: 40, right: 40, bottom: 60, left: 40 };
-    const innerWidth = width - margin.left - margin.right;
-    const innerHeight = height - margin.top - margin.bottom;
 
     // Clear previous content
     d3.select(svgRef.current).selectAll("*").remove();
@@ -86,150 +84,271 @@ export function TimelineView({
       .attr("width", width)
       .attr("height", height);
 
-    // Create scales
     const dateExtent = d3.extent(processedEvents, (d) => d.parsedDate) as [Date, Date];
-    const xScale = d3
-      .scaleTime()
-      .domain(dateExtent)
-      .range([0, innerWidth])
-      .nice();
 
-    // Main group with margin
-    const g = svg
-      .append("g")
-      .attr("transform", `translate(${margin.left},${margin.top})`);
+    if (layout === "vertical") {
+      // ===== VERTICAL LAYOUT =====
+      const margin = { top: 40, right: 40, bottom: 40, left: 80 };
+      const innerWidth = width - margin.left - margin.right;
+      const verticalHeight = Math.max(height, processedEvents.length * 80 + 100);
+      const innerHeight = verticalHeight - margin.top - margin.bottom;
 
-    // Add zoom behavior
-    const zoom = d3
-      .zoom<SVGSVGElement, unknown>()
-      .scaleExtent([0.5, 10])
-      .translateExtent([
-        [-100, 0],
-        [width + 100, height],
-      ])
-      .on("zoom", (event) => {
-        const newXScale = event.transform.rescaleX(xScale);
-        updateTimeline(newXScale);
-      });
+      svg.attr("height", verticalHeight);
 
-    svg.call(zoom);
+      const yScale = d3
+        .scaleTime()
+        .domain(dateExtent)
+        .range([0, innerHeight])
+        .nice();
 
-    // Draw axis
-    const xAxis = d3.axisBottom(xScale).ticks(Math.max(3, innerWidth / 100));
+      const g = svg
+        .append("g")
+        .attr("transform", `translate(${margin.left},${margin.top})`);
 
-    const axisGroup = g
-      .append("g")
-      .attr("class", "x-axis")
-      .attr("transform", `translate(0,${innerHeight / 2})`)
-      .call(xAxis);
+      // Zoom behavior for vertical
+      const zoom = d3
+        .zoom<SVGSVGElement, unknown>()
+        .scaleExtent([0.5, 10])
+        .translateExtent([
+          [0, -100],
+          [width, verticalHeight + 100],
+        ])
+        .on("zoom", (event) => {
+          const newYScale = event.transform.rescaleY(yScale);
+          updateVerticalTimeline(newYScale);
+        });
 
-    axisGroup
-      .selectAll("text")
-      .attr("fill", "var(--color-text-muted)")
-      .attr("font-size", "11px");
+      svg.call(zoom);
 
-    axisGroup.selectAll("line, path").attr("stroke", "var(--color-border)");
+      const centerX = innerWidth / 2;
 
-    // Timeline line
-    g.append("line")
-      .attr("x1", 0)
-      .attr("y1", innerHeight / 2)
-      .attr("x2", innerWidth)
-      .attr("y2", innerHeight / 2)
-      .attr("stroke", "var(--color-border)")
-      .attr("stroke-width", 2);
+      // Y-axis on the left
+      const yAxis = d3.axisLeft(yScale).ticks(Math.max(3, innerHeight / 80));
+      const axisGroup = g
+        .append("g")
+        .attr("class", "y-axis")
+        .attr("transform", `translate(${centerX},0)`)
+        .call(yAxis);
 
-    // Draw events
-    const eventGroups = g
-      .selectAll(".event")
-      .data(processedEvents)
-      .enter()
-      .append("g")
-      .attr("class", "event")
-      .attr("transform", (d, i) => {
-        const x = xScale(d.parsedDate);
-        const y = innerHeight / 2 + (i % 2 === 0 ? -60 : 60);
-        return `translate(${x},${y})`;
-      })
-      .style("cursor", "pointer");
-
-    // Event circles
-    eventGroups
-      .append("circle")
-      .attr("r", 8)
-      .attr("fill", (d) => colorScale(d.category || "default"))
-      .attr("stroke", "var(--color-bg-primary)")
-      .attr("stroke-width", 2);
-
-    // Connector lines
-    eventGroups
-      .append("line")
-      .attr("x1", 0)
-      .attr("y1", (_, i) => (i % 2 === 0 ? 8 : -8))
-      .attr("x2", 0)
-      .attr("y2", (_, i) => (i % 2 === 0 ? 52 : -52))
-      .attr("stroke", "var(--color-border)")
-      .attr("stroke-width", 1)
-      .attr("stroke-dasharray", "2,2");
-
-    // Event labels
-    eventGroups
-      .append("text")
-      .text((d) => (d.title.length > 25 ? d.title.slice(0, 23) + "..." : d.title))
-      .attr("x", 0)
-      .attr("y", (_, i) => (i % 2 === 0 ? -15 : 20))
-      .attr("text-anchor", "middle")
-      .attr("fill", "var(--color-text-secondary)")
-      .attr("font-size", "11px");
-
-    // Date labels
-    eventGroups
-      .append("text")
-      .text((d) => d3.timeFormat("%b %d, %Y")(d.parsedDate))
-      .attr("x", 0)
-      .attr("y", (_, i) => (i % 2 === 0 ? -28 : 35))
-      .attr("text-anchor", "middle")
-      .attr("fill", "var(--color-text-muted)")
-      .attr("font-size", "9px");
-
-    // Event interactions
-    eventGroups
-      .on("mouseenter", function (_event, d) {
-        d3.select(this)
-          .select("circle")
-          .transition()
-          .duration(150)
-          .attr("r", 12)
-          .attr("stroke-width", 3);
-        setHoveredEvent(d);
-      })
-      .on("mouseleave", function () {
-        d3.select(this)
-          .select("circle")
-          .transition()
-          .duration(150)
-          .attr("r", 8)
-          .attr("stroke-width", 2);
-        setHoveredEvent(null);
-      })
-      .on("click", (event, d) => {
-        event.stopPropagation();
-        setSelectedEvent(d);
-      });
-
-    // Update function for zoom
-    function updateTimeline(newXScale: d3.ScaleTime<number, number>) {
-      eventGroups.attr("transform", (d, i) => {
-        const x = newXScale(d.parsedDate);
-        const y = innerHeight / 2 + (i % 2 === 0 ? -60 : 60);
-        return `translate(${x},${y})`;
-      });
-
-      axisGroup.call(d3.axisBottom(newXScale).ticks(Math.max(3, innerWidth / 100)));
-      axisGroup.selectAll("text").attr("fill", "var(--color-text-muted)");
+      axisGroup
+        .selectAll("text")
+        .attr("fill", "var(--color-text-muted)")
+        .attr("font-size", "11px");
       axisGroup.selectAll("line, path").attr("stroke", "var(--color-border)");
+
+      // Vertical timeline line
+      g.append("line")
+        .attr("x1", centerX)
+        .attr("y1", 0)
+        .attr("x2", centerX)
+        .attr("y2", innerHeight)
+        .attr("stroke", "var(--color-border)")
+        .attr("stroke-width", 2);
+
+      // Draw events alternating left/right
+      const offsetX = 120;
+      const eventGroups = g
+        .selectAll(".event")
+        .data(processedEvents)
+        .enter()
+        .append("g")
+        .attr("class", "event")
+        .attr("transform", (d, i) => {
+          const x = centerX + (i % 2 === 0 ? -offsetX : offsetX);
+          const y = yScale(d.parsedDate);
+          return `translate(${x},${y})`;
+        })
+        .style("cursor", "pointer");
+
+      // Event circles
+      eventGroups
+        .append("circle")
+        .attr("r", 8)
+        .attr("fill", (d) => colorScale(d.category || "default"))
+        .attr("stroke", "var(--color-bg-primary)")
+        .attr("stroke-width", 2);
+
+      // Connector lines from circle to center axis
+      eventGroups
+        .append("line")
+        .attr("x1", (_, i) => (i % 2 === 0 ? 8 : -8))
+        .attr("y1", 0)
+        .attr("x2", (_, i) => (i % 2 === 0 ? offsetX - 4 : -(offsetX - 4)))
+        .attr("y2", 0)
+        .attr("stroke", "var(--color-border)")
+        .attr("stroke-width", 1)
+        .attr("stroke-dasharray", "2,2");
+
+      // Event labels
+      eventGroups
+        .append("text")
+        .text((d) => (d.title.length > 25 ? d.title.slice(0, 23) + "..." : d.title))
+        .attr("x", 0)
+        .attr("y", -15)
+        .attr("text-anchor", "middle")
+        .attr("fill", "var(--color-text-secondary)")
+        .attr("font-size", "11px");
+
+      // Date labels
+      eventGroups
+        .append("text")
+        .text((d) => d3.timeFormat("%b %d, %Y")(d.parsedDate))
+        .attr("x", 0)
+        .attr("y", 20)
+        .attr("text-anchor", "middle")
+        .attr("fill", "var(--color-text-muted)")
+        .attr("font-size", "9px");
+
+      // Interactions
+      eventGroups
+        .on("mouseenter", function (_event, d) {
+          d3.select(this).select("circle").transition().duration(150).attr("r", 12).attr("stroke-width", 3);
+          setHoveredEvent(d);
+        })
+        .on("mouseleave", function () {
+          d3.select(this).select("circle").transition().duration(150).attr("r", 8).attr("stroke-width", 2);
+          setHoveredEvent(null);
+        })
+        .on("click", (event, d) => {
+          event.stopPropagation();
+          setSelectedEvent(d);
+        });
+
+      function updateVerticalTimeline(newYScale: d3.ScaleTime<number, number>) {
+        eventGroups.attr("transform", (d, i) => {
+          const x = centerX + (i % 2 === 0 ? -offsetX : offsetX);
+          const y = newYScale(d.parsedDate);
+          return `translate(${x},${y})`;
+        });
+        axisGroup.call(d3.axisLeft(newYScale).ticks(Math.max(3, innerHeight / 80)));
+        axisGroup.selectAll("text").attr("fill", "var(--color-text-muted)");
+        axisGroup.selectAll("line, path").attr("stroke", "var(--color-border)");
+      }
+    } else {
+      // ===== HORIZONTAL LAYOUT (existing) =====
+      const margin = { top: 40, right: 40, bottom: 60, left: 40 };
+      const innerWidth = width - margin.left - margin.right;
+      const innerHeight = height - margin.top - margin.bottom;
+
+      const xScale = d3
+        .scaleTime()
+        .domain(dateExtent)
+        .range([0, innerWidth])
+        .nice();
+
+      const g = svg
+        .append("g")
+        .attr("transform", `translate(${margin.left},${margin.top})`);
+
+      const zoom = d3
+        .zoom<SVGSVGElement, unknown>()
+        .scaleExtent([0.5, 10])
+        .translateExtent([
+          [-100, 0],
+          [width + 100, height],
+        ])
+        .on("zoom", (event) => {
+          const newXScale = event.transform.rescaleX(xScale);
+          updateTimeline(newXScale);
+        });
+
+      svg.call(zoom);
+
+      const xAxis = d3.axisBottom(xScale).ticks(Math.max(3, innerWidth / 100));
+      const axisGroup = g
+        .append("g")
+        .attr("class", "x-axis")
+        .attr("transform", `translate(0,${innerHeight / 2})`)
+        .call(xAxis);
+
+      axisGroup
+        .selectAll("text")
+        .attr("fill", "var(--color-text-muted)")
+        .attr("font-size", "11px");
+      axisGroup.selectAll("line, path").attr("stroke", "var(--color-border)");
+
+      g.append("line")
+        .attr("x1", 0)
+        .attr("y1", innerHeight / 2)
+        .attr("x2", innerWidth)
+        .attr("y2", innerHeight / 2)
+        .attr("stroke", "var(--color-border)")
+        .attr("stroke-width", 2);
+
+      const eventGroups = g
+        .selectAll(".event")
+        .data(processedEvents)
+        .enter()
+        .append("g")
+        .attr("class", "event")
+        .attr("transform", (d, i) => {
+          const x = xScale(d.parsedDate);
+          const y = innerHeight / 2 + (i % 2 === 0 ? -60 : 60);
+          return `translate(${x},${y})`;
+        })
+        .style("cursor", "pointer");
+
+      eventGroups
+        .append("circle")
+        .attr("r", 8)
+        .attr("fill", (d) => colorScale(d.category || "default"))
+        .attr("stroke", "var(--color-bg-primary)")
+        .attr("stroke-width", 2);
+
+      eventGroups
+        .append("line")
+        .attr("x1", 0)
+        .attr("y1", (_, i) => (i % 2 === 0 ? 8 : -8))
+        .attr("x2", 0)
+        .attr("y2", (_, i) => (i % 2 === 0 ? 52 : -52))
+        .attr("stroke", "var(--color-border)")
+        .attr("stroke-width", 1)
+        .attr("stroke-dasharray", "2,2");
+
+      eventGroups
+        .append("text")
+        .text((d) => (d.title.length > 25 ? d.title.slice(0, 23) + "..." : d.title))
+        .attr("x", 0)
+        .attr("y", (_, i) => (i % 2 === 0 ? -15 : 20))
+        .attr("text-anchor", "middle")
+        .attr("fill", "var(--color-text-secondary)")
+        .attr("font-size", "11px");
+
+      eventGroups
+        .append("text")
+        .text((d) => d3.timeFormat("%b %d, %Y")(d.parsedDate))
+        .attr("x", 0)
+        .attr("y", (_, i) => (i % 2 === 0 ? -28 : 35))
+        .attr("text-anchor", "middle")
+        .attr("fill", "var(--color-text-muted)")
+        .attr("font-size", "9px");
+
+      eventGroups
+        .on("mouseenter", function (_event, d) {
+          d3.select(this).select("circle").transition().duration(150).attr("r", 12).attr("stroke-width", 3);
+          setHoveredEvent(d);
+        })
+        .on("mouseleave", function () {
+          d3.select(this).select("circle").transition().duration(150).attr("r", 8).attr("stroke-width", 2);
+          setHoveredEvent(null);
+        })
+        .on("click", (event, d) => {
+          event.stopPropagation();
+          setSelectedEvent(d);
+        });
+
+      function updateTimeline(newXScale: d3.ScaleTime<number, number>) {
+        eventGroups.attr("transform", (d, i) => {
+          const x = newXScale(d.parsedDate);
+          const y = innerHeight / 2 + (i % 2 === 0 ? -60 : 60);
+          return `translate(${x},${y})`;
+        });
+        axisGroup.call(d3.axisBottom(newXScale).ticks(Math.max(3, innerWidth / 100)));
+        axisGroup.selectAll("text").attr("fill", "var(--color-text-muted)");
+        axisGroup.selectAll("line, path").attr("stroke", "var(--color-border)");
+      }
     }
-  }, [processedEvents, dimensions, colorScale]);
+  }, [processedEvents, dimensions, colorScale, layout]);
 
   const handleNavigateToPage = useCallback(
     (pageId: string) => {
@@ -314,22 +433,49 @@ export function TimelineView({
             ))}
           </div>
         )}
-        <button
-          onClick={handleExportSvg}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs hover:opacity-80 transition-opacity"
-          style={{
-            backgroundColor: "var(--color-bg-tertiary)",
-            color: "var(--color-text-secondary)",
-            border: "1px solid var(--color-border)",
-          }}
-        >
-          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-            <polyline points="7 10 12 15 17 10" />
-            <line x1="12" y1="15" x2="12" y2="3" />
-          </svg>
-          Export SVG
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setLayout(layout === "horizontal" ? "vertical" : "horizontal")}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs hover:opacity-80 transition-opacity"
+            style={{
+              backgroundColor: "var(--color-bg-tertiary)",
+              color: "var(--color-text-secondary)",
+              border: "1px solid var(--color-border)",
+            }}
+            title={`Switch to ${layout === "horizontal" ? "vertical" : "horizontal"} layout`}
+          >
+            {layout === "horizontal" ? (
+              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="12" y1="3" x2="12" y2="21" />
+                <circle cx="12" cy="8" r="2" />
+                <circle cx="12" cy="16" r="2" />
+              </svg>
+            ) : (
+              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="3" y1="12" x2="21" y2="12" />
+                <circle cx="8" cy="12" r="2" />
+                <circle cx="16" cy="12" r="2" />
+              </svg>
+            )}
+            {layout === "horizontal" ? "Vertical" : "Horizontal"}
+          </button>
+          <button
+            onClick={handleExportSvg}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs hover:opacity-80 transition-opacity"
+            style={{
+              backgroundColor: "var(--color-bg-tertiary)",
+              color: "var(--color-text-secondary)",
+              border: "1px solid var(--color-border)",
+            }}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            Export SVG
+          </button>
+        </div>
       </div>
 
       {/* Timeline visualization */}

@@ -197,7 +197,8 @@ export type StudyToolType =
   | "flashcards"
   | "briefing"
   | "timeline"
-  | "concept-map";
+  | "concept-map"
+  | "knowledge-graph";
 
 export interface StudyToolsState {
   isOpen: boolean;

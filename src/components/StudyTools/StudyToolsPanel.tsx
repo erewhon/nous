@@ -8,6 +8,7 @@ import { FAQPanel } from "./FAQPanel";
 import { BriefingPanel } from "./BriefingPanel";
 import { TimelineView } from "./TimelineView";
 import { ConceptMapView } from "./ConceptMapView";
+import { CrossNotebookGraph } from "./CrossNotebookGraph";
 import { InfographicGenerator } from "../Infographics/InfographicGenerator";
 import { VideoGeneratorDialog } from "../VideoGenerator/VideoGeneratorDialog";
 import { MediaLibrary } from "../MediaLibrary/MediaLibrary";
@@ -106,6 +107,19 @@ const STUDY_TOOLS: Array<{
       </svg>
     ),
     color: "#3b82f6",
+  },
+  {
+    id: "knowledge-graph",
+    name: "Knowledge Graph",
+    description: "Cross-notebook link visualization",
+    icon: (
+      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="10" />
+        <line x1="2" y1="12" x2="22" y2="12" />
+        <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+      </svg>
+    ),
+    color: "#f97316",
   },
 ];
 
@@ -290,7 +304,7 @@ export function StudyToolsPanel({ isOpen, onClose }: StudyToolsPanelProps) {
                     <button
                       key={tool.id}
                       onClick={() => setActiveTool(tool.id)}
-                      disabled={selectedPages.length === 0}
+                      disabled={tool.id !== "knowledge-graph" && selectedPages.length === 0}
                       className="p-4 rounded-xl border text-left transition-all hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed hover:border-[--color-accent]"
                       style={{
                         backgroundColor: "var(--color-bg-secondary)",
@@ -451,28 +465,30 @@ export function StudyToolsPanel({ isOpen, onClose }: StudyToolsPanelProps) {
             ) : (
               // Active tool panel
               <div className="p-6">
-                {/* Page info bar */}
-                <div
-                  className="mb-4 p-3 rounded-lg flex items-center justify-between"
-                  style={{ backgroundColor: "var(--color-bg-secondary)" }}
-                >
-                  <span
-                    className="text-sm"
-                    style={{ color: "var(--color-text-secondary)" }}
+                {/* Page info bar (not shown for knowledge graph) */}
+                {activeTool !== "knowledge-graph" && (
+                  <div
+                    className="mb-4 p-3 rounded-lg flex items-center justify-between"
+                    style={{ backgroundColor: "var(--color-bg-secondary)" }}
                   >
-                    Using {selectedPages.length} page{selectedPages.length !== 1 ? "s" : ""}:
-                    <span className="font-medium ml-1">
-                      {selectedPages.map((p) => p.title).join(", ")}
+                    <span
+                      className="text-sm"
+                      style={{ color: "var(--color-text-secondary)" }}
+                    >
+                      Using {selectedPages.length} page{selectedPages.length !== 1 ? "s" : ""}:
+                      <span className="font-medium ml-1">
+                        {selectedPages.map((p) => p.title).join(", ")}
+                      </span>
                     </span>
-                  </span>
-                  <button
-                    onClick={() => setShowPageSelector(true)}
-                    className="text-sm hover:underline"
-                    style={{ color: "var(--color-accent)" }}
-                  >
-                    Change
-                  </button>
-                </div>
+                    <button
+                      onClick={() => setShowPageSelector(true)}
+                      className="text-sm hover:underline"
+                      style={{ color: "var(--color-accent)" }}
+                    >
+                      Change
+                    </button>
+                  </div>
+                )}
 
                 {/* Tool-specific content */}
                 {activeTool === "study-guide" && (
@@ -542,6 +558,15 @@ export function StudyToolsPanel({ isOpen, onClose }: StudyToolsPanelProps) {
                     onClear={clearConceptGraph}
                     pages={selectedPages}
                   />
+                )}
+
+                {activeTool === "knowledge-graph" && (
+                  <div className="h-[500px]">
+                    <CrossNotebookGraph
+                      onNavigateToPage={handleNavigateToPage}
+                      onClose={onClose}
+                    />
+                  </div>
                 )}
               </div>
             )}
