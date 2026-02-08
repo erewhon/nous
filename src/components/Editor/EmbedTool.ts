@@ -695,9 +695,18 @@ export class EmbedTool implements BlockTool {
           blockEl.innerHTML = `<p>${block.data.text || ""}</p>`;
           break;
         case "list":
-          const items = (block.data.items as string[]) || [];
+          const items = (block.data.items as Array<string | { content?: string; items?: unknown[] }>) || [];
           const listType = block.data.style === "ordered" ? "ol" : "ul";
-          blockEl.innerHTML = `<${listType}>${items.map(item => `<li>${item}</li>`).join("")}</${listType}>`;
+          const renderListItems = (listItems: Array<string | { content?: string; items?: unknown[] }>): string => {
+            return listItems.map(item => {
+              const text = typeof item === "string" ? item : item.content || "";
+              const children = typeof item === "object" && Array.isArray(item.items) && item.items.length > 0
+                ? `<${listType}>${renderListItems(item.items as Array<string | { content?: string; items?: unknown[] }>)}</${listType}>`
+                : "";
+              return `<li>${text}${children}</li>`;
+            }).join("");
+          };
+          blockEl.innerHTML = `<${listType}>${renderListItems(items)}</${listType}>`;
           break;
         case "checklist":
           const checkItems = (block.data.items as Array<{ text: string; checked: boolean }>) || [];

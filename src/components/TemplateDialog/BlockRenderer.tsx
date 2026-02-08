@@ -101,10 +101,16 @@ function ChecklistBlock({ data }: { data: Record<string, unknown> }) {
 }
 
 function ListBlock({ data }: { data: Record<string, unknown> }) {
-  const items = (data.items as Array<string | { content?: string }>) || [];
+  const items = (data.items as Array<string | { content?: string; items?: unknown[] }>) || [];
   const style = (data.style as string) || "unordered";
-  const Tag = style === "ordered" ? "ol" : "ul";
 
+  return (
+    <NestedList items={items} style={style} />
+  );
+}
+
+function NestedList({ items, style }: { items: Array<string | { content?: string; items?: unknown[] }>; style: string }) {
+  const Tag = style === "ordered" ? "ol" : "ul";
   return (
     <Tag
       className={`space-y-1 pl-5 text-sm ${style === "ordered" ? "list-decimal" : "list-disc"}`}
@@ -112,7 +118,15 @@ function ListBlock({ data }: { data: Record<string, unknown> }) {
     >
       {items.map((item, i) => {
         const text = typeof item === "string" ? item : item.content || "";
-        return <li key={i} dangerouslySetInnerHTML={{ __html: text }} />;
+        const children = typeof item === "object" && Array.isArray(item.items) && item.items.length > 0
+          ? item.items as Array<string | { content?: string; items?: unknown[] }>
+          : null;
+        return (
+          <li key={i}>
+            <span dangerouslySetInnerHTML={{ __html: text }} />
+            {children && <NestedList items={children} style={style} />}
+          </li>
+        );
       })}
     </Tag>
   );

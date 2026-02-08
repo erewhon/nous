@@ -325,6 +325,76 @@ impl VectorIndex {
         Ok(results)
     }
 
+    /// Find pages similar to a given page by averaging its chunk embeddings.
+    pub fn find_similar_pages(
+        &self,
+        page_id: Uuid,
+        limit: usize,
+        notebook_id: Option<Uuid>,
+    ) -> Result<Vec<SemanticSearchResult>> {
+        // Get all embeddings for the source page
+        let mut stmt = self.conn.prepare(
+            r#"
+            SELECT e.embedding
+            FROM embeddings e
+            JOIN chunks c ON c.id = e.chunk_id
+            WHERE c.page_id = ?1
+            "#,
+        )?;
+
+        let embeddings: Vec<Vec<f32>> = stmt
+            .query_map(params![page_id.to_string()], |row| {
+                row.get::<_, Vec<u8>>(0)
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?
+            .into_iter()
+            .map(|bytes| deserialize_embedding(&bytes))
+            .collect();
+
+        if embeddings.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Average all chunk embeddings to get a page-level embedding
+        let dim = embeddings[0].len();
+        let mut avg = vec![0.0f32; dim];
+        for emb in &embeddings {
+            for (i, v) in emb.iter().enumerate() {
+                avg[i] += v;
+            }
+        }
+        let n = embeddings.len() as f32;
+        for v in avg.iter_mut() {
+            *v /= n;
+        }
+
+        // Search with the averaged embedding, requesting extra results to account for filtering
+        let raw_results = self.search(&avg, limit + 1, notebook_id)?;
+
+        // Exclude the source page and aggregate by page_id (keep best score per page)
+        let page_id_str = page_id.to_string();
+        let mut seen: HashMap<String, SemanticSearchResult> = HashMap::new();
+
+        for r in raw_results {
+            if r.page_id == page_id_str {
+                continue;
+            }
+            seen.entry(r.page_id.clone())
+                .and_modify(|existing| {
+                    if r.score > existing.score {
+                        *existing = r.clone();
+                    }
+                })
+                .or_insert(r);
+        }
+
+        let mut results: Vec<SemanticSearchResult> = seen.into_values().collect();
+        results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        results.truncate(limit);
+
+        Ok(results)
+    }
+
     /// Rebuild the index (clear and prepare for re-indexing).
     pub fn rebuild(&mut self) -> Result<()> {
         let tx = self.conn.transaction()?;

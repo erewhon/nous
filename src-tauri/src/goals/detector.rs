@@ -32,29 +32,109 @@ impl GoalDetector {
             return Ok(None);
         };
 
+        // Handle legacy format by checking if we need to use the old fields
+        if auto_detect.is_legacy() {
+            return self.check_goal_completion_legacy(goal, auto_detect, date);
+        }
+
+        if auto_detect.checks.is_empty() {
+            return Ok(None);
+        }
+
+        let mut check_results: Vec<(u32, bool)> = Vec::new();
+
+        for check in &auto_detect.checks {
+            let threshold = check.threshold.unwrap_or(1);
+            let value = match check.detect_type {
+                AutoDetectType::GitCommit => {
+                    let repo_paths = check.get_repo_paths();
+                    if repo_paths.is_empty() {
+                        continue;
+                    }
+                    self.detect_git_commits_multi(&repo_paths, date)?
+                }
+                AutoDetectType::JjCommit => {
+                    let repo_paths = check.get_repo_paths();
+                    if repo_paths.is_empty() {
+                        continue;
+                    }
+                    self.detect_jj_commits_multi(&repo_paths, date)?
+                }
+                AutoDetectType::PageEdit => {
+                    let (_, count) = self.detect_page_edits(&check.scope, date)?;
+                    count
+                }
+                AutoDetectType::PageCreate => {
+                    let (_, count) = self.detect_page_creates(&check.scope, date)?;
+                    count
+                }
+                AutoDetectType::YoutubePublish => {
+                    let Some(ref channel_id) = check.youtube_channel_id else {
+                        continue;
+                    };
+                    self.detect_youtube_publishes(channel_id, date, goal.frequency.clone())?
+                }
+            };
+            check_results.push((value, value >= threshold));
+        }
+
+        if check_results.is_empty() {
+            return Ok(None);
+        }
+
+        let total_value: u32 = check_results.iter().map(|(v, _)| *v).sum();
+        let completed = match auto_detect.combine_mode {
+            CheckCombineMode::Any => check_results.iter().any(|(_, p)| *p),
+            CheckCombineMode::All => check_results.iter().all(|(_, p)| *p),
+        };
+
+        Ok(Some(GoalProgress::new_auto(goal.id, date, completed, total_value)))
+    }
+
+    /// Legacy check for old single-check format (before migration)
+    fn check_goal_completion_legacy(
+        &self,
+        goal: &Goal,
+        auto_detect: &AutoDetectConfig,
+        date: NaiveDate,
+    ) -> Result<Option<GoalProgress>> {
+        let Some(ref detect_type) = auto_detect.detect_type else {
+            return Ok(None);
+        };
+        let Some(ref scope) = auto_detect.scope else {
+            return Ok(None);
+        };
+
         let threshold = auto_detect.threshold.unwrap_or(1);
 
-        let value = match auto_detect.detect_type {
+        // Get repo paths from legacy fields
+        let repo_paths: Vec<&str> = if !auto_detect.repo_paths.is_empty() {
+            auto_detect.repo_paths.iter().map(|s| s.as_str()).collect()
+        } else if let Some(ref path) = auto_detect.repo_path {
+            vec![path.as_str()]
+        } else {
+            vec![]
+        };
+
+        let value = match detect_type {
             AutoDetectType::GitCommit => {
-                let repo_paths = auto_detect.get_repo_paths();
                 if repo_paths.is_empty() {
                     return Ok(None);
                 }
                 self.detect_git_commits_multi(&repo_paths, date)?
             }
             AutoDetectType::JjCommit => {
-                let repo_paths = auto_detect.get_repo_paths();
                 if repo_paths.is_empty() {
                     return Ok(None);
                 }
                 self.detect_jj_commits_multi(&repo_paths, date)?
             }
             AutoDetectType::PageEdit => {
-                let (_, count) = self.detect_page_edits(&auto_detect.scope, date)?;
+                let (_, count) = self.detect_page_edits(scope, date)?;
                 count
             }
             AutoDetectType::PageCreate => {
-                let (_, count) = self.detect_page_creates(&auto_detect.scope, date)?;
+                let (_, count) = self.detect_page_creates(scope, date)?;
                 count
             }
             AutoDetectType::YoutubePublish => {

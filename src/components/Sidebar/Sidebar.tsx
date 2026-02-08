@@ -6,6 +6,8 @@ import { useInboxStore } from "../../stores/inboxStore";
 import { useFlashcardStore } from "../../stores/flashcardStore";
 import { useGoalsStore } from "../../stores/goalsStore";
 import { useThemeStore } from "../../stores/themeStore";
+import { useDailyNotesStore } from "../../stores/dailyNotesStore";
+import { useTasksStore } from "../../stores/tasksStore";
 import { NotebookList } from "../NotebookList/NotebookList";
 import { LibrarySwitcher } from "../Library";
 
@@ -15,13 +17,15 @@ interface SidebarProps {
 
 export function Sidebar({ width = 256 }: SidebarProps) {
   const { selectedNotebookId, selectNotebook, createNotebook, getVisibleNotebooks, showArchived, toggleShowArchived, getArchivedNotebooks } = useNotebookStore();
-  const { getRecentPages, clearRecentPages, getFavoritePages, selectPage } = usePageStore();
+  const { pages, selectedPageId, getRecentPages, clearRecentPages, getFavoritePages, selectPage } = usePageStore();
   const visibleNotebooks = getVisibleNotebooks();
   const archivedCount = getArchivedNotebooks().length;
   const openActionLibrary = useActionStore((state) => state.openActionLibrary);
   const { summary, openQuickCapture, openInboxPanel } = useInboxStore();
   const { togglePanel: toggleFlashcards, stats: flashcardStats } = useFlashcardStore();
   const { summary: goalsSummary, togglePanel: toggleGoals } = useGoalsStore();
+  const { togglePanel: toggleDailyNotes } = useDailyNotesStore();
+  const { summary: tasksSummary, togglePanel: toggleTasks } = useTasksStore();
   const autoHidePanels = useThemeStore((state) => state.autoHidePanels);
   const setAutoHidePanels = useThemeStore((state) => state.setAutoHidePanels);
   const showRecentPages = useThemeStore((state) => state.showRecentPages);
@@ -367,12 +371,12 @@ export function Sidebar({ width = 256 }: SidebarProps) {
         className="border-t px-4 py-3"
         style={{ borderColor: "var(--color-border)" }}
       >
-        {/* Tool buttons - arranged in a grid */}
-        <div className="grid grid-cols-8 gap-1">
+        {/* Tool buttons - arranged in a flex grid */}
+        <div className="flex flex-wrap justify-center gap-1">
           {/* Quick Capture */}
           <button
             onClick={openQuickCapture}
-            className="flex h-8 w-full items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
+            className="flex h-8 w-8 items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
             style={{ color: "var(--color-text-muted)" }}
             title="Quick Capture (⌘⇧C)"
           >
@@ -390,10 +394,35 @@ export function Sidebar({ width = 256 }: SidebarProps) {
               <path d="M12 5v14M5 12h14" />
             </svg>
           </button>
+          {/* Web Clipper */}
+          <button
+            onClick={() => {
+              window.dispatchEvent(new CustomEvent("open-web-clipper"));
+            }}
+            className="flex h-8 w-8 items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
+            style={{ color: "var(--color-text-muted)" }}
+            title="Web Clipper (⌘⇧L)"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="15"
+              height="15"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <circle cx="12" cy="12" r="10" />
+              <path d="M2 12h20" />
+              <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+            </svg>
+          </button>
           {/* Inbox */}
           <button
             onClick={openInboxPanel}
-            className="relative flex h-8 w-full items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
+            className="relative flex h-8 w-8 items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
             style={{ color: "var(--color-text-muted)" }}
             title="Inbox (⌘⇧I)"
           >
@@ -432,7 +461,7 @@ export function Sidebar({ width = 256 }: SidebarProps) {
                 })
               );
             }}
-            className="flex h-8 w-full items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
+            className="flex h-8 w-8 items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
             style={{ color: "var(--color-text-muted)" }}
             title="AI Chat (⌘⇧A)"
           >
@@ -453,7 +482,7 @@ export function Sidebar({ width = 256 }: SidebarProps) {
           {/* Actions */}
           <button
             onClick={openActionLibrary}
-            className="flex h-8 w-full items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
+            className="flex h-8 w-8 items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
             style={{ color: "var(--color-text-muted)" }}
             title="Actions (⌘⇧X)"
           >
@@ -474,7 +503,7 @@ export function Sidebar({ width = 256 }: SidebarProps) {
           {/* Flashcards */}
           <button
             onClick={toggleFlashcards}
-            className="relative flex h-8 w-full items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
+            className="relative flex h-8 w-8 items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
             style={{ color: "var(--color-text-muted)" }}
             title="Flashcards (⌘⇧F)"
           >
@@ -504,7 +533,7 @@ export function Sidebar({ width = 256 }: SidebarProps) {
           {/* Goals */}
           <button
             onClick={toggleGoals}
-            className="relative flex h-8 w-full items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
+            className="relative flex h-8 w-8 items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
             style={{ color: "var(--color-text-muted)" }}
             title="Goals"
           >
@@ -536,6 +565,67 @@ export function Sidebar({ width = 256 }: SidebarProps) {
               </span>
             )}
           </button>
+          {/* Tasks */}
+          <button
+            onClick={toggleTasks}
+            className="relative flex h-8 w-8 items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
+            style={{ color: "var(--color-text-muted)" }}
+            title="Tasks"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="15"
+              height="15"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M9 11l3 3L22 4" />
+              <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+            </svg>
+            {tasksSummary.overdueCount > 0 ? (
+              <span
+                className="absolute right-0.5 top-0.5 flex h-3.5 min-w-[14px] items-center justify-center rounded-full px-0.5 text-[9px] font-bold"
+                style={{ backgroundColor: "rgba(239, 68, 68, 0.2)", color: "#ef4444" }}
+              >
+                {tasksSummary.overdueCount}
+              </span>
+            ) : tasksSummary.dueTodayCount > 0 ? (
+              <span
+                className="absolute right-0.5 top-0.5 flex h-3.5 min-w-[14px] items-center justify-center rounded-full px-0.5 text-[9px] font-bold"
+                style={{ backgroundColor: "var(--color-accent)", color: "white" }}
+              >
+                {tasksSummary.dueTodayCount}
+              </span>
+            ) : null}
+          </button>
+          {/* Daily Notes */}
+          <button
+            onClick={toggleDailyNotes}
+            className="flex h-8 w-8 items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
+            style={{ color: "var(--color-text-muted)" }}
+            title="Daily Notes (⌘⇧D)"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="15"
+              height="15"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+              <line x1="16" y1="2" x2="16" y2="6" />
+              <line x1="8" y1="2" x2="8" y2="6" />
+              <line x1="3" y1="10" x2="21" y2="10" />
+            </svg>
+          </button>
           {/* Graph View */}
           <button
             onClick={() => {
@@ -547,7 +637,7 @@ export function Sidebar({ width = 256 }: SidebarProps) {
                 })
               );
             }}
-            className="flex h-8 w-full items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
+            className="flex h-8 w-8 items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
             style={{ color: "var(--color-text-muted)" }}
             title="Graph View (⌘G)"
           >
@@ -569,6 +659,42 @@ export function Sidebar({ width = 256 }: SidebarProps) {
               <line x1="9.5" y1="14.5" x2="6.5" y2="17.5" />
             </svg>
           </button>
+          {/* Random Note */}
+          <button
+            onClick={() => {
+              const candidates = pages.filter(
+                (p) =>
+                  p.notebookId === selectedNotebookId &&
+                  !p.deletedAt &&
+                  p.id !== selectedPageId
+              );
+              if (candidates.length > 0) {
+                const pick = candidates[Math.floor(Math.random() * candidates.length)];
+                selectPage(pick.id);
+              }
+            }}
+            className="flex h-8 w-8 items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
+            style={{ color: "var(--color-text-muted)" }}
+            title="Random Note"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="15"
+              height="15"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M2 18h1.4c1.3 0 2.5-.6 3.3-1.7l6.1-8.6c.7-1.1 2-1.7 3.3-1.7H22" />
+              <path d="m18 2 4 4-4 4" />
+              <path d="M2 6h1.9c1.5 0 2.9.9 3.6 2.2" />
+              <path d="M22 18h-5.9c-1.3 0-2.6-.7-3.3-1.8l-.5-.8" />
+              <path d="m18 14 4 4-4 4" />
+            </svg>
+          </button>
           {/* Settings */}
           <button
             onClick={() => {
@@ -580,7 +706,7 @@ export function Sidebar({ width = 256 }: SidebarProps) {
                 })
               );
             }}
-            className="flex h-8 w-full items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
+            className="flex h-8 w-8 items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
             style={{ color: "var(--color-text-muted)" }}
             title="Settings (⌘,)"
           >

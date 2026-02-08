@@ -12,6 +12,8 @@ import {
   checkExternalChanges,
   syncFromExternalEditor,
   endExternalEditSession,
+  markAsDailyNote,
+  unmarkDailyNote,
   type EditorConfig,
   type EditSession,
 } from "../../utils/api";
@@ -22,9 +24,13 @@ import { PageSettingsDialog } from "../PageSettings";
 import { PageHistoryDialog } from "../PageHistory";
 import { WritingAssistancePanel } from "./WritingAssistancePanel";
 import { AudioGenerateDialog } from "../Audio";
+import { PresentationDialog } from "../Presentation";
+import { PrintDialog } from "../Print";
 import { useFolderStore } from "../../stores/folderStore";
 import { useToastStore } from "../../stores/toastStore";
 import { useDrawingStore } from "../../stores/drawingStore";
+import { WritingGoalProgress } from "./WritingGoalProgress";
+import { WritingGoalSettings } from "./WritingGoalSettings";
 import type { PageStats } from "../../utils/pageStats";
 
 interface PageHeaderProps {
@@ -42,6 +48,8 @@ interface PageHeaderProps {
   canRedo?: boolean;
   onUndo?: () => void;
   onRedo?: () => void;
+  onToggleOutline?: () => void;
+  showOutline?: boolean;
 }
 
 export function PageHeader({
@@ -59,6 +67,8 @@ export function PageHeader({
   canRedo = false,
   onUndo,
   onRedo,
+  onToggleOutline,
+  showOutline = false,
 }: PageHeaderProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [title, setTitle] = useState(page.title);
@@ -68,12 +78,19 @@ export function PageHeader({
   const [showPageHistory, setShowPageHistory] = useState(false);
   const [showWritingAssistance, setShowWritingAssistance] = useState(false);
   const [showAudioGenerate, setShowAudioGenerate] = useState(false);
+  const [showPresentation, setShowPresentation] = useState(false);
+  const [showPrint, setShowPrint] = useState(false);
   const [externalEditSession, setExternalEditSession] =
     useState<EditSession | null>(null);
   const [availableEditors, setAvailableEditors] = useState<EditorConfig[]>([]);
   const [showEditorPicker, setShowEditorPicker] = useState(false);
   const [hasExternalChanges, setHasExternalChanges] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [showWritingGoalSettings, setShowWritingGoalSettings] = useState(false);
+  const [showDailyNoteDialog, setShowDailyNoteDialog] = useState(false);
+  const [dailyNoteDate, setDailyNoteDate] = useState(
+    new Date().toISOString().split("T")[0]
+  );
   const inputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const {
@@ -83,6 +100,7 @@ export function PageHeader({
     unarchivePage,
     createPage,
     updatePageContent,
+    toggleFavorite,
   } = usePageStore();
   const { loadFolders } = useFolderStore();
   const { getTemplateForPage } = useTemplateStore();
@@ -221,6 +239,36 @@ export function PageHeader({
   const handleUnarchive = async () => {
     setIsMenuOpen(false);
     await unarchivePage(page.notebookId, page.id);
+  };
+
+  const handleMarkAsDailyNote = async () => {
+    try {
+      await markAsDailyNote(page.notebookId, page.id, dailyNoteDate);
+      toast.success(`Marked as daily note for ${dailyNoteDate}`);
+      setShowDailyNoteDialog(false);
+      // Refresh the page to show updated state
+      selectPage(page.id);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to mark as daily note";
+      toast.error(message);
+    }
+  };
+
+  const handleUnmarkDailyNote = async () => {
+    setIsMenuOpen(false);
+    try {
+      await unmarkDailyNote(page.notebookId, page.id);
+      toast.success("Removed daily note marking");
+      // Refresh the page to show updated state
+      selectPage(page.id);
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Failed to unmark as daily note";
+      toast.error(message);
+    }
   };
 
   const handleOpenInEditor = async (editor?: EditorConfig) => {
@@ -475,6 +523,18 @@ export function PageHeader({
                   AI Prompt
                 </span>
               )}
+              {page.isDailyNote && (
+                <span
+                  className="rounded-full px-2.5 py-0.5 text-xs font-medium"
+                  style={{
+                    backgroundColor: "rgba(34, 197, 94, 0.15)",
+                    color: "rgb(34, 197, 94)",
+                  }}
+                  title={`Daily Note: ${page.dailyNoteDate}`}
+                >
+                  Daily Note
+                </span>
+              )}
               {page.isArchived && (
                 <span
                   className="rounded-full px-2.5 py-0.5 text-xs font-medium"
@@ -517,6 +577,45 @@ export function PageHeader({
             Use Template
           </button>
         )}
+
+        {/* Star/Favorite button */}
+        <button
+          onClick={() => toggleFavorite(page.notebookId, page.id)}
+          className="ml-4 rounded-lg p-2 transition-colors hover:opacity-80"
+          style={{ backgroundColor: "var(--color-bg-tertiary)" }}
+          title={page.isFavorite ? "Unstar page (Ctrl+Shift+S)" : "Star page (Ctrl+Shift+S)"}
+        >
+          {page.isFavorite ? (
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="rgb(250, 204, 21)"
+              stroke="rgb(250, 204, 21)"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+            </svg>
+          ) : (
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              style={{ color: "var(--color-text-muted)" }}
+            >
+              <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+            </svg>
+          )}
+        </button>
 
         {/* Undo/Redo buttons */}
         <div className="ml-4 flex items-center">
@@ -606,6 +705,41 @@ export function PageHeader({
                 {historyCount > 9 ? "9+" : historyCount}
               </span>
             )}
+          </button>
+        )}
+
+        {/* Outline toggle button */}
+        {onToggleOutline && (
+          <button
+            onClick={onToggleOutline}
+            className="ml-2 rounded-lg p-2 transition-colors hover:opacity-80"
+            style={{
+              backgroundColor: showOutline
+                ? "var(--color-selection)"
+                : "var(--color-bg-tertiary)",
+            }}
+            title="Toggle outline"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              style={{
+                color: showOutline
+                  ? "var(--color-accent)"
+                  : "var(--color-text-muted)",
+              }}
+            >
+              <line x1="3" y1="6" x2="21" y2="6" />
+              <line x1="7" y1="12" x2="21" y2="12" />
+              <line x1="11" y1="18" x2="21" y2="18" />
+            </svg>
           </button>
         )}
 
@@ -917,6 +1051,56 @@ export function PageHeader({
                 </svg>
                 Generate Audio
               </button>
+              <button
+                onClick={() => {
+                  setIsMenuOpen(false);
+                  setShowPresentation(true);
+                }}
+                className="flex w-full items-center gap-3 px-4 py-2 text-left text-sm transition-colors hover:opacity-80"
+                style={{ color: "var(--color-text-secondary)" }}
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
+                  <line x1="8" y1="21" x2="16" y2="21" />
+                  <line x1="12" y1="17" x2="12" y2="21" />
+                </svg>
+                Present as Slides
+              </button>
+              <button
+                onClick={() => {
+                  setIsMenuOpen(false);
+                  setShowPrint(true);
+                }}
+                className="flex w-full items-center gap-3 px-4 py-2 text-left text-sm transition-colors hover:opacity-80"
+                style={{ color: "var(--color-text-secondary)" }}
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <polyline points="6 9 6 2 18 2 18 9" />
+                  <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
+                  <rect x="6" y="14" width="12" height="8" />
+                </svg>
+                Print / PDF
+              </button>
               <div
                 className="my-1 border-t"
                 style={{ borderColor: "var(--color-border)" }}
@@ -967,6 +1151,86 @@ export function PageHeader({
                   Archive Page
                 </button>
               )}
+              {/* Daily Note options */}
+              {page.isDailyNote ? (
+                <button
+                  onClick={handleUnmarkDailyNote}
+                  className="flex w-full items-center gap-3 px-4 py-2 text-left text-sm transition-colors hover:opacity-80"
+                  style={{ color: "var(--color-text-muted)" }}
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+                    <line x1="16" y1="2" x2="16" y2="6" />
+                    <line x1="8" y1="2" x2="8" y2="6" />
+                    <line x1="3" y1="10" x2="21" y2="10" />
+                    <line x1="9" y1="16" x2="15" y2="16" />
+                  </svg>
+                  Unmark as Daily Note
+                </button>
+              ) : (
+                <button
+                  onClick={() => {
+                    setIsMenuOpen(false);
+                    setShowDailyNoteDialog(true);
+                  }}
+                  className="flex w-full items-center gap-3 px-4 py-2 text-left text-sm transition-colors hover:opacity-80"
+                  style={{ color: "var(--color-text-secondary)" }}
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+                    <line x1="16" y1="2" x2="16" y2="6" />
+                    <line x1="8" y1="2" x2="8" y2="6" />
+                    <line x1="3" y1="10" x2="21" y2="10" />
+                  </svg>
+                  Mark as Daily Note
+                </button>
+              )}
+
+              {/* Writing Goal */}
+              <button
+                onClick={() => {
+                  setIsMenuOpen(false);
+                  setShowWritingGoalSettings(true);
+                }}
+                className="flex w-full items-center gap-3 px-4 py-2 text-left text-sm transition-colors hover:opacity-80"
+                style={{ color: "var(--color-text-secondary)" }}
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                  <polyline points="22 4 12 14.01 9 11.01" />
+                </svg>
+                Writing Goal
+              </button>
             </div>
           )}
         </div>
@@ -1040,6 +1304,11 @@ export function PageHeader({
             </button>
           </div>
         )}
+
+        {/* Writing goal progress */}
+        <div className="ml-2">
+          <WritingGoalProgress onOpenSettings={() => setShowWritingGoalSettings(true)} />
+        </div>
 
         {/* Save status */}
         <div
@@ -1273,6 +1542,87 @@ export function PageHeader({
         pageId={page.id}
         pageTitle={page.title || "Untitled"}
       />
+
+      {/* Presentation Dialog */}
+      <PresentationDialog
+        isOpen={showPresentation}
+        onClose={() => setShowPresentation(false)}
+        page={page}
+      />
+
+      {/* Print Dialog */}
+      <PrintDialog
+        isOpen={showPrint}
+        onClose={() => setShowPrint(false)}
+        page={page}
+      />
+
+      {/* Writing Goal Settings */}
+      <WritingGoalSettings
+        isOpen={showWritingGoalSettings}
+        onClose={() => setShowWritingGoalSettings(false)}
+      />
+
+      {/* Mark as Daily Note Dialog */}
+      {showDailyNoteDialog && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center"
+          onClick={() => setShowDailyNoteDialog(false)}
+        >
+          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
+          <div
+            className="relative w-full max-w-sm rounded-xl border p-6 shadow-2xl"
+            style={{
+              backgroundColor: "var(--color-bg-panel)",
+              borderColor: "var(--color-border)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3
+              className="mb-4 text-lg font-semibold"
+              style={{ color: "var(--color-text-primary)" }}
+            >
+              Mark as Daily Note
+            </h3>
+            <p
+              className="mb-4 text-sm"
+              style={{ color: "var(--color-text-muted)" }}
+            >
+              Select the date for this daily note:
+            </p>
+            <input
+              type="date"
+              value={dailyNoteDate}
+              onChange={(e) => setDailyNoteDate(e.target.value)}
+              className="mb-4 w-full rounded-lg border px-3 py-2 text-sm outline-none transition-colors focus:border-[--color-accent]"
+              style={{
+                backgroundColor: "var(--color-bg-secondary)",
+                borderColor: "var(--color-border)",
+                color: "var(--color-text-primary)",
+              }}
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setShowDailyNoteDialog(false)}
+                className="rounded-lg px-4 py-2 text-sm font-medium transition-colors hover:opacity-80"
+                style={{
+                  backgroundColor: "var(--color-bg-tertiary)",
+                  color: "var(--color-text-secondary)",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleMarkAsDailyNote}
+                className="rounded-lg px-4 py-2 text-sm font-medium text-white transition-colors hover:opacity-90"
+                style={{ backgroundColor: "var(--color-accent)" }}
+              >
+                Mark as Daily Note
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -7,6 +7,8 @@ import { KeybindingsSettings } from "./KeybindingsSettings";
 import { MCPServersSettings } from "./MCPServersSettings";
 import { RAGSettings } from "./RAGSettings";
 import { BackupScheduleSettings } from "./BackupScheduleSettings";
+import { ExternalSourcesSettings } from "./ExternalSourcesSettings";
+import { DailyNotesSettings } from "./DailyNotesSettings";
 import { LibrarySettingsPanel } from "../Library";
 import type { ProviderType, ProviderConfig } from "../../types/ai";
 import type { TTSProviderType } from "../../types/audio";
@@ -24,7 +26,9 @@ interface SettingsDialogProps {
     | "mcp"
     | "rag"
     | "backup"
-    | "audio";
+    | "audio"
+    | "external-sources"
+    | "daily-notes";
 }
 
 type TabId =
@@ -37,19 +41,53 @@ type TabId =
   | "mcp"
   | "rag"
   | "backup"
-  | "audio";
+  | "audio"
+  | "external-sources"
+  | "daily-notes";
 
-const TABS: { id: TabId; label: string; icon: React.ReactNode }[] = [
-  { id: "theme", label: "Appearance", icon: <IconPalette /> },
-  { id: "keybindings", label: "Shortcuts", icon: <IconKeyboard /> },
-  { id: "libraries", label: "Libraries", icon: <IconLibrary /> },
-  { id: "backup", label: "Backup", icon: <IconBackup /> },
-  { id: "ai", label: "AI Providers", icon: <IconSparkles /> },
-  { id: "rag", label: "Semantic Search", icon: <IconBrain /> },
-  { id: "system-prompt", label: "System Prompt", icon: <IconPrompt /> },
-  { id: "audio", label: "Audio / TTS", icon: <IconAudio /> },
-  { id: "mcp", label: "MCP Servers", icon: <IconPlug /> },
-  { id: "web-research", label: "Web Research", icon: <IconGlobe /> },
+interface TabCategory {
+  name: string;
+  tabs: { id: TabId; label: string; icon: React.ReactNode }[];
+}
+
+const TAB_CATEGORIES: TabCategory[] = [
+  {
+    name: "General",
+    tabs: [
+      { id: "theme", label: "Appearance", icon: <IconPalette /> },
+      { id: "keybindings", label: "Shortcuts", icon: <IconKeyboard /> },
+      { id: "daily-notes", label: "Daily Notes", icon: <IconCalendarSettings /> },
+    ],
+  },
+  {
+    name: "Data",
+    tabs: [
+      { id: "libraries", label: "Libraries", icon: <IconLibrary /> },
+      { id: "backup", label: "Backup", icon: <IconBackup /> },
+      { id: "external-sources", label: "External Sources", icon: <IconFileImport /> },
+    ],
+  },
+  {
+    name: "AI & Search",
+    tabs: [
+      { id: "ai", label: "AI Models", icon: <IconSparkles /> },
+      { id: "system-prompt", label: "System Prompt", icon: <IconPrompt /> },
+      { id: "rag", label: "Knowledge Base", icon: <IconBrain /> },
+      { id: "web-research", label: "Web Research", icon: <IconGlobe /> },
+    ],
+  },
+  {
+    name: "Media",
+    tabs: [
+      { id: "audio", label: "Text-to-Speech", icon: <IconAudio /> },
+    ],
+  },
+  {
+    name: "Integrations",
+    tabs: [
+      { id: "mcp", label: "MCP Servers", icon: <IconPlug /> },
+    ],
+  },
 ];
 
 const PROVIDER_INFO: Record<
@@ -134,28 +172,40 @@ export function SettingsDialog({
             </h2>
           </div>
 
-          <nav className="space-y-1">
-            {TABS.map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
-                  activeTab === tab.id ? "" : "hover:bg-[--color-bg-tertiary]"
-                }`}
-                style={{
-                  backgroundColor:
-                    activeTab === tab.id
-                      ? "rgba(139, 92, 246, 0.15)"
-                      : undefined,
-                  color:
-                    activeTab === tab.id
-                      ? "var(--color-accent)"
-                      : "var(--color-text-secondary)",
-                }}
-              >
-                {tab.icon}
-                {tab.label}
-              </button>
+          <nav className="space-y-4">
+            {TAB_CATEGORIES.map((category) => (
+              <div key={category.name}>
+                <div
+                  className="mb-2 px-3 text-xs font-semibold uppercase tracking-wider"
+                  style={{ color: "var(--color-text-muted)" }}
+                >
+                  {category.name}
+                </div>
+                <div className="space-y-1">
+                  {category.tabs.map((tab) => (
+                    <button
+                      key={tab.id}
+                      onClick={() => setActiveTab(tab.id)}
+                      className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                        activeTab === tab.id ? "" : "hover:bg-[--color-bg-tertiary]"
+                      }`}
+                      style={{
+                        backgroundColor:
+                          activeTab === tab.id
+                            ? "rgba(139, 92, 246, 0.15)"
+                            : undefined,
+                        color:
+                          activeTab === tab.id
+                            ? "var(--color-accent)"
+                            : "var(--color-text-secondary)",
+                      }}
+                    >
+                      {tab.icon}
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
             ))}
           </nav>
         </div>
@@ -171,7 +221,7 @@ export function SettingsDialog({
               className="text-base font-semibold"
               style={{ color: "var(--color-text-primary)" }}
             >
-              {TABS.find((t) => t.id === activeTab)?.label}
+              {TAB_CATEGORIES.flatMap((c) => c.tabs).find((t) => t.id === activeTab)?.label}
             </h3>
             <button
               onClick={onClose}
@@ -186,6 +236,7 @@ export function SettingsDialog({
           <div className="flex-1 overflow-y-auto p-6">
             {activeTab === "theme" && <ThemeSettings />}
             {activeTab === "keybindings" && <KeybindingsSettings />}
+            {activeTab === "daily-notes" && <DailyNotesSettings />}
             {activeTab === "libraries" && <LibrarySettingsPanel />}
             {activeTab === "backup" && <BackupScheduleSettings />}
             {activeTab === "ai" && <AISettingsContent />}
@@ -194,6 +245,7 @@ export function SettingsDialog({
             {activeTab === "audio" && <AudioSettingsContent />}
             {activeTab === "mcp" && <MCPServersSettings />}
             {activeTab === "web-research" && <WebResearchSettingsContent />}
+            {activeTab === "external-sources" && <ExternalSourcesSettings />}
           </div>
         </div>
       </div>
@@ -2047,6 +2099,49 @@ function IconBrain() {
       <path d="M19.938 10.5a4 4 0 0 1 .585.396" />
       <path d="M6 18a4 4 0 0 1-1.967-.516" />
       <path d="M19.967 17.484A4 4 0 0 1 18 18" />
+    </svg>
+  );
+}
+
+function IconFileImport() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+      <polyline points="14 2 14 8 20 8" />
+      <path d="M12 18v-6" />
+      <path d="m9 15 3 3 3-3" />
+    </svg>
+  );
+}
+
+function IconCalendarSettings() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+      <line x1="16" y1="2" x2="16" y2="6" />
+      <line x1="8" y1="2" x2="8" y2="6" />
+      <line x1="3" y1="10" x2="21" y2="10" />
+      <circle cx="12" cy="15" r="2" />
     </svg>
   );
 }

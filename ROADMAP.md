@@ -266,7 +266,7 @@ Already implemented with Tantivy, may need refinement:
   - [x] WebDAV client (Nextcloud, ownCloud, etc.)
   - [x] Per-notebook sync configuration
   - [x] Credential storage in OS keyring
-  - [x] Manual, on-save, and periodic sync modes
+  - [x] Manual and periodic sync modes
   - [x] Sync UI in Notebook Settings
 - [x] CRDT-based conflict resolution (Yrs/Yjs)
   - [x] EditorData <-> Yrs document conversion
@@ -292,6 +292,10 @@ Already implemented with Tantivy, may need refinement:
   - [x] Asset manifest per notebook mapping relative paths to content hashes
   - [x] Deduplication across notebooks (same content = one remote copy)
   - [x] Migration path from legacy per-notebook asset storage
+- [x] Implement OnSave sync mode (trigger sync when a page is saved)
+- [ ] Sync integration tests
+  - [ ] Nextcloud WebDAV sync validation using testcontainers
+- [ ] Goals synchronization across instances
 
 ### 19. Page Stats & Writing Assistance
 - [x] Page statistics (word count, character count, reading time) - toggleable in page header
@@ -470,7 +474,7 @@ Already implemented with Tantivy, may need refinement:
 - [x] Jupyter cell editing (add, delete, reorder, edit cell content)
 - [x] Jupyter cell execution via Python kernel
 - [x] PDF annotation persistence (save highlights/notes)
-- [ ] EPUB reading progress tracking
+- [x] EPUB reading progress tracking
 - [ ] EPUB highlight/annotation support
 
 ---
@@ -534,6 +538,125 @@ Already implemented with Tantivy, may need refinement:
   - Uses @dnd-kit library
   - Drag handle appears on hover
   - Smooth animations during drag
+
+---
+
+## NotebookLM-like Study Tools
+
+### 33. AI-Powered Study Tools (Complete)
+
+NotebookLM-inspired features for generating study materials from notebook content.
+
+#### Content Generation
+- [x] **Study Guide Generation** - Structured learning materials from pages
+  - Learning objectives, key concepts with definitions
+  - Section summaries with key points
+  - Practice questions with answers
+  - Configurable depth (brief, standard, comprehensive)
+  - Focus areas selection
+- [x] **FAQ Generation** - Extract Q&A pairs from content
+  - Configurable number of questions
+  - Source page tracking
+  - Output to new page, prepend, or variable
+- [x] **Briefing Documents** - Executive summaries with action items
+  - Executive summary paragraph
+  - Key findings and recommendations
+  - Action items with owner, deadline, priority
+  - Detailed sections
+- [x] **Flashcard Auto-Generation** - AI-generated flashcards
+  - Integration with existing FlashcardStorage
+  - Card types: basic, cloze, reversible
+  - Configurable number of cards
+
+#### Source-Grounded Intelligence
+- [x] **Source-Cited Chat** - Q&A with clickable source citations
+  - Inline citation badges [1], [2] in responses
+  - Citation component with expandable excerpts
+  - Click to navigate to source page
+  - Relevance scoring per citation
+
+#### Visualizations (D3.js)
+- [x] **Timeline Visualization** - Chronological event display
+  - D3.js horizontal timeline with zoom/pan
+  - Category color coding
+  - Hover tooltips and click-to-select events
+  - Navigate to source pages
+- [x] **Concept Map Visualization** - Visual relationship mapping
+  - D3.js force-directed graph
+  - Node types: concept (circle), example (rectangle), definition (diamond)
+  - Draggable nodes with connection highlighting
+  - Relationship labels on edges
+
+#### UI Integration
+- [x] **Study Tools Panel** - Dedicated modal for all study tools
+  - Page selector for source content
+  - Tool grid with descriptions
+  - Generation progress and error handling
+- [x] **Page Context Menu** - Right-click menu for quick access
+  - Generate Study Guide, FAQ, Flashcards, Briefing
+  - Extract Timeline, Concept Map
+
+#### Actions System Integration
+- [x] **New ActionStep types** for automated workflows
+  - `GenerateStudyGuide` - Create study guide from page selector
+  - `GenerateFaq` - Generate FAQ with output options
+  - `GenerateFlashcards` - Add AI cards to deck
+  - `GenerateBriefing` - Executive summary with action items
+  - `ExtractTimeline` - Timeline page from dated content
+  - `ExtractConceptMap` - Concept map page from content
+
+### 34. Study Tools Enhancements (Future)
+
+#### Advanced Media Generation
+- [x] **Infographic Generation** - Visual summaries
+  - SVG-based layout with svgwrite (key concepts, executive summary, timeline, concept map templates)
+  - Theme support (light/dark)
+  - Size presets (Social Media, Story/Reel, Presentation, Poster, Wide Banner, Custom)
+  - PNG export via cairosvg
+  - Export as PNG/SVG with download buttons
+- [x] **Video Generation** - Narrated presentations
+  - Auto-generate slides from study guides/briefings
+  - Integration with existing TTS infrastructure (OpenAI, ElevenLabs, Kokoro)
+  - Pillow for slide rendering, FFmpeg for video assembly
+  - Theme support (light/dark), aspect ratio presets
+  - Transition styles (cut/fade with xfade filter)
+  - Slide editor with live preview
+  - Speaker notes field, duration hints
+  - Progress tracking via Tauri events
+  - Keyboard shortcuts for slide navigation
+- [x] **Media Library** - Browse and manage generated media
+  - List all videos and infographics in notebook
+  - Filter by type (all/video/infographic)
+  - Delete with confirmation
+  - File size and creation date display
+
+#### Media Generation Enhancements (Not Yet Implemented)
+- [x] **Drag-and-drop slide reordering** - Reorder slides via drag-and-drop in slide list
+- [x] **Export from Media Library** - Open/export media files directly from library
+- [x] **Batch delete in Media Library** - Select and delete multiple media files at once
+- [ ] **Slide templates** - Pre-built slide layouts (title slide, bullet points, image, quote)
+- [ ] **Undo/redo for slides** - History stack for slide edits with keyboard shortcuts
+- [ ] **Video thumbnails** - Generate and display thumbnails in Media Library
+- [ ] **Re-generate single slide audio** - Regenerate TTS for individual slides without full rebuild
+- [x] **Custom accent colors** - User-defined accent color for slides and infographics
+
+#### Visualization Enhancements
+- [x] **Timeline Export** - Save as SVG/PNG/PDF
+- [x] **Concept Map Export** - SVG/PNG and Mermaid/GraphViz formats
+- [x] **Vertical Timeline** - Alternative layout option
+- [x] **Hierarchical Concept Map** - Tree layout mode
+- [x] **Cross-Notebook Knowledge Graph** - Concepts across all notebooks
+
+#### UI Enhancements
+- [x] **Text Selection Context Menu** - Generate from highlighted text
+- [x] **Quick Generate Dialog** - Minimal UI for fast generation
+- [ ] **AIChatPanel Citation Integration** - Citations in regular chat
+- [x] **FlashcardStorage Direct Integration** - Add cards to decks automatically
+
+#### Built-in Action Templates
+- [x] **Weekly Study Review** - Summarize week's notes + flashcards
+- [x] **Exam Prep Workflow** - Study Guide → Flashcards → Practice Questions
+- [x] **Daily Learning Summary** - Combine multiple study tools
 
 ---
 
@@ -660,8 +783,360 @@ Read iMessage and call history directly from macOS system SQLite databases. The 
 
 ---
 
+## Future Feature Ideas
+
+Inspired by other note-taking and organization software (Notion, Obsidian, Roam, Logseq, Craft, Mem, Evernote, Apple Notes, etc.)
+
+### Top Recommendations (High Impact)
+
+These features are recommended as high-priority additions:
+
+1. ~~**Daily notes** - Central to many workflows, leverages existing templates~~ ✅ Complete
+2. ~~**Canvas/whiteboard** - Visual thinking, very popular in Obsidian~~ ✅ Complete
+3. ~~**Block references** - Major upgrade to linking capabilities~~ ✅ Complete
+4. ~~**Web clipper** - Key capture workflow currently missing~~ ✅ Complete
+5. ~~**Starred/recent pages** - Simple but impactful navigation improvement~~ ✅ Complete (starred/pinned)
+6. ~~**Live queries** - Power feature for dynamic organization~~ ✅ Complete
+7. ~~**Publish to web** - Sharing capability many users want~~ ✅ Complete
+
+---
+
+### 35. Databases & Structured Data (Notion, Tana, Capacities)
+
+- [x] **Database pages** - Structured data with table view
+  - [x] Table view with editable cells, column resize, row add/delete
+  - [x] Properties: text, number, select, multi-select, checkbox, date, URL
+  - [x] Filter and sort by any property
+  - [x] Property editor (rename, change type, manage select options, delete)
+  - [x] Toolbar with add property, filter, sort popovers
+  - [x] Notion CSV import creates database pages with type inference
+  - [x] Full-text search indexing of database content
+  - [x] Multi-view architecture (V2 schema with per-view sorts/filters/config)
+  - [x] View tabs (add, rename, duplicate, delete views)
+  - [x] Group by any property (table view, collapsible groups with counts)
+  - [x] Board (kanban) view with drag-and-drop via @dnd-kit
+  - [x] Gallery view (CSS grid cards with configurable size)
+  - [x] List view (compact rows with primary/secondary properties)
+  - [x] Calendar view (month grid with date navigation, unscheduled section)
+  - [x] Row detail modal (shared property editor for non-table views)
+  - [x] V1→V2 automatic migration (existing databases upgrade seamlessly)
+  - [x] Relation property type
+  - [x] Inline databases within pages
+- [x] **Object types** - Custom content types
+  - [x] Built-in types (Book, Person, Project, Meeting) with typed fields
+  - [x] Custom type creation, editing, and deletion
+  - [x] Object type picker when creating database pages
+  - [x] Object type management UI
+  - [x] Templates per object type (default cell values for new rows, per-property default value editor in PropertyEditor and ObjectTypeManager)
+  - [x] Type-specific views and queries (default sorts, filters, group-by, date property per object type; auto-applied when creating database from type)
+- [x] **Relations & rollups** - Link and aggregate data
+  - [x] Relate database items to each other
+  - [x] Rollup properties (count, sum, average, min, max, range, percent empty/not empty, show original, count values, count unique)
+  - [x] Bidirectional relations (auto-created back-relation in target DB, editable from both sides, cascade delete)
+- [x] **Live queries** - Dynamic embedded lists
+  - Editor.js block tool with React component (LiveQueryBlockTool + LiveQueryBlock)
+  - Filter pages by title, tag, pageType, folder, or content (contains, equals, not_equals, starts_with)
+  - Sort by title, createdAt, or updatedAt with configurable limit
+  - Three display modes: list (default), table, compact
+  - Auto-updating via Zustand page store subscription
+  - Inline config editor for filters, sort, and limit
+  - Click result to navigate to page
+
+---
+
+### 36. Block-Level Features (Roam, Logseq)
+
+- [x] **Block references** - Reference individual blocks
+  - `((block-id))` syntax to reference any block
+  - Backlinks panel shows block-level references
+  - Click to navigate to source block (with highlight animation)
+  - Block ref preview text auto-updates when target block changes
+  - Broken ref detection when target block is deleted
+  - Graph view integration (purple dashed edges)
+- [x] **Block embedding** - Embed blocks inline
+  - Embed referenced blocks with live sync
+  - Edit embedded block in place, updates original
+  - Visual indicator for embedded vs. native blocks
+- [x] **Transclusion** - Same content in multiple places
+  - Synced blocks that appear in multiple pages
+  - Single source of truth, all instances update together
+  - Notion-style synced blocks
+- [ ] **Block-level version history** - Granular change tracking
+  - Track changes at block level, not just page level
+  - See who changed what block and when
+  - Restore individual blocks to previous state
+
+---
+
+### 37. Visual & Spatial (Obsidian, Logseq, Miro)
+
+- [x] **Canvas/whiteboard** - Infinite visual workspace ⭐ TOP RECOMMENDATION
+  - Infinite canvas with pan and zoom
+  - Add cards, images, embedded pages, arrows/connections
+  - Freeform spatial organization
+  - Group and frame elements
+  - Export as image
+- [x] **Outline/TOC panel** - Table of contents
+  - Auto-generated from page headers
+  - Click to jump to section with highlight animation
+  - Active heading tracking on scroll
+  - Right sidebar panel (220px, toggle button in page header)
+  - Hidden in zen mode and for non-standard page types
+  - Preference persisted via themeStore
+- [ ] **Mind map view** - Visual hierarchy
+  - Convert page structure to interactive mind map
+  - Expand/collapse branches
+  - Drag to reorganize
+- [ ] **Card/gallery view** - Visual page browsing
+  - View pages as cards with cover images
+  - Grid layout with customizable card size
+  - Preview on hover
+
+---
+
+### 38. Daily Notes & Journaling (Logseq, Roam, Capacities)
+
+- [x] **Daily notes** - Date-based pages ⭐ TOP RECOMMENDATION
+  - Auto-create page for today's date
+  - Quick access button/shortcut (Cmd+Shift+D)
+  - Calendar picker for past dates
+  - Customizable daily note template (optional daily-journal template)
+  - Forward/back navigation between days
+  - Mark existing pages as daily notes
+  - Daily Notes panel with calendar view
+  - Carry Forward Daily Notes action
+- [x] **Weekly/monthly rollups** - Aggregate journals
+  - Auto-generate weekly/monthly summary from daily notes via AI
+  - Period selector (this/last week/month)
+  - Summary style options (concise, detailed, bullets, narrative)
+  - Custom prompt support
+  - Save rollup as new page
+- [x] **Reflection prompts** - AI-generated prompts
+  - Category tabs (Gratitude, Learning, Goals, Review, Free)
+  - AI-generated prompts based on recent journal entries
+  - Static fallback prompts when AI unavailable
+  - "Use" button to insert prompt into daily note
+  - Collapsible card in Daily Notes panel
+- [x] **Mood/habit tracking** - Quick daily check-ins
+  - Editor.js block tool with emoji mood selector (5 levels)
+  - Configurable habit checkboxes (add/remove habits)
+  - D3 mood line chart and habit completion bars
+  - Date range filtering (7/14/30 days)
+  - Habits persisted via Zustand store
+
+---
+
+### 39. Collaboration (Notion, Craft)
+
+- [ ] **Page comments** - Threaded discussions
+  - Comment on pages or individual blocks
+  - Reply threads
+  - Resolve/unresolve comments
+  - Comment notifications
+- [ ] **@mentions** - Reference content inline
+  - @page-name to link pages
+  - @date for date references
+  - Future: @person for shared notebooks
+- [ ] **Shared notebooks** - Multi-user access
+  - Share specific notebooks with others
+  - Permission levels (view, edit, admin)
+  - Sync shared content
+- [ ] **Real-time collaboration** - Simultaneous editing
+  - Multiple users editing same page
+  - Cursor presence indicators
+  - Conflict-free via CRDT (already have Yrs)
+
+---
+
+### 40. Publishing & Sharing (Obsidian, Craft, Notion)
+
+- [x] **Publish to web** - Static site generation ⭐ TOP RECOMMENDATION
+  - One-click publish pages as website (4 themes: Minimal, Documentation, Blog, Academic)
+  - Theme/styling options with preview
+  - Choose whole notebook or selected pages to publish
+  - Wiki-link resolution and backlinks support
+  - Image asset copying
+  - Command Palette integration ("Publish to Web")
+- [ ] **Share as link** - Single page sharing
+  - Generate shareable link for any page
+  - Optional expiration date
+  - View-only or allow comments
+- [x] **Export as presentation** - Slides from pages
+  - Convert page to Reveal.js slide deck (H1/H2 headers split slides)
+  - 5 themes (white, black, moon, solarized, dracula) + 4 transitions
+  - Fullscreen in-app presenter with ESC to exit
+  - Export as standalone HTML with CDN assets
+- [x] **Print-friendly export** - PDF with proper formatting
+  - Clean print-optimized HTML (serif font, A4 page breaks)
+  - Optional table of contents from headers
+  - Optional metadata (tags, dates)
+  - Preview iframe with browser print dialog (Ctrl+P for PDF)
+
+---
+
+### 41. Capture & Input (Evernote, Apple Notes)
+
+- [x] **Web clipper** - In-app URL clipper ⭐ TOP RECOMMENDATION
+  - Clip any URL via dialog (sidebar button or editor trigger)
+  - Readability-based article extraction (Rust `readability` crate)
+  - Metadata capture (title, favicon, site name via OpenGraph)
+  - Block preview with title editing before save
+  - Notebook and folder selection for target page
+  - Source attribution block auto-added
+  - Smart URL normalization (auto-adds https://)
+- [ ] **Document scanning** - Camera-based capture
+  - Scan documents with device camera
+  - Auto-crop and perspective correction
+  - OCR text extraction
+  - Save as image or searchable PDF
+- [ ] **Audio recording** - Voice notes
+  - Record audio attached to page
+  - Optional transcription via Whisper
+  - Timestamp links in transcript
+  - Playback controls in page
+- [ ] **Email to notebook** - Email capture
+  - Unique email address per notebook
+  - Forward emails to create pages
+  - Parse attachments
+  - Tag via subject line prefixes
+
+---
+
+### 42. Task Management (Notion, Todoist)
+
+- [x] **Task database** - Centralized task list
+  - Zustand+persist store with full CRUD
+  - Priority levels (low/medium/high/urgent), due dates, projects, tags
+  - Quick add tasks via modal editor
+  - Sidebar button with overdue/due-today badge
+- [x] **Due date reminders** - Notifications
+  - Set due dates and times on tasks
+  - Browser notifications for overdue/due-today (15-min check interval)
+  - Overdue task highlighting (red badge) and due-today (orange badge)
+- [x] **Recurring tasks** - Repeating items
+  - Daily, weekly, monthly, yearly recurrence with configurable interval
+  - Days-of-week selection for weekly, optional end date
+  - Regenerate on completion (creates next instance linked via parentTaskId)
+- [x] **Task views** - Multiple perspectives
+  - Today view (due today + overdue)
+  - Upcoming view (future tasks)
+  - By project (with project dropdown filter)
+  - By priority (sorted urgent → low)
+  - All tasks view
+
+---
+
+### 43. AI Enhancements (Mem, Notion AI, Reflect)
+
+- [x] **Smart collections** - AI-curated groups
+  - Automatically group related pages
+  - "Notes about X" collections
+  - Update as content changes
+- [ ] **Meeting notes integration** - Calendar-aware
+  - Connect to calendar (Google, Outlook)
+  - Auto-create meeting pages
+  - Pull attendees, agenda from invite
+  - Post-meeting summary generation
+- [x] **Semantic search** - Beyond keywords
+  - "Find similar" to current page
+  - Natural language queries ("notes from last week about project X")
+  - Conceptual matching, not just text
+- [x] **Daily AI digest** - Automated summaries
+  - Summary of what you wrote/learned today
+  - Connections to past notes
+  - Suggested follow-ups
+- [x] **Inline AI assistance** - Writing helpers
+  - Summarize selection
+  - Expand bullet points
+  - Translate text
+  - Fix grammar/spelling inline
+  - Change tone (formal, casual)
+
+---
+
+### 44. Navigation & Organization
+
+- [ ] **Workspaces** - Save window layouts
+  - Save current panel arrangement, open pages
+  - Switch between workspaces (e.g., "Writing", "Research", "Review")
+  - Per-project workspaces
+- [x] **Starred/pinned pages** - Quick access ⭐ TOP RECOMMENDATION
+  - Star frequently used pages
+  - Starred section in sidebar
+  - Keyboard shortcut to toggle star
+- [x] **Recent pages** - History
+  - List of recently viewed pages
+  - Quick switcher with recent pages first
+  - Clear history option
+- [x] **Random note** - Rediscovery
+  - Surface a random page for review
+  - Filter by notebook, age, or tag
+  - "Surprise me" feature
+- [x] **Nested tags** - Tag hierarchy
+  - Hierarchical tags (`#work/project-a/tasks`)
+  - Browse tag tree
+  - Filter by parent or child tags
+
+---
+
+### 45. Writing Tools
+
+- [x] **Word count goals** - Writing targets
+  - Set target word count per page or session (daily/session period)
+  - Progress bar in page header
+  - Streak tracking from daily history (last 90 days)
+  - Settings modal with target, period toggle, and recent history
+- [x] **Focus mode enhancements** - Concentration aids
+  - Paragraph mode: dim non-active blocks (opacity 0.25)
+  - Sentence mode: highlight active sentence via Range API
+  - Configurable in Settings > Zen Mode (none/paragraph/sentence)
+  - 50ms debounced selectionchange listener with cleanup
+- [x] **Typewriter scrolling** - Centered cursor
+  - Keep cursor vertically centered while typing
+  - Reduces eye movement
+  - Toggle in Zen mode settings
+- [x] **Pomodoro timer** - Focus sessions
+  - 25/5/15 min work/short break/long break with configurable durations
+  - Floating pill (minimized) and expanded view with arc progress
+  - Session tracking (sessions before long break, today's count)
+  - Browser notifications on session end
+  - Auto-start breaks toggle, pause/resume/skip/reset controls
+
+---
+
+---
+
+### 46. CLI for Notebooks
+
+A command-line interface for viewing and searching notebook content without launching the GUI.
+
+- [ ] **CLI binary** - Standalone CLI tool (`nous-cli` or subcommand)
+  - Separate Rust binary or `--cli` mode on main binary
+  - Reuse existing storage layer (`src-tauri/src/storage/`)
+  - Library/notebook discovery from default data directory
+- [ ] **List & browse** - Navigate notebook structure from terminal
+  - `nous list` — list all libraries and notebooks
+  - `nous ls <notebook>` — list pages/folders in a notebook
+  - `nous show <notebook> <page>` — render page content to terminal (markdown output)
+  - Tree view of folder hierarchy
+- [ ] **Full-text search** - Search across notebooks from CLI
+  - `nous search <query>` — search all notebooks (uses existing Tantivy index)
+  - `nous search --notebook <name> <query>` — scoped search
+  - Highlight matching terms in results
+  - Output: page title, notebook, matched excerpt
+- [ ] **Tag operations** - Query and filter by tags
+  - `nous tags` — list all tags with counts
+  - `nous search --tag <tag>` — filter by tag
+- [ ] **Output formats** - Machine-readable output
+  - `--json` flag for JSON output (for piping/scripting)
+  - `--plain` for plain text (default)
+  - Configurable output width
+
+---
+
 ## Notes
 
 - Priority order within sections is flexible
 - AI features depend on Python bridge (nous-py) being properly configured
 - Some features may require additional Tauri plugins
+- ⭐ marks top recommended features for high impact

@@ -5,7 +5,10 @@ import type {
   ActionExecutionResult,
   ActionUpdate,
   ScheduledActionInfo,
+  ActionExecutionProgress,
+  StepProgress,
 } from "../types/action";
+import { STEP_TYPES } from "../types/action";
 import {
   listActions,
   createAction,
@@ -30,6 +33,8 @@ interface ActionState {
   showActionEditor: boolean;
   editingActionId: string | null;
   viewOnlyMode: boolean;
+  executionProgress: ActionExecutionProgress | null;
+  showProgressDialog: boolean;
 }
 
 interface ActionActions {
@@ -84,6 +89,16 @@ interface ActionActions {
   openActionEditor: (actionId?: string, viewOnly?: boolean) => void;
   closeActionEditor: () => void;
   clearError: () => void;
+
+  // Progress dialog
+  runActionWithProgress: (
+    actionId: string,
+    options?: {
+      variables?: Record<string, string>;
+      currentNotebookId?: string;
+    }
+  ) => Promise<ActionExecutionResult>;
+  closeProgressDialog: () => void;
 }
 
 type ActionStore = ActionState & ActionActions;
@@ -99,6 +114,8 @@ export const useActionStore = create<ActionStore>()((set, get) => ({
   showActionEditor: false,
   editingActionId: null,
   viewOnlyMode: false,
+  executionProgress: null,
+  showProgressDialog: false,
 
   // Data fetching
   loadActions: async () => {
@@ -338,6 +355,159 @@ export const useActionStore = create<ActionStore>()((set, get) => ({
 
   clearError: () => {
     set({ error: null });
+  },
+
+  // Progress dialog actions
+  runActionWithProgress: async (actionId, options) => {
+    const { actions } = get();
+    const action = actions.find((a) => a.id === actionId);
+    if (!action) {
+      throw new Error("Action not found");
+    }
+
+    // Helper to get step display name
+    const getStepName = (step: Action["steps"][0]): string => {
+      const stepType = STEP_TYPES.find((s) => s.type === step.type);
+      return stepType?.name || step.type;
+    };
+
+    // Initialize progress with all steps pending
+    const steps: StepProgress[] = action.steps.map((step, index) => ({
+      index,
+      type: step.type,
+      name: getStepName(step),
+      status: "pending",
+    }));
+
+    const progress: ActionExecutionProgress = {
+      actionId,
+      actionName: action.name,
+      steps,
+      currentStepIndex: 0,
+      isComplete: false,
+      overallSuccess: false,
+    };
+
+    set({ executionProgress: progress, showProgressDialog: true, error: null });
+
+    // Animate through steps (mark each as "running" briefly before executing)
+    // This creates a visual progression effect
+    const animateStep = async (stepIndex: number) => {
+      set((state) => {
+        if (!state.executionProgress) return state;
+        const newSteps = [...state.executionProgress.steps];
+        newSteps[stepIndex] = { ...newSteps[stepIndex], status: "running" };
+        return {
+          executionProgress: {
+            ...state.executionProgress,
+            steps: newSteps,
+            currentStepIndex: stepIndex,
+          },
+        };
+      });
+      // Brief delay to show "running" state
+      await new Promise((resolve) => setTimeout(resolve, 200));
+    };
+
+    try {
+      // Animate steps as running one by one
+      for (let i = 0; i < steps.length; i++) {
+        await animateStep(i);
+        // Mark previous step as completed
+        if (i > 0) {
+          set((state) => {
+            if (!state.executionProgress) return state;
+            const newSteps = [...state.executionProgress.steps];
+            newSteps[i - 1] = { ...newSteps[i - 1], status: "completed" };
+            return {
+              executionProgress: {
+                ...state.executionProgress,
+                steps: newSteps,
+              },
+            };
+          });
+        }
+      }
+
+      // Execute the actual action
+      const result = await runAction(actionId, options);
+
+      // Update final state based on result
+      set((state) => {
+        if (!state.executionProgress) return state;
+        const newSteps = state.executionProgress.steps.map((step, idx) => ({
+          ...step,
+          status:
+            idx < result.stepsCompleted
+              ? ("completed" as const)
+              : result.errors.length > 0 && idx === result.stepsCompleted
+                ? ("error" as const)
+                : ("pending" as const),
+          error:
+            idx === result.stepsCompleted && result.errors.length > 0
+              ? result.errors[0]
+              : undefined,
+        }));
+
+        return {
+          executionProgress: {
+            ...state.executionProgress,
+            steps: newSteps,
+            isComplete: true,
+            overallSuccess: result.success,
+            result,
+          },
+        };
+      });
+
+      // Refresh actions to update last_run time
+      await get().loadActions();
+
+      // Reload any pages modified or created by the action
+      const affectedPages = [...result.modifiedPages, ...result.createdPages];
+      if (affectedPages.length > 0) {
+        await usePageStore.getState().refreshPages(affectedPages);
+      }
+
+      return result;
+    } catch (error) {
+      // Update progress to show error
+      set((state) => {
+        if (!state.executionProgress) return state;
+        const currentIdx = state.executionProgress.currentStepIndex;
+        const newSteps = state.executionProgress.steps.map((step, idx) => ({
+          ...step,
+          status:
+            idx < currentIdx
+              ? ("completed" as const)
+              : idx === currentIdx
+                ? ("error" as const)
+                : ("pending" as const),
+          error:
+            idx === currentIdx
+              ? error instanceof Error
+                ? error.message
+                : "Unknown error"
+              : undefined,
+        }));
+
+        return {
+          executionProgress: {
+            ...state.executionProgress,
+            steps: newSteps,
+            isComplete: true,
+            overallSuccess: false,
+          },
+          error:
+            error instanceof Error ? error.message : "Failed to run action",
+        };
+      });
+      throw error;
+    }
+  },
+
+  closeProgressDialog: () => {
+    set({ showProgressDialog: false, executionProgress: null });
   },
 }));
 

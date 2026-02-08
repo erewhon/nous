@@ -166,3 +166,135 @@ pub fn save_notebook_asset(
             message: "Invalid path encoding".to_string(),
         })
 }
+
+/// Media asset info returned from listing
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MediaAssetInfo {
+    pub path: String,
+    pub filename: String,
+    pub media_type: String, // "video" or "infographic"
+    pub size_bytes: u64,
+    pub created_at: Option<String>,
+}
+
+/// List media assets (videos and infographics) for a notebook
+#[tauri::command]
+pub fn list_notebook_media_assets(
+    state: State<AppState>,
+    notebook_id: String,
+) -> CommandResult<Vec<MediaAssetInfo>> {
+    let storage = state.storage.lock().unwrap();
+
+    let nb_id = Uuid::parse_str(&notebook_id).map_err(|e| CommandError {
+        message: format!("Invalid notebook ID: {}", e),
+    })?;
+
+    let assets_path = storage.notebook_assets_dir(nb_id);
+    let mut media_assets = Vec::new();
+
+    // List videos
+    let videos_dir = assets_path.join("videos");
+    if videos_dir.exists() {
+        if let Ok(entries) = fs::read_dir(&videos_dir) {
+            for entry in entries.flatten() {
+                if let Ok(metadata) = entry.metadata() {
+                    if metadata.is_file() {
+                        let path = entry.path();
+                        let filename = path.file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("")
+                            .to_string();
+
+                        // Only include video files
+                        if filename.ends_with(".mp4") || filename.ends_with(".webm") {
+                            let created_at = metadata.created().ok().map(|t| {
+                                chrono::DateTime::<chrono::Utc>::from(t)
+                                    .format("%Y-%m-%dT%H:%M:%SZ")
+                                    .to_string()
+                            });
+
+                            media_assets.push(MediaAssetInfo {
+                                path: path.to_str().unwrap_or("").to_string(),
+                                filename,
+                                media_type: "video".to_string(),
+                                size_bytes: metadata.len(),
+                                created_at,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // List infographics
+    let infographics_dir = assets_path.join("infographics");
+    if infographics_dir.exists() {
+        if let Ok(entries) = fs::read_dir(&infographics_dir) {
+            for entry in entries.flatten() {
+                if let Ok(metadata) = entry.metadata() {
+                    if metadata.is_file() {
+                        let path = entry.path();
+                        let filename = path.file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or("")
+                            .to_string();
+
+                        // Only include image files
+                        if filename.ends_with(".svg") || filename.ends_with(".png") {
+                            let created_at = metadata.created().ok().map(|t| {
+                                chrono::DateTime::<chrono::Utc>::from(t)
+                                    .format("%Y-%m-%dT%H:%M:%SZ")
+                                    .to_string()
+                            });
+
+                            media_assets.push(MediaAssetInfo {
+                                path: path.to_str().unwrap_or("").to_string(),
+                                filename,
+                                media_type: "infographic".to_string(),
+                                size_bytes: metadata.len(),
+                                created_at,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Sort by created_at descending (newest first)
+    media_assets.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+
+    Ok(media_assets)
+}
+
+/// Delete a media asset from a notebook
+#[tauri::command]
+pub fn delete_notebook_media_asset(
+    state: State<AppState>,
+    notebook_id: String,
+    asset_path: String,
+) -> CommandResult<()> {
+    let storage = state.storage.lock().unwrap();
+
+    let nb_id = Uuid::parse_str(&notebook_id).map_err(|e| CommandError {
+        message: format!("Invalid notebook ID: {}", e),
+    })?;
+
+    let assets_path = storage.notebook_assets_dir(nb_id);
+    let file_path = PathBuf::from(&asset_path);
+
+    // Security: ensure the path is within the notebook's assets directory
+    if !file_path.starts_with(&assets_path) {
+        return Err(CommandError {
+            message: "Invalid asset path".to_string(),
+        });
+    }
+
+    fs::remove_file(&file_path).map_err(|e| CommandError {
+        message: format!("Failed to delete asset: {}", e),
+    })?;
+
+    Ok(())
+}

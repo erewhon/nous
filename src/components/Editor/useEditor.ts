@@ -9,17 +9,38 @@ import Delimiter from "@editorjs/delimiter";
 import Table from "@editorjs/table";
 import Image from "@editorjs/image";
 import { WikiLinkTool } from "./WikiLinkTool";
+import { BlockRefTool } from "./BlockRefTool";
 import { CodeBlockTool } from "./CodeBlockTool";
 import { CalloutTool } from "./CalloutTool";
 import { ChecklistTool } from "./ChecklistTool";
 import { FlashcardTool } from "./FlashcardTool";
+import { MoodHabitTool } from "./MoodHabitTool";
 import { HighlighterTool } from "./HighlighterTool";
 import { PDFTool } from "./PDFTool";
 import { VideoTool } from "./VideoTool";
+import { DatabaseBlockTool } from "./DatabaseBlockTool";
+import { LiveQueryBlockTool } from "./LiveQueryBlockTool";
+import { BlockEmbedTool } from "./BlockEmbedTool";
 import { DrawingTool } from "./DrawingTool";
 import { EmbedTool } from "./EmbedTool";
 import { ColumnsTool } from "./ColumnsTool";
 import { createImageUploader } from "./imageUploader";
+
+/** Assign data-block-id attributes to each .ce-block holder for scroll targeting */
+function assignBlockIdAttributes(editor: EditorJS | null) {
+  if (!editor) return;
+  try {
+    const blocks = editor.blocks;
+    for (let i = 0; i < blocks.getBlocksCount(); i++) {
+      const block = blocks.getBlockByIndex(i);
+      if (block) {
+        block.holder.setAttribute("data-block-id", block.id);
+      }
+    }
+  } catch {
+    // Editor may not be ready yet
+  }
+}
 
 interface UseEditorOptions {
   holderId: string;
@@ -30,7 +51,11 @@ interface UseEditorOptions {
   readOnly?: boolean;
   placeholder?: string;
   notebookId?: string;
+  pageId?: string;
   pages?: Array<{ id: string; title: string }>;
+  /** Called with the latest editor data just before the editor is destroyed on unmount.
+   *  This bypasses Editor.js's onChange debounce and captures the true current state. */
+  onUnmountSave?: (data: OutputData) => void;
 }
 
 export function useEditor({
@@ -42,12 +67,21 @@ export function useEditor({
   readOnly = false,
   placeholder = "Start writing or press '/' for commands...",
   notebookId,
+  pageId,
   pages,
+  onUnmountSave,
 }: UseEditorOptions) {
   const editorRef = useRef<EditorJS | null>(null);
   const isReady = useRef(false);
   // Flag to prevent onChange from firing during render operations
   const isRenderingRef = useRef(false);
+  // Tracks whether the editor has unsaved changes.  When dirty, the
+  // initialData effect skips editor.render() to avoid overwriting the
+  // user's live edits with (potentially stale) store data.
+  const isDirtyRef = useRef(false);
+  // Ref to the onUnmountSave callback so the cleanup can always access the latest
+  const onUnmountSaveRef = useRef(onUnmountSave);
+  onUnmountSaveRef.current = onUnmountSave;
   // Track the initialData used during editor construction so we can skip
   // the redundant render() call that the render effect would otherwise make.
   const constructedWithDataRef = useRef<OutputData | undefined>(undefined);
@@ -119,6 +153,20 @@ export function useEditor({
           backPlaceholder: "Enter answer...",
         },
       },
+      moodHabit: {
+        class: MoodHabitTool as unknown as ToolConstructable,
+      },
+      database: {
+        class: DatabaseBlockTool as unknown as ToolConstructable,
+      },
+      liveQuery: {
+        class: LiveQueryBlockTool as unknown as ToolConstructable,
+        config: { notebookId },
+      },
+      blockEmbed: {
+        class: BlockEmbedTool as unknown as ToolConstructable,
+        config: { notebookId, pageId },
+      },
       ...(notebookId
         ? {
             image: {
@@ -162,6 +210,9 @@ export function useEditor({
           onLinkClick: onLinkClick,
         },
       },
+      blockRef: {
+        class: BlockRefTool,
+      },
     };
 
     // Full tools config including columns (columns use baseTools for nested editors)
@@ -193,6 +244,9 @@ export function useEditor({
       onChange: async () => {
         // Don't save during render operations - this can capture partial/corrupted data
         if (onChange && editorRef.current && isReady.current && !isRenderingRef.current) {
+          isDirtyRef.current = true;
+          // Sync data-block-id attributes for any newly added blocks
+          assignBlockIdAttributes(editorRef.current);
           const data = await editorRef.current.save();
           onChange(data);
         }
@@ -204,6 +258,10 @@ export function useEditor({
         setTimeout(() => {
           isRenderingRef.current = false;
         }, 500);
+        // Assign data-block-id attributes to block holders for scroll targeting
+        setTimeout(() => {
+          assignBlockIdAttributes(editorRef.current);
+        }, 100);
         onReady?.();
       },
     });
@@ -212,9 +270,22 @@ export function useEditor({
 
     return () => {
       if (editorRef.current && isReady.current) {
-        editorRef.current.destroy();
+        const editor = editorRef.current;
         editorRef.current = null;
         isReady.current = false;
+
+        // Save the true current state before destroying. This bypasses
+        // Editor.js's onChange debounce, which can leave the last edit
+        // (e.g. a checklist item deletion) unreported if the user
+        // switches pages quickly.
+        editor.save()
+          .then((data) => {
+            if (data) onUnmountSaveRef.current?.(data);
+          })
+          .catch(() => {})
+          .finally(() => {
+            editor.destroy();
+          });
       }
     };
   }, [holderId]);
@@ -230,6 +301,13 @@ export function useEditor({
       }
       constructedWithDataRef.current = undefined;
 
+      // Skip render if the editor has unsaved changes — the user's live edits
+      // take priority over (potentially stale) store data.  The pending
+      // auto-save will persist the editor's state and update the store.
+      if (isDirtyRef.current) {
+        return;
+      }
+
       // Set flag to prevent onChange from firing during render
       isRenderingRef.current = true;
       editorRef.current.render(initialData).finally(() => {
@@ -237,6 +315,7 @@ export function useEditor({
         // async DOM mutations after the render Promise resolves.
         setTimeout(() => {
           isRenderingRef.current = false;
+          assignBlockIdAttributes(editorRef.current);
         }, 500);
       });
     }
@@ -270,11 +349,19 @@ export function useEditor({
     }
   }, []);
 
+  // Called after the editor's data has been persisted to the store.
+  // Clears the dirty flag so that future initialData changes (e.g. from
+  // sync) are allowed to render.
+  const markClean = useCallback(() => {
+    isDirtyRef.current = false;
+  }, []);
+
   return {
     editor: editorRef,
     isReady: isReady.current,
     save,
     clear,
     render,
+    markClean,
   };
 }

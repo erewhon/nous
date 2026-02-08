@@ -8,6 +8,7 @@ mod commands;
 pub mod encryption;
 mod evernote;
 mod external_editor;
+mod external_sources;
 mod flashcards;
 mod git;
 mod goals;
@@ -19,6 +20,7 @@ mod notion;
 mod obsidian;
 mod onenote;
 mod orgmode;
+mod publish;
 mod python_bridge;
 mod rag;
 mod scrivener;
@@ -31,6 +33,7 @@ use actions::{ActionExecutor, ActionScheduler, ActionStorage};
 use commands::BackupScheduler;
 use encryption::EncryptionManager;
 use external_editor::ExternalEditorManager;
+use external_sources::ExternalSourcesStorage;
 use flashcards::FlashcardStorage;
 use goals::GoalsStorage;
 use inbox::InboxStorage;
@@ -51,11 +54,12 @@ pub struct AppState {
     pub action_storage: Arc<Mutex<ActionStorage>>,
     pub action_executor: Arc<Mutex<ActionExecutor>>,
     pub action_scheduler: Mutex<ActionScheduler>,
-    pub inbox_storage: Mutex<InboxStorage>,
+    pub inbox_storage: Arc<Mutex<InboxStorage>>,
     pub flashcard_storage: Mutex<FlashcardStorage>,
-    pub goals_storage: Mutex<GoalsStorage>,
+    pub goals_storage: Arc<Mutex<GoalsStorage>>,
     pub sync_manager: Arc<SyncManager>,
     pub external_editor: Mutex<ExternalEditorManager>,
+    pub external_sources_storage: Arc<Mutex<ExternalSourcesStorage>>,
     pub backup_scheduler: Arc<tokio::sync::Mutex<Option<BackupScheduler>>>,
     pub sync_scheduler: Arc<tokio::sync::Mutex<Option<SyncScheduler>>>,
     pub video_server: Arc<tokio::sync::Mutex<Option<VideoServer>>>,
@@ -146,6 +150,7 @@ pub fn run() {
     // Initialize inbox storage
     let inbox_storage = InboxStorage::new(data_dir.clone())
         .expect("Failed to initialize inbox storage");
+    let inbox_storage_arc = Arc::new(Mutex::new(inbox_storage));
 
     // Initialize flashcard storage
     let flashcard_storage = FlashcardStorage::new(data_dir.join("notebooks"));
@@ -153,6 +158,7 @@ pub fn run() {
     // Initialize goals storage
     let goals_storage = GoalsStorage::new(data_dir.clone())
         .expect("Failed to initialize goals storage");
+    let goals_storage_arc = Arc::new(Mutex::new(goals_storage));
 
     // Initialize sync manager
     let sync_manager = SyncManager::new(data_dir.clone());
@@ -162,17 +168,24 @@ pub fn run() {
     let external_editor = ExternalEditorManager::new()
         .expect("Failed to initialize external editor manager");
 
+    // Initialize external sources storage
+    let external_sources_storage = ExternalSourcesStorage::new(data_dir.clone())
+        .expect("Failed to initialize external sources storage");
+    let external_sources_storage_arc = Arc::new(Mutex::new(external_sources_storage));
+
     // Wrap storage in Arc<Mutex<>> for sharing with executor
     let storage_arc = Arc::new(Mutex::new(storage));
     let action_storage_arc = Arc::new(Mutex::new(action_storage));
     let python_ai_arc = Arc::new(Mutex::new(python_ai));
 
     // Initialize action executor (needs references to storage, action_storage, and python_ai)
-    let action_executor = ActionExecutor::new(
+    let mut action_executor = ActionExecutor::new(
         Arc::clone(&storage_arc),
         Arc::clone(&action_storage_arc),
         Arc::clone(&python_ai_arc),
     );
+    // Wire up external sources storage to executor
+    action_executor.set_external_sources_storage(Arc::clone(&external_sources_storage_arc));
     let action_executor_arc = Arc::new(Mutex::new(action_executor));
 
     // Initialize action scheduler
@@ -192,6 +205,8 @@ pub fn run() {
         Arc::clone(&sync_manager_arc),
         Arc::clone(&storage_arc),
         Arc::clone(&library_storage_arc),
+        Arc::clone(&goals_storage_arc),
+        Arc::clone(&inbox_storage_arc),
     );
     let sync_scheduler_arc = Arc::new(tokio::sync::Mutex::new(Some(sync_scheduler)));
 
@@ -210,11 +225,12 @@ pub fn run() {
         action_storage: action_storage_arc,
         action_executor: action_executor_arc,
         action_scheduler: Mutex::new(action_scheduler),
-        inbox_storage: Mutex::new(inbox_storage),
+        inbox_storage: inbox_storage_arc,
         flashcard_storage: Mutex::new(flashcard_storage),
-        goals_storage: Mutex::new(goals_storage),
+        goals_storage: goals_storage_arc,
         sync_manager: sync_manager_arc,
         external_editor: Mutex::new(external_editor),
+        external_sources_storage: external_sources_storage_arc,
         backup_scheduler: backup_scheduler_arc,
         sync_scheduler: sync_scheduler_arc,
         video_server: video_server_arc,
@@ -334,6 +350,14 @@ pub fn run() {
             commands::ai_summarize_pages,
             commands::browser_run_task,
             commands::discover_ai_models,
+            // Study tools commands
+            commands::generate_study_guide,
+            commands::generate_faq,
+            commands::ai_generate_flashcards,
+            commands::generate_briefing,
+            commands::extract_timeline,
+            commands::extract_concepts,
+            commands::chat_with_citations,
             // Markdown commands
             commands::export_page_markdown,
             commands::import_markdown,
@@ -345,12 +369,16 @@ pub fn run() {
             commands::register_asset_path,
             commands::get_asset_data_url,
             commands::save_video_asset,
+            commands::list_notebook_media_assets,
+            commands::delete_notebook_media_asset,
             // Web research commands
             commands::web_search,
             commands::scrape_url,
             commands::summarize_research,
             commands::fetch_link_metadata,
             commands::fetch_url_content,
+            // Web clipper commands
+            commands::clip_web_page,
             // Tag management commands
             commands::get_all_tags,
             commands::get_notebook_tags,
@@ -407,6 +435,7 @@ pub fn run() {
             commands::update_section,
             commands::delete_section,
             commands::reorder_sections,
+            commands::move_section_to_notebook,
             // Cover page commands
             commands::get_cover_page,
             commands::create_cover_page,
@@ -423,6 +452,14 @@ pub fn run() {
             commands::get_actions_by_category,
             commands::get_scheduled_actions,
             commands::set_action_enabled,
+            // External sources commands
+            commands::list_external_sources,
+            commands::get_external_source,
+            commands::create_external_source,
+            commands::update_external_source,
+            commands::delete_external_source,
+            commands::preview_external_source_files,
+            commands::preview_path_pattern_files,
             // Inbox commands
             commands::inbox_capture,
             commands::inbox_list,
@@ -582,6 +619,7 @@ pub fn run() {
             commands::get_rag_context,
             commands::index_page_embedding,
             commands::remove_page_embedding,
+            commands::find_similar_pages,
             commands::get_page_chunks,
             commands::rebuild_vector_index,
             commands::get_vector_index_stats,
@@ -616,9 +654,28 @@ pub fn run() {
             commands::generate_page_audio,
             commands::get_tts_providers,
             commands::list_tts_voices,
+            // Infographic generation commands
+            commands::generate_infographic,
+            commands::check_infographic_availability,
+            // Video generation commands
+            commands::generate_study_video,
+            commands::check_video_generation_availability,
             // Smart organize commands
             commands::smart_organize_suggest,
             commands::smart_organize_apply,
+            // Publish commands
+            commands::publish_notebook,
+            commands::publish_selected_pages,
+            commands::preview_publish_page,
+            commands::generate_presentation,
+            commands::generate_print_html,
+            // Daily notes commands
+            commands::get_daily_note,
+            commands::create_daily_note,
+            commands::list_daily_notes,
+            commands::get_or_create_today_daily_note,
+            commands::mark_as_daily_note,
+            commands::unmark_daily_note,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

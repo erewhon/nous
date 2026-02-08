@@ -22,7 +22,7 @@ interface Command {
   subtitle?: string;
   snippet?: string;
   icon: React.ReactNode;
-  category: "page" | "action" | "notebook" | "search" | "recent" | "automation";
+  category: "page" | "action" | "notebook" | "search" | "recent" | "recent-page" | "automation";
   action: () => void;
   keywords?: string[];
   score?: number;
@@ -53,7 +53,7 @@ export function CommandPalette({
 
   const { notebooks, selectedNotebookId, selectNotebook, createNotebook } =
     useNotebookStore();
-  const { pages, selectPage, createPage } = usePageStore();
+  const { pages, selectPage, createPage, getRecentPages } = usePageStore();
   const { recentSearches, searchScope, searchMode, addRecentSearch, setSearchScope, setSearchMode, clearRecentSearches } =
     useSearchStore();
   const { actions, runAction: executeAction, openActionLibrary } = useActionStore();
@@ -171,6 +171,29 @@ export function CommandPalette({
     });
 
     cmds.push({
+      id: "action-random-note",
+      title: "Random Note",
+      subtitle: "Open a random page",
+      icon: <IconShuffle />,
+      category: "action",
+      action: () => {
+        const selectedPageId = usePageStore.getState().selectedPageId;
+        const candidates = pages.filter(
+          (p) =>
+            p.notebookId === selectedNotebookId &&
+            !p.deletedAt &&
+            p.id !== selectedPageId
+        );
+        if (candidates.length > 0) {
+          const pick = candidates[Math.floor(Math.random() * candidates.length)];
+          selectPage(pick.id);
+        }
+        onClose();
+      },
+      keywords: ["random", "shuffle", "surprise", "discover"],
+    });
+
+    cmds.push({
       id: "action-export-markdown",
       title: "Export Page to Markdown",
       subtitle: "Save current page as .md file",
@@ -192,6 +215,19 @@ export function CommandPalette({
         onClose();
       },
       keywords: ["export", "markdown", "md", "save", "file"],
+    });
+
+    cmds.push({
+      id: "action-publish-web",
+      title: "Publish to Web",
+      subtitle: "Export notebook as a static HTML site",
+      icon: <IconPublish />,
+      category: "action",
+      action: () => {
+        window.dispatchEvent(new CustomEvent("open-publish-dialog"));
+        onClose();
+      },
+      keywords: ["publish", "web", "html", "site", "export", "static"],
     });
 
     cmds.push({
@@ -306,6 +342,22 @@ export function CommandPalette({
           window.dispatchEvent(new CustomEvent("smart-organize-open"));
         },
         keywords: ["organize", "sort", "move", "ai", "classify", "smart"],
+      });
+    }
+
+    // Smart Collections
+    if (selectedNotebookId) {
+      cmds.push({
+        id: "action-smart-collections",
+        title: "Smart Collections",
+        subtitle: "AI groups related pages into collections",
+        icon: <IconWand />,
+        category: "action",
+        action: () => {
+          onClose();
+          window.dispatchEvent(new CustomEvent("open-smart-collections"));
+        },
+        keywords: ["collections", "groups", "topics", "ai", "cluster", "smart"],
       });
     }
 
@@ -437,6 +489,29 @@ export function CommandPalette({
     }));
   }, [recentSearches, query]);
 
+  // Recent pages as commands (shown when no query)
+  const recentPageCommands = useMemo<Command[]>(() => {
+    if (query.trim()) return [];
+
+    return getRecentPages(10).map((entry) => {
+      const notebook = notebooks.find((n) => n.id === entry.notebookId);
+      return {
+        id: `recent-page-${entry.pageId}`,
+        title: entry.title || "Untitled",
+        subtitle: notebook?.name || "Unknown notebook",
+        icon: <IconHistory />,
+        category: "recent-page" as const,
+        action: () => {
+          if (entry.notebookId !== selectedNotebookId) {
+            selectNotebook(entry.notebookId);
+          }
+          selectPage(entry.pageId);
+          onClose();
+        },
+      };
+    });
+  }, [query, getRecentPages, notebooks, selectedNotebookId, selectNotebook, selectPage, onClose]);
+
   // Filter commands based on query
   const filteredCommands = useMemo(() => {
     if (!query.trim()) {
@@ -456,13 +531,14 @@ export function CommandPalette({
 
   // Combine filtered commands with search results and recent searches
   const allCommands = useMemo(() => {
-    return [...recentCommands, ...filteredCommands, ...searchCommands];
-  }, [recentCommands, filteredCommands, searchCommands]);
+    return [...recentPageCommands, ...recentCommands, ...filteredCommands, ...searchCommands];
+  }, [recentPageCommands, recentCommands, filteredCommands, searchCommands]);
 
   // Group filtered commands by category
   const groupedCommands = useMemo(() => {
     const groups: { category: string; commands: Command[] }[] = [];
 
+    const recentPageMatches = allCommands.filter((c) => c.category === "recent-page");
     const recentMatches = allCommands.filter((c) => c.category === "recent");
     const searchMatches = allCommands.filter((c) => c.category === "search");
     const actionCommands = allCommands.filter((c) => c.category === "action");
@@ -470,6 +546,10 @@ export function CommandPalette({
     const pageResults = allCommands.filter((c) => c.category === "page");
     const notebookResults = allCommands.filter((c) => c.category === "notebook");
 
+    // Show recent pages first when there's no query
+    if (recentPageMatches.length > 0) {
+      groups.push({ category: "Recent Pages", commands: recentPageMatches });
+    }
     // Show recent searches when there's no query
     if (recentMatches.length > 0) {
       groups.push({ category: "Recent Searches", commands: recentMatches });
@@ -915,6 +995,28 @@ function IconGraph() {
   );
 }
 
+function IconShuffle() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M2 18h1.4c1.3 0 2.5-.6 3.3-1.7l6.1-8.6c.7-1.1 2-1.7 3.3-1.7H22" />
+      <path d="m18 2 4 4-4 4" />
+      <path d="M2 6h1.9c1.5 0 2.9.9 3.6 2.2" />
+      <path d="M22 18h-5.9c-1.3 0-2.6-.7-3.3-1.8l-.5-.8" />
+      <path d="m18 14 4 4-4 4" />
+    </svg>
+  );
+}
+
 function IconPage() {
   return (
     <svg
@@ -950,6 +1052,26 @@ function IconNotebook() {
       <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" />
       <path d="M8 7h6" />
       <path d="M8 11h8" />
+    </svg>
+  );
+}
+
+function IconPublish() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="12" cy="12" r="10" />
+      <line x1="2" y1="12" x2="22" y2="12" />
+      <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
     </svg>
   );
 }
@@ -1148,6 +1270,23 @@ function PageTypeIcon({ pageType }: { pageType: PageType }) {
       return (
         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
           <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" />
+        </svg>
+      );
+    case "canvas":
+      return (
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
+          <rect x="3" y="3" width="18" height="18" rx="2" />
+          <circle cx="9" cy="9" r="2" />
+          <circle cx="15" cy="15" r="2" />
+        </svg>
+      );
+    case "database":
+      return (
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={style}>
+          <rect x="3" y="3" width="18" height="18" rx="2" />
+          <path d="M3 9h18" />
+          <path d="M3 15h18" />
+          <path d="M9 3v18" />
         </svg>
       );
     default:

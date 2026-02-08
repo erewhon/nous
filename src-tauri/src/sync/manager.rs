@@ -11,6 +11,8 @@ use futures_util::StreamExt;
 use tauri::Emitter;
 use tokio::sync::Semaphore;
 
+use crate::goals::{Goal, GoalProgress, GoalsStorage};
+use crate::inbox::{InboxItem, InboxStorage};
 use crate::library::LibraryStorage;
 use crate::storage::Page;
 use crate::storage::FileStorage;
@@ -32,6 +34,12 @@ pub type SharedStorage = Arc<Mutex<FileStorage>>;
 
 /// Type alias for shared library storage
 pub type SharedLibraryStorage = Arc<Mutex<LibraryStorage>>;
+
+/// Type alias for shared goals storage
+pub type SharedGoalsStorage = Arc<Mutex<GoalsStorage>>;
+
+/// Type alias for shared inbox storage
+pub type SharedInboxStorage = Arc<Mutex<InboxStorage>>;
 
 #[derive(Error, Debug)]
 pub enum SyncError {
@@ -133,6 +141,23 @@ pub struct SyncPagesUpdated {
     pub page_ids: Vec<String>,
 }
 
+/// Event payload sent after syncing goals from remote.
+/// The frontend uses this to refresh goal displays.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncGoalsUpdated {
+    pub goals_changed: bool,
+    pub progress_changed: bool,
+}
+
+/// Event payload emitted when inbox sync completes with changes.
+/// The frontend uses this to refresh inbox displays.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncInboxUpdated {
+    pub inbox_changed: bool,
+}
+
 /// Sentinel file content written after successful push
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -147,6 +172,9 @@ const DEFAULT_WEBDAV_CONCURRENCY: usize = 8;
 
 /// Maximum concurrent notebook syncs within a library
 const MAX_NOTEBOOK_CONCURRENCY: usize = 4;
+
+/// Minimum interval between on-save sync triggers for the same notebook
+const ONSAVE_DEBOUNCE_SECS: u64 = 2;
 
 /// Manager for sync operations
 pub struct SyncManager {
@@ -166,6 +194,8 @@ pub struct SyncManager {
     sentinel_counter: std::sync::atomic::AtomicU64,
     /// App handle for emitting events (set after app initialization)
     app_handle: Arc<Mutex<Option<tauri::AppHandle>>>,
+    /// Debounce tracking for on-save sync triggers
+    onsave_debounce: Arc<Mutex<HashMap<Uuid, std::time::Instant>>>,
 }
 
 impl SyncManager {
@@ -180,6 +210,7 @@ impl SyncManager {
             syncing_notebooks: Arc::new(Mutex::new(HashSet::new())),
             sentinel_counter: std::sync::atomic::AtomicU64::new(0),
             app_handle: Arc::new(Mutex::new(None)),
+            onsave_debounce: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -497,6 +528,65 @@ impl SyncManager {
         let mut state = self.get_local_state(notebook_id);
         state.mark_page_modified(page_id);
         let _ = self.save_local_state(notebook_id, &state);
+    }
+
+    /// Trigger an on-save sync if the notebook is configured for OnSave mode.
+    /// Debounces to avoid rapid consecutive syncs.
+    pub fn trigger_onsave_sync_if_needed(
+        self: &Arc<Self>,
+        notebook_id: Uuid,
+        storage: &SharedStorage,
+    ) {
+        // Check notebook's sync_config for OnSave mode
+        let should_sync = {
+            let storage_guard = storage.lock().unwrap();
+            storage_guard
+                .get_notebook(notebook_id)
+                .ok()
+                .and_then(|nb| nb.sync_config)
+                .map(|cfg| cfg.enabled && cfg.sync_mode == super::config::SyncMode::OnSave)
+                .unwrap_or(false)
+        };
+
+        if !should_sync {
+            return;
+        }
+
+        // Debounce: skip if last trigger was less than ONSAVE_DEBOUNCE_SECS ago
+        {
+            let mut debounce = self.onsave_debounce.lock().unwrap();
+            let now = std::time::Instant::now();
+            if let Some(last) = debounce.get(&notebook_id) {
+                if now.duration_since(*last).as_secs() < ONSAVE_DEBOUNCE_SECS {
+                    return;
+                }
+            }
+            debounce.insert(notebook_id, now);
+        }
+
+        let manager = Arc::clone(self);
+        let storage = Arc::clone(storage);
+        let app_handle = self.app_handle.lock().unwrap().clone();
+
+        tauri::async_runtime::spawn(async move {
+            log::info!("OnSave sync triggered for notebook {}", notebook_id);
+            match manager
+                .sync_notebook(notebook_id, &storage, app_handle.as_ref())
+                .await
+            {
+                Ok(result) => {
+                    log::info!(
+                        "OnSave sync completed for notebook {}: {} pushed, {} pulled",
+                        notebook_id,
+                        result.pages_pushed,
+                        result.pages_pulled
+                    );
+                }
+                Err(e) => {
+                    log::warn!("OnSave sync failed for notebook {}: {}", notebook_id, e);
+                }
+            }
+        });
     }
 
     /// Queue a page deletion for sync
@@ -1815,6 +1905,8 @@ impl SyncManager {
             template_id: None,
             deleted_at: None,
             is_favorite: false,
+            is_daily_note: false,
+            daily_note_date: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         };
@@ -2827,12 +2919,286 @@ impl SyncManager {
         Ok(created)
     }
 
+    // ===== Goal sync methods =====
+
+    /// Sync goal definitions with remote.
+    /// Returns true if local goals were changed.
+    async fn sync_goals(
+        &self,
+        client: &WebDAVClient,
+        library_base_path: &str,
+        goals_storage: &SharedGoalsStorage,
+    ) -> Result<bool, SyncError> {
+        let remote_path = format!("{}/goals/goals.json", library_base_path);
+
+        // Read local goals
+        let local_goals = {
+            let gs = goals_storage.lock().unwrap();
+            gs.list_goals().unwrap_or_default()
+        };
+
+        // Fetch remote goals
+        let remote_goals: Vec<Goal> = match client.get(&remote_path).await {
+            Ok(data) => serde_json::from_slice(&data).unwrap_or_default(),
+            Err(WebDAVError::NotFound(_)) => Vec::new(),
+            Err(e) => return Err(e.into()),
+        };
+
+        // Build maps by ID
+        let mut local_map: HashMap<Uuid, Goal> = local_goals.iter().map(|g| (g.id, g.clone())).collect();
+        let remote_map: HashMap<Uuid, Goal> = remote_goals.iter().map(|g| (g.id, g.clone())).collect();
+
+        let mut merged_changed = false;
+
+        // Merge remote-only goals into local
+        for (id, remote_goal) in &remote_map {
+            match local_map.get(id) {
+                None => {
+                    // Remote only — pull it
+                    local_map.insert(*id, remote_goal.clone());
+                    merged_changed = true;
+                }
+                Some(local_goal) => {
+                    // Both exist — newer updated_at wins
+                    if remote_goal.updated_at > local_goal.updated_at {
+                        local_map.insert(*id, remote_goal.clone());
+                        merged_changed = true;
+                    }
+                }
+            }
+        }
+
+        // Build merged list (preserving insertion order by sorting by created_at)
+        let mut merged: Vec<Goal> = local_map.into_values().collect();
+        merged.sort_by_key(|g| g.created_at);
+
+        // Check if remote needs updating (local-only goals or local wins)
+        let remote_needs_update = merged.len() != remote_goals.len()
+            || merged.iter().any(|g| !remote_map.contains_key(&g.id))
+            || merged.iter().any(|g| {
+                remote_map.get(&g.id).map_or(false, |r| g.updated_at > r.updated_at)
+            });
+
+        // Write back locally if changed
+        if merged_changed {
+            let gs = goals_storage.lock().unwrap();
+            gs.replace_goals(&merged).map_err(SyncError::Storage)?;
+        }
+
+        // Push merged to remote if remote differs
+        if remote_needs_update || merged_changed {
+            let data = serde_json::to_vec_pretty(&merged)?;
+            // Ensure remote directory exists
+            let _ = client.mkdir_p(&format!("{}/goals", library_base_path)).await;
+            client.put(&remote_path, &data, None).await?;
+        }
+
+        Ok(merged_changed)
+    }
+
+    /// Sync progress data for a set of goals.
+    /// Returns true if any local progress was changed.
+    async fn sync_goal_progress(
+        &self,
+        client: &WebDAVClient,
+        library_base_path: &str,
+        goals_storage: &SharedGoalsStorage,
+        goal_ids: &[Uuid],
+    ) -> Result<bool, SyncError> {
+        let mut any_local_changed = false;
+
+        // Ensure remote progress directory exists
+        let _ = client
+            .mkdir_p(&format!("{}/goals/progress", library_base_path))
+            .await;
+
+        for goal_id in goal_ids {
+            let remote_path = format!(
+                "{}/goals/progress/{}.json",
+                library_base_path, goal_id
+            );
+
+            // Read local progress
+            let local_entries = {
+                let gs = goals_storage.lock().unwrap();
+                gs.get_progress(*goal_id).unwrap_or_default()
+            };
+
+            // Fetch remote progress
+            let remote_entries: Vec<GoalProgress> = match client.get(&remote_path).await {
+                Ok(data) => serde_json::from_slice(&data).unwrap_or_default(),
+                Err(WebDAVError::NotFound(_)) => Vec::new(),
+                Err(e) => {
+                    log::warn!("Failed to fetch remote progress for goal {}: {}", goal_id, e);
+                    continue;
+                }
+            };
+
+            if local_entries.is_empty() && remote_entries.is_empty() {
+                continue;
+            }
+
+            // Build maps by date
+            let mut merged_map: HashMap<chrono::NaiveDate, GoalProgress> =
+                local_entries.iter().map(|p| (p.date, p.clone())).collect();
+            let remote_map: HashMap<chrono::NaiveDate, GoalProgress> =
+                remote_entries.iter().map(|p| (p.date, p.clone())).collect();
+
+            let mut local_changed = false;
+
+            for (date, remote_entry) in &remote_map {
+                match merged_map.get(date) {
+                    None => {
+                        // Remote only — include it
+                        merged_map.insert(*date, remote_entry.clone());
+                        local_changed = true;
+                    }
+                    Some(local_entry) => {
+                        // Both exist — prefer completed=true, take max value
+                        let merged_completed = local_entry.completed || remote_entry.completed;
+                        let merged_value = match (local_entry.value, remote_entry.value) {
+                            (Some(a), Some(b)) => Some(a.max(b)),
+                            (Some(a), None) => Some(a),
+                            (None, Some(b)) => Some(b),
+                            (None, None) => None,
+                        };
+                        let merged_auto = local_entry.auto_detected || remote_entry.auto_detected;
+
+                        if merged_completed != local_entry.completed
+                            || merged_value != local_entry.value
+                            || merged_auto != local_entry.auto_detected
+                        {
+                            merged_map.insert(
+                                *date,
+                                GoalProgress {
+                                    goal_id: *goal_id,
+                                    date: *date,
+                                    completed: merged_completed,
+                                    auto_detected: merged_auto,
+                                    value: merged_value,
+                                },
+                            );
+                            local_changed = true;
+                        }
+                    }
+                }
+            }
+
+            // Build sorted merged list
+            let mut merged: Vec<GoalProgress> = merged_map.into_values().collect();
+            merged.sort_by_key(|p| p.date);
+
+            // Check if remote needs updating
+            let remote_needs_update = merged.len() != remote_entries.len()
+                || merged.iter().any(|p| !remote_map.contains_key(&p.date));
+
+            // Write back locally if changed
+            if local_changed {
+                let gs = goals_storage.lock().unwrap();
+                gs.replace_progress(*goal_id, &merged)
+                    .map_err(SyncError::Storage)?;
+                any_local_changed = true;
+            }
+
+            // Push merged to remote if needed
+            if remote_needs_update || local_changed {
+                let data = serde_json::to_vec_pretty(&merged)?;
+                if let Err(e) = client.put(&remote_path, &data, None).await {
+                    log::warn!("Failed to push progress for goal {}: {}", goal_id, e);
+                }
+            }
+        }
+
+        Ok(any_local_changed)
+    }
+
+    // ===== Inbox sync methods =====
+
+    /// Sync inbox items with remote.
+    /// Returns true if local inbox was changed.
+    async fn sync_inbox(
+        &self,
+        client: &WebDAVClient,
+        library_base_path: &str,
+        inbox_storage: &SharedInboxStorage,
+    ) -> Result<bool, SyncError> {
+        let remote_path = format!("{}/inbox/inbox.json", library_base_path);
+
+        // Read local inbox items
+        let local_items = {
+            let is = inbox_storage.lock().unwrap();
+            is.list_items().unwrap_or_default()
+        };
+
+        // Fetch remote inbox items
+        let remote_items: Vec<InboxItem> = match client.get(&remote_path).await {
+            Ok(data) => serde_json::from_slice(&data).unwrap_or_default(),
+            Err(WebDAVError::NotFound(_)) => Vec::new(),
+            Err(e) => return Err(e.into()),
+        };
+
+        // Build maps by ID
+        let mut local_map: HashMap<Uuid, InboxItem> =
+            local_items.iter().map(|i| (i.id, i.clone())).collect();
+        let remote_map: HashMap<Uuid, InboxItem> =
+            remote_items.iter().map(|i| (i.id, i.clone())).collect();
+
+        let mut merged_changed = false;
+
+        // Merge remote-only items into local
+        for (id, remote_item) in &remote_map {
+            match local_map.get(id) {
+                None => {
+                    // Remote only — pull it
+                    local_map.insert(*id, remote_item.clone());
+                    merged_changed = true;
+                }
+                Some(local_item) => {
+                    // Both exist — newer updated_at wins
+                    if remote_item.updated_at > local_item.updated_at {
+                        local_map.insert(*id, remote_item.clone());
+                        merged_changed = true;
+                    }
+                }
+            }
+        }
+
+        // Build merged list (sort by captured_at, newest first)
+        let mut merged: Vec<InboxItem> = local_map.into_values().collect();
+        merged.sort_by(|a, b| b.captured_at.cmp(&a.captured_at));
+
+        // Check if remote needs updating (local-only items or local wins)
+        let remote_needs_update = merged.len() != remote_items.len()
+            || merged.iter().any(|i| !remote_map.contains_key(&i.id))
+            || merged
+                .iter()
+                .any(|i| remote_map.get(&i.id).map_or(false, |r| i.updated_at > r.updated_at));
+
+        // Write back locally if changed
+        if merged_changed {
+            let is = inbox_storage.lock().unwrap();
+            is.replace_items(&merged).map_err(SyncError::Storage)?;
+        }
+
+        // Push merged to remote if remote differs
+        if remote_needs_update || merged_changed {
+            let data = serde_json::to_vec_pretty(&merged)?;
+            // Ensure remote directory exists
+            let _ = client.mkdir_p(&format!("{}/inbox", library_base_path)).await;
+            client.put(&remote_path, &data, None).await?;
+        }
+
+        Ok(merged_changed)
+    }
+
     /// Sync all notebooks in a library (notebooks synced concurrently)
     pub async fn sync_library(
         &self,
         library_id: Uuid,
         library_storage: &SharedLibraryStorage,
         storage: &SharedStorage,
+        goals_storage: &SharedGoalsStorage,
+        inbox_storage: &SharedInboxStorage,
         app_handle: Option<&tauri::AppHandle>,
     ) -> Result<SyncResult, SyncError> {
         let start = std::time::Instant::now();
@@ -3013,6 +3379,137 @@ impl SyncManager {
         let total_assets_pushed = total_assets_pushed.load(Ordering::Relaxed);
         let total_assets_pulled = total_assets_pulled.load(Ordering::Relaxed);
         let errors = errors.lock().unwrap().clone();
+
+        // Sync goals after notebooks
+        if let Some(ref lib_config) = library_config {
+            match self.get_library_credentials(library_id) {
+                Ok(creds) => {
+                    match WebDAVClient::new(lib_config.server_url.clone(), creds) {
+                        Ok(goals_client) => {
+                            let base_path = &lib_config.remote_base_path;
+
+                            let goals_changed = match self
+                                .sync_goals(&goals_client, base_path, goals_storage)
+                                .await
+                            {
+                                Ok(changed) => {
+                                    log::info!("Library sync: goals sync complete, changed={}", changed);
+                                    changed
+                                }
+                                Err(e) => {
+                                    log::warn!("Library sync: goals sync failed: {}", e);
+                                    false
+                                }
+                            };
+
+                            // Collect all goal IDs for progress sync
+                            let goal_ids: Vec<Uuid> = {
+                                let gs = goals_storage.lock().unwrap();
+                                gs.list_goals()
+                                    .unwrap_or_default()
+                                    .iter()
+                                    .map(|g| g.id)
+                                    .collect()
+                            };
+
+                            let progress_changed = match self
+                                .sync_goal_progress(&goals_client, base_path, goals_storage, &goal_ids)
+                                .await
+                            {
+                                Ok(changed) => {
+                                    log::info!("Library sync: progress sync complete, changed={}", changed);
+                                    changed
+                                }
+                                Err(e) => {
+                                    log::warn!("Library sync: progress sync failed: {}", e);
+                                    false
+                                }
+                            };
+
+                            // Emit event if goals or progress changed
+                            if goals_changed || progress_changed {
+                                let event_payload = SyncGoalsUpdated {
+                                    goals_changed,
+                                    progress_changed,
+                                };
+
+                                // Try app_handle parameter first, then stored handle
+                                let emitted = if let Some(app) = app_handle {
+                                    app.emit("sync-goals-updated", event_payload.clone()).is_ok()
+                                } else {
+                                    false
+                                };
+
+                                if !emitted {
+                                    let handle_guard = self.app_handle.lock().unwrap();
+                                    if let Some(ref handle) = *handle_guard {
+                                        let _ = handle.emit("sync-goals-updated", event_payload);
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            log::warn!("Library sync: failed to create WebDAV client for goals: {}", e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    log::warn!("Library sync: failed to get credentials for goals: {}", e);
+                }
+            }
+        }
+
+        // Sync inbox after goals
+        if let Some(ref lib_config) = library_config {
+            match self.get_library_credentials(library_id) {
+                Ok(creds) => {
+                    match WebDAVClient::new(lib_config.server_url.clone(), creds) {
+                        Ok(inbox_client) => {
+                            let base_path = &lib_config.remote_base_path;
+
+                            let inbox_changed = match self
+                                .sync_inbox(&inbox_client, base_path, inbox_storage)
+                                .await
+                            {
+                                Ok(changed) => {
+                                    log::info!("Library sync: inbox sync complete, changed={}", changed);
+                                    changed
+                                }
+                                Err(e) => {
+                                    log::warn!("Library sync: inbox sync failed: {}", e);
+                                    false
+                                }
+                            };
+
+                            // Emit event if inbox changed
+                            if inbox_changed {
+                                let event_payload = SyncInboxUpdated { inbox_changed };
+
+                                // Try app_handle parameter first, then stored handle
+                                let emitted = if let Some(app) = app_handle {
+                                    app.emit("sync-inbox-updated", event_payload.clone()).is_ok()
+                                } else {
+                                    false
+                                };
+
+                                if !emitted {
+                                    let handle_guard = self.app_handle.lock().unwrap();
+                                    if let Some(ref handle) = *handle_guard {
+                                        let _ = handle.emit("sync-inbox-updated", event_payload);
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            log::warn!("Library sync: failed to create WebDAV client for inbox: {}", e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    log::warn!("Library sync: failed to get credentials for inbox: {}", e);
+                }
+            }
+        }
 
         log::info!(
             "Library sync complete: pulled={}, pushed={}, conflicts={}, errors={}",

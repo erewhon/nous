@@ -10,9 +10,12 @@ export type NotebookSortOption = "position" | "name-asc" | "name-desc" | "update
 export type PageSortOption = "position" | "name-asc" | "name-desc" | "updated" | "created";
 export type EditorKeymap = "standard" | "vim" | "emacs";
 
+export type FocusHighlightMode = "sentence" | "paragraph" | "none";
+
 export interface ZenModeSettings {
   typewriterScrolling: boolean;
   showPageTitle: boolean;
+  focusHighlight: FocusHighlightMode;
 }
 
 export interface PanelWidths {
@@ -65,6 +68,7 @@ interface ThemeState {
   panelsHovered: boolean;   // Track hover state for auto-hide (all panels as one)
   showRecentPages: boolean;   // Show Recent section in sidebar
   showFavoritePages: boolean; // Show Favorites section in sidebar
+  showOutline: boolean;  // Show outline/TOC panel
   zenMode: boolean;  // Distraction-free writing mode
   zenModeSettings: ZenModeSettings;  // Zen mode configuration (persisted)
   setMode: (mode: ThemeMode) => void;
@@ -76,6 +80,7 @@ interface ThemeState {
   setLineHeight: (height: number) => void;
   setUIScale: (scale: number) => void;
   togglePageStats: () => void;
+  toggleOutline: () => void;
   setUIMode: (mode: UIMode) => void;
   setNotebookSortBy: (sort: NotebookSortOption) => void;
   setPageSortBy: (sort: PageSortOption) => void;
@@ -372,6 +377,7 @@ function getSystemTheme(): "light" | "dark" {
 const DEFAULT_ZEN_MODE_SETTINGS: ZenModeSettings = {
   typewriterScrolling: false,
   showPageTitle: true,
+  focusHighlight: "none",
 };
 
 export const useThemeStore = create<ThemeState>()(
@@ -388,6 +394,7 @@ export const useThemeStore = create<ThemeState>()(
       panelsHovered: false,
       showRecentPages: true,
       showFavoritePages: true,
+      showOutline: false,
       zenMode: false,  // Always starts as false (not persisted)
       zenModeSettings: DEFAULT_ZEN_MODE_SETTINGS,
 
@@ -449,6 +456,10 @@ export const useThemeStore = create<ThemeState>()(
 
       togglePageStats: () => {
         set((state) => ({ showPageStats: !state.showPageStats }));
+      },
+
+      toggleOutline: () => {
+        set((state) => ({ showOutline: !state.showOutline }));
       },
 
       setUIMode: (mode) => {
@@ -552,7 +563,7 @@ export const useThemeStore = create<ThemeState>()(
     }),
     {
       name: "nous-theme",
-      partialize: (state) => ({ settings: state.settings, showPageStats: state.showPageStats, uiMode: state.uiMode, notebookSortBy: state.notebookSortBy, pageSortBy: state.pageSortBy, panelWidths: state.panelWidths, autoHidePanels: state.autoHidePanels, zenModeSettings: state.zenModeSettings, showRecentPages: state.showRecentPages, showFavoritePages: state.showFavoritePages }),
+      partialize: (state) => ({ settings: state.settings, showPageStats: state.showPageStats, showOutline: state.showOutline, uiMode: state.uiMode, notebookSortBy: state.notebookSortBy, pageSortBy: state.pageSortBy, panelWidths: state.panelWidths, autoHidePanels: state.autoHidePanels, zenModeSettings: state.zenModeSettings, showRecentPages: state.showRecentPages, showFavoritePages: state.showFavoritePages }),
       onRehydrateStorage: () => (state) => {
         if (state) {
           // Resolve system theme on rehydration
@@ -583,6 +594,10 @@ export const useThemeStore = create<ThemeState>()(
             state.zenModeSettings = DEFAULT_ZEN_MODE_SETTINGS;
           } else {
             state.zenModeSettings = { ...DEFAULT_ZEN_MODE_SETTINGS, ...state.zenModeSettings };
+          }
+          // Migration: ensure focusHighlight exists
+          if (!state.zenModeSettings.focusHighlight) {
+            state.zenModeSettings.focusHighlight = "none";
           }
           // Migration: ensure uiScale exists with default
           if (state.settings.uiScale === undefined) {

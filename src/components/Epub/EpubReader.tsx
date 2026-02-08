@@ -117,12 +117,26 @@ export function EpubReader({ page, notebookId, className = "" }: EpubReaderProps
       },
     });
 
-    // Track location changes
+    // Track location changes and save reading progress
     newRendition.on("relocated", (location: Location) => {
       setCurrentLocation(location);
+      // Persist reading position
+      if (location.start?.cfi) {
+        try {
+          localStorage.setItem(`epub-progress-${page.id}`, location.start.cfi);
+        } catch {
+          // Ignore storage errors
+        }
+      }
     });
 
-    newRendition.display();
+    // Restore saved reading position, or start from beginning
+    const savedCfi = localStorage.getItem(`epub-progress-${page.id}`);
+    if (savedCfi) {
+      newRendition.display(savedCfi);
+    } else {
+      newRendition.display();
+    }
     setRendition(newRendition);
 
     return () => {
@@ -389,6 +403,22 @@ export function EpubReader({ page, notebookId, className = "" }: EpubReaderProps
         />
       </div>
 
+      {/* Reading progress bar */}
+      {currentLocation && currentLocation.start.displayed.total > 0 && (
+        <div
+          className="h-0.5"
+          style={{ backgroundColor: "var(--color-border)" }}
+        >
+          <div
+            className="h-full transition-all duration-300"
+            style={{
+              backgroundColor: "var(--color-accent)",
+              width: `${Math.round((currentLocation.start.displayed.page / currentLocation.start.displayed.total) * 100)}%`,
+            }}
+          />
+        </div>
+      )}
+
       {/* Footer */}
       <div
         className="flex items-center justify-between px-4 py-2 border-t text-xs"
@@ -399,6 +429,11 @@ export function EpubReader({ page, notebookId, className = "" }: EpubReaderProps
         }}
       >
         <span>Arrow keys or Space to navigate</span>
+        {currentLocation && currentLocation.start.displayed.total > 0 && (
+          <span>
+            {Math.round((currentLocation.start.displayed.page / currentLocation.start.displayed.total) * 100)}% complete
+          </span>
+        )}
         {page.storageMode === "linked" && page.sourceFile && (
           <span className="truncate max-w-[300px]" title={page.sourceFile}>
             {page.sourceFile}

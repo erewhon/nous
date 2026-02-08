@@ -52,7 +52,26 @@ impl GoalsStorage {
         }
 
         let content = fs::read_to_string(path)?;
-        let goals: Vec<Goal> = serde_json::from_str(&content)?;
+        let mut goals: Vec<Goal> = serde_json::from_str(&content)?;
+
+        // Migrate any legacy auto_detect configs to new format
+        let mut needs_save = false;
+        for goal in &mut goals {
+            if let Some(ref mut auto_detect) = goal.auto_detect {
+                if auto_detect.is_legacy() {
+                    auto_detect.migrate_legacy();
+                    needs_save = true;
+                }
+            }
+        }
+
+        // Save migrated goals
+        if needs_save {
+            if let Err(e) = self.save_goals(&goals) {
+                log::warn!("Failed to save migrated goals: {}", e);
+            }
+        }
+
         Ok(goals)
     }
 
@@ -73,6 +92,7 @@ impl GoalsStorage {
 
     /// Create a new goal
     pub fn create_goal(&self, request: CreateGoalRequest) -> Result<Goal> {
+        let now = Utc::now();
         let goal = Goal {
             id: Uuid::new_v4(),
             name: request.name,
@@ -81,7 +101,8 @@ impl GoalsStorage {
             tracking_type: request.tracking_type,
             auto_detect: request.auto_detect,
             reminder: request.reminder,
-            created_at: Utc::now(),
+            created_at: now,
+            updated_at: now,
             archived_at: None,
         };
 
@@ -116,6 +137,8 @@ impl GoalsStorage {
             goal.reminder = updates.reminder;
         }
 
+        goal.updated_at = Utc::now();
+
         let updated = goal.clone();
         self.save_goals(&goals)?;
 
@@ -130,7 +153,9 @@ impl GoalsStorage {
             .find(|g| g.id == id)
             .ok_or_else(|| StorageError::NotFound(format!("Goal {} not found", id)))?;
 
-        goal.archived_at = Some(Utc::now());
+        let now = Utc::now();
+        goal.archived_at = Some(now);
+        goal.updated_at = now;
         let updated = goal.clone();
         self.save_goals(&goals)?;
 
@@ -163,6 +188,16 @@ impl GoalsStorage {
         let json = serde_json::to_string_pretty(goals)?;
         fs::write(self.goals_file(), json)?;
         Ok(())
+    }
+
+    /// Replace the full goals list (used by sync merge)
+    pub fn replace_goals(&self, goals: &[Goal]) -> Result<()> {
+        self.save_goals(goals)
+    }
+
+    /// Replace progress entries for a goal (used by sync merge)
+    pub fn replace_progress(&self, goal_id: Uuid, entries: &[GoalProgress]) -> Result<()> {
+        self.save_progress(goal_id, entries)
     }
 
     // ===== Progress Operations =====

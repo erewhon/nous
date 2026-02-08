@@ -115,6 +115,7 @@ impl InboxStorage {
     ) -> Result<InboxItem> {
         let mut item = self.get_item(id)?;
         item.classification = Some(classification);
+        item.updated_at = chrono::Utc::now();
         self.save_item(&item)?;
         Ok(item)
     }
@@ -123,6 +124,7 @@ impl InboxStorage {
     pub fn mark_processed(&self, id: Uuid) -> Result<InboxItem> {
         let mut item = self.get_item(id)?;
         item.is_processed = true;
+        item.updated_at = chrono::Utc::now();
         self.save_item(&item)?;
         Ok(item)
     }
@@ -169,5 +171,26 @@ impl InboxStorage {
             classified_count,
             processed_count,
         })
+    }
+
+    /// Replace all inbox items (used by sync merge)
+    pub fn replace_items(&self, items: &[InboxItem]) -> Result<()> {
+        // Delete all existing items
+        if self.inbox_dir.exists() {
+            for entry in fs::read_dir(&self.inbox_dir)? {
+                let entry = entry?;
+                let path = entry.path();
+                if path.extension().map(|e| e == "json").unwrap_or(false) {
+                    fs::remove_file(path)?;
+                }
+            }
+        }
+
+        // Write all new items
+        for item in items {
+            self.save_item(item)?;
+        }
+
+        Ok(())
     }
 }

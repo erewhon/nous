@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import type {
   ActionStep,
   NotebookTarget,
   PageSelector,
 } from "../../types/action";
 import { STEP_TYPES } from "../../types/action";
+import { useExternalSourceStore } from "../../stores/externalSourceStore";
 
 interface StepBuilderProps {
   steps: ActionStep[];
@@ -340,6 +341,13 @@ function StepEditor({ step, onUpdate, viewOnly = false }: StepEditorProps) {
           onUpdate={(updates) => onUpdate({ ...step, ...updates })}
         />
       );
+    case "processExternalSource":
+      return (
+        <ProcessExternalSourceEditor
+          step={step}
+          onUpdate={(updates) => onUpdate({ ...step, ...updates })}
+        />
+      );
     default:
       return (
         <div className="text-sm" style={{ color: "var(--color-text-muted)" }}>
@@ -481,6 +489,27 @@ function StepConfigSummary({ step }: { step: ActionStep }) {
             <div>
               <span className="font-medium">Custom prompt:</span>{" "}
               {step.customPrompt}
+            </div>
+          )}
+        </div>
+      );
+    case "processExternalSource":
+      return (
+        <div className="space-y-1">
+          <div>
+            <span className="font-medium">Source:</span>{" "}
+            {step.sourceId || step.inlinePath || "Not set"}
+          </div>
+          <div>
+            <span className="font-medium">Title:</span> {step.titleTemplate}
+          </div>
+          <div>
+            <span className="font-medium">Incremental:</span>{" "}
+            {step.incremental ? "Yes" : "No"}
+          </div>
+          {step.tags.length > 0 && (
+            <div>
+              <span className="font-medium">Tags:</span> {step.tags.join(", ")}
             </div>
           )}
         </div>
@@ -1047,6 +1076,265 @@ function AiSummarizeEditor({
   );
 }
 
+function ProcessExternalSourceEditor({
+  step,
+  onUpdate,
+}: {
+  step: Extract<ActionStep, { type: "processExternalSource" }>;
+  onUpdate: (updates: Partial<typeof step>) => void;
+}) {
+  const { sources, loadSources, isLoading } = useExternalSourceStore();
+  const [sourceMode, setSourceMode] = useState<"registered" | "inline">(
+    step.sourceId ? "registered" : "inline"
+  );
+
+  useEffect(() => {
+    loadSources();
+  }, [loadSources]);
+
+  return (
+    <div className="space-y-3">
+      {/* Source Selection Mode */}
+      <div>
+        <label
+          className="mb-1.5 block text-xs font-medium"
+          style={{ color: "var(--color-text-secondary)" }}
+        >
+          Source
+        </label>
+        <div className="flex gap-2 mb-2">
+          <button
+            onClick={() => {
+              setSourceMode("registered");
+              onUpdate({ inlinePath: undefined });
+            }}
+            className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
+              sourceMode === "registered" ? "text-white" : ""
+            }`}
+            style={{
+              backgroundColor:
+                sourceMode === "registered"
+                  ? "var(--color-accent)"
+                  : "var(--color-bg-tertiary)",
+              color:
+                sourceMode === "registered"
+                  ? "white"
+                  : "var(--color-text-secondary)",
+            }}
+          >
+            Registered Source
+          </button>
+          <button
+            onClick={() => {
+              setSourceMode("inline");
+              onUpdate({ sourceId: undefined });
+            }}
+            className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
+              sourceMode === "inline" ? "text-white" : ""
+            }`}
+            style={{
+              backgroundColor:
+                sourceMode === "inline"
+                  ? "var(--color-accent)"
+                  : "var(--color-bg-tertiary)",
+              color:
+                sourceMode === "inline"
+                  ? "white"
+                  : "var(--color-text-secondary)",
+            }}
+          >
+            Inline Path
+          </button>
+        </div>
+
+        {sourceMode === "registered" ? (
+          <select
+            value={step.sourceId || ""}
+            onChange={(e) => onUpdate({ sourceId: e.target.value || undefined })}
+            className="w-full rounded-lg border px-3 py-2 text-sm outline-none transition-colors focus:border-[--color-accent]"
+            style={{
+              backgroundColor: "var(--color-bg-tertiary)",
+              borderColor: "var(--color-border)",
+              color: "var(--color-text-primary)",
+            }}
+          >
+            <option value="">
+              {isLoading ? "Loading..." : "Select a registered source"}
+            </option>
+            {sources.map((source) => (
+              <option key={source.id} value={source.id}>
+                {source.name} ({source.pathPattern})
+              </option>
+            ))}
+          </select>
+        ) : (
+          <input
+            type="text"
+            value={step.inlinePath || ""}
+            onChange={(e) => onUpdate({ inlinePath: e.target.value || undefined })}
+            placeholder="e.g., ~/research/*.json"
+            className="w-full rounded-lg border px-3 py-2 text-sm outline-none transition-colors focus:border-[--color-accent]"
+            style={{
+              backgroundColor: "var(--color-bg-tertiary)",
+              borderColor: "var(--color-border)",
+              color: "var(--color-text-primary)",
+            }}
+          />
+        )}
+        {sourceMode === "inline" && (
+          <p
+            className="mt-1 text-xs"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            Supports glob patterns. Use ~ for home directory.
+          </p>
+        )}
+      </div>
+
+      {/* Title Template */}
+      <div>
+        <label
+          className="mb-1.5 block text-xs font-medium"
+          style={{ color: "var(--color-text-secondary)" }}
+        >
+          Title Template
+        </label>
+        <input
+          type="text"
+          value={step.titleTemplate}
+          onChange={(e) => onUpdate({ titleTemplate: e.target.value })}
+          placeholder="e.g., {{filename}} - {{date}}"
+          className="w-full rounded-lg border px-3 py-2 text-sm outline-none transition-colors focus:border-[--color-accent]"
+          style={{
+            backgroundColor: "var(--color-bg-tertiary)",
+            borderColor: "var(--color-border)",
+            color: "var(--color-text-primary)",
+          }}
+        />
+        <p
+          className="mt-1 text-xs"
+          style={{ color: "var(--color-text-muted)" }}
+        >
+          Variables: {"{{filename}}"}, {"{{date}}"}, {"{{format}}"}
+        </p>
+      </div>
+
+      {/* Notebook Target */}
+      <NotebookTargetEditor
+        target={step.notebookTarget}
+        onChange={(notebookTarget) => onUpdate({ notebookTarget })}
+      />
+
+      {/* Folder Name */}
+      <div>
+        <label
+          className="mb-1.5 block text-xs font-medium"
+          style={{ color: "var(--color-text-secondary)" }}
+        >
+          Folder Name (optional)
+        </label>
+        <input
+          type="text"
+          value={step.folderName || ""}
+          onChange={(e) => onUpdate({ folderName: e.target.value || undefined })}
+          placeholder="e.g., External Files"
+          className="w-full rounded-lg border px-3 py-2 text-sm outline-none transition-colors focus:border-[--color-accent]"
+          style={{
+            backgroundColor: "var(--color-bg-tertiary)",
+            borderColor: "var(--color-border)",
+            color: "var(--color-text-primary)",
+          }}
+        />
+      </div>
+
+      {/* Custom AI Prompt */}
+      <div>
+        <label
+          className="mb-1.5 block text-xs font-medium"
+          style={{ color: "var(--color-text-secondary)" }}
+        >
+          Custom AI Prompt (optional)
+        </label>
+        <textarea
+          value={step.customPrompt || ""}
+          onChange={(e) =>
+            onUpdate({ customPrompt: e.target.value || undefined })
+          }
+          placeholder="e.g., Extract key insights and action items from this file"
+          rows={3}
+          className="w-full resize-none rounded-lg border px-3 py-2 text-sm outline-none transition-colors focus:border-[--color-accent]"
+          style={{
+            backgroundColor: "var(--color-bg-tertiary)",
+            borderColor: "var(--color-border)",
+            color: "var(--color-text-primary)",
+          }}
+        />
+      </div>
+
+      {/* Options */}
+      <div className="flex flex-col gap-2">
+        <label className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={step.includeSourceLink}
+            onChange={(e) => onUpdate({ includeSourceLink: e.target.checked })}
+            className="rounded"
+          />
+          <span
+            className="text-sm"
+            style={{ color: "var(--color-text-secondary)" }}
+          >
+            Include link to source file
+          </span>
+        </label>
+        <label className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={step.incremental}
+            onChange={(e) => onUpdate({ incremental: e.target.checked })}
+            className="rounded"
+          />
+          <span
+            className="text-sm"
+            style={{ color: "var(--color-text-secondary)" }}
+          >
+            Incremental mode (skip already processed files)
+          </span>
+        </label>
+      </div>
+
+      {/* Tags */}
+      <div>
+        <label
+          className="mb-1.5 block text-xs font-medium"
+          style={{ color: "var(--color-text-secondary)" }}
+        >
+          Tags (comma separated)
+        </label>
+        <input
+          type="text"
+          value={step.tags.join(", ")}
+          onChange={(e) =>
+            onUpdate({
+              tags: e.target.value
+                .split(",")
+                .map((t) => t.trim())
+                .filter((t) => t),
+            })
+          }
+          placeholder="e.g., external, imported"
+          className="w-full rounded-lg border px-3 py-2 text-sm outline-none transition-colors focus:border-[--color-accent]"
+          style={{
+            backgroundColor: "var(--color-bg-tertiary)",
+            borderColor: "var(--color-border)",
+            color: "var(--color-text-primary)",
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
 // Shared editors
 
 function NotebookTargetEditor({
@@ -1293,6 +1581,15 @@ function createDefaultStep(type: ActionStep["type"]): ActionStep | null {
         query: "",
         processSteps: [],
       };
+    case "processExternalSource":
+      return {
+        type: "processExternalSource",
+        notebookTarget: { type: "current" },
+        titleTemplate: "{{filename}} - {{date}}",
+        includeSourceLink: true,
+        incremental: false,
+        tags: [],
+      };
     default:
       return null;
   }
@@ -1328,6 +1625,8 @@ function getStepSummary(step: ActionStep): string {
       return `Wait ${step.seconds} seconds`;
     case "conditional":
       return `If condition then ${step.thenSteps.length} steps`;
+    case "processExternalSource":
+      return `Process ${step.sourceId ? "source" : step.inlinePath || "files"} → "${step.titleTemplate}"`;
     default:
       return step.type;
   }
@@ -1470,6 +1769,22 @@ function StepIcon({ type }: { type: ActionStep["type"] }) {
           <circle cx="18" cy="6" r="3" />
           <circle cx="6" cy="18" r="3" />
           <path d="M18 9a9 9 0 0 1-9 9" />
+        </svg>
+      );
+    case "processExternalSource":
+      return (
+        <svg
+          width={size}
+          height={size}
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke={color}
+          strokeWidth="2"
+        >
+          <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+          <polyline points="14,2 14,8 20,8" />
+          <path d="M12 18v-6" />
+          <path d="M9 15l3-3 3 3" />
         </svg>
       );
     default:

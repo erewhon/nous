@@ -88,6 +88,10 @@ export const PageSelectorSchema = z.object({
   archivedOnly: z.boolean().default(false),
   inFolder: z.string().optional(),
   fromTemplate: z.string().optional(),
+  /** Filter to only Daily Notes (true) or only non-Daily Notes (false) */
+  isDailyNote: z.boolean().optional(),
+  /** Filter by specific daily note date (YYYY-MM-DD format, or "today"/"yesterday") */
+  dailyNoteDate: z.string().optional(),
 });
 
 export type PageSelector = z.infer<typeof PageSelectorSchema>;
@@ -247,6 +251,19 @@ export const SetVariableStepSchema = z.object({
   value: z.string(),
 });
 
+export const ProcessExternalSourceStepSchema = z.object({
+  type: z.literal("processExternalSource"),
+  sourceId: z.string().optional(),
+  inlinePath: z.string().optional(),
+  customPrompt: z.string().optional(),
+  notebookTarget: NotebookTargetSchema,
+  folderName: z.string().optional(),
+  titleTemplate: z.string(),
+  includeSourceLink: z.boolean().default(true),
+  incremental: z.boolean().default(false),
+  tags: z.array(z.string()).default([]),
+});
+
 export const ConditionalStepSchema: z.ZodType<ConditionalStep> = z.lazy(() =>
   z.object({
     type: z.literal("conditional"),
@@ -295,6 +312,7 @@ export const ActionStepSchema: z.ZodType<ActionStep> = z.lazy(() =>
       thenSteps: z.array(ActionStepSchema),
       elseSteps: z.array(ActionStepSchema).default([]),
     }),
+    ProcessExternalSourceStepSchema,
   ])
 );
 
@@ -310,7 +328,8 @@ export type ActionStep =
   | z.infer<typeof CarryForwardItemsStepSchema>
   | z.infer<typeof DelayStepSchema>
   | z.infer<typeof SetVariableStepSchema>
-  | ConditionalStep;
+  | ConditionalStep
+  | z.infer<typeof ProcessExternalSourceStepSchema>;
 
 // ===== Variable Types =====
 
@@ -456,6 +475,28 @@ export const ACTION_CATEGORIES: ActionCategoryInfo[] = [
   },
 ];
 
+// ===== Action Execution Progress Types =====
+
+export type StepStatus = "pending" | "running" | "completed" | "error";
+
+export interface StepProgress {
+  index: number;
+  type: ActionStep["type"];
+  name: string;
+  status: StepStatus;
+  error?: string;
+}
+
+export interface ActionExecutionProgress {
+  actionId: string;
+  actionName: string;
+  steps: StepProgress[];
+  currentStepIndex: number;
+  isComplete: boolean;
+  overallSuccess: boolean;
+  result?: ActionExecutionResult;
+}
+
 // ===== Step Type Metadata =====
 
 export interface StepTypeInfo {
@@ -531,5 +572,11 @@ export const STEP_TYPES: StepTypeInfo[] = [
     name: "Set Variable",
     description: "Set a variable for use in later steps",
     icon: "variable",
+  },
+  {
+    type: "processExternalSource",
+    name: "Process External Files",
+    description: "Import and summarize external files with AI",
+    icon: "file-import",
   },
 ];

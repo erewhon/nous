@@ -5,6 +5,7 @@ export { useThemeStore } from "./themeStore";
 export { useInboxStore } from "./inboxStore";
 export { useSyncStore } from "./syncStore";
 export { useToastStore } from "./toastStore";
+export { useDigestStore } from "./digestStore";
 export type {
   ThemeMode,
   ColorScheme,

@@ -34,6 +34,8 @@ export const PageTypeSchema = z.enum([
   "epub", // E-book (.epub)
   "calendar", // Calendar file (.ics)
   "chat", // AI Chat conversation page (.chat)
+  "canvas", // Infinite canvas/whiteboard (.canvas)
+  "database", // Database/table view (.database)
 ]);
 export type PageType = z.infer<typeof PageTypeSchema>;
 
@@ -105,6 +107,9 @@ export const PageSchema = z.object({
   deletedAt: z.string().datetime().nullable().optional(), // When page was moved to trash (null = not deleted)
   // Favorites
   isFavorite: z.boolean().default(false),
+  // Daily notes
+  isDailyNote: z.boolean().default(false),
+  dailyNoteDate: z.string().nullable().optional(), // "YYYY-MM-DD" format
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });

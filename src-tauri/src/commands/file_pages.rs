@@ -169,9 +169,9 @@ pub fn get_file_content(
             message: format!("Page not found: {}", e),
         })?;
 
-    // Only allow reading text-based files (Jupyter and Chat are JSON, so also text-based)
+    // Only allow reading text-based files (Jupyter, Chat, Canvas, Database are JSON, so also text-based)
     match page.page_type {
-        PageType::Markdown | PageType::Calendar | PageType::Jupyter | PageType::Chat => {}
+        PageType::Markdown | PageType::Calendar | PageType::Jupyter | PageType::Chat | PageType::Canvas | PageType::Database => {}
         _ => {
             return Err(CommandError {
                 message: format!(
@@ -219,9 +219,9 @@ pub fn update_file_content(
             message: format!("Page not found: {}", e),
         })?;
 
-    // Only allow writing text-based files (Jupyter and Chat are JSON, also writable)
+    // Only allow writing text-based files (Jupyter, Chat, Canvas, Database are JSON, also writable)
     match page.page_type {
-        PageType::Markdown | PageType::Calendar | PageType::Jupyter | PageType::Chat => {}
+        PageType::Markdown | PageType::Calendar | PageType::Jupyter | PageType::Chat | PageType::Canvas | PageType::Database => {}
         _ => {
             return Err(CommandError {
                 message: format!("Cannot write content for page type: {:?}", page.page_type),

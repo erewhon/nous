@@ -2,12 +2,16 @@ import { z } from "zod";
 import { EncryptionConfigSchema } from "./encryption";
 import { SyncConfigSchema } from "./sync";
 import { SystemPromptModeSchema } from "./page";
+import { DailyNotesConfigSchema } from "./dailyNotes";
 
 export const NotebookTypeSchema = z.enum(["standard", "zettelkasten"]);
 export type NotebookType = z.infer<typeof NotebookTypeSchema>;
 
 export const AIProviderTypeSchema = z.enum(["openai", "anthropic", "ollama", "lmstudio"]);
 export type AIProviderType = z.infer<typeof AIProviderTypeSchema>;
+
+export const PageSortOptionSchema = z.enum(["position", "name-asc", "name-desc", "updated", "created"]);
+export type PageSortOption = z.infer<typeof PageSortOptionSchema>;
 
 export const NotebookSchema = z.object({
   id: z.string().uuid(),
@@ -25,6 +29,8 @@ export const NotebookSchema = z.object({
   encryptionConfig: EncryptionConfigSchema.optional(),
   isPinned: z.boolean().default(false),
   position: z.number().default(0),
+  pageSortBy: PageSortOptionSchema.optional(),
+  dailyNotesConfig: DailyNotesConfigSchema.optional(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });

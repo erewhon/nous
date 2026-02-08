@@ -63,6 +63,7 @@ pub fn update_notebook(
     ai_provider: Option<String>,
     ai_model: Option<String>,
     is_pinned: Option<bool>,
+    page_sort_by: Option<String>,
 ) -> CommandResult<Notebook> {
     let storage = state.storage.lock().unwrap();
     let id = Uuid::parse_str(&notebook_id).map_err(|e| CommandError {
@@ -108,6 +109,10 @@ pub fn update_notebook(
     // Set is_pinned if provided
     if let Some(pinned) = is_pinned {
         notebook.is_pinned = pinned;
+    }
+    // Allow setting page_sort_by to None (empty string clears it)
+    if let Some(sort) = page_sort_by {
+        notebook.page_sort_by = if sort.is_empty() { None } else { Some(sort) };
     }
     notebook.updated_at = chrono::Utc::now();
 

@@ -10,11 +10,16 @@ import { ConfirmDialog } from "./components/ConfirmDialog";
 import { TemplateDialog } from "./components/TemplateDialog";
 import { TagManager } from "./components/Tags";
 import { BackupDialog } from "./components/Backup";
+import { PublishDialog } from "./components/Publish";
 import { ActionLibrary, ActionEditor } from "./components/Actions";
 import { QuickCapture, InboxPanel } from "./components/Inbox";
 import { FlashcardPanel } from "./components/Flashcards";
 import { GoalsPanel, GoalsDashboard } from "./components/Goals";
+import { DailyNotesPanel } from "./components/DailyNotes";
+import { TasksPanel } from "./components/Tasks";
 import { ToastContainer } from "./components/Toast";
+import { WebClipperDialog } from "./components/WebClipper/WebClipperDialog";
+import { SmartCollectionsPanel } from "./components/SmartCollections/SmartCollectionsPanel";
 import { useAppInit } from "./hooks/useAppInit";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useNotebookStore } from "./stores/notebookStore";
@@ -24,6 +29,8 @@ import { useActionStore } from "./stores/actionStore";
 import { useInboxStore } from "./stores/inboxStore";
 import { useAIStore } from "./stores/aiStore";
 import { useFlashcardStore } from "./stores/flashcardStore";
+import { useDailyNotesStore } from "./stores/dailyNotesStore";
+import { useTasksStore } from "./stores/tasksStore";
 import { useWindowLibrary } from "./contexts/WindowContext";
 import { exportPageToFile } from "./utils/api";
 import { save } from "@tauri-apps/plugin-dialog";
@@ -41,6 +48,15 @@ function App() {
     applyTheme();
   }, [applyTheme]);
 
+  // Task reminders check
+  useEffect(() => {
+    useTasksStore.getState().checkReminders();
+    const interval = setInterval(() => {
+      useTasksStore.getState().checkReminders();
+    }, 15 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, []);
+
   // Set window title based on library
   useEffect(() => {
     if (library) {
@@ -51,6 +67,7 @@ function App() {
 
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [showBackup, setShowBackup] = useState(false);
+  const [showPublish, setShowPublish] = useState(false);
 
   // Listen for custom event to open backup dialog
   useEffect(() => {
@@ -58,6 +75,34 @@ function App() {
     window.addEventListener("open-backup-dialog", handleOpenBackup);
     return () => window.removeEventListener("open-backup-dialog", handleOpenBackup);
   }, []);
+
+  // Listen for custom event to open publish dialog
+  useEffect(() => {
+    const handleOpenPublish = () => setShowPublish(true);
+    window.addEventListener("open-publish-dialog", handleOpenPublish);
+    return () => window.removeEventListener("open-publish-dialog", handleOpenPublish);
+  }, []);
+
+  // Listen for custom event to open web clipper (optionally with a URL)
+  const [clipperUrl, setClipperUrl] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    const handleOpenClipper = (e: Event) => {
+      const detail = (e as CustomEvent<{ url?: string }>).detail;
+      setClipperUrl(detail?.url);
+      setShowWebClipper(true);
+    };
+    window.addEventListener("open-web-clipper", handleOpenClipper);
+    return () => window.removeEventListener("open-web-clipper", handleOpenClipper);
+  }, []);
+  const [showSmartCollections, setShowSmartCollections] = useState(false);
+
+  // Listen for custom event to open smart collections
+  useEffect(() => {
+    const handleOpenCollections = () => setShowSmartCollections(true);
+    window.addEventListener("open-smart-collections", handleOpenCollections);
+    return () => window.removeEventListener("open-smart-collections", handleOpenCollections);
+  }, []);
+
   const [showGraph, setShowGraph] = useState(false);
   const [showWebResearch, setShowWebResearch] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -65,6 +110,7 @@ function App() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showTemplateDialog, setShowTemplateDialog] = useState(false);
   const [showTagManager, setShowTagManager] = useState(false);
+  const [showWebClipper, setShowWebClipper] = useState(false);
 
   const { selectedNotebookId, createNotebook } = useNotebookStore();
   const {
@@ -85,7 +131,8 @@ function App() {
     closePanel: closeAIPanel,
   } = useAIStore();
   const toggleFlashcardPanel = useFlashcardStore((state) => state.togglePanel);
-  const { pages, selectedPageId, selectPage, deletePage, duplicatePage } = usePageStore();
+  const openTodayNote = useDailyNotesStore((state) => state.openTodayNote);
+  const { pages, selectedPageId, selectPage, deletePage, duplicatePage, toggleFavorite } = usePageStore();
 
   // Get the selected page
   const selectedPage = pages.find((p) => p.id === selectedPageId);
@@ -139,6 +186,23 @@ function App() {
     setShowDeleteConfirm(true);
   }, [selectedPage]);
 
+  // Open today's daily note
+  const handleDailyNote = useCallback(async () => {
+    if (!selectedNotebookId) return;
+    try {
+      const note = await openTodayNote(selectedNotebookId);
+      selectPage(note.id);
+    } catch (err) {
+      console.error("Failed to open daily note:", err);
+    }
+  }, [selectedNotebookId, openTodayNote, selectPage]);
+
+  // Toggle favorite on current page
+  const handleToggleFavorite = useCallback(() => {
+    if (!selectedPage || !selectedNotebookId) return;
+    toggleFavorite(selectedNotebookId, selectedPage.id);
+  }, [selectedPage, selectedNotebookId, toggleFavorite]);
+
   // Confirm delete
   const handleConfirmDelete = useCallback(() => {
     if (!selectedPage || !selectedNotebookId) return;
@@ -164,6 +228,9 @@ function App() {
     onInbox: openInboxPanel,
     onFlashcards: toggleFlashcardPanel,
     onZenMode: toggleZenMode,
+    onDailyNote: handleDailyNote,
+    onToggleFavorite: handleToggleFavorite,
+    onWebClipper: () => setShowWebClipper(true),
   });
 
   return (
@@ -240,6 +307,12 @@ function App() {
         onClose={() => setShowBackup(false)}
       />
 
+      {/* Publish Dialog */}
+      <PublishDialog
+        isOpen={showPublish}
+        onClose={() => setShowPublish(false)}
+      />
+
       {/* Action Library */}
       <ActionLibrary
         isOpen={showActionLibrary}
@@ -268,6 +341,28 @@ function App() {
 
       {/* Goals Dashboard */}
       <GoalsDashboard />
+
+      {/* Daily Notes Panel */}
+      <DailyNotesPanel />
+
+      {/* Tasks Panel */}
+      <TasksPanel />
+
+      {/* Web Clipper */}
+      <WebClipperDialog
+        isOpen={showWebClipper}
+        onClose={() => {
+          setShowWebClipper(false);
+          setClipperUrl(undefined);
+        }}
+        initialUrl={clipperUrl}
+      />
+
+      {/* Smart Collections */}
+      <SmartCollectionsPanel
+        isOpen={showSmartCollections}
+        onClose={() => setShowSmartCollections(false)}
+      />
 
       {/* Toast Notifications */}
       <ToastContainer />

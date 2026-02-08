@@ -50,6 +50,7 @@ export async function updateNotebook(
     aiProvider?: string;
     aiModel?: string;
     isPinned?: boolean;
+    pageSortBy?: string;
   }
 ): Promise<Notebook> {
   return invoke<Notebook>("update_notebook", { notebookId, ...updates });
@@ -114,9 +115,13 @@ export async function updatePage(
       | "jupyter"
       | "epub"
       | "calendar"
-      | "chat";
+      | "chat"
+      | "canvas"
+      | "database";
     fileExtension?: string | null;
     isFavorite?: boolean;
+    isDailyNote?: boolean;
+    dailyNoteDate?: string | null; // "YYYY-MM-DD" format, null to clear
   },
   commit?: boolean // Whether to create a git commit (default: false, use true for explicit saves)
 ): Promise<Page> {
@@ -138,6 +143,10 @@ export async function updatePage(
   if (updates.fileExtension !== undefined)
     params.fileExtension = updates.fileExtension;
   if (updates.isFavorite !== undefined) params.isFavorite = updates.isFavorite;
+  if (updates.isDailyNote !== undefined)
+    params.isDailyNote = updates.isDailyNote;
+  if (updates.dailyNoteDate !== undefined)
+    params.dailyNoteDate = updates.dailyNoteDate;
 
   return invoke<Page>("update_page", params);
 }
@@ -671,6 +680,21 @@ export async function summarizeResearch(
   });
 }
 
+// ===== Web Clipper API =====
+
+export interface ClippedContent {
+  title: string;
+  content: string;
+  text: string;
+  url: string;
+  siteName: string | null;
+  favicon: string | null;
+}
+
+export async function clipWebPage(url: string): Promise<ClippedContent> {
+  return invoke<ClippedContent>("clip_web_page", { url });
+}
+
 // ===== Browser Automation API =====
 
 export async function runBrowserTask(
@@ -1094,6 +1118,75 @@ export async function setActionEnabled(
   return invoke<Action>("set_action_enabled", { actionId, enabled });
 }
 
+// ===== External Sources API =====
+
+import type {
+  ExternalSource,
+  ExternalFileFormat,
+  ResolvedFileInfo,
+} from "../types/externalSource";
+
+export async function listExternalSources(): Promise<ExternalSource[]> {
+  return invoke<ExternalSource[]>("list_external_sources");
+}
+
+export async function getExternalSource(
+  sourceId: string
+): Promise<ExternalSource> {
+  return invoke<ExternalSource>("get_external_source", { sourceId });
+}
+
+export async function createExternalSource(
+  name: string,
+  pathPattern: string,
+  fileFormats?: ExternalFileFormat[],
+  enabled?: boolean
+): Promise<ExternalSource> {
+  return invoke<ExternalSource>("create_external_source", {
+    name,
+    pathPattern,
+    fileFormats,
+    enabled,
+  });
+}
+
+export async function updateExternalSource(
+  sourceId: string,
+  options: {
+    name?: string;
+    pathPattern?: string;
+    fileFormats?: ExternalFileFormat[];
+    enabled?: boolean;
+  }
+): Promise<ExternalSource> {
+  return invoke<ExternalSource>("update_external_source", {
+    sourceId,
+    ...options,
+  });
+}
+
+export async function deleteExternalSource(sourceId: string): Promise<void> {
+  return invoke<void>("delete_external_source", { sourceId });
+}
+
+export async function previewExternalSourceFiles(
+  sourceId: string
+): Promise<ResolvedFileInfo[]> {
+  return invoke<ResolvedFileInfo[]>("preview_external_source_files", {
+    sourceId,
+  });
+}
+
+export async function previewPathPatternFiles(
+  pathPattern: string,
+  fileFormats?: ExternalFileFormat[]
+): Promise<ResolvedFileInfo[]> {
+  return invoke<ResolvedFileInfo[]>("preview_path_pattern_files", {
+    pathPattern,
+    fileFormats,
+  });
+}
+
 // ===== Inbox API =====
 
 import type {
@@ -1496,6 +1589,18 @@ export async function reorderSections(
   sectionIds: string[]
 ): Promise<void> {
   return invoke("reorder_sections", { notebookId, sectionIds });
+}
+
+export async function moveSectionToNotebook(
+  sourceNotebookId: string,
+  sectionId: string,
+  targetNotebookId: string
+): Promise<Section> {
+  return invoke<Section>("move_section_to_notebook", {
+    sourceNotebookId,
+    sectionId,
+    targetNotebookId,
+  });
 }
 
 // ========== Cover Page Operations ==========
@@ -2233,4 +2338,324 @@ export async function smartOrganizeApply(
     sourceNotebookId,
     moves,
   });
+}
+
+// ===== Study Tools =====
+
+import type {
+  StudyGuide,
+  StudyPageContent,
+  FAQ,
+  FlashcardGenerationResult,
+  BriefingDocument,
+  Timeline,
+  ConceptGraph,
+  RAGChunk,
+  CitedResponse,
+  StudyToolsGenerationOptions,
+} from "../types/studyTools";
+
+export async function generateStudyGuide(
+  pages: StudyPageContent[],
+  options?: StudyToolsGenerationOptions & {
+    depth?: string;
+    focusAreas?: string[];
+    numPracticeQuestions?: number;
+  }
+): Promise<StudyGuide> {
+  return invoke<StudyGuide>("generate_study_guide", {
+    pages,
+    providerType: options?.providerType,
+    apiKey: options?.apiKey,
+    model: options?.model,
+    temperature: options?.temperature,
+    maxTokens: options?.maxTokens,
+    depth: options?.depth,
+    focusAreas: options?.focusAreas,
+    numPracticeQuestions: options?.numPracticeQuestions,
+  });
+}
+
+export async function generateFaq(
+  pages: StudyPageContent[],
+  numQuestions?: number,
+  options?: StudyToolsGenerationOptions
+): Promise<FAQ> {
+  return invoke<FAQ>("generate_faq", {
+    pages,
+    numQuestions,
+    providerType: options?.providerType,
+    apiKey: options?.apiKey,
+    model: options?.model,
+    temperature: options?.temperature,
+    maxTokens: options?.maxTokens,
+  });
+}
+
+export async function aiGenerateFlashcards(
+  pages: StudyPageContent[],
+  numCards?: number,
+  cardTypes?: string[],
+  options?: StudyToolsGenerationOptions
+): Promise<FlashcardGenerationResult> {
+  return invoke<FlashcardGenerationResult>("ai_generate_flashcards", {
+    pages,
+    numCards,
+    cardTypes,
+    providerType: options?.providerType,
+    apiKey: options?.apiKey,
+    model: options?.model,
+    temperature: options?.temperature,
+    maxTokens: options?.maxTokens,
+  });
+}
+
+export async function generateBriefing(
+  pages: StudyPageContent[],
+  includeActionItems?: boolean,
+  options?: StudyToolsGenerationOptions
+): Promise<BriefingDocument> {
+  return invoke<BriefingDocument>("generate_briefing", {
+    pages,
+    includeActionItems,
+    providerType: options?.providerType,
+    apiKey: options?.apiKey,
+    model: options?.model,
+    temperature: options?.temperature,
+    maxTokens: options?.maxTokens,
+  });
+}
+
+export async function extractTimeline(
+  pages: StudyPageContent[],
+  options?: StudyToolsGenerationOptions
+): Promise<Timeline> {
+  return invoke<Timeline>("extract_timeline", {
+    pages,
+    providerType: options?.providerType,
+    apiKey: options?.apiKey,
+    model: options?.model,
+    temperature: options?.temperature,
+    maxTokens: options?.maxTokens,
+  });
+}
+
+export async function extractConcepts(
+  pages: StudyPageContent[],
+  maxNodes?: number,
+  options?: StudyToolsGenerationOptions
+): Promise<ConceptGraph> {
+  return invoke<ConceptGraph>("extract_concepts", {
+    pages,
+    maxNodes,
+    providerType: options?.providerType,
+    apiKey: options?.apiKey,
+    model: options?.model,
+    temperature: options?.temperature,
+    maxTokens: options?.maxTokens,
+  });
+}
+
+export async function chatWithCitations(
+  query: string,
+  contextChunks: RAGChunk[],
+  maxCitations?: number,
+  options?: StudyToolsGenerationOptions
+): Promise<CitedResponse> {
+  return invoke<CitedResponse>("chat_with_citations", {
+    query,
+    contextChunks,
+    maxCitations,
+    providerType: options?.providerType,
+    apiKey: options?.apiKey,
+    model: options?.model,
+    temperature: options?.temperature,
+    maxTokens: options?.maxTokens,
+  });
+}
+
+// ===== Infographic Generation API =====
+
+export interface InfographicConfig {
+  template: string;
+  width?: number;
+  height?: number;
+  theme?: string;
+  title?: string | null;
+  accentColor?: string | null;
+}
+
+export interface InfographicResult {
+  svgContent: string;
+  pngPath: string | null;
+  width: number;
+  height: number;
+  generationTimeSeconds: number;
+}
+
+export async function generateInfographic(
+  notebookId: string,
+  template: string,
+  data: Record<string, unknown>,
+  config?: InfographicConfig,
+  exportPng?: boolean
+): Promise<InfographicResult> {
+  return invoke<InfographicResult>("generate_infographic", {
+    notebookId,
+    template,
+    data,
+    config,
+    exportPng,
+  });
+}
+
+export async function checkInfographicAvailability(): Promise<{
+  svg_generation: boolean;
+  png_export: boolean;
+}> {
+  return invoke("check_infographic_availability");
+}
+
+// ===== Video Generation API =====
+
+export interface SlideContent {
+  title: string;
+  body?: string;
+  bulletPoints?: string[];
+  durationHint?: number | null;
+}
+
+export interface VideoTTSConfig {
+  provider: string;
+  voice: string;
+  apiKey?: string | null;
+  baseUrl?: string | null;
+  model?: string | null;
+}
+
+export interface VideoConfig {
+  width?: number;
+  height?: number;
+  theme?: string;
+  transition?: string;
+  title?: string | null;
+  accentColor?: string | null;
+}
+
+export interface VideoGenerationResult {
+  videoPath: string;
+  durationSeconds: number;
+  slideCount: number;
+  generationTimeSeconds: number;
+}
+
+export async function generateStudyVideo(
+  notebookId: string,
+  slides: SlideContent[],
+  ttsConfig: VideoTTSConfig,
+  videoConfig?: VideoConfig
+): Promise<VideoGenerationResult> {
+  return invoke<VideoGenerationResult>("generate_study_video", {
+    notebookId,
+    slides,
+    ttsConfig,
+    videoConfig,
+  });
+}
+
+export async function checkVideoGenerationAvailability(): Promise<{
+  pillow: boolean;
+  ffmpeg: boolean;
+  pydub: boolean;
+  fully_available: boolean;
+}> {
+  return invoke("check_video_generation_availability");
+}
+
+// ===== Media Asset Management =====
+
+export interface MediaAssetInfo {
+  path: string;
+  filename: string;
+  mediaType: "video" | "infographic";
+  sizeBytes: number;
+  createdAt: string | null;
+}
+
+export async function listNotebookMediaAssets(
+  notebookId: string
+): Promise<MediaAssetInfo[]> {
+  return invoke<MediaAssetInfo[]>("list_notebook_media_assets", { notebookId });
+}
+
+export async function deleteNotebookMediaAsset(
+  notebookId: string,
+  assetPath: string
+): Promise<void> {
+  return invoke("delete_notebook_media_asset", { notebookId, assetPath });
+}
+
+// ===== Daily Notes API =====
+
+/**
+ * Get the daily note for a specific date in a notebook
+ */
+export async function getDailyNote(
+  notebookId: string,
+  date: string // "YYYY-MM-DD" format
+): Promise<Page | null> {
+  return invoke<Page | null>("get_daily_note", { notebookId, date });
+}
+
+/**
+ * Create a daily note for a specific date
+ */
+export async function createDailyNote(
+  notebookId: string,
+  date: string, // "YYYY-MM-DD" format
+  templateId?: string
+): Promise<Page> {
+  return invoke<Page>("create_daily_note", { notebookId, date, templateId });
+}
+
+/**
+ * List all daily notes in a notebook, optionally filtered by date range
+ */
+export async function listDailyNotes(
+  notebookId: string,
+  startDate?: string, // "YYYY-MM-DD" format
+  endDate?: string // "YYYY-MM-DD" format
+): Promise<Page[]> {
+  return invoke<Page[]>("list_daily_notes", { notebookId, startDate, endDate });
+}
+
+/**
+ * Get or create today's daily note
+ */
+export async function getOrCreateTodayDailyNote(
+  notebookId: string,
+  templateId?: string
+): Promise<Page> {
+  return invoke<Page>("get_or_create_today_daily_note", { notebookId, templateId });
+}
+
+/**
+ * Mark an existing page as a daily note
+ */
+export async function markAsDailyNote(
+  notebookId: string,
+  pageId: string,
+  date: string // "YYYY-MM-DD" format
+): Promise<Page> {
+  return invoke<Page>("mark_as_daily_note", { notebookId, pageId, date });
+}
+
+/**
+ * Unmark a page as a daily note
+ */
+export async function unmarkDailyNote(
+  notebookId: string,
+  pageId: string
+): Promise<Page> {
+  return invoke<Page>("unmark_daily_note", { notebookId, pageId });
 }

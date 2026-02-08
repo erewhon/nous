@@ -18,7 +18,10 @@ export type KeybindingAction =
   | "quickCapture"
   | "inbox"
   | "flashcards"
-  | "zenMode";
+  | "zenMode"
+  | "dailyNote"
+  | "toggleFavorite"
+  | "webClipper";
 
 // Keybinding definition
 export interface Keybinding {
@@ -145,6 +148,27 @@ export const DEFAULT_KEYBINDINGS: Keybinding[] = [
     label: "Zen Mode",
     description: "Toggle distraction-free writing mode",
     key: ".",
+    modifiers: { ctrl: true, shift: true, alt: false },
+  },
+  {
+    action: "dailyNote",
+    label: "Daily Note",
+    description: "Open today's daily note",
+    key: "d",
+    modifiers: { ctrl: true, shift: true, alt: false },
+  },
+  {
+    action: "toggleFavorite",
+    label: "Toggle Star",
+    description: "Star or unstar the current page",
+    key: "s",
+    modifiers: { ctrl: true, shift: true, alt: false },
+  },
+  {
+    action: "webClipper",
+    label: "Web Clipper",
+    description: "Clip a web page",
+    key: "l",
     modifiers: { ctrl: true, shift: true, alt: false },
   },
 ];

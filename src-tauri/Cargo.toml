@@ -27,6 +27,7 @@ uuid = { version = "1.0", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 thiserror = "1.0"
 dirs = "5.0"
+glob = "0.3"
 tantivy = "0.22"
 
 # Markdown parsing and generation
@@ -67,6 +68,9 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 
 # Misc utilities
 md5 = "0.7"
+
+# Web clipper - article extraction
+readability = "0.3"
 
 # Sync support
 reqwest = { version = "0.12", features = ["json", "rustls-tls-native-roots", "blocking", "stream"] }

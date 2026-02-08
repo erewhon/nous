@@ -1,0 +1,1842 @@
+/* Database Editor Styles */
+
+.db-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.db-save-indicator {
+  display: flex;
+  justify-content: flex-end;
+  min-height: 20px;
+  padding: 0 4px;
+}
+
+.db-saving {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  animation: pulse 1.5s infinite;
+}
+
+.db-saved {
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+/* Loading/Error */
+.db-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 48px;
+  color: var(--color-text-muted);
+  font-size: 14px;
+}
+
+.db-loading-spinner {
+  width: 24px;
+  height: 24px;
+  border: 2px solid var(--color-border);
+  border-top-color: var(--color-accent);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.db-error {
+  padding: 24px;
+  color: var(--color-error, #ef4444);
+  font-size: 14px;
+}
+
+/* Toolbar */
+.db-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 0;
+  gap: 8px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.db-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.db-toolbar-right {
+  display: flex;
+  align-items: center;
+}
+
+.db-toolbar-count {
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.db-toolbar-btn-group {
+  position: relative;
+}
+
+.db-toolbar-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.db-toolbar-btn:hover {
+  background-color: var(--color-bg-tertiary);
+}
+
+.db-toolbar-btn-active {
+  color: var(--color-accent);
+  background-color: rgba(139, 92, 246, 0.1);
+}
+
+/* Table */
+.db-table-wrapper {
+  overflow-x: auto;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+
+.db-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 13px;
+}
+
+.db-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.db-row-num-header {
+  width: 40px;
+  min-width: 40px;
+  padding: 6px 8px;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  background-color: var(--color-bg-secondary);
+  border-bottom: 1px solid var(--color-border);
+  border-right: 1px solid var(--color-border);
+}
+
+.db-col-header {
+  position: relative;
+  padding: 0;
+  background-color: var(--color-bg-secondary);
+  border-bottom: 1px solid var(--color-border);
+  border-right: 1px solid var(--color-border);
+  user-select: none;
+}
+
+.db-col-header:last-child {
+  border-right: none;
+}
+
+.db-col-header-content {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.db-col-header-content:hover {
+  background-color: var(--color-bg-tertiary);
+}
+
+.db-col-header-icon {
+  display: flex;
+  align-items: center;
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.db-col-header-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.db-col-sort-icon {
+  font-size: 11px;
+  color: var(--color-accent);
+  flex-shrink: 0;
+}
+
+.db-col-resize {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 4px;
+  height: 100%;
+  cursor: col-resize;
+  background: transparent;
+  transition: background-color 0.15s;
+}
+
+.db-col-resize:hover {
+  background-color: var(--color-accent);
+}
+
+/* Rows */
+.db-row {
+  transition: background-color 0.1s;
+}
+
+.db-row:nth-child(even) {
+  background-color: var(--color-bg-primary);
+}
+
+.db-row:nth-child(odd) {
+  background-color: var(--color-bg-secondary);
+}
+
+.db-row:hover {
+  background-color: var(--color-bg-tertiary);
+}
+
+.db-row-num {
+  width: 40px;
+  min-width: 40px;
+  padding: 4px 8px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  border-right: 1px solid var(--color-border);
+  position: relative;
+}
+
+.db-row-num-text {
+  display: block;
+}
+
+.db-row-delete {
+  display: none;
+  position: absolute;
+  inset: 0;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-bg-tertiary);
+  border: none;
+  color: var(--color-error, #ef4444);
+  cursor: pointer;
+}
+
+.db-row:hover .db-row-delete {
+  display: flex;
+}
+
+.db-row:hover .db-row-num-text {
+  display: none;
+}
+
+/* Cells */
+.db-cell {
+  padding: 0;
+  border-right: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+  vertical-align: middle;
+  overflow: hidden;
+}
+
+.db-cell:last-child {
+  border-right: none;
+}
+
+.db-cell-display {
+  padding: 4px 8px;
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  cursor: text;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--color-text-primary);
+  font-size: 13px;
+}
+
+.db-cell-multi {
+  flex-wrap: wrap;
+  gap: 2px;
+}
+
+.db-cell-number {
+  text-align: right;
+  justify-content: flex-end;
+}
+
+.db-cell-input {
+  width: 100%;
+  padding: 4px 8px;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--color-text-primary);
+  font-size: 13px;
+  font-family: inherit;
+}
+
+.db-cell-input:focus {
+  background-color: rgba(139, 92, 246, 0.08);
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
+}
+
+.db-cell-checkbox {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 8px;
+  min-height: 28px;
+}
+
+.db-cell-checkbox input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--color-accent);
+  cursor: pointer;
+}
+
+.db-cell-link {
+  color: var(--color-accent);
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.db-cell-link:hover {
+  text-decoration: underline;
+}
+
+.db-cell-placeholder {
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+/* Select Dropdown */
+.db-cell-select {
+  position: relative;
+}
+
+.db-select-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 20;
+  min-width: 180px;
+  max-height: 240px;
+  overflow-y: auto;
+  background-color: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  padding: 4px;
+}
+
+.db-select-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 5px 8px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 12px;
+  text-align: left;
+  color: var(--color-text-primary);
+}
+
+.db-select-option:hover {
+  background-color: var(--color-bg-tertiary);
+}
+
+.db-select-option-checked {
+  background-color: rgba(139, 92, 246, 0.08);
+}
+
+.db-select-checkbox {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--color-accent);
+}
+
+.db-select-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.db-select-add {
+  padding: 4px;
+  border-top: 1px solid var(--color-border);
+  margin-top: 4px;
+}
+
+.db-select-add-input {
+  width: 100%;
+  padding: 4px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  font-size: 12px;
+  outline: none;
+}
+
+.db-select-add-input:focus {
+  border-color: var(--color-accent);
+}
+
+/* Add Row Button */
+.db-add-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  cursor: pointer;
+  border-top: 1px solid var(--color-border);
+  border-bottom-left-radius: 8px;
+  border-bottom-right-radius: 8px;
+  transition: background-color 0.15s;
+}
+
+.db-add-row:hover {
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
+/* Property Editor Popover */
+.db-property-editor {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 30;
+  min-width: 240px;
+  background-color: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  padding: 12px;
+}
+
+.db-pe-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.db-pe-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+
+.db-pe-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.db-pe-close:hover {
+  background-color: var(--color-bg-tertiary);
+}
+
+.db-pe-section {
+  margin-bottom: 10px;
+}
+
+.db-pe-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.db-pe-input {
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  font-size: 12px;
+  outline: none;
+}
+
+.db-pe-input:focus {
+  border-color: var(--color-accent);
+}
+
+.db-pe-select {
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  font-size: 12px;
+  outline: none;
+  cursor: pointer;
+}
+
+.db-pe-options {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.db-pe-option-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.db-pe-color-input {
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: none;
+  cursor: pointer;
+}
+
+.db-pe-option-remove {
+  display: flex;
+  align-items: center;
+  padding: 2px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  border-radius: 4px;
+  margin-left: auto;
+}
+
+.db-pe-option-remove:hover {
+  color: var(--color-error, #ef4444);
+}
+
+.db-pe-add-option {
+  display: flex;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.db-pe-add-btn {
+  padding: 4px 10px;
+  border: none;
+  border-radius: 4px;
+  background: var(--color-accent);
+  color: white;
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.db-pe-add-btn:hover {
+  opacity: 0.9;
+}
+
+.db-pe-delete {
+  width: 100%;
+  padding: 6px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-error, #ef4444);
+  font-size: 12px;
+  cursor: pointer;
+  text-align: center;
+}
+
+.db-pe-delete:hover {
+  background-color: rgba(239, 68, 68, 0.1);
+}
+
+/* Popovers (sort/filter/add property) */
+.db-popover {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 30;
+  min-width: 280px;
+  background-color: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  padding: 10px;
+}
+
+.db-popover-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  margin-bottom: 8px;
+}
+
+.db-popover-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.db-popover-remove {
+  display: flex;
+  align-items: center;
+  padding: 4px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.db-popover-remove:hover {
+  color: var(--color-error, #ef4444);
+}
+
+.db-popover-action {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  border: 1px dashed var(--color-border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  width: 100%;
+  justify-content: center;
+  margin-top: 4px;
+}
+
+.db-popover-action:hover {
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
+.db-popover-types {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  margin: 8px 0;
+}
+
+.db-popover-type-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.db-popover-type-btn:hover {
+  background-color: var(--color-bg-tertiary);
+}
+
+.db-popover-type-btn-active {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+  background-color: rgba(139, 92, 246, 0.08);
+}
+
+/* ============================================
+   View Tabs
+   ============================================ */
+.db-view-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--color-border);
+  overflow-x: auto;
+}
+
+.db-view-tab {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+  position: relative;
+  user-select: none;
+  transition: background-color 0.15s;
+}
+
+.db-view-tab:hover {
+  background-color: var(--color-bg-tertiary);
+}
+
+.db-view-tab-active {
+  color: var(--color-accent);
+  background-color: rgba(139, 92, 246, 0.1);
+  font-weight: 500;
+}
+
+.db-view-tab-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 120px;
+}
+
+.db-view-tab-rename {
+  width: 80px;
+  padding: 1px 4px;
+  border: 1px solid var(--color-accent);
+  border-radius: 3px;
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  font-size: 12px;
+  outline: none;
+}
+
+.db-view-tab-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 30;
+  min-width: 120px;
+  background-color: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  padding: 4px;
+}
+
+.db-view-tab-menu-item {
+  display: block;
+  width: 100%;
+  padding: 5px 10px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-primary);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.db-view-tab-menu-item:hover {
+  background-color: var(--color-bg-tertiary);
+}
+
+.db-view-tab-menu-item-danger {
+  color: var(--color-error, #ef4444);
+}
+
+.db-view-tab-menu-item-danger:hover {
+  background-color: rgba(239, 68, 68, 0.1);
+}
+
+.db-view-tabs-add {
+  position: relative;
+  margin-left: 4px;
+}
+
+.db-view-tabs-add-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.db-view-tabs-add-btn:hover {
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
+.db-view-tabs-add-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 30;
+  min-width: 180px;
+  background-color: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  padding: 4px;
+}
+
+.db-view-tabs-add-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 10px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-primary);
+  font-size: 12px;
+  cursor: pointer;
+  border-radius: 4px;
+  text-align: left;
+}
+
+.db-view-tabs-add-option:hover {
+  background-color: var(--color-bg-tertiary);
+}
+
+.db-view-tabs-add-option-disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.db-view-tabs-add-option-disabled:hover {
+  background: transparent;
+}
+
+.db-view-tabs-add-hint {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  margin-left: auto;
+}
+
+/* ============================================
+   Row Detail Modal
+   ============================================ */
+.db-row-detail-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(0, 0, 0, 0.5);
+}
+
+.db-row-detail-panel {
+  width: 480px;
+  max-width: 90vw;
+  max-height: 80vh;
+  overflow-y: auto;
+  background-color: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
+.db-row-detail-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.db-row-detail-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.db-row-detail-body {
+  padding: 12px 20px;
+}
+
+.db-row-detail-prop {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--color-border);
+  min-height: 36px;
+}
+
+.db-row-detail-prop:last-child {
+  border-bottom: none;
+}
+
+.db-row-detail-prop-label {
+  width: 120px;
+  min-width: 120px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.db-row-detail-prop-value {
+  flex: 1;
+  min-width: 0;
+}
+
+.db-row-detail-footer {
+  padding: 12px 20px 16px;
+  border-top: 1px solid var(--color-border);
+}
+
+/* ============================================
+   Group By (Table View)
+   ============================================ */
+.db-group-header-row {
+  background-color: var(--color-bg-secondary) !important;
+}
+
+.db-group-header-cell {
+  padding: 6px 10px !important;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.db-group-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.db-group-toggle:hover {
+  background-color: var(--color-bg-tertiary);
+}
+
+.db-group-chevron {
+  transition: transform 0.15s;
+}
+
+.db-group-chevron-open {
+  transform: rotate(90deg);
+}
+
+.db-group-label {
+  color: var(--color-text-secondary);
+}
+
+.db-group-count {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--color-text-muted);
+  background-color: var(--color-bg-tertiary);
+  padding: 0 6px;
+  border-radius: 10px;
+  line-height: 18px;
+}
+
+/* ============================================
+   List View
+   ============================================ */
+.db-list-container {
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.db-list-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--color-border);
+  cursor: pointer;
+  transition: background-color 0.1s;
+}
+
+.db-list-item:last-child {
+  border-bottom: none;
+}
+
+.db-list-item:hover {
+  background-color: var(--color-bg-tertiary);
+}
+
+.db-list-item-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.db-list-item-primary {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.db-list-item-secondary {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.db-list-item-delete {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.db-list-item:hover .db-list-item-delete {
+  display: flex;
+}
+
+.db-list-item-delete:hover {
+  color: var(--color-error, #ef4444);
+  background-color: rgba(239, 68, 68, 0.1);
+}
+
+/* ============================================
+   Board (Kanban) View
+   ============================================ */
+.db-board-container {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  padding: 8px 0 16px;
+  min-height: 200px;
+}
+
+.db-board-empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
+.db-board-column {
+  min-width: 240px;
+  max-width: 280px;
+  flex-shrink: 0;
+  background-color: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  transition: border-color 0.15s;
+}
+
+.db-board-column-over {
+  border-color: var(--color-accent);
+  background-color: rgba(139, 92, 246, 0.04);
+}
+
+.db-board-column-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.db-board-column-count {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  margin-left: auto;
+}
+
+.db-board-column-cards {
+  flex: 1;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 40px;
+}
+
+.db-board-card {
+  padding: 8px 10px;
+  background-color: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: box-shadow 0.15s, border-color 0.15s;
+}
+
+.db-board-card:hover {
+  border-color: var(--color-accent);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.1);
+}
+
+.db-board-card-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-primary);
+  margin-bottom: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.db-board-card-prop {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  margin-top: 3px;
+}
+
+.db-board-card-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.db-board-card-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: block;
+}
+
+.db-board-card-more {
+  font-size: 10px;
+  color: var(--color-text-muted);
+}
+
+.db-board-add-card {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 6px;
+  margin: 0 8px 8px;
+  border: 1px dashed var(--color-border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.db-board-add-card:hover {
+  background-color: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
+/* ============================================
+   Gallery View
+   ============================================ */
+.db-gallery-wrapper {
+  padding: 8px 0;
+}
+
+.db-gallery-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.db-gallery-grid-small {
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+}
+
+.db-gallery-grid-medium {
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+}
+
+.db-gallery-grid-large {
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+}
+
+.db-gallery-card {
+  padding: 12px;
+  background-color: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.db-gallery-card:hover {
+  border-color: var(--color-accent);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.db-gallery-card-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin-bottom: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.db-gallery-card-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.db-gallery-card-label {
+  color: var(--color-text-muted);
+  min-width: 60px;
+  flex-shrink: 0;
+}
+
+.db-gallery-card-value {
+  color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.db-gallery-card-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+/* ============================================
+   Calendar View
+   ============================================ */
+.db-calendar-wrapper {
+  padding: 8px 0;
+}
+
+.db-calendar-empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
+.db-calendar-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.db-calendar-month-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin-left: 8px;
+}
+
+.db-calendar-grid-header {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+  margin-bottom: 4px;
+}
+
+.db-calendar-day-name {
+  text-align: center;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  padding: 4px;
+}
+
+.db-calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+}
+
+.db-calendar-cell {
+  min-height: 90px;
+  padding: 4px 6px;
+  background-color: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.1s;
+}
+
+.db-calendar-cell:hover {
+  background-color: var(--color-bg-tertiary);
+}
+
+.db-calendar-cell-empty {
+  background: transparent;
+  border: none;
+  cursor: default;
+}
+
+.db-calendar-cell-empty:hover {
+  background: transparent;
+}
+
+.db-calendar-cell-today {
+  border-color: var(--color-accent);
+}
+
+.db-calendar-cell-date {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  margin-bottom: 4px;
+}
+
+.db-calendar-cell-today .db-calendar-cell-date {
+  color: var(--color-accent);
+  font-weight: 700;
+}
+
+.db-calendar-cell-items {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.db-calendar-item {
+  font-size: 11px;
+  padding: 2px 4px;
+  border-radius: 3px;
+  background-color: rgba(139, 92, 246, 0.1);
+  color: var(--color-accent);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.db-calendar-item:hover {
+  background-color: rgba(139, 92, 246, 0.2);
+}
+
+.db-calendar-more {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  padding: 1px 4px;
+}
+
+.db-calendar-unscheduled {
+  margin-top: 16px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.db-calendar-unscheduled-header {
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  background-color: var(--color-bg-secondary);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.db-calendar-unscheduled-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 8px 12px;
+}
+
+/* ============================================
+   Compact Mode (inline database blocks)
+   ============================================ */
+.db-editor-compact {
+  max-height: 500px;
+  overflow-y: auto;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 4px 8px;
+}
+
+.db-editor-compact .db-view-tabs {
+  padding: 2px 0;
+  gap: 1px;
+}
+
+.db-editor-compact .db-view-tab {
+  padding: 3px 8px;
+  font-size: 11px;
+}
+
+.db-editor-compact .db-toolbar {
+  padding: 2px 0;
+}
+
+.db-editor-compact .db-toolbar-btn {
+  padding: 3px 8px;
+  font-size: 11px;
+}
+
+.db-editor-compact .db-table {
+  font-size: 12px;
+}
+
+.db-editor-compact .db-cell-display {
+  font-size: 12px;
+  min-height: 24px;
+  padding: 2px 6px;
+}
+
+.db-editor-compact .db-cell-input {
+  font-size: 12px;
+  padding: 2px 6px;
+}
+
+.db-editor-compact .db-calendar-cell {
+  min-height: 70px;
+}
+
+/* ============================================
+   Relation Property Styles
+   ============================================ */
+.db-relation-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  background-color: rgba(139, 92, 246, 0.08);
+  color: var(--color-accent);
+  border: 1px solid rgba(139, 92, 246, 0.2);
+}
+
+.db-relation-dropdown {
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.db-relation-search {
+  padding: 4px;
+  border-bottom: 1px solid var(--color-border);
+  margin-bottom: 4px;
+}
+
+.db-relation-empty {
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  text-align: center;
+}
+
+.db-relation-target-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.db-relation-config {
+  margin: 8px 0;
+}
+
+.db-relation-config .db-pe-label {
+  margin-bottom: 4px;
+}
+
+/* Rollup cell */
+.db-rollup-cell {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  padding: 2px 4px;
+}
+
+.db-rollup-cell-number {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Rollup config in add-property popover */
+.db-rollup-config {
+  margin: 8px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.db-rollup-config .db-pe-label {
+  margin-bottom: 2px;
+}
+
+/* Read-only property type display */
+.db-pe-readonly {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  padding: 4px 0;
+}
+
+/* ============================================
+   Object Type Manager
+   ============================================ */
+.db-object-type-manager {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  max-width: 480px;
+}
+
+.db-object-type-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.db-object-type-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.db-object-type-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.db-object-type-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 0.15s, border-color 0.15s;
+  width: 100%;
+}
+
+.db-object-type-card:hover {
+  background-color: var(--color-bg-tertiary);
+  border-color: var(--color-accent);
+}
+
+.db-object-type-card-icon {
+  font-size: 20px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+}
+
+.db-object-type-card-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.db-object-type-card-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.db-object-type-badge {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  background-color: var(--color-bg-tertiary);
+  padding: 1px 6px;
+  border-radius: 10px;
+}
+
+.db-object-type-card-desc {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.db-object-type-card-props {
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+/* Object Type Edit View */
+.db-object-type-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.db-object-type-edit-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.db-object-type-icon-large {
+  font-size: 28px;
+}
+
+.db-object-type-name-display {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.db-object-type-name-input {
+  font-size: 16px;
+  font-weight: 600;
+  flex: 1;
+}
+
+.db-object-type-description {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  margin: 0;
+}
+
+.db-object-type-props {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.db-object-type-prop-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background-color: var(--color-bg-secondary);
+}
+
+.db-object-type-prop-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-primary);
+  flex: 1;
+}
+
+.db-object-type-prop-type {
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.db-object-type-add-prop {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.db-object-type-add-prop .db-pe-input {
+  flex: 1;
+}
+
+.db-object-type-add-prop .db-pe-select {
+  width: 120px;
+}
+
+/* Create Form */
+.db-object-type-create-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+
+.db-object-type-create-row {
+  display: flex;
+  gap: 8px;
+}
+
+.db-object-type-icon-input {
+  width: 44px !important;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.db-object-type-create-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+/* Object Type Picker (database creation) */
+.db-object-type-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  min-width: 300px;
+}
+
+.db-object-type-picker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 4px 8px;
+  border-bottom: 1px solid var(--color-border);
+  margin-bottom: 4px;
+}
+
+.db-object-type-picker-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 0.15s;
+  width: 100%;
+}
+
+.db-object-type-picker-option:hover {
+  background-color: var(--color-bg-tertiary);
+}
+
+/* Default value inputs in ObjectTypeManager */
+.db-ot-default-input {
+  font-size: 11px;
+  padding: 2px 6px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  width: 80px;
+  margin-left: auto;
+}
+
+.db-ot-default-select {
+  font-size: 11px;
+  padding: 2px 4px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  max-width: 100px;
+  margin-left: auto;
+}
+
+.db-ot-default-checkbox {
+  margin-left: auto;
+}
+
+/* View config section in ObjectTypeManager */
+.db-ot-view-config {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.db-ot-view-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.db-pe-label-sm {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}
+
+.db-ot-sort-row {
+  display: flex;
+  gap: 6px;
+}
+
+/* Default value checkbox in PropertyEditor */
+.db-pe-default-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.db-pe-default-checkbox input {
+  cursor: pointer;
+}

@@ -9,8 +9,13 @@ import { useHeaderCollapse } from "./useHeaderCollapse";
 import { VimModeIndicator } from "./VimModeIndicator";
 import { WikiLinkAutocomplete } from "./WikiLinkAutocomplete";
 import { WikiLinkTool } from "./WikiLinkTool";
+import { BlockRefAutocomplete } from "./BlockRefAutocomplete";
+import { BlockRefTool } from "./BlockRefTool";
 import { LinkPreview } from "./LinkPreview";
+import { AIAssistToolbar } from "./AIAssistToolbar";
+import { usePageStore } from "../../stores/pageStore";
 import { useThemeStore } from "../../stores/themeStore";
+import { useToastStore } from "../../stores/toastStore";
 
 interface BlockEditorProps {
   initialData?: OutputData;
@@ -18,9 +23,11 @@ interface BlockEditorProps {
   onSave?: (data: OutputData) => void;
   onExplicitSave?: (data: OutputData) => void; // Called on Ctrl+S - should trigger git commit
   onLinkClick?: (pageTitle: string) => void;
+  onBlockRefClick?: (blockId: string, pageId: string) => void;
   readOnly?: boolean;
   className?: string;
   notebookId?: string;
+  pageId?: string;
   pages?: Array<{ id: string; title: string }>;
 }
 
@@ -35,9 +42,11 @@ export const BlockEditor = forwardRef<BlockEditorRef, BlockEditorProps>(function
   onSave,
   onExplicitSave,
   onLinkClick,
+  onBlockRefClick,
   readOnly = false,
   className = "",
   notebookId,
+  pageId,
   pages = [],
 }, ref) {
   const editorId = useId().replace(/:/g, "-");
@@ -58,6 +67,11 @@ export const BlockEditor = forwardRef<BlockEditorRef, BlockEditorProps>(function
   // Track vim mode state for indicator (used by useVimMode callback)
   const [, setCurrentVimMode] = useState<VimMode>("normal");
 
+  // Ref to access the save() function inside the debounce timer.
+  // save() comes from useEditor (defined below), so we use a ref to break the
+  // circular dependency while always getting fresh editor state at save time.
+  const saveRef = useRef<(() => Promise<OutputData | null>) | null>(null);
+
   // Debounced save
   const handleChange = useCallback(
     (data: OutputData) => {
@@ -71,23 +85,46 @@ export const BlockEditor = forwardRef<BlockEditorRef, BlockEditorProps>(function
         clearTimeout(saveTimeoutRef.current);
       }
 
-      saveTimeoutRef.current = setTimeout(() => {
-        onSave?.(data);
-        pendingDataRef.current = null; // Clear after successful save
+      saveTimeoutRef.current = setTimeout(async () => {
+        // Get fresh data from the editor at save time rather than using
+        // stale closure data — the editor state may have changed since
+        // the debounce was scheduled (e.g., checklist item deletion that
+        // didn't trigger Editor.js's onChange).
+        const freshData = await saveRef.current?.();
+        if (freshData) {
+          // onSave updates the store synchronously (setPageContentLocal) before
+          // the async backend write, so markClean is safe to call right after.
+          onSaveRef.current?.(freshData);
+          markClean();
+        }
+        pendingDataRef.current = null;
       }, 2000); // Auto-save after 2 seconds of inactivity
     },
-    [onChange, onSave]
+    [onChange]
   );
 
-  const { editor, save, render } = useEditor({
+  const { editor, save, render, markClean } = useEditor({
     holderId,
     initialData,
     onChange: handleChange,
     onLinkClick,
     readOnly,
     notebookId,
+    pageId,
     pages,
+    onUnmountSave: (data) => {
+      // Called by useEditor just before the editor is destroyed.
+      // This captures the true current state, bypassing Editor.js's
+      // onChange debounce which may not have fired yet.
+      pendingDataRef.current = null;
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+        saveTimeoutRef.current = null;
+      }
+      onSaveRef.current?.(data);
+    },
   });
+  saveRef.current = save;
 
   // Expose render and save methods via ref
   useImperativeHandle(ref, () => ({
@@ -138,19 +175,18 @@ export const BlockEditor = forwardRef<BlockEditorRef, BlockEditorProps>(function
     pendingDataRef.current = null;
   }, [initialData]);
 
-  // Cleanup: flush pending save on unmount
+  // Cleanup: clear pending debounce on unmount.
+  // The actual save is handled by useEditor's onUnmountSave callback,
+  // which fires before the editor is destroyed and captures the true state.
   useEffect(() => {
     return () => {
       if (saveTimeoutRef.current) {
         clearTimeout(saveTimeoutRef.current);
+        saveTimeoutRef.current = null;
       }
-      // Flush any pending save immediately before unmounting
-      if (pendingDataRef.current && onSaveRef.current) {
-        onSaveRef.current(pendingDataRef.current);
-        pendingDataRef.current = null;
-      }
+      pendingDataRef.current = null;
     };
-  }, []); // Empty deps - only runs on unmount, uses refs for latest values
+  }, []);
 
   // Save on Ctrl+S - this is an explicit save that should trigger git commit
   useEffect(() => {
@@ -167,23 +203,35 @@ export const BlockEditor = forwardRef<BlockEditorRef, BlockEditorProps>(function
         if (data) {
           // Use explicit save callback if provided, otherwise fall back to regular save
           (onExplicitSave ?? onSave)?.(data);
+          markClean();
         }
       }
     };
 
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [save, onSave, onExplicitSave]);
+  }, [save, onSave, onExplicitSave, markClean]);
 
-  // Mark broken links when pages change or content renders
+  // Mark broken links/refs and update block-ref previews when pages change or content renders
   useEffect(() => {
     if (!containerRef.current || pages.length === 0) return;
 
-    // Use MutationObserver to mark broken links after editor renders
+    // Guard to prevent infinite loop: updateBlockRefPreviews changes textContent
+    // which triggers characterData mutations, which would re-enter markLinks.
+    let isUpdatingPreviews = false;
+
+    // Use MutationObserver to mark broken links/refs after editor renders
     const markLinks = () => {
+      if (isUpdatingPreviews) return;
       if (containerRef.current) {
         const pageTitles = pages.map((p) => p.title);
         WikiLinkTool.markBrokenLinks(containerRef.current, pageTitles);
+        // Mark broken block refs and refresh preview text using full page data
+        const allPages = usePageStore.getState().pages;
+        BlockRefTool.markBrokenBlockRefs(containerRef.current, allPages);
+        isUpdatingPreviews = true;
+        BlockRefTool.updateBlockRefPreviews(containerRef.current, allPages);
+        isUpdatingPreviews = false;
       }
     };
 
@@ -338,9 +386,95 @@ export const BlockEditor = forwardRef<BlockEditorRef, BlockEditorProps>(function
     };
   }, [onLinkClick]);
 
+  // Handle block-ref clicks via event delegation
+  useEffect(() => {
+    if (!containerRef.current || !onBlockRefClick) return;
+
+    const handleBlockRefClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      const blockRef = target.closest("block-ref");
+
+      if (blockRef) {
+        e.preventDefault();
+        e.stopPropagation();
+        const blockId = blockRef.getAttribute("data-block-id");
+        const pageId = blockRef.getAttribute("data-page-id");
+        if (blockId && pageId) {
+          onBlockRefClick(blockId, pageId);
+        }
+      }
+    };
+
+    containerRef.current.addEventListener("click", handleBlockRefClick);
+
+    return () => {
+      containerRef.current?.removeEventListener("click", handleBlockRefClick);
+    };
+  }, [onBlockRefClick]);
+
+  // Checklist structural changes (item deletion, reorder) rebuild the DOM
+  // via innerHTML which Editor.js's MutationObserver-based onChange does not
+  // reliably detect.  ChecklistTool dispatches a custom event as a backup;
+  // we catch it here and feed the current editor state into the save pipeline.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || readOnly) return;
+
+    const handleStructuralChange = async () => {
+      const data = await save();
+      if (data) {
+        handleChange(data);
+      }
+    };
+
+    container.addEventListener("checklist-structural-change", handleStructuralChange);
+    return () => {
+      container.removeEventListener("checklist-structural-change", handleStructuralChange);
+    };
+  }, [save, handleChange, readOnly]);
+
+  // Detect URL paste and offer to clip
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || readOnly) return;
+
+    const handlePaste = (e: ClipboardEvent) => {
+      const text = e.clipboardData?.getData("text/plain")?.trim();
+      if (!text) return;
+      if (/^https?:\/\/\S+$/.test(text)) {
+        useToastStore.getState().addToast({
+          type: "info",
+          message: "URL pasted \u2014 Clip as page?",
+          duration: 6000,
+          action: {
+            label: "Clip",
+            onClick: () => {
+              window.dispatchEvent(
+                new CustomEvent("open-web-clipper", { detail: { url: text } })
+              );
+            },
+          },
+        });
+      }
+    };
+
+    container.addEventListener("paste", handlePaste);
+    return () => container.removeEventListener("paste", handlePaste);
+  }, [readOnly]);
+
   // Handle autocomplete link insertion (trigger save)
   const handleInsertLink = useCallback(() => {
     // Trigger a save after link insertion
+    setTimeout(async () => {
+      const data = await save();
+      if (data) {
+        onChange?.(data);
+      }
+    }, 50);
+  }, [save, onChange]);
+
+  // Handle autocomplete block ref insertion (trigger save)
+  const handleInsertBlockRef = useCallback(() => {
     setTimeout(async () => {
       const data = await save();
       if (data) {
@@ -362,8 +496,16 @@ export const BlockEditor = forwardRef<BlockEditorRef, BlockEditorProps>(function
           onInsertLink={handleInsertLink}
         />
       )}
+      {!readOnly && notebookId && (
+        <BlockRefAutocomplete
+          containerRef={containerRef}
+          notebookId={notebookId}
+          onInsertRef={handleInsertBlockRef}
+        />
+      )}
       {/* Link preview tooltip for external URLs */}
       <LinkPreview containerRef={containerRef} />
+      {!readOnly && <AIAssistToolbar containerRef={containerRef as React.RefObject<HTMLElement | null>} />}
       {isVimModeEnabled && (
         <div className="pointer-events-none fixed bottom-4 left-4 z-50">
           <VimModeIndicator mode={vimMode} pendingKeys={pendingKeys} />

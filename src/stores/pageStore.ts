@@ -11,6 +11,26 @@ import { useRAGStore } from "./ragStore";
 const _gitCommitTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const GIT_AUTO_COMMIT_DELAY = 30_000; // 30 seconds
 
+/** Check whether the page content has actually changed. Avoids unnecessary
+ *  editor re-renders (which destroy in-flight edits) when a background fetch
+ *  returns the same data that's already in the store. */
+function hasContentChanged(current: Page | undefined, fresh: Page): boolean {
+  if (!current?.content || !fresh.content) return true;
+
+  // If local content is at least as recent as the fresh data, keep it.
+  // This avoids overwriting optimistic local edits (via setPageContentLocal)
+  // with stale backend data that api.getPage returns before updatePageContent
+  // has finished writing.
+  if (current.content.time && fresh.content.time && current.content.time >= fresh.content.time) {
+    return false;
+  }
+
+  // Fresh data is newer or timestamps missing — check for structural differences
+  if (current.content.blocks.length !== fresh.content.blocks.length) return true;
+  if (current.content.time !== fresh.content.time) return true;
+  return false;
+}
+
 function scheduleGitAutoCommit(notebookId: string) {
   const existing = _gitCommitTimers.get(notebookId);
   if (existing) clearTimeout(existing);
@@ -637,6 +657,8 @@ export const usePageStore = create<PageStore>()(
             api
               .getPage(page.notebookId, id)
               .then((freshPage) => {
+                const current = get().pages.find((p) => p.id === id);
+                if (!hasContentChanged(current, freshPage)) return;
                 set((state) => ({
                   pages: state.pages.map((p) => (p.id === id ? freshPage : p)),
                   pageDataVersion: state.pageDataVersion + 1,
@@ -668,6 +690,8 @@ export const usePageStore = create<PageStore>()(
           api
             .getPage(page.notebookId, pageId)
             .then((freshPage) => {
+              const current = get().pages.find((p) => p.id === pageId);
+              if (!hasContentChanged(current, freshPage)) return;
               set((state) => ({
                 pages: state.pages.map((p) =>
                   p.id === pageId ? freshPage : p
@@ -707,6 +731,8 @@ export const usePageStore = create<PageStore>()(
           api
             .getPage(page.notebookId, pageId)
             .then((freshPage) => {
+              const current = get().pages.find((p) => p.id === pageId);
+              if (!hasContentChanged(current, freshPage)) return;
               set((state) => ({
                 pages: state.pages.map((p) =>
                   p.id === pageId ? freshPage : p
@@ -933,6 +959,8 @@ export const usePageStore = create<PageStore>()(
           api
             .getPage(page.notebookId, pageId)
             .then((freshPage) => {
+              const current = get().pages.find((p) => p.id === pageId);
+              if (!hasContentChanged(current, freshPage)) return;
               set((state) => ({
                 pages: state.pages.map((p) =>
                   p.id === pageId ? freshPage : p
@@ -1007,13 +1035,21 @@ export const usePageStore = create<PageStore>()(
           )
           .map((r) => r.value);
         if (freshPages.length > 0) {
-          set((state) => ({
-            pages: state.pages.map((p) => {
-              const fresh = freshPages.find((f) => f.id === p.id);
-              return fresh ?? p;
-            }),
-            pageDataVersion: state.pageDataVersion + 1,
-          }));
+          // Only update pages whose content actually changed to avoid
+          // unnecessary editor re-renders that discard unsaved edits.
+          const changedPages = freshPages.filter((fresh) => {
+            const current = get().pages.find((p) => p.id === fresh.id);
+            return hasContentChanged(current, fresh);
+          });
+          if (changedPages.length > 0) {
+            set((state) => ({
+              pages: state.pages.map((p) => {
+                const fresh = changedPages.find((f) => f.id === p.id);
+                return fresh ?? p;
+              }),
+              pageDataVersion: state.pageDataVersion + 1,
+            }));
+          }
         }
       },
 

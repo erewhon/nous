@@ -8,6 +8,7 @@ interface DeckManagerProps {
   onStartReview: (deckId?: string) => void;
   onCreateDeck: () => void;
   onEditDeck: (deck: Deck) => void;
+  onAIGenerate?: (deckId: string) => void;
 }
 
 export function DeckManager({
@@ -16,6 +17,7 @@ export function DeckManager({
   onStartReview,
   onCreateDeck,
   onEditDeck,
+  onAIGenerate,
 }: DeckManagerProps) {
   const { decks, loadDecks, stats, loadStats, isLoading } = useFlashcardStore();
 
@@ -206,6 +208,7 @@ export function DeckManager({
                 onClick={() => onSelectDeck(deck)}
                 onEdit={() => onEditDeck(deck)}
                 onReview={() => onStartReview(deck.id)}
+                onAIGenerate={onAIGenerate ? () => onAIGenerate(deck.id) : undefined}
               />
             ))}
           </div>
@@ -220,9 +223,10 @@ interface DeckItemProps {
   onClick: () => void;
   onEdit: () => void;
   onReview: () => void;
+  onAIGenerate?: () => void;
 }
 
-function DeckItem({ deck, onClick, onEdit, onReview }: DeckItemProps) {
+function DeckItem({ deck, onClick, onEdit, onReview, onAIGenerate }: DeckItemProps) {
   return (
     <div
       className="mx-2 mb-1 rounded-lg border transition-colors hover:bg-[--color-bg-tertiary] cursor-pointer group"
@@ -293,6 +297,35 @@ function DeckItem({ deck, onClick, onEdit, onReview }: DeckItemProps) {
           >
             Review
           </button>
+          {onAIGenerate && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onAIGenerate();
+              }}
+              className="px-2 py-0.5 rounded text-xs font-medium transition-colors hover:opacity-80 flex items-center gap-1"
+              style={{
+                backgroundColor: "rgba(16, 185, 129, 0.1)",
+                color: "#10b981",
+              }}
+              title="Generate cards with AI from current page"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="10"
+                height="10"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+              </svg>
+              AI
+            </button>
+          )}
         </div>
       </div>
     </div>

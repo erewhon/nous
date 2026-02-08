@@ -21,6 +21,8 @@ fn page_type_to_str(page_type: &PageType) -> &'static str {
         PageType::Epub => "epub",
         PageType::Calendar => "calendar",
         PageType::Chat => "chat",
+        PageType::Canvas => "canvas",
+        PageType::Database => "database",
     }
 }
 
@@ -335,6 +337,7 @@ impl SearchIndex {
             PageType::Markdown => file_content.to_string(),
             PageType::Calendar => Self::extract_text_from_calendar(file_content),
             PageType::Pdf | PageType::Epub => Self::extract_text_from_markdown(file_content),
+            PageType::Database => Self::extract_text_from_database(file_content),
             _ => String::new(),
         };
 
@@ -420,6 +423,56 @@ impl SearchIndex {
         }
 
         text_parts.join(" ")
+    }
+
+    /// Extract searchable text from database JSON content
+    fn extract_text_from_database(json_content: &str) -> String {
+        // Parse JSON and extract all text/url cell values
+        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(json_content) {
+            let mut text_parts: Vec<String> = Vec::new();
+
+            // Extract property names
+            if let Some(properties) = parsed.get("properties").and_then(|p| p.as_array()) {
+                for prop in properties {
+                    if let Some(name) = prop.get("name").and_then(|n| n.as_str()) {
+                        text_parts.push(name.to_string());
+                    }
+                }
+            }
+
+            // Extract cell values from rows
+            if let Some(rows) = parsed.get("rows").and_then(|r| r.as_array()) {
+                for row in rows {
+                    if let Some(cells) = row.get("cells").and_then(|c| c.as_object()) {
+                        for value in cells.values() {
+                            match value {
+                                serde_json::Value::String(s) => {
+                                    if !s.is_empty() {
+                                        text_parts.push(s.clone());
+                                    }
+                                }
+                                serde_json::Value::Number(n) => {
+                                    text_parts.push(n.to_string());
+                                }
+                                serde_json::Value::Array(arr) => {
+                                    // multiSelect values
+                                    for item in arr {
+                                        if let Some(s) = item.as_str() {
+                                            text_parts.push(s.to_string());
+                                        }
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+            }
+
+            text_parts.join(" ")
+        } else {
+            String::new()
+        }
     }
 
     /// Remove a page from the index

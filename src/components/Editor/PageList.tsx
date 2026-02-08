@@ -1,7 +1,9 @@
 import { useState, useMemo, useEffect, memo, useCallback } from "react";
 import type { Page, PageType } from "../../types/page";
+import type { StudyPageContent } from "../../types/studyTools";
 import { usePageStore } from "../../stores/pageStore";
 import { useTagStore } from "../../stores/tagStore";
+import { PageContextMenu } from "./PageContextMenu";
 
 // Icon component for different page types
 function PageTypeIcon({ pageType }: { pageType: PageType }) {
@@ -52,6 +54,23 @@ function PageTypeIcon({ pageType }: { pageType: PageType }) {
           <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" />
         </svg>
       );
+    case "canvas":
+      return (
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="3" y="3" width="18" height="18" rx="2" />
+          <circle cx="9" cy="9" r="2" />
+          <circle cx="15" cy="15" r="2" />
+        </svg>
+      );
+    case "database":
+      return (
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="3" y="3" width="18" height="18" rx="2" />
+          <path d="M3 9h18" />
+          <path d="M3 15h18" />
+          <path d="M9 3v18" />
+        </svg>
+      );
     default:
       return (
         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -67,21 +86,32 @@ interface PageListItemProps {
   page: Page;
   isSelected: boolean;
   onSelect: (pageId: string) => void;
+  onContextMenu: (page: Page, position: { x: number; y: number }) => void;
 }
 
 const PageListItem = memo(function PageListItem({
   page,
   isSelected,
   onSelect,
+  onContextMenu,
 }: PageListItemProps) {
   const handleClick = useCallback(() => {
     onSelect(page.id);
   }, [onSelect, page.id]);
 
+  const handleContextMenu = useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
+      onContextMenu(page, { x: e.clientX, y: e.clientY });
+    },
+    [page, onContextMenu]
+  );
+
   return (
     <li>
       <button
         onClick={handleClick}
+        onContextMenu={handleContextMenu}
         className="flex w-full items-center gap-3 rounded-lg text-left transition-all p-3"
         style={{
           backgroundColor: isSelected ? "var(--color-bg-tertiary)" : "transparent",
@@ -106,18 +136,23 @@ const PageListItem = memo(function PageListItem({
           </span>
           {page.tags.length > 0 && (
             <div className="mt-1 flex flex-wrap gap-1">
-              {page.tags.slice(0, 2).map((tag) => (
-                <span
-                  key={tag}
-                  className="rounded-full text-xs px-2 py-0.5"
-                  style={{
-                    backgroundColor: "rgba(139, 92, 246, 0.1)",
-                    color: "var(--color-accent)",
-                  }}
-                >
-                  {tag}
-                </span>
-              ))}
+              {page.tags.slice(0, 2).map((tag) => {
+                const parts = tag.split("/");
+                const leaf = parts[parts.length - 1];
+                return (
+                  <span
+                    key={tag}
+                    className="rounded-full text-xs px-2 py-0.5"
+                    style={{
+                      backgroundColor: "rgba(139, 92, 246, 0.1)",
+                      color: "var(--color-accent)",
+                    }}
+                    title={tag}
+                  >
+                    {leaf}
+                  </span>
+                );
+              })}
               {page.tags.length > 2 && (
                 <span
                   className="text-xs"
@@ -139,6 +174,7 @@ interface PageListProps {
   selectedPageId: string | null;
   onSelectPage: (pageId: string) => void;
   notebookId: string;
+  onOpenStudyTools?: (pages: StudyPageContent[]) => void;
 }
 
 export function PageList({
@@ -146,6 +182,7 @@ export function PageList({
   selectedPageId,
   onSelectPage,
   notebookId,
+  onOpenStudyTools,
 }: PageListProps) {
   const { createPage } = usePageStore();
   const {
@@ -157,6 +194,33 @@ export function PageList({
     filterPagesByTags,
   } = useTagStore();
   const [showTagFilter, setShowTagFilter] = useState(false);
+
+  // Context menu state
+  const [contextMenu, setContextMenu] = useState<{
+    page: Page;
+    position: { x: number; y: number };
+  } | null>(null);
+
+  const handleContextMenu = useCallback(
+    (page: Page, position: { x: number; y: number }) => {
+      setContextMenu({ page, position });
+    },
+    []
+  );
+
+  const handleCloseContextMenu = useCallback(() => {
+    setContextMenu(null);
+  }, []);
+
+  const handleOpenStudyTools = useCallback(
+    (studyPages: StudyPageContent[]) => {
+      if (onOpenStudyTools) {
+        onOpenStudyTools(studyPages);
+      }
+      setContextMenu(null);
+    },
+    [onOpenStudyTools]
+  );
 
   // Build tags from pages when pages change
   useEffect(() => {
@@ -349,11 +413,22 @@ export function PageList({
                 page={page}
                 isSelected={selectedPageId === page.id}
                 onSelect={onSelectPage}
+                onContextMenu={handleContextMenu}
               />
             ))}
           </ul>
         )}
       </div>
+
+      {/* Context menu */}
+      {contextMenu && onOpenStudyTools && (
+        <PageContextMenu
+          page={contextMenu.page}
+          position={contextMenu.position}
+          onClose={handleCloseContextMenu}
+          onOpenStudyTools={handleOpenStudyTools}
+        />
+      )}
     </div>
   );
 }

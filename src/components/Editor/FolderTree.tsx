@@ -16,12 +16,16 @@ import { arrayMove } from "@dnd-kit/sortable";
 import { open } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { Folder, Page, Section, FileStorageMode } from "../../types/page";
+import type { Notebook, PageSortOption } from "../../types/notebook";
+import type { ObjectType } from "../../types/database";
 import { useFolderStore } from "../../stores/folderStore";
 import { usePageStore } from "../../stores/pageStore";
-import { useThemeStore, type PageSortOption } from "../../stores/themeStore";
+import { useNotebookStore } from "../../stores/notebookStore";
+import { useThemeStore, type PageSortOption as ThemePageSortOption } from "../../stores/themeStore";
 import * as api from "../../utils/api";
 import { FolderTreeItem, DraggablePageItem } from "./FolderTreeItem";
 import { FileImportDialog } from "../Import/FileImportDialog";
+import { ObjectTypePicker, ObjectTypeManager } from "../Database/ObjectTypeManager";
 
 const PAGE_SORT_OPTIONS: { value: PageSortOption; label: string }[] = [
   { value: "position", label: "Manual" },
@@ -110,6 +114,7 @@ function DroppableUnsorted({ isOver }: { isOver: boolean }) {
 
 interface FolderTreeProps {
   notebookId: string;
+  notebook?: Notebook;
   pages: Page[];
   folders: Folder[];
   selectedPageId: string | null;
@@ -135,6 +140,7 @@ interface FolderTreeProps {
 
 export function FolderTree({
   notebookId,
+  notebook,
   pages,
   folders,
   selectedPageId,
@@ -163,10 +169,13 @@ export function FolderTree({
     updateFolder,
     deleteFolder: deleteFolderApi,
   } = useFolderStore();
+  const { updateNotebook } = useNotebookStore();
   const autoHidePanels = useThemeStore((state) => state.autoHidePanels);
   const setAutoHidePanels = useThemeStore((state) => state.setAutoHidePanels);
-  const pageSortBy = useThemeStore((state) => state.pageSortBy);
-  const setPageSortBy = useThemeStore((state) => state.setPageSortBy);
+  const globalPageSortBy = useThemeStore((state) => state.pageSortBy);
+
+  // Use per-notebook sort setting with fallback to global
+  const pageSortBy = (notebook?.pageSortBy ?? globalPageSortBy) as ThemePageSortOption;
 
   const [isCreatingFolder, setIsCreatingFolder] = useState(false);
   const [showPageSortMenu, setShowPageSortMenu] = useState(false);
@@ -201,10 +210,12 @@ export function FolderTree({
   const [pendingImportPath, setPendingImportPath] = useState<string | null>(null);
   const [isImporting, setIsImporting] = useState(false);
   const [isFileDragOver, setIsFileDragOver] = useState(false);
+  const [showDatabaseTypePicker, setShowDatabaseTypePicker] = useState(false);
+  const [showObjectTypeManager, setShowObjectTypeManager] = useState(false);
   const treeContainerRef = useRef<HTMLDivElement>(null);
 
   // Supported file extensions for import
-  const SUPPORTED_EXTENSIONS = ["md", "pdf", "ipynb", "epub", "ics"];
+  const SUPPORTED_EXTENSIONS = ["md", "pdf", "ipynb", "epub", "ics", "canvas"];
 
   // Listen for Tauri file drop events
   useEffect(() => {
@@ -471,6 +482,67 @@ END:VCALENDAR`;
       await api.updateFileContent(notebookId, pageData.id, icsContent);
     } catch (err) {
       console.error("Failed to create calendar page:", err);
+    }
+  }, [notebookId, sectionsEnabled, selectedSectionId, createPage]);
+
+  // Handle creating a database page (optionally from an object type template)
+  const handleCreateDatabasePage = useCallback(async (objectType?: ObjectType | null) => {
+    try {
+      const title = objectType ? `New ${objectType.name}` : "New Database";
+      const sectionId = sectionsEnabled && selectedSectionId ? selectedSectionId : undefined;
+      const pageData = await createPage(notebookId, title, undefined, undefined, sectionId);
+      if (!pageData) {
+        console.error("Failed to create database page");
+        return;
+      }
+      const { updatePage: storeUpdatePage } = usePageStore.getState();
+      await storeUpdatePage(notebookId, pageData.id, {
+        fileExtension: "database",
+        pageType: "database",
+      });
+      // Initialize database content — from template or empty
+      const { createDefaultDatabaseContent, createDatabaseFromObjectType } = await import("../../types/database");
+      const content = objectType
+        ? createDatabaseFromObjectType(objectType)
+        : createDefaultDatabaseContent();
+      await api.updateFileContent(notebookId, pageData.id, JSON.stringify(content, null, 2));
+    } catch (err) {
+      console.error("Failed to create database page:", err);
+    }
+  }, [notebookId, sectionsEnabled, selectedSectionId, createPage]);
+
+  // Handle creating a canvas page
+  const handleCreateCanvasPage = useCallback(async () => {
+    try {
+      const title = "New Canvas";
+      const sectionId = sectionsEnabled && selectedSectionId ? selectedSectionId : undefined;
+      const pageData = await createPage(notebookId, title, undefined, undefined, sectionId);
+      if (!pageData) {
+        console.error("Failed to create canvas page");
+        return;
+      }
+      // Update the page to have .canvas extension which will set pageType to canvas
+      const { updatePage: storeUpdatePage } = usePageStore.getState();
+      await storeUpdatePage(notebookId, pageData.id, {
+        fileExtension: "canvas",
+        pageType: "canvas",
+      });
+      // Initialize with empty canvas content
+      const canvasContent = JSON.stringify({
+        version: "1.0",
+        fabricData: null,
+        viewport: { panX: 0, panY: 0, zoom: 1 },
+        elements: {},
+        settings: {
+          gridEnabled: true,
+          gridSize: 20,
+          snapToGrid: false,
+          backgroundColor: "#1e1e2e",
+        },
+      }, null, 2);
+      await api.updateFileContent(notebookId, pageData.id, canvasContent);
+    } catch (err) {
+      console.error("Failed to create canvas page:", err);
     }
   }, [notebookId, sectionsEnabled, selectedSectionId, createPage]);
 
@@ -904,6 +976,42 @@ END:VCALENDAR`;
         onCancel={handleCancelImport}
         isImporting={isImporting}
       />
+
+      {/* Database type picker modal */}
+      {showDatabaseTypePicker && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center"
+          style={{ backgroundColor: "rgba(0, 0, 0, 0.5)" }}
+          onClick={() => setShowDatabaseTypePicker(false)}
+        >
+          <div
+            className="rounded-xl shadow-2xl"
+            style={{
+              backgroundColor: "var(--color-bg-secondary)",
+              border: "1px solid var(--color-border)",
+              width: "380px",
+              maxHeight: "500px",
+              overflowY: "auto",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {showObjectTypeManager ? (
+              <ObjectTypeManager
+                onClose={() => setShowObjectTypeManager(false)}
+              />
+            ) : (
+              <ObjectTypePicker
+                onSelect={(objectType) => {
+                  setShowDatabaseTypePicker(false);
+                  handleCreateDatabasePage(objectType);
+                }}
+                onManageTypes={() => setShowObjectTypeManager(true)}
+              />
+            )}
+          </div>
+        </div>
+      )}
+
       <DndContext
         sensors={sensors}
         collisionDetection={closestCenter}
@@ -944,7 +1052,8 @@ END:VCALENDAR`;
                     <button
                       key={option.value}
                       onClick={() => {
-                        setPageSortBy(option.value);
+                        // Save per-notebook sort preference
+                        updateNotebook(notebookId, { pageSortBy: option.value });
                         setShowPageSortMenu(false);
                       }}
                       className="flex w-full items-center justify-between px-3 py-1.5 text-left text-xs transition-colors hover:bg-[--color-bg-tertiary]"
@@ -1175,6 +1284,59 @@ END:VCALENDAR`;
                       <line x1="3" y1="10" x2="21" y2="10" />
                     </svg>
                     Calendar Page
+                  </button>
+                  <button
+                    onClick={() => {
+                      setShowNewPageMenu(false);
+                      setShowDatabaseTypePicker(true);
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors hover:bg-[--color-bg-tertiary]"
+                    style={{ color: "var(--color-text-primary)" }}
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <rect x="3" y="3" width="18" height="18" rx="2" />
+                      <path d="M3 9h18" />
+                      <path d="M3 15h18" />
+                      <path d="M9 3v18" />
+                    </svg>
+                    Database Page
+                  </button>
+                  <button
+                    onClick={() => {
+                      handleCreateCanvasPage();
+                      setShowNewPageMenu(false);
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors hover:bg-[--color-bg-tertiary]"
+                    style={{ color: "var(--color-text-primary)" }}
+                  >
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <rect x="3" y="3" width="18" height="18" rx="2" />
+                      <circle cx="9" cy="9" r="2" />
+                      <circle cx="15" cy="15" r="2" />
+                      <line x1="9" y1="11" x2="9" y2="15" />
+                      <line x1="11" y1="9" x2="15" y2="9" />
+                    </svg>
+                    Canvas/Whiteboard
                   </button>
                   <div
                     className="my-1 mx-2 border-t"

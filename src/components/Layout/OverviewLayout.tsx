@@ -352,6 +352,7 @@ export function OverviewLayout() {
         >
           <FolderTree
             notebookId={selectedNotebook.id}
+            notebook={selectedNotebook}
             pages={notebookPages}
             folders={folders}
             selectedPageId={selectedPageId}

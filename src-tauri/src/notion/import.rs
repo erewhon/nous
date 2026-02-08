@@ -14,7 +14,7 @@ use uuid::Uuid;
 use zip::ZipArchive;
 
 use crate::markdown::import_markdown_to_page;
-use crate::storage::{Notebook, NotebookType, Page, StorageError};
+use crate::storage::{FileStorageMode, Notebook, NotebookType, Page, PageType, StorageError};
 
 type Result<T> = std::result::Result<T, StorageError>;
 
@@ -68,6 +68,8 @@ struct NotionPageInfo {
     images: Vec<(String, String)>, // (original_ref, zip_path)
     /// Whether this is a database (CSV converted to table)
     is_database: bool,
+    /// JSON content for database pages (when is_database is true)
+    database_json: Option<String>,
 }
 
 /// Regex pattern for Notion UUID suffix in filenames
@@ -306,14 +308,237 @@ fn convert_links_to_wikilinks(markdown: &str, title_mapping: &HashMap<String, St
     }).to_string()
 }
 
+/// Infer the property type from a column of values
+fn infer_property_type(header: &str, values: &[String]) -> &'static str {
+    let header_lower = header.to_lowercase();
+
+    // Tags columns -> multiSelect
+    if header_lower == "tags" || header_lower == "labels" || header_lower == "categories" {
+        return "multiSelect";
+    }
+
+    // Check values to infer type
+    let non_empty: Vec<&str> = values.iter().map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
+    if non_empty.is_empty() {
+        return "text";
+    }
+
+    // Check if all non-empty values are booleans
+    let all_bool = non_empty.iter().all(|v| {
+        let lower = v.to_lowercase();
+        lower == "true" || lower == "false" || lower == "yes" || lower == "no"
+    });
+    if all_bool {
+        return "checkbox";
+    }
+
+    // Check if all non-empty values are numeric
+    let all_numeric = non_empty.iter().all(|v| v.parse::<f64>().is_ok());
+    if all_numeric {
+        return "number";
+    }
+
+    // Check if all non-empty values look like URLs
+    let all_urls = non_empty.iter().all(|v| v.starts_with("http://") || v.starts_with("https://"));
+    if all_urls {
+        return "url";
+    }
+
+    // Check if all non-empty values look like dates (YYYY-MM-DD or similar)
+    let date_re = regex::Regex::new(r"^\d{4}-\d{2}-\d{2}").unwrap();
+    let all_dates = non_empty.iter().all(|v| date_re.is_match(v));
+    if all_dates {
+        return "date";
+    }
+
+    "text"
+}
+
+/// Convert CSV content to a database JSON string (DatabaseContent format)
+fn csv_to_database_content(csv_content: &str) -> Option<String> {
+    let mut reader = csv::ReaderBuilder::new()
+        .has_headers(true)
+        .flexible(true)
+        .from_reader(csv_content.as_bytes());
+
+    let headers: Vec<String> = match reader.headers() {
+        Ok(h) => h.iter().map(|s| s.to_string()).collect(),
+        Err(_) => return None,
+    };
+
+    if headers.is_empty() {
+        return None;
+    }
+
+    // Read all records first to infer types
+    let records: Vec<Vec<String>> = reader.records()
+        .filter_map(|r| r.ok())
+        .map(|r| (0..headers.len()).map(|i| r.get(i).unwrap_or("").to_string()).collect())
+        .collect();
+
+    // Infer column types
+    let mut properties = Vec::new();
+    let select_colors = [
+        "#ef4444", "#f97316", "#eab308", "#22c55e", "#06b6d4",
+        "#3b82f6", "#8b5cf6", "#ec4899", "#6b7280", "#a855f7",
+    ];
+
+    for (col_idx, header) in headers.iter().enumerate() {
+        let col_values: Vec<String> = records.iter().map(|r| r[col_idx].clone()).collect();
+        let prop_type = infer_property_type(header, &col_values);
+        let prop_id = uuid::Uuid::new_v4().to_string();
+
+        // Build options for select/multiSelect columns
+        let options = if prop_type == "select" || prop_type == "multiSelect" {
+            let mut unique_labels: Vec<String> = Vec::new();
+            for val in &col_values {
+                if prop_type == "multiSelect" {
+                    for tag in val.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()) {
+                        if !unique_labels.contains(&tag) {
+                            unique_labels.push(tag);
+                        }
+                    }
+                } else if !val.trim().is_empty() && !unique_labels.contains(&val.trim().to_string()) {
+                    unique_labels.push(val.trim().to_string());
+                }
+            }
+            let opts: Vec<serde_json::Value> = unique_labels.iter().enumerate().map(|(i, label)| {
+                serde_json::json!({
+                    "id": uuid::Uuid::new_v4().to_string(),
+                    "label": label,
+                    "color": select_colors[i % select_colors.len()]
+                })
+            }).collect();
+            Some(opts)
+        } else {
+            None
+        };
+
+        let mut prop = serde_json::json!({
+            "id": prop_id,
+            "name": header,
+            "type": prop_type,
+        });
+        if let Some(opts) = &options {
+            prop["options"] = serde_json::Value::Array(opts.clone());
+        }
+        properties.push((prop_id, prop_type.to_string(), prop, options));
+    }
+
+    // Build rows
+    let now = chrono::Utc::now().to_rfc3339();
+    let mut rows = Vec::new();
+    for record in &records {
+        let mut cells = serde_json::Map::new();
+        for (col_idx, (prop_id, prop_type, _prop_json, options)) in properties.iter().enumerate() {
+            let raw_value = &record[col_idx];
+            let cell_value = match prop_type.as_str() {
+                "number" => {
+                    if raw_value.trim().is_empty() {
+                        serde_json::Value::Null
+                    } else {
+                        match raw_value.trim().parse::<f64>() {
+                            Ok(n) => serde_json::json!(n),
+                            Err(_) => serde_json::Value::Null,
+                        }
+                    }
+                }
+                "checkbox" => {
+                    let lower = raw_value.trim().to_lowercase();
+                    serde_json::json!(lower == "true" || lower == "yes")
+                }
+                "multiSelect" => {
+                    // Map labels to option IDs
+                    let tags: Vec<String> = raw_value.split(',')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect();
+                    let opt_ids: Vec<serde_json::Value> = if let Some(opts) = options {
+                        tags.iter().filter_map(|tag| {
+                            opts.iter().find(|o| o.get("label").and_then(|l| l.as_str()) == Some(tag))
+                                .and_then(|o| o.get("id").cloned())
+                        }).collect()
+                    } else {
+                        Vec::new()
+                    };
+                    serde_json::Value::Array(opt_ids)
+                }
+                "select" => {
+                    // Map label to option ID
+                    if raw_value.trim().is_empty() {
+                        serde_json::Value::Null
+                    } else if let Some(opts) = options {
+                        opts.iter()
+                            .find(|o| o.get("label").and_then(|l| l.as_str()) == Some(raw_value.trim()))
+                            .and_then(|o| o.get("id").cloned())
+                            .unwrap_or(serde_json::Value::Null)
+                    } else {
+                        serde_json::Value::Null
+                    }
+                }
+                "date" => {
+                    if raw_value.trim().is_empty() {
+                        serde_json::Value::Null
+                    } else {
+                        // Take just the date part (YYYY-MM-DD)
+                        let date_str = raw_value.trim();
+                        if date_str.len() >= 10 {
+                            serde_json::json!(&date_str[..10])
+                        } else {
+                            serde_json::json!(date_str)
+                        }
+                    }
+                }
+                _ => {
+                    // text, url
+                    if raw_value.trim().is_empty() {
+                        serde_json::Value::Null
+                    } else {
+                        serde_json::json!(raw_value.trim())
+                    }
+                }
+            };
+            cells.insert(prop_id.clone(), cell_value);
+        }
+
+        rows.push(serde_json::json!({
+            "id": uuid::Uuid::new_v4().to_string(),
+            "cells": cells,
+            "createdAt": now,
+            "updatedAt": now,
+        }));
+    }
+
+    // Build final DatabaseContent (v2 with views)
+    let property_defs: Vec<serde_json::Value> = properties.iter().map(|(_, _, p, _)| p.clone()).collect();
+    let db_content = serde_json::json!({
+        "version": 2,
+        "properties": property_defs,
+        "rows": rows,
+        "views": [{
+            "id": uuid::Uuid::new_v4().to_string(),
+            "name": "Table",
+            "type": "table",
+            "sorts": [],
+            "filters": [],
+            "config": {},
+        }],
+    });
+
+    serde_json::to_string_pretty(&db_content).ok()
+}
+
 /// Parse a CSV database file and return a single page info with a table
 fn parse_database_csv(
     csv_content: &str,
     database_name: &str,
     database_path: &Path,
 ) -> Option<NotionPageInfo> {
-    // Convert CSV to markdown table
+    // Convert CSV to markdown table (fallback content)
     let content = csv_to_markdown_table(csv_content, database_name);
+
+    // Also generate structured database JSON
+    let database_json = csv_to_database_content(csv_content);
 
     // Extract notion ID from the database filename
     let filename = database_path.file_name()
@@ -332,6 +557,7 @@ fn parse_database_csv(
         children_folder_path,
         images: Vec::new(),
         is_database: true,
+        database_json,
     })
 }
 
@@ -573,6 +799,7 @@ pub fn import_notion_zip(
             children_folder_path,
             images,
             is_database: false,
+            database_json: None,
         });
     }
 
@@ -636,6 +863,8 @@ pub fn import_notion_zip(
         encryption_config: None,
         is_pinned: false,
         position: 0,
+        page_sort_by: None,
+        daily_notes_config: None,
         created_at: now,
         updated_at: now,
     };
@@ -730,8 +959,25 @@ pub fn import_notion_zip(
             tags.push("database".to_string());
         }
 
-        // Import markdown content to page
-        let mut page = import_markdown_to_page(&content, notebook_id, &info.clean_title);
+        // Create page — either as database page or standard markdown page
+        let mut page = if let Some(ref db_json) = info.database_json {
+            // Create as a database page type
+            let mut p = Page::new(notebook_id, info.clean_title.clone());
+            p.page_type = PageType::Database;
+            p.file_extension = Some("database".to_string());
+            p.storage_mode = Some(FileStorageMode::Embedded);
+            p.source_file = Some(format!("files/{}.database", p.id));
+
+            // Write the database content file
+            let files_dir = notebook_dir.join("files");
+            fs::create_dir_all(&files_dir)?;
+            fs::write(files_dir.join(format!("{}.database", p.id)), db_json)?;
+
+            p
+        } else {
+            // Standard markdown import
+            import_markdown_to_page(&content, notebook_id, &info.clean_title)
+        };
         page.tags = tags;
 
         // Set parent_page_id based on the folder -> notion_id -> nous_id mapping
@@ -874,6 +1120,7 @@ where
             children_folder_path,
             images,
             is_database: false,
+            database_json: None,
         });
     }
 
@@ -960,6 +1207,8 @@ where
         encryption_config: None,
         is_pinned: false,
         position: 0,
+        page_sort_by: None,
+        daily_notes_config: None,
         created_at: now,
         updated_at: now,
     };
@@ -1070,8 +1319,25 @@ where
             tags.push("database".to_string());
         }
 
-        // Import markdown content to page
-        let mut page = import_markdown_to_page(&content, notebook_id, &info.clean_title);
+        // Create page — either as database page or standard markdown page
+        let mut page = if let Some(ref db_json) = info.database_json {
+            // Create as a database page type
+            let mut p = Page::new(notebook_id, info.clean_title.clone());
+            p.page_type = PageType::Database;
+            p.file_extension = Some("database".to_string());
+            p.storage_mode = Some(FileStorageMode::Embedded);
+            p.source_file = Some(format!("files/{}.database", p.id));
+
+            // Write the database content file
+            let files_dir = notebook_dir.join("files");
+            fs::create_dir_all(&files_dir)?;
+            fs::write(files_dir.join(format!("{}.database", p.id)), db_json)?;
+
+            p
+        } else {
+            // Standard markdown import
+            import_markdown_to_page(&content, notebook_id, &info.clean_title)
+        };
         page.tags = tags;
 
         // Set parent_page_id based on the folder -> notion_id -> nous_id mapping

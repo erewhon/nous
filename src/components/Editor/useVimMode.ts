@@ -258,6 +258,13 @@ export function useVimMode({
     // Remove the item from DOM
     itemToDelete.remove();
 
+    // Dispatch custom event to trigger save.  ChecklistTool.save() reads from
+    // the DOM, so the deletion will be captured even though we bypassed the
+    // tool's internal data array.
+    checklistContainer.dispatchEvent(
+      new CustomEvent("checklist-structural-change", { bubbles: true })
+    );
+
     // Focus the previous item, or the first item if we deleted the first one
     const newIndex = itemIndex > 0 ? itemIndex - 1 : 0;
     const remainingItems = Array.from(

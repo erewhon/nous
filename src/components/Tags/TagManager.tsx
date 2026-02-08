@@ -443,25 +443,59 @@ export function TagManager({ isOpen, onClose, notebookId }: TagManagerProps) {
                   No tags in this notebook yet.
                 </div>
               ) : (
-                <div className="flex flex-wrap gap-2">
-                  {tags.map((tag) => (
-                    <span
-                      key={tag.name}
-                      className="inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm"
-                      style={{
-                        backgroundColor: "rgba(139, 92, 246, 0.1)",
-                        color: "var(--color-accent)",
-                      }}
-                    >
-                      {tag.name}
-                      <span
-                        className="text-xs"
-                        style={{ color: "var(--color-text-muted)" }}
-                      >
-                        {tag.count}
-                      </span>
-                    </span>
-                  ))}
+                <div className="space-y-1">
+                  {(() => {
+                    // Group tags into tree structure
+                    const rootTags: TagInfo[] = [];
+                    const childMap = new Map<string, TagInfo[]>();
+                    for (const tag of tags) {
+                      const parts = tag.name.split("/");
+                      if (parts.length === 1) {
+                        rootTags.push(tag);
+                      } else {
+                        const parent = parts.slice(0, -1).join("/");
+                        if (!childMap.has(parent)) childMap.set(parent, []);
+                        childMap.get(parent)!.push(tag);
+                      }
+                    }
+                    // Also include tags whose parent doesn't exist at root level
+                    for (const tag of tags) {
+                      const parts = tag.name.split("/");
+                      if (parts.length > 1) {
+                        const parent = parts.slice(0, -1).join("/");
+                        if (!tags.some((t) => t.name === parent) && !rootTags.includes(tag)) {
+                          rootTags.push(tag);
+                        }
+                      }
+                    }
+
+                    function renderTag(tag: TagInfo, indent: number) {
+                      const children = childMap.get(tag.name) || [];
+                      return (
+                        <div key={tag.name}>
+                          <span
+                            className="inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm"
+                            style={{
+                              marginLeft: `${indent * 16}px`,
+                              backgroundColor: "rgba(139, 92, 246, 0.1)",
+                              color: "var(--color-accent)",
+                            }}
+                          >
+                            {tag.name.split("/").pop()}
+                            <span
+                              className="text-xs"
+                              style={{ color: "var(--color-text-muted)" }}
+                            >
+                              {tag.count}
+                            </span>
+                          </span>
+                          {children.map((child) => renderTag(child, indent + 1))}
+                        </div>
+                      );
+                    }
+
+                    return rootTags.map((tag) => renderTag(tag, 0));
+                  })()}
                 </div>
               )}
             </>

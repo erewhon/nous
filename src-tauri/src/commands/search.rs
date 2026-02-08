@@ -151,7 +151,7 @@ pub fn rebuild_search_index(state: State<AppState>) -> Result<(), CommandError> 
     // Index each page with proper content extraction
     for page in &all_pages {
         let result = match page.page_type {
-            PageType::Jupyter | PageType::Markdown | PageType::Calendar => {
+            PageType::Jupyter | PageType::Markdown | PageType::Calendar | PageType::Database => {
                 // Read file content for text-based files
                 match storage.read_native_file_content(page) {
                     Ok(content) => search_index.index_page_with_content(page, &content),

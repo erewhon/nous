@@ -359,6 +359,52 @@ pub fn remove_page_embedding(state: State<AppState>, page_id: String) -> Result<
     Ok(())
 }
 
+/// Find pages similar to a given page using its chunk embeddings.
+#[tauri::command]
+pub fn find_similar_pages(
+    state: State<AppState>,
+    page_id: String,
+    notebook_id: Option<String>,
+    limit: Option<usize>,
+) -> Result<Vec<SemanticSearchResult>, CommandError> {
+    let page_uuid = Uuid::parse_str(&page_id).map_err(|e| CommandError {
+        message: format!("Invalid page ID: {}", e),
+    })?;
+
+    let notebook_uuid = notebook_id
+        .map(|id| Uuid::parse_str(&id))
+        .transpose()
+        .map_err(|e| CommandError {
+            message: format!("Invalid notebook ID: {}", e),
+        })?;
+
+    let locked_ids = get_locked_notebook_ids(&state)?;
+
+    let vector_index = state.vector_index.lock().map_err(|e| CommandError {
+        message: format!("Failed to acquire vector index lock: {}", e),
+    })?;
+
+    let results = vector_index
+        .find_similar_pages(page_uuid, limit.unwrap_or(10), notebook_uuid)
+        .map_err(|e| CommandError {
+            message: format!("Find similar pages failed: {}", e),
+        })?;
+
+    // Filter out results from locked notebooks
+    let filtered_results: Vec<SemanticSearchResult> = results
+        .into_iter()
+        .filter(|r| {
+            if let Ok(nb_id) = Uuid::parse_str(&r.notebook_id) {
+                !locked_ids.contains(&nb_id)
+            } else {
+                true
+            }
+        })
+        .collect();
+
+    Ok(filtered_results)
+}
+
 /// Get chunks for a page (for embedding generation).
 #[tauri::command]
 pub fn get_page_chunks(
