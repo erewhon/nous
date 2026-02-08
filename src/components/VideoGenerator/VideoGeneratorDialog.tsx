@@ -524,6 +524,9 @@ export function VideoGeneratorDialog({
                     slides={videoStore.slides}
                     selectedIndex={selectedSlideIndex}
                     onSelectSlide={setSelectedSlideIndex}
+                    onReorder={(from, to) => {
+                      videoStore.reorderSlides(from, to);
+                    }}
                     theme={videoStore.settings.theme}
                   />
 
@@ -709,6 +712,49 @@ export function VideoGeneratorDialog({
                       </option>
                     ))}
                   </select>
+                </div>
+              </div>
+
+              {/* Accent Color */}
+              <div>
+                <label
+                  className="block text-sm font-medium mb-2"
+                  style={{ color: "var(--color-text-primary)" }}
+                >
+                  Accent Color
+                </label>
+                <div className="flex items-center gap-3">
+                  {["#e74c3c", "#3498db", "#2ecc71", "#f39c12", "#9b59b6", "#1abc9c"].map((color) => (
+                    <button
+                      key={color}
+                      onClick={() => videoStore.setAccentColor(
+                        videoStore.settings.accentColor === color ? null : color
+                      )}
+                      className={`w-7 h-7 rounded-full transition-all ${
+                        videoStore.settings.accentColor === color
+                          ? "ring-2 ring-offset-2 ring-[--color-accent] scale-110"
+                          : "hover:scale-110"
+                      }`}
+                      style={{ backgroundColor: color }}
+                      title={videoStore.settings.accentColor === color ? "Using custom accent (click to reset)" : color}
+                    />
+                  ))}
+                  <input
+                    type="color"
+                    value={videoStore.settings.accentColor || "#e74c3c"}
+                    onChange={(e) => videoStore.setAccentColor(e.target.value)}
+                    className="w-7 h-7 rounded cursor-pointer border-0 p-0"
+                    title="Custom color"
+                  />
+                  {videoStore.settings.accentColor && (
+                    <button
+                      onClick={() => videoStore.setAccentColor(null)}
+                      className="text-xs hover:underline"
+                      style={{ color: "var(--color-text-muted)" }}
+                    >
+                      Reset
+                    </button>
+                  )}
                 </div>
               </div>
 

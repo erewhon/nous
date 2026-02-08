@@ -46,6 +46,7 @@ pub struct VideoConfig {
     #[serde(default = "default_transition")]
     pub transition: String, // cut, fade
     pub title: Option<String>,
+    pub accent_color: Option<String>, // Custom accent color hex
 }
 
 fn default_video_width() -> i32 {

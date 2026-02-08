@@ -1,3 +1,18 @@
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  rectSortingStrategy,
+  useSortable,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import type { SlideContent } from "../../types/videoGenerate";
 
 interface SlidePreviewProps {
@@ -100,10 +115,60 @@ export function SlidePreview({
   );
 }
 
+interface SortableSlideProps {
+  id: string;
+  slide: SlideContent;
+  slideNumber: number;
+  totalSlides: number;
+  theme: "light" | "dark";
+  isSelected: boolean;
+  onClick: () => void;
+}
+
+function SortableSlide({
+  id,
+  slide,
+  slideNumber,
+  totalSlides,
+  theme,
+  isSelected,
+  onClick,
+}: SortableSlideProps) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+    zIndex: isDragging ? 10 : undefined,
+  };
+
+  return (
+    <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
+      <SlidePreview
+        slide={slide}
+        slideNumber={slideNumber}
+        totalSlides={totalSlides}
+        theme={theme}
+        isSelected={isSelected}
+        onClick={onClick}
+      />
+    </div>
+  );
+}
+
 interface SlideListProps {
   slides: SlideContent[];
   selectedIndex: number;
   onSelectSlide: (index: number) => void;
+  onReorder?: (fromIndex: number, toIndex: number) => void;
   theme: "light" | "dark";
 }
 
@@ -111,8 +176,36 @@ export function SlideList({
   slides,
   selectedIndex,
   onSelectSlide,
+  onReorder,
   theme,
 }: SlideListProps) {
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor)
+  );
+
+  // Stable IDs for sortable
+  const slideIds = slides.map((_, i) => `slide-${i}`);
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id || !onReorder) return;
+
+    const oldIndex = slideIds.indexOf(active.id as string);
+    const newIndex = slideIds.indexOf(over.id as string);
+    if (oldIndex !== -1 && newIndex !== -1) {
+      onReorder(oldIndex, newIndex);
+      // Update selected index to follow the dragged item
+      if (selectedIndex === oldIndex) {
+        onSelectSlide(newIndex);
+      } else if (selectedIndex > oldIndex && selectedIndex <= newIndex) {
+        onSelectSlide(selectedIndex - 1);
+      } else if (selectedIndex < oldIndex && selectedIndex >= newIndex) {
+        onSelectSlide(selectedIndex + 1);
+      }
+    }
+  };
+
   if (slides.length === 0) {
     return (
       <div
@@ -125,18 +218,27 @@ export function SlideList({
   }
 
   return (
-    <div className="grid grid-cols-3 gap-3">
-      {slides.map((slide, index) => (
-        <SlidePreview
-          key={index}
-          slide={slide}
-          slideNumber={index + 1}
-          totalSlides={slides.length}
-          theme={theme}
-          isSelected={index === selectedIndex}
-          onClick={() => onSelectSlide(index)}
-        />
-      ))}
-    </div>
+    <DndContext
+      sensors={sensors}
+      collisionDetection={closestCenter}
+      onDragEnd={handleDragEnd}
+    >
+      <SortableContext items={slideIds} strategy={rectSortingStrategy}>
+        <div className="grid grid-cols-3 gap-3">
+          {slides.map((slide, index) => (
+            <SortableSlide
+              key={slideIds[index]}
+              id={slideIds[index]}
+              slide={slide}
+              slideNumber={index + 1}
+              totalSlides={slides.length}
+              theme={theme}
+              isSelected={index === selectedIndex}
+              onClick={() => onSelectSlide(index)}
+            />
+          ))}
+        </div>
+      </SortableContext>
+    </DndContext>
   );
 }

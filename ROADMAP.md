@@ -474,7 +474,7 @@ Already implemented with Tantivy, may need refinement:
 - [x] Jupyter cell editing (add, delete, reorder, edit cell content)
 - [x] Jupyter cell execution via Python kernel
 - [x] PDF annotation persistence (save highlights/notes)
-- [ ] EPUB reading progress tracking
+- [x] EPUB reading progress tracking
 - [ ] EPUB highlight/annotation support
 
 ---
@@ -631,20 +631,20 @@ NotebookLM-inspired features for generating study materials from notebook conten
   - File size and creation date display
 
 #### Media Generation Enhancements (Not Yet Implemented)
-- [ ] **Drag-and-drop slide reordering** - Reorder slides via drag-and-drop in slide list
+- [x] **Drag-and-drop slide reordering** - Reorder slides via drag-and-drop in slide list
 - [x] **Export from Media Library** - Open/export media files directly from library
 - [x] **Batch delete in Media Library** - Select and delete multiple media files at once
 - [ ] **Slide templates** - Pre-built slide layouts (title slide, bullet points, image, quote)
 - [ ] **Undo/redo for slides** - History stack for slide edits with keyboard shortcuts
 - [ ] **Video thumbnails** - Generate and display thumbnails in Media Library
 - [ ] **Re-generate single slide audio** - Regenerate TTS for individual slides without full rebuild
-- [ ] **Custom accent colors** - User-defined accent color for slides and infographics
+- [x] **Custom accent colors** - User-defined accent color for slides and infographics
 
 #### Visualization Enhancements
 - [x] **Timeline Export** - Save as SVG/PNG/PDF
 - [x] **Concept Map Export** - SVG/PNG and Mermaid/GraphViz formats
 - [x] **Vertical Timeline** - Alternative layout option
-- [ ] **Hierarchical Concept Map** - Tree layout mode
+- [x] **Hierarchical Concept Map** - Tree layout mode
 - [x] **Cross-Notebook Knowledge Graph** - Concepts across all notebooks
 
 #### UI Enhancements

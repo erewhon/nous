@@ -64,6 +64,7 @@ class VideoConfig(BaseModel):
     theme: str = "light"  # light, dark
     transition: str = "cut"  # cut, fade
     title: str | None = None
+    accent_color: str | None = None  # Custom accent color hex (e.g., "#e74c3c")
 
 
 class VideoResult(BaseModel):
@@ -78,10 +79,16 @@ class VideoResult(BaseModel):
 # ===== Theme Colors =====
 
 
-def get_theme_colors(theme: str) -> dict[str, tuple[int, int, int]]:
-    """Get color palette for a theme (RGB tuples)."""
+def hex_to_rgb(hex_color: str) -> tuple[int, int, int]:
+    """Convert hex color string to RGB tuple."""
+    hex_color = hex_color.lstrip("#")
+    return (int(hex_color[0:2], 16), int(hex_color[2:4], 16), int(hex_color[4:6], 16))
+
+
+def get_theme_colors(theme: str, accent_color: str | None = None) -> dict[str, tuple[int, int, int]]:
+    """Get color palette for a theme (RGB tuples), with optional accent color override."""
     if theme == "dark":
-        return {
+        colors = {
             "background": (26, 26, 46),
             "text": (234, 234, 234),
             "text_secondary": (176, 176, 176),
@@ -90,7 +97,7 @@ def get_theme_colors(theme: str) -> dict[str, tuple[int, int, int]]:
             "accent": (187, 225, 250),
         }
     else:  # light
-        return {
+        colors = {
             "background": (255, 255, 255),
             "text": (44, 62, 80),
             "text_secondary": (127, 140, 141),
@@ -98,6 +105,9 @@ def get_theme_colors(theme: str) -> dict[str, tuple[int, int, int]]:
             "secondary": (41, 128, 185),
             "accent": (231, 76, 60),
         }
+    if accent_color:
+        colors["accent"] = hex_to_rgb(accent_color)
+    return colors
 
 
 # ===== Text Utilities =====
@@ -178,7 +188,7 @@ def render_slide(
     if not PILLOW_AVAILABLE:
         raise ImportError("Pillow is not installed. Install with: pip install pillow")
 
-    colors = get_theme_colors(config.theme)
+    colors = get_theme_colors(config.theme, config.accent_color)
 
     # Create image
     img = Image.new("RGB", (config.width, config.height), colors["background"])
@@ -273,7 +283,7 @@ def render_title_slide(
     if not PILLOW_AVAILABLE:
         raise ImportError("Pillow is not installed. Install with: pip install pillow")
 
-    colors = get_theme_colors(config.theme)
+    colors = get_theme_colors(config.theme, config.accent_color)
 
     img = Image.new("RGB", (config.width, config.height), colors["background"])
     draw = ImageDraw.Draw(img)

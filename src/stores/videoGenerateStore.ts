@@ -16,6 +16,7 @@ interface VideoGenerateSettings {
   transition: VideoTransition;
   width: number;
   height: number;
+  accentColor: string | null;
 }
 
 interface VideoGenerateState {
@@ -44,6 +45,7 @@ interface VideoGenerateActions {
   setWidth: (width: number) => void;
   setHeight: (height: number) => void;
   setAspectRatio: (width: number, height: number) => void;
+  setAccentColor: (color: string | null) => void;
 
   // TTS config
   setTTSConfig: (config: Partial<VideoTTSConfig>) => void;
@@ -99,6 +101,7 @@ export const useVideoGenerateStore = create<VideoGenerateStore>()(
         transition: "cut",
         width: 1920,
         height: 1080,
+        accentColor: null,
       },
       ttsConfig: {},
       slides: [],
@@ -125,6 +128,10 @@ export const useVideoGenerateStore = create<VideoGenerateStore>()(
       setAspectRatio: (width, height) =>
         set((state) => ({
           settings: { ...state.settings, width, height },
+        })),
+      setAccentColor: (accentColor) =>
+        set((state) => ({
+          settings: { ...state.settings, accentColor },
         })),
 
       // TTS config
@@ -191,6 +198,7 @@ export const useVideoGenerateStore = create<VideoGenerateStore>()(
               theme: settings.theme,
               transition: settings.transition,
               title,
+              accentColor: settings.accentColor,
             }
           );
 

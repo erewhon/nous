@@ -22,6 +22,7 @@ pub struct InfographicConfig {
     #[serde(default = "default_theme")]
     pub theme: String, // light, dark
     pub title: Option<String>,
+    pub accent_color: Option<String>, // Custom accent color hex
 }
 
 fn default_width() -> i32 {

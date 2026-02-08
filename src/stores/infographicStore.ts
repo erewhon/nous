@@ -12,6 +12,7 @@ interface InfographicSettings {
   theme: InfographicTheme;
   width: number;
   height: number;
+  accentColor: string | null;
 }
 
 interface InfographicState {
@@ -37,6 +38,7 @@ interface InfographicActions {
   setTheme: (theme: InfographicTheme) => void;
   setWidth: (width: number) => void;
   setHeight: (height: number) => void;
+  setAccentColor: (color: string | null) => void;
 
   // Generation
   generateInfographic: (
@@ -68,6 +70,7 @@ export const useInfographicStore = create<InfographicStore>()(
         theme: "light",
         width: 1200,
         height: 800,
+        accentColor: null,
       },
       availability: null,
       isLoadingAvailability: false,
@@ -88,6 +91,10 @@ export const useInfographicStore = create<InfographicStore>()(
         set((state) => ({
           settings: { ...state.settings, height },
         })),
+      setAccentColor: (accentColor) =>
+        set((state) => ({
+          settings: { ...state.settings, accentColor },
+        })),
 
       // Generation
       generateInfographic: async (notebookId, template, data, title) => {
@@ -104,6 +111,7 @@ export const useInfographicStore = create<InfographicStore>()(
               height: settings.height,
               theme: settings.theme,
               title,
+              accentColor: settings.accentColor,
             }
           );
           set({ result, isGenerating: false });

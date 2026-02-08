@@ -2482,6 +2482,7 @@ export interface InfographicConfig {
   height?: number;
   theme?: string;
   title?: string | null;
+  accentColor?: string | null;
 }
 
 export interface InfographicResult {
@@ -2538,6 +2539,7 @@ export interface VideoConfig {
   theme?: string;
   transition?: string;
   title?: string | null;
+  accentColor?: string | null;
 }
 
 export interface VideoGenerationResult {

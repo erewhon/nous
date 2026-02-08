@@ -56,6 +56,7 @@ class InfographicConfig(BaseModel):
     height: int = 800
     theme: InfographicTheme = InfographicTheme.LIGHT
     title: str | None = None
+    accent_color: str | None = None  # Custom accent color hex (e.g., "#e74c3c")
 
 
 class InfographicResult(BaseModel):
@@ -71,10 +72,10 @@ class InfographicResult(BaseModel):
 # ===== Theme Colors =====
 
 
-def get_theme_colors(theme: InfographicTheme) -> dict[str, str]:
-    """Get color palette for a theme."""
+def get_theme_colors(theme: InfographicTheme, accent_color: str | None = None) -> dict[str, str]:
+    """Get color palette for a theme, with optional accent color override."""
     if theme == InfographicTheme.DARK:
-        return {
+        colors = {
             "background": "#1a1a2e",
             "text": "#eaeaea",
             "text_secondary": "#b0b0b0",
@@ -86,7 +87,7 @@ def get_theme_colors(theme: InfographicTheme) -> dict[str, str]:
             "highlight": "#f39c12",
         }
     else:  # light
-        return {
+        colors = {
             "background": "#ffffff",
             "text": "#2c3e50",
             "text_secondary": "#7f8c8d",
@@ -97,6 +98,9 @@ def get_theme_colors(theme: InfographicTheme) -> dict[str, str]:
             "card": "#ecf0f1",
             "highlight": "#f39c12",
         }
+    if accent_color:
+        colors["accent"] = accent_color
+    return colors
 
 
 # ===== Text Utilities =====
@@ -152,7 +156,7 @@ def generate_key_concepts_svg(
     if not SVGWRITE_AVAILABLE:
         raise ImportError("svgwrite package is not installed. Install with: pip install svgwrite")
 
-    colors = get_theme_colors(config.theme)
+    colors = get_theme_colors(config.theme, config.accent_color)
     dwg = svgwrite.Drawing(size=(config.width, config.height))
 
     # Background
@@ -275,7 +279,7 @@ def generate_executive_summary_svg(
     if not SVGWRITE_AVAILABLE:
         raise ImportError("svgwrite package is not installed. Install with: pip install svgwrite")
 
-    colors = get_theme_colors(config.theme)
+    colors = get_theme_colors(config.theme, config.accent_color)
     dwg = svgwrite.Drawing(size=(config.width, config.height))
 
     # Background
@@ -431,7 +435,7 @@ def generate_timeline_svg(
     if not SVGWRITE_AVAILABLE:
         raise ImportError("svgwrite package is not installed. Install with: pip install svgwrite")
 
-    colors = get_theme_colors(config.theme)
+    colors = get_theme_colors(config.theme, config.accent_color)
     dwg = svgwrite.Drawing(size=(config.width, config.height))
 
     # Background
@@ -594,7 +598,7 @@ def generate_concept_map_svg(
     if not SVGWRITE_AVAILABLE:
         raise ImportError("svgwrite package is not installed. Install with: pip install svgwrite")
 
-    colors = get_theme_colors(config.theme)
+    colors = get_theme_colors(config.theme, config.accent_color)
     dwg = svgwrite.Drawing(size=(config.width, config.height))
 
     # Background

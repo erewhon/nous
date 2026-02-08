@@ -29,6 +29,7 @@ export function ConceptMapView({ conceptGraph, onClose: _onClose }: ConceptMapVi
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
   const [selectedNode, setSelectedNode] = useState<ConceptNode | null>(null);
   const [hoveredNode, setHoveredNode] = useState<ConceptNode | null>(null);
+  const [layout, setLayout] = useState<"force" | "tree">("force");
 
   // Update dimensions on resize
   useEffect(() => {
@@ -69,7 +70,132 @@ export function ConceptMapView({ conceptGraph, onClose: _onClose }: ConceptMapVi
     [conceptGraph.links]
   );
 
-  // Render force-directed graph
+  // Helper: draw node shapes
+  const drawNodeShapes = useCallback(
+    (
+      node: d3.Selection<SVGGElement, D3ConceptNode, SVGGElement, unknown>,
+    ) => {
+      node.each(function (d) {
+        const el = d3.select(this);
+        const color = nodeColors[d.nodeType];
+
+        if (d.nodeType === "concept") {
+          el.append("circle")
+            .attr("r", 20)
+            .attr("fill", color)
+            .attr("stroke", "var(--color-bg-primary)")
+            .attr("stroke-width", 2);
+        } else if (d.nodeType === "example") {
+          el.append("rect")
+            .attr("width", 28)
+            .attr("height", 28)
+            .attr("x", -14)
+            .attr("y", -14)
+            .attr("fill", color)
+            .attr("stroke", "var(--color-bg-primary)")
+            .attr("stroke-width", 2)
+            .attr("transform", "rotate(45)");
+        } else {
+          el.append("rect")
+            .attr("width", 36)
+            .attr("height", 28)
+            .attr("x", -18)
+            .attr("y", -14)
+            .attr("rx", 6)
+            .attr("fill", color)
+            .attr("stroke", "var(--color-bg-primary)")
+            .attr("stroke-width", 2);
+        }
+      });
+    },
+    [nodeColors]
+  );
+
+  // Helper: add node interactions (hover highlight, click select)
+  const addNodeInteractions = useCallback(
+    (
+      node: d3.Selection<SVGGElement, D3ConceptNode, SVGGElement, unknown>,
+      linkLines: d3.Selection<SVGLineElement, D3ConceptLink, SVGGElement, unknown>,
+      linkLabels: d3.Selection<SVGTextElement, D3ConceptLink, SVGGElement, unknown>,
+    ) => {
+      node
+        .on("mouseenter", function (_event, d) {
+          const shape = d3.select(this).select("circle, rect");
+          shape
+            .transition()
+            .duration(150)
+            .attr("stroke-width", 4)
+            .attr("stroke", "var(--color-accent)");
+
+          linkLines
+            .transition()
+            .duration(150)
+            .attr("stroke-opacity", (l) => {
+              const sourceId =
+                typeof l.source === "object" ? (l.source as D3ConceptNode).id : l.source;
+              const targetId =
+                typeof l.target === "object" ? (l.target as D3ConceptNode).id : l.target;
+              return sourceId === d.id || targetId === d.id ? 1 : 0.15;
+            })
+            .attr("stroke-width", (l) => {
+              const sourceId =
+                typeof l.source === "object" ? (l.source as D3ConceptNode).id : l.source;
+              const targetId =
+                typeof l.target === "object" ? (l.target as D3ConceptNode).id : l.target;
+              return sourceId === d.id || targetId === d.id ? 2.5 : 1.5;
+            });
+
+          linkLabels.attr("opacity", (l) => {
+            const sourceId =
+              typeof l.source === "object" ? (l.source as D3ConceptNode).id : l.source;
+            const targetId =
+              typeof l.target === "object" ? (l.target as D3ConceptNode).id : l.target;
+            return sourceId === d.id || targetId === d.id ? 1 : 0;
+          });
+
+          const connected = getConnectedNodes(d.id);
+          node
+            .filter((n) => n.id !== d.id && !connected.has(n.id))
+            .select("circle, rect")
+            .transition()
+            .duration(150)
+            .attr("opacity", 0.3);
+
+          setHoveredNode(conceptGraph.nodes.find((n) => n.id === d.id) || null);
+        })
+        .on("mouseleave", function () {
+          const shape = d3.select(this).select("circle, rect");
+          shape
+            .transition()
+            .duration(150)
+            .attr("stroke-width", 2)
+            .attr("stroke", "var(--color-bg-primary)");
+
+          linkLines
+            .transition()
+            .duration(150)
+            .attr("stroke-opacity", 0.6)
+            .attr("stroke-width", 1.5);
+
+          linkLabels.attr("opacity", 0);
+
+          node
+            .select("circle, rect")
+            .transition()
+            .duration(150)
+            .attr("opacity", 1);
+
+          setHoveredNode(null);
+        })
+        .on("click", (event, d) => {
+          event.stopPropagation();
+          setSelectedNode(conceptGraph.nodes.find((n) => n.id === d.id) || null);
+        });
+    },
+    [conceptGraph.nodes, getConnectedNodes]
+  );
+
+  // Render graph
   useEffect(() => {
     if (!svgRef.current || conceptGraph.nodes.length === 0) return;
 
@@ -90,8 +216,6 @@ export function ConceptMapView({ conceptGraph, onClose: _onClose }: ConceptMapVi
 
     // Define arrow markers
     const defs = svg.append("defs");
-
-    // Arrow marker for links
     defs
       .append("marker")
       .attr("id", "concept-arrow")
@@ -117,230 +241,317 @@ export function ConceptMapView({ conceptGraph, onClose: _onClose }: ConceptMapVi
 
     svg.call(zoom);
 
-    // Create force simulation
-    const simulation = d3
-      .forceSimulation<D3ConceptNode>(nodes)
-      .force(
-        "link",
-        d3
-          .forceLink<D3ConceptNode, D3ConceptLink>(links)
-          .id((d) => d.id)
-          .distance(150)
-      )
-      .force("charge", d3.forceManyBody().strength(-500))
-      .force("center", d3.forceCenter(width / 2, height / 2))
-      .force("collision", d3.forceCollide().radius(60));
+    if (layout === "tree") {
+      // ===== TREE LAYOUT =====
+      // Build adjacency from links
+      const adjacency = new Map<string, string[]>();
+      for (const l of links) {
+        const src = typeof l.source === "object" ? (l.source as D3ConceptNode).id : l.source;
+        const tgt = typeof l.target === "object" ? (l.target as D3ConceptNode).id : l.target;
+        if (!adjacency.has(src)) adjacency.set(src, []);
+        adjacency.get(src)!.push(tgt);
+      }
 
-    // Draw links
-    const link = g
-      .append("g")
-      .attr("class", "links")
-      .selectAll("g")
-      .data(links)
-      .join("g");
+      // Find root: node with most connections or first concept node
+      const connectionCount = new Map<string, number>();
+      for (const n of nodes) connectionCount.set(n.id, 0);
+      for (const l of links) {
+        const src = typeof l.source === "object" ? (l.source as D3ConceptNode).id : l.source;
+        const tgt = typeof l.target === "object" ? (l.target as D3ConceptNode).id : l.target;
+        connectionCount.set(src, (connectionCount.get(src) || 0) + 1);
+        connectionCount.set(tgt, (connectionCount.get(tgt) || 0) + 1);
+      }
+      const rootId = [...connectionCount.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || nodes[0]?.id;
 
-    // Link lines
-    const linkLines = link
-      .append("line")
-      .attr("stroke", "var(--color-border)")
-      .attr("stroke-opacity", 0.6)
-      .attr("stroke-width", 1.5)
-      .attr("marker-end", "url(#concept-arrow)");
+      // BFS to build tree hierarchy
+      const visited = new Set<string>();
+      interface TreeNode { id: string; children: TreeNode[] }
+      const buildTree = (id: string): TreeNode => {
+        visited.add(id);
+        const children: TreeNode[] = [];
+        // Collect both outgoing and incoming connections for the tree
+        const neighbors = new Set<string>();
+        for (const l of conceptGraph.links) {
+          if (l.source === id && !visited.has(l.target)) neighbors.add(l.target);
+          if (l.target === id && !visited.has(l.source)) neighbors.add(l.source);
+        }
+        for (const nid of neighbors) {
+          children.push(buildTree(nid));
+        }
+        return { id, children };
+      };
+      const treeData = buildTree(rootId);
 
-    // Link labels
-    const linkLabels = link
-      .append("text")
-      .text((d) => d.relationship)
-      .attr("text-anchor", "middle")
-      .attr("fill", "var(--color-text-muted)")
-      .attr("font-size", "9px")
-      .attr("dy", -5);
+      // Add orphan nodes as children of root
+      for (const n of nodes) {
+        if (!visited.has(n.id)) {
+          treeData.children.push({ id: n.id, children: [] });
+        }
+      }
 
-    // Create drag behavior
-    const dragBehavior = d3
-      .drag<SVGGElement, D3ConceptNode>()
-      .on("start", (event, d) => {
-        if (!event.active) simulation.alphaTarget(0.3).restart();
-        d.fx = d.x;
-        d.fy = d.y;
-      })
-      .on("drag", (event, d) => {
-        d.fx = event.x;
-        d.fy = event.y;
-      })
-      .on("end", (event, d) => {
-        if (!event.active) simulation.alphaTarget(0);
-        d.fx = null;
-        d.fy = null;
+      // D3 tree layout
+      const margin = { top: 40, right: 80, bottom: 40, left: 80 };
+      const innerWidth = width - margin.left - margin.right;
+      const innerHeight = height - margin.top - margin.bottom;
+
+      const root = d3.hierarchy(treeData);
+      const treeLayout = d3.tree<TreeNode>().size([innerHeight, innerWidth]);
+      treeLayout(root);
+
+      const treeG = g.append("g").attr("transform", `translate(${margin.left},${margin.top})`);
+
+      // Draw links as curved paths
+      const nodeById = new Map(nodes.map((n) => [n.id, n]));
+
+      const linkGroup = treeG
+        .append("g")
+        .attr("class", "links")
+        .selectAll("path")
+        .data(root.links())
+        .join("path")
+        .attr("d", (d) =>
+          `M${d.source.y!},${d.source.x!}C${(d.source.y! + d.target.y!) / 2},${d.source.x!} ${(d.source.y! + d.target.y!) / 2},${d.target.x!} ${d.target.y!},${d.target.x!}`
+        )
+        .attr("fill", "none")
+        .attr("stroke", "var(--color-border)")
+        .attr("stroke-opacity", 0.6)
+        .attr("stroke-width", 1.5);
+
+      // Draw link labels (find matching relationship from original links)
+      const treeLinkLabels = treeG
+        .append("g")
+        .attr("class", "link-labels")
+        .selectAll("text")
+        .data(root.links())
+        .join("text")
+        .text((d) => {
+          const srcId = d.source.data.id;
+          const tgtId = d.target.data.id;
+          const origLink = conceptGraph.links.find(
+            (l) => (l.source === srcId && l.target === tgtId) || (l.source === tgtId && l.target === srcId)
+          );
+          return origLink?.relationship || "";
+        })
+        .attr("x", (d) => (d.source.y! + d.target.y!) / 2)
+        .attr("y", (d) => (d.source.x! + d.target.x!) / 2)
+        .attr("text-anchor", "middle")
+        .attr("fill", "var(--color-text-muted)")
+        .attr("font-size", "9px")
+        .attr("dy", -5)
+        .attr("opacity", 0);
+
+      // Draw nodes
+      const treeNodes = treeG
+        .append("g")
+        .attr("class", "nodes")
+        .selectAll<SVGGElement, d3.HierarchyPointNode<TreeNode>>("g")
+        .data(root.descendants())
+        .join("g")
+        .attr("transform", (d) => `translate(${d.y},${d.x})`)
+        .attr("cursor", "pointer");
+
+      // Map tree nodes back to concept nodes for shapes
+      const treeConceptNodes = treeNodes.data().map((d) => nodeById.get(d.data.id)!).filter(Boolean);
+      treeNodes.each(function (_d, i) {
+        const conceptNode = treeConceptNodes[i];
+        if (!conceptNode) return;
+        const el = d3.select(this);
+        const color = nodeColors[conceptNode.nodeType];
+        if (conceptNode.nodeType === "concept") {
+          el.append("circle").attr("r", 20).attr("fill", color).attr("stroke", "var(--color-bg-primary)").attr("stroke-width", 2);
+        } else if (conceptNode.nodeType === "example") {
+          el.append("rect").attr("width", 28).attr("height", 28).attr("x", -14).attr("y", -14).attr("fill", color).attr("stroke", "var(--color-bg-primary)").attr("stroke-width", 2).attr("transform", "rotate(45)");
+        } else {
+          el.append("rect").attr("width", 36).attr("height", 28).attr("x", -18).attr("y", -14).attr("rx", 6).attr("fill", color).attr("stroke", "var(--color-bg-primary)").attr("stroke-width", 2);
+        }
       });
 
-    // Draw nodes
-    const node = g
-      .append("g")
-      .attr("class", "nodes")
-      .selectAll<SVGGElement, D3ConceptNode>("g")
-      .data(nodes)
-      .join("g")
-      .attr("cursor", "pointer")
-      .call(dragBehavior);
+      // Node labels
+      treeNodes
+        .append("text")
+        .text((_d, i) => {
+          const n = treeConceptNodes[i];
+          if (!n) return "";
+          return n.label.length > 15 ? n.label.slice(0, 13) + "..." : n.label;
+        })
+        .attr("x", 0)
+        .attr("y", 35)
+        .attr("text-anchor", "middle")
+        .attr("fill", "var(--color-text-secondary)")
+        .attr("font-size", "11px")
+        .attr("font-weight", "500");
 
-    // Node shapes based on type
-    node.each(function (d) {
-      const el = d3.select(this);
-      const color = nodeColors[d.nodeType];
+      // Node interactions for tree
+      treeNodes
+        .on("mouseenter", function (_event, d) {
+          const i = root.descendants().indexOf(d);
+          const conceptNode = treeConceptNodes[i];
+          if (!conceptNode) return;
 
-      if (d.nodeType === "concept") {
-        // Circle for concepts
-        el.append("circle")
-          .attr("r", 20)
-          .attr("fill", color)
-          .attr("stroke", "var(--color-bg-primary)")
-          .attr("stroke-width", 2);
-      } else if (d.nodeType === "example") {
-        // Diamond for examples
-        el.append("rect")
-          .attr("width", 28)
-          .attr("height", 28)
-          .attr("x", -14)
-          .attr("y", -14)
-          .attr("fill", color)
-          .attr("stroke", "var(--color-bg-primary)")
-          .attr("stroke-width", 2)
-          .attr("transform", "rotate(45)");
-      } else {
-        // Rounded rect for definitions
-        el.append("rect")
-          .attr("width", 36)
-          .attr("height", 28)
-          .attr("x", -18)
-          .attr("y", -14)
-          .attr("rx", 6)
-          .attr("fill", color)
-          .attr("stroke", "var(--color-bg-primary)")
-          .attr("stroke-width", 2);
-      }
-    });
+          const shape = d3.select(this).select("circle, rect");
+          shape.transition().duration(150).attr("stroke-width", 4).attr("stroke", "var(--color-accent)");
 
-    // Node labels
-    node
-      .append("text")
-      .text((d) => (d.label.length > 15 ? d.label.slice(0, 13) + "..." : d.label))
-      .attr("x", 0)
-      .attr("y", 35)
-      .attr("text-anchor", "middle")
-      .attr("fill", "var(--color-text-secondary)")
-      .attr("font-size", "11px")
-      .attr("font-weight", "500");
+          // Highlight connected links
+          linkGroup
+            .transition()
+            .duration(150)
+            .attr("stroke-opacity", (l) =>
+              l.source.data.id === conceptNode.id || l.target.data.id === conceptNode.id ? 1 : 0.15
+            )
+            .attr("stroke-width", (l) =>
+              l.source.data.id === conceptNode.id || l.target.data.id === conceptNode.id ? 2.5 : 1.5
+            );
 
-    // Node interactions
-    node
-      .on("mouseenter", function (_event, d) {
-        const shape = d3.select(this).select("circle, rect");
-        shape
-          .transition()
-          .duration(150)
-          .attr("stroke-width", 4)
-          .attr("stroke", "var(--color-accent)");
+          treeLinkLabels.attr("opacity", (l) =>
+            l.source.data.id === conceptNode.id || l.target.data.id === conceptNode.id ? 1 : 0
+          );
 
-        // Highlight connected links
-        linkLines
-          .transition()
-          .duration(150)
-          .attr("stroke-opacity", (l) => {
-            const sourceId =
-              typeof l.source === "object" ? (l.source as D3ConceptNode).id : l.source;
-            const targetId =
-              typeof l.target === "object" ? (l.target as D3ConceptNode).id : l.target;
-            return sourceId === d.id || targetId === d.id ? 1 : 0.15;
-          })
-          .attr("stroke-width", (l) => {
-            const sourceId =
-              typeof l.source === "object" ? (l.source as D3ConceptNode).id : l.source;
-            const targetId =
-              typeof l.target === "object" ? (l.target as D3ConceptNode).id : l.target;
-            return sourceId === d.id || targetId === d.id ? 2.5 : 1.5;
-          });
+          const connected = getConnectedNodes(conceptNode.id);
+          treeNodes
+            .filter((_tn, j) => {
+              const cn = treeConceptNodes[j];
+              return cn ? cn.id !== conceptNode.id && !connected.has(cn.id) : false;
+            })
+            .select("circle, rect")
+            .transition()
+            .duration(150)
+            .attr("opacity", 0.3);
 
-        // Show link labels for connected
-        linkLabels.attr("opacity", (l) => {
-          const sourceId =
-            typeof l.source === "object" ? (l.source as D3ConceptNode).id : l.source;
-          const targetId =
-            typeof l.target === "object" ? (l.target as D3ConceptNode).id : l.target;
-          return sourceId === d.id || targetId === d.id ? 1 : 0;
+          setHoveredNode(conceptGraph.nodes.find((n) => n.id === conceptNode.id) || null);
+        })
+        .on("mouseleave", function () {
+          const shape = d3.select(this).select("circle, rect");
+          shape.transition().duration(150).attr("stroke-width", 2).attr("stroke", "var(--color-bg-primary)");
+
+          linkGroup.transition().duration(150).attr("stroke-opacity", 0.6).attr("stroke-width", 1.5);
+          treeLinkLabels.attr("opacity", 0);
+          treeNodes.select("circle, rect").transition().duration(150).attr("opacity", 1);
+          setHoveredNode(null);
+        })
+        .on("click", (_event, d) => {
+          const i = root.descendants().indexOf(d);
+          const conceptNode = treeConceptNodes[i];
+          if (conceptNode) {
+            setSelectedNode(conceptGraph.nodes.find((n) => n.id === conceptNode.id) || null);
+          }
         });
 
-        // Dim unconnected nodes
-        const connected = getConnectedNodes(d.id);
-        node
-          .filter((n) => n.id !== d.id && !connected.has(n.id))
-          .select("circle, rect")
-          .transition()
-          .duration(150)
-          .attr("opacity", 0.3);
+      // Center tree
+      svg.call(zoom.transform, d3.zoomIdentity.translate(0, 0));
+    } else {
+      // ===== FORCE-DIRECTED LAYOUT =====
+      // Create force simulation
+      const simulation = d3
+        .forceSimulation<D3ConceptNode>(nodes)
+        .force(
+          "link",
+          d3
+            .forceLink<D3ConceptNode, D3ConceptLink>(links)
+            .id((d) => d.id)
+            .distance(150)
+        )
+        .force("charge", d3.forceManyBody().strength(-500))
+        .force("center", d3.forceCenter(width / 2, height / 2))
+        .force("collision", d3.forceCollide().radius(60));
 
-        setHoveredNode(conceptGraph.nodes.find((n) => n.id === d.id) || null);
-      })
-      .on("mouseleave", function () {
-        const shape = d3.select(this).select("circle, rect");
-        shape
-          .transition()
-          .duration(150)
-          .attr("stroke-width", 2)
-          .attr("stroke", "var(--color-bg-primary)");
+      // Draw links
+      const link = g
+        .append("g")
+        .attr("class", "links")
+        .selectAll("g")
+        .data(links)
+        .join("g");
 
+      const linkLines = link
+        .append("line")
+        .attr("stroke", "var(--color-border)")
+        .attr("stroke-opacity", 0.6)
+        .attr("stroke-width", 1.5)
+        .attr("marker-end", "url(#concept-arrow)");
+
+      const linkLabels = link
+        .append("text")
+        .text((d) => d.relationship)
+        .attr("text-anchor", "middle")
+        .attr("fill", "var(--color-text-muted)")
+        .attr("font-size", "9px")
+        .attr("dy", -5);
+
+      // Create drag behavior
+      const dragBehavior = d3
+        .drag<SVGGElement, D3ConceptNode>()
+        .on("start", (event, d) => {
+          if (!event.active) simulation.alphaTarget(0.3).restart();
+          d.fx = d.x;
+          d.fy = d.y;
+        })
+        .on("drag", (event, d) => {
+          d.fx = event.x;
+          d.fy = event.y;
+        })
+        .on("end", (event, d) => {
+          if (!event.active) simulation.alphaTarget(0);
+          d.fx = null;
+          d.fy = null;
+        });
+
+      // Draw nodes
+      const node = g
+        .append("g")
+        .attr("class", "nodes")
+        .selectAll<SVGGElement, D3ConceptNode>("g")
+        .data(nodes)
+        .join("g")
+        .attr("cursor", "pointer")
+        .call(dragBehavior);
+
+      drawNodeShapes(node);
+
+      // Node labels
+      node
+        .append("text")
+        .text((d) => (d.label.length > 15 ? d.label.slice(0, 13) + "..." : d.label))
+        .attr("x", 0)
+        .attr("y", 35)
+        .attr("text-anchor", "middle")
+        .attr("fill", "var(--color-text-secondary)")
+        .attr("font-size", "11px")
+        .attr("font-weight", "500");
+
+      addNodeInteractions(node, linkLines, linkLabels);
+
+      // Initially hide link labels
+      linkLabels.attr("opacity", 0);
+
+      // Update positions on tick
+      simulation.on("tick", () => {
         linkLines
-          .transition()
-          .duration(150)
-          .attr("stroke-opacity", 0.6)
-          .attr("stroke-width", 1.5);
+          .attr("x1", (d) => (d.source as D3ConceptNode).x!)
+          .attr("y1", (d) => (d.source as D3ConceptNode).y!)
+          .attr("x2", (d) => (d.target as D3ConceptNode).x!)
+          .attr("y2", (d) => (d.target as D3ConceptNode).y!);
 
-        linkLabels.attr("opacity", 0);
+        linkLabels
+          .attr(
+            "x",
+            (d) =>
+              ((d.source as D3ConceptNode).x! + (d.target as D3ConceptNode).x!) / 2
+          )
+          .attr(
+            "y",
+            (d) =>
+              ((d.source as D3ConceptNode).y! + (d.target as D3ConceptNode).y!) / 2
+          );
 
-        node
-          .select("circle, rect")
-          .transition()
-          .duration(150)
-          .attr("opacity", 1);
-
-        setHoveredNode(null);
-      })
-      .on("click", (event, d) => {
-        event.stopPropagation();
-        setSelectedNode(conceptGraph.nodes.find((n) => n.id === d.id) || null);
+        node.attr("transform", (d) => `translate(${d.x},${d.y})`);
       });
 
-    // Initially hide link labels
-    linkLabels.attr("opacity", 0);
-
-    // Update positions on tick
-    simulation.on("tick", () => {
-      linkLines
-        .attr("x1", (d) => (d.source as D3ConceptNode).x!)
-        .attr("y1", (d) => (d.source as D3ConceptNode).y!)
-        .attr("x2", (d) => (d.target as D3ConceptNode).x!)
-        .attr("y2", (d) => (d.target as D3ConceptNode).y!);
-
-      linkLabels
-        .attr(
-          "x",
-          (d) =>
-            ((d.source as D3ConceptNode).x! + (d.target as D3ConceptNode).x!) / 2
-        )
-        .attr(
-          "y",
-          (d) =>
-            ((d.source as D3ConceptNode).y! + (d.target as D3ConceptNode).y!) / 2
-        );
-
-      node.attr("transform", (d) => `translate(${d.x},${d.y})`);
-    });
-
-    // Cleanup
-    return () => {
-      simulation.stop();
-    };
-  }, [conceptGraph, dimensions, nodeColors, getConnectedNodes]);
+      // Cleanup
+      return () => {
+        simulation.stop();
+      };
+    }
+  }, [conceptGraph, dimensions, nodeColors, getConnectedNodes, layout, drawNodeShapes, addNodeInteractions]);
 
   const handleExportSvg = useCallback(async () => {
     if (!svgRef.current) return;
@@ -429,8 +640,37 @@ export function ConceptMapView({ conceptGraph, onClose: _onClose }: ConceptMapVi
           {conceptGraph.nodes.length} concepts, {conceptGraph.links.length} connections
         </span>
         <button
-          onClick={handleExportSvg}
+          onClick={() => setLayout(layout === "force" ? "tree" : "force")}
           className="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded text-xs hover:opacity-80 transition-opacity"
+          style={{
+            backgroundColor: "var(--color-bg-tertiary)",
+            color: "var(--color-text-secondary)",
+            border: "1px solid var(--color-border)",
+          }}
+          title={layout === "force" ? "Switch to tree layout" : "Switch to force layout"}
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            {layout === "force" ? (
+              <>
+                <path d="M12 3v18" />
+                <path d="M5 10l7-7 7 7" />
+                <path d="M3 21h18" />
+              </>
+            ) : (
+              <>
+                <circle cx="12" cy="12" r="3" />
+                <circle cx="19" cy="5" r="2" />
+                <circle cx="5" cy="5" r="2" />
+                <circle cx="5" cy="19" r="2" />
+                <circle cx="19" cy="19" r="2" />
+              </>
+            )}
+          </svg>
+          {layout === "force" ? "Tree" : "Force"}
+        </button>
+        <button
+          onClick={handleExportSvg}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs hover:opacity-80 transition-opacity"
           style={{
             backgroundColor: "var(--color-bg-tertiary)",
             color: "var(--color-text-secondary)",
