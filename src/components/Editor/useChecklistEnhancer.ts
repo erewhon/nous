@@ -210,8 +210,9 @@ export function useChecklistEnhancer(
     const holder = document.getElementById(holderId);
     if (!holder) return;
 
-    // Initial enhancement
-    enhanceAllChecklists();
+    // Initial enhancement (with delay for Editor.js to render)
+    let debounceId: ReturnType<typeof setTimeout> | null = null;
+    const timeoutId = setTimeout(enhanceAllChecklists, 200);
 
     // Observe for new checklist items
     observerRef.current = new MutationObserver((mutations) => {
@@ -230,31 +231,24 @@ export function useChecklistEnhancer(
               }
             }
           });
-        } else if (mutation.type === "attributes") {
-          // Check if a checkbox was added/modified
-          if (
-            mutation.target instanceof HTMLElement &&
-            mutation.target.classList?.contains("cdx-list__checkbox")
-          ) {
-            shouldEnhance = true;
-          }
         }
       }
 
       if (shouldEnhance) {
-        // Debounce enhancement
-        setTimeout(enhanceAllChecklists, 50);
+        // Properly debounce — clear any pending callback before scheduling
+        if (debounceId) clearTimeout(debounceId);
+        debounceId = setTimeout(enhanceAllChecklists, 150);
       }
     });
 
     observerRef.current.observe(holder, {
       childList: true,
       subtree: true,
-      attributes: true,
-      attributeFilter: ["class"],
     });
 
     return () => {
+      clearTimeout(timeoutId);
+      if (debounceId) clearTimeout(debounceId);
       observerRef.current?.disconnect();
     };
   }, [holderId, enhanceAllChecklists]);

@@ -52,16 +52,14 @@ export function EditorPaneContent({
   showPaneControls,
   zenMode = false,
 }: EditorPaneContentProps) {
-  const {
-    pages,
-    updatePageContent,
-    setPageContentLocal,
-    createPage,
-    pageDataVersion,
-    openTabInPane,
-    closeTabInPane,
-    updateTabTitleInPane,
-  } = usePageStore();
+  const pages = usePageStore((s) => s.pages);
+  const updatePageContent = usePageStore((s) => s.updatePageContent);
+  const setPageContentLocal = usePageStore((s) => s.setPageContentLocal);
+  const createPage = usePageStore((s) => s.createPage);
+  const pageDataVersion = usePageStore((s) => s.pageDataVersion);
+  const openTabInPane = usePageStore((s) => s.openTabInPane);
+  const closeTabInPane = usePageStore((s) => s.closeTabInPane);
+  const updateTabTitleInPane = usePageStore((s) => s.updateTabTitleInPane);
   const { updatePageLinks } = useLinkStore();
   const setZenMode = useThemeStore((state) => state.setZenMode);
   const zenModeSettings = useThemeStore((state) => state.zenModeSettings);
@@ -181,11 +179,13 @@ export function EditorPaneContent({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedPage?.id, pageDataVersion]);
 
-  // Calculate page statistics
+  // Calculate page statistics — only recalculate on page switch or explicit refresh,
+  // not on every auto-save (which changes the blocks array reference)
   const pageStats: PageStats | null = useMemo(() => {
     if (!selectedPage?.content?.blocks?.length) return null;
     return calculatePageStats(selectedPage.content.blocks);
-  }, [selectedPage?.content?.blocks]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedPage?.id, pageDataVersion]);
 
   // Update writing goals progress when word count changes
   const writingGoalsEnabled = useWritingGoalsStore((s) => s.enabled);

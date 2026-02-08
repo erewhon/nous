@@ -2250,14 +2250,34 @@ impl ActionExecutor {
 
                 // Daily Note date filter
                 if let Some(date_filter) = &selector.daily_note_date {
-                    // Resolve special values
-                    let target_date = match date_filter.to_lowercase().as_str() {
-                        "today" => now.format("%Y-%m-%d").to_string(),
-                        "yesterday" => (now - chrono::Duration::days(1)).format("%Y-%m-%d").to_string(),
-                        _ => date_filter.clone(),
-                    };
-                    if p.daily_note_date.as_ref() != Some(&target_date) {
-                        return false;
+                    let lower = date_filter.to_lowercase();
+                    if lower.starts_with("recent:") {
+                        // "recent:N" — match any daily note from the last N days (excluding today)
+                        let n: i64 = lower.trim_start_matches("recent:").parse().unwrap_or(7);
+                        if let Some(page_date) = &p.daily_note_date {
+                            let today = now.format("%Y-%m-%d").to_string();
+                            if page_date == &today {
+                                return false; // Exclude today (that's the destination)
+                            }
+                            let cutoff = (now - chrono::Duration::days(n))
+                                .format("%Y-%m-%d")
+                                .to_string();
+                            if page_date.as_str() < cutoff.as_str() {
+                                return false;
+                            }
+                        } else {
+                            return false;
+                        }
+                    } else {
+                        // Resolve special values: "today", "yesterday", or literal date
+                        let target_date = match lower.as_str() {
+                            "today" => now.format("%Y-%m-%d").to_string(),
+                            "yesterday" => (now - chrono::Duration::days(1)).format("%Y-%m-%d").to_string(),
+                            _ => date_filter.clone(),
+                        };
+                        if p.daily_note_date.as_ref() != Some(&target_date) {
+                            return false;
+                        }
                     }
                 }
 

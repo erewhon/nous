@@ -159,10 +159,17 @@ function cloneData(data: OutputData): OutputData {
   return JSON.parse(JSON.stringify(data));
 }
 
-// Check if two OutputData objects are equal (shallow comparison of blocks)
+// Check if two OutputData objects are equal (fast shallow comparison)
 function isDataEqual(a: OutputData, b: OutputData): boolean {
   if (a.blocks.length !== b.blocks.length) return false;
-  return JSON.stringify(a.blocks) === JSON.stringify(b.blocks);
+  // Quick check: compare block types and IDs (much cheaper than JSON.stringify)
+  for (let i = 0; i < a.blocks.length; i++) {
+    if (a.blocks[i].id !== b.blocks[i].id || a.blocks[i].type !== b.blocks[i].type) {
+      return false;
+    }
+  }
+  // If structure matches, compare time to detect content changes
+  return a.time === b.time;
 }
 
 export const useUndoHistoryStore = create<UndoHistoryState>()(

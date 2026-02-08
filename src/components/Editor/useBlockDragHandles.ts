@@ -262,6 +262,7 @@ export function useBlockDragHandles({
     const timeoutId = setTimeout(processBlocks, 200);
 
     // Watch for new blocks
+    let debounceId: ReturnType<typeof setTimeout> | null = null;
     observer = new MutationObserver((mutations) => {
       let shouldProcess = false;
       for (const mutation of mutations) {
@@ -278,8 +279,8 @@ export function useBlockDragHandles({
         }
       }
       if (shouldProcess) {
-        // Debounce processing
-        setTimeout(processBlocks, 50);
+        if (debounceId) clearTimeout(debounceId);
+        debounceId = setTimeout(processBlocks, 150);
       }
     });
 

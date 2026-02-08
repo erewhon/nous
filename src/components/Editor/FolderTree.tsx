@@ -158,7 +158,12 @@ export function FolderTree({
   onMoveToNotebook,
   onSmartOrganize,
 }: FolderTreeProps) {
-  const { createPage, createSubpage, movePageToFolder, movePageToParent, loadPages, toggleFavorite } = usePageStore();
+  const createPage = usePageStore((s) => s.createPage);
+  const createSubpage = usePageStore((s) => s.createSubpage);
+  const movePageToFolder = usePageStore((s) => s.movePageToFolder);
+  const movePageToParent = usePageStore((s) => s.movePageToParent);
+  const loadPages = usePageStore((s) => s.loadPages);
+  const toggleFavorite = usePageStore((s) => s.toggleFavorite);
   const {
     expandedFolderIds,
     toggleFolderExpanded,

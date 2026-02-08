@@ -219,6 +219,7 @@ export const BlockEditor = forwardRef<BlockEditorRef, BlockEditorProps>(function
     // Guard to prevent infinite loop: updateBlockRefPreviews changes textContent
     // which triggers characterData mutations, which would re-enter markLinks.
     let isUpdatingPreviews = false;
+    let debounceId: ReturnType<typeof setTimeout> | null = null;
 
     // Use MutationObserver to mark broken links/refs after editor renders
     const markLinks = () => {
@@ -235,19 +236,27 @@ export const BlockEditor = forwardRef<BlockEditorRef, BlockEditorProps>(function
       }
     };
 
+    // Debounced version — avoids running expensive DOM queries on every keystroke
+    const markLinksDebounced = () => {
+      if (debounceId) clearTimeout(debounceId);
+      debounceId = setTimeout(markLinks, 500);
+    };
+
     // Initial mark
     const timeoutId = setTimeout(markLinks, 100);
 
-    // Mark on mutations (new content added)
-    const observer = new MutationObserver(markLinks);
+    // Mark on mutations (new content added) — only watch childList, not characterData
+    // characterData fires on every keystroke which is far too aggressive for the
+    // expensive DOM traversal in markLinks
+    const observer = new MutationObserver(markLinksDebounced);
     observer.observe(containerRef.current, {
       childList: true,
       subtree: true,
-      characterData: true,
     });
 
     return () => {
       clearTimeout(timeoutId);
+      if (debounceId) clearTimeout(debounceId);
       observer.disconnect();
     };
   }, [pages]);

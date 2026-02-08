@@ -132,7 +132,12 @@ function App() {
   } = useAIStore();
   const toggleFlashcardPanel = useFlashcardStore((state) => state.togglePanel);
   const openTodayNote = useDailyNotesStore((state) => state.openTodayNote);
-  const { pages, selectedPageId, selectPage, deletePage, duplicatePage, toggleFavorite } = usePageStore();
+  const pages = usePageStore((s) => s.pages);
+  const selectedPageId = usePageStore((s) => s.selectedPageId);
+  const selectPage = usePageStore((s) => s.selectPage);
+  const deletePage = usePageStore((s) => s.deletePage);
+  const duplicatePage = usePageStore((s) => s.duplicatePage);
+  const toggleFavorite = usePageStore((s) => s.toggleFavorite);
 
   // Get the selected page
   const selectedPage = pages.find((p) => p.id === selectedPageId);

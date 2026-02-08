@@ -11,7 +11,13 @@ const GOALS_CHECK_INTERVAL = 15 * 60 * 1000;
 
 export function useAppInit() {
   const { loadNotebooks, notebooks, selectedNotebookId, selectNotebook, getNotebookViewState, saveNotebookViewState } = useNotebookStore();
-  const { loadPages, clearPages, selectPage, selectedPageId, pages, isLoading: pagesLoading, refreshPages } = usePageStore();
+  const loadPages = usePageStore((s) => s.loadPages);
+  const clearPages = usePageStore((s) => s.clearPages);
+  const selectPage = usePageStore((s) => s.selectPage);
+  const selectedPageId = usePageStore((s) => s.selectedPageId);
+  const pages = usePageStore((s) => s.pages);
+  const pagesLoading = usePageStore((s) => s.isLoading);
+  const refreshPages = usePageStore((s) => s.refreshPages);
   const { sections, selectedSectionId, selectSection } = useSectionStore();
   const { loadGoals, checkAutoGoals, loadSummary } = useGoalsStore();
   const { library } = useWindowLibrary();
