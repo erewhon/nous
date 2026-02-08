@@ -1104,6 +1104,36 @@ These features are recommended as high-priority additions:
 
 ---
 
+---
+
+### 46. CLI for Notebooks
+
+A command-line interface for viewing and searching notebook content without launching the GUI.
+
+- [ ] **CLI binary** - Standalone CLI tool (`nous-cli` or subcommand)
+  - Separate Rust binary or `--cli` mode on main binary
+  - Reuse existing storage layer (`src-tauri/src/storage/`)
+  - Library/notebook discovery from default data directory
+- [ ] **List & browse** - Navigate notebook structure from terminal
+  - `nous list` — list all libraries and notebooks
+  - `nous ls <notebook>` — list pages/folders in a notebook
+  - `nous show <notebook> <page>` — render page content to terminal (markdown output)
+  - Tree view of folder hierarchy
+- [ ] **Full-text search** - Search across notebooks from CLI
+  - `nous search <query>` — search all notebooks (uses existing Tantivy index)
+  - `nous search --notebook <name> <query>` — scoped search
+  - Highlight matching terms in results
+  - Output: page title, notebook, matched excerpt
+- [ ] **Tag operations** - Query and filter by tags
+  - `nous tags` — list all tags with counts
+  - `nous search --tag <tag>` — filter by tag
+- [ ] **Output formats** - Machine-readable output
+  - `--json` flag for JSON output (for piping/scripting)
+  - `--plain` for plain text (default)
+  - Configurable output width
+
+---
+
 ## Notes
 
 - Priority order within sections is flexible

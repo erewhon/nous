@@ -114,6 +114,7 @@ pub async fn generate_study_video(
         theme: default_theme(),
         transition: default_transition(),
         title: None,
+        accent_color: None,
     });
 
     // Create a channel for progress updates
