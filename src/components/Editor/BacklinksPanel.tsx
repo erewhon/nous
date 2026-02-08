@@ -15,8 +15,10 @@ export function BacklinksPanel({
   notebookId,
   onBlockRefClick,
 }: BacklinksPanelProps) {
-  const { getBacklinks, getBlockBacklinks } = useLinkStore();
-  const { selectPage, pages } = usePageStore();
+  const getBacklinks = useLinkStore((s) => s.getBacklinks);
+  const getBlockBacklinks = useLinkStore((s) => s.getBlockBacklinks);
+  const selectPage = usePageStore((s) => s.selectPage);
+  const pages = usePageStore((s) => s.pages);
 
   const backlinks = getBacklinks(pageTitle);
 

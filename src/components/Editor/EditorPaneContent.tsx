@@ -8,6 +8,7 @@ import { useTypewriterScroll } from "../../hooks/useTypewriterScroll";
 import { useFocusHighlight } from "../../hooks/useFocusHighlight";
 import { useUndoHistory } from "../../hooks/useUndoHistory";
 import { BlockEditor, type BlockEditorRef } from "./BlockEditor";
+import { crumb } from "../../utils/breadcrumbs";
 import { PageHeader } from "./PageHeader";
 import { PaneTabBar } from "./PaneTabBar";
 import { UndoHistoryPanel } from "./UndoHistoryPanel";
@@ -60,13 +61,15 @@ export function EditorPaneContent({
   const openTabInPane = usePageStore((s) => s.openTabInPane);
   const closeTabInPane = usePageStore((s) => s.closeTabInPane);
   const updateTabTitleInPane = usePageStore((s) => s.updateTabTitleInPane);
-  const { updatePageLinks } = useLinkStore();
+  const updatePageLinks = useLinkStore((s) => s.updatePageLinks);
   const setZenMode = useThemeStore((state) => state.setZenMode);
   const zenModeSettings = useThemeStore((state) => state.zenModeSettings);
   const showOutline = useThemeStore((state) => state.showOutline);
   const toggleOutline = useThemeStore((state) => state.toggleOutline);
   const [isSaving, setIsSaving] = useState(false);
-  const [lastSaved, setLastSaved] = useState<Date | null>(null);
+  const lastSavedRef = useRef<Date | null>(null);
+  // Separate state for explicit save indicator only (Ctrl+S) — NOT updated during auto-save
+  const [lastSavedDisplay, setLastSavedDisplay] = useState<Date | null>(null);
   const [showHistoryPanel, setShowHistoryPanel] = useState(false);
   const editorScrollRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<BlockEditorRef>(null);
@@ -164,6 +167,13 @@ export function EditorPaneContent({
     updateTabTitleInPane,
   ]);
 
+  // Memoize the pages list for BlockEditor so it doesn't create a new array
+  // reference on every render (which would tear down and recreate MutationObservers)
+  const blockEditorPages = useMemo(
+    () => notebookPages.map((p) => ({ id: p.id, title: p.title })),
+    [notebookPages]
+  );
+
   // Convert page content to Editor.js format
   const editorData: OutputData | undefined = useMemo(() => {
     if (!selectedPage?.content) return undefined;
@@ -212,9 +222,10 @@ export function EditorPaneContent({
 
   // Handle content change (for undo history capture)
   const handleChange = useCallback(
-    (data: OutputData) => {
-      // Capture state for undo history (debounced)
-      captureState(data);
+    (data?: OutputData) => {
+      // Capture state for undo history — only when data is provided
+      // (at debounce-save time or after structural changes, not per-keystroke)
+      if (data) captureState(data);
     },
     [captureState]
   );
@@ -245,28 +256,29 @@ export function EditorPaneContent({
         }),
       };
 
-      // Update local store immediately (optimistic update)
-      // This ensures the cache is fresh even if backend save hasn't completed
-      // Critical for flush-on-unmount to avoid race conditions when navigating back
-      setPageContentLocal(pane.pageId, editorData);
+      // NOTE: We intentionally do NOT call setPageContentLocal here.
+      // Updating the local store during auto-save triggers a React re-render
+      // cascade (pages array new reference → EditorPaneContent + BacklinksPanel +
+      // sidebar all re-render) which causes WebKitGTK's rendering pipeline to
+      // freeze for 10-260+ seconds.  The local store is updated on unmount
+      // (via onUnmountSave in BlockEditor) and on explicit save (Ctrl+S).
 
+      crumb("pane:updatePageContent:start");
       await updatePageContent(notebookId, pane.pageId, editorData, false);
+      crumb("pane:updatePageContent:done");
 
-      requestAnimationFrame(() => {
-        updatePageLinks({
-          ...selectedPage,
-          content: editorData,
-        });
-        setLastSaved(new Date());
-      });
+      // NOTE: We intentionally do NOT call updatePageLinks or setLastSaved here.
+      // ANY React state update during auto-save triggers re-renders near the
+      // contenteditable editor, which causes WebKitGTK's rendering pipeline to
+      // freeze for 10-260+ seconds.  Links and timestamps are updated on
+      // unmount (page switch) and explicit save (Ctrl+S) only.
+      lastSavedRef.current = new Date();
     },
     [
       notebookId,
       pane.pageId,
       selectedPage,
       updatePageContent,
-      setPageContentLocal,
-      updatePageLinks,
     ]
   );
 
@@ -348,7 +360,8 @@ export function EditorPaneContent({
           ...selectedPage,
           content: editorData,
         });
-        setLastSaved(new Date());
+        lastSavedRef.current = new Date();
+        setLastSavedDisplay(new Date());
       } finally {
         setIsSaving(false);
       }
@@ -571,7 +584,7 @@ export function EditorPaneContent({
                 <PageHeader
                   page={selectedPage}
                   isSaving={isSaving}
-                  lastSaved={lastSaved}
+                  lastSaved={lastSavedDisplay}
                   stats={zenMode ? null : pageStats}
                   pageText={pageStats?.text}
                   zenMode={zenMode}
@@ -674,10 +687,7 @@ export function EditorPaneContent({
                         onBlockRefClick={handleBlockRefClick}
                         notebookId={notebookId}
                         pageId={selectedPage.id}
-                        pages={notebookPages.map((p) => ({
-                          id: p.id,
-                          title: p.title,
-                        }))}
+                        pages={blockEditorPages}
                         className="min-h-[calc(100vh-300px)]"
                       />
                     )}

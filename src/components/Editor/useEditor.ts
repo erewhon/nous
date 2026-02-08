@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback } from "react";
 import EditorJS, { type OutputData, type ToolConstructable } from "@editorjs/editorjs";
+import { crumb } from "../../utils/breadcrumbs";
 import Header from "@editorjs/header";
 import List from "@editorjs/list";
 import Quote from "@editorjs/quote";
@@ -26,14 +27,16 @@ import { EmbedTool } from "./EmbedTool";
 import { ColumnsTool } from "./ColumnsTool";
 import { createImageUploader } from "./imageUploader";
 
-/** Assign data-block-id attributes to each .ce-block holder for scroll targeting */
+/** Assign data-block-id attributes to each .ce-block holder for scroll targeting.
+ *  Only sets the attribute when it is missing or stale, avoiding unnecessary
+ *  DOM mutations that would re-trigger Editor.js's internal MutationObserver. */
 function assignBlockIdAttributes(editor: EditorJS | null) {
   if (!editor) return;
   try {
     const blocks = editor.blocks;
     for (let i = 0; i < blocks.getBlocksCount(); i++) {
       const block = blocks.getBlockByIndex(i);
-      if (block) {
+      if (block && block.holder.getAttribute("data-block-id") !== block.id) {
         block.holder.setAttribute("data-block-id", block.id);
       }
     }
@@ -45,7 +48,11 @@ function assignBlockIdAttributes(editor: EditorJS | null) {
 interface UseEditorOptions {
   holderId: string;
   initialData?: OutputData;
-  onChange?: (data: OutputData) => void;
+  /** Called when the editor content changes.  data is only provided when
+   *  called explicitly (e.g. from structural changes); normal keystroke
+   *  changes call with no data to avoid expensive editor.save() on every
+   *  keystroke — the debounce timer handles the actual save. */
+  onChange?: (data?: OutputData) => void;
   onReady?: () => void;
   onLinkClick?: (pageTitle: string) => void;
   readOnly?: boolean;
@@ -75,6 +82,14 @@ export function useEditor({
   const isReady = useRef(false);
   // Flag to prevent onChange from firing during render operations
   const isRenderingRef = useRef(false);
+  // Tracks the timeout that clears isRenderingRef — cancelled when a new
+  // editor is constructed so the old editor's clear doesn't clobber it.
+  const renderingGuardTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Re-entry guard: prevents onChange → save() → mutation → onChange → save()
+  // infinite cascade.  editor.save() may trigger DOM mutations (e.g., block
+  // tool save methods reading innerHTML causes layout → pending mutation
+  // resolution), which fires Editor.js's internal MutationObserver again.
+  const isSavingRef = useRef(false);
   // Tracks whether the editor has unsaved changes.  When dirty, the
   // initialData effect skips editor.render() to avoid overwriting the
   // user's live edits with (potentially stale) store data.
@@ -233,6 +248,15 @@ export function useEditor({
     isRenderingRef.current = true;
     constructedWithDataRef.current = initialData;
 
+    crumb("editor:constructor-start");
+    const editorConstructStart = performance.now();
+
+    // Timestamp-based guard: ignore onChange for 600ms after editor creation.
+    // This is immune to timer races that plagued the isRenderingRef approach —
+    // old editors' setTimeout callbacks can clobber isRenderingRef via shared
+    // refs, but they cannot change this local constant captured in the closure.
+    const createdAt = performance.now();
+
     const editor = new EditorJS({
       holder: holderId,
       data: initialData,
@@ -241,20 +265,47 @@ export function useEditor({
       autofocus: true,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       tools: tools as any,
-      onChange: async () => {
-        // Don't save during render operations - this can capture partial/corrupted data
-        if (onChange && editorRef.current && isReady.current && !isRenderingRef.current) {
+      onChange: () => {
+        const age = Math.round(performance.now() - createdAt);
+        // Hard time-based guard for initial construction window.
+        // Editor.js fires onChange during block setup, assignBlockIdAttributes,
+        // and other init-related DOM mutations.  600ms covers all of these.
+        if (age < 600) {
+          return;
+        }
+        // Flag-based guard for ongoing render operations
+        if (isRenderingRef.current) {
+          crumb(`onChange:blocked-render:age=${age}`);
+          return;
+        }
+        // Re-entry guard: prevents cascading onChange during debounce save
+        if (isSavingRef.current) {
+          crumb(`onChange:blocked-save:age=${age}`);
+          return;
+        }
+        if (onChange && editorRef.current && isReady.current) {
+          crumb(`editor:onChange:age=${age}`);
           isDirtyRef.current = true;
-          // Sync data-block-id attributes for any newly added blocks
-          assignBlockIdAttributes(editorRef.current);
-          const data = await editorRef.current.save();
-          onChange(data);
+          // Signal that content changed — don't call editor.save() here.
+          // editor.save() forces an expensive full DOM traversal of all
+          // blocks on every keystroke.  The debounce timer in BlockEditor
+          // calls editor.save() when it fires (2s after last change).
+          onChange();
         }
       },
       onReady: () => {
+        crumb("editor:onReady");
+        const readyTime = performance.now() - editorConstructStart;
+        if (readyTime > 200) {
+          console.warn(
+            `[Perf] Editor.js init took ${Math.round(readyTime)}ms ` +
+            `(${initialData?.blocks?.length ?? 0} blocks)`
+          );
+        }
         isReady.current = true;
-        // Keep the rendering guard up briefly after ready — block tools
-        // may still fire async DOM mutations that trigger onChange.
+        // Clear the rendering flag after a brief delay — block tools
+        // may still fire async DOM mutations that trigger onChange,
+        // but the timestamp guard covers this window regardless.
         setTimeout(() => {
           isRenderingRef.current = false;
         }, 500);
@@ -269,6 +320,7 @@ export function useEditor({
     editorRef.current = editor;
 
     return () => {
+      crumb("editor:cleanup-start");
       if (editorRef.current && isReady.current) {
         const editor = editorRef.current;
         editorRef.current = null;
@@ -280,10 +332,12 @@ export function useEditor({
         // switches pages quickly.
         editor.save()
           .then((data) => {
+            crumb("editor:cleanup-saved");
             if (data) onUnmountSaveRef.current?.(data);
           })
           .catch(() => {})
           .finally(() => {
+            crumb("editor:cleanup-destroy");
             editor.destroy();
           });
       }
@@ -297,6 +351,7 @@ export function useEditor({
       // EditorJS already rendered it during initialization.
       if (initialData === constructedWithDataRef.current) {
         constructedWithDataRef.current = undefined;
+        crumb("editor:initialData-skip-constructed");
         return;
       }
       constructedWithDataRef.current = undefined;
@@ -305,17 +360,37 @@ export function useEditor({
       // take priority over (potentially stale) store data.  The pending
       // auto-save will persist the editor's state and update the store.
       if (isDirtyRef.current) {
+        crumb("editor:initialData-skip-dirty");
         return;
       }
 
       // Set flag to prevent onChange from firing during render
+      crumb("editor:re-render-start");
       isRenderingRef.current = true;
+      const renderStart = performance.now();
       editorRef.current.render(initialData).finally(() => {
+        crumb("editor:re-render-done");
+        const renderTime = performance.now() - renderStart;
+        if (renderTime > 200) {
+          console.warn(
+            `[Perf] Editor.js re-render took ${Math.round(renderTime)}ms ` +
+            `(${initialData?.blocks?.length ?? 0} blocks)`
+          );
+        }
         // Keep the guard up briefly — Editor.js block tools may fire
         // async DOM mutations after the render Promise resolves.
-        setTimeout(() => {
-          isRenderingRef.current = false;
+        renderingGuardTimerRef.current = setTimeout(() => {
+          renderingGuardTimerRef.current = null;
+          // Assign block IDs WHILE isRenderingRef is still true —
+          // the setAttribute calls trigger Editor.js's MutationObserver,
+          // and the guard must be up so the resulting onChange is suppressed.
           assignBlockIdAttributes(editorRef.current);
+          // Delay clearing the guard until the next frame so that
+          // MutationObserver callbacks from assignBlockIdAttributes
+          // (delivered as microtasks) still see isRenderingRef = true.
+          requestAnimationFrame(() => {
+            isRenderingRef.current = false;
+          });
         }, 500);
       });
     }
@@ -342,7 +417,8 @@ export function useEditor({
       // Set flag to prevent onChange from firing during render
       isRenderingRef.current = true;
       editorRef.current.render(data).finally(() => {
-        setTimeout(() => {
+        renderingGuardTimerRef.current = setTimeout(() => {
+          renderingGuardTimerRef.current = null;
           isRenderingRef.current = false;
         }, 500);
       });
@@ -363,5 +439,7 @@ export function useEditor({
     clear,
     render,
     markClean,
+    /** Set to true around editor.save() calls to suppress cascading onChange */
+    isSavingRef,
   };
 }

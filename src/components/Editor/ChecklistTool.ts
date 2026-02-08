@@ -3,6 +3,7 @@ import type {
   BlockToolConstructorOptions,
   BlockAPI,
 } from "@editorjs/editorjs";
+import { crumb } from "../../utils/breadcrumbs";
 
 interface ChecklistItem {
   text: string;
@@ -27,6 +28,8 @@ export class ChecklistTool implements BlockTool {
   private draggedIndex: number = -1;
   private placeholder: HTMLElement | null = null;
   private readOnly: boolean;
+  private instanceId: string;
+  private styleEl: HTMLStyleElement | null = null;
 
   static get toolbox() {
     return {
@@ -90,10 +93,10 @@ export class ChecklistTool implements BlockTool {
     this.config = config || {};
     this.readOnly = readOnly || false;
     this.block = block;
+    this.instanceId = `checklist-${crypto.randomUUID().slice(0, 8)}`;
     // Deep-copy items to avoid sharing mutable references with the Zustand
-    // store (or Editor.js internals).  Without this, moveCheckedToBottom()
-    // replaces the array while item objects stay shared, causing splice
-    // (deletion) to diverge from text edits and producing phantom reverts.
+    // store (or Editor.js internals).  Without this, splice/reorder
+    // diverges from text edits and produces phantom reverts.
     this.data = {
       items:
         data.items && data.items.length > 0
@@ -103,17 +106,31 @@ export class ChecklistTool implements BlockTool {
   }
 
   render(): HTMLElement {
+    // Clean up previous style tag if re-rendering
+    this.styleEl?.remove();
+
     this.wrapper = document.createElement("div");
     this.wrapper.classList.add("cdx-checklist");
+    this.wrapper.id = this.instanceId;
 
     this.itemsContainer = document.createElement("div");
     this.itemsContainer.classList.add("cdx-checklist__items");
     this.wrapper.appendChild(this.itemsContainer);
 
+    // Create <style> tag in <head> — OUTSIDE the editor container.
+    // Checked state styling is driven entirely by CSS to avoid DOM mutations
+    // inside the editor that freeze WebKitGTK's rendering pipeline.
+    this.styleEl = document.createElement("style");
+    this.styleEl.id = `style-${this.instanceId}`;
+    document.head.appendChild(this.styleEl);
+
     // Render all items
     this.data.items.forEach((item, index) => {
       this.createItem(item, index);
     });
+
+    // Generate initial CSS for checked items
+    this.updateCheckedStyles();
 
     return this.wrapper;
   }
@@ -121,9 +138,9 @@ export class ChecklistTool implements BlockTool {
   private createItem(item: ChecklistItem, index: number): HTMLElement {
     const itemEl = document.createElement("div");
     itemEl.classList.add("cdx-checklist__item");
-    if (item.checked) {
-      itemEl.classList.add("cdx-checklist__item--checked");
-    }
+    // NOTE: Do NOT add cdx-checklist__item--checked here.
+    // Checked styling is driven entirely by a <style> tag in <head> to avoid
+    // DOM mutations inside the editor that freeze WebKitGTK's rendering pipeline.
     itemEl.dataset.index = String(index);
 
     // Drag handle
@@ -157,9 +174,8 @@ export class ChecklistTool implements BlockTool {
     // Checkbox
     const checkbox = document.createElement("div");
     checkbox.classList.add("cdx-checklist__item-checkbox");
-    if (item.checked) {
-      checkbox.classList.add("cdx-checklist__item-checkbox--checked");
-    }
+    // NOTE: Do NOT add cdx-checklist__item-checkbox--checked here.
+    // Checked styling is driven by CSS in <head>.
 
     if (!this.readOnly) {
       checkbox.addEventListener("click", (e) => {
@@ -193,35 +209,76 @@ export class ChecklistTool implements BlockTool {
     return itemEl;
   }
 
-  private toggleItem(itemEl: HTMLElement, index: number): void {
+  private toggleItem(_itemEl: HTMLElement, index: number): void {
+    crumb(`checklist:toggle:start:idx=${index}`);
     const isChecked = !this.data.items[index].checked;
     this.data.items[index].checked = isChecked;
 
-    itemEl.classList.toggle("cdx-checklist__item--checked", isChecked);
-    const checkbox = itemEl.querySelector(".cdx-checklist__item-checkbox");
-    checkbox?.classList.toggle("cdx-checklist__item-checkbox--checked", isChecked);
+    // Update visual state via CSS (proven safe — doesn't freeze)
+    this.updateCheckedStyles();
 
-    // Notify Editor.js — class-only changes are invisible to MutationObserver
-    this.block?.dispatchChange();
-
-    // Move checked items to the bottom with a small delay for visual feedback
-    if (isChecked) {
-      setTimeout(() => {
-        this.moveCheckedToBottom();
-      }, 150);
-    }
+    // DO NOT trigger any save pipeline here. editor.save() does a full
+    // synchronous DOM traversal of ALL blocks, which forces a layout reflow
+    // while pending style changes are queued — freezing WebKitGTK for 6+ seconds.
+    //
+    // Checkbox state changes are persisted by:
+    //   1. The next text edit (triggers normal auto-save via editor.save(),
+    //      which calls ChecklistTool.save() → reads this.data.items)
+    //   2. Ctrl+S (explicit save)
+    //   3. Page switch (onUnmountSave calls editor.save())
+    crumb(`checklist:toggle:done:idx=${index}:checked=${isChecked}`);
   }
 
-  private moveCheckedToBottom(): void {
-    // Separate checked and unchecked items
-    const unchecked = this.data.items.filter((item) => !item.checked);
-    const checked = this.data.items.filter((item) => item.checked);
+  /**
+   * Generate CSS rules for checked items. The <style> tag is in <head>,
+   * outside the editor container, so updates never trigger Editor.js's
+   * MutationObserver.
+   *
+   * IMPORTANT: Only target non-contenteditable elements (checkbox).
+   * Styling the .cdx-checklist__item-text (which is contentEditable="true")
+   * causes WebKitGTK to freeze during style recalculation — even via CSS.
+   * The checkbox visual alone (accent background + checkmark) is sufficient
+   * to indicate checked state.
+   */
+  private updateCheckedStyles(): void {
+    if (!this.styleEl) return;
+    const id = CSS.escape(this.instanceId);
+    const rules: string[] = [];
 
-    // Only reorder if there are both checked and unchecked items
-    if (unchecked.length > 0 && checked.length > 0) {
-      this.data.items = [...unchecked, ...checked];
-      this.rerenderItems();
-    }
+    this.data.items.forEach((item, index) => {
+      if (item.checked) {
+        const nth = index + 1; // nth-child is 1-based
+        // Checkbox only (non-contenteditable): accent background + checkmark
+        rules.push(
+          `#${id} .cdx-checklist__item:nth-child(${nth}) .cdx-checklist__item-checkbox {` +
+            `background-color: var(--color-accent) !important;` +
+            `border-color: var(--color-accent) !important;` +
+            `}`
+        );
+        rules.push(
+          `#${id} .cdx-checklist__item:nth-child(${nth}) .cdx-checklist__item-checkbox::after {` +
+            `content: '';` +
+            `display: block;` +
+            `width: 100%;` +
+            `height: 100%;` +
+            `background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'%3E%3C/polyline%3E%3C/svg%3E");` +
+            `background-size: 70%;` +
+            `background-position: center;` +
+            `background-repeat: no-repeat;` +
+            `}`
+        );
+        // Text: strikethrough + muted (safe — the freeze was caused by
+        // editor.save() forcing layout reflow, not by CSS changes)
+        rules.push(
+          `#${id} .cdx-checklist__item:nth-child(${nth}) .cdx-checklist__item-text {` +
+            `text-decoration: line-through;` +
+            `color: var(--color-text-muted);` +
+            `}`
+        );
+      }
+    });
+
+    this.styleEl.textContent = rules.join("\n");
   }
 
   private rerenderItems(): void {
@@ -232,6 +289,9 @@ export class ChecklistTool implements BlockTool {
     this.data.items.forEach((item, index) => {
       this.createItem(item, index);
     });
+
+    // Regenerate CSS for checked items
+    this.updateCheckedStyles();
 
     // Explicitly notify Editor.js that the block data changed.
     // Editor.js's MutationObserver may not detect innerHTML-based rebuilds
@@ -453,17 +513,16 @@ export class ChecklistTool implements BlockTool {
   }
 
   save(): ChecklistData {
-    // Read from the DOM rather than this.data.items.  External code (e.g. Vim
-    // mode's "dd" command) may manipulate the DOM directly without updating
-    // the internal array.  Reading from DOM ensures saves reflect reality.
+    // Read text from the DOM (external code like Vim "dd" may manipulate it)
+    // but read checked state from this.data.items (canonical source of truth).
     const items: ChecklistItem[] = [];
 
     if (this.itemsContainer) {
       const itemEls = this.itemsContainer.querySelectorAll(".cdx-checklist__item");
-      itemEls.forEach((itemEl) => {
+      itemEls.forEach((itemEl, idx) => {
         const textEl = itemEl.querySelector(".cdx-checklist__item-text");
         const text = textEl?.innerHTML ?? "";
-        const checked = itemEl.classList.contains("cdx-checklist__item--checked");
+        const checked = this.data.items[idx]?.checked ?? false;
         if (text.trim() !== "") {
           items.push({ text, checked });
         }

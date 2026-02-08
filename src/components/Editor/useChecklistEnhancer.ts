@@ -2,15 +2,17 @@ import { useEffect, useRef, useCallback } from "react";
 import type EditorJS from "@editorjs/editorjs";
 
 /**
- * Hook that enhances the List tool's checklist mode with:
- * 1. Drag handles for reordering items within a checklist
- * 2. Auto-sorting checked items to the bottom
+ * Hook that enhances the List tool's checklist mode with drag handles
+ * for reordering items within a checklist.
+ *
+ * IMPORTANT: Uses lazy loading — drag handles are only inserted when the
+ * mouse hovers over a checklist item. This avoids mass DOM insertions at
+ * init time, which causes WebKitGTK rendering pipeline freezes.
  */
 export function useChecklistEnhancer(
   _editorRef: React.RefObject<EditorJS | null>,
   holderId: string
 ) {
-  const observerRef = useRef<MutationObserver | null>(null);
   const draggedItemRef = useRef<HTMLElement | null>(null);
   const draggedIndexRef = useRef<number>(-1);
 
@@ -39,35 +41,6 @@ export function useChecklistEnhancer(
   const getChecklistItems = useCallback((list: HTMLElement): HTMLElement[] => {
     return Array.from(list.querySelectorAll(":scope > .cdx-list__item")) as HTMLElement[];
   }, []);
-
-  // Check if item is checked
-  const isItemChecked = useCallback((item: HTMLElement): boolean => {
-    const checkbox = item.querySelector(".cdx-list__checkbox");
-    return checkbox?.classList.contains("cdx-list__checkbox--checked") ?? false;
-  }, []);
-
-  // Sort checked items to bottom
-  const sortCheckedToBottom = useCallback((list: HTMLElement) => {
-    const items = getChecklistItems(list);
-    const unchecked: HTMLElement[] = [];
-    const checked: HTMLElement[] = [];
-
-    items.forEach((item) => {
-      if (isItemChecked(item)) {
-        checked.push(item);
-      } else {
-        unchecked.push(item);
-      }
-    });
-
-    // Only reorder if there are both checked and unchecked items
-    if (unchecked.length > 0 && checked.length > 0) {
-      // Reorder by appending in correct order
-      [...unchecked, ...checked].forEach((item) => {
-        list.appendChild(item);
-      });
-    }
-  }, [getChecklistItems, isItemChecked]);
 
   // Handle drag start
   const handleDragStart = useCallback((e: DragEvent, item: HTMLElement, index: number) => {
@@ -137,7 +110,7 @@ export function useChecklistEnhancer(
     }
   }, [getParentList, getChecklistItems]);
 
-  // Enhance a checklist item with drag handle and events
+  // Enhance a single checklist item with drag handle and events
   const enhanceChecklistItem = useCallback((item: HTMLElement, index: number) => {
     // Skip if already enhanced
     if (item.querySelector(".cdx-list__drag-handle")) return;
@@ -165,19 +138,6 @@ export function useChecklistEnhancer(
     item.addEventListener("dragover", (e) => handleDragOver(e, item));
     item.addEventListener("dragleave", (e) => handleDragLeave(e, item));
     item.addEventListener("drop", (e) => handleDrop(e, item));
-
-    // Add click listener to checkbox for auto-sort
-    checkbox.addEventListener("click", () => {
-      const list = getParentList(item);
-      if (list) {
-        // Small delay to let the checkbox state update
-        setTimeout(() => {
-          if (isItemChecked(item)) {
-            sortCheckedToBottom(list);
-          }
-        }, 150);
-      }
-    });
   }, [
     createDragHandle,
     handleDragStart,
@@ -185,73 +145,40 @@ export function useChecklistEnhancer(
     handleDragOver,
     handleDragLeave,
     handleDrop,
-    getParentList,
-    isItemChecked,
-    sortCheckedToBottom,
   ]);
 
-  // Enhance all checklist items in the editor
-  const enhanceAllChecklists = useCallback(() => {
-    const holder = document.getElementById(holderId);
-    if (!holder) return;
-
-    // Find all checklist items (items with checkboxes)
-    const checklistItems = holder.querySelectorAll(
-      ".cdx-list__item"
-    ) as NodeListOf<HTMLElement>;
-
-    checklistItems.forEach((item, index) => {
-      enhanceChecklistItem(item, index);
-    });
-  }, [holderId, enhanceChecklistItem]);
-
-  // Set up mutation observer to enhance new checklist items
+  // Lazy enhance: use event delegation to enhance items on hover
   useEffect(() => {
     const holder = document.getElementById(holderId);
     if (!holder) return;
 
-    // Initial enhancement (with delay for Editor.js to render)
-    let debounceId: ReturnType<typeof setTimeout> | null = null;
-    const timeoutId = setTimeout(enhanceAllChecklists, 200);
+    const handleMouseOver = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      const item = target.closest(".cdx-list__item") as HTMLElement | null;
+      if (!item) return;
 
-    // Observe for new checklist items
-    observerRef.current = new MutationObserver((mutations) => {
-      let shouldEnhance = false;
+      // Already enhanced
+      if (item.querySelector(".cdx-list__drag-handle")) return;
 
-      for (const mutation of mutations) {
-        if (mutation.type === "childList") {
-          // Check if any added nodes are or contain checklist items
-          mutation.addedNodes.forEach((node) => {
-            if (node instanceof HTMLElement) {
-              if (
-                node.classList?.contains("cdx-list__item") ||
-                node.querySelector?.(".cdx-list__item")
-              ) {
-                shouldEnhance = true;
-              }
-            }
-          });
-        }
-      }
+      // Only enhance items with checkboxes (checklist style)
+      const checkbox = item.querySelector(".cdx-list__checkbox");
+      if (!checkbox) return;
 
-      if (shouldEnhance) {
-        // Properly debounce — clear any pending callback before scheduling
-        if (debounceId) clearTimeout(debounceId);
-        debounceId = setTimeout(enhanceAllChecklists, 150);
-      }
-    });
+      // Find index within parent list
+      const list = getParentList(item);
+      if (!list) return;
+      const items = getChecklistItems(list);
+      const index = items.indexOf(item);
 
-    observerRef.current.observe(holder, {
-      childList: true,
-      subtree: true,
-    });
+      enhanceChecklistItem(item, index);
+    };
+
+    holder.addEventListener("mouseover", handleMouseOver);
 
     return () => {
-      clearTimeout(timeoutId);
-      if (debounceId) clearTimeout(debounceId);
-      observerRef.current?.disconnect();
+      holder.removeEventListener("mouseover", handleMouseOver);
     };
-  }, [holderId, enhanceAllChecklists]);
+  }, [holderId, enhanceChecklistItem, getParentList, getChecklistItems]);
 
-  return { enhanceAllChecklists };
+  return { enhanceAllChecklists: () => {} };
 }

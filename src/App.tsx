@@ -22,6 +22,8 @@ import { WebClipperDialog } from "./components/WebClipper/WebClipperDialog";
 import { SmartCollectionsPanel } from "./components/SmartCollections/SmartCollectionsPanel";
 import { useAppInit } from "./hooks/useAppInit";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
+import { useMainThreadWatchdog, getWatchdogLog, clearWatchdogLog } from "./hooks/useMainThreadWatchdog";
+import { readCrumbs } from "./utils/breadcrumbs";
 import { useNotebookStore } from "./stores/notebookStore";
 import { usePageStore } from "./stores/pageStore";
 import { useThemeStore } from "./stores/themeStore";
@@ -37,6 +39,23 @@ import { save } from "@tauri-apps/plugin-dialog";
 
 function App() {
   useAppInit();
+  useMainThreadWatchdog({ thresholdMs: 500 });
+
+  // On startup, dump diagnostics from the previous session
+  useEffect(() => {
+    const log = getWatchdogLog();
+    if (log.length > 0) {
+      console.warn(`[Watchdog] ${log.length} lockup(s) recorded from previous session:`);
+      console.table(log);
+      clearWatchdogLog();
+    }
+    const crumbs = readCrumbs();
+    if (crumbs.length > 0) {
+      console.warn(`[Breadcrumbs] Last page-switch trail from previous session (freeze point):`);
+      console.table(crumbs);
+      // Don't clear — let selectPage:start clear it on next switch
+    }
+  }, []);
 
   // Get window library context
   const { library, isSecondaryWindow } = useWindowLibrary();

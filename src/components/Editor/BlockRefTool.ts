@@ -153,6 +153,9 @@ export class BlockRefTool implements InlineTool {
     const refs = container.querySelectorAll("block-ref");
     if (refs.length === 0) return;
 
+    // Only modify refs in the top-level editor, not nested editors
+    const editorRoot = container.querySelector(".codex-editor");
+
     // Build a map of blockId -> plain text preview
     const blockTextMap = new Map<string, string>();
     for (const page of pages) {
@@ -186,6 +189,9 @@ export class BlockRefTool implements InlineTool {
     }
 
     refs.forEach((ref) => {
+      // Skip refs inside nested editors (columns, embeds, etc.)
+      if (editorRoot && ref.closest(".codex-editor") !== editorRoot) return;
+
       const blockId = ref.getAttribute("data-block-id");
       if (!blockId) return;
       const freshText = blockTextMap.get(blockId);
@@ -206,6 +212,10 @@ export class BlockRefTool implements InlineTool {
     }>
   ): void {
     const refs = container.querySelectorAll("block-ref");
+    if (refs.length === 0) return;
+
+    // Only modify refs in the top-level editor, not nested editors
+    const editorRoot = container.querySelector(".codex-editor");
 
     // Build a set of all existing block IDs
     const existingBlockIds = new Set<string>();
@@ -218,12 +228,23 @@ export class BlockRefTool implements InlineTool {
     }
 
     refs.forEach((ref) => {
+      // Skip refs inside nested editors (columns, embeds, etc.)
+      if (editorRoot && ref.closest(".codex-editor") !== editorRoot) return;
+
       const blockId = ref.getAttribute("data-block-id");
       if (!blockId) {
-        ref.classList.add("broken");
+        if (!ref.classList.contains("broken")) {
+          ref.classList.add("broken");
+        }
         return;
       }
-      ref.classList.toggle("broken", !existingBlockIds.has(blockId));
+      const shouldBeBroken = !existingBlockIds.has(blockId);
+      const isBroken = ref.classList.contains("broken");
+      if (shouldBeBroken && !isBroken) {
+        ref.classList.add("broken");
+      } else if (!shouldBeBroken && isBroken) {
+        ref.classList.remove("broken");
+      }
     });
   }
 }
