@@ -52,7 +52,7 @@ pub struct SearchResult {
 }
 
 /// Fields in the search index schema
-struct SearchFields {
+pub(crate) struct SearchFields {
     page_id: Field,
     notebook_id: Field,
     title: Field,
@@ -636,5 +636,178 @@ impl SearchIndex {
         self.writer.commit()?;
 
         Ok(())
+    }
+}
+
+/// A read-only search index that doesn't acquire a writer lock.
+/// Use this when the GUI app may be running (it holds the writer lock).
+pub struct ReadOnlySearchIndex {
+    index: Index,
+    reader: IndexReader,
+    fields: SearchFields,
+}
+
+impl ReadOnlySearchIndex {
+    /// Open an existing search index in read-only mode (no writer lock needed)
+    pub fn open(index_path: PathBuf) -> Result<Self> {
+        let mut schema_builder = Schema::builder();
+
+        let page_id = schema_builder.add_text_field("page_id", STORED);
+        let notebook_id = schema_builder.add_text_field("notebook_id", STORED);
+        let title = schema_builder.add_text_field("title", TEXT | STORED);
+        let content = schema_builder.add_text_field("content", TEXT);
+        let tags = schema_builder.add_text_field("tags", TEXT | STORED);
+        let page_type = schema_builder.add_text_field("page_type", STORED);
+
+        let _schema = schema_builder.build();
+
+        // Open existing index (don't create)
+        let index = Index::open_in_dir(&index_path)?;
+
+        let reader = index
+            .reader_builder()
+            .reload_policy(ReloadPolicy::OnCommitWithDelay)
+            .try_into()?;
+
+        let fields = SearchFields {
+            page_id,
+            notebook_id,
+            title,
+            content,
+            tags,
+            page_type,
+        };
+
+        Ok(Self {
+            index,
+            reader,
+            fields,
+        })
+    }
+
+    /// Search pages with a query string
+    pub fn search(&self, query_str: &str, limit: usize) -> Result<Vec<SearchResult>> {
+        if query_str.trim().is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let searcher = self.reader.searcher();
+
+        let query_parser = QueryParser::for_index(
+            &self.index,
+            vec![self.fields.title, self.fields.content, self.fields.tags],
+        );
+
+        let query = query_parser.parse_query(query_str)?;
+        let top_docs = searcher.search(&query, &TopDocs::with_limit(limit))?;
+
+        let mut results = Vec::new();
+
+        for (score, doc_address) in top_docs {
+            let retrieved_doc: TantivyDocument = searcher.doc(doc_address)?;
+
+            let page_id = retrieved_doc
+                .get_first(self.fields.page_id)
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+
+            let notebook_id = retrieved_doc
+                .get_first(self.fields.notebook_id)
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+
+            let title = retrieved_doc
+                .get_first(self.fields.title)
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+
+            let tags = retrieved_doc
+                .get_first(self.fields.tags)
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+
+            let page_type = retrieved_doc
+                .get_first(self.fields.page_type)
+                .and_then(|v| v.as_str())
+                .unwrap_or("standard")
+                .to_string();
+
+            results.push(SearchResult {
+                page_id,
+                notebook_id,
+                title,
+                snippet: tags,
+                score,
+                page_type,
+            });
+        }
+
+        Ok(results)
+    }
+
+    /// Fuzzy search for autocomplete-style matching
+    pub fn fuzzy_search(&self, query_str: &str, limit: usize) -> Result<Vec<SearchResult>> {
+        if query_str.trim().is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let searcher = self.reader.searcher();
+        let query_lower = query_str.to_lowercase();
+
+        let term = Term::from_field_text(self.fields.title, &query_lower);
+        let fuzzy_query = FuzzyTermQuery::new(term, 2, true);
+
+        let top_docs = searcher.search(&fuzzy_query, &TopDocs::with_limit(limit))?;
+
+        let mut results = Vec::new();
+
+        for (score, doc_address) in top_docs {
+            let retrieved_doc: TantivyDocument = searcher.doc(doc_address)?;
+
+            let page_id = retrieved_doc
+                .get_first(self.fields.page_id)
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+
+            let notebook_id = retrieved_doc
+                .get_first(self.fields.notebook_id)
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+
+            let title = retrieved_doc
+                .get_first(self.fields.title)
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+
+            let tags = retrieved_doc
+                .get_first(self.fields.tags)
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+
+            let page_type = retrieved_doc
+                .get_first(self.fields.page_type)
+                .and_then(|v| v.as_str())
+                .unwrap_or("standard")
+                .to_string();
+
+            results.push(SearchResult {
+                page_id,
+                notebook_id,
+                title,
+                snippet: tags,
+                score,
+                page_type,
+            });
+        }
+
+        Ok(results)
     }
 }

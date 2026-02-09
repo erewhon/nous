@@ -7,10 +7,15 @@ license = "ISC"
 repository = ""
 edition = "2021"
 rust-version = "1.77.2"
+default-run = "nous"
 
 [lib]
 name = "nous_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "nous-cli"
+path = "src/bin/cli/main.rs"
 
 [build-dependencies]
 tauri-build = { version = "2.5.3", features = [] }
@@ -98,6 +103,17 @@ argon2 = "0.5"
 hkdf = "0.12"
 sha2 = "0.10"
 zeroize = { version = "1.7", features = ["derive"] }
+
+# CLI dependencies
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
+env_logger = "0.11"
+ratatui = { version = "0.29", optional = true }
+crossterm = { version = "0.28", optional = true }
+
+[features]
+default = ["tui"]
+tui = ["dep:ratatui", "dep:crossterm"]
 
 [dev-dependencies]
 tempfile = "3"
