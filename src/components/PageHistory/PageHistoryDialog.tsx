@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import type { Page } from "../../types/page";
 import type { EditorBlock } from "../../types/page";
 import {
@@ -10,7 +10,8 @@ import {
 } from "../../utils/api";
 import { usePageStore } from "../../stores/pageStore";
 import { HistoryBlockRenderer } from "./HistoryBlockRenderer";
-import { blocksToLines, computeLineDiff, type DiffLine } from "../../utils/diff";
+import { BlockDiffRenderer } from "./BlockDiffRenderer";
+import { computeBlockDiff, type BlockDiff } from "../../utils/diff";
 
 type ViewMode = "preview" | "changes";
 
@@ -24,6 +25,8 @@ interface PageHistoryDialogProps {
   page: Page | null;
   onClose: () => void;
 }
+
+const COMMITS_PER_PAGE = 100;
 
 function parsePage(json: string): ParsedPage | null {
   try {
@@ -42,19 +45,23 @@ export function PageHistoryDialog({
   page,
   onClose,
 }: PageHistoryDialogProps) {
-  const { loadPages } = usePageStore();
+  const loadPages = usePageStore((s) => s.loadPages);
   const [isLoading, setIsLoading] = useState(true);
   const [gitEnabled, setGitEnabled] = useState(false);
   const [commits, setCommits] = useState<CommitInfo[]>([]);
+  const [hasMoreCommits, setHasMoreCommits] = useState(false);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [selectedCommit, setSelectedCommit] = useState<CommitInfo | null>(null);
+  const [compareCommit, setCompareCommit] = useState<CommitInfo | null>(null);
   const [previewContent, setPreviewContent] = useState<string | null>(null);
   const [parsedPage, setParsedPage] = useState<ParsedPage | null>(null);
   const [isLoadingPreview, setIsLoadingPreview] = useState(false);
   const [isRestoring, setIsRestoring] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("preview");
-  const [diffLines, setDiffLines] = useState<DiffLine[] | null>(null);
+  const [blockDiffs, setBlockDiffs] = useState<BlockDiff[] | null>(null);
   const [isLoadingDiff, setIsLoadingDiff] = useState(false);
+  const commitListRef = useRef<HTMLDivElement>(null);
 
   // Load git status and history when dialog opens
   useEffect(() => {
@@ -64,9 +71,10 @@ export function PageHistoryDialog({
       setIsLoading(true);
       setError(null);
       setSelectedCommit(null);
+      setCompareCommit(null);
       setPreviewContent(null);
       setParsedPage(null);
-      setDiffLines(null);
+      setBlockDiffs(null);
       setViewMode("preview");
 
       try {
@@ -74,10 +82,16 @@ export function PageHistoryDialog({
         setGitEnabled(enabled);
 
         if (enabled) {
-          const history = await gitHistory(page.notebookId, page.id, 50);
+          const history = await gitHistory(
+            page.notebookId,
+            page.id,
+            COMMITS_PER_PAGE
+          );
           setCommits(history);
+          setHasMoreCommits(history.length === COMMITS_PER_PAGE);
         } else {
           setCommits([]);
+          setHasMoreCommits(false);
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load history");
@@ -88,6 +102,29 @@ export function PageHistoryDialog({
 
     loadHistory();
   }, [isOpen, page]);
+
+  // Load more commits (pagination)
+  const loadMore = useCallback(async () => {
+    if (!page || isLoadingMore || !hasMoreCommits) return;
+
+    setIsLoadingMore(true);
+    try {
+      const moreCommits = await gitHistory(
+        page.notebookId,
+        page.id,
+        COMMITS_PER_PAGE,
+        commits.length
+      );
+      setCommits((prev) => [...prev, ...moreCommits]);
+      setHasMoreCommits(moreCommits.length === COMMITS_PER_PAGE);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Failed to load more history"
+      );
+    } finally {
+      setIsLoadingMore(false);
+    }
+  }, [page, isLoadingMore, hasMoreCommits, commits.length]);
 
   // Load preview when a commit is selected
   const loadPreview = useCallback(
@@ -118,46 +155,81 @@ export function PageHistoryDialog({
     [page]
   );
 
-  const handleSelectCommit = (commit: CommitInfo) => {
-    setSelectedCommit(commit);
-    setViewMode("preview");
-    setDiffLines(null);
-    loadPreview(commit);
+  const handleSelectCommit = (commit: CommitInfo, shiftKey: boolean) => {
+    if (shiftKey && selectedCommit && selectedCommit.id !== commit.id) {
+      // Shift+click: enter compare mode
+      setCompareCommit(commit);
+      setViewMode("changes");
+      setBlockDiffs(null);
+    } else {
+      // Normal click: select commit, exit compare mode
+      setSelectedCommit(commit);
+      setCompareCommit(null);
+      setViewMode("preview");
+      setBlockDiffs(null);
+      loadPreview(commit);
+    }
   };
 
-  // Lazily compute diff when user switches to Changes tab
-  const loadDiff = useCallback(async () => {
-    if (!page || !selectedCommit || !previewContent) return;
+  const clearCompare = () => {
+    setCompareCommit(null);
+    setBlockDiffs(null);
+  };
 
-    const selectedIndex = commits.findIndex((c) => c.id === selectedCommit.id);
-    // Newest-first: predecessor is next index
-    if (selectedIndex < 0 || selectedIndex >= commits.length - 1) {
-      // This is the oldest commit
-      setDiffLines([]);
-      return;
+  // Determine the two commits being compared
+  const compareInfo = useMemo(() => {
+    if (compareCommit && selectedCommit) {
+      // Compare mode: determine older/newer
+      const selIdx = commits.findIndex((c) => c.id === selectedCommit.id);
+      const cmpIdx = commits.findIndex((c) => c.id === compareCommit.id);
+      if (selIdx < 0 || cmpIdx < 0) return null;
+      // commits are newest-first, so higher index = older
+      const olderCommit = selIdx > cmpIdx ? selectedCommit : compareCommit;
+      const newerCommit = selIdx > cmpIdx ? compareCommit : selectedCommit;
+      return { olderCommit, newerCommit };
     }
+    if (selectedCommit) {
+      const selIdx = commits.findIndex((c) => c.id === selectedCommit.id);
+      if (selIdx < 0 || selIdx >= commits.length - 1) return null; // oldest commit
+      return {
+        olderCommit: commits[selIdx + 1],
+        newerCommit: selectedCommit,
+      };
+    }
+    return null;
+  }, [selectedCommit, compareCommit, commits]);
 
-    const predecessorCommit = commits[selectedIndex + 1];
-    const currentCommitId = selectedCommit.id;
+  const isOldestCommit = useMemo(() => {
+    if (compareCommit) return false;
+    if (!selectedCommit) return false;
+    const idx = commits.findIndex((c) => c.id === selectedCommit.id);
+    return idx >= 0 && idx >= commits.length - 1;
+  }, [selectedCommit, compareCommit, commits]);
+
+  // Lazily compute block diff when user switches to Changes tab
+  const loadBlockDiff = useCallback(async () => {
+    if (!page || !compareInfo) return;
+
+    const { olderCommit, newerCommit } = compareInfo;
+    const capturedNewerId = newerCommit.id;
     setIsLoadingDiff(true);
 
     try {
-      const predecessorContent = await gitGetPageAtCommit(
-        page.notebookId,
-        page.id,
-        predecessorCommit.id
-      );
+      const [olderContent, newerContent] = await Promise.all([
+        gitGetPageAtCommit(page.notebookId, page.id, olderCommit.id),
+        gitGetPageAtCommit(page.notebookId, page.id, newerCommit.id),
+      ]);
 
       // Race condition guard
-      if (currentCommitId !== selectedCommit.id) return;
+      if (capturedNewerId !== newerCommit.id) return;
 
-      const oldParsed = parsePage(predecessorContent);
-      const newParsed = parsePage(previewContent);
+      const oldParsed = parsePage(olderContent);
+      const newParsed = parsePage(newerContent);
 
-      const oldLines = oldParsed ? blocksToLines(oldParsed.blocks) : [];
-      const newLines = newParsed ? blocksToLines(newParsed.blocks) : [];
+      const oldBlocks = oldParsed?.blocks || [];
+      const newBlocks = newParsed?.blocks || [];
 
-      setDiffLines(computeLineDiff(oldLines, newLines));
+      setBlockDiffs(computeBlockDiff(oldBlocks, newBlocks));
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Failed to compute diff"
@@ -165,13 +237,17 @@ export function PageHistoryDialog({
     } finally {
       setIsLoadingDiff(false);
     }
-  }, [page, selectedCommit, previewContent, commits]);
+  }, [page, compareInfo]);
+
+  // Auto-load block diff when Changes tab is active but diffs not yet loaded
+  useEffect(() => {
+    if (viewMode === "changes" && blockDiffs === null && !isLoadingDiff && compareInfo) {
+      loadBlockDiff();
+    }
+  }, [viewMode, blockDiffs, isLoadingDiff, compareInfo, loadBlockDiff]);
 
   const handleViewModeChange = (mode: ViewMode) => {
     setViewMode(mode);
-    if (mode === "changes" && diffLines === null && !isLoadingDiff) {
-      loadDiff();
-    }
   };
 
   const handleRestore = async () => {
@@ -185,25 +261,59 @@ export function PageHistoryDialog({
       await loadPages(page.notebookId);
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to restore version");
+      setError(
+        err instanceof Error ? err.message : "Failed to restore version"
+      );
     } finally {
       setIsRestoring(false);
     }
   };
 
-  // Handle keyboard events
+  // Keyboard navigation
   useEffect(() => {
     if (!isOpen) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         onClose();
+        return;
+      }
+
+      // Don't intercept keys when typing in an input/textarea
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || (e.target as HTMLElement)?.isContentEditable) {
+        return;
+      }
+
+      // j/k or Arrow keys to navigate commits
+      if (
+        (e.key === "j" || e.key === "ArrowDown" ||
+         e.key === "k" || e.key === "ArrowUp") &&
+        !e.ctrlKey &&
+        !e.metaKey
+      ) {
+        e.preventDefault();
+        const isDown = e.key === "j" || e.key === "ArrowDown";
+        const currentIdx = selectedCommit
+          ? commits.findIndex((c) => c.id === selectedCommit.id)
+          : isDown ? -1 : commits.length;
+        const nextIdx = isDown
+          ? Math.min(currentIdx + 1, commits.length - 1)
+          : Math.max(currentIdx - 1, 0);
+        if (nextIdx >= 0 && commits[nextIdx]) {
+          setSelectedCommit(commits[nextIdx]);
+          setCompareCommit(null);
+          setViewMode("preview");
+          setBlockDiffs(null);
+          loadPreview(commits[nextIdx]);
+        }
+        return;
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, onClose]);
+  }, [isOpen, onClose, selectedCommit, commits, loadPreview]);
 
   // Close when clicking backdrop
   const handleBackdropClick = (e: React.MouseEvent) => {
@@ -212,17 +322,19 @@ export function PageHistoryDialog({
     }
   };
 
+  // Diff stats (must be before conditional return to satisfy rules of hooks)
+  const diffStats = useMemo(() => {
+    if (!blockDiffs) return null;
+    const added = blockDiffs.filter((d) => d.type === "added").length;
+    const removed = blockDiffs.filter((d) => d.type === "removed").length;
+    const modified = blockDiffs.filter((d) => d.type === "modified").length;
+    return { added, removed, modified };
+  }, [blockDiffs]);
+
   if (!isOpen || !page) return null;
 
-  // Find predecessor for diff header
-  const selectedIndex = selectedCommit
-    ? commits.findIndex((c) => c.id === selectedCommit.id)
-    : -1;
-  const isOldestCommit = selectedIndex >= 0 && selectedIndex >= commits.length - 1;
-  const predecessorCommit =
-    selectedIndex >= 0 && selectedIndex < commits.length - 1
-      ? commits[selectedIndex + 1]
-      : null;
+  // Group commits by date
+  const dateGroups = groupCommitsByDate(commits);
 
   return (
     <div
@@ -230,7 +342,7 @@ export function PageHistoryDialog({
       onClick={handleBackdropClick}
     >
       <div
-        className="flex h-[600px] w-full max-w-4xl flex-col rounded-xl border shadow-2xl"
+        className="flex h-[650px] w-full max-w-5xl flex-col rounded-xl border shadow-2xl"
         style={{
           backgroundColor: "var(--color-bg-secondary)",
           borderColor: "var(--color-border)",
@@ -301,55 +413,111 @@ export function PageHistoryDialog({
             </div>
           ) : (
             <>
-              {/* Commit List */}
+              {/* Commit List (sidebar) */}
               <div
-                className="w-64 shrink-0 overflow-y-auto border-r"
+                ref={commitListRef}
+                className="w-72 shrink-0 overflow-y-auto border-r"
                 style={{ borderColor: "var(--color-border)" }}
               >
-                {commits.map((commit) => (
-                  <button
-                    key={commit.id}
-                    onClick={() => handleSelectCommit(commit)}
-                    className="w-full border-b px-4 py-3 text-left transition-colors hover:bg-[--color-bg-tertiary]"
-                    style={{
-                      borderColor: "var(--color-border)",
-                      backgroundColor:
-                        selectedCommit?.id === commit.id
-                          ? "var(--color-bg-tertiary)"
-                          : undefined,
-                    }}
-                  >
-                    <p
-                      className="truncate text-sm font-medium"
-                      style={{ color: "var(--color-text-primary)" }}
+                {dateGroups.map((group) => (
+                  <div key={group.label}>
+                    {/* Date group header */}
+                    <div
+                      className="sticky top-0 z-10 border-b px-4 py-1.5 text-[10px] font-semibold uppercase tracking-wider"
+                      style={{
+                        backgroundColor: "var(--color-bg-secondary)",
+                        borderColor: "var(--color-border)",
+                        color: "var(--color-text-muted)",
+                      }}
                     >
-                      {commit.message}
-                    </p>
-                    <p
-                      className="mt-1 text-xs"
-                      style={{ color: "var(--color-text-muted)" }}
-                    >
-                      {formatTimestamp(commit.timestamp)}
-                    </p>
-                    <p
-                      className="mt-0.5 truncate text-xs"
-                      style={{ color: "var(--color-text-muted)" }}
-                    >
-                      {commit.short_id} by {commit.author}
-                    </p>
-                  </button>
+                      {group.label}
+                    </div>
+                    {group.commits.map((commit) => {
+                      const isSelected = selectedCommit?.id === commit.id;
+                      const isCompare = compareCommit?.id === commit.id;
+
+                      return (
+                        <button
+                          key={commit.id}
+                          onClick={(e) =>
+                            handleSelectCommit(commit, e.shiftKey)
+                          }
+                          className="w-full border-b px-4 py-2.5 text-left transition-colors hover:bg-[--color-bg-tertiary]"
+                          style={{
+                            borderColor: "var(--color-border)",
+                            backgroundColor: isSelected
+                              ? "var(--color-bg-tertiary)"
+                              : isCompare
+                                ? "rgba(59, 130, 246, 0.08)"
+                                : undefined,
+                          }}
+                        >
+                          <div className="flex items-start gap-2">
+                            {/* Selection indicator */}
+                            {(isSelected || isCompare) && (
+                              <div
+                                className="mt-1 h-2 w-2 shrink-0 rounded-full"
+                                style={{
+                                  backgroundColor: isSelected
+                                    ? "var(--color-accent)"
+                                    : "rgb(59, 130, 246)",
+                                }}
+                              />
+                            )}
+                            <div className="min-w-0 flex-1">
+                              <p
+                                className="truncate text-sm font-medium"
+                                style={{
+                                  color: "var(--color-text-primary)",
+                                }}
+                              >
+                                {commit.message}
+                              </p>
+                              <p
+                                className="mt-0.5 text-xs"
+                                style={{ color: "var(--color-text-muted)" }}
+                              >
+                                {formatTime(commit.timestamp)}{" "}
+                                <span className="opacity-60">
+                                  {commit.short_id}
+                                </span>
+                              </p>
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
                 ))}
+
+                {/* Load More */}
+                {hasMoreCommits && (
+                  <button
+                    onClick={loadMore}
+                    disabled={isLoadingMore}
+                    className="w-full px-4 py-3 text-center text-xs font-medium transition-colors hover:bg-[--color-bg-tertiary]"
+                    style={{ color: "var(--color-accent)" }}
+                  >
+                    {isLoadingMore ? "Loading..." : "Load more"}
+                  </button>
+                )}
               </div>
 
-              {/* Preview Panel */}
+              {/* Preview / Changes Panel */}
               <div className="flex min-w-0 flex-1 flex-col">
                 {!selectedCommit ? (
-                  <div className="flex flex-1 items-center justify-center">
+                  <div className="flex flex-1 flex-col items-center justify-center gap-2">
                     <p
                       className="text-sm"
                       style={{ color: "var(--color-text-muted)" }}
                     >
                       Select a version to preview
+                    </p>
+                    <p
+                      className="text-xs"
+                      style={{ color: "var(--color-text-muted)", opacity: 0.6 }}
+                    >
+                      Shift+click two versions to compare
                     </p>
                   </div>
                 ) : isLoadingPreview ? (
@@ -368,26 +536,51 @@ export function PageHistoryDialog({
                       className="shrink-0 border-b px-4 py-2"
                       style={{ borderColor: "var(--color-border)" }}
                     >
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p
-                            className="text-xs font-medium"
-                            style={{ color: "var(--color-text-secondary)" }}
-                          >
-                            {selectedCommit.message}
-                          </p>
-                          <p
-                            className="text-xs"
-                            style={{ color: "var(--color-text-muted)" }}
-                          >
-                            {formatTimestamp(selectedCommit.timestamp)} by{" "}
-                            {selectedCommit.author}
-                          </p>
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          {compareCommit ? (
+                            <div className="flex items-center gap-2">
+                              <span
+                                className="text-xs font-medium"
+                                style={{ color: "var(--color-text-secondary)" }}
+                              >
+                                Comparing {compareInfo?.olderCommit.short_id}{" "}
+                                &rarr; {compareInfo?.newerCommit.short_id}
+                              </span>
+                              <button
+                                onClick={clearCompare}
+                                className="rounded px-1.5 py-0.5 text-[10px] transition-colors hover:bg-[--color-bg-tertiary]"
+                                style={{ color: "var(--color-text-muted)" }}
+                              >
+                                Clear
+                              </button>
+                            </div>
+                          ) : (
+                            <>
+                              <p
+                                className="truncate text-xs font-medium"
+                                style={{
+                                  color: "var(--color-text-secondary)",
+                                }}
+                              >
+                                {selectedCommit.message}
+                              </p>
+                              <p
+                                className="text-xs"
+                                style={{ color: "var(--color-text-muted)" }}
+                              >
+                                {formatTimestamp(selectedCommit.timestamp)} by{" "}
+                                {selectedCommit.author}
+                              </p>
+                            </>
+                          )}
                         </div>
                         {/* Tab Toggle */}
                         <div
-                          className="flex gap-1 rounded-lg p-0.5"
-                          style={{ backgroundColor: "var(--color-bg-tertiary)" }}
+                          className="flex shrink-0 gap-1 rounded-lg p-0.5"
+                          style={{
+                            backgroundColor: "var(--color-bg-tertiary)",
+                          }}
                         >
                           <button
                             onClick={() => handleViewModeChange("preview")}
@@ -447,11 +640,12 @@ export function PageHistoryDialog({
                           </pre>
                         )
                       ) : (
-                        <DiffView
-                          diffLines={diffLines}
+                        <BlockDiffView
+                          blockDiffs={blockDiffs}
                           isLoading={isLoadingDiff}
                           isOldestCommit={isOldestCommit}
-                          predecessorCommit={predecessorCommit}
+                          compareInfo={compareInfo}
+                          diffStats={diffStats}
                         />
                       )}
                     </div>
@@ -484,7 +678,13 @@ export function PageHistoryDialog({
             className="text-xs"
             style={{ color: "var(--color-text-muted)" }}
           >
-            {commits.length > 0 && `${commits.length} versions`}
+            {commits.length > 0 &&
+              `${commits.length} version${commits.length !== 1 ? "s" : ""}${hasMoreCommits ? "+" : ""}`}
+            {commits.length > 0 && (
+              <span className="ml-2 opacity-50">
+                j/k to navigate, Tab to switch tabs, Shift+click to compare
+              </span>
+            )}
           </p>
           <div className="flex items-center gap-3">
             <button
@@ -497,7 +697,7 @@ export function PageHistoryDialog({
             >
               Close
             </button>
-            {selectedCommit && (
+            {selectedCommit && !compareCommit && (
               <button
                 onClick={handleRestore}
                 disabled={isRestoring}
@@ -517,18 +717,20 @@ export function PageHistoryDialog({
   );
 }
 
-// --- Diff View Component ---
+// --- Block Diff View Component ---
 
-function DiffView({
-  diffLines,
+function BlockDiffView({
+  blockDiffs,
   isLoading,
   isOldestCommit,
-  predecessorCommit,
+  compareInfo,
+  diffStats,
 }: {
-  diffLines: DiffLine[] | null;
+  blockDiffs: BlockDiff[] | null;
   isLoading: boolean;
   isOldestCommit: boolean;
-  predecessorCommit: CommitInfo | null;
+  compareInfo: { olderCommit: CommitInfo; newerCommit: CommitInfo } | null;
+  diffStats: { added: number; removed: number; modified: number } | null;
 }) {
   if (isOldestCommit) {
     return (
@@ -541,88 +743,139 @@ function DiffView({
     );
   }
 
-  if (isLoading) {
-    return (
-      <p
-        className="text-sm"
-        style={{ color: "var(--color-text-muted)" }}
-      >
-        Computing changes...
-      </p>
-    );
-  }
-
-  if (!diffLines) return null;
-
-  if (diffLines.length === 0) {
+  if (!compareInfo) {
     return (
       <p
         className="text-sm italic"
         style={{ color: "var(--color-text-muted)" }}
       >
-        No text changes detected.
+        No previous version to compare with.
       </p>
     );
   }
 
-  const hasChanges = diffLines.some((l) => l.type !== "unchanged");
+  if (isLoading) {
+    return (
+      <p className="text-sm" style={{ color: "var(--color-text-muted)" }}>
+        Computing changes...
+      </p>
+    );
+  }
+
+  if (!blockDiffs) return null;
+
+  const hasChanges = blockDiffs.some((d) => d.type !== "unchanged");
 
   return (
     <div>
-      {predecessorCommit && (
-        <p
-          className="mb-3 text-xs"
-          style={{ color: "var(--color-text-muted)" }}
-        >
-          Comparing with previous version ({predecessorCommit.short_id})
+      {/* Diff header */}
+      <div className="mb-3 flex items-center gap-3">
+        <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
+          {compareInfo.olderCommit.short_id} &rarr;{" "}
+          {compareInfo.newerCommit.short_id}
         </p>
-      )}
+        {diffStats && hasChanges && (
+          <div className="flex gap-2 text-[10px] font-medium">
+            {diffStats.added > 0 && (
+              <span style={{ color: "rgb(34, 197, 94)" }}>
+                +{diffStats.added} added
+              </span>
+            )}
+            {diffStats.modified > 0 && (
+              <span style={{ color: "rgb(59, 130, 246)" }}>
+                ~{diffStats.modified} modified
+              </span>
+            )}
+            {diffStats.removed > 0 && (
+              <span style={{ color: "rgb(239, 68, 68)" }}>
+                -{diffStats.removed} removed
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+
       {!hasChanges ? (
         <p
           className="text-sm italic"
           style={{ color: "var(--color-text-muted)" }}
         >
-          No text changes detected.
+          No block changes detected.
         </p>
       ) : (
-        <div
-          className="overflow-x-auto rounded-lg border"
-          style={{ borderColor: "var(--color-border)" }}
-        >
-          {diffLines.map((line, i) => (
-            <div
-              key={i}
-              className="px-3 py-0.5 font-mono text-xs"
-              style={{
-                backgroundColor:
-                  line.type === "added"
-                    ? "rgba(34, 197, 94, 0.1)"
-                    : line.type === "removed"
-                      ? "rgba(239, 68, 68, 0.1)"
-                      : undefined,
-                color:
-                  line.type === "added"
-                    ? "rgb(34, 197, 94)"
-                    : line.type === "removed"
-                      ? "rgb(239, 68, 68)"
-                      : "var(--color-text-secondary)",
-              }}
-            >
-              {line.type === "added"
-                ? "+"
-                : line.type === "removed"
-                  ? "-"
-                  : " "}{" "}
-              {line.text}
-            </div>
-          ))}
-        </div>
+        <BlockDiffRenderer diffs={blockDiffs} />
       )}
     </div>
   );
 }
 
+// --- Date grouping ---
+
+interface CommitDateGroup {
+  label: string;
+  commits: CommitInfo[];
+}
+
+function groupCommitsByDate(commits: CommitInfo[]): CommitDateGroup[] {
+  const groups: CommitDateGroup[] = [];
+  const now = new Date();
+  const todayStr = formatDateKey(now);
+
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  const yesterdayStr = formatDateKey(yesterday);
+
+  let currentLabel = "";
+  let currentGroup: CommitInfo[] = [];
+
+  for (const commit of commits) {
+    const date = new Date(commit.timestamp);
+    const dateKey = formatDateKey(date);
+
+    let label: string;
+    if (dateKey === todayStr) {
+      label = "Today";
+    } else if (dateKey === yesterdayStr) {
+      label = "Yesterday";
+    } else {
+      label = date.toLocaleDateString(undefined, {
+        weekday: "short",
+        month: "short",
+        day: "numeric",
+      });
+    }
+
+    if (label !== currentLabel) {
+      if (currentGroup.length > 0) {
+        groups.push({ label: currentLabel, commits: currentGroup });
+      }
+      currentLabel = label;
+      currentGroup = [commit];
+    } else {
+      currentGroup.push(commit);
+    }
+  }
+
+  if (currentGroup.length > 0) {
+    groups.push({ label: currentLabel, commits: currentGroup });
+  }
+
+  return groups;
+}
+
+function formatDateKey(date: Date): string {
+  return `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+}
+
 // --- Helper Functions ---
+
+function formatTime(timestamp: string): string {
+  const date = new Date(timestamp);
+  return date.toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
 
 function formatTimestamp(timestamp: string): string {
   const date = new Date(timestamp);

@@ -1110,27 +1110,36 @@ These features are recommended as high-priority additions:
 
 A command-line interface for viewing and searching notebook content without launching the GUI.
 
-- [ ] **CLI binary** - Standalone CLI tool (`nous-cli` or subcommand)
-  - Separate Rust binary or `--cli` mode on main binary
-  - Reuse existing storage layer (`src-tauri/src/storage/`)
+- [x] **CLI binary** - Standalone CLI tool (`nous-cli` or subcommand)
+  - Separate Rust binary with `tui` feature flag
+  - Reuses existing storage layer (`src-tauri/src/storage/`)
   - Library/notebook discovery from default data directory
-- [ ] **List & browse** - Navigate notebook structure from terminal
-  - `nous list` — list all libraries and notebooks
-  - `nous ls <notebook>` — list pages/folders in a notebook
-  - `nous show <notebook> <page>` — render page content to terminal (markdown output)
-  - Tree view of folder hierarchy
-- [ ] **Full-text search** - Search across notebooks from CLI
-  - `nous search <query>` — search all notebooks (uses existing Tantivy index)
-  - `nous search --notebook <name> <query>` — scoped search
-  - Highlight matching terms in results
+- [x] **List & browse** - Navigate notebook structure from terminal
+  - `nous-cli list` — list all libraries and notebooks
+  - `nous-cli ls <notebook>` — list pages/folders in a notebook
+  - `nous-cli show <notebook> <page>` — render page content to terminal
+  - `nous-cli tree <notebook>` — tree view of folder hierarchy
+- [x] **Full-text search** - Search across notebooks from CLI
+  - `nous-cli search <query>` — search all notebooks (uses existing Tantivy index)
+  - `nous-cli search --notebook <name> <query>` — scoped search
   - Output: page title, notebook, matched excerpt
-- [ ] **Tag operations** - Query and filter by tags
-  - `nous tags` — list all tags with counts
-  - `nous search --tag <tag>` — filter by tag
-- [ ] **Output formats** - Machine-readable output
-  - `--json` flag for JSON output (for piping/scripting)
-  - `--plain` for plain text (default)
-  - Configurable output width
+- [x] **Tag operations** - Query and filter by tags
+  - `nous-cli tags` — list all tags with counts
+  - `nous-cli tags --notebook <name>` — scoped to notebook
+- [x] **Output formats** - Machine-readable output
+  - `--format json` flag for JSON output (for piping/scripting)
+  - `--format plain` for plain text (default)
+- [x] **Page creation** - Create pages from CLI
+  - `nous-cli new <notebook> [title]` — create page with optional folder, tags, content
+  - Stdin piping support for content (`echo "text" | nous-cli new Agile`)
+- [x] **Inbox capture** - Quick capture from CLI
+  - `nous-cli inbox capture <title>` — capture to inbox with optional content/tags
+  - `nous-cli inbox list [--unprocessed]` — list inbox items
+- [x] **Interactive TUI** - Terminal UI for browsing
+  - Tree navigation with vim-style keys
+  - Page content viewer with scrolling
+  - Full-text search integration
+  - `n` key for quick note creation, `i` key for inbox capture
 
 ---
 

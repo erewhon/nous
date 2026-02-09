@@ -1,3 +1,3 @@
 mod index;
 
-pub use index::{SearchIndex, SearchResult};
+pub use index::{ReadOnlySearchIndex, SearchIndex, SearchResult};

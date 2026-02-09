@@ -148,7 +148,7 @@ export function SettingsDialog({
 
       {/* Dialog */}
       <div
-        className="relative flex h-[600px] w-full max-w-2xl overflow-hidden rounded-2xl border shadow-2xl"
+        className="relative flex h-[600px] w-full max-w-3xl overflow-hidden rounded-2xl border shadow-2xl"
         style={{
           backgroundColor: "var(--color-bg-panel)",
           borderColor: "var(--color-border)",
@@ -157,13 +157,13 @@ export function SettingsDialog({
       >
         {/* Sidebar */}
         <div
-          className="w-48 flex-shrink-0 border-r p-4"
+          className="flex w-52 flex-shrink-0 flex-col border-r"
           style={{
             backgroundColor: "var(--color-bg-secondary)",
             borderColor: "var(--color-border)",
           }}
         >
-          <div className="mb-6">
+          <div className="shrink-0 px-4 pt-4 pb-2">
             <h2
               className="text-lg font-semibold"
               style={{ color: "var(--color-text-primary)" }}
@@ -172,7 +172,7 @@ export function SettingsDialog({
             </h2>
           </div>
 
-          <nav className="space-y-4">
+          <nav className="flex-1 space-y-4 overflow-y-auto px-4 pb-4">
             {TAB_CATEGORIES.map((category) => (
               <div key={category.name}>
                 <div
@@ -181,12 +181,12 @@ export function SettingsDialog({
                 >
                   {category.name}
                 </div>
-                <div className="space-y-1">
+                <div className="space-y-0.5">
                   {category.tabs.map((tab) => (
                     <button
                       key={tab.id}
                       onClick={() => setActiveTab(tab.id)}
-                      className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
+                      className={`flex w-full items-center gap-2.5 whitespace-nowrap rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
                         activeTab === tab.id ? "" : "hover:bg-[--color-bg-tertiary]"
                       }`}
                       style={{
@@ -200,7 +200,7 @@ export function SettingsDialog({
                             : "var(--color-text-secondary)",
                       }}
                     >
-                      {tab.icon}
+                      <span className="shrink-0">{tab.icon}</span>
                       {tab.label}
                     </button>
                   ))}

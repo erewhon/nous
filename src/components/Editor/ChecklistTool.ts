@@ -143,7 +143,9 @@ export class ChecklistTool implements BlockTool {
     // DOM mutations inside the editor that freeze WebKitGTK's rendering pipeline.
     itemEl.dataset.index = String(index);
 
-    // Drag handle
+    // Drag handle — display:none by default, shown as position:absolute on
+    // hover via CSS. This keeps it out of the flex layout entirely (WebKitGTK
+    // has rendering quirks with opacity-hidden flex children).
     if (!this.readOnly) {
       const dragHandle = document.createElement("div");
       dragHandle.classList.add("cdx-checklist__item-drag-handle");
@@ -261,9 +263,14 @@ export class ChecklistTool implements BlockTool {
     const id = CSS.escape(this.instanceId);
     const rules: string[] = [];
 
+    // Make the items container a flex column so CSS `order` works for auto-sort
+    rules.push(
+      `#${id} .cdx-checklist__items { display: flex; flex-direction: column; }`
+    );
+
     this.data.items.forEach((item, index) => {
+      const nth = index + 1; // nth-child is 1-based
       if (item.checked) {
-        const nth = index + 1; // nth-child is 1-based
         // Checkbox: accent background + checkmark
         rules.push(
           `#${id} .cdx-checklist__item:nth-child(${nth}) .cdx-checklist__item-checkbox {` +
@@ -289,6 +296,15 @@ export class ChecklistTool implements BlockTool {
             `text-decoration: line-through;` +
             `color: var(--color-text-muted);` +
             `}`
+        );
+        // Auto-sort: checked items sink to bottom via CSS order
+        rules.push(
+          `#${id} .cdx-checklist__item:nth-child(${nth}) { order: 1; }`
+        );
+      } else {
+        // Unchecked items stay at top
+        rules.push(
+          `#${id} .cdx-checklist__item:nth-child(${nth}) { order: 0; }`
         );
       }
     });

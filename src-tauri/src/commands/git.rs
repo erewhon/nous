@@ -95,13 +95,15 @@ pub fn git_history(
     notebook_id: String,
     page_id: Option<String>,
     limit: Option<usize>,
+    skip: Option<usize>,
 ) -> CommandResult<Vec<CommitInfo>> {
     let path = get_notebook_path(&state, &notebook_id)?;
 
     let file_path = page_id.map(|id| format!("pages/{}.json", id));
-    let limit = limit.unwrap_or(50);
+    let limit = limit.unwrap_or(100);
+    let skip = skip.unwrap_or(0);
 
-    git::get_history(&path, file_path.as_deref(), limit).map_err(Into::into)
+    git::get_history(&path, file_path.as_deref(), limit, skip).map_err(Into::into)
 }
 
 /// Get file content at a specific commit

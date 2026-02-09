@@ -234,7 +234,7 @@ export const usePageStore = create<PageStore>()(
             seen.add(p.id);
             return true;
           });
-          set({ pages, isLoading: false });
+          set((state) => ({ pages, isLoading: false, pageDataVersion: state.pageDataVersion + 1 }));
         } catch (err) {
           set({
             error: err instanceof Error ? err.message : "Failed to load pages",

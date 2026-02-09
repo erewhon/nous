@@ -269,7 +269,7 @@ fn get_signature(repo: &Repository) -> Result<Signature<'static>> {
 }
 
 /// Get commit history for a file or the entire repo
-pub fn get_history(path: &Path, file_path: Option<&str>, limit: usize) -> Result<Vec<CommitInfo>> {
+pub fn get_history(path: &Path, file_path: Option<&str>, limit: usize, skip: usize) -> Result<Vec<CommitInfo>> {
     let repo = open_repo(path)?;
 
     let mut revwalk = repo.revwalk()?;
@@ -277,6 +277,7 @@ pub fn get_history(path: &Path, file_path: Option<&str>, limit: usize) -> Result
     revwalk.set_sorting(git2::Sort::TIME)?;
 
     let mut commits = Vec::new();
+    let mut skipped = 0;
 
     for oid_result in revwalk {
         let oid = oid_result?;
@@ -287,6 +288,12 @@ pub fn get_history(path: &Path, file_path: Option<&str>, limit: usize) -> Result
             if !commit_touches_file(&repo, &commit, fp)? {
                 continue;
             }
+        }
+
+        // Skip the first `skip` matching commits
+        if skipped < skip {
+            skipped += 1;
+            continue;
         }
 
         commits.push(commit_to_info(&commit));
@@ -1013,7 +1020,7 @@ mod tests {
         std::fs::write(path.join("file2.txt"), "Content 2").unwrap();
         commit_all(&path, "Second commit").unwrap();
 
-        let history = get_history(&path, None, 10).unwrap();
+        let history = get_history(&path, None, 10, 0).unwrap();
         assert_eq!(history.len(), 2);
         assert_eq!(history[0].message, "Second commit");
         assert_eq!(history[1].message, "First commit");

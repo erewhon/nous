@@ -1307,9 +1307,10 @@ export async function gitCommit(
 export async function gitHistory(
   notebookId: string,
   pageId?: string,
-  limit?: number
+  limit?: number,
+  skip?: number
 ): Promise<CommitInfo[]> {
-  return invoke<CommitInfo[]>("git_history", { notebookId, pageId, limit });
+  return invoke<CommitInfo[]>("git_history", { notebookId, pageId, limit, skip });
 }
 
 export async function gitGetPageAtCommit(
