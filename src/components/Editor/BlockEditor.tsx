@@ -183,7 +183,6 @@ export const BlockEditor = memo(forwardRef<BlockEditorRef, BlockEditorProps>(fun
 }, ref) {
   const editorId = useId().replace(/:/g, "-");
   const holderId = `editor-${editorId}`;
-  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   // Track pending data that needs to be saved on unmount
   const pendingDataRef = useRef<OutputData | null>(null);
@@ -199,63 +198,79 @@ export const BlockEditor = memo(forwardRef<BlockEditorRef, BlockEditorProps>(fun
   // Track vim mode state for indicator (used by useVimMode callback)
   const [, setCurrentVimMode] = useState<VimMode>("normal");
 
-  // Ref to access the save() function inside the debounce timer.
-  // save() comes from useEditor (defined below), so we use a ref to break the
-  // circular dependency while always getting fresh editor state at save time.
+  // Refs to access useEditor functions inside callbacks defined before useEditor.
+  // useEditor takes handleChange as a prop, but handleChange/performSave need
+  // save(), markClean(), and isSavingRef from useEditor — refs break the cycle.
   const saveRef = useRef<(() => Promise<OutputData | null>) | null>(null);
+  const markCleanRef = useRef<(() => void) | null>(null);
+  const isSavingRefRef = useRef<React.MutableRefObject<boolean>>({ current: false });
 
-  // Debounced save.  Called either with no data (lightweight signal from
-  // useEditor's onChange — avoids expensive per-keystroke editor.save()) or
-  // with data (from checklist-structural-change handler which already saved).
+  // Track whether editor has unsaved changes for the safety-net save
+  const hasUnsavedChangesRef = useRef(false);
+  // Safety-net periodic save timer
+  const safetyNetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Performs the actual save: editor.save() → undo capture → backend persist.
+  // Extracted so it can be called from the safety net, structural changes,
+  // and Ctrl+S without duplication.
+  const performSave = useCallback(async () => {
+    isSavingRefRef.current.current = true;
+    try {
+      crumb("blockEditor:editor.save:start");
+      const freshData = await saveRef.current?.();
+      crumb(`blockEditor:editor.save:done:blocks=${freshData?.blocks?.length ?? 0}`);
+      if (freshData) {
+        onChange?.(freshData);
+        crumb("blockEditor:onSave:start");
+        onSaveRef.current?.(freshData);
+        crumb("blockEditor:onSave:done");
+        hasUnsavedChangesRef.current = false;
+        requestAnimationFrame(() => {
+          markCleanRef.current?.();
+        });
+      }
+    } finally {
+      queueMicrotask(() => {
+        isSavingRefRef.current.current = false;
+      });
+    }
+  }, [onChange]);
+
+  // Called on every Editor.js onChange.  Does NOT call editor.save() —
+  // editor.save() forces a synchronous full DOM traversal of ALL blocks,
+  // which freezes WebKitGTK for 6+ seconds on pages with many blocks.
+  // Instead, just marks the editor as dirty.  Actual saves happen on:
+  //   - Ctrl+S (explicit save)
+  //   - Page switch (onUnmountSave)
+  //   - Safety-net timer (every 60s of inactivity)
   const handleChange = useCallback(
     (data?: OutputData) => {
       crumb(`blockEditor:handleChange:${data ? "withData" : "signal"}`);
-      // If data is provided (structural change), forward to parent immediately
-      // for undo history capture.  For normal keystrokes, undo capture happens
-      // at debounce time — this is standard UX (nobody wants char-level undo).
+      hasUnsavedChangesRef.current = true;
+
+      // If data is provided (structural change that already has the data),
+      // forward to parent immediately for undo history capture and save.
       if (data) {
         onChange?.(data);
+        onSaveRef.current?.(data);
+        requestAnimationFrame(() => {
+          markCleanRef.current?.();
+        });
       }
 
-      // Debounce auto-save
-      if (saveTimeoutRef.current) {
-        clearTimeout(saveTimeoutRef.current);
+      // Reset the safety-net timer.  If the user stops editing for 60s,
+      // the safety net will call editor.save() to persist pending changes.
+      if (safetyNetTimerRef.current) {
+        clearTimeout(safetyNetTimerRef.current);
       }
-
-      saveTimeoutRef.current = setTimeout(async () => {
-        crumb("blockEditor:debounce:fire");
-        // Get fresh data from the editor.  This is the ONLY place we call
-        // editor.save() for normal edits — NOT per-keystroke.
-        // Set isSavingRef to suppress cascading onChange during save().
-        isSavingRef.current = true;
-        try {
-          crumb("blockEditor:editor.save:start");
-          const freshData = await saveRef.current?.();
-          crumb(`blockEditor:editor.save:done:blocks=${freshData?.blocks?.length ?? 0}`);
-          if (freshData) {
-            // Capture undo state at save time (if not already captured above)
-            if (!data) {
-              onChange?.(freshData);
-            }
-            // onSave calls setPageContentLocal which updates the Zustand store
-            // synchronously.  Deferring markClean to the next frame ensures
-            // React has already processed the re-render (seeing isDirtyRef=true
-            // → skipping render) before we clear the dirty flag.
-            crumb("blockEditor:onSave:start");
-            onSaveRef.current?.(freshData);
-            crumb("blockEditor:onSave:done");
-            requestAnimationFrame(() => {
-              markClean();
-            });
-          }
-        } finally {
-          queueMicrotask(() => {
-            isSavingRef.current = false;
-          });
+      safetyNetTimerRef.current = setTimeout(() => {
+        if (hasUnsavedChangesRef.current) {
+          crumb("blockEditor:safetyNet:fire");
+          performSave();
         }
-      }, 2000); // Auto-save after 2 seconds of inactivity
+      }, 60000); // 60 seconds of inactivity
     },
-    [onChange]
+    [onChange, performSave]
   );
 
   const { editor, save, render, markClean, isSavingRef } = useEditor({
@@ -272,9 +287,9 @@ export const BlockEditor = memo(forwardRef<BlockEditorRef, BlockEditorProps>(fun
       // This captures the true current state, bypassing Editor.js's
       // onChange debounce which may not have fired yet.
       pendingDataRef.current = null;
-      if (saveTimeoutRef.current) {
-        clearTimeout(saveTimeoutRef.current);
-        saveTimeoutRef.current = null;
+      if (safetyNetTimerRef.current) {
+        clearTimeout(safetyNetTimerRef.current);
+        safetyNetTimerRef.current = null;
       }
       // Flush to local store for race-condition protection when switching pages.
       // The auto-save path intentionally skips setPageContentLocal (to avoid
@@ -307,6 +322,8 @@ export const BlockEditor = memo(forwardRef<BlockEditorRef, BlockEditorProps>(fun
     },
   });
   saveRef.current = save;
+  markCleanRef.current = markClean;
+  isSavingRefRef.current = isSavingRef;
 
   // Expose render and save methods via ref
   useImperativeHandle(ref, () => ({
@@ -351,42 +368,48 @@ export const BlockEditor = memo(forwardRef<BlockEditorRef, BlockEditorProps>(fun
   // cancel any pending auto-save to prevent stale editor content from overwriting
   // the fresh backend data that the editor is about to render.
   useEffect(() => {
-    if (saveTimeoutRef.current) {
-      clearTimeout(saveTimeoutRef.current);
-      saveTimeoutRef.current = null;
+    if (safetyNetTimerRef.current) {
+      clearTimeout(safetyNetTimerRef.current);
+      safetyNetTimerRef.current = null;
     }
     pendingDataRef.current = null;
+    hasUnsavedChangesRef.current = false;
   }, [initialData]);
 
-  // Cleanup: clear pending debounce on unmount.
+  // Cleanup: clear safety-net timer on unmount.
   // The actual save is handled by useEditor's onUnmountSave callback,
   // which fires before the editor is destroyed and captures the true state.
   useEffect(() => {
     return () => {
-      if (saveTimeoutRef.current) {
-        clearTimeout(saveTimeoutRef.current);
-        saveTimeoutRef.current = null;
+      if (safetyNetTimerRef.current) {
+        clearTimeout(safetyNetTimerRef.current);
+        safetyNetTimerRef.current = null;
       }
       pendingDataRef.current = null;
     };
   }, []);
 
-  // Save on Ctrl+S - this is an explicit save that should trigger git commit
+  // Save on Ctrl+S - this is an explicit save that should trigger git commit.
+  // This DOES call editor.save() since the user explicitly requested a save.
+  // On large pages this may briefly pause WebKitGTK, but that's acceptable
+  // for an explicit action (vs the old 2s debounce that froze on every keystroke).
   useEffect(() => {
     const handleKeyDown = async (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === "s") {
         e.preventDefault();
-        // Clear pending debounced save since we're saving explicitly now
-        if (saveTimeoutRef.current) {
-          clearTimeout(saveTimeoutRef.current);
+        // Clear safety-net timer since we're saving explicitly now
+        if (safetyNetTimerRef.current) {
+          clearTimeout(safetyNetTimerRef.current);
+          safetyNetTimerRef.current = null;
         }
         pendingDataRef.current = null;
 
         const data = await save();
         if (data) {
+          hasUnsavedChangesRef.current = false;
           // Use explicit save callback if provided, otherwise fall back to regular save
           (onExplicitSave ?? onSave)?.(data);
-          // Defer markClean — same reasoning as the debounced save above
+          // Defer markClean — same reasoning as the safety-net save
           requestAnimationFrame(() => {
             markClean();
           });
@@ -604,11 +627,48 @@ export const BlockEditor = memo(forwardRef<BlockEditorRef, BlockEditorProps>(fun
     };
   }, [save, handleChange, readOnly]);
 
-  // NOTE: Checkbox toggles do NOT trigger any save pipeline.
+  // Checklist data-changed events — direct persistence WITHOUT editor.save().
   // editor.save() forces a synchronous DOM traversal which causes WebKitGTK
-  // to freeze during layout reflow (6+ seconds). Checkbox state changes
-  // (stored in ChecklistTool.data.items) are captured by the next regular
-  // save: text edit auto-save, Ctrl+S, or page switch (onUnmountSave).
+  // to freeze during layout reflow (6+ seconds). Instead, ChecklistTool
+  // dispatches the updated items data directly, and we patch the page content
+  // in the store + backend without touching the editor DOM.
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || readOnly || !pageId || !notebookId) return;
+
+    const handleDataChanged = (e: Event) => {
+      const { blockId, items } = (e as CustomEvent).detail;
+      if (!blockId) return;
+
+      // Defer persistence to avoid running during the event dispatch.
+      // Synchronous work here (JSON serialization for Tauri invoke) could
+      // force a layout reflow while CSS `order` changes are pending,
+      // freezing WebKitGTK's rendering pipeline.
+      setTimeout(() => {
+        const state = usePageStore.getState();
+        const page = state.pages.find((p) => p.id === pageId);
+        if (!page?.content?.blocks) return;
+
+        const updatedBlocks = page.content.blocks.map((block) =>
+          block.id === blockId
+            ? { ...block, data: { ...block.data, items } }
+            : block
+        );
+        const updatedContent = { ...page.content, blocks: updatedBlocks };
+
+        // Persist to backend only (fire-and-forget).
+        // Do NOT call setPageContentLocal — it triggers a React re-render
+        // cascade that causes editor.render() → onChange → editor.save() → freeze.
+        // The store cache is updated on page switch via onUnmountSave.
+        state.updatePageContent(notebookId, pageId, updatedContent, false);
+      }, 0);
+    };
+
+    container.addEventListener("checklist-data-changed", handleDataChanged);
+    return () => {
+      container.removeEventListener("checklist-data-changed", handleDataChanged);
+    };
+  }, [readOnly, pageId, notebookId]);
 
   // Detect URL paste and offer to clip
   useEffect(() => {

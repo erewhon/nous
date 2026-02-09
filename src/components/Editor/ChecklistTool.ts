@@ -178,6 +178,14 @@ export class ChecklistTool implements BlockTool {
     // Checked styling is driven by CSS in <head>.
 
     if (!this.readOnly) {
+      // Prevent mousedown from propagating to Editor.js — it reads layout
+      // properties (getBoundingClientRect) for block detection, which forces
+      // a synchronous reflow.  If CSS `order` changes are pending, this
+      // reflow freezes WebKitGTK's rendering pipeline.
+      checkbox.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+      });
       checkbox.addEventListener("click", (e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -214,18 +222,29 @@ export class ChecklistTool implements BlockTool {
     const isChecked = !this.data.items[index].checked;
     this.data.items[index].checked = isChecked;
 
-    // Update visual state via CSS (proven safe — doesn't freeze)
+    // Update visual state via CSS — includes checkbox styling and
+    // CSS `order` property for auto-sort (checked items sink to bottom).
+    // No DOM mutations — all visual changes are via <style> tag in <head>.
     this.updateCheckedStyles();
 
-    // DO NOT trigger any save pipeline here. editor.save() does a full
-    // synchronous DOM traversal of ALL blocks, which forces a layout reflow
-    // while pending style changes are queued — freezing WebKitGTK for 6+ seconds.
-    //
-    // Checkbox state changes are persisted by:
-    //   1. The next text edit (triggers normal auto-save via editor.save(),
-    //      which calls ChecklistTool.save() → reads this.data.items)
-    //   2. Ctrl+S (explicit save)
-    //   3. Page switch (onUnmountSave calls editor.save())
+    // Persist the checkbox change directly WITHOUT calling editor.save().
+    // editor.save() does a full synchronous DOM traversal of ALL blocks,
+    // which forces a layout reflow that freezes WebKitGTK for 6+ seconds.
+    // Instead, dispatch a lightweight event with just the checklist data —
+    // BlockEditor catches it and updates the backend directly.
+    this.wrapper?.dispatchEvent(
+      new CustomEvent("checklist-data-changed", {
+        bubbles: true,
+        detail: {
+          blockId: this.block?.id,
+          items: this.data.items.map((item) => ({
+            text: item.text,
+            checked: item.checked,
+          })),
+        },
+      })
+    );
+
     crumb(`checklist:toggle:done:idx=${index}:checked=${isChecked}`);
   }
 
@@ -234,11 +253,8 @@ export class ChecklistTool implements BlockTool {
    * outside the editor container, so updates never trigger Editor.js's
    * MutationObserver.
    *
-   * IMPORTANT: Only target non-contenteditable elements (checkbox).
-   * Styling the .cdx-checklist__item-text (which is contentEditable="true")
-   * causes WebKitGTK to freeze during style recalculation — even via CSS.
-   * The checkbox visual alone (accent background + checkmark) is sufficient
-   * to indicate checked state.
+   * Includes CSS `order` property for auto-sort (checked items visually
+   * move to the bottom) without any DOM mutations.
    */
   private updateCheckedStyles(): void {
     if (!this.styleEl) return;
@@ -248,7 +264,7 @@ export class ChecklistTool implements BlockTool {
     this.data.items.forEach((item, index) => {
       if (item.checked) {
         const nth = index + 1; // nth-child is 1-based
-        // Checkbox only (non-contenteditable): accent background + checkmark
+        // Checkbox: accent background + checkmark
         rules.push(
           `#${id} .cdx-checklist__item:nth-child(${nth}) .cdx-checklist__item-checkbox {` +
             `background-color: var(--color-accent) !important;` +
@@ -267,8 +283,7 @@ export class ChecklistTool implements BlockTool {
             `background-repeat: no-repeat;` +
             `}`
         );
-        // Text: strikethrough + muted (safe — the freeze was caused by
-        // editor.save() forcing layout reflow, not by CSS changes)
+        // Text: strikethrough + muted
         rules.push(
           `#${id} .cdx-checklist__item:nth-child(${nth}) .cdx-checklist__item-text {` +
             `text-decoration: line-through;` +

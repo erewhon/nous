@@ -276,10 +276,10 @@ pub fn run() {
                 log::info!("Successfully registered /tmp/nous-videos with asset protocol");
             }
 
-            // Auto-open devtools for freeze diagnostics
-            if let Some(window) = app.get_webview_window("main") {
-                window.open_devtools();
-            }
+            // Devtools: uncomment to enable for debugging
+            // if let Some(window) = app.get_webview_window("main") {
+            //     window.open_devtools();
+            // }
 
             // Start the action scheduler
             let state: tauri::State<AppState> = app.handle().state();
