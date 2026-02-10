@@ -1166,7 +1166,37 @@ impl SyncManager {
             self.apply_pages_meta(storage, notebook_id, &remote_pages_meta);
         }
 
-        // 6d. Pull folders and sections structure from remote
+        // 6d. Pull and apply notebook metadata (pinned, position, sort order)
+        match self.fetch_notebook_meta(&client, &config.remote_path).await {
+            Ok(remote_meta) => {
+                let mut storage_guard = storage.lock().unwrap();
+                if let Ok(mut notebook) = storage_guard.get_notebook(notebook_id) {
+                    if remote_meta.updated_at > notebook.updated_at {
+                        notebook.is_pinned = remote_meta.is_pinned;
+                        notebook.position = remote_meta.position;
+                        notebook.page_sort_by = remote_meta.page_sort_by;
+                        notebook.name = remote_meta.name;
+                        notebook.icon = remote_meta.icon;
+                        notebook.color = remote_meta.color;
+                        notebook.sections_enabled = remote_meta.sections_enabled;
+                        notebook.archived = remote_meta.archived;
+                        notebook.system_prompt = remote_meta.system_prompt;
+                        notebook.system_prompt_mode = remote_meta.system_prompt_mode;
+                        notebook.ai_provider = remote_meta.ai_provider;
+                        notebook.ai_model = remote_meta.ai_model;
+                        notebook.updated_at = remote_meta.updated_at;
+                        if let Err(e) = storage_guard.update_notebook(&notebook) {
+                            log::warn!("Sync: failed to apply notebook metadata: {}", e);
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                log::info!("Sync: no remote notebook-meta.json: {}", e);
+            }
+        }
+
+        // 6e. Pull folders and sections structure from remote
         if let Err(e) = self.pull_structure(&client, &config.remote_path, storage, notebook_id).await {
             log::warn!("Sync: failed to pull structure: {}", e);
         }

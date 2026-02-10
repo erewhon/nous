@@ -423,6 +423,12 @@ pub struct NotebookMeta {
     pub ai_provider: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ai_model: Option<String>,
+    #[serde(default)]
+    pub is_pinned: bool,
+    #[serde(default)]
+    pub position: i32,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub page_sort_by: Option<String>,
     pub updated_at: DateTime<Utc>,
 }
 
@@ -439,6 +445,9 @@ impl From<&Notebook> for NotebookMeta {
             system_prompt_mode: notebook.system_prompt_mode.clone(),
             ai_provider: notebook.ai_provider.clone(),
             ai_model: notebook.ai_model.clone(),
+            is_pinned: notebook.is_pinned,
+            position: notebook.position,
+            page_sort_by: notebook.page_sort_by.clone(),
             updated_at: notebook.updated_at,
         }
     }
