@@ -760,9 +760,42 @@ impl FileStorage {
         Ok(())
     }
 
-    /// Replace all folders for a notebook from sync data
-    pub fn save_folders_for_sync(&self, notebook_id: Uuid, folders: &[Folder]) -> Result<()> {
-        self.save_folders(notebook_id, folders)
+    /// Merge remote folders with local folders.
+    /// - Remote folders not found locally → added
+    /// - Remote folders newer than local → updated
+    /// - Local folders not on remote → preserved (created locally, not yet pushed)
+    pub fn save_folders_for_sync(&self, notebook_id: Uuid, remote_folders: &[Folder]) -> Result<()> {
+        let local_folders = self.list_folders(notebook_id)?;
+        let remote_map: std::collections::HashMap<Uuid, &Folder> =
+            remote_folders.iter().map(|f| (f.id, f)).collect();
+        let local_map: std::collections::HashMap<Uuid, &Folder> =
+            local_folders.iter().map(|f| (f.id, f)).collect();
+
+        let mut merged: Vec<Folder> = Vec::new();
+
+        // Add/update from remote
+        for rf in remote_folders {
+            if let Some(lf) = local_map.get(&rf.id) {
+                if rf.updated_at > lf.updated_at {
+                    merged.push(rf.clone());
+                } else {
+                    merged.push((*lf).clone());
+                }
+            } else {
+                merged.push(rf.clone());
+            }
+        }
+
+        // Preserve local-only folders (not on remote yet)
+        for lf in &local_folders {
+            if !remote_map.contains_key(&lf.id) {
+                merged.push(lf.clone());
+            }
+        }
+
+        merged.sort_by_key(|f| f.position);
+
+        self.save_folders(notebook_id, &merged)
     }
 
     /// Create a new folder in a notebook
@@ -919,9 +952,45 @@ impl FileStorage {
         Ok(())
     }
 
-    /// Replace all sections for a notebook from sync data
-    pub fn save_sections_for_sync(&self, notebook_id: Uuid, sections: &[Section]) -> Result<()> {
-        self.save_sections(notebook_id, sections)
+    /// Merge remote sections with local sections.
+    /// - Remote sections not found locally → added
+    /// - Remote sections newer than local → updated
+    /// - Local sections not on remote → preserved (created locally, not yet pushed)
+    pub fn save_sections_for_sync(&self, notebook_id: Uuid, remote_sections: &[Section]) -> Result<()> {
+        let local_sections = self.list_sections(notebook_id)?;
+        let remote_map: std::collections::HashMap<Uuid, &Section> =
+            remote_sections.iter().map(|s| (s.id, s)).collect();
+        let local_map: std::collections::HashMap<Uuid, &Section> =
+            local_sections.iter().map(|s| (s.id, s)).collect();
+
+        let mut merged: Vec<Section> = Vec::new();
+
+        // Add/update from remote
+        for rs in remote_sections {
+            if let Some(ls) = local_map.get(&rs.id) {
+                // Exists locally — use whichever is newer
+                if rs.updated_at > ls.updated_at {
+                    merged.push(rs.clone());
+                } else {
+                    merged.push((*ls).clone());
+                }
+            } else {
+                // New from remote
+                merged.push(rs.clone());
+            }
+        }
+
+        // Preserve local-only sections (not on remote yet)
+        for ls in &local_sections {
+            if !remote_map.contains_key(&ls.id) {
+                merged.push(ls.clone());
+            }
+        }
+
+        // Sort by position for consistent ordering
+        merged.sort_by_key(|s| s.position);
+
+        self.save_sections(notebook_id, &merged)
     }
 
     /// Create a new section in a notebook
