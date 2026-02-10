@@ -26,13 +26,21 @@ jobs:
 
       - name: Calculate version
         id: calc
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          CURRENT=$(grep '"version"' package.json | head -1 | sed 's/.*"\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)".*/\1/')
-          echo "Current version: $CURRENT"
-
           if [[ -n "${{ inputs.version }}" ]]; then
             VERSION="${{ inputs.version }}"
           else
+            # Get latest release tag to determine current version
+            LATEST_TAG=$(gh release view --json tagName --jq '.tagName' 2>/dev/null || echo "")
+            if [[ -n "$LATEST_TAG" ]]; then
+              CURRENT="${LATEST_TAG#v}"
+            else
+              CURRENT=$(grep '"version"' package.json | head -1 | sed 's/.*"\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)".*/\1/')
+            fi
+            echo "Current version: $CURRENT"
+
             IFS='.' read -r CUR_YEAR CUR_MONTH CUR_MICRO <<< "$CURRENT"
             NOW_YEAR=$(date +%Y)
             NOW_MONTH=$(date +%-m)
