@@ -535,165 +535,206 @@ export function NotebookOverview({
         onClose={() => setSettingsNotebook(null)}
       />
 
-      {/* Footer tool buttons - fixed at bottom left */}
+      {/* Footer tool dock - fixed at bottom left */}
+      <ToolDock
+        openQuickCapture={openQuickCapture}
+        openInboxPanel={openInboxPanel}
+        openActionLibrary={openActionLibrary}
+        toggleFlashcards={toggleFlashcards}
+        inboxCount={summary?.unprocessed_count ?? 0}
+        flashcardsDue={flashcardStats?.dueCards ?? 0}
+      />
+    </div>
+  );
+}
+
+// --- Tool Dock ---
+
+interface ToolDockProps {
+  openQuickCapture: () => void;
+  openInboxPanel: () => void;
+  openActionLibrary: () => void;
+  toggleFlashcards: () => void;
+  inboxCount: number;
+  flashcardsDue: number;
+}
+
+function ToolDock({
+  openQuickCapture,
+  openInboxPanel,
+  openActionLibrary,
+  toggleFlashcards,
+  inboxCount,
+  flashcardsDue,
+}: ToolDockProps) {
+  const [expanded, setExpanded] = useState(false);
+  const dockRef = useRef<HTMLDivElement>(null);
+
+  // Close expanded panel when clicking outside
+  useEffect(() => {
+    if (!expanded) return;
+    function handleClick(e: MouseEvent) {
+      if (dockRef.current && !dockRef.current.contains(e.target as Node)) {
+        setExpanded(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [expanded]);
+
+  const hasNotifications = inboxCount > 0 || flashcardsDue > 0;
+
+  const openAIChat = () => {
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "A",
+        metaKey: true,
+        shiftKey: true,
+        bubbles: true,
+      })
+    );
+  };
+
+  const openGraphView = () => {
+    window.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "g",
+        metaKey: true,
+        bubbles: true,
+      })
+    );
+  };
+
+  return (
+    <div ref={dockRef} className="fixed bottom-4 left-4 z-30">
+      {/* Expanded panel (popover above the dock) */}
+      {expanded && (
+        <div
+          className="absolute bottom-12 left-0 w-52 rounded-xl border shadow-xl"
+          style={{
+            backgroundColor: "var(--color-bg-secondary)",
+            borderColor: "var(--color-border)",
+          }}
+        >
+          <div className="p-1.5">
+            <ToolDockItem
+              icon={<IconPlus />}
+              label="Quick Capture"
+              shortcut="\u2318\u21e7C"
+              onClick={() => { openQuickCapture(); setExpanded(false); }}
+            />
+            <ToolDockItem
+              icon={<IconInbox />}
+              label="Inbox"
+              shortcut="\u2318\u21e7I"
+              badge={inboxCount}
+              onClick={() => { openInboxPanel(); setExpanded(false); }}
+            />
+            <ToolDockItem
+              icon={<IconFlashcard />}
+              label="Flashcards"
+              shortcut="\u2318\u21e7F"
+              badge={flashcardsDue}
+              onClick={() => { toggleFlashcards(); setExpanded(false); }}
+            />
+            <div
+              className="mx-2 my-1 border-t"
+              style={{ borderColor: "var(--color-border)" }}
+            />
+            <ToolDockItem
+              icon={<IconSparkle />}
+              label="AI Chat"
+              shortcut="\u2318\u21e7A"
+              onClick={() => { openAIChat(); setExpanded(false); }}
+            />
+            <ToolDockItem
+              icon={<IconBolt />}
+              label="Actions"
+              shortcut="\u2318\u21e7X"
+              onClick={() => { openActionLibrary(); setExpanded(false); }}
+            />
+            <ToolDockItem
+              icon={<IconGraph />}
+              label="Graph View"
+              shortcut="\u2318G"
+              onClick={() => { openGraphView(); setExpanded(false); }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Dock bar */}
       <div
-        className="fixed bottom-4 left-4 flex items-center gap-1 rounded-xl border px-2 py-1.5 shadow-lg"
+        className="flex items-center gap-1 rounded-xl border px-1.5 py-1 shadow-lg"
         style={{
           backgroundColor: "var(--color-bg-secondary)",
           borderColor: "var(--color-border)",
         }}
       >
-        {/* Quick Capture */}
+        {/* Quick Capture — always visible, primary action */}
         <button
           onClick={openQuickCapture}
-          className="flex h-9 w-9 items-center justify-center rounded-lg transition-colors hover:bg-[--color-bg-tertiary]"
-          style={{ color: "var(--color-text-muted)" }}
+          className="flex h-8 items-center gap-1.5 rounded-lg px-2.5 text-xs font-medium transition-colors hover:bg-[--color-bg-tertiary]"
+          style={{ color: "var(--color-text-secondary)" }}
           title="Quick Capture (⌘⇧C)"
         >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M12 5v14M5 12h14" />
-          </svg>
+          <IconPlus />
+          <span>Capture</span>
         </button>
-        {/* Inbox */}
+
+        {/* Inbox — always visible if has items */}
         <button
           onClick={openInboxPanel}
-          className="relative flex h-9 w-9 items-center justify-center rounded-lg transition-colors hover:bg-[--color-bg-tertiary]"
+          className="relative flex h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-medium transition-colors hover:bg-[--color-bg-tertiary]"
           style={{ color: "var(--color-text-muted)" }}
           title="Inbox (⌘⇧I)"
         >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <polyline points="22 12 16 12 14 15 10 15 8 12 2 12" />
-            <path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
-          </svg>
-          {summary && summary.unprocessed_count > 0 && (
+          <IconInbox />
+          {inboxCount > 0 && (
             <span
-              className="absolute right-0.5 top-0.5 flex h-4 w-4 items-center justify-center rounded-full text-[10px] font-bold text-white"
+              className="flex h-4 min-w-[16px] items-center justify-center rounded-full px-1 text-[10px] font-bold text-white"
               style={{ backgroundColor: "var(--color-accent)" }}
             >
-              {summary.unprocessed_count > 9 ? "9+" : summary.unprocessed_count}
+              {inboxCount > 9 ? "9+" : inboxCount}
             </span>
           )}
         </button>
-        {/* AI Chat */}
-        <button
-          onClick={() => {
-            window.dispatchEvent(
-              new KeyboardEvent("keydown", {
-                key: "A",
-                metaKey: true,
-                shiftKey: true,
-                bubbles: true,
-              })
-            );
-          }}
-          className="flex h-9 w-9 items-center justify-center rounded-lg transition-colors hover:bg-[--color-bg-tertiary]"
-          style={{ color: "var(--color-text-muted)" }}
-          title="AI Chat (⌘⇧A)"
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z" />
-          </svg>
-        </button>
-        {/* Actions */}
-        <button
-          onClick={openActionLibrary}
-          className="flex h-9 w-9 items-center justify-center rounded-lg transition-colors hover:bg-[--color-bg-tertiary]"
-          style={{ color: "var(--color-text-muted)" }}
-          title="Actions (⌘⇧X)"
-        >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-          </svg>
-        </button>
-        {/* Flashcards */}
+
+        {/* Flashcards — always visible if has due items */}
         <button
           onClick={toggleFlashcards}
-          className="relative flex h-9 w-9 items-center justify-center rounded-lg transition-colors hover:bg-[--color-bg-tertiary]"
+          className="relative flex h-8 items-center gap-1.5 rounded-lg px-2 text-xs font-medium transition-colors hover:bg-[--color-bg-tertiary]"
           style={{ color: "var(--color-text-muted)" }}
           title="Flashcards (⌘⇧F)"
         >
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <rect x="2" y="4" width="20" height="16" rx="2" />
-            <line x1="2" y1="12" x2="22" y2="12" />
-          </svg>
-          {flashcardStats && flashcardStats.dueCards > 0 && (
+          <IconFlashcard />
+          {flashcardsDue > 0 && (
             <span
-              className="absolute right-0.5 top-0.5 flex h-4 w-4 items-center justify-center rounded-full text-[10px] font-bold text-white"
+              className="flex h-4 min-w-[16px] items-center justify-center rounded-full px-1 text-[10px] font-bold text-white"
               style={{ backgroundColor: "var(--color-accent)" }}
             >
-              {flashcardStats.dueCards > 9 ? "9+" : flashcardStats.dueCards}
+              {flashcardsDue > 9 ? "9+" : flashcardsDue}
             </span>
           )}
         </button>
-        {/* Graph View */}
+
+        {/* Separator */}
+        <div
+          className="mx-0.5 h-5 w-px"
+          style={{ backgroundColor: "var(--color-border)" }}
+        />
+
+        {/* More tools toggle */}
         <button
-          onClick={() => {
-            window.dispatchEvent(
-              new KeyboardEvent("keydown", {
-                key: "g",
-                metaKey: true,
-                bubbles: true,
-              })
-            );
-          }}
-          className="flex h-9 w-9 items-center justify-center rounded-lg transition-colors hover:bg-[--color-bg-tertiary]"
+          onClick={() => setExpanded(!expanded)}
+          className="relative flex h-8 w-8 items-center justify-center rounded-lg transition-colors hover:bg-[--color-bg-tertiary]"
           style={{ color: "var(--color-text-muted)" }}
-          title="Graph View (⌘G)"
+          title="More tools"
         >
           <svg
             xmlns="http://www.w3.org/2000/svg"
-            width="16"
-            height="16"
+            width="14"
+            height="14"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
@@ -701,14 +742,114 @@ export function NotebookOverview({
             strokeLinecap="round"
             strokeLinejoin="round"
           >
-            <circle cx="12" cy="12" r="3" />
-            <circle cx="19" cy="5" r="2" />
-            <circle cx="5" cy="19" r="2" />
-            <line x1="14.5" y1="9.5" x2="17.5" y2="6.5" />
-            <line x1="9.5" y1="14.5" x2="6.5" y2="17.5" />
+            <rect x="3" y="3" width="7" height="7" rx="1" />
+            <rect x="14" y="3" width="7" height="7" rx="1" />
+            <rect x="3" y="14" width="7" height="7" rx="1" />
+            <rect x="14" y="14" width="7" height="7" rx="1" />
           </svg>
+          {!expanded && hasNotifications && (
+            <span
+              className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full"
+              style={{ backgroundColor: "var(--color-accent)" }}
+            />
+          )}
         </button>
       </div>
     </div>
+  );
+}
+
+function ToolDockItem({
+  icon,
+  label,
+  shortcut,
+  badge,
+  onClick,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  shortcut: string;
+  badge?: number;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition-colors hover:bg-[--color-bg-tertiary]"
+      style={{ color: "var(--color-text-secondary)" }}
+    >
+      <span style={{ color: "var(--color-text-muted)" }}>{icon}</span>
+      <span className="flex-1 font-medium">{label}</span>
+      {badge !== undefined && badge > 0 && (
+        <span
+          className="flex h-4 min-w-[16px] items-center justify-center rounded-full px-1 text-[10px] font-bold text-white"
+          style={{ backgroundColor: "var(--color-accent)" }}
+        >
+          {badge > 9 ? "9+" : badge}
+        </span>
+      )}
+      <span
+        className="text-[10px]"
+        style={{ color: "var(--color-text-muted)", opacity: 0.5 }}
+      >
+        {shortcut}
+      </span>
+    </button>
+  );
+}
+
+// --- Dock Icons ---
+
+function IconPlus() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 5v14M5 12h14" />
+    </svg>
+  );
+}
+
+function IconInbox() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="22 12 16 12 14 15 10 15 8 12 2 12" />
+      <path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
+    </svg>
+  );
+}
+
+function IconFlashcard() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <rect x="2" y="4" width="20" height="16" rx="2" />
+      <line x1="2" y1="12" x2="22" y2="12" />
+    </svg>
+  );
+}
+
+function IconSparkle() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z" />
+    </svg>
+  );
+}
+
+function IconBolt() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+    </svg>
+  );
+}
+
+function IconGraph() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="3" />
+      <circle cx="19" cy="5" r="2" />
+      <circle cx="5" cy="19" r="2" />
+      <line x1="14.5" y1="9.5" x2="17.5" y2="6.5" />
+      <line x1="9.5" y1="14.5" x2="6.5" y2="17.5" />
+    </svg>
   );
 }

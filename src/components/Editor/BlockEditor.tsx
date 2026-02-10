@@ -749,7 +749,7 @@ export const BlockEditor = memo(forwardRef<BlockEditorRef, BlockEditorProps>(fun
       <LinkPreview containerRef={containerRef} />
       {!readOnly && <AIAssistToolbar containerRef={containerRef as React.RefObject<HTMLElement | null>} />}
       {isVimModeEnabled && (
-        <div className="pointer-events-none fixed bottom-4 left-4 z-50">
+        <div className="pointer-events-none fixed bottom-16 left-4 z-50">
           <VimModeIndicator mode={vimMode} pendingKeys={pendingKeys} />
         </div>
       )}
