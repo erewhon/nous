@@ -16,6 +16,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 [[bin]]
 name = "nous-cli"
 path = "src/bin/cli/main.rs"
+required-features = ["cli"]
 
 [build-dependencies]
 tauri-build = { version = "2.5.3", features = [] }
@@ -113,6 +114,7 @@ crossterm = { version = "0.28", optional = true }
 
 [features]
 default = ["tui"]
+cli = []
 tui = ["dep:ratatui", "dep:crossterm"]
 
 [dev-dependencies]
