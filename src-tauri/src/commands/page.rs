@@ -240,6 +240,14 @@ pub fn update_page(
 
     storage.update_page(&page)?;
 
+    // Grab notebook path before releasing the storage lock (needed for git commit below)
+    let notebook_path = storage.get_notebook_path(nb_id);
+
+    // Release the storage lock BEFORE calling trigger_onsave_sync_if_needed.
+    // That function also acquires the storage lock, and std::sync::Mutex is
+    // non-reentrant — locking it twice on the same thread deadlocks permanently.
+    drop(storage);
+
     // Notify sync manager of the change
     state.sync_manager.queue_page_update(nb_id, pg_id);
 
@@ -254,7 +262,6 @@ pub fn update_page(
     // Only commit if explicitly requested (not on every auto-save)
     let should_commit = commit.unwrap_or(false);
     if should_commit {
-        let notebook_path = storage.get_notebook_path(nb_id);
         if git::is_git_repo(&notebook_path) {
             let commit_message = format!("Update page: {}", page.title);
             if let Err(e) = git::commit_all(&notebook_path, &commit_message) {

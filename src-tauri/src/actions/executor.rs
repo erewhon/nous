@@ -443,9 +443,24 @@ impl ActionExecutor {
 
         match target {
             NotebookTarget::Current => {
-                context.current_notebook_id.ok_or_else(|| {
-                    ExecutionError::InvalidConfig("No current notebook set".to_string())
-                })
+                if let Some(id) = context.current_notebook_id {
+                    Ok(id)
+                } else {
+                    // Fallback for scheduled/background actions that have no UI context:
+                    // use the first available notebook.
+                    let notebooks = storage.list_notebooks()?;
+                    if let Some(nb) = notebooks.first() {
+                        log::info!(
+                            "NotebookTarget::Current resolved via fallback to first notebook: {} ({})",
+                            nb.name, nb.id
+                        );
+                        Ok(nb.id)
+                    } else {
+                        Err(ExecutionError::InvalidConfig(
+                            "No current notebook set and no notebooks exist".to_string(),
+                        ))
+                    }
+                }
             }
             NotebookTarget::ById { id } => {
                 let uuid = Uuid::parse_str(id).map_err(|_| {
@@ -710,29 +725,14 @@ impl ActionExecutor {
                     }
                 }
 
-                if block.block_type == "checklist" {
-                    if let Some(items) = block.data.get("items") {
-                        if let Some(items_array) = items.as_array() {
-                            for (item_idx, item) in items_array.iter().enumerate() {
-                                if let Some(checked) = item.get("checked") {
-                                    if !checked.as_bool().unwrap_or(true) {
-                                        if let Some(text) = item.get("text") {
-                                            if let Some(text_str) = text.as_str() {
-                                                if !text_str.trim().is_empty() {
-                                                    items_with_source.push(CarriedItem {
-                                                        text: text_str.to_string(),
-                                                        source_page_id: page.id,
-                                                        block_index: block_idx,
-                                                        item_index: item_idx,
-                                                    });
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                let unchecked = extract_unchecked_items_from_block(block);
+                for (item_idx, text) in unchecked.into_iter().enumerate() {
+                    items_with_source.push(CarriedItem {
+                        text,
+                        source_page_id: page.id,
+                        block_index: block_idx,
+                        item_index: item_idx,
+                    });
                 }
             }
             if in_carried_forward_section {
@@ -2162,6 +2162,25 @@ impl ActionExecutor {
 
         // Apply filters
         let now = Local::now();
+
+        // Diagnostic: log daily note pages when daily_note_date filter is active
+        if selector.is_daily_note.is_some() || selector.daily_note_date.is_some() {
+            let daily_notes: Vec<_> = pages.iter()
+                .filter(|p| p.is_daily_note)
+                .map(|p| format!("'{}' (date={:?}, deleted={:?})", p.title, p.daily_note_date, p.deleted_at))
+                .collect();
+            log::info!(
+                "find_pages: {} total pages, {} daily notes: {:?}",
+                pages.len(),
+                daily_notes.len(),
+                daily_notes
+            );
+            if let Some(date_filter) = &selector.daily_note_date {
+                let today_str = now.format("%Y-%m-%d").to_string();
+                log::info!("find_pages: date_filter={:?}, today={}", date_filter, today_str);
+            }
+        }
+
         let filtered: Vec<_> = pages
             .into_iter()
             .filter(|p| {
@@ -2250,14 +2269,34 @@ impl ActionExecutor {
 
                 // Daily Note date filter
                 if let Some(date_filter) = &selector.daily_note_date {
-                    // Resolve special values
-                    let target_date = match date_filter.to_lowercase().as_str() {
-                        "today" => now.format("%Y-%m-%d").to_string(),
-                        "yesterday" => (now - chrono::Duration::days(1)).format("%Y-%m-%d").to_string(),
-                        _ => date_filter.clone(),
-                    };
-                    if p.daily_note_date.as_ref() != Some(&target_date) {
-                        return false;
+                    let lower = date_filter.to_lowercase();
+                    if lower.starts_with("recent:") {
+                        // "recent:N" — match any daily note from the last N days (excluding today)
+                        let n: i64 = lower.trim_start_matches("recent:").parse().unwrap_or(7);
+                        if let Some(page_date) = &p.daily_note_date {
+                            let today = now.format("%Y-%m-%d").to_string();
+                            if page_date == &today {
+                                return false; // Exclude today (that's the destination)
+                            }
+                            let cutoff = (now - chrono::Duration::days(n))
+                                .format("%Y-%m-%d")
+                                .to_string();
+                            if page_date.as_str() < cutoff.as_str() {
+                                return false;
+                            }
+                        } else {
+                            return false;
+                        }
+                    } else {
+                        // Resolve special values: "today", "yesterday", or literal date
+                        let target_date = match lower.as_str() {
+                            "today" => now.format("%Y-%m-%d").to_string(),
+                            "yesterday" => (now - chrono::Duration::days(1)).format("%Y-%m-%d").to_string(),
+                            _ => date_filter.clone(),
+                        };
+                        if p.daily_note_date.as_ref() != Some(&target_date) {
+                            return false;
+                        }
                     }
                 }
 
@@ -2290,6 +2329,64 @@ impl ActionExecutor {
             StepCondition::VariableNotEmpty { name } => {
                 let value = context.variables.get(name).cloned().unwrap_or_default();
                 Ok(!value.is_empty())
+            }
+        }
+    }
+}
+
+/// Extract unchecked items from a block, handling both:
+/// - Custom ChecklistTool: block_type "checklist", items: [{text, checked}]
+/// - @editorjs/list checklist mode: block_type "list", style: "checklist",
+///   items: [{content, meta: {checked}, items: [...]}]
+fn extract_unchecked_items_from_block(block: &EditorBlock) -> Vec<String> {
+    let mut results = Vec::new();
+
+    if block.block_type == "checklist" {
+        // Custom ChecklistTool format: { items: [{ text: "...", checked: bool }] }
+        if let Some(items_array) = block.data.get("items").and_then(|v| v.as_array()) {
+            for item in items_array {
+                let checked = item.get("checked").and_then(|c| c.as_bool()).unwrap_or(true);
+                if !checked {
+                    if let Some(text) = item.get("text").and_then(|t| t.as_str()) {
+                        if !text.trim().is_empty() {
+                            results.push(text.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    } else if block.block_type == "list" {
+        // @editorjs/list format: { style: "checklist", items: [{ content: "...", meta: { checked: bool }, items: [...] }] }
+        let style = block.data.get("style").and_then(|s| s.as_str()).unwrap_or("");
+        if style == "checklist" {
+            if let Some(items_array) = block.data.get("items").and_then(|v| v.as_array()) {
+                collect_unchecked_list_items(items_array, &mut results);
+            }
+        }
+    }
+
+    results
+}
+
+/// Recursively collect unchecked items from @editorjs/list nested item structure
+fn collect_unchecked_list_items(items: &[serde_json::Value], results: &mut Vec<String>) {
+    for item in items {
+        let checked = item
+            .get("meta")
+            .and_then(|m| m.get("checked"))
+            .and_then(|c| c.as_bool())
+            .unwrap_or(true);
+        if !checked {
+            if let Some(content) = item.get("content").and_then(|c| c.as_str()) {
+                if !content.trim().is_empty() {
+                    results.push(content.to_string());
+                }
+            }
+        }
+        // Recurse into nested items
+        if let Some(sub_items) = item.get("items").and_then(|v| v.as_array()) {
+            if !sub_items.is_empty() {
+                collect_unchecked_list_items(sub_items, results);
             }
         }
     }
@@ -2405,22 +2502,8 @@ fn extract_carried_forward_items(blocks: &[EditorBlock]) -> Vec<String> {
             }
         }
 
-        if in_section && block.block_type == "checklist" {
-            if let Some(items_val) = block.data.get("items").and_then(|v| v.as_array()) {
-                for item in items_val {
-                    let checked = item
-                        .get("checked")
-                        .and_then(|c| c.as_bool())
-                        .unwrap_or(true);
-                    if !checked {
-                        if let Some(text) = item.get("text").and_then(|t| t.as_str()) {
-                            if !text.trim().is_empty() {
-                                items.push(text.to_string());
-                            }
-                        }
-                    }
-                }
-            }
+        if in_section {
+            items.extend(extract_unchecked_items_from_block(block));
         }
     }
 

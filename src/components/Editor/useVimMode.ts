@@ -233,21 +233,25 @@ export function useVimMode({
   }, []);
 
   // Delete a specific checklist/list item (returns true if item was deleted)
-  const deleteChecklistItem = useCallback((
-    checklistContainer: HTMLElement,
+  // Uses Editor.js block API instead of direct DOM removal to avoid
+  // WebKitGTK rendering freezes from DOM mutations inside contenteditable.
+  const deleteChecklistItem = useCallback(async (
+    _checklistContainer: HTMLElement,
     items: HTMLElement[],
     itemIndex: number,
-    itemSelector: string,
+    _itemSelector: string,
     textSelector: string
-  ): boolean => {
+  ): Promise<boolean> => {
     if (items.length <= 1) {
       // Don't delete the last item - delete the whole block instead
       return false;
     }
 
-    const itemToDelete = items[itemIndex];
+    const editor = editorRef.current;
+    if (!editor) return false;
 
     // Save item text to register before deleting
+    const itemToDelete = items[itemIndex];
     const textEl = itemToDelete.querySelector(textSelector) || itemToDelete.querySelector("[contenteditable='true']");
     const itemText = textEl?.textContent || "";
     setVimState((s) => ({
@@ -255,28 +259,52 @@ export function useVimMode({
       register: itemText,
     }));
 
-    // Remove the item from DOM
-    itemToDelete.remove();
+    // Get the block index and save editor data
+    const blockIndex = getCurrentBlockIndex();
+    if (blockIndex < 0) return false;
 
-    // Dispatch custom event to trigger save.  ChecklistTool.save() reads from
-    // the DOM, so the deletion will be captured even though we bypassed the
-    // tool's internal data array.
-    checklistContainer.dispatchEvent(
-      new CustomEvent("checklist-structural-change", { bubbles: true })
-    );
+    const data = await editor.save();
+    const block = data.blocks[blockIndex];
+    if (!block) return false;
 
-    // Focus the previous item, or the first item if we deleted the first one
-    const newIndex = itemIndex > 0 ? itemIndex - 1 : 0;
-    const remainingItems = Array.from(
-      checklistContainer.querySelectorAll(`:scope > ${itemSelector}`)
-    ) as HTMLElement[];
-
-    if (remainingItems.length > 0) {
-      setTimeout(() => focusChecklistItem(remainingItems, newIndex, textSelector), 0);
+    // Remove the item from the block data based on block type
+    let updated = false;
+    if (block.type === "checklist" && Array.isArray(block.data.items)) {
+      // Custom ChecklistTool: { items: [{ text, checked }] }
+      if (itemIndex < block.data.items.length) {
+        block.data.items.splice(itemIndex, 1);
+        updated = true;
+      }
+    } else if (block.type === "list" && Array.isArray(block.data.items)) {
+      // @editorjs/list: { items: [{ content, meta, items }] }
+      if (itemIndex < block.data.items.length) {
+        block.data.items.splice(itemIndex, 1);
+        updated = true;
+      }
     }
 
+    if (!updated) return false;
+
+    // Update the block through Editor.js API (safe re-render, no direct DOM mutation)
+    editor.blocks.update(block.id!, block.data);
+
+    // Focus the appropriate item after re-render
+    const focusIndex = itemIndex > 0 ? itemIndex - 1 : 0;
+    setTimeout(() => {
+      const holder = containerRef.current;
+      if (!holder) return;
+      const blockEl = holder.querySelectorAll(".ce-block")[blockIndex] as HTMLElement;
+      if (!blockEl) return;
+      const newItems = Array.from(blockEl.querySelectorAll(
+        ".cdx-checklist__item, .cdx-list__item, .cdx-nested-list__item"
+      )) as HTMLElement[];
+      if (newItems.length > 0) {
+        focusChecklistItem(newItems, Math.min(focusIndex, newItems.length - 1), textSelector);
+      }
+    }, 50);
+
     return true;
-  }, [focusChecklistItem]);
+  }, [editorRef, containerRef, getCurrentBlockIndex, focusChecklistItem]);
 
   // Focus a block by index
   const focusBlock = useCallback(
@@ -643,18 +671,19 @@ export function useVimMode({
       if (fullKey === "dd") {
         const checklistInfoDD = getChecklistInfo();
         if (checklistInfoDD.isInChecklist && checklistInfoDD.checklistContainer) {
-          // Delete just the current checklist/list item
-          const deleted = deleteChecklistItem(
+          // Delete just the current checklist/list item (async — uses Editor.js API)
+          deleteChecklistItem(
             checklistInfoDD.checklistContainer,
             checklistInfoDD.items,
             checklistInfoDD.currentItemIndex,
             checklistInfoDD.itemSelector,
             checklistInfoDD.textSelector
-          );
-          if (!deleted) {
-            // Only one item left, delete the whole block
-            deleteBlock();
-          }
+          ).then((deleted) => {
+            if (!deleted) {
+              // Only one item left, delete the whole block
+              deleteBlock();
+            }
+          });
         } else {
           deleteBlock();
         }

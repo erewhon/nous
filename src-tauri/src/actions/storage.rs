@@ -7,7 +7,7 @@ use crate::actions::models::{Action, ActionUpdate};
 use crate::storage::StorageError;
 
 /// Version for built-in actions — bump this to force regeneration
-const BUILTIN_ACTIONS_VERSION: u32 = 4;
+const BUILTIN_ACTIONS_VERSION: u32 = 5;
 
 /// Storage for custom actions
 /// Actions are stored in ~/.local/share/nous/actions/

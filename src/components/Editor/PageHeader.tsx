@@ -174,20 +174,34 @@ export function PageHeader({
       return;
     }
 
+    let inFlight = false;
+    let cancelled = false;
+
     const checkChanges = async () => {
+      if (inFlight || cancelled) return;
+      inFlight = true;
       try {
         const changes = await checkExternalChanges(page.id);
-        setHasExternalChanges(changes !== null);
+        if (!cancelled) {
+          setHasExternalChanges(changes !== null);
+        }
       } catch {
         // Session may have ended
-        setExternalEditSession(null);
+        if (!cancelled) {
+          setExternalEditSession(null);
+        }
+      } finally {
+        inFlight = false;
       }
     };
 
-    // Check immediately and then every 2 seconds
+    // Check immediately and then every 3 seconds
     checkChanges();
-    const interval = setInterval(checkChanges, 2000);
-    return () => clearInterval(interval);
+    const interval = setInterval(checkChanges, 3000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }, [externalEditSession, page.id]);
 
   const handleExport = async () => {

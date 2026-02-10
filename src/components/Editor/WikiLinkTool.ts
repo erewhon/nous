@@ -165,12 +165,25 @@ export class WikiLinkTool implements InlineTool {
     existingPageTitles: string[]
   ): void {
     const links = container.querySelectorAll("wiki-link");
-    const titlesLower = existingPageTitles.map((t) => t.toLowerCase());
+    if (links.length === 0) return;
+
+    // Only modify links in the top-level editor, not inside nested editors
+    // (e.g., column blocks).  Modifying classList inside a nested editor
+    // triggers that editor's MutationObserver → onChange → cascade → freeze.
+    const editorRoot = container.querySelector(".codex-editor");
+
+    // Use a Set for O(1) lookup instead of Array.includes O(n)
+    const titlesSet = new Set(existingPageTitles.map((t) => t.toLowerCase()));
 
     links.forEach((link) => {
+      // Skip links inside nested editors (columns, embeds, etc.)
+      if (editorRoot && link.closest(".codex-editor") !== editorRoot) return;
+
       const title = link.getAttribute("data-page-title");
       if (!title) {
-        link.classList.add("broken");
+        if (!link.classList.contains("broken")) {
+          link.classList.add("broken");
+        }
         return;
       }
 
@@ -180,8 +193,13 @@ export class WikiLinkTool implements InlineTool {
         ? title.split("/").pop()?.trim() || title
         : title;
 
-      const exists = titlesLower.includes(titleToCheck.toLowerCase());
-      link.classList.toggle("broken", !exists);
+      const exists = titlesSet.has(titleToCheck.toLowerCase());
+      const isBroken = link.classList.contains("broken");
+      if (exists && isBroken) {
+        link.classList.remove("broken");
+      } else if (!exists && !isBroken) {
+        link.classList.add("broken");
+      }
     });
   }
 }

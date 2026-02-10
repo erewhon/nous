@@ -4,47 +4,53 @@ import type EditorJS from "@editorjs/editorjs";
 interface UseHeaderCollapseOptions {
   containerRef: RefObject<HTMLElement | null>;
   editorRef: RefObject<EditorJS | null>;
+  holderId: string;
   enabled?: boolean;
 }
+
+// Chevron SVG encoded for use in CSS mask-image (theme-aware via currentColor)
+const CHEVRON_SVG = encodeURIComponent(
+  `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24">` +
+    `<path d="M7 10l5 5 5-5z" fill="black"/>` +
+    `</svg>`
+);
 
 /**
  * Adds collapsible section toggles to Editor.js header blocks (H1-H4).
  * Clicking a toggle hides all blocks until the next header of equal or higher level.
  * Collapse state is view-only (not persisted), resets on page switch.
+ *
+ * IMPORTANT: This hook makes ZERO DOM mutations inside the editor container.
+ * All visual changes are applied via a <style> tag in <head>, and clicks are
+ * handled via event delegation on the container. This avoids triggering
+ * Editor.js's internal MutationObserver and prevents WebKitGTK rendering freezes.
  */
 export function useHeaderCollapse({
   containerRef,
-  editorRef,
+  editorRef: _editorRef,
+  holderId,
   enabled = true,
 }: UseHeaderCollapseOptions) {
-  const collapsedHeaders = useRef<Set<number>>(new Set());
+  const collapsedIds = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (!enabled || !containerRef.current) return;
 
     const container = containerRef.current;
-    let observer: MutationObserver | null = null;
 
-    // Get the header level (1-4) from a .ce-block element, or 0 if not a header
+    // Create <style> element in <head> — OUTSIDE the editor container,
+    // so updates never trigger Editor.js's MutationObserver.
+    const styleEl = document.createElement("style");
+    styleEl.id = `header-collapse-${holderId}`;
+    document.head.appendChild(styleEl);
+
     const getHeaderLevel = (block: HTMLElement): number => {
       for (let level = 1; level <= 4; level++) {
-        if (block.querySelector(`h${level}.ce-header`)) {
-          return level;
-        }
+        if (block.querySelector(`h${level}.ce-header`)) return level;
       }
       return 0;
     };
 
-    // Get the actual header element (h1-h4) from a block
-    const getHeaderElement = (block: HTMLElement): HTMLElement | null => {
-      for (let level = 1; level <= 4; level++) {
-        const el = block.querySelector(`h${level}.ce-header`);
-        if (el) return el as HTMLElement;
-      }
-      return null;
-    };
-
-    // Get all top-level editor blocks (not inside columns)
     const getBlocks = (): HTMLElement[] => {
       return Array.from(
         container.querySelectorAll(
@@ -53,143 +59,160 @@ export function useHeaderCollapse({
       ) as HTMLElement[];
     };
 
-    // Create toggle chevron element
-    const createToggle = (isCollapsed: boolean): HTMLElement => {
-      const toggle = document.createElement("span");
-      toggle.className = "ce-header-collapse-toggle";
-      if (isCollapsed) {
-        toggle.classList.add("ce-header-collapse-toggle--collapsed");
-      }
-      toggle.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>`;
-      toggle.title = isCollapsed ? "Expand section" : "Collapse section";
-      return toggle;
-    };
+    // Regenerate CSS based on current block layout and collapse state.
+    // This reads the DOM (block IDs, header levels) but never writes to it.
+    const updateCSS = () => {
+      const blocks = getBlocks();
+      const lines: string[] = [];
 
-    // Apply collapse/expand for a given header block index
-    const applyCollapseState = (blocks: HTMLElement[]) => {
-      // First, remove all section-collapsed classes
-      for (const block of blocks) {
-        block.classList.remove("ce-block--section-collapsed");
-      }
+      // Base styles: toggle chevron via ::before on all headers.
+      // Uses mask-image so the chevron inherits the header's text color.
+      lines.push(
+        `#${holderId} .ce-block .ce-header {` +
+          `position: relative;` +
+          `padding-left: 24px;` +
+          `}`,
+        `#${holderId} .ce-block .ce-header::before {` +
+          `content: "";` +
+          `position: absolute;` +
+          `left: 2px;` +
+          `top: 50%;` +
+          `transform: translateY(-50%);` +
+          `width: 16px;` +
+          `height: 16px;` +
+          `-webkit-mask-image: url("data:image/svg+xml,${CHEVRON_SVG}");` +
+          `mask-image: url("data:image/svg+xml,${CHEVRON_SVG}");` +
+          `-webkit-mask-size: contain;` +
+          `mask-size: contain;` +
+          `-webkit-mask-repeat: no-repeat;` +
+          `mask-repeat: no-repeat;` +
+          `background-color: currentColor;` +
+          `cursor: pointer;` +
+          `opacity: 0;` +
+          `transition: transform 0.15s ease, opacity 0.15s ease;` +
+          `}`,
+        `#${holderId} .ce-block:hover .ce-header::before {` +
+          `opacity: 0.5;` +
+          `}`
+      );
 
-      // For each collapsed header, hide subsequent blocks
-      for (const headerIdx of collapsedHeaders.current) {
-        if (headerIdx >= blocks.length) continue;
-        const headerBlock = blocks[headerIdx];
-        const headerLevel = getHeaderLevel(headerBlock);
+      // Per-collapsed-header: rotated chevron + hide subsequent blocks
+      for (const collapsedId of collapsedIds.current) {
+        const blockIdx = blocks.findIndex(
+          (b) => b.getAttribute("data-block-id") === collapsedId
+        );
+        if (blockIdx === -1) continue;
+        const headerLevel = getHeaderLevel(blocks[blockIdx]);
         if (headerLevel === 0) continue;
 
-        // Walk subsequent siblings and hide until next header of equal/higher level
-        for (let i = headerIdx + 1; i < blocks.length; i++) {
+        // Rotated chevron, always visible
+        lines.push(
+          `#${holderId} .ce-block[data-block-id="${collapsedId}"] .ce-header::before {` +
+            `transform: translateY(-50%) rotate(-90deg);` +
+            `opacity: 0.7;` +
+            `}`
+        );
+
+        // Hide subsequent blocks until next header of equal/higher level
+        for (let i = blockIdx + 1; i < blocks.length; i++) {
           const siblingLevel = getHeaderLevel(blocks[i]);
-          if (siblingLevel > 0 && siblingLevel <= headerLevel) {
-            break; // Stop at equal or higher level header
+          if (siblingLevel > 0 && siblingLevel <= headerLevel) break;
+          const siblingId = blocks[i].getAttribute("data-block-id");
+          if (siblingId) {
+            lines.push(
+              `#${holderId} .ce-block[data-block-id="${siblingId}"] { display: none; }`
+            );
           }
-          blocks[i].classList.add("ce-block--section-collapsed");
         }
       }
+
+      styleEl.textContent = lines.join("\n");
     };
 
-    // Inject toggle buttons on all header blocks
-    const processHeaders = () => {
-      const blocks = getBlocks();
+    // Toggle click handler via event delegation — no elements inserted,
+    // no event listeners on editor internals.
+    const handleClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      const header = target.closest(".ce-header") as HTMLElement | null;
+      if (!header) return;
 
-      // Remove existing toggles
-      container
-        .querySelectorAll(".ce-header-collapse-toggle")
-        .forEach((el) => el.remove());
+      // Only toggle when clicking the left 28px (the ::before toggle area)
+      const headerRect = header.getBoundingClientRect();
+      const clickX = e.clientX - headerRect.left;
+      if (clickX > 28) return;
 
-      for (let i = 0; i < blocks.length; i++) {
-        const block = blocks[i];
-        const level = getHeaderLevel(block);
-        if (level === 0) continue;
+      const block = header.closest(".ce-block") as HTMLElement | null;
+      if (!block) return;
+      const blockId = block.getAttribute("data-block-id");
+      if (!blockId) return;
 
-        const isCollapsed = collapsedHeaders.current.has(i);
-        const toggle = createToggle(isCollapsed);
+      e.preventDefault();
+      e.stopPropagation();
 
-        // Insert toggle inline as the first child of the header element
-        const headerEl = getHeaderElement(block);
-        if (headerEl) {
-          headerEl.insertBefore(toggle, headerEl.firstChild);
-        }
-
-        // Handle click
-        toggle.addEventListener("click", (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-
-          if (collapsedHeaders.current.has(i)) {
-            collapsedHeaders.current.delete(i);
-          } else {
-            collapsedHeaders.current.add(i);
-          }
-
-          // Re-process to update toggles and visibility
-          processHeaders();
-        });
+      if (collapsedIds.current.has(blockId)) {
+        collapsedIds.current.delete(blockId);
+      } else {
+        collapsedIds.current.add(blockId);
       }
 
-      applyCollapseState(blocks);
+      updateCSS();
     };
 
-    // Initial processing (with delay for Editor.js to render)
-    const timeoutId = setTimeout(processHeaders, 200);
+    // Use capture phase so we intercept before Editor.js handles the click
+    container.addEventListener("click", handleClick, true);
 
-    // Watch for DOM changes
+    // Initial CSS generation — wait for assignBlockIdAttributes (runs at ~100ms
+    // after onReady, plus the 500ms rendering guard in useEditor).
+    const timeoutId = setTimeout(updateCSS, 700);
+
+    // Watch for block additions/removals to regenerate CSS.
+    // This observer only READS block IDs — it never modifies the DOM.
     let debounceId: ReturnType<typeof setTimeout> | null = null;
-    observer = new MutationObserver((mutations) => {
-      let shouldProcess = false;
+    const observer = new MutationObserver((mutations) => {
+      let shouldUpdate = false;
       for (const mutation of mutations) {
-        if (mutation.type === "childList") {
-          for (const node of mutation.addedNodes) {
-            if (
-              node instanceof HTMLElement &&
-              (node.classList.contains("ce-block") ||
-                node.querySelector?.(".ce-block"))
-            ) {
-              shouldProcess = true;
-              break;
-            }
+        if (mutation.type !== "childList") continue;
+        for (const node of mutation.addedNodes) {
+          if (
+            node instanceof HTMLElement &&
+            (node.classList.contains("ce-block") ||
+              node.querySelector?.(".ce-block"))
+          ) {
+            shouldUpdate = true;
+            break;
           }
+        }
+        if (!shouldUpdate) {
           for (const node of mutation.removedNodes) {
             if (
               node instanceof HTMLElement &&
               (node.classList.contains("ce-block") ||
                 node.querySelector?.(".ce-block"))
             ) {
-              shouldProcess = true;
+              shouldUpdate = true;
               break;
             }
           }
         }
-        if (shouldProcess) break;
+        if (shouldUpdate) break;
       }
-      if (shouldProcess) {
-        // On structural changes, clear collapse state and re-inject
-        collapsedHeaders.current.clear();
+      if (shouldUpdate) {
+        // Block structure changed — clear collapse state and regenerate
+        collapsedIds.current.clear();
         if (debounceId) clearTimeout(debounceId);
-        debounceId = setTimeout(processHeaders, 50);
+        debounceId = setTimeout(updateCSS, 200);
       }
     });
 
-    observer.observe(container, {
-      childList: true,
-      subtree: true,
-    });
+    observer.observe(container, { childList: true, subtree: true });
 
     return () => {
       clearTimeout(timeoutId);
       if (debounceId) clearTimeout(debounceId);
-      observer?.disconnect();
-      collapsedHeaders.current.clear();
-
-      // Clean up toggles and collapsed classes
-      container
-        .querySelectorAll(".ce-header-collapse-toggle")
-        .forEach((el) => el.remove());
-      container
-        .querySelectorAll(".ce-block--section-collapsed")
-        .forEach((el) => el.classList.remove("ce-block--section-collapsed"));
+      observer.disconnect();
+      container.removeEventListener("click", handleClick, true);
+      collapsedIds.current.clear();
+      styleEl.remove();
     };
-  }, [containerRef, editorRef, enabled]);
+  }, [containerRef, holderId, enabled]);
 }

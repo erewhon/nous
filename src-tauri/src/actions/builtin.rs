@@ -292,14 +292,14 @@ fn create_weekly_review_action() -> Action {
     }
 }
 
-/// Carry Forward action - copies incomplete items from yesterday to today
+/// Carry Forward action - copies incomplete items from recent days to today
 fn create_carry_forward_action() -> Action {
     let id = Uuid::parse_str("00000000-0000-0000-0001-000000000006").unwrap();
 
     Action {
         id,
         name: "Carry Forward".to_string(),
-        description: "Copy incomplete checklist items from yesterday's page to today's page"
+        description: "Copy incomplete checklist items from recent pages to today's page"
             .to_string(),
         icon: Some("arrow-right".to_string()),
         category: ActionCategory::DailyRoutines,
@@ -318,7 +318,7 @@ fn create_carry_forward_action() -> Action {
         steps: vec![ActionStep::CarryForwardItems {
             source_selector: PageSelector {
                 notebook: Some(NotebookTarget::Current),
-                created_within_days: Some(1),
+                created_within_days: Some(7),
                 ..Default::default()
             },
             destination: NotebookTarget::Current,
@@ -411,14 +411,14 @@ fn create_weekly_outcomes_carry_forward_action() -> Action {
     }
 }
 
-/// Carry Forward Daily Notes action - copies incomplete items from yesterday's daily note to today's
+/// Carry Forward Daily Notes action - copies incomplete items from recent daily notes to today's
 fn create_carry_forward_daily_notes_action() -> Action {
     let id = Uuid::parse_str("00000000-0000-0000-0001-000000000008").unwrap();
 
     Action {
         id,
         name: "Carry Forward Daily Notes".to_string(),
-        description: "Copy incomplete checklist items from yesterday's daily note to today's daily note"
+        description: "Copy incomplete checklist items from recent daily notes to today's daily note"
             .to_string(),
         icon: Some("calendar-arrow-right".to_string()),
         category: ActionCategory::DailyRoutines,
@@ -437,7 +437,7 @@ fn create_carry_forward_daily_notes_action() -> Action {
             source_selector: PageSelector {
                 notebook: Some(NotebookTarget::Current),
                 is_daily_note: Some(true),
-                daily_note_date: Some("yesterday".to_string()),
+                daily_note_date: Some("recent:7".to_string()),
                 ..Default::default()
             },
             destination: NotebookTarget::Current,

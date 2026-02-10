@@ -5,6 +5,7 @@ use tauri::Manager;
 
 mod actions;
 mod commands;
+mod freeze_watchdog;
 pub mod encryption;
 mod evernote;
 mod external_editor;
@@ -12,10 +13,10 @@ mod external_sources;
 mod flashcards;
 mod git;
 mod goals;
-mod inbox;
+pub mod inbox;
 mod joplin;
-mod library;
-mod markdown;
+pub mod library;
+pub mod markdown;
 mod notion;
 mod obsidian;
 mod onenote;
@@ -24,8 +25,8 @@ mod publish;
 mod python_bridge;
 mod rag;
 mod scrivener;
-mod search;
-mod storage;
+pub mod search;
+pub mod storage;
 pub mod sync;
 mod video_server;
 
@@ -237,11 +238,14 @@ pub fn run() {
         encryption_manager,
     };
 
+    let watchdog_state = Arc::new(freeze_watchdog::WatchdogState::new());
+
     tauri::Builder::default()
         .manage(state)
+        .manage(Arc::clone(&watchdog_state))
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
-        .setup(|app| {
+        .setup(move |app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()
@@ -272,6 +276,11 @@ pub fn run() {
                 log::info!("Successfully registered /tmp/nous-videos with asset protocol");
             }
 
+            // Devtools: uncomment to enable for debugging
+            // if let Some(window) = app.get_webview_window("main") {
+            //     window.open_devtools();
+            // }
+
             // Start the action scheduler
             let state: tauri::State<AppState> = app.handle().state();
             if let Ok(mut scheduler) = state.action_scheduler.lock() {
@@ -282,6 +291,17 @@ pub fn run() {
             // Give the sync manager the app handle so scheduler-triggered syncs
             // can emit events (e.g., sync-pages-updated) to the frontend.
             state.sync_manager.set_app_handle(app.handle().clone());
+
+            // Show the main window (starts hidden to avoid white flash)
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+            }
+
+            // Start the freeze watchdog (Rust-side ping/pong to detect frontend freezes)
+            freeze_watchdog::start_watchdog(
+                app.handle().clone(),
+                Arc::clone(&watchdog_state),
+            );
 
             // Start the video streaming server
             let video_server_handle = state.video_server.clone();
@@ -676,6 +696,8 @@ pub fn run() {
             commands::get_or_create_today_daily_note,
             commands::mark_as_daily_note,
             commands::unmark_daily_note,
+            // Freeze watchdog
+            freeze_watchdog::freeze_pong,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

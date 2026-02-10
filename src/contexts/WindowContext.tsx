@@ -5,7 +5,7 @@
  * Each window can display a different library based on URL parameter.
  */
 
-import { createContext, useContext, ReactNode } from "react";
+import { createContext, useContext, useEffect, ReactNode } from "react";
 import { useWindowContext, type WindowContext } from "../hooks/useWindowContext";
 import { LoadingSpinner } from "../components/Loading";
 
@@ -23,6 +23,17 @@ interface WindowContextProviderProps {
  */
 export function WindowContextProvider({ children }: WindowContextProviderProps) {
   const context = useWindowContext();
+
+  // Remove the HTML splash screen once React has taken over rendering
+  useEffect(() => {
+    if (!context.isLoading) {
+      const splash = document.getElementById("splash");
+      if (splash) {
+        splash.style.opacity = "0";
+        setTimeout(() => splash.remove(), 300);
+      }
+    }
+  }, [context.isLoading]);
 
   // Show loading state
   if (context.isLoading) {

@@ -34,6 +34,9 @@ export class ColumnsTool implements BlockTool {
   private columnEditors: (EditorJS | null)[] = [];
   private columnElements: HTMLDivElement[] = [];
   private isInitialized = false;
+  // Re-entry guard: prevents onChange → save() → mutation → onChange → save()
+  // infinite cascade within each nested editor.
+  private _columnSaving: boolean[] = [];
 
   static get toolbox() {
     return {
@@ -99,6 +102,7 @@ export class ColumnsTool implements BlockTool {
     this.wrapper.innerHTML = "";
     this.columnElements = [];
     this.columnEditors = [];
+    this._columnSaving = [];
 
     // Column selector (only in edit mode)
     if (!this.readOnly) {
@@ -209,19 +213,22 @@ export class ColumnsTool implements BlockTool {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           tools: tools as any,
           onChange: async () => {
-            // Update data when nested editor changes
+            // Re-entry guard: save() may trigger DOM mutations that fire
+            // another onChange via Editor.js's internal MutationObserver.
+            // Without this guard, the cycle save→mutation→onChange→save
+            // creates an infinite microtask cascade that freezes the WebView.
+            if (this._columnSaving[i]) return;
             if (this.columnEditors[i]) {
+              this._columnSaving[i] = true;
               try {
                 const savedData = await this.columnEditors[i]!.save();
                 this.data.columnData[i] = { blocks: savedData.blocks };
               } catch (e) {
                 console.error("Failed to save column data:", e);
+              } finally {
+                this._columnSaving[i] = false;
               }
             }
-          },
-          onReady: () => {
-            // Mark nested editor as ready
-            holder.classList.add("columns-editor-ready");
           },
         });
 

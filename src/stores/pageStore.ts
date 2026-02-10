@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { Page, EditorData } from "../types/page";
 import * as api from "../utils/api";
+import { crumb, resetCrumbs } from "../utils/breadcrumbs";
 import { useRAGStore } from "./ragStore";
 
 // Debounced auto-commit for git-versioned notebooks.
@@ -620,54 +621,73 @@ export const usePageStore = create<PageStore>()(
       },
 
       selectPage: (id) => {
+        resetCrumbs();
+        crumb("selectPage:start");
+        const t0 = performance.now();
         const state = get();
         const activePaneId = state.activePaneId || state.panes[0]?.id;
+        const page = id ? state.pages.find((p) => p.id === id) : undefined;
 
-        if (activePaneId) {
-          // Update the active pane's pageId
-          set((state) => ({
-            selectedPageId: id,
-            panes: state.panes.map((p) =>
+        // Batch the selectedPageId, pane update, and recentPages into a
+        // single set() call to avoid triggering multiple re-render cascades.
+        set((state) => {
+          const base: Record<string, unknown> = { selectedPageId: id };
+
+          if (activePaneId) {
+            base.panes = state.panes.map((p) =>
               p.id === activePaneId ? { ...p, pageId: id } : p
-            ),
-          }));
-        } else {
-          set({ selectedPageId: id });
-        }
+            );
+          }
 
-        // When selecting a page, fetch fresh data from backend and track in recent pages
-        if (id) {
-          const page = state.pages.find((p) => p.id === id);
+          // Track in recent pages (in the same set call)
           if (page) {
-            // Track in recent pages
             const recentEntry: RecentPageEntry = {
               pageId: page.id,
               notebookId: page.notebookId,
               title: page.title,
               accessedAt: new Date().toISOString(),
             };
-            set((state) => {
-              // Remove existing entry for this page if present
-              const filtered = state.recentPages.filter((r) => r.pageId !== id);
-              // Add to front, limit to 20
-              const newRecent = [recentEntry, ...filtered].slice(0, 20);
-              return { recentPages: newRecent };
-            });
-
-            api
-              .getPage(page.notebookId, id)
-              .then((freshPage) => {
-                const current = get().pages.find((p) => p.id === id);
-                if (!hasContentChanged(current, freshPage)) return;
-                set((state) => ({
-                  pages: state.pages.map((p) => (p.id === id ? freshPage : p)),
-                  pageDataVersion: state.pageDataVersion + 1,
-                }));
-              })
-              .catch(() => {
-                // Silently ignore errors
-              });
+            const filtered = state.recentPages.filter((r) => r.pageId !== id);
+            base.recentPages = [recentEntry, ...filtered].slice(0, 20);
           }
+
+          return base;
+        });
+
+        crumb("selectPage:set-done");
+        const t1 = performance.now();
+        if (t1 - t0 > 50) {
+          console.warn(`[Perf] selectPage sync set() took ${Math.round(t1 - t0)}ms`);
+        }
+
+        // Fetch fresh data from backend (single async set if content changed)
+        if (id && page) {
+          crumb("selectPage:fetch-start");
+          const fetchStart = performance.now();
+          api
+            .getPage(page.notebookId, id)
+            .then((freshPage) => {
+              crumb("selectPage:fetch-done");
+              const fetchTime = performance.now() - fetchStart;
+              const current = get().pages.find((p) => p.id === id);
+              if (!hasContentChanged(current, freshPage)) {
+                if (fetchTime > 200) {
+                  console.warn(`[Perf] selectPage api.getPage took ${Math.round(fetchTime)}ms (no content change)`);
+                }
+                return;
+              }
+              set((state) => ({
+                pages: state.pages.map((p) => (p.id === id ? freshPage : p)),
+                pageDataVersion: state.pageDataVersion + 1,
+              }));
+              const totalTime = performance.now() - fetchStart;
+              if (totalTime > 200) {
+                console.warn(`[Perf] selectPage api.getPage + set() took ${Math.round(totalTime)}ms`);
+              }
+            })
+            .catch(() => {
+              // Silently ignore errors
+            });
         }
       },
 
