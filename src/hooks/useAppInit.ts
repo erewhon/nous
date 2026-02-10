@@ -18,7 +18,7 @@ export function useAppInit() {
   const pages = usePageStore((s) => s.pages);
   const pagesLoading = usePageStore((s) => s.isLoading);
   const refreshPages = usePageStore((s) => s.refreshPages);
-  const { sections, selectedSectionId, selectSection } = useSectionStore();
+  const { sections, selectedSectionId, selectSection, loadSections } = useSectionStore();
   const { loadGoals, checkAutoGoals, loadSummary } = useGoalsStore();
   const { library } = useWindowLibrary();
   const goalsIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -129,6 +129,30 @@ export function useAppInit() {
       if (unlisten) unlisten();
     };
   }, [loadGoals, loadSummary, checkAutoGoals]);
+
+  // Listen for sync-notebook-updated events from the backend.
+  // When sync pulls notebook metadata or section changes, reload them.
+  useEffect(() => {
+    let unlisten: UnlistenFn | null = null;
+
+    const setup = async () => {
+      unlisten = await listen<{ notebookId: string }>(
+        "sync-notebook-updated",
+        (event) => {
+          const { notebookId } = event.payload;
+          console.log(`[sync] Notebook ${notebookId} updated by sync, refreshing`);
+          loadNotebooks();
+          loadSections(notebookId);
+        }
+      );
+    };
+
+    setup();
+
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, [loadNotebooks, loadSections]);
 
   // Load goals and check auto-detected goals on app init and periodically
   useEffect(() => {

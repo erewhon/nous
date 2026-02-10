@@ -1167,6 +1167,7 @@ impl SyncManager {
         }
 
         // 6d. Pull and apply notebook metadata (pinned, position, sort order)
+        let mut notebook_meta_changed = false;
         match self.fetch_notebook_meta(&client, &config.remote_path).await {
             Ok(remote_meta) => {
                 let mut storage_guard = storage.lock().unwrap();
@@ -1187,6 +1188,8 @@ impl SyncManager {
                         notebook.updated_at = remote_meta.updated_at;
                         if let Err(e) = storage_guard.update_notebook(&notebook) {
                             log::warn!("Sync: failed to apply notebook metadata: {}", e);
+                        } else {
+                            notebook_meta_changed = true;
                         }
                     }
                 }
@@ -1245,13 +1248,10 @@ impl SyncManager {
             }
         }
 
-        // Push structural metadata IN PARALLEL (only if we pushed pages)
-        if pages_pushed > 0 {
-            if let Err(e) = self.push_structure(&client, &config.remote_path, storage, notebook_id).await {
-                log::warn!("Sync: failed to push structural metadata: {}", e);
-            }
-        } else {
-            log::info!("Sync: skipping structure push (no pages pushed)");
+        // Push structural metadata (sections, folders, pages-meta) always —
+        // structure can change independently of page content (e.g. new section)
+        if let Err(e) = self.push_structure(&client, &config.remote_path, storage, notebook_id).await {
+            log::warn!("Sync: failed to push structural metadata: {}", e);
         }
 
         // 8. Update changelog with synced pages
@@ -1379,6 +1379,15 @@ impl SyncManager {
                     notebook_id: notebook_id.to_string(),
                     page_ids: updated_page_ids,
                 });
+            }
+
+            // Notify frontend to reload notebook metadata (pinned, position,
+            // sort order, sections, folders) when any structure changed
+            if notebook_meta_changed {
+                log::info!("Sync: notifying frontend of notebook metadata changes");
+                let _ = app.emit("sync-notebook-updated", serde_json::json!({
+                    "notebookId": notebook_id.to_string(),
+                }));
             }
 
             let _ = app.emit("sync-progress", SyncProgress {
