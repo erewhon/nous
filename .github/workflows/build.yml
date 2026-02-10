@@ -6,12 +6,50 @@ on:
   release:
     types: [created]
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'CalVer version (e.g. 2026.2.1). Leave empty for auto-increment.'
+        required: false
+        type: string
 
 permissions:
   contents: write
 
 jobs:
+  determine-version:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.calc.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Calculate version
+        id: calc
+        run: |
+          CURRENT=$(grep '"version"' package.json | head -1 | sed 's/.*"\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)".*/\1/')
+          echo "Current version: $CURRENT"
+
+          if [[ -n "${{ inputs.version }}" ]]; then
+            VERSION="${{ inputs.version }}"
+          else
+            IFS='.' read -r CUR_YEAR CUR_MONTH CUR_MICRO <<< "$CURRENT"
+            NOW_YEAR=$(date +%Y)
+            NOW_MONTH=$(date +%-m)
+            if [[ "$CUR_YEAR" == "$NOW_YEAR" && "$CUR_MONTH" == "$NOW_MONTH" ]]; then
+              NEW_MICRO=$((CUR_MICRO + 1))
+              VERSION="${NOW_YEAR}.${NOW_MONTH}.${NEW_MICRO}"
+            else
+              VERSION="${NOW_YEAR}.${NOW_MONTH}.0"
+            fi
+          fi
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Release version: $VERSION"
+
   build:
+    needs: [determine-version]
+    if: always() && (needs.determine-version.result == 'success' || needs.determine-version.result == 'skipped')
     strategy:
       fail-fast: false
       matrix:
@@ -26,6 +64,22 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Update version files
+        if: needs.determine-version.outputs.version
+        run: |
+          VERSION="${{ needs.determine-version.outputs.version }}"
+          echo "Updating version to $VERSION"
+
+          node -e "
+          const fs = require('fs');
+          const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          pkg.version = '$VERSION';
+          fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+          "
+
+          sed -i "0,/^version = \".*\"/s//version = \"$VERSION\"/" src-tauri/Cargo.toml
+          sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" src-tauri/tauri.conf.json
 
       - name: Install system deps (Linux)
         if: runner.os == 'Linux'
@@ -73,8 +127,8 @@ jobs:
             src-tauri/target/release/bundle/dmg/*.dmg
 
   release:
-    needs: build
-    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'release'
+    needs: [determine-version, build]
+    if: always() && needs.build.result == 'success' && (needs.determine-version.outputs.version || startsWith(github.ref, 'refs/tags/v') || github.event_name == 'release')
     runs-on: ubuntu-latest
 
     steps:
@@ -97,10 +151,19 @@ jobs:
           sha256sum * > checksums.txt
           cat checksums.txt
 
+      - name: Determine tag name
+        id: tag
+        run: |
+          if [[ -n "${{ needs.determine-version.outputs.version }}" ]]; then
+            echo "tag=v${{ needs.determine-version.outputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${{ github.event.release.tag_name || github.ref_name }}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event.release.tag_name || github.ref_name }}
+          tag_name: ${{ steps.tag.outputs.tag }}
           generate_release_notes: true
           files: release-assets/*
         env:
