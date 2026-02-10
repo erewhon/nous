@@ -202,28 +202,29 @@ jobs:
 
           echo "Updating Homebrew cask: version=$VERSION sha256=$SHA256"
 
-          cat > /tmp/nous.rb <<'CASK'
-cask "nous" do
-  version "VERSION_PLACEHOLDER"
-  sha256 "SHA256_PLACEHOLDER"
-
-  url "URL_PLACEHOLDER"
-  name "Nous"
-  desc "Personal notebook and data organization tool"
-  homepage "https://github.com/erewhon/nous"
-
-  app "Nous.app"
-
-  zap trash: [
-    "~/.local/share/nous",
-    "~/.local/share/com.nous.app",
-  ]
-end
-CASK
-
-          sed -i "s|VERSION_PLACEHOLDER|$VERSION|" /tmp/nous.rb
-          sed -i "s|SHA256_PLACEHOLDER|$SHA256|" /tmp/nous.rb
-          sed -i "s|URL_PLACEHOLDER|$URL|" /tmp/nous.rb
+          node -e "
+          const fs = require('fs');
+          const cask = [
+            'cask \"nous\" do',
+            '  version \"$VERSION\"',
+            '  sha256 \"$SHA256\"',
+            '',
+            '  url \"$URL\"',
+            '  name \"Nous\"',
+            '  desc \"Personal notebook and data organization tool\"',
+            '  homepage \"https://github.com/erewhon/nous\"',
+            '',
+            '  app \"Nous.app\"',
+            '',
+            '  zap trash: [',
+            '    \"~/.local/share/nous\",',
+            '    \"~/.local/share/com.nous.app\",',
+            '  ]',
+            'end',
+            '',
+          ].join('\n');
+          fs.writeFileSync('/tmp/nous.rb', cask);
+          "
 
           CONTENT=$(base64 -w0 /tmp/nous.rb)
           EXISTING_SHA=$(gh api repos/erewhon/homebrew-tap/contents/Casks/nous.rb --jq '.sha' 2>/dev/null || true)
