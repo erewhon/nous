@@ -47,21 +47,6 @@ declare module "@editorjs/list" {
   }
 }
 
-declare module "@editorjs/checklist" {
-  import { BlockTool, BlockToolConstructorOptions } from "@editorjs/editorjs";
-
-  interface ChecklistData {
-    items: Array<{ text: string; checked: boolean }>;
-  }
-
-  export default class Checklist implements BlockTool {
-    constructor(config: BlockToolConstructorOptions<ChecklistData, object>);
-    render(): HTMLElement;
-    save(block: HTMLElement): ChecklistData;
-    static get toolbox(): { title: string; icon: string };
-  }
-}
-
 declare module "@editorjs/code" {
   import { BlockTool, BlockToolConstructorOptions } from "@editorjs/editorjs";
 

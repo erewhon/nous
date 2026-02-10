@@ -27,6 +27,25 @@ import { EmbedTool } from "./EmbedTool";
 import { ColumnsTool } from "./ColumnsTool";
 import { createImageUploader } from "./imageUploader";
 
+// Wrapper that hides the "Checklist" style option from the List tool's settings.
+// We use a dedicated ChecklistTool instead, which has instant persistence (no
+// WebKitGTK freeze from editor.save()). The List tool's built-in checklist mode
+// relies on the standard auto-save debounce, so checked state may not persist
+// promptly for sync.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const ListBase = List as any;
+class ListWithoutChecklist extends ListBase {
+  renderSettings() {
+    const settings = super.renderSettings();
+    if (Array.isArray(settings)) {
+      return settings.filter(
+        (item: { label?: string }) => item.label !== "Checklist"
+      );
+    }
+    return settings;
+  }
+}
+
 /** Assign data-block-id attributes to each .ce-block holder for scroll targeting.
  *  Only sets the attribute when it is missing or stale, avoiding unnecessary
  *  DOM mutations that would re-trigger Editor.js's internal MutationObserver. */
@@ -117,7 +136,7 @@ export function useEditor({
         },
       },
       list: {
-        class: List as unknown as ToolConstructable,
+        class: ListWithoutChecklist as unknown as ToolConstructable,
         inlineToolbar: true,
         config: {
           defaultStyle: "unordered",

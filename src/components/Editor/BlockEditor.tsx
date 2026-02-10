@@ -17,6 +17,7 @@ import { useLinkStore } from "../../stores/linkStore";
 import { useThemeStore } from "../../stores/themeStore";
 import { useToastStore } from "../../stores/toastStore";
 import { crumb } from "../../utils/breadcrumbs";
+import type { EditorData } from "../../types/page";
 
 /**
  * Extract data-page-title values from Editor.js block HTML content.
@@ -210,6 +211,13 @@ export const BlockEditor = memo(forwardRef<BlockEditorRef, BlockEditorProps>(fun
   // Safety-net periodic save timer
   const safetyNetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Snapshot of the latest content written to disk (or loaded initially).
+  // handleDataChanged reads from this instead of the Zustand store, which
+  // is intentionally NOT updated during editing (setPageContentLocal is skipped
+  // to avoid WebKitGTK freezes). Without this ref, consecutive checklist toggles
+  // on different blocks would read stale store data and overwrite each other.
+  const contentSnapshotRef = useRef<OutputData | null>(initialData ?? null);
+
   // Performs the actual save: editor.save() → undo capture → backend persist.
   // Extracted so it can be called from the safety net, structural changes,
   // and Ctrl+S without duplication.
@@ -220,6 +228,7 @@ export const BlockEditor = memo(forwardRef<BlockEditorRef, BlockEditorProps>(fun
       const freshData = await saveRef.current?.();
       crumb(`blockEditor:editor.save:done:blocks=${freshData?.blocks?.length ?? 0}`);
       if (freshData) {
+        contentSnapshotRef.current = freshData;
         onChange?.(freshData);
         crumb("blockEditor:onSave:start");
         onSaveRef.current?.(freshData);
@@ -251,6 +260,7 @@ export const BlockEditor = memo(forwardRef<BlockEditorRef, BlockEditorProps>(fun
       // If data is provided (structural change that already has the data),
       // forward to parent immediately for undo history capture and save.
       if (data) {
+        contentSnapshotRef.current = data;
         onChange?.(data);
         onSaveRef.current?.(data);
         requestAnimationFrame(() => {
@@ -374,6 +384,7 @@ export const BlockEditor = memo(forwardRef<BlockEditorRef, BlockEditorProps>(fun
     }
     pendingDataRef.current = null;
     hasUnsavedChangesRef.current = false;
+    contentSnapshotRef.current = initialData ?? null;
   }, [initialData]);
 
   // Cleanup: clear safety-net timer on unmount.
@@ -645,22 +656,28 @@ export const BlockEditor = memo(forwardRef<BlockEditorRef, BlockEditorProps>(fun
       // force a layout reflow while CSS `order` changes are pending,
       // freezing WebKitGTK's rendering pipeline.
       setTimeout(() => {
-        const state = usePageStore.getState();
-        const page = state.pages.find((p) => p.id === pageId);
-        if (!page?.content?.blocks) return;
+        // Read from contentSnapshotRef (latest content written to disk),
+        // NOT from the Zustand store. The store is intentionally NOT updated
+        // during editing to avoid WebKitGTK freezes. Without this, consecutive
+        // checklist toggles on different blocks would read stale store data and
+        // overwrite each other's changes.
+        const snapshot = contentSnapshotRef.current;
+        if (!snapshot?.blocks) return;
 
-        const updatedBlocks = page.content.blocks.map((block) =>
+        const updatedBlocks = snapshot.blocks.map((block) =>
           block.id === blockId
             ? { ...block, data: { ...block.data, items } }
             : block
         );
-        const updatedContent = { ...page.content, blocks: updatedBlocks };
+        const updatedContent = { ...snapshot, blocks: updatedBlocks };
+        contentSnapshotRef.current = updatedContent;
 
         // Persist to backend only (fire-and-forget).
         // Do NOT call setPageContentLocal — it triggers a React re-render
         // cascade that causes editor.render() → onChange → editor.save() → freeze.
         // The store cache is updated on page switch via onUnmountSave.
-        state.updatePageContent(notebookId, pageId, updatedContent, false);
+        const state = usePageStore.getState();
+        state.updatePageContent(notebookId, pageId, updatedContent as EditorData, false);
       }, 0);
     };
 

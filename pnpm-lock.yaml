@@ -41,9 +41,6 @@ importers:
       '@dnd-kit/utilities':
         specifier: ^3.2.2
         version: 3.2.2(react@19.2.3)
-      '@editorjs/checklist':
-        specifier: ^1.6.0
-        version: 1.6.0
       '@editorjs/code':
         specifier: ^2.9.4
         version: 2.9.4
@@ -351,9 +348,6 @@ packages:
 
   '@editorjs/caret@1.0.3':
     resolution: {integrity: sha512-VmgwQJZgL/LQjk049JunzRV1YCa0vDi+BNEpbDmr5cp3lGZllq9QQFO1eI71ZPzvFVn3vvhb+eOif4sAEyGgbw==}
-
-  '@editorjs/checklist@1.6.0':
-    resolution: {integrity: sha512-hRNP36DInr73mSK3noHBQeoQb7DA12ANfqTXufEkTgQzx+k4mRJ0HdeGukTIR4JbwjHJ9ecUBnnQqIEGnxCFEg==}
 
   '@editorjs/code@2.9.4':
     resolution: {integrity: sha512-c0zyWodNqjL/0WI67sZvACIOFU9IAHG0UeeIpjss8pZGGNBum+UWkh7nKULK0SYvaOrdPdlWWqjuFU1TFA5jUA==}
@@ -2589,10 +2583,6 @@ snapshots:
   '@editorjs/caret@1.0.3':
     dependencies:
       '@editorjs/dom': 1.0.1
-
-  '@editorjs/checklist@1.6.0':
-    dependencies:
-      '@codexteam/icons': 0.3.3
 
   '@editorjs/code@2.9.4':
     dependencies:
