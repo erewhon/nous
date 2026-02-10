@@ -993,6 +993,65 @@ impl FileStorage {
         self.save_sections(notebook_id, &merged)
     }
 
+    /// Repair orphaned sections: find pages with section_ids that don't match
+    /// any existing section, and recreate those sections.
+    /// Returns the number of sections repaired.
+    pub fn repair_orphaned_sections(&self, notebook_id: Uuid) -> Result<usize> {
+        let sections = self.list_sections(notebook_id)?;
+        let section_ids: std::collections::HashSet<Uuid> =
+            sections.iter().map(|s| s.id).collect();
+
+        let pages = self.list_all_pages(notebook_id)?;
+        let mut orphaned_ids: std::collections::HashMap<Uuid, Vec<String>> =
+            std::collections::HashMap::new();
+
+        for page in &pages {
+            if let Some(sid) = page.section_id {
+                if !section_ids.contains(&sid) {
+                    orphaned_ids
+                        .entry(sid)
+                        .or_default()
+                        .push(page.title.clone());
+                }
+            }
+        }
+
+        if orphaned_ids.is_empty() {
+            return Ok(0);
+        }
+
+        let mut all_sections = sections;
+        let max_pos = all_sections.iter().map(|s| s.position).max().unwrap_or(-1);
+
+        for (i, (section_id, page_titles)) in orphaned_ids.iter().enumerate() {
+            log::info!(
+                "Repairing orphaned section {} with {} page(s): {:?}",
+                section_id,
+                page_titles.len(),
+                page_titles.iter().take(3).collect::<Vec<_>>()
+            );
+
+            let now = chrono::Utc::now();
+            let section = Section {
+                id: *section_id,
+                notebook_id,
+                name: format!("Recovered Section ({})", page_titles.first().map(|t| t.as_str()).unwrap_or("unknown")),
+                description: Some(format!("Auto-recovered: contained {} page(s)", page_titles.len())),
+                color: None,
+                system_prompt: None,
+                system_prompt_mode: crate::storage::models::SystemPromptMode::default(),
+                ai_model: None,
+                position: max_pos + 1 + i as i32,
+                created_at: now,
+                updated_at: now,
+            };
+            all_sections.push(section);
+        }
+
+        self.save_sections(notebook_id, &all_sections)?;
+        Ok(orphaned_ids.len())
+    }
+
     /// Create a new section in a notebook
     pub fn create_section(
         &self,

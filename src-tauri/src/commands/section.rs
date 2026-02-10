@@ -241,6 +241,34 @@ pub fn set_cover_page(
     storage.set_cover_page(nb_id, pg_id).map_err(Into::into)
 }
 
+/// Repair orphaned sections: recreate sections for pages whose section_id
+/// doesn't match any existing section. Returns the number of sections repaired.
+#[tauri::command]
+pub fn repair_orphaned_sections(
+    state: State<AppState>,
+    notebook_id: String,
+) -> CommandResult<usize> {
+    let storage = state.storage.lock().unwrap();
+    let nb_id = Uuid::parse_str(&notebook_id).map_err(|e| CommandError {
+        message: format!("Invalid notebook ID: {}", e),
+    })?;
+
+    let repaired = storage.repair_orphaned_sections(nb_id)?;
+
+    if repaired > 0 {
+        // Auto-commit if git is enabled for this notebook
+        let notebook_path = storage.get_notebook_path(nb_id);
+        if git::is_git_repo(&notebook_path) {
+            let commit_message = format!("Repair {} orphaned section(s)", repaired);
+            if let Err(e) = git::commit_all(&notebook_path, &commit_message) {
+                log::warn!("Failed to auto-commit section repair: {}", e);
+            }
+        }
+    }
+
+    Ok(repaired)
+}
+
 /// Move a section with all its folders and pages to another notebook
 #[tauri::command]
 pub fn move_section_to_notebook(

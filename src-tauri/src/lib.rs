@@ -456,6 +456,7 @@ pub fn run() {
             commands::delete_section,
             commands::reorder_sections,
             commands::move_section_to_notebook,
+            commands::repair_orphaned_sections,
             // Cover page commands
             commands::get_cover_page,
             commands::create_cover_page,

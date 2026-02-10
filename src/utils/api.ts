@@ -1604,6 +1604,12 @@ export async function moveSectionToNotebook(
   });
 }
 
+export async function repairOrphanedSections(
+  notebookId: string
+): Promise<number> {
+  return invoke<number>("repair_orphaned_sections", { notebookId });
+}
+
 // ========== Cover Page Operations ==========
 
 export async function getCoverPage(notebookId: string): Promise<Page | null> {

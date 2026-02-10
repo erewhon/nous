@@ -1593,6 +1593,12 @@ impl SyncManager {
                         log::info!("Sync: pulled {} sections from remote, applying", sections.len());
                         let storage_guard = storage.lock().unwrap();
                         storage_guard.save_sections_for_sync(notebook_id, &sections)?;
+                        // Repair any orphaned sections (pages referencing non-existent sections)
+                        match storage_guard.repair_orphaned_sections(notebook_id) {
+                            Ok(0) => {},
+                            Ok(n) => log::info!("Sync: repaired {} orphaned section(s)", n),
+                            Err(e) => log::warn!("Sync: failed to repair orphaned sections: {}", e),
+                        }
                     }
                     Err(e) => log::warn!("Sync: failed to parse remote sections.json: {}", e),
                 }
