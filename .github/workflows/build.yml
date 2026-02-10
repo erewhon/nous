@@ -78,8 +78,17 @@ jobs:
           fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
           "
 
-          sed -i "0,/^version = \".*\"/s//version = \"$VERSION\"/" src-tauri/Cargo.toml
-          sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" src-tauri/tauri.conf.json
+          node -e "
+          const fs = require('fs');
+          let cargo = fs.readFileSync('src-tauri/Cargo.toml', 'utf8');
+          cargo = cargo.replace(/^version = \".*\"/m, 'version = \"$VERSION\"');
+          fs.writeFileSync('src-tauri/Cargo.toml', cargo);
+
+          let tauri = fs.readFileSync('src-tauri/tauri.conf.json', 'utf8');
+          const tj = JSON.parse(tauri);
+          tj.version = '$VERSION';
+          fs.writeFileSync('src-tauri/tauri.conf.json', JSON.stringify(tj, null, 2) + '\n');
+          "
 
       - name: Install system deps (Linux)
         if: runner.os == 'Linux'
