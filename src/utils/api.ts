@@ -2270,6 +2270,66 @@ export async function toggleGoalToday(goalId: string): Promise<GoalProgress> {
   return invoke<GoalProgress>("toggle_goal_today", { goalId });
 }
 
+// ===== Contacts API =====
+
+import type {
+  Contact,
+  ContactActivity,
+  HarvestResult,
+  HarvestState,
+  UpdateContactRequest,
+} from "../types/contact";
+
+/** List all contacts */
+export async function listContacts(): Promise<Contact[]> {
+  return invoke<Contact[]>("list_contacts");
+}
+
+/** Get a contact by ID */
+export async function getContact(id: string): Promise<Contact> {
+  return invoke<Contact>("get_contact", { id });
+}
+
+/** Update an existing contact */
+export async function updateContact(
+  id: string,
+  updates: UpdateContactRequest
+): Promise<Contact> {
+  return invoke<Contact>("update_contact", { id, updates });
+}
+
+/** Delete a contact */
+export async function deleteContact(id: string): Promise<void> {
+  return invoke("delete_contact", { id });
+}
+
+/** List activities for a specific contact */
+export async function listContactActivities(
+  contactId: string
+): Promise<ContactActivity[]> {
+  return invoke<ContactActivity[]>("list_contact_activities", { contactId });
+}
+
+/** List all activities */
+export async function listAllActivities(): Promise<ContactActivity[]> {
+  return invoke<ContactActivity[]>("list_all_activities");
+}
+
+/** Run the contact harvester (macOS only) */
+export async function harvestContacts(): Promise<HarvestResult> {
+  return invoke<HarvestResult>("harvest_contacts");
+}
+
+/** Check if the harvester is available */
+export async function isHarvesterAvailable(): Promise<boolean> {
+  return invoke<boolean>("is_harvester_available");
+}
+
+/** Get the current harvest state */
+export async function getHarvestState(): Promise<HarvestState> {
+  return invoke<HarvestState>("get_harvest_state");
+}
+
 // ===== Audio Generation API =====
 
 import type {

@@ -5,7 +5,7 @@ use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use super::config::SyncMode;
-use super::manager::{SharedGoalsStorage, SharedInboxStorage, SharedLibraryStorage, SharedStorage, SyncManager};
+use super::manager::{SharedContactsStorage, SharedGoalsStorage, SharedInboxStorage, SharedLibraryStorage, SharedStorage, SyncManager};
 
 /// Messages to control the sync scheduler
 #[derive(Debug)]
@@ -76,11 +76,12 @@ pub fn start_sync_scheduler(
     library_storage: SharedLibraryStorage,
     goals_storage: SharedGoalsStorage,
     inbox_storage: SharedInboxStorage,
+    contacts_storage: SharedContactsStorage,
 ) -> SyncScheduler {
     let (tx, rx) = mpsc::channel(32);
 
     tauri::async_runtime::spawn(async move {
-        sync_scheduler_loop(sync_manager, storage, library_storage, goals_storage, inbox_storage, rx).await;
+        sync_scheduler_loop(sync_manager, storage, library_storage, goals_storage, inbox_storage, contacts_storage, rx).await;
     });
 
     // Trigger initial scan
@@ -231,6 +232,7 @@ async fn sync_scheduler_loop(
     library_storage: SharedLibraryStorage,
     goals_storage: SharedGoalsStorage,
     inbox_storage: SharedInboxStorage,
+    contacts_storage: SharedContactsStorage,
     mut receiver: mpsc::Receiver<SyncSchedulerMessage>,
 ) {
     use std::collections::HashMap;
@@ -360,7 +362,7 @@ async fn sync_scheduler_loop(
 
                         log::info!("Sync scheduler: running periodic sync for library {}", id);
                         match sync_manager
-                            .sync_library(id, &library_storage, &storage, &goals_storage, &inbox_storage, None)
+                            .sync_library(id, &library_storage, &storage, &goals_storage, &inbox_storage, &contacts_storage, None)
                             .await
                         {
                             Ok(result) => {
@@ -417,7 +419,7 @@ async fn sync_scheduler_loop(
                     Some(SyncSchedulerMessage::RemoteChanged { library_id }) => {
                         log::info!("Sync scheduler: remote change detected for library {}, triggering sync", library_id);
                         match sync_manager
-                            .sync_library(library_id, &library_storage, &storage, &goals_storage, &inbox_storage, None)
+                            .sync_library(library_id, &library_storage, &storage, &goals_storage, &inbox_storage, &contacts_storage, None)
                             .await
                         {
                             Ok(result) => {

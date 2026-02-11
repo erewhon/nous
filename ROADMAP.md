@@ -295,7 +295,7 @@ Already implemented with Tantivy, may need refinement:
 - [x] Implement OnSave sync mode (trigger sync when a page is saved)
 - [ ] Sync integration tests
   - [ ] Nextcloud WebDAV sync validation using testcontainers
-- [ ] Goals synchronization across instances
+- [x] Goals synchronization across instances
 
 ### 19. Page Stats & Writing Assistance
 - [x] Page statistics (word count, character count, reading time) - toggleable in page header

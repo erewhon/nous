@@ -5,6 +5,7 @@ use tauri::Manager;
 
 mod actions;
 mod commands;
+mod contacts;
 mod freeze_watchdog;
 pub mod encryption;
 mod evernote;
@@ -32,6 +33,7 @@ mod video_server;
 
 use actions::{ActionExecutor, ActionScheduler, ActionStorage};
 use commands::BackupScheduler;
+use contacts::ContactsStorage;
 use encryption::EncryptionManager;
 use external_editor::ExternalEditorManager;
 use external_sources::ExternalSourcesStorage;
@@ -58,6 +60,7 @@ pub struct AppState {
     pub inbox_storage: Arc<Mutex<InboxStorage>>,
     pub flashcard_storage: Mutex<FlashcardStorage>,
     pub goals_storage: Arc<Mutex<GoalsStorage>>,
+    pub contacts_storage: Arc<Mutex<ContactsStorage>>,
     pub sync_manager: Arc<SyncManager>,
     pub external_editor: Mutex<ExternalEditorManager>,
     pub external_sources_storage: Arc<Mutex<ExternalSourcesStorage>>,
@@ -161,6 +164,11 @@ pub fn run() {
         .expect("Failed to initialize goals storage");
     let goals_storage_arc = Arc::new(Mutex::new(goals_storage));
 
+    // Initialize contacts storage
+    let contacts_storage = ContactsStorage::new(data_dir.clone())
+        .expect("Failed to initialize contacts storage");
+    let contacts_storage_arc = Arc::new(Mutex::new(contacts_storage));
+
     // Initialize sync manager
     let sync_manager = SyncManager::new(data_dir.clone());
     let sync_manager_arc = Arc::new(sync_manager);
@@ -208,6 +216,7 @@ pub fn run() {
         Arc::clone(&library_storage_arc),
         Arc::clone(&goals_storage_arc),
         Arc::clone(&inbox_storage_arc),
+        Arc::clone(&contacts_storage_arc),
     );
     let sync_scheduler_arc = Arc::new(tokio::sync::Mutex::new(Some(sync_scheduler)));
 
@@ -229,6 +238,7 @@ pub fn run() {
         inbox_storage: inbox_storage_arc,
         flashcard_storage: Mutex::new(flashcard_storage),
         goals_storage: goals_storage_arc,
+        contacts_storage: contacts_storage_arc,
         sync_manager: sync_manager_arc,
         external_editor: Mutex::new(external_editor),
         external_sources_storage: external_sources_storage_arc,
@@ -504,6 +514,16 @@ pub fn run() {
             commands::check_auto_goals,
             commands::get_goals_summary,
             commands::toggle_goal_today,
+            // Contacts commands
+            commands::list_contacts,
+            commands::get_contact,
+            commands::update_contact,
+            commands::delete_contact,
+            commands::list_contact_activities,
+            commands::list_all_activities,
+            commands::harvest_contacts,
+            commands::is_harvester_available,
+            commands::get_harvest_state,
             // Git commands
             commands::git_is_enabled,
             commands::git_init,

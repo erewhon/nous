@@ -4,6 +4,7 @@ import { useNotebookStore } from "../stores/notebookStore";
 import { usePageStore } from "../stores/pageStore";
 import { useSectionStore } from "../stores/sectionStore";
 import { useGoalsStore } from "../stores/goalsStore";
+import { useContactStore } from "../stores/contactStore";
 import { useWindowLibrary } from "../contexts/WindowContext";
 
 // Check goals every 15 minutes
@@ -20,6 +21,7 @@ export function useAppInit() {
   const refreshPages = usePageStore((s) => s.refreshPages);
   const { sections, selectedSectionId, selectSection, loadSections } = useSectionStore();
   const { loadGoals, checkAutoGoals, loadSummary } = useGoalsStore();
+  const { loadContacts: loadContactsFromStore } = useContactStore();
   const { library } = useWindowLibrary();
   const goalsIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const restoredForNotebookRef = useRef<string | null>(null);
@@ -129,6 +131,25 @@ export function useAppInit() {
       if (unlisten) unlisten();
     };
   }, [loadGoals, loadSummary, checkAutoGoals]);
+
+  // Listen for sync-contacts-updated events from the backend.
+  // When sync pulls contact or activity changes from remote, refresh displays.
+  useEffect(() => {
+    let unlisten: UnlistenFn | null = null;
+
+    const setup = async () => {
+      unlisten = await listen("sync-contacts-updated", () => {
+        console.log("[sync] Contacts updated by sync, refreshing");
+        loadContactsFromStore();
+      });
+    };
+
+    setup();
+
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, [loadContactsFromStore]);
 
   // Listen for sync-notebook-updated events from the backend.
   // When sync pulls notebook metadata or section changes, reload them.

@@ -9,6 +9,7 @@ import { useGoalsStore } from "../../stores/goalsStore";
 import { useThemeStore } from "../../stores/themeStore";
 import { useDailyNotesStore } from "../../stores/dailyNotesStore";
 import { useTasksStore } from "../../stores/tasksStore";
+import { useContactStore } from "../../stores/contactStore";
 import { NotebookList } from "../NotebookList/NotebookList";
 import { LibrarySwitcher } from "../Library";
 
@@ -27,6 +28,7 @@ export function Sidebar({ width = 256 }: SidebarProps) {
   const { summary: goalsSummary, togglePanel: toggleGoals } = useGoalsStore();
   const { togglePanel: toggleDailyNotes } = useDailyNotesStore();
   const { summary: tasksSummary, togglePanel: toggleTasks } = useTasksStore();
+  const { togglePanel: togglePeople } = useContactStore();
   const autoHidePanels = useThemeStore((state) => state.autoHidePanels);
   const setAutoHidePanels = useThemeStore((state) => state.setAutoHidePanels);
   const showRecentPages = useThemeStore((state) => state.showRecentPages);
@@ -374,6 +376,7 @@ export function Sidebar({ width = 256 }: SidebarProps) {
         openActionLibrary={openActionLibrary}
         toggleFlashcards={toggleFlashcards}
         toggleGoals={toggleGoals}
+        togglePeople={togglePeople}
         toggleTasks={toggleTasks}
         toggleDailyNotes={toggleDailyNotes}
         selectPage={selectPage}
@@ -533,6 +536,7 @@ interface SidebarToolDockProps {
   openActionLibrary: () => void;
   toggleFlashcards: () => void;
   toggleGoals: () => void;
+  togglePeople: () => void;
   toggleTasks: () => void;
   toggleDailyNotes: () => void;
   selectPage: (id: string) => void;
@@ -552,6 +556,7 @@ function SidebarToolDock({
   openActionLibrary,
   toggleFlashcards,
   toggleGoals,
+  togglePeople,
   toggleTasks,
   toggleDailyNotes,
   selectPage,
@@ -659,6 +664,11 @@ function SidebarToolDock({
               badgeEmoji={goalStreak > 0 ? "\uD83D\uDD25" : undefined}
               onClick={() => { toggleGoals(); setMoreOpen(false); }}
               icon={<SvgIcon d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zM12 6a6 6 0 1 0 0 12 6 6 0 0 0 0-12zM12 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4z" />}
+            />
+            <SidebarMenuItem
+              label="People"
+              onClick={() => { togglePeople(); setMoreOpen(false); }}
+              icon={<SvgIcon d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 7a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />}
             />
             <SidebarMenuItem
               label="Daily Notes"

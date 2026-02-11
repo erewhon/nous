@@ -11,6 +11,7 @@ use futures_util::StreamExt;
 use tauri::Emitter;
 use tokio::sync::Semaphore;
 
+use crate::contacts::{Contact, ContactActivity, ContactsStorage};
 use crate::goals::{Goal, GoalProgress, GoalsStorage};
 use crate::inbox::{InboxItem, InboxStorage};
 use crate::library::LibraryStorage;
@@ -40,6 +41,9 @@ pub type SharedGoalsStorage = Arc<Mutex<GoalsStorage>>;
 
 /// Type alias for shared inbox storage
 pub type SharedInboxStorage = Arc<Mutex<InboxStorage>>;
+
+/// Type alias for shared contacts storage
+pub type SharedContactsStorage = Arc<Mutex<ContactsStorage>>;
 
 #[derive(Error, Debug)]
 pub enum SyncError {
@@ -156,6 +160,14 @@ pub struct SyncGoalsUpdated {
 #[serde(rename_all = "camelCase")]
 pub struct SyncInboxUpdated {
     pub inbox_changed: bool,
+}
+
+/// Event payload emitted when contacts sync completes with changes.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncContactsUpdated {
+    pub contacts_changed: bool,
+    pub activities_changed: bool,
 }
 
 /// Sentinel file content written after successful push
@@ -3236,6 +3248,166 @@ impl SyncManager {
         Ok(merged_changed)
     }
 
+    // ===== Contacts sync methods =====
+
+    /// Sync contacts with remote.
+    /// Returns true if local contacts were changed.
+    async fn sync_contacts(
+        &self,
+        client: &WebDAVClient,
+        library_base_path: &str,
+        contacts_storage: &SharedContactsStorage,
+    ) -> Result<bool, SyncError> {
+        let remote_path = format!("{}/contacts/contacts.json", library_base_path);
+
+        let local_contacts = {
+            let cs = contacts_storage.lock().unwrap();
+            cs.list_contacts().unwrap_or_default()
+        };
+
+        let remote_contacts: Vec<Contact> = match client.get(&remote_path).await {
+            Ok(data) => serde_json::from_slice(&data).unwrap_or_default(),
+            Err(WebDAVError::NotFound(_)) => Vec::new(),
+            Err(e) => return Err(e.into()),
+        };
+
+        let mut local_map: HashMap<Uuid, Contact> =
+            local_contacts.iter().map(|c| (c.id, c.clone())).collect();
+        let remote_map: HashMap<Uuid, Contact> =
+            remote_contacts.iter().map(|c| (c.id, c.clone())).collect();
+
+        let mut merged_changed = false;
+
+        for (id, remote_contact) in &remote_map {
+            match local_map.get(id) {
+                None => {
+                    local_map.insert(*id, remote_contact.clone());
+                    merged_changed = true;
+                }
+                Some(local_contact) => {
+                    if remote_contact.updated_at > local_contact.updated_at {
+                        local_map.insert(*id, remote_contact.clone());
+                        merged_changed = true;
+                    }
+                }
+            }
+        }
+
+        let mut merged: Vec<Contact> = local_map.into_values().collect();
+        merged.sort_by_key(|c| c.created_at);
+
+        let remote_needs_update = merged.len() != remote_contacts.len()
+            || merged.iter().any(|c| !remote_map.contains_key(&c.id))
+            || merged.iter().any(|c| {
+                remote_map
+                    .get(&c.id)
+                    .map_or(false, |r| c.updated_at > r.updated_at)
+            });
+
+        if merged_changed {
+            let cs = contacts_storage.lock().unwrap();
+            cs.replace_contacts(&merged).map_err(SyncError::Storage)?;
+        }
+
+        if remote_needs_update || merged_changed {
+            let data = serde_json::to_vec_pretty(&merged)?;
+            let _ = client
+                .mkdir_p(&format!("{}/contacts", library_base_path))
+                .await;
+            client.put(&remote_path, &data, None).await?;
+        }
+
+        Ok(merged_changed)
+    }
+
+    /// Sync contact activities with remote.
+    /// Returns true if local activities were changed.
+    async fn sync_contact_activities(
+        &self,
+        client: &WebDAVClient,
+        library_base_path: &str,
+        contacts_storage: &SharedContactsStorage,
+    ) -> Result<bool, SyncError> {
+        let remote_path = format!("{}/contacts/activity.json", library_base_path);
+
+        let local_activities = {
+            let cs = contacts_storage.lock().unwrap();
+            cs.list_activities().unwrap_or_default()
+        };
+
+        let remote_activities: Vec<ContactActivity> = match client.get(&remote_path).await {
+            Ok(data) => serde_json::from_slice(&data).unwrap_or_default(),
+            Err(WebDAVError::NotFound(_)) => Vec::new(),
+            Err(e) => return Err(e.into()),
+        };
+
+        // Dedup key: (contact_id, activity_type, timestamp)
+        let local_set: HashSet<(Uuid, String, String)> = local_activities
+            .iter()
+            .map(|a| {
+                (
+                    a.contact_id,
+                    serde_json::to_string(&a.activity_type).unwrap_or_default(),
+                    a.timestamp.to_rfc3339(),
+                )
+            })
+            .collect();
+
+        let mut merged = local_activities.clone();
+        let mut merged_changed = false;
+
+        for remote_act in &remote_activities {
+            let key = (
+                remote_act.contact_id,
+                serde_json::to_string(&remote_act.activity_type).unwrap_or_default(),
+                remote_act.timestamp.to_rfc3339(),
+            );
+            if !local_set.contains(&key) {
+                merged.push(remote_act.clone());
+                merged_changed = true;
+            }
+        }
+
+        // Sort by timestamp descending
+        merged.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+
+        let remote_set: HashSet<(Uuid, String, String)> = remote_activities
+            .iter()
+            .map(|a| {
+                (
+                    a.contact_id,
+                    serde_json::to_string(&a.activity_type).unwrap_or_default(),
+                    a.timestamp.to_rfc3339(),
+                )
+            })
+            .collect();
+
+        let remote_needs_update = merged.len() != remote_activities.len()
+            || merged.iter().any(|a| {
+                let key = (
+                    a.contact_id,
+                    serde_json::to_string(&a.activity_type).unwrap_or_default(),
+                    a.timestamp.to_rfc3339(),
+                );
+                !remote_set.contains(&key)
+            });
+
+        if merged_changed {
+            let cs = contacts_storage.lock().unwrap();
+            cs.replace_activities(&merged).map_err(SyncError::Storage)?;
+        }
+
+        if remote_needs_update || merged_changed {
+            let data = serde_json::to_vec_pretty(&merged)?;
+            let _ = client
+                .mkdir_p(&format!("{}/contacts", library_base_path))
+                .await;
+            client.put(&remote_path, &data, None).await?;
+        }
+
+        Ok(merged_changed)
+    }
+
     /// Sync all notebooks in a library (notebooks synced concurrently)
     pub async fn sync_library(
         &self,
@@ -3244,6 +3416,7 @@ impl SyncManager {
         storage: &SharedStorage,
         goals_storage: &SharedGoalsStorage,
         inbox_storage: &SharedInboxStorage,
+        contacts_storage: &SharedContactsStorage,
         app_handle: Option<&tauri::AppHandle>,
     ) -> Result<SyncResult, SyncError> {
         let start = std::time::Instant::now();
@@ -3552,6 +3725,73 @@ impl SyncManager {
                 }
                 Err(e) => {
                     log::warn!("Library sync: failed to get credentials for inbox: {}", e);
+                }
+            }
+        }
+
+        // Sync contacts after inbox
+        if let Some(ref lib_config) = library_config {
+            match self.get_library_credentials(library_id) {
+                Ok(creds) => {
+                    match WebDAVClient::new(lib_config.server_url.clone(), creds) {
+                        Ok(contacts_client) => {
+                            let base_path = &lib_config.remote_base_path;
+
+                            let contacts_changed = match self
+                                .sync_contacts(&contacts_client, base_path, contacts_storage)
+                                .await
+                            {
+                                Ok(changed) => {
+                                    log::info!("Library sync: contacts sync complete, changed={}", changed);
+                                    changed
+                                }
+                                Err(e) => {
+                                    log::warn!("Library sync: contacts sync failed: {}", e);
+                                    false
+                                }
+                            };
+
+                            let activities_changed = match self
+                                .sync_contact_activities(&contacts_client, base_path, contacts_storage)
+                                .await
+                            {
+                                Ok(changed) => {
+                                    log::info!("Library sync: contact activities sync complete, changed={}", changed);
+                                    changed
+                                }
+                                Err(e) => {
+                                    log::warn!("Library sync: contact activities sync failed: {}", e);
+                                    false
+                                }
+                            };
+
+                            if contacts_changed || activities_changed {
+                                let event_payload = SyncContactsUpdated {
+                                    contacts_changed,
+                                    activities_changed,
+                                };
+
+                                let emitted = if let Some(app) = app_handle {
+                                    app.emit("sync-contacts-updated", event_payload.clone()).is_ok()
+                                } else {
+                                    false
+                                };
+
+                                if !emitted {
+                                    let handle_guard = self.app_handle.lock().unwrap();
+                                    if let Some(ref handle) = *handle_guard {
+                                        let _ = handle.emit("sync-contacts-updated", event_payload);
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            log::warn!("Library sync: failed to create WebDAV client for contacts: {}", e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    log::warn!("Library sync: failed to get credentials for contacts: {}", e);
                 }
             }
         }
