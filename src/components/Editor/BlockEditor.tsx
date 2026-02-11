@@ -400,6 +400,32 @@ export const BlockEditor = memo(forwardRef<BlockEditorRef, BlockEditorProps>(fun
     };
   }, []);
 
+  // Save when the window loses visibility or is about to close.
+  // The 60s safety-net timer is intentionally long (editor.save() freezes
+  // WebKitGTK for 6+ seconds), but that means minor edits can be lost if
+  // the app closes or the user switches away before the timer fires.
+  // A brief freeze is acceptable in these situations since the user isn't
+  // actively editing.
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden" && hasUnsavedChangesRef.current) {
+        performSave();
+      }
+    };
+    const handleBeforeUnload = () => {
+      if (hasUnsavedChangesRef.current) {
+        performSave();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
+  }, [performSave]);
+
   // Save on Ctrl+S - this is an explicit save that should trigger git commit.
   // This DOES call editor.save() since the user explicitly requested a save.
   // On large pages this may briefly pause WebKitGTK, but that's acceptable

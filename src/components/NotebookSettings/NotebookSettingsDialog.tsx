@@ -205,6 +205,7 @@ export function NotebookSettingsDialog({
     const setupListener = async () => {
       unlisten = await listen<{
         notebook_id: string;
+        notebook_name: string;
         current: number;
         total: number;
         message: string;

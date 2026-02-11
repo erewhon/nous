@@ -129,6 +129,7 @@ struct AssetSyncResult {
 #[derive(Clone, Serialize)]
 pub struct SyncProgress {
     pub notebook_id: String,
+    pub notebook_name: String,
     pub current: usize,
     pub total: usize,
     pub message: String,
@@ -845,9 +846,10 @@ impl SyncManager {
         let app_handle = app_handle.or(stored_handle.as_ref());
 
         // 1. Get notebook config + local pages (short lock)
-        let (config, local_pages) = {
+        let (config, local_pages, notebook_name) = {
             let storage_guard = storage.lock().unwrap();
             let notebook = storage_guard.get_notebook(notebook_id)?;
+            let name = notebook.name.clone();
             let config = notebook
                 .sync_config
                 .as_ref()
@@ -855,7 +857,7 @@ impl SyncManager {
                 .ok_or(SyncError::NotConfigured)?
                 .clone();
             let pages = storage_guard.list_all_pages(notebook_id)?;
-            (config, pages)
+            (config, pages, name)
         }; // Lock released
 
         log::info!(
@@ -1014,6 +1016,7 @@ impl SyncManager {
                 let counter = Arc::clone(&progress_counter);
                 let app = app_handle.cloned();
                 let nb_id_str = notebook_id.to_string();
+                let nb_name = notebook_name.clone();
                 let page_title = page.title.clone();
                 async move {
                     let _permit = sem.acquire().await.unwrap();
@@ -1021,6 +1024,7 @@ impl SyncManager {
                     if let Some(ref app) = app {
                         let _ = app.emit("sync-progress", SyncProgress {
                             notebook_id: nb_id_str,
+                            notebook_name: nb_name,
                             current: idx + 1,
                             total: total_pages,
                             message: format!("Syncing page: {}", page_title),
@@ -1296,6 +1300,7 @@ impl SyncManager {
         if let Some(app) = app_handle {
             let _ = app.emit("sync-progress", SyncProgress {
                 notebook_id: notebook_id.to_string(),
+                notebook_name: notebook_name.clone(),
                 current: 0,
                 total: 0,
                 message: "Syncing assets...".to_string(),
@@ -1404,6 +1409,7 @@ impl SyncManager {
 
             let _ = app.emit("sync-progress", SyncProgress {
                 notebook_id: notebook_id.to_string(),
+                notebook_name: notebook_name.clone(),
                 current: total_pages,
                 total: total_pages,
                 message: "Complete".to_string(),

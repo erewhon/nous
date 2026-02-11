@@ -55,6 +55,7 @@ export function LibrarySettingsPanel() {
   const [syncResult, setSyncResult] = useState<string | null>(null);
   const [syncProgress, setSyncProgress] = useState<{
     notebook_id: string;
+    notebook_name: string;
     current: number;
     total: number;
     message: string;
@@ -72,6 +73,7 @@ export function LibrarySettingsPanel() {
     const setupListener = async () => {
       unlisten = await listen<{
         notebook_id: string;
+        notebook_name: string;
         current: number;
         total: number;
         message: string;
@@ -697,6 +699,10 @@ export function LibrarySettingsPanel() {
                   <div className="rounded-lg p-2.5" style={{ backgroundColor: "var(--color-bg-tertiary)" }}>
                     <div className="flex items-center justify-between mb-1.5">
                       <span className="text-xs" style={{ color: "var(--color-text-secondary)" }}>
+                        <span className="font-medium" style={{ color: "var(--color-text-primary)" }}>
+                          {syncProgress.notebook_name}
+                        </span>
+                        {" \u2014 "}
                         {syncProgress.message}
                       </span>
                       {syncProgress.total > 0 && (
