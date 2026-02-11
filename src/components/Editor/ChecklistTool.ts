@@ -180,15 +180,16 @@ export class ChecklistTool implements BlockTool {
     // Checked styling is driven by CSS in <head>.
 
     if (!this.readOnly) {
-      // Prevent mousedown from propagating to Editor.js — it reads layout
-      // properties (getBoundingClientRect) for block detection, which forces
-      // a synchronous reflow.  If CSS `order` changes are pending, this
-      // reflow freezes WebKitGTK's rendering pipeline.
+      // Toggle on mousedown instead of click.  macOS WKWebView does not fire
+      // a `click` event on plain <div> elements inside contenteditable when
+      // `preventDefault()` was called on the preceding `mousedown`.  Using
+      // mousedown directly avoids this WebKit-specific issue.
+      //
+      // stopPropagation prevents Editor.js from reading layout properties
+      // (getBoundingClientRect) for block detection, which would force a
+      // synchronous reflow and freeze WebKitGTK if CSS `order` changes
+      // are pending.
       checkbox.addEventListener("mousedown", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-      });
-      checkbox.addEventListener("click", (e) => {
         e.preventDefault();
         e.stopPropagation();
         this.toggleItem(itemEl, index);

@@ -177,14 +177,69 @@ export function EditorPaneContent({
   // Convert page content to Editor.js format
   const editorData: OutputData | undefined = useMemo(() => {
     if (!selectedPage?.content) return undefined;
-    return {
-      time: selectedPage.content.time,
-      version: selectedPage.content.version,
-      blocks: selectedPage.content.blocks.map((block) => ({
+    let migrated = false;
+    const blocks = selectedPage.content.blocks.map((block) => {
+      // Migrate list blocks with checklist style to the custom ChecklistTool.
+      // The @editorjs/list checklist variant uses a different data format
+      // (content/meta.checked/nested items) and lacks the CSS order sorting
+      // that moves checked items to the bottom.
+      if (
+        block.type === "list" &&
+        (block.data as Record<string, unknown>).style === "checklist"
+      ) {
+        const listItems = (block.data as Record<string, unknown>).items as
+          | Array<{ content?: string; meta?: { checked?: boolean }; items?: unknown[] }>
+          | undefined;
+        if (listItems) {
+          migrated = true;
+          // Flatten nested list-checklist items into flat checklist items
+          const flatItems: Array<{ text: string; checked: boolean }> = [];
+          const flatten = (
+            items: Array<{ content?: string; meta?: { checked?: boolean }; items?: unknown[] }>,
+          ) => {
+            for (const item of items) {
+              flatItems.push({
+                text: item.content ?? "",
+                checked: item.meta?.checked ?? false,
+              });
+              if (item.items && Array.isArray(item.items) && item.items.length > 0) {
+                flatten(item.items as typeof items);
+              }
+            }
+          };
+          flatten(listItems);
+          return {
+            id: block.id,
+            type: "checklist",
+            data: { items: flatItems },
+          };
+        }
+      }
+      return {
         id: block.id,
         type: block.type,
         data: block.data as Record<string, unknown>,
-      })),
+      };
+    });
+
+    // Persist migrated data so the conversion is permanent
+    if (migrated && notebookId && pane.pageId) {
+      const migratedContent: EditorData = {
+        time: selectedPage.content.time,
+        version: selectedPage.content.version,
+        blocks: blocks.map((b) => ({
+          id: b.id,
+          type: b.type,
+          data: b.data as Record<string, unknown>,
+        })),
+      };
+      updatePageContent(notebookId, pane.pageId, migratedContent, false);
+    }
+
+    return {
+      time: selectedPage.content.time,
+      version: selectedPage.content.version,
+      blocks,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedPage?.id, pageDataVersion]);
