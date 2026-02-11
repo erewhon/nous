@@ -272,12 +272,13 @@ h4.ce-header {
   transform: scale(0.9);
 }
 
-.ce-block .cdx-checklist__item-checkbox--checked {
+/* Checked checkbox — driven by data-checked attribute */
+.ce-block .cdx-checklist__item[data-checked="true"] .cdx-checklist__item-checkbox {
   background-color: var(--color-accent) !important;
   border-color: var(--color-accent) !important;
 }
 
-.ce-block .cdx-checklist__item-checkbox--checked::after {
+.ce-block .cdx-checklist__item[data-checked="true"] .cdx-checklist__item-checkbox::after {
   content: '';
   display: block;
   width: 100%;
@@ -305,10 +306,19 @@ h4.ce-header {
   pointer-events: none;
 }
 
-/* Checked state */
-.ce-block .cdx-checklist__item--checked .cdx-checklist__item-text {
+/* Checked state — text strikethrough and auto-sort */
+.ce-block .cdx-checklist__item[data-checked="true"] .cdx-checklist__item-text {
   text-decoration: line-through;
   color: var(--color-text-muted);
+}
+
+/* Auto-sort: checked items sink to bottom via CSS order */
+.ce-block .cdx-checklist__item[data-checked="true"] {
+  order: 1;
+}
+
+.ce-block .cdx-checklist__item[data-checked="false"] {
+  order: 0;
 }
 
 /* Dragging states */

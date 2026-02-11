@@ -117,20 +117,18 @@ export class ChecklistTool implements BlockTool {
     this.itemsContainer.classList.add("cdx-checklist__items");
     this.wrapper.appendChild(this.itemsContainer);
 
-    // Create <style> tag in <head> — OUTSIDE the editor container.
-    // Checked state styling is driven entirely by CSS to avoid DOM mutations
-    // inside the editor that freeze WebKitGTK's rendering pipeline.
+    // Create <style> tag in <head> for the flex container rule (instance-specific).
+    // Checked/unchecked styling uses data-checked attributes with static CSS
+    // rules in editor-styles.css.
     this.styleEl = document.createElement("style");
     this.styleEl.id = `style-${this.instanceId}`;
     document.head.appendChild(this.styleEl);
+    this.updateCheckedStyles();
 
-    // Render all items
+    // Render all items (sets data-checked attribute on each)
     this.data.items.forEach((item, index) => {
       this.createItem(item, index);
     });
-
-    // Generate initial CSS for checked items
-    this.updateCheckedStyles();
 
     return this.wrapper;
   }
@@ -138,10 +136,8 @@ export class ChecklistTool implements BlockTool {
   private createItem(item: ChecklistItem, index: number): HTMLElement {
     const itemEl = document.createElement("div");
     itemEl.classList.add("cdx-checklist__item");
-    // NOTE: Do NOT add cdx-checklist__item--checked here.
-    // Checked styling is driven entirely by a <style> tag in <head> to avoid
-    // DOM mutations inside the editor that freeze WebKitGTK's rendering pipeline.
     itemEl.dataset.index = String(index);
+    itemEl.dataset.checked = String(item.checked);
 
     // Drag handle — display:none by default, shown as position:absolute on
     // hover via CSS. This keeps it out of the flex layout entirely (WebKitGTK
@@ -176,8 +172,6 @@ export class ChecklistTool implements BlockTool {
     // Checkbox
     const checkbox = document.createElement("div");
     checkbox.classList.add("cdx-checklist__item-checkbox");
-    // NOTE: Do NOT add cdx-checklist__item-checkbox--checked here.
-    // Checked styling is driven by CSS in <head>.
 
     if (!this.readOnly) {
       // Toggle on mousedown instead of click.  macOS WKWebView does not fire
@@ -220,15 +214,14 @@ export class ChecklistTool implements BlockTool {
     return itemEl;
   }
 
-  private toggleItem(_itemEl: HTMLElement, index: number): void {
+  private toggleItem(itemEl: HTMLElement, index: number): void {
     crumb(`checklist:toggle:start:idx=${index}`);
     const isChecked = !this.data.items[index].checked;
     this.data.items[index].checked = isChecked;
 
-    // Update visual state via CSS — includes checkbox styling and
-    // CSS `order` property for auto-sort (checked items sink to bottom).
-    // No DOM mutations — all visual changes are via <style> tag in <head>.
-    this.updateCheckedStyles();
+    // Update the data attribute — CSS rules in editor-styles.css handle
+    // checked styling and order (auto-sort checked items to bottom).
+    itemEl.dataset.checked = String(isChecked);
 
     // Persist the checkbox change directly WITHOUT calling editor.save().
     // editor.save() does a full synchronous DOM traversal of ALL blocks,
@@ -252,65 +245,16 @@ export class ChecklistTool implements BlockTool {
   }
 
   /**
-   * Generate CSS rules for checked items. The <style> tag is in <head>,
-   * outside the editor container, so updates never trigger Editor.js's
-   * MutationObserver.
-   *
-   * Includes CSS `order` property for auto-sort (checked items visually
-   * move to the bottom) without any DOM mutations.
+   * Generate CSS rules for the flex container.  Checked/unchecked styling
+   * and auto-sort order are driven by `data-checked` attributes on items,
+   * with static CSS rules in editor-styles.css.
    */
   private updateCheckedStyles(): void {
     if (!this.styleEl) return;
     const id = CSS.escape(this.instanceId);
-    const rules: string[] = [];
-
-    // Make the items container a flex column so CSS `order` works for auto-sort
-    rules.push(
-      `#${id} .cdx-checklist__items { display: flex; flex-direction: column; }`
-    );
-
-    this.data.items.forEach((item, index) => {
-      const nth = index + 1; // nth-child is 1-based
-      if (item.checked) {
-        // Checkbox: accent background + checkmark
-        rules.push(
-          `#${id} .cdx-checklist__item:nth-child(${nth}) .cdx-checklist__item-checkbox {` +
-            `background-color: var(--color-accent) !important;` +
-            `border-color: var(--color-accent) !important;` +
-            `}`
-        );
-        rules.push(
-          `#${id} .cdx-checklist__item:nth-child(${nth}) .cdx-checklist__item-checkbox::after {` +
-            `content: '';` +
-            `display: block;` +
-            `width: 100%;` +
-            `height: 100%;` +
-            `background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'%3E%3C/polyline%3E%3C/svg%3E");` +
-            `background-size: 70%;` +
-            `background-position: center;` +
-            `background-repeat: no-repeat;` +
-            `}`
-        );
-        // Text: strikethrough + muted
-        rules.push(
-          `#${id} .cdx-checklist__item:nth-child(${nth}) .cdx-checklist__item-text {` +
-            `text-decoration: line-through;` +
-            `color: var(--color-text-muted);` +
-            `}`
-        );
-        // Auto-sort: checked items sink to bottom via CSS order
-        rules.push(
-          `#${id} .cdx-checklist__item:nth-child(${nth}) { order: 1; }`
-        );
-      } else {
-        // Unchecked items stay at top
-        rules.push(
-          `#${id} .cdx-checklist__item:nth-child(${nth}) { order: 0; }`
-        );
-      }
-    });
-
-    this.styleEl.textContent = rules.join("\n");
+    // Only the flex container rule is instance-specific
+    this.styleEl.textContent =
+      `#${id} .cdx-checklist__items { display: flex; flex-direction: column; }`;
   }
 
   private rerenderItems(): void {
