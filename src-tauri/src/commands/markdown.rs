@@ -40,12 +40,30 @@ pub fn import_markdown(
     notebook_id: String,
     markdown: String,
     filename: String,
+    folder_id: Option<String>,
+    section_id: Option<String>,
 ) -> CommandResult<Page> {
     let storage = state.storage.lock().unwrap();
 
     let nb_id = Uuid::parse_str(&notebook_id).map_err(|e| CommandError {
         message: format!("Invalid notebook ID: {}", e),
     })?;
+
+    let parsed_folder_id = folder_id
+        .as_deref()
+        .map(|id| Uuid::parse_str(id))
+        .transpose()
+        .map_err(|e| CommandError {
+            message: format!("Invalid folder ID: {}", e),
+        })?;
+
+    let parsed_section_id = section_id
+        .as_deref()
+        .map(|id| Uuid::parse_str(id))
+        .transpose()
+        .map_err(|e| CommandError {
+            message: format!("Invalid section ID: {}", e),
+        })?;
 
     // Use filename (without extension) as fallback title
     let fallback_title = Path::new(&filename)
@@ -54,7 +72,9 @@ pub fn import_markdown(
         .unwrap_or("Imported")
         .to_string();
 
-    let page = import_markdown_to_page(&markdown, nb_id, &fallback_title);
+    let mut page = import_markdown_to_page(&markdown, nb_id, &fallback_title);
+    page.folder_id = parsed_folder_id;
+    page.section_id = parsed_section_id;
 
     // Save the page
     storage.create_page_from(page.clone())?;

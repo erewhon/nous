@@ -14,8 +14,7 @@ import {
 } from "@dnd-kit/core";
 import { arrayMove } from "@dnd-kit/sortable";
 import { open } from "@tauri-apps/plugin-dialog";
-import { getCurrentWindow } from "@tauri-apps/api/window";
-import type { Folder, Page, Section, FileStorageMode } from "../../types/page";
+import type { Folder, Page, Section } from "../../types/page";
 import type { Notebook, PageSortOption } from "../../types/notebook";
 import type { ObjectType } from "../../types/database";
 import { useFolderStore } from "../../stores/folderStore";
@@ -24,8 +23,8 @@ import { useNotebookStore } from "../../stores/notebookStore";
 import { useThemeStore, type PageSortOption as ThemePageSortOption } from "../../stores/themeStore";
 import * as api from "../../utils/api";
 import { FolderTreeItem, DraggablePageItem } from "./FolderTreeItem";
-import { FileImportDialog } from "../Import/FileImportDialog";
 import { ObjectTypePicker, ObjectTypeManager } from "../Database/ObjectTypeManager";
+import { ALL_SUPPORTED_EXTENSIONS } from "../../utils/fileImport";
 
 const PAGE_SORT_OPTIONS: { value: PageSortOption; label: string }[] = [
   { value: "position", label: "Manual" },
@@ -211,61 +210,9 @@ export function FolderTree({
   const [overSectionId, setOverSectionId] = useState<string | null>(null);
   const [showSectionDropZones, setShowSectionDropZones] = useState(false);
   const [expandedPageIds, setExpandedPageIds] = useState<Set<string>>(new Set());
-  const [importDialogOpen, setImportDialogOpen] = useState(false);
-  const [pendingImportPath, setPendingImportPath] = useState<string | null>(null);
-  const [isImporting, setIsImporting] = useState(false);
-  const [isFileDragOver, setIsFileDragOver] = useState(false);
   const [showDatabaseTypePicker, setShowDatabaseTypePicker] = useState(false);
   const [showObjectTypeManager, setShowObjectTypeManager] = useState(false);
   const treeContainerRef = useRef<HTMLDivElement>(null);
-
-  // Supported file extensions for import
-  const SUPPORTED_EXTENSIONS = ["md", "pdf", "ipynb", "epub", "ics", "canvas"];
-
-  // Listen for Tauri file drop events
-  useEffect(() => {
-    const appWindow = getCurrentWindow();
-
-    const handleFileDrop = (event: { payload: { paths: string[]; position: { x: number; y: number } } }) => {
-      const { paths } = event.payload;
-      if (paths && paths.length > 0) {
-        // Find the first supported file
-        const supportedFile = paths.find((path) => {
-          const ext = path.split(".").pop()?.toLowerCase();
-          return ext && SUPPORTED_EXTENSIONS.includes(ext);
-        });
-
-        if (supportedFile) {
-          setPendingImportPath(supportedFile);
-          setImportDialogOpen(true);
-        }
-      }
-      setIsFileDragOver(false);
-    };
-
-    const handleDragEnter = () => {
-      setIsFileDragOver(true);
-    };
-
-    const handleDragLeave = () => {
-      setIsFileDragOver(false);
-    };
-
-    // Subscribe to Tauri window drag-drop events
-    const unlistenDrop = appWindow.onDragDropEvent((event) => {
-      if (event.payload.type === "drop") {
-        handleFileDrop({ payload: { paths: event.payload.paths, position: event.payload.position } });
-      } else if (event.payload.type === "enter" || event.payload.type === "over") {
-        handleDragEnter();
-      } else if (event.payload.type === "leave") {
-        handleDragLeave();
-      }
-    });
-
-    return () => {
-      unlistenDrop.then((unlisten) => unlisten());
-    };
-  }, []);
 
   // Toggle page expansion for nested pages
   const togglePageExpanded = useCallback((pageId: string) => {
@@ -555,56 +502,32 @@ END:VCALENDAR`;
   const handleImportFile = useCallback(async () => {
     try {
       const selected = await open({
-        multiple: false,
+        multiple: true,
         filters: [
           {
             name: "Supported Files",
-            extensions: ["md", "pdf", "ipynb", "epub", "ics"],
+            extensions: [...ALL_SUPPORTED_EXTENSIONS],
           },
-          { name: "Markdown", extensions: ["md"] },
+          { name: "Markdown", extensions: ["md", "markdown"] },
           { name: "PDF", extensions: ["pdf"] },
-          { name: "Jupyter Notebook", extensions: ["ipynb"] },
-          { name: "EPUB", extensions: ["epub"] },
-          { name: "Calendar", extensions: ["ics"] },
+          { name: "Documents", extensions: ["docx", "doc", "pptx", "ppt", "xlsx", "xls", "rtf", "txt"] },
+          { name: "Web", extensions: ["html", "htm", "csv", "json", "xml"] },
+          { name: "Media", extensions: ["png", "jpg", "jpeg", "gif", "bmp", "tiff", "svg", "wav", "mp3", "m4a", "ogg", "flac"] },
+          { name: "Other", extensions: ["ipynb", "epub", "ics", "ical", "canvas", "zip"] },
         ],
       });
 
       if (selected) {
-        // Show dialog to choose storage mode
-        setPendingImportPath(selected);
-        setImportDialogOpen(true);
+        const paths = Array.isArray(selected) ? selected : [selected];
+        if (paths.length > 0) {
+          window.dispatchEvent(
+            new CustomEvent("import-files", { detail: { paths } })
+          );
+        }
       }
     } catch (err) {
       console.error("Failed to open file picker:", err);
     }
-  }, []);
-
-  // Handle confirming the import with storage mode
-  const handleConfirmImport = useCallback(
-    async (storageMode: FileStorageMode) => {
-      if (!pendingImportPath) return;
-
-      setIsImporting(true);
-      try {
-        const sectionId = sectionsEnabled && selectedSectionId ? selectedSectionId : undefined;
-        await api.importFileAsPage(notebookId, pendingImportPath, storageMode, undefined, sectionId);
-        // Refresh the page list to show the imported page
-        await loadPages(notebookId);
-      } catch (err) {
-        console.error("Failed to import file:", err);
-      } finally {
-        setIsImporting(false);
-        setImportDialogOpen(false);
-        setPendingImportPath(null);
-      }
-    },
-    [notebookId, pendingImportPath, sectionsEnabled, selectedSectionId, loadPages]
-  );
-
-  // Handle canceling the import
-  const handleCancelImport = useCallback(() => {
-    setImportDialogOpen(false);
-    setPendingImportPath(null);
   }, []);
 
   // Handle creating a subpage
@@ -974,14 +897,6 @@ END:VCALENDAR`;
 
   return (
     <>
-      <FileImportDialog
-        isOpen={importDialogOpen}
-        filePath={pendingImportPath || ""}
-        onConfirm={handleConfirmImport}
-        onCancel={handleCancelImport}
-        isImporting={isImporting}
-      />
-
       {/* Database type picker modal */}
       {showDatabaseTypePicker && (
         <div
@@ -1380,7 +1295,7 @@ END:VCALENDAR`;
               onClick={handleImportFile}
               className="flex h-7 w-7 items-center justify-center rounded-lg transition-all"
               style={{ color: "var(--color-text-muted)" }}
-              title="Import file (Markdown, PDF, Jupyter, EPUB, Calendar)"
+              title="Import file (Markdown, PDF, Word, Excel, PowerPoint, Images, Audio, and more)"
             >
               <svg
                 xmlns="http://www.w3.org/2000/svg"
@@ -1461,45 +1376,6 @@ END:VCALENDAR`;
               : "16px",
           }}
         >
-          {/* File drop overlay */}
-          {isFileDragOver && (
-            <div
-              className="absolute inset-2 z-40 flex flex-col items-center justify-center rounded-xl border-2 border-dashed"
-              style={{
-                backgroundColor: "rgba(139, 92, 246, 0.1)",
-                borderColor: "var(--color-accent)",
-              }}
-            >
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                width="32"
-                height="32"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                style={{ color: "var(--color-accent)" }}
-              >
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                <polyline points="17 8 12 3 7 8" />
-                <line x1="12" y1="3" x2="12" y2="15" />
-              </svg>
-              <span
-                className="mt-2 text-sm font-medium"
-                style={{ color: "var(--color-accent)" }}
-              >
-                Drop to import
-              </span>
-              <span
-                className="mt-1 text-xs"
-                style={{ color: "var(--color-text-muted)" }}
-              >
-                MD, PDF, Jupyter, EPUB, ICS
-              </span>
-            </div>
-          )}
           {visibleFolders.length === 0 && visiblePages.length === 0 ? (
             <div
               className="flex h-28 flex-col items-center justify-center gap-2 rounded-xl border border-dashed p-4 text-center mx-2"

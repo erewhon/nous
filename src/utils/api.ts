@@ -611,9 +611,17 @@ export async function exportPageToMarkdown(
 export async function importMarkdown(
   notebookId: string,
   markdown: string,
-  filename: string
+  filename: string,
+  folderId?: string,
+  sectionId?: string
 ): Promise<Page> {
-  return invoke<Page>("import_markdown", { notebookId, markdown, filename });
+  return invoke<Page>("import_markdown", {
+    notebookId,
+    markdown,
+    filename,
+    folderId: folderId || null,
+    sectionId: sectionId || null,
+  });
 }
 
 export async function exportPageToFile(

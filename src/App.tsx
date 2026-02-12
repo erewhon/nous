@@ -21,10 +21,14 @@ import { PeoplePanel } from "./components/People";
 import { ToastContainer } from "./components/Toast";
 import { WebClipperDialog } from "./components/WebClipper/WebClipperDialog";
 import { SmartCollectionsPanel } from "./components/SmartCollections/SmartCollectionsPanel";
+import { DropZoneOverlay } from "./components/Import/DropZoneOverlay";
+import { FileImportDialog, type ImportConfig, type ImportProgress } from "./components/Import/FileImportDialog";
 import { useAppInit } from "./hooks/useAppInit";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { useMainThreadWatchdog, getWatchdogLog, clearWatchdogLog } from "./hooks/useMainThreadWatchdog";
 import { readCrumbs } from "./utils/breadcrumbs";
+import { classifyFile, ALL_SUPPORTED_EXTENSIONS } from "./utils/fileImport";
+import * as api from "./utils/api";
 import { useNotebookStore } from "./stores/notebookStore";
 import { usePageStore } from "./stores/pageStore";
 import { useThemeStore } from "./stores/themeStore";
@@ -34,6 +38,8 @@ import { useAIStore } from "./stores/aiStore";
 import { useFlashcardStore } from "./stores/flashcardStore";
 import { useDailyNotesStore } from "./stores/dailyNotesStore";
 import { useTasksStore } from "./stores/tasksStore";
+import { useSectionStore } from "./stores/sectionStore";
+import { useToastStore } from "./stores/toastStore";
 import { useWindowLibrary } from "./contexts/WindowContext";
 import { exportPageToFile } from "./utils/api";
 import { save } from "@tauri-apps/plugin-dialog";
@@ -235,6 +241,123 @@ function App() {
     setShowDeleteConfirm(false);
   }, [selectedPage, selectedNotebookId, deletePage]);
 
+  // File import state
+  const [isFileDragOver, setIsFileDragOver] = useState(false);
+  const [pendingImportPaths, setPendingImportPaths] = useState<string[]>([]);
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [importProgress, setImportProgress] = useState<ImportProgress | null>(null);
+
+  const currentSectionId = useSectionStore((s) => s.selectedSectionId);
+  const loadPages = usePageStore((s) => s.loadPages);
+
+  // Listen for Tauri file drop events (full-window)
+  useEffect(() => {
+    const appWindow = getCurrentWindow();
+
+    const unlistenDrop = appWindow.onDragDropEvent((event) => {
+      if (event.payload.type === "drop") {
+        const { paths } = event.payload;
+        if (paths && paths.length > 0) {
+          const supported = paths.filter((path) => {
+            const ext = path.split(".").pop()?.toLowerCase() ?? "";
+            return (ALL_SUPPORTED_EXTENSIONS as readonly string[]).includes(ext);
+          });
+          if (supported.length > 0) {
+            setPendingImportPaths(supported);
+            setImportDialogOpen(true);
+          }
+        }
+        setIsFileDragOver(false);
+      } else if (event.payload.type === "enter" || event.payload.type === "over") {
+        setIsFileDragOver(true);
+      } else if (event.payload.type === "leave") {
+        setIsFileDragOver(false);
+      }
+    });
+
+    return () => {
+      unlistenDrop.then((unlisten) => unlisten());
+    };
+  }, []);
+
+  // Listen for custom "import-files" event from FolderTree Import button
+  useEffect(() => {
+    const handleImportFiles = (e: Event) => {
+      const detail = (e as CustomEvent<{ paths: string[] }>).detail;
+      if (detail?.paths?.length > 0) {
+        setPendingImportPaths(detail.paths);
+        setImportDialogOpen(true);
+      }
+    };
+    window.addEventListener("import-files", handleImportFiles);
+    return () => window.removeEventListener("import-files", handleImportFiles);
+  }, []);
+
+  // Import orchestration
+  const handleConfirmImport = useCallback(
+    async (config: ImportConfig) => {
+      const { storageMode, notebookId, folderId, sectionId } = config;
+      const files = pendingImportPaths;
+      const errors: string[] = [];
+      let completed = 0;
+
+      for (const filePath of files) {
+        const fileName = filePath.split(/[/\\]/).pop() || filePath;
+        setImportProgress({ total: files.length, completed, currentFile: fileName });
+
+        try {
+          const classification = classifyFile(filePath);
+          if (!classification.supported) {
+            errors.push(`${fileName}: unsupported file type`);
+            completed++;
+            continue;
+          }
+
+          if (classification.action === "native") {
+            await api.importFileAsPage(notebookId, filePath, storageMode, folderId, sectionId);
+          } else {
+            // Convert then import as markdown
+            const result = await api.convertDocument(filePath);
+            await api.importMarkdown(notebookId, result.content, fileName, folderId, sectionId);
+          }
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          errors.push(`${fileName}: ${msg}`);
+        }
+        completed++;
+      }
+
+      setImportProgress(null);
+      setImportDialogOpen(false);
+      setPendingImportPaths([]);
+
+      // Refresh pages if we imported to the current notebook
+      if (notebookId === selectedNotebookId) {
+        loadPages(notebookId);
+      }
+
+      // Show toast summary
+      const successCount = completed - errors.length;
+      if (errors.length === 0) {
+        useToastStore.getState().success(
+          `Imported ${successCount} file${successCount !== 1 ? "s" : ""} successfully`
+        );
+      } else if (successCount > 0) {
+        useToastStore.getState().warning(
+          `Imported ${successCount} file${successCount !== 1 ? "s" : ""}, ${errors.length} failed`
+        );
+      } else {
+        useToastStore.getState().error(`Import failed: ${errors[0]}`);
+      }
+    },
+    [pendingImportPaths, selectedNotebookId, loadPages]
+  );
+
+  const handleCancelImport = useCallback(() => {
+    setImportDialogOpen(false);
+    setPendingImportPaths([]);
+  }, []);
+
   // Global keyboard shortcuts
   useKeyboardShortcuts({
     onCommandPalette: () => setShowCommandPalette(true),
@@ -390,6 +513,20 @@ function App() {
       <SmartCollectionsPanel
         isOpen={showSmartCollections}
         onClose={() => setShowSmartCollections(false)}
+      />
+
+      {/* File Import Drop Zone Overlay */}
+      <DropZoneOverlay isVisible={isFileDragOver} />
+
+      {/* File Import Dialog */}
+      <FileImportDialog
+        isOpen={importDialogOpen}
+        filePaths={pendingImportPaths}
+        currentNotebookId={selectedNotebookId}
+        currentSectionId={currentSectionId}
+        onConfirm={handleConfirmImport}
+        onCancel={handleCancelImport}
+        importProgress={importProgress}
       />
 
       {/* Toast Notifications */}
