@@ -726,12 +726,12 @@ impl ActionExecutor {
                 }
 
                 let unchecked = extract_unchecked_items_from_block(block);
-                for (item_idx, text) in unchecked.into_iter().enumerate() {
+                for (original_idx, text) in unchecked {
                     items_with_source.push(CarriedItem {
                         text,
                         source_page_id: page.id,
                         block_index: block_idx,
-                        item_index: item_idx,
+                        item_index: original_idx,
                     });
                 }
             }
@@ -2338,18 +2338,20 @@ impl ActionExecutor {
 /// - Custom ChecklistTool: block_type "checklist", items: [{text, checked}]
 /// - @editorjs/list checklist mode: block_type "list", style: "checklist",
 ///   items: [{content, meta: {checked}, items: [...]}]
-fn extract_unchecked_items_from_block(block: &EditorBlock) -> Vec<String> {
+/// Returns (original_index, text) pairs for unchecked items so callers can
+/// use the original index to mark items in the source array later.
+fn extract_unchecked_items_from_block(block: &EditorBlock) -> Vec<(usize, String)> {
     let mut results = Vec::new();
 
     if block.block_type == "checklist" {
         // Custom ChecklistTool format: { items: [{ text: "...", checked: bool }] }
         if let Some(items_array) = block.data.get("items").and_then(|v| v.as_array()) {
-            for item in items_array {
+            for (idx, item) in items_array.iter().enumerate() {
                 let checked = item.get("checked").and_then(|c| c.as_bool()).unwrap_or(true);
                 if !checked {
                     if let Some(text) = item.get("text").and_then(|t| t.as_str()) {
                         if !text.trim().is_empty() {
-                            results.push(text.to_string());
+                            results.push((idx, text.to_string()));
                         }
                     }
                 }
@@ -2360,7 +2362,7 @@ fn extract_unchecked_items_from_block(block: &EditorBlock) -> Vec<String> {
         let style = block.data.get("style").and_then(|s| s.as_str()).unwrap_or("");
         if style == "checklist" {
             if let Some(items_array) = block.data.get("items").and_then(|v| v.as_array()) {
-                collect_unchecked_list_items(items_array, &mut results);
+                collect_unchecked_list_items(items_array, &mut results, 0);
             }
         }
     }
@@ -2368,8 +2370,10 @@ fn extract_unchecked_items_from_block(block: &EditorBlock) -> Vec<String> {
     results
 }
 
-/// Recursively collect unchecked items from @editorjs/list nested item structure
-fn collect_unchecked_list_items(items: &[serde_json::Value], results: &mut Vec<String>) {
+/// Recursively collect unchecked items from @editorjs/list nested item structure.
+/// `base_index` tracks the flat position for nested items.
+fn collect_unchecked_list_items(items: &[serde_json::Value], results: &mut Vec<(usize, String)>, base_index: usize) {
+    let mut flat_idx = base_index;
     for item in items {
         let checked = item
             .get("meta")
@@ -2379,14 +2383,16 @@ fn collect_unchecked_list_items(items: &[serde_json::Value], results: &mut Vec<S
         if !checked {
             if let Some(content) = item.get("content").and_then(|c| c.as_str()) {
                 if !content.trim().is_empty() {
-                    results.push(content.to_string());
+                    results.push((flat_idx, content.to_string()));
                 }
             }
         }
+        flat_idx += 1;
         // Recurse into nested items
         if let Some(sub_items) = item.get("items").and_then(|v| v.as_array()) {
             if !sub_items.is_empty() {
-                collect_unchecked_list_items(sub_items, results);
+                collect_unchecked_list_items(sub_items, results, flat_idx);
+                flat_idx += sub_items.len();
             }
         }
     }
@@ -2503,7 +2509,7 @@ fn extract_carried_forward_items(blocks: &[EditorBlock]) -> Vec<String> {
         }
 
         if in_section {
-            items.extend(extract_unchecked_items_from_block(block));
+            items.extend(extract_unchecked_items_from_block(block).into_iter().map(|(_, text)| text));
         }
     }
 

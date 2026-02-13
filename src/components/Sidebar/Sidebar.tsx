@@ -607,7 +607,10 @@ function SortableToolButton({ def }: { def: ToolButtonDef }) {
       className="flex h-7 items-center gap-1 rounded-md px-1.5 text-[11px] transition-colors hover:bg-[--color-bg-tertiary]"
       title={def.label + (def.shortcut ? ` (${def.shortcut})` : "")}
     >
-      <SvgIcon d={def.icon} size={13} />
+      {/* Hide SVG icon when badgeEmoji is active (e.g. goals streak flame) */}
+      {!(def.badgeEmoji && def.badge !== undefined && def.badge > 0) && (
+        <SvgIcon d={def.icon} size={13} />
+      )}
       {def.compactLabel && (
         <span className="font-medium" style={{ color: "var(--color-text-secondary)" }}>
           {def.compactLabel}
