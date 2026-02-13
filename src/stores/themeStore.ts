@@ -12,6 +12,11 @@ export type EditorKeymap = "standard" | "vim" | "emacs";
 
 export type FocusHighlightMode = "sentence" | "paragraph" | "none";
 
+export type ToolButtonId =
+  | "quick-capture" | "web-clipper" | "inbox" | "flashcards" | "tasks"
+  | "goals" | "people" | "daily-notes" | "ai-chat" | "actions"
+  | "graph-view" | "random-note" | "settings";
+
 export interface ZenModeSettings {
   typewriterScrolling: boolean;
   showPageTitle: boolean;
@@ -71,6 +76,9 @@ interface ThemeState {
   showOutline: boolean;  // Show outline/TOC panel
   zenMode: boolean;  // Distraction-free writing mode
   zenModeSettings: ZenModeSettings;  // Zen mode configuration (persisted)
+  pinnedToolButtons: ToolButtonId[];
+  setPinnedToolButtons: (buttons: ToolButtonId[]) => void;
+  togglePinnedToolButton: (buttonId: ToolButtonId) => void;
   setMode: (mode: ThemeMode) => void;
   setColorScheme: (scheme: ColorScheme) => void;
   setFontFamily: (font: FontFamily) => void;
@@ -380,6 +388,8 @@ const DEFAULT_ZEN_MODE_SETTINGS: ZenModeSettings = {
   focusHighlight: "none",
 };
 
+const DEFAULT_PINNED_TOOL_BUTTONS: ToolButtonId[] = ["quick-capture", "inbox"];
+
 export const useThemeStore = create<ThemeState>()(
   persist(
     (set, get) => ({
@@ -397,6 +407,21 @@ export const useThemeStore = create<ThemeState>()(
       showOutline: false,
       zenMode: false,  // Always starts as false (not persisted)
       zenModeSettings: DEFAULT_ZEN_MODE_SETTINGS,
+      pinnedToolButtons: DEFAULT_PINNED_TOOL_BUTTONS,
+
+      setPinnedToolButtons: (buttons) => {
+        set({ pinnedToolButtons: buttons });
+      },
+
+      togglePinnedToolButton: (buttonId) => {
+        set((state) => {
+          const current = state.pinnedToolButtons;
+          if (current.includes(buttonId)) {
+            return { pinnedToolButtons: current.filter((id) => id !== buttonId) };
+          }
+          return { pinnedToolButtons: [...current, buttonId] };
+        });
+      },
 
       setMode: (mode) => {
         set((state) => ({
@@ -563,7 +588,7 @@ export const useThemeStore = create<ThemeState>()(
     }),
     {
       name: "nous-theme",
-      partialize: (state) => ({ settings: state.settings, showPageStats: state.showPageStats, showOutline: state.showOutline, uiMode: state.uiMode, notebookSortBy: state.notebookSortBy, pageSortBy: state.pageSortBy, panelWidths: state.panelWidths, autoHidePanels: state.autoHidePanels, zenModeSettings: state.zenModeSettings, showRecentPages: state.showRecentPages, showFavoritePages: state.showFavoritePages }),
+      partialize: (state) => ({ settings: state.settings, showPageStats: state.showPageStats, showOutline: state.showOutline, uiMode: state.uiMode, notebookSortBy: state.notebookSortBy, pageSortBy: state.pageSortBy, panelWidths: state.panelWidths, autoHidePanels: state.autoHidePanels, zenModeSettings: state.zenModeSettings, showRecentPages: state.showRecentPages, showFavoritePages: state.showFavoritePages, pinnedToolButtons: state.pinnedToolButtons }),
       onRehydrateStorage: () => (state) => {
         if (state) {
           // Resolve system theme on rehydration
@@ -602,6 +627,10 @@ export const useThemeStore = create<ThemeState>()(
           // Migration: ensure uiScale exists with default
           if (state.settings.uiScale === undefined) {
             state.settings.uiScale = 1.0;
+          }
+          // Migration: ensure pinnedToolButtons exists with defaults
+          if (!state.pinnedToolButtons || !Array.isArray(state.pinnedToolButtons)) {
+            state.pinnedToolButtons = DEFAULT_PINNED_TOOL_BUTTONS;
           }
           // Apply theme after rehydration
           setTimeout(() => state.applyTheme(), 0);

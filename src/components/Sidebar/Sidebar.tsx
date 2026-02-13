@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import type { Page } from "../../types/page";
 import { useNotebookStore } from "../../stores/notebookStore";
 import { usePageStore } from "../../stores/pageStore";
@@ -6,12 +6,27 @@ import { useActionStore } from "../../stores/actionStore";
 import { useInboxStore } from "../../stores/inboxStore";
 import { useFlashcardStore } from "../../stores/flashcardStore";
 import { useGoalsStore } from "../../stores/goalsStore";
-import { useThemeStore } from "../../stores/themeStore";
+import { useThemeStore, type ToolButtonId } from "../../stores/themeStore";
 import { useDailyNotesStore } from "../../stores/dailyNotesStore";
 import { useTasksStore } from "../../stores/tasksStore";
 import { useContactStore } from "../../stores/contactStore";
 import { NotebookList } from "../NotebookList/NotebookList";
 import { LibrarySwitcher } from "../Library";
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  horizontalListSortingStrategy,
+  useSortable,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 
 interface SidebarProps {
   width?: number;
@@ -530,6 +545,19 @@ function IconPage() {
 
 // --- Sidebar Tool Dock ---
 
+interface ToolButtonDef {
+  id: ToolButtonId;
+  label: string;
+  icon: string;           // SVG path d attribute
+  onClick: () => void;
+  shortcut?: string;
+  badge?: number;
+  badgeUrgent?: boolean;
+  badgeEmoji?: string;
+  compactLabel?: string;  // e.g. "New" for quick-capture
+  separator?: boolean;    // divider before this item in popover
+}
+
 interface SidebarToolDockProps {
   openQuickCapture: () => void;
   openInboxPanel: () => void;
@@ -548,6 +576,66 @@ interface SidebarToolDockProps {
   goalStreak: number;
   tasksOverdue: number;
   tasksDueToday: number;
+}
+
+// --- SortableToolButton for compact bar ---
+
+function SortableToolButton({ def }: { def: ToolButtonDef }) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: def.id });
+
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+    color: "var(--color-text-muted)",
+  };
+
+  return (
+    <button
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      {...listeners}
+      onClick={def.onClick}
+      className="flex h-7 items-center gap-1 rounded-md px-1.5 text-[11px] transition-colors hover:bg-[--color-bg-tertiary]"
+      title={def.label + (def.shortcut ? ` (${def.shortcut})` : "")}
+    >
+      <SvgIcon d={def.icon} size={13} />
+      {def.compactLabel && (
+        <span className="font-medium" style={{ color: "var(--color-text-secondary)" }}>
+          {def.compactLabel}
+        </span>
+      )}
+      {def.badgeEmoji && def.badge !== undefined && def.badge > 0 ? (
+        <>
+          <span className="text-[11px]">{def.badgeEmoji}</span>
+          <span
+            className="flex h-3.5 min-w-[14px] items-center justify-center rounded-full px-0.5 text-[9px] font-bold"
+            style={{ backgroundColor: "rgba(239, 68, 68, 0.2)", color: "#ef4444" }}
+          >
+            {def.badge}
+          </span>
+        </>
+      ) : def.badge !== undefined && def.badge > 0 && (
+        <span
+          className="flex h-3.5 min-w-[14px] items-center justify-center rounded-full px-0.5 text-[9px] font-bold"
+          style={{
+            backgroundColor: def.badgeUrgent ? "rgba(239, 68, 68, 0.2)" : "var(--color-accent)",
+            color: def.badgeUrgent ? "#ef4444" : "white",
+          }}
+        >
+          {def.badge > 9 ? "9+" : def.badge}
+        </span>
+      )}
+    </button>
+  );
 }
 
 function SidebarToolDock({
@@ -572,6 +660,10 @@ function SidebarToolDock({
   const [moreOpen, setMoreOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
+  const pinnedToolButtons = useThemeStore((s) => s.pinnedToolButtons);
+  const setPinnedToolButtons = useThemeStore((s) => s.setPinnedToolButtons);
+  const togglePinnedToolButton = useThemeStore((s) => s.togglePinnedToolButton);
+
   // Close menu when clicking outside
   useEffect(() => {
     if (!moreOpen) return;
@@ -584,7 +676,7 @@ function SidebarToolDock({
     return () => document.removeEventListener("mousedown", handleClick);
   }, [moreOpen]);
 
-  const openRandomNote = () => {
+  const openRandomNote = useCallback(() => {
     const candidates = pages.filter(
       (p) =>
         p.notebookId === selectedNotebookId &&
@@ -595,17 +687,157 @@ function SidebarToolDock({
       const pick = candidates[Math.floor(Math.random() * candidates.length)];
       selectPage(pick.id);
     }
-  };
+  }, [pages, selectedNotebookId, selectedPageId, selectPage]);
 
-  const dispatchKey = (key: string, meta: boolean, shift: boolean) => {
+  const dispatchKey = useCallback((key: string, meta: boolean, shift: boolean) => {
     window.dispatchEvent(
       new KeyboardEvent("keydown", { key, metaKey: meta, shiftKey: shift, bubbles: true })
     );
-  };
+  }, []);
 
   // Badge for tasks: overdue takes priority
   const taskBadge = tasksOverdue > 0 ? tasksOverdue : tasksDueToday > 0 ? tasksDueToday : 0;
   const taskBadgeUrgent = tasksOverdue > 0;
+
+  // Button registry — all 13 tool buttons
+  const allButtons: ToolButtonDef[] = useMemo(() => [
+    {
+      id: "quick-capture",
+      label: "Quick Capture",
+      icon: "M12 5v14M5 12h14",
+      onClick: openQuickCapture,
+      shortcut: "\u2318\u21e7C",
+      compactLabel: "New",
+    },
+    {
+      id: "web-clipper",
+      label: "Web Clipper",
+      icon: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zM2 12h20",
+      onClick: () => window.dispatchEvent(new CustomEvent("open-web-clipper")),
+      shortcut: "\u2318\u21e7L",
+    },
+    {
+      id: "inbox",
+      label: "Inbox",
+      icon: "M22 12l-6 0-2 3H10L8 12l-6 0M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z",
+      onClick: openInboxPanel,
+      shortcut: "\u2318\u21e7I",
+      badge: inboxCount,
+      separator: true,
+    },
+    {
+      id: "flashcards",
+      label: "Flashcards",
+      icon: "M2 4h20v16H2zM2 12h20",
+      onClick: toggleFlashcards,
+      shortcut: "\u2318\u21e7F",
+      badge: flashcardsDue,
+    },
+    {
+      id: "tasks",
+      label: "Tasks",
+      icon: "M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11",
+      onClick: toggleTasks,
+      badge: taskBadge,
+      badgeUrgent: taskBadgeUrgent,
+    },
+    {
+      id: "goals",
+      label: "Goals",
+      icon: "M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zM12 6a6 6 0 1 0 0 12 6 6 0 0 0 0-12zM12 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4z",
+      onClick: toggleGoals,
+      badge: goalStreak,
+      badgeUrgent: true,
+      badgeEmoji: goalStreak > 0 ? "\uD83D\uDD25" : undefined,
+    },
+    {
+      id: "people",
+      label: "People",
+      icon: "M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 7a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75",
+      onClick: togglePeople,
+    },
+    {
+      id: "daily-notes",
+      label: "Daily Notes",
+      icon: "M3 4h18v18H3zM16 2v4M8 2v4M3 10h18",
+      onClick: toggleDailyNotes,
+      shortcut: "\u2318\u21e7D",
+    },
+    {
+      id: "ai-chat",
+      label: "AI Chat",
+      icon: "M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z",
+      onClick: () => dispatchKey("A", true, true),
+      shortcut: "\u2318\u21e7A",
+      separator: true,
+    },
+    {
+      id: "actions",
+      label: "Actions",
+      icon: "M13 2L3 14h9l-1 8 10-12h-9l1-8",
+      onClick: openActionLibrary,
+      shortcut: "\u2318\u21e7X",
+    },
+    {
+      id: "graph-view",
+      label: "Graph View",
+      icon: "M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM19 3a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM5 17a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM14.5 9.5l3-3M9.5 14.5l-3 3",
+      onClick: () => dispatchKey("g", true, false),
+      shortcut: "\u2318G",
+    },
+    {
+      id: "random-note",
+      label: "Random Note",
+      icon: "M2 18h1.4c1.3 0 2.5-.6 3.3-1.7l6.1-8.6c.7-1.1 2-1.7 3.3-1.7H22M18 2l4 4-4 4M2 6h1.9c1.5 0 2.9.9 3.6 2.2M22 18h-5.9c-1.3 0-2.6-.7-3.3-1.8l-.5-.8M18 14l4 4-4 4",
+      onClick: openRandomNote,
+    },
+    {
+      id: "settings",
+      label: "Settings",
+      icon: "M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z",
+      onClick: () => dispatchKey(",", true, false),
+      shortcut: "\u2318,",
+    },
+  ], [
+    openQuickCapture, openInboxPanel, toggleFlashcards, toggleTasks, toggleGoals,
+    togglePeople, toggleDailyNotes, openActionLibrary, openRandomNote, dispatchKey,
+    inboxCount, flashcardsDue, taskBadge, taskBadgeUrgent, goalStreak,
+  ]);
+
+  const buttonMap = useMemo(
+    () => new Map(allButtons.map((b) => [b.id, b])),
+    [allButtons]
+  );
+
+  // Resolve pinned buttons
+  const pinnedButtons = useMemo(
+    () => pinnedToolButtons.map((id) => buttonMap.get(id)).filter((b): b is ToolButtonDef => !!b),
+    [pinnedToolButtons, buttonMap]
+  );
+
+  const pinnedSet = useMemo(
+    () => new Set(pinnedToolButtons),
+    [pinnedToolButtons]
+  );
+
+  // dnd-kit
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
+  );
+
+  const handleDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      const { active, over } = event;
+      if (over && active.id !== over.id) {
+        const oldIndex = pinnedToolButtons.indexOf(active.id as ToolButtonId);
+        const newIndex = pinnedToolButtons.indexOf(over.id as ToolButtonId);
+        if (oldIndex !== -1 && newIndex !== -1) {
+          setPinnedToolButtons(arrayMove(pinnedToolButtons, oldIndex, newIndex));
+        }
+      }
+    },
+    [pinnedToolButtons, setPinnedToolButtons]
+  );
 
   return (
     <div
@@ -623,180 +855,53 @@ function SidebarToolDock({
           }}
         >
           <div className="p-1">
-            <SidebarMenuItem
-              label="Quick Capture"
-              shortcut="\u2318\u21e7C"
-              onClick={() => { openQuickCapture(); setMoreOpen(false); }}
-              icon={<SvgIcon d="M12 5v14M5 12h14" />}
-            />
-            <SidebarMenuItem
-              label="Web Clipper"
-              shortcut="\u2318\u21e7L"
-              onClick={() => { window.dispatchEvent(new CustomEvent("open-web-clipper")); setMoreOpen(false); }}
-              icon={<SvgIcon d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zM2 12h20" />}
-            />
-            <div className="mx-2 my-1 border-t" style={{ borderColor: "var(--color-border)" }} />
-            <SidebarMenuItem
-              label="Inbox"
-              shortcut="\u2318\u21e7I"
-              badge={inboxCount}
-              onClick={() => { openInboxPanel(); setMoreOpen(false); }}
-              icon={<SvgIcon d="M22 12l-6 0-2 3H10L8 12l-6 0M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />}
-            />
-            <SidebarMenuItem
-              label="Flashcards"
-              shortcut="\u2318\u21e7F"
-              badge={flashcardsDue}
-              onClick={() => { toggleFlashcards(); setMoreOpen(false); }}
-              icon={<SvgIcon d="M2 4h20v16H2zM2 12h20" />}
-            />
-            <SidebarMenuItem
-              label="Tasks"
-              badge={taskBadge}
-              badgeUrgent={taskBadgeUrgent}
-              onClick={() => { toggleTasks(); setMoreOpen(false); }}
-              icon={<SvgIcon d="M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />}
-            />
-            <SidebarMenuItem
-              label="Goals"
-              badge={goalStreak}
-              badgeUrgent
-              badgeEmoji={goalStreak > 0 ? "\uD83D\uDD25" : undefined}
-              onClick={() => { toggleGoals(); setMoreOpen(false); }}
-              icon={<SvgIcon d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zM12 6a6 6 0 1 0 0 12 6 6 0 0 0 0-12zM12 10a2 2 0 1 0 0 4 2 2 0 0 0 0-4z" />}
-            />
-            <SidebarMenuItem
-              label="People"
-              onClick={() => { togglePeople(); setMoreOpen(false); }}
-              icon={<SvgIcon d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M9 7a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />}
-            />
-            <SidebarMenuItem
-              label="Daily Notes"
-              shortcut="\u2318\u21e7D"
-              onClick={() => { toggleDailyNotes(); setMoreOpen(false); }}
-              icon={<SvgIcon d="M3 4h18v18H3zM16 2v4M8 2v4M3 10h18" />}
-            />
-            <div className="mx-2 my-1 border-t" style={{ borderColor: "var(--color-border)" }} />
-            <SidebarMenuItem
-              label="AI Chat"
-              shortcut="\u2318\u21e7A"
-              onClick={() => { dispatchKey("A", true, true); setMoreOpen(false); }}
-              icon={<SvgIcon d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z" />}
-            />
-            <SidebarMenuItem
-              label="Actions"
-              shortcut="\u2318\u21e7X"
-              onClick={() => { openActionLibrary(); setMoreOpen(false); }}
-              icon={<SvgIcon d="M13 2L3 14h9l-1 8 10-12h-9l1-8" />}
-            />
-            <SidebarMenuItem
-              label="Graph View"
-              shortcut="\u2318G"
-              onClick={() => { dispatchKey("g", true, false); setMoreOpen(false); }}
-              icon={<SvgIcon d="M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM19 3a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM5 17a2 2 0 1 0 0 4 2 2 0 0 0 0-4zM14.5 9.5l3-3M9.5 14.5l-3 3" />}
-            />
-            <SidebarMenuItem
-              label="Random Note"
-              onClick={() => { openRandomNote(); setMoreOpen(false); }}
-              icon={<SvgIcon d="M2 18h1.4c1.3 0 2.5-.6 3.3-1.7l6.1-8.6c.7-1.1 2-1.7 3.3-1.7H22M18 2l4 4-4 4M2 6h1.9c1.5 0 2.9.9 3.6 2.2M22 18h-5.9c-1.3 0-2.6-.7-3.3-1.8l-.5-.8M18 14l4 4-4 4" />}
-            />
-            <SidebarMenuItem
-              label="Settings"
-              shortcut="\u2318,"
-              onClick={() => { dispatchKey(",", true, false); setMoreOpen(false); }}
-              icon={<SvgIcon d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z" />}
-            />
+            {allButtons.map((btn) => (
+              <div key={btn.id}>
+                {btn.separator && (
+                  <div className="mx-2 my-1 border-t" style={{ borderColor: "var(--color-border)" }} />
+                )}
+                <div className="group flex items-center">
+                  <SidebarMenuItem
+                    icon={<SvgIcon d={btn.icon} />}
+                    label={btn.label}
+                    shortcut={btn.shortcut}
+                    badge={btn.badge}
+                    badgeUrgent={btn.badgeUrgent}
+                    badgeEmoji={btn.badgeEmoji}
+                    onClick={() => { btn.onClick(); setMoreOpen(false); }}
+                  />
+                  <button
+                    onClick={(e) => { e.stopPropagation(); togglePinnedToolButton(btn.id); }}
+                    className="mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded opacity-0 transition-opacity hover:bg-[--color-bg-tertiary] group-hover:opacity-100"
+                    style={{ color: pinnedSet.has(btn.id) ? "var(--color-accent)" : "var(--color-text-muted)" }}
+                    title={pinnedSet.has(btn.id) ? "Unpin from toolbar" : "Pin to toolbar"}
+                  >
+                    {pinnedSet.has(btn.id) ? (
+                      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M12 17v5M9 2h6l1 7h2l-1 4H7L6 9h2z" />
+                      </svg>
+                    ) : (
+                      <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M12 17v5M9 2h6l1 7h2l-1 4H7L6 9h2z" />
+                      </svg>
+                    )}
+                  </button>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       )}
 
-      {/* Compact bar: primary actions + more button */}
+      {/* Compact bar: pinned actions + more button */}
       <div className="flex items-center justify-center gap-1">
-        {/* Quick Capture */}
-        <button
-          onClick={openQuickCapture}
-          className="flex h-7 items-center gap-1 rounded-md px-2 text-[11px] font-medium transition-colors hover:bg-[--color-bg-tertiary]"
-          style={{ color: "var(--color-text-secondary)" }}
-          title="Quick Capture (⌘⇧C)"
-        >
-          <SvgIcon d="M12 5v14M5 12h14" size={13} />
-          <span>New</span>
-        </button>
-
-        {/* Inbox — show badge inline */}
-        <button
-          onClick={openInboxPanel}
-          className="flex h-7 items-center gap-1 rounded-md px-1.5 text-[11px] transition-colors hover:bg-[--color-bg-tertiary]"
-          style={{ color: "var(--color-text-muted)" }}
-          title="Inbox (⌘⇧I)"
-        >
-          <SvgIcon d="M22 12l-6 0-2 3H10L8 12l-6 0M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" size={13} />
-          {inboxCount > 0 && (
-            <span
-              className="flex h-3.5 min-w-[14px] items-center justify-center rounded-full px-0.5 text-[9px] font-bold text-white"
-              style={{ backgroundColor: "var(--color-accent)" }}
-            >
-              {inboxCount > 9 ? "9+" : inboxCount}
-            </span>
-          )}
-        </button>
-
-        {/* Tasks — show badge if overdue/due */}
-        {taskBadge > 0 && (
-          <button
-            onClick={toggleTasks}
-            className="flex h-7 items-center gap-1 rounded-md px-1.5 text-[11px] transition-colors hover:bg-[--color-bg-tertiary]"
-            style={{ color: "var(--color-text-muted)" }}
-            title="Tasks"
-          >
-            <SvgIcon d="M9 11l3 3L22 4M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" size={13} />
-            <span
-              className="flex h-3.5 min-w-[14px] items-center justify-center rounded-full px-0.5 text-[9px] font-bold"
-              style={{
-                backgroundColor: taskBadgeUrgent ? "rgba(239, 68, 68, 0.2)" : "var(--color-accent)",
-                color: taskBadgeUrgent ? "#ef4444" : "white",
-              }}
-            >
-              {taskBadge}
-            </span>
-          </button>
-        )}
-
-        {/* Flashcards — show badge if due */}
-        {flashcardsDue > 0 && (
-          <button
-            onClick={toggleFlashcards}
-            className="flex h-7 items-center gap-1 rounded-md px-1.5 text-[11px] transition-colors hover:bg-[--color-bg-tertiary]"
-            style={{ color: "var(--color-text-muted)" }}
-            title="Flashcards (⌘⇧F)"
-          >
-            <SvgIcon d="M2 4h20v16H2zM2 12h20" size={13} />
-            <span
-              className="flex h-3.5 min-w-[14px] items-center justify-center rounded-full px-0.5 text-[9px] font-bold text-white"
-              style={{ backgroundColor: "var(--color-accent)" }}
-            >
-              {flashcardsDue > 9 ? "9+" : flashcardsDue}
-            </span>
-          </button>
-        )}
-
-        {/* Goals streak — show if active */}
-        {goalStreak > 0 && (
-          <button
-            onClick={toggleGoals}
-            className="flex h-7 items-center gap-0.5 rounded-md px-1.5 text-[11px] transition-colors hover:bg-[--color-bg-tertiary]"
-            style={{ color: "var(--color-text-muted)" }}
-            title="Goals"
-          >
-            <span className="text-[11px]">{"\uD83D\uDD25"}</span>
-            <span
-              className="flex h-3.5 min-w-[14px] items-center justify-center rounded-full px-0.5 text-[9px] font-bold"
-              style={{ backgroundColor: "rgba(239, 68, 68, 0.2)", color: "#ef4444" }}
-            >
-              {goalStreak}
-            </span>
-          </button>
-        )}
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <SortableContext items={pinnedButtons.map((b) => b.id)} strategy={horizontalListSortingStrategy}>
+            {pinnedButtons.map((btn) => (
+              <SortableToolButton key={btn.id} def={btn} />
+            ))}
+          </SortableContext>
+        </DndContext>
 
         {/* Separator */}
         <div className="mx-0.5 h-4 w-px" style={{ backgroundColor: "var(--color-border)" }} />
@@ -851,7 +956,7 @@ function SidebarMenuItem({
   return (
     <button
       onClick={onClick}
-      className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] transition-colors hover:bg-[--color-bg-tertiary]"
+      className="flex flex-1 min-w-0 items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-[13px] transition-colors hover:bg-[--color-bg-tertiary]"
       style={{ color: "var(--color-text-secondary)" }}
     >
       <span className="shrink-0" style={{ color: "var(--color-text-muted)" }}>{icon}</span>
@@ -883,8 +988,6 @@ function SidebarMenuItem({
 // --- Reusable SVG icon helper ---
 
 function SvgIcon({ d, size = 14 }: { d: string; size?: number }) {
-  // Parse the d string for multi-path support (paths separated by M or other commands)
-  // For simplicity, render as a single path element
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
