@@ -1576,6 +1576,7 @@ export async function updateSection(
     color?: string | null;
     systemPrompt?: string | null;
     systemPromptMode?: string;
+    pageSortBy?: string;
   }
 ): Promise<Section> {
   return invoke<Section>("update_section", {

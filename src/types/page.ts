@@ -56,6 +56,7 @@ export const SectionSchema = z.object({
   systemPrompt: z.string().optional(),
   systemPromptMode: SystemPromptModeSchema.default("override"),
   aiModel: z.string().optional(), // Model override (format: "provider:model" or just "model")
+  pageSortBy: z.enum(["position", "name-asc", "name-desc", "updated", "created"]).optional(),
   position: z.number().default(0),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),

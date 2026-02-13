@@ -20,6 +20,7 @@ import type { ObjectType } from "../../types/database";
 import { useFolderStore } from "../../stores/folderStore";
 import { usePageStore } from "../../stores/pageStore";
 import { useNotebookStore } from "../../stores/notebookStore";
+import { useSectionStore } from "../../stores/sectionStore";
 import { useThemeStore, type PageSortOption as ThemePageSortOption } from "../../stores/themeStore";
 import * as api from "../../utils/api";
 import { FolderTreeItem, DraggablePageItem } from "./FolderTreeItem";
@@ -174,12 +175,19 @@ export function FolderTree({
     deleteFolder: deleteFolderApi,
   } = useFolderStore();
   const { updateNotebook } = useNotebookStore();
+  const { updateSection: updateSectionStore } = useSectionStore();
   const autoHidePanels = useThemeStore((state) => state.autoHidePanels);
   const setAutoHidePanels = useThemeStore((state) => state.setAutoHidePanels);
   const globalPageSortBy = useThemeStore((state) => state.pageSortBy);
 
-  // Use per-notebook sort setting with fallback to global
-  const pageSortBy = (notebook?.pageSortBy ?? globalPageSortBy) as ThemePageSortOption;
+  // Resolve selected section for per-section sort
+  const selectedSection = useMemo(
+    () => sections.find((s) => s.id === selectedSectionId) ?? null,
+    [sections, selectedSectionId]
+  );
+
+  // Use per-section → per-notebook → global fallback for sort setting
+  const pageSortBy = (selectedSection?.pageSortBy ?? notebook?.pageSortBy ?? globalPageSortBy) as ThemePageSortOption;
 
   const [isCreatingFolder, setIsCreatingFolder] = useState(false);
   const [showPageSortMenu, setShowPageSortMenu] = useState(false);
@@ -972,8 +980,12 @@ END:VCALENDAR`;
                     <button
                       key={option.value}
                       onClick={() => {
-                        // Save per-notebook sort preference
-                        updateNotebook(notebookId, { pageSortBy: option.value });
+                        // Save per-section sort if a section is selected, otherwise per-notebook
+                        if (sectionsEnabled && selectedSectionId) {
+                          updateSectionStore(notebookId, selectedSectionId, { pageSortBy: option.value });
+                        } else {
+                          updateNotebook(notebookId, { pageSortBy: option.value });
+                        }
                         setShowPageSortMenu(false);
                       }}
                       className="flex w-full items-center justify-between px-3 py-1.5 text-left text-xs transition-colors hover:bg-[--color-bg-tertiary]"

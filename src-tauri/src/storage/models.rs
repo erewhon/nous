@@ -122,6 +122,9 @@ pub struct Section {
     /// AI model override for this section (e.g., "gpt-4o", "claude-sonnet-4-20250514")
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ai_model: Option<String>,
+    /// Page sort preference for this section (overrides notebook-level setting)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page_sort_by: Option<String>,
     /// Position for ordering sections
     #[serde(default)]
     pub position: i32,
@@ -141,6 +144,7 @@ impl Section {
             system_prompt: None,
             system_prompt_mode: SystemPromptMode::default(),
             ai_model: None,
+            page_sort_by: None,
             position: 0,
             created_at: now,
             updated_at: now,

@@ -76,6 +76,7 @@ pub fn update_section(
     color: Option<Option<String>>, // None = don't change, Some(None) = clear color, Some(Some(c)) = set color
     system_prompt: Option<Option<String>>, // None = don't change, Some(None) = clear, Some(Some(p)) = set
     system_prompt_mode: Option<String>, // None = don't change, Some("override") or Some("concatenate")
+    page_sort_by: Option<String>,      // None = don't change, Some("") = clear, Some(sort) = set
 ) -> CommandResult<Section> {
     let storage = state.storage.lock().unwrap();
     let nb_id = Uuid::parse_str(&notebook_id).map_err(|e| CommandError {
@@ -108,6 +109,10 @@ pub fn update_section(
             "concatenate" => crate::storage::SystemPromptMode::Concatenate,
             _ => crate::storage::SystemPromptMode::Override,
         };
+    }
+
+    if let Some(sort) = page_sort_by {
+        section.page_sort_by = if sort.is_empty() { None } else { Some(sort) };
     }
 
     section.updated_at = chrono::Utc::now();
