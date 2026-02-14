@@ -107,6 +107,7 @@ export const PageSchema = z.object({
   // Soft delete support - pages in trash
   deletedAt: z.string().datetime().nullable().optional(), // When page was moved to trash (null = not deleted)
   // Favorites
+  color: z.string().optional(),
   isFavorite: z.boolean().default(false),
   // Daily notes
   isDailyNote: z.boolean().default(false),

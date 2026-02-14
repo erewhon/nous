@@ -633,6 +633,7 @@ pub fn import_onenote(
                     template_id: None,
                     deleted_at: None,
                     is_favorite: false,
+                    color: None,
                     is_daily_note: false,
                     daily_note_date: None,
                     created_at: now,

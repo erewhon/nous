@@ -1,4 +1,4 @@
-import { useState, memo, useCallback } from "react";
+import { useState, useRef, useEffect, memo, useCallback } from "react";
 import { useDraggable, useDroppable } from "@dnd-kit/core";
 import type { Folder, Page, PageType, Section } from "../../types/page";
 
@@ -104,7 +104,11 @@ interface FolderTreeItemProps {
   onMoveToSection?: (pageId: string, sectionId: string | null) => void;
   onMoveFolderToSection?: (folderId: string, sectionId: string | null) => void;
   onMoveToNotebook?: (pageId: string, pageTitle: string) => void;
+  onMoveFolderToNotebook?: (folderId: string, folderName: string) => void;
   onSmartOrganize?: (pageId: string, pageTitle: string) => void;
+  onArchivePage?: (pageId: string) => void;
+  onUnarchivePage?: (pageId: string) => void;
+  onSetPageColor?: (pageId: string, color: string | undefined) => void;
 }
 
 export const FolderTreeItem = memo(function FolderTreeItem({
@@ -133,15 +137,38 @@ export const FolderTreeItem = memo(function FolderTreeItem({
   onMoveToSection,
   onMoveFolderToSection,
   onMoveToNotebook,
+  onMoveFolderToNotebook,
   onSmartOrganize,
+  onArchivePage,
+  onUnarchivePage,
+  onSetPageColor,
 }: FolderTreeItemProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState(folder.name);
   const [showActions, setShowActions] = useState(false);
   const [showContextMenu, setShowContextMenu] = useState(false);
   const [contextMenuPos, setContextMenuPos] = useState({ x: 0, y: 0 });
+  const contextMenuRef = useRef<HTMLDivElement>(null);
 
   const isArchive = folder.folderType === "archive";
+
+  // Close context menu on click outside or Escape
+  useEffect(() => {
+    if (!showContextMenu) return;
+    const handleMouseDown = (e: MouseEvent) => {
+      if (contextMenuRef.current && !contextMenuRef.current.contains(e.target as Node))
+        setShowContextMenu(false);
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setShowContextMenu(false);
+    };
+    document.addEventListener("mousedown", handleMouseDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handleMouseDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [showContextMenu]);
 
   // Make folder a drop target
   const { setNodeRef: setDroppableRef, isOver } = useDroppable({
@@ -200,12 +227,15 @@ export const FolderTreeItem = memo(function FolderTreeItem({
   }, [handleSubmitRename, folder.name]);
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
-    if (sections && sections.length > 0 && onMoveFolderToSection && !isArchive) {
+    if (!isArchive && (
+      (sections && sections.length > 0 && onMoveFolderToSection) ||
+      onMoveFolderToNotebook
+    )) {
       e.preventDefault();
       setContextMenuPos({ x: e.clientX, y: e.clientY });
       setShowContextMenu(true);
     }
-  }, [sections, onMoveFolderToSection, isArchive]);
+  }, [sections, onMoveFolderToSection, onMoveFolderToNotebook, isArchive]);
 
   const handleMoveFolderToSection = useCallback((sectionId: string | null) => {
     if (onMoveFolderToSection) {
@@ -467,6 +497,9 @@ export const FolderTreeItem = memo(function FolderTreeItem({
               onMoveToSection={onMoveToSection}
               onMoveToNotebook={onMoveToNotebook}
               onSmartOrganize={onSmartOrganize}
+              onArchivePage={onArchivePage}
+              onUnarchivePage={onUnarchivePage}
+              onSetPageColor={onSetPageColor}
               getChildPages={getChildPages}
               expandedPageIds={expandedPageIds}
               onTogglePageExpand={onTogglePageExpand}
@@ -477,9 +510,10 @@ export const FolderTreeItem = memo(function FolderTreeItem({
       )}
     </li>
 
-    {/* Context menu for moving folder to section */}
-    {showContextMenu && sections && (
+    {/* Context menu for folder actions */}
+    {showContextMenu && (
       <div
+        ref={contextMenuRef}
         className="fixed z-50 min-w-40 rounded-lg border py-1 shadow-lg"
         style={{
           left: contextMenuPos.x,
@@ -488,49 +522,87 @@ export const FolderTreeItem = memo(function FolderTreeItem({
           borderColor: "var(--color-border)",
         }}
         onClick={(e) => e.stopPropagation()}
-        onMouseLeave={() => setShowContextMenu(false)}
       >
-        <div
-          className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wider"
-          style={{ color: "var(--color-text-muted)" }}
-        >
-          Move to Section
-        </div>
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            handleMoveFolderToSection(null);
-          }}
-          className="flex w-full items-center gap-2 px-3 py-1.5 text-sm transition-colors hover:bg-[var(--color-bg-tertiary)]"
-          style={{
-            color: folder.sectionId === null ? "var(--color-accent)" : "var(--color-text-primary)",
-          }}
-        >
-          <span
-            className="h-2 w-2 rounded-full"
-            style={{ backgroundColor: "var(--color-text-muted)" }}
-          />
-          No Section
-        </button>
-        {sections.map((section) => (
-          <button
-            key={section.id}
-            onClick={(e) => {
-              e.stopPropagation();
-              handleMoveFolderToSection(section.id);
-            }}
-            className="flex w-full items-center gap-2 px-3 py-1.5 text-sm transition-colors hover:bg-[var(--color-bg-tertiary)]"
-            style={{
-              color: folder.sectionId === section.id ? "var(--color-accent)" : "var(--color-text-primary)",
-            }}
-          >
-            <span
-              className="h-2 w-2 rounded-full"
-              style={{ backgroundColor: section.color || "var(--color-accent)" }}
-            />
-            {section.name}
-          </button>
-        ))}
+        {sections && sections.length > 0 && onMoveFolderToSection && (
+          <>
+            <div
+              className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wider"
+              style={{ color: "var(--color-text-muted)" }}
+            >
+              Move to Section
+            </div>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                handleMoveFolderToSection(null);
+              }}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-sm transition-colors hover:bg-[var(--color-bg-tertiary)]"
+              style={{
+                color: folder.sectionId === null ? "var(--color-accent)" : "var(--color-text-primary)",
+              }}
+            >
+              <span
+                className="h-2 w-2 rounded-full"
+                style={{ backgroundColor: "var(--color-text-muted)" }}
+              />
+              No Section
+            </button>
+            {sections.map((section) => (
+              <button
+                key={section.id}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleMoveFolderToSection(section.id);
+                }}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-sm transition-colors hover:bg-[var(--color-bg-tertiary)]"
+                style={{
+                  color: folder.sectionId === section.id ? "var(--color-accent)" : "var(--color-text-primary)",
+                }}
+              >
+                <span
+                  className="h-2 w-2 rounded-full"
+                  style={{ backgroundColor: section.color || "var(--color-accent)" }}
+                />
+                {section.name}
+              </button>
+            ))}
+          </>
+        )}
+        {onMoveFolderToNotebook && (
+          <>
+            {sections && sections.length > 0 && onMoveFolderToSection && (
+              <div
+                className="my-1 border-t"
+                style={{ borderColor: "var(--color-border)" }}
+              />
+            )}
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowContextMenu(false);
+                onMoveFolderToNotebook(folder.id, folder.name);
+              }}
+              className="flex w-full items-center gap-2 px-3 py-1.5 text-sm transition-colors hover:bg-[var(--color-bg-tertiary)]"
+              style={{ color: "var(--color-text-primary)" }}
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M12 3v12M9 9l3-3 3 3" />
+                <path d="M4 11v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" />
+              </svg>
+              Move to Notebook...
+            </button>
+          </>
+        )}
       </div>
     )}
     </>
@@ -610,6 +682,9 @@ interface DraggablePageItemProps {
   onMoveToSection?: (pageId: string, sectionId: string | null) => void;
   onMoveToNotebook?: (pageId: string, pageTitle: string) => void; // Move page to another notebook
   onSmartOrganize?: (pageId: string, pageTitle: string) => void; // Smart organize from page
+  onArchivePage?: (pageId: string) => void; // Archive the page
+  onUnarchivePage?: (pageId: string) => void; // Unarchive the page
+  onSetPageColor?: (pageId: string, color: string | undefined) => void; // Set page color
   getChildPages?: (parentPageId: string) => Page[];
   expandedPageIds?: Set<string>;
   onTogglePageExpand?: (pageId: string) => void;
@@ -632,6 +707,9 @@ const DraggablePageItem = memo(function DraggablePageItem({
   onMoveToSection,
   onMoveToNotebook,
   onSmartOrganize,
+  onArchivePage,
+  onUnarchivePage,
+  onSetPageColor,
   getChildPages,
   expandedPageIds,
   onTogglePageExpand,
@@ -640,6 +718,25 @@ const DraggablePageItem = memo(function DraggablePageItem({
   const [showContextMenu, setShowContextMenu] = useState(false);
   const [contextMenuPos, setContextMenuPos] = useState({ x: 0, y: 0 });
   const [isHovered, setIsHovered] = useState(false);
+  const pageContextMenuRef = useRef<HTMLDivElement>(null);
+
+  // Close context menu on click outside or Escape
+  useEffect(() => {
+    if (!showContextMenu) return;
+    const handleMouseDown = (e: MouseEvent) => {
+      if (pageContextMenuRef.current && !pageContextMenuRef.current.contains(e.target as Node))
+        setShowContextMenu(false);
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setShowContextMenu(false);
+    };
+    document.addEventListener("mousedown", handleMouseDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handleMouseDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [showContextMenu]);
 
   // Make page draggable
   const {
@@ -682,7 +779,12 @@ const DraggablePageItem = memo(function DraggablePageItem({
 
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
-    setContextMenuPos({ x: e.clientX, y: e.clientY });
+    // Adjust position to stay within viewport
+    const menuWidth = 200;
+    const menuHeight = 400;
+    const x = e.clientX + menuWidth > window.innerWidth ? window.innerWidth - menuWidth - 8 : e.clientX;
+    const y = e.clientY + menuHeight > window.innerHeight ? Math.max(8, window.innerHeight - menuHeight - 8) : e.clientY;
+    setContextMenuPos({ x, y });
     setShowContextMenu(true);
   }, []);
 
@@ -800,11 +902,17 @@ const DraggablePageItem = memo(function DraggablePageItem({
             <span
               className="flex h-5 w-5 flex-shrink-0 items-center justify-center"
               style={{
-                color: isSelected ? "var(--color-accent)" : "var(--color-text-muted)",
+                color: page.color || (isSelected ? "var(--color-accent)" : "var(--color-text-muted)"),
               }}
             >
               <PageTypeIcon pageType={page.pageType} />
             </span>
+            {page.color && (
+              <span
+                className="h-2 w-2 flex-shrink-0 rounded-full"
+                style={{ backgroundColor: page.color }}
+              />
+            )}
             <span className="flex-1 min-w-0 truncate text-sm">{page.title}</span>
             {page.isFavorite && !isHovered && (
               <span
@@ -868,6 +976,9 @@ const DraggablePageItem = memo(function DraggablePageItem({
                 onMoveToSection={onMoveToSection}
                 onMoveToNotebook={onMoveToNotebook}
                 onSmartOrganize={onSmartOrganize}
+                onArchivePage={onArchivePage}
+                onUnarchivePage={onUnarchivePage}
+                onSetPageColor={onSetPageColor}
                 getChildPages={getChildPages}
                 expandedPageIds={expandedPageIds}
                 onTogglePageExpand={onTogglePageExpand}
@@ -881,6 +992,7 @@ const DraggablePageItem = memo(function DraggablePageItem({
       {/* Context menu */}
       {showContextMenu && (
         <div
+          ref={pageContextMenuRef}
           className="fixed z-50 min-w-40 rounded-lg border py-1 shadow-lg"
           style={{
             left: contextMenuPos.x,
@@ -889,7 +1001,6 @@ const DraggablePageItem = memo(function DraggablePageItem({
             borderColor: "var(--color-border)",
           }}
           onClick={(e) => e.stopPropagation()}
-          onMouseLeave={() => setShowContextMenu(false)}
         >
           {/* Open in Tab option */}
           {onOpenInTab && (
@@ -1114,6 +1225,112 @@ const DraggablePageItem = memo(function DraggablePageItem({
               </svg>
               Smart Organize...
             </button>
+          )}
+
+          {/* Color swatches */}
+          {onSetPageColor && (
+            <>
+              <div
+                className="my-1 border-t"
+                style={{ borderColor: "var(--color-border)" }}
+              />
+              <div
+                className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wider"
+                style={{ color: "var(--color-text-muted)" }}
+              >
+                Color
+              </div>
+              <div className="flex items-center gap-1 px-3 py-1">
+                {/* Clear color */}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onSetPageColor(page.id, undefined);
+                    setShowContextMenu(false);
+                  }}
+                  className="flex h-5 w-5 items-center justify-center rounded-full border transition-transform hover:scale-110"
+                  style={{
+                    borderColor: !page.color ? "var(--color-text-primary)" : "var(--color-border)",
+                    backgroundColor: "var(--color-bg-tertiary)",
+                  }}
+                  title="No color"
+                >
+                  {!page.color && (
+                    <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round">
+                      <path d="M18 6L6 18M6 6l12 12" />
+                    </svg>
+                  )}
+                </button>
+                {/* Preset colors */}
+                {[
+                  "#ef4444", "#f97316", "#eab308", "#22c55e",
+                  "#06b6d4", "#3b82f6", "#8b5cf6", "#ec4899",
+                ].map((color) => (
+                  <button
+                    key={color}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSetPageColor(page.id, color);
+                      setShowContextMenu(false);
+                    }}
+                    className="h-5 w-5 rounded-full border-2 transition-transform hover:scale-110"
+                    style={{
+                      backgroundColor: color,
+                      borderColor: page.color === color ? "white" : "transparent",
+                      boxShadow: page.color === color ? `0 0 0 1px ${color}` : "none",
+                    }}
+                    title={color}
+                  />
+                ))}
+              </div>
+            </>
+          )}
+
+          {/* Archive/Unarchive option */}
+          {(onArchivePage || onUnarchivePage) && (
+            <>
+              <div
+                className="my-1 border-t"
+                style={{ borderColor: "var(--color-border)" }}
+              />
+              {!page.isArchived && onArchivePage && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowContextMenu(false);
+                    onArchivePage(page.id);
+                  }}
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-sm transition-colors hover:bg-[var(--color-bg-tertiary)]"
+                  style={{ color: "var(--color-text-primary)" }}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="2" y="4" width="20" height="5" rx="1" />
+                    <path d="M4 9v9a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9" />
+                    <path d="M10 13h4" />
+                  </svg>
+                  Archive
+                </button>
+              )}
+              {page.isArchived && onUnarchivePage && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowContextMenu(false);
+                    onUnarchivePage(page.id);
+                  }}
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-sm transition-colors hover:bg-[var(--color-bg-tertiary)]"
+                  style={{ color: "var(--color-text-primary)" }}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="2" y="4" width="20" height="5" rx="1" />
+                    <path d="M4 9v9a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9" />
+                    <path d="M12 16V11" />
+                    <path d="M9 13l3-3 3 3" />
+                  </svg>
+                  Unarchive
+                </button>
+              )}
+            </>
           )}
 
           {/* Delete page option */}

@@ -64,6 +64,13 @@ export async function reorderNotebooks(notebookIds: string[]): Promise<void> {
   return invoke("reorder_notebooks", { notebookIds });
 }
 
+export async function mergeNotebook(
+  sourceNotebookId: string,
+  targetNotebookId: string
+): Promise<void> {
+  return invoke("merge_notebook", { sourceNotebookId, targetNotebookId });
+}
+
 // ===== Page API =====
 
 export async function listPages(
@@ -122,6 +129,7 @@ export async function updatePage(
     isFavorite?: boolean;
     isDailyNote?: boolean;
     dailyNoteDate?: string | null; // "YYYY-MM-DD" format, null to clear
+    color?: string | null; // CSS color string, null to clear
   },
   commit?: boolean // Whether to create a git commit (default: false, use true for explicit saves)
 ): Promise<Page> {
@@ -147,6 +155,7 @@ export async function updatePage(
     params.isDailyNote = updates.isDailyNote;
   if (updates.dailyNoteDate !== undefined)
     params.dailyNoteDate = updates.dailyNoteDate;
+  if (updates.color !== undefined) params.color = updates.color;
 
   return invoke<Page>("update_page", params);
 }
@@ -208,6 +217,20 @@ export async function movePageToNotebook(
     pageId,
     targetNotebookId,
     targetFolderId,
+  });
+}
+
+export async function moveFolderToNotebook(
+  sourceNotebookId: string,
+  folderId: string,
+  targetNotebookId: string,
+  targetParentFolderId?: string
+): Promise<Folder> {
+  return invoke<Folder>("move_folder_to_notebook", {
+    sourceNotebookId,
+    folderId,
+    targetNotebookId,
+    targetParentFolderId,
   });
 }
 

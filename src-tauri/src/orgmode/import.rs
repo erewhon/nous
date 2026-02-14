@@ -662,6 +662,7 @@ fn import_org_file(content: &str, notebook_id: Uuid, fallback_title: &str) -> Pa
         template_id: None,
         deleted_at: None,
         is_favorite: false,
+        color: None,
         is_daily_note: false,
         daily_note_date: None,
         created_at,

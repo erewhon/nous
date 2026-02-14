@@ -136,6 +136,8 @@ interface FolderTreeProps {
   onMoveToNotebook?: (pageId: string, pageTitle: string) => void;
   // Smart organize
   onSmartOrganize?: (pageId: string, pageTitle: string) => void;
+  // Move folder to notebook
+  onMoveFolderToNotebook?: (folderId: string, folderName: string) => void;
 }
 
 export function FolderTree({
@@ -157,6 +159,7 @@ export function FolderTree({
   onReorderPages,
   onMoveToNotebook,
   onSmartOrganize,
+  onMoveFolderToNotebook,
 }: FolderTreeProps) {
   const createPage = usePageStore((s) => s.createPage);
   const createSubpage = usePageStore((s) => s.createSubpage);
@@ -164,6 +167,8 @@ export function FolderTree({
   const movePageToParent = usePageStore((s) => s.movePageToParent);
   const loadPages = usePageStore((s) => s.loadPages);
   const toggleFavorite = usePageStore((s) => s.toggleFavorite);
+  const archivePage = usePageStore((s) => s.archivePage);
+  const unarchivePage = usePageStore((s) => s.unarchivePage);
   const {
     expandedFolderIds,
     toggleFolderExpanded,
@@ -256,7 +261,10 @@ export function FolderTree({
     if (sectionsEnabled && selectedSectionId !== undefined) {
       // null means "unsorted" - show pages with no section
       // string means a specific section
-      filtered = filtered.filter((p) => (p.sectionId ?? null) === selectedSectionId);
+      // When showArchived is on, always include archived pages regardless of section
+      filtered = filtered.filter((p) =>
+        (showArchived && p.isArchived) || (p.sectionId ?? null) === selectedSectionId
+      );
     }
     // Deduplicate by ID (defensive - shouldn't happen but prevents React key errors)
     const seen = new Set<string>();
@@ -277,8 +285,11 @@ export function FolderTree({
       return folders;
     }
     // null means "unsorted" - show folders with no section
-    return folders.filter((f) => (f.sectionId ?? null) === selectedSectionId);
-  }, [folders, sectionsEnabled, selectedSectionId]);
+    // Always include archive folder when showArchived is on
+    return folders.filter((f) =>
+      (showArchived && f.folderType === "archive") || (f.sectionId ?? null) === selectedSectionId
+    );
+  }, [folders, sectionsEnabled, selectedSectionId, showArchived]);
 
   // Get top-level pages for a specific folder (pages without a parent page)
   const getPagesForFolder = useCallback(
@@ -600,6 +611,35 @@ END:VCALENDAR`;
     [notebookId, toggleFavorite]
   );
 
+  // Handle archiving a page
+  const handleArchivePage = useCallback(
+    (pageId: string) => {
+      archivePage(notebookId, pageId);
+    },
+    [notebookId, archivePage]
+  );
+
+  // Handle unarchiving a page
+  const handleUnarchivePage = useCallback(
+    (pageId: string) => {
+      unarchivePage(notebookId, pageId);
+    },
+    [notebookId, unarchivePage]
+  );
+
+  // Handle setting page color
+  const handleSetPageColor = useCallback(
+    (pageId: string, color: string | undefined) => {
+      // Use api.updatePage directly so we can send null to clear
+      api.updatePage(notebookId, pageId, { color: color ?? null }).then((page) => {
+        usePageStore.setState((state) => ({
+          pages: state.pages.map((p) => (p.id === pageId ? page : p)),
+        }));
+      });
+    },
+    [notebookId]
+  );
+
   // DnD handlers
   const handleDragStart = useCallback((event: DragStartEvent) => {
     const { active } = event;
@@ -848,6 +888,10 @@ END:VCALENDAR`;
           onMoveFolderToSection={onMoveFolderToSection}
           onMoveToNotebook={onMoveToNotebook}
           onSmartOrganize={onSmartOrganize}
+          onArchivePage={handleArchivePage}
+          onUnarchivePage={handleUnarchivePage}
+          onSetPageColor={handleSetPageColor}
+          onMoveFolderToNotebook={onMoveFolderToNotebook}
         />
       );
     },
@@ -876,6 +920,10 @@ END:VCALENDAR`;
       onMoveFolderToSection,
       onMoveToNotebook,
       onSmartOrganize,
+      handleArchivePage,
+      handleUnarchivePage,
+      handleSetPageColor,
+      onMoveFolderToNotebook,
     ]
   );
 
@@ -1428,6 +1476,9 @@ END:VCALENDAR`;
                   onMoveToSection={onMovePageToSection}
                   onMoveToNotebook={onMoveToNotebook}
                   onSmartOrganize={onSmartOrganize}
+                  onArchivePage={handleArchivePage}
+                  onUnarchivePage={handleUnarchivePage}
+                  onSetPageColor={handleSetPageColor}
                   getChildPages={getChildPagesForParent}
                   expandedPageIds={expandedPageIds}
                   onTogglePageExpand={togglePageExpanded}

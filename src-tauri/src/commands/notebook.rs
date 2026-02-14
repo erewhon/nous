@@ -140,6 +140,35 @@ pub fn delete_notebook(state: State<AppState>, notebook_id: String) -> CommandRe
 }
 
 #[tauri::command]
+pub fn merge_notebook(
+    state: State<AppState>,
+    source_notebook_id: String,
+    target_notebook_id: String,
+) -> CommandResult<()> {
+    let storage = state.storage.lock().unwrap();
+    let source_id = Uuid::parse_str(&source_notebook_id).map_err(|e| CommandError {
+        message: format!("Invalid source notebook ID: {}", e),
+    })?;
+    let target_id = Uuid::parse_str(&target_notebook_id).map_err(|e| CommandError {
+        message: format!("Invalid target notebook ID: {}", e),
+    })?;
+
+    storage.merge_notebook(source_id, target_id)?;
+
+    // Auto-commit target notebook if git is enabled
+    let notebook_path = storage.get_notebook_path(target_id);
+    if crate::git::is_git_repo(&notebook_path) {
+        let target = storage.get_notebook(target_id)?;
+        let commit_message = format!("Merge notebook into: {}", target.name);
+        if let Err(e) = crate::git::commit_all(&notebook_path, &commit_message) {
+            log::warn!("Failed to auto-commit after merge: {}", e);
+        }
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
 pub fn reorder_notebooks(
     state: State<AppState>,
     notebook_ids: Vec<String>,

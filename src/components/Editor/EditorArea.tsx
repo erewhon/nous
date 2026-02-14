@@ -18,6 +18,7 @@ import { VideoFullScreen } from "../Video";
 import { DrawingFullScreen, PageAnnotationOverlay } from "../Drawing";
 import { ResizeHandle } from "../Layout/ResizeHandle";
 import { MovePageDialog } from "../Move/MovePageDialog";
+import { MoveFolderDialog } from "../Move/MoveFolderDialog";
 import { SmartOrganizeDialog } from "../SmartOrganize/SmartOrganizeDialog";
 import type { EditorData, Page } from "../../types/page";
 import * as api from "../../utils/api";
@@ -119,6 +120,10 @@ export function EditorArea() {
   // Move page dialog state
   const [movePageDialogOpen, setMovePageDialogOpen] = useState(false);
   const [movePageTarget, setMovePageTarget] = useState<{ pageId: string; pageTitle: string } | null>(null);
+
+  // Move folder dialog state
+  const [moveFolderDialogOpen, setMoveFolderDialogOpen] = useState(false);
+  const [moveFolderTarget, setMoveFolderTarget] = useState<{ folderId: string; folderName: string } | null>(null);
 
   // Smart Organize dialog state
   const [smartOrganizeOpen, setSmartOrganizeOpen] = useState(false);
@@ -489,6 +494,10 @@ export function EditorArea() {
                     setSmartOrganizePageContext({ pageId, pageTitle });
                     setSmartOrganizeOpen(true);
                   }}
+                  onMoveFolderToNotebook={(folderId, folderName) => {
+                    setMoveFolderTarget({ folderId, folderName });
+                    setMoveFolderDialogOpen(true);
+                  }}
                 />
               </div>
             )}
@@ -552,6 +561,24 @@ export function EditorArea() {
           onMoved={() => {
             // Reload pages after moving
             loadPages(selectedNotebook.id, showArchived);
+          }}
+        />
+      )}
+
+      {/* Move Folder Dialog */}
+      {selectedNotebook && moveFolderTarget && (
+        <MoveFolderDialog
+          isOpen={moveFolderDialogOpen}
+          onClose={() => {
+            setMoveFolderDialogOpen(false);
+            setMoveFolderTarget(null);
+          }}
+          folderId={moveFolderTarget.folderId}
+          folderName={moveFolderTarget.folderName}
+          currentNotebookId={selectedNotebook.id}
+          onMoved={() => {
+            loadPages(selectedNotebook.id, showArchived);
+            loadFolders(selectedNotebook.id);
           }}
         />
       )}

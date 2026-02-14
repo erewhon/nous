@@ -145,6 +145,7 @@ pub fn update_page(
     is_favorite: Option<bool>,
     is_daily_note: Option<bool>,
     daily_note_date: Option<Option<String>>, // Some(Some("YYYY-MM-DD")) to set, Some(None) to clear
+    color: Option<Option<String>>, // Some(Some(hex)) to set, Some(None) to clear
     #[allow(unused_variables)]
     commit: Option<bool>, // Whether to create a git commit (default: false)
 ) -> CommandResult<Page> {
@@ -235,6 +236,10 @@ pub fn update_page(
     // Allow setting daily_note_date (Some(Some(date)) to set, Some(None) to clear)
     if let Some(date) = daily_note_date {
         page.daily_note_date = date;
+    }
+    // Allow setting color (Some(Some(hex)) to set, Some(None) to clear)
+    if let Some(c) = color {
+        page.color = c;
     }
     page.updated_at = chrono::Utc::now();
 

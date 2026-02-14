@@ -371,6 +371,57 @@ pub fn reorder_pages(
         .map_err(Into::into)
 }
 
+/// Move a folder (and all descendants + pages) to another notebook
+#[tauri::command]
+pub fn move_folder_to_notebook(
+    state: State<AppState>,
+    source_notebook_id: String,
+    folder_id: String,
+    target_notebook_id: String,
+    target_parent_folder_id: Option<String>,
+) -> CommandResult<Folder> {
+    let storage = state.storage.lock().unwrap();
+
+    let src_nb_id = Uuid::parse_str(&source_notebook_id).map_err(|e| CommandError {
+        message: format!("Invalid source notebook ID: {}", e),
+    })?;
+    let fld_id = Uuid::parse_str(&folder_id).map_err(|e| CommandError {
+        message: format!("Invalid folder ID: {}", e),
+    })?;
+    let tgt_nb_id = Uuid::parse_str(&target_notebook_id).map_err(|e| CommandError {
+        message: format!("Invalid target notebook ID: {}", e),
+    })?;
+    let tgt_parent_id = target_parent_folder_id
+        .map(|id| {
+            Uuid::parse_str(&id).map_err(|e| CommandError {
+                message: format!("Invalid target parent folder ID: {}", e),
+            })
+        })
+        .transpose()?;
+
+    let folder = storage.move_folder_to_notebook(src_nb_id, fld_id, tgt_nb_id, tgt_parent_id)?;
+
+    // Auto-commit if git is enabled for source notebook
+    let source_path = storage.get_notebook_path(src_nb_id);
+    if git::is_git_repo(&source_path) {
+        let commit_message = format!("Move folder '{}' to another notebook", folder.name);
+        if let Err(e) = git::commit_all(&source_path, &commit_message) {
+            log::warn!("Failed to auto-commit folder move (source): {}", e);
+        }
+    }
+
+    // Auto-commit if git is enabled for target notebook
+    let target_path = storage.get_notebook_path(tgt_nb_id);
+    if git::is_git_repo(&target_path) {
+        let commit_message = format!("Add folder '{}' from another notebook", folder.name);
+        if let Err(e) = git::commit_all(&target_path, &commit_message) {
+            log::warn!("Failed to auto-commit folder move (target): {}", e);
+        }
+    }
+
+    Ok(folder)
+}
+
 /// Ensure the archive folder exists for a notebook
 #[tauri::command]
 pub fn ensure_archive_folder(

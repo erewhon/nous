@@ -352,6 +352,7 @@ pub fn run() {
             commands::update_notebook,
             commands::delete_notebook,
             commands::reorder_notebooks,
+            commands::merge_notebook,
             // Page commands
             commands::list_pages,
             commands::get_page,
@@ -458,6 +459,7 @@ pub fn run() {
             commands::reorder_folders,
             commands::reorder_pages,
             commands::ensure_archive_folder,
+            commands::move_folder_to_notebook,
             // Section commands
             commands::list_sections,
             commands::get_section,

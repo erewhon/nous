@@ -172,6 +172,7 @@ pub fn sync_from_external_editor(
         template_id: existing_page.template_id,
         deleted_at: existing_page.deleted_at,
         is_favorite: existing_page.is_favorite,
+        color: existing_page.color.clone(),
         is_daily_note: existing_page.is_daily_note,
         daily_note_date: existing_page.daily_note_date.clone(),
         created_at: existing_page.created_at,

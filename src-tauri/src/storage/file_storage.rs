@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use super::models::{
     EditorBlock, EditorData, FileStorageMode, Folder, FolderType, Notebook, NotebookType, Page,
-    PageType, Section,
+    PageType, Section, SystemPromptMode,
 };
 use crate::encryption::{
     decrypt_json, encrypt_json, is_encrypted_file, EncryptedContainer, EncryptionError,
@@ -1301,6 +1301,596 @@ impl FileStorage {
         Ok(new_section)
     }
 
+    /// Move a folder (and all descendants + pages) to another notebook
+    pub fn move_folder_to_notebook(
+        &self,
+        source_notebook_id: Uuid,
+        folder_id: Uuid,
+        target_notebook_id: Uuid,
+        target_parent_folder_id: Option<Uuid>,
+    ) -> Result<Folder> {
+        // Verify source folder exists
+        let _source_folder = self.get_folder(source_notebook_id, folder_id)?;
+
+        // Verify target notebook exists
+        if !self.notebook_dir(target_notebook_id).exists() {
+            return Err(StorageError::NotebookNotFound(target_notebook_id));
+        }
+
+        // Collect all descendant folder IDs recursively
+        let all_source_folders = self.list_folders(source_notebook_id)?;
+        let mut descendant_ids: Vec<Uuid> = vec![folder_id];
+        let mut i = 0;
+        while i < descendant_ids.len() {
+            let parent = descendant_ids[i];
+            for f in &all_source_folders {
+                if f.parent_id == Some(parent) && !descendant_ids.contains(&f.id) {
+                    descendant_ids.push(f.id);
+                }
+            }
+            i += 1;
+        }
+
+        // Collect the actual folder objects for descendants
+        let descendant_folders: Vec<&Folder> = all_source_folders
+            .iter()
+            .filter(|f| descendant_ids.contains(&f.id))
+            .collect();
+
+        // Collect all pages in those folders (including metadata-based pages like markdown, PDF)
+        let source_pages = self.list_all_pages(source_notebook_id)?;
+        let descendant_id_set: std::collections::HashSet<Uuid> =
+            descendant_ids.iter().copied().collect();
+        let folder_pages: Vec<&Page> = source_pages
+            .iter()
+            .filter(|p| p.folder_id.map_or(false, |fid| descendant_id_set.contains(&fid)))
+            .collect();
+
+        // Build old folder ID -> new folder ID mapping
+        let mut folder_id_map: std::collections::HashMap<Uuid, Uuid> =
+            std::collections::HashMap::new();
+
+        // First pass: create all folders with new IDs
+        let mut target_folders = self.list_folders(target_notebook_id)?;
+        let mut new_folders: Vec<Folder> = Vec::new();
+
+        for src_folder in &descendant_folders {
+            let new_folder_id = Uuid::new_v4();
+            folder_id_map.insert(src_folder.id, new_folder_id);
+
+            let new_folder = Folder {
+                id: new_folder_id,
+                notebook_id: target_notebook_id,
+                name: src_folder.name.clone(),
+                parent_id: None, // Will be set in second pass
+                section_id: None, // Clear section assignment
+                color: src_folder.color.clone(),
+                position: src_folder.position,
+                folder_type: src_folder.folder_type.clone(),
+                created_at: chrono::Utc::now(),
+                updated_at: chrono::Utc::now(),
+            };
+            new_folders.push(new_folder);
+        }
+
+        // Second pass: fix parent_id references
+        for new_folder in new_folders.iter_mut() {
+            // Find the original folder
+            if let Some(src_folder) = descendant_folders
+                .iter()
+                .find(|f| folder_id_map.get(&f.id) == Some(&new_folder.id))
+            {
+                if src_folder.id == folder_id {
+                    // Root folder being moved: parent becomes target_parent_folder_id
+                    new_folder.parent_id = target_parent_folder_id;
+                } else if let Some(old_parent_id) = src_folder.parent_id {
+                    // Map parent if it's also in this folder tree
+                    if let Some(new_parent_id) = folder_id_map.get(&old_parent_id) {
+                        new_folder.parent_id = Some(*new_parent_id);
+                    }
+                }
+            }
+        }
+
+        // Add new folders to target
+        target_folders.extend(new_folders);
+        self.save_folders(target_notebook_id, &target_folders)?;
+
+        // Move each page to the target notebook (best-effort: log errors, don't abort)
+        for page in &folder_pages {
+            let target_folder_id = page.folder_id.and_then(|fid| folder_id_map.get(&fid).copied());
+
+            // Try standard move first (works for standard .json pages)
+            let move_result = self.move_page_to_notebook(
+                source_notebook_id, page.id, target_notebook_id, target_folder_id,
+            );
+
+            match move_result {
+                Ok(mut moved_page) => {
+                    moved_page.section_id = None;
+                    moved_page.updated_at = chrono::Utc::now();
+                    if let Err(e) = self.update_page(&moved_page) {
+                        log::warn!("Failed to update moved page {}: {}", page.id, e);
+                    }
+                }
+                Err(_) => {
+                    // Standard move failed — likely a metadata-based page (.metadata.json).
+                    // Move it manually: copy metadata + source files, then delete originals.
+                    let mut moved = (*page).clone();
+                    moved.notebook_id = target_notebook_id;
+                    moved.folder_id = target_folder_id;
+                    moved.section_id = None;
+                    moved.parent_page_id = None;
+                    moved.updated_at = chrono::Utc::now();
+
+                    // Copy embedded source file if applicable
+                    if moved.storage_mode == Some(crate::storage::FileStorageMode::Embedded) {
+                        if let Some(ref source_file) = moved.source_file {
+                            let src = self.notebook_assets_dir(source_notebook_id)
+                                .join("embedded").join(source_file);
+                            let tgt = self.notebook_assets_dir(target_notebook_id)
+                                .join("embedded").join(source_file);
+                            if src.exists() {
+                                if let Some(parent) = tgt.parent() {
+                                    let _ = fs::create_dir_all(parent);
+                                }
+                                if let Err(e) = fs::copy(&src, &tgt) {
+                                    log::warn!("Failed to copy source file for page {}: {}", page.id, e);
+                                }
+                            }
+                        }
+                    }
+
+                    // Write metadata file in target
+                    let target_meta = self.metadata_path(target_notebook_id, page.id);
+                    match serde_json::to_string_pretty(&moved) {
+                        Ok(content) => {
+                            if let Err(e) = fs::write(&target_meta, content) {
+                                log::warn!("Failed to write metadata for page {}: {}", page.id, e);
+                                continue;
+                            }
+                        }
+                        Err(e) => {
+                            log::warn!("Failed to serialize page {}: {}", page.id, e);
+                            continue;
+                        }
+                    }
+
+                    // Delete source metadata file
+                    let source_meta = self.metadata_path(source_notebook_id, page.id);
+                    if source_meta.exists() {
+                        let _ = fs::remove_file(&source_meta);
+                    }
+
+                    // Also delete source embedded file (it was copied, not moved)
+                    if moved.storage_mode == Some(crate::storage::FileStorageMode::Embedded) {
+                        if let Some(ref source_file) = moved.source_file {
+                            let src = self.notebook_assets_dir(source_notebook_id)
+                                .join("embedded").join(source_file);
+                            if src.exists() {
+                                let _ = fs::remove_file(&src);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Delete source folders from source notebook
+        let mut remaining_source_folders = self.list_folders(source_notebook_id)?;
+        remaining_source_folders.retain(|f| !descendant_id_set.contains(&f.id));
+        self.save_folders(source_notebook_id, &remaining_source_folders)?;
+
+        // Return the new root folder
+        let new_root_id = folder_id_map[&folder_id];
+        let result_folder = self.get_folder(target_notebook_id, new_root_id)?;
+        Ok(result_folder)
+    }
+
+    /// Merge all contents of one notebook into another, then delete the source notebook.
+    ///
+    /// Handles four cases based on whether source/target have sections enabled:
+    /// 1. Both have sections: move sections directly, unsorted content into a new section
+    /// 2. Source has sections, target doesn't: sections become folders under a parent folder
+    /// 3. Source has no sections, target has: all content into a new section
+    /// 4. Neither has sections: all content into a new folder
+    pub fn merge_notebook(
+        &self,
+        source_notebook_id: Uuid,
+        target_notebook_id: Uuid,
+    ) -> Result<()> {
+        let source = self.get_notebook(source_notebook_id)?;
+        let target = self.get_notebook(target_notebook_id)?;
+
+        let source_name = source.name.clone();
+
+        if source.sections_enabled && target.sections_enabled {
+            // Case 1: Both have sections — move sections directly
+            let source_sections = self.list_sections(source_notebook_id)?;
+            for section in &source_sections {
+                self.move_section_to_notebook(source_notebook_id, section.id, target_notebook_id)?;
+            }
+
+            // Handle unsorted content (pages/folders with no section_id)
+            let remaining_folders = self.list_folders(source_notebook_id)?;
+            let remaining_pages = self.list_all_pages(source_notebook_id)?;
+
+            let unsorted_folders: Vec<&Folder> = remaining_folders
+                .iter()
+                .filter(|f| f.section_id.is_none() && f.folder_type == FolderType::Standard)
+                .collect();
+            let unsorted_pages: Vec<&Page> = remaining_pages
+                .iter()
+                .filter(|p| p.section_id.is_none() && p.deleted_at.is_none() && !p.is_cover)
+                .collect();
+
+            if !unsorted_folders.is_empty() || !unsorted_pages.is_empty() {
+                // Create a section in target named after source notebook
+                let mut target_sections = self.list_sections(target_notebook_id)?;
+                let max_pos = target_sections.iter().map(|s| s.position).max().unwrap_or(-1);
+                let new_section = Section {
+                    id: Uuid::new_v4(),
+                    notebook_id: target_notebook_id,
+                    name: source_name.clone(),
+                    description: None,
+                    color: None,
+                    system_prompt: None,
+                    system_prompt_mode: SystemPromptMode::default(),
+                    ai_model: None,
+                    page_sort_by: None,
+                    position: max_pos + 1,
+                    created_at: chrono::Utc::now(),
+                    updated_at: chrono::Utc::now(),
+                };
+                target_sections.push(new_section.clone());
+                self.save_sections(target_notebook_id, &target_sections)?;
+
+                // Move unsorted folders and pages using the two-pass pattern
+                self.merge_move_folders_and_pages(
+                    source_notebook_id,
+                    target_notebook_id,
+                    &unsorted_folders,
+                    &unsorted_pages,
+                    None,               // no parent folder
+                    Some(new_section.id), // assign to new section
+                )?;
+            }
+        } else if source.sections_enabled && !target.sections_enabled {
+            // Case 2: Source has sections, target doesn't — sections become folders
+            // Create a top-level folder in target named after source notebook
+            let wrapper_folder = self.create_folder(target_notebook_id, source_name.clone(), None)?;
+
+            let source_sections = self.list_sections(source_notebook_id)?;
+            for section in &source_sections {
+                // Create a child folder named after the section
+                let section_folder = self.create_folder(
+                    target_notebook_id,
+                    section.name.clone(),
+                    Some(wrapper_folder.id),
+                )?;
+
+                // Get section's folders and pages
+                let all_folders = self.list_folders(source_notebook_id)?;
+                let section_folders: Vec<&Folder> = all_folders
+                    .iter()
+                    .filter(|f| f.section_id == Some(section.id))
+                    .collect();
+
+                let all_pages = self.list_all_pages(source_notebook_id)?;
+                let section_folder_ids: std::collections::HashSet<Uuid> =
+                    section_folders.iter().map(|f| f.id).collect();
+                let section_pages: Vec<&Page> = all_pages
+                    .iter()
+                    .filter(|p| {
+                        (p.section_id == Some(section.id)
+                            || p.folder_id.map_or(false, |fid| section_folder_ids.contains(&fid)))
+                            && p.deleted_at.is_none()
+                            && !p.is_cover
+                    })
+                    .collect();
+
+                self.merge_move_folders_and_pages(
+                    source_notebook_id,
+                    target_notebook_id,
+                    &section_folders,
+                    &section_pages,
+                    Some(section_folder.id),
+                    None,
+                )?;
+
+                // Clean up moved section folders from source
+                let mut src_folders = self.list_folders(source_notebook_id)?;
+                src_folders.retain(|f| f.section_id != Some(section.id));
+                self.save_folders(source_notebook_id, &src_folders)?;
+            }
+
+            // Handle unsorted content
+            let remaining_folders = self.list_folders(source_notebook_id)?;
+            let remaining_pages = self.list_all_pages(source_notebook_id)?;
+
+            let unsorted_folders: Vec<&Folder> = remaining_folders
+                .iter()
+                .filter(|f| f.section_id.is_none() && f.folder_type == FolderType::Standard)
+                .collect();
+            let unsorted_pages: Vec<&Page> = remaining_pages
+                .iter()
+                .filter(|p| p.section_id.is_none() && p.deleted_at.is_none() && !p.is_cover)
+                .collect();
+
+            if !unsorted_folders.is_empty() || !unsorted_pages.is_empty() {
+                self.merge_move_folders_and_pages(
+                    source_notebook_id,
+                    target_notebook_id,
+                    &unsorted_folders,
+                    &unsorted_pages,
+                    Some(wrapper_folder.id),
+                    None,
+                )?;
+            }
+        } else if !source.sections_enabled && target.sections_enabled {
+            // Case 3: Source has no sections, target has — all into a new section
+            let mut target_sections = self.list_sections(target_notebook_id)?;
+            let max_pos = target_sections.iter().map(|s| s.position).max().unwrap_or(-1);
+            let new_section = Section {
+                id: Uuid::new_v4(),
+                notebook_id: target_notebook_id,
+                name: source_name.clone(),
+                description: None,
+                color: None,
+                system_prompt: None,
+                system_prompt_mode: SystemPromptMode::default(),
+                ai_model: None,
+                page_sort_by: None,
+                position: max_pos + 1,
+                created_at: chrono::Utc::now(),
+                updated_at: chrono::Utc::now(),
+            };
+            target_sections.push(new_section.clone());
+            self.save_sections(target_notebook_id, &target_sections)?;
+
+            let all_folders = self.list_folders(source_notebook_id)?;
+            let all_pages = self.list_all_pages(source_notebook_id)?;
+
+            let source_folders: Vec<&Folder> = all_folders
+                .iter()
+                .filter(|f| f.folder_type == FolderType::Standard)
+                .collect();
+            let source_pages: Vec<&Page> = all_pages
+                .iter()
+                .filter(|p| p.deleted_at.is_none() && !p.is_cover)
+                .collect();
+
+            self.merge_move_folders_and_pages(
+                source_notebook_id,
+                target_notebook_id,
+                &source_folders,
+                &source_pages,
+                None,
+                Some(new_section.id),
+            )?;
+        } else {
+            // Case 4: Neither has sections — all into a new folder
+            let wrapper_folder = self.create_folder(target_notebook_id, source_name.clone(), None)?;
+
+            let all_folders = self.list_folders(source_notebook_id)?;
+            let all_pages = self.list_all_pages(source_notebook_id)?;
+
+            let source_folders: Vec<&Folder> = all_folders
+                .iter()
+                .filter(|f| f.folder_type == FolderType::Standard)
+                .collect();
+            let source_pages: Vec<&Page> = all_pages
+                .iter()
+                .filter(|p| p.deleted_at.is_none() && !p.is_cover)
+                .collect();
+
+            self.merge_move_folders_and_pages(
+                source_notebook_id,
+                target_notebook_id,
+                &source_folders,
+                &source_pages,
+                Some(wrapper_folder.id),
+                None,
+            )?;
+        }
+
+        // Delete the source notebook
+        self.delete_notebook(source_notebook_id)?;
+
+        Ok(())
+    }
+
+    /// Helper for merge_notebook: move a set of folders and pages from source to target.
+    ///
+    /// - Folders are recreated with new IDs in the target, maintaining hierarchy.
+    /// - Root-level source folders get `target_parent_folder_id` as their parent.
+    /// - All folders and pages are assigned `target_section_id` if provided.
+    /// - Pages not in any folder get `target_parent_folder_id` as their folder.
+    fn merge_move_folders_and_pages(
+        &self,
+        source_notebook_id: Uuid,
+        target_notebook_id: Uuid,
+        source_folders: &[&Folder],
+        source_pages: &[&Page],
+        target_parent_folder_id: Option<Uuid>,
+        target_section_id: Option<Uuid>,
+    ) -> Result<()> {
+        // Build folder ID mapping (old -> new)
+        let mut folder_id_map: std::collections::HashMap<Uuid, Uuid> =
+            std::collections::HashMap::new();
+
+        // Collect all folder IDs that are being moved
+        let source_folder_ids: std::collections::HashSet<Uuid> =
+            source_folders.iter().map(|f| f.id).collect();
+
+        // First pass: create all folders with new IDs
+        let mut target_folders = self.list_folders(target_notebook_id)?;
+        let mut new_folders: Vec<Folder> = Vec::new();
+
+        for src_folder in source_folders {
+            let new_folder_id = Uuid::new_v4();
+            folder_id_map.insert(src_folder.id, new_folder_id);
+
+            let new_folder = Folder {
+                id: new_folder_id,
+                notebook_id: target_notebook_id,
+                name: src_folder.name.clone(),
+                parent_id: None, // Set in second pass
+                section_id: target_section_id,
+                color: src_folder.color.clone(),
+                position: src_folder.position,
+                folder_type: src_folder.folder_type.clone(),
+                created_at: chrono::Utc::now(),
+                updated_at: chrono::Utc::now(),
+            };
+            new_folders.push(new_folder);
+        }
+
+        // Second pass: fix parent_id references
+        for new_folder in new_folders.iter_mut() {
+            if let Some(src_folder) = source_folders
+                .iter()
+                .find(|f| folder_id_map.get(&f.id) == Some(&new_folder.id))
+            {
+                if let Some(old_parent_id) = src_folder.parent_id {
+                    if let Some(new_parent_id) = folder_id_map.get(&old_parent_id) {
+                        // Parent is also being moved — remap
+                        new_folder.parent_id = Some(*new_parent_id);
+                    } else {
+                        // Parent is not in this set — treat as root
+                        new_folder.parent_id = target_parent_folder_id;
+                    }
+                } else {
+                    // Root-level folder — assign to target parent
+                    new_folder.parent_id = target_parent_folder_id;
+                }
+            }
+        }
+
+        target_folders.extend(new_folders);
+        self.save_folders(target_notebook_id, &target_folders)?;
+
+        // Move pages (best-effort with logging)
+        for page in source_pages {
+            let page_target_folder = if let Some(fid) = page.folder_id {
+                // If the page's folder is being moved, remap to new ID
+                if let Some(new_fid) = folder_id_map.get(&fid) {
+                    Some(*new_fid)
+                } else if source_folder_ids.contains(&fid) {
+                    // Folder was in the set but not mapped (shouldn't happen)
+                    target_parent_folder_id
+                } else {
+                    // Page is in a folder not being moved — put in wrapper
+                    target_parent_folder_id
+                }
+            } else {
+                // Page has no folder — put in wrapper
+                target_parent_folder_id
+            };
+
+            let move_result = self.move_page_to_notebook(
+                source_notebook_id,
+                page.id,
+                target_notebook_id,
+                page_target_folder,
+            );
+
+            match move_result {
+                Ok(mut moved_page) => {
+                    moved_page.section_id = target_section_id;
+                    moved_page.updated_at = chrono::Utc::now();
+                    if let Err(e) = self.update_page(&moved_page) {
+                        log::warn!("merge_notebook: failed to update moved page {}: {}", page.id, e);
+                    }
+                }
+                Err(_) => {
+                    // Metadata-based page — move manually
+                    let mut moved = (*page).clone();
+                    moved.notebook_id = target_notebook_id;
+                    moved.folder_id = page_target_folder;
+                    moved.section_id = target_section_id;
+                    moved.parent_page_id = None;
+                    moved.updated_at = chrono::Utc::now();
+
+                    // Copy embedded source file if applicable
+                    if moved.storage_mode == Some(crate::storage::FileStorageMode::Embedded) {
+                        if let Some(ref source_file) = moved.source_file {
+                            let src = self
+                                .notebook_assets_dir(source_notebook_id)
+                                .join("embedded")
+                                .join(source_file);
+                            let tgt = self
+                                .notebook_assets_dir(target_notebook_id)
+                                .join("embedded")
+                                .join(source_file);
+                            if src.exists() {
+                                if let Some(parent) = tgt.parent() {
+                                    let _ = fs::create_dir_all(parent);
+                                }
+                                if let Err(e) = fs::copy(&src, &tgt) {
+                                    log::warn!(
+                                        "merge_notebook: failed to copy source file for page {}: {}",
+                                        page.id,
+                                        e
+                                    );
+                                }
+                            }
+                        }
+                    }
+
+                    // Write metadata in target
+                    let target_meta = self.metadata_path(target_notebook_id, page.id);
+                    match serde_json::to_string_pretty(&moved) {
+                        Ok(content) => {
+                            if let Err(e) = fs::write(&target_meta, content) {
+                                log::warn!(
+                                    "merge_notebook: failed to write metadata for page {}: {}",
+                                    page.id,
+                                    e
+                                );
+                                continue;
+                            }
+                        }
+                        Err(e) => {
+                            log::warn!(
+                                "merge_notebook: failed to serialize page {}: {}",
+                                page.id,
+                                e
+                            );
+                            continue;
+                        }
+                    }
+
+                    // Delete source metadata
+                    let source_meta = self.metadata_path(source_notebook_id, page.id);
+                    if source_meta.exists() {
+                        let _ = fs::remove_file(&source_meta);
+                    }
+
+                    // Delete source embedded file
+                    if moved.storage_mode == Some(crate::storage::FileStorageMode::Embedded) {
+                        if let Some(ref source_file) = moved.source_file {
+                            let src = self
+                                .notebook_assets_dir(source_notebook_id)
+                                .join("embedded")
+                                .join(source_file);
+                            if src.exists() {
+                                let _ = fs::remove_file(&src);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Clean up moved folders from source
+        let mut remaining = self.list_folders(source_notebook_id)?;
+        remaining.retain(|f| !source_folder_ids.contains(&f.id));
+        self.save_folders(source_notebook_id, &remaining)?;
+
+        Ok(())
+    }
+
     // ===== Cover Page Operations =====
 
     /// Get the cover page for a notebook, if it exists
@@ -1592,6 +2182,7 @@ impl FileStorage {
             template_id: None,
             deleted_at: None,
             is_favorite: false,
+            color: None,
             is_daily_note: false,
             daily_note_date: None,
             created_at: now,

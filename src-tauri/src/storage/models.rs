@@ -388,6 +388,9 @@ pub struct Page {
     /// Template this page was created from
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub template_id: Option<String>,
+    /// Color for the page (CSS color string)
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub color: Option<String>,
     /// Whether this page is marked as a favorite
     #[serde(default)]
     pub is_favorite: bool,
@@ -426,6 +429,7 @@ impl Page {
             last_file_sync: None,
             template_id: None,
             deleted_at: None,
+            color: None,
             is_favorite: false,
             is_daily_note: false,
             daily_note_date: None,

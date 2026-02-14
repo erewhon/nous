@@ -8,6 +8,7 @@ import { useAIStore } from "../../stores/aiStore";
 import { useSyncStore } from "../../stores/syncStore";
 import { useLibraryStore } from "../../stores/libraryStore";
 import { MoveNotebookDialog } from "../Move/MoveNotebookDialog";
+import { MergeNotebookDialog } from "../Move/MergeNotebookDialog";
 import { EncryptionSettings } from "../Encryption";
 import {
   gitIsEnabled,
@@ -76,6 +77,7 @@ export function NotebookSettingsDialog({
   const [isSaving, setIsSaving] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showMoveDialog, setShowMoveDialog] = useState(false);
+  const [showMergeDialog, setShowMergeDialog] = useState(false);
   const nameInputRef = useRef<HTMLInputElement>(null);
 
   // Git state
@@ -1535,6 +1537,13 @@ export function NotebookSettingsDialog({
               Move to Library
             </button>
             <button
+              onClick={() => setShowMergeDialog(true)}
+              className="rounded-lg px-3 py-2 text-sm font-medium transition-colors hover:bg-[--color-bg-tertiary]"
+              style={{ color: "var(--color-text-secondary)" }}
+            >
+              Merge Into...
+            </button>
+            <button
               onClick={async () => {
                 if (!notebook) return;
                 if (notebook.archived) {
@@ -1660,6 +1669,20 @@ export function NotebookSettingsDialog({
           notebookName={notebook.name}
           currentLibraryId={currentLibrary.id}
           onMoved={() => {
+            loadNotebooks();
+            onClose();
+          }}
+        />
+      )}
+
+      {/* Merge Into Another Notebook Dialog */}
+      {notebook && (
+        <MergeNotebookDialog
+          isOpen={showMergeDialog}
+          onClose={() => setShowMergeDialog(false)}
+          notebookId={notebook.id}
+          notebookName={notebook.name}
+          onMerged={() => {
             loadNotebooks();
             onClose();
           }}

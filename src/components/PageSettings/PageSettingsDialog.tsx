@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import type { Page, SystemPromptMode } from "../../types/page";
 import { usePageStore } from "../../stores/pageStore";
 import { useAIStore } from "../../stores/aiStore";
+import { InlineColorPicker } from "../ColorPicker/ColorPicker";
 
 interface PageSettingsDialogProps {
   isOpen: boolean;
@@ -19,6 +20,7 @@ export function PageSettingsDialog({
   const [systemPrompt, setSystemPrompt] = useState("");
   const [systemPromptMode, setSystemPromptMode] = useState<SystemPromptMode>("override");
   const [aiModel, setAiModel] = useState<string | undefined>(undefined);
+  const [color, setColor] = useState<string | undefined>(undefined);
   const [isSaving, setIsSaving] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -31,6 +33,7 @@ export function PageSettingsDialog({
       setSystemPrompt(page.systemPrompt || "");
       setSystemPromptMode(page.systemPromptMode || "override");
       setAiModel(page.aiModel);
+      setColor(page.color);
     }
   }, [page]);
 
@@ -64,6 +67,7 @@ export function PageSettingsDialog({
         systemPrompt: systemPrompt.trim() || undefined,
         systemPromptMode,
         aiModel: aiModel || undefined,
+        color,
       });
       onClose();
     } finally {
@@ -83,7 +87,8 @@ export function PageSettingsDialog({
   const hasChanges =
     (systemPrompt || "") !== (page.systemPrompt || "") ||
     systemPromptMode !== (page.systemPromptMode || "override") ||
-    (aiModel || undefined) !== (page.aiModel || undefined);
+    (aiModel || undefined) !== (page.aiModel || undefined) ||
+    (color || undefined) !== (page.color || undefined);
 
   return (
     <div
@@ -228,6 +233,34 @@ export function PageSettingsDialog({
               style={{ color: "var(--color-text-muted)" }}
             >
               Override the AI model for chats on this page.
+            </p>
+          </div>
+
+          {/* Color */}
+          <div>
+            <div className="mb-2 flex items-center justify-between">
+              <label
+                className="text-sm font-medium"
+                style={{ color: "var(--color-text-primary)" }}
+              >
+                Page Color
+              </label>
+              {color && (
+                <button
+                  onClick={() => setColor(undefined)}
+                  className="text-xs transition-colors hover:underline"
+                  style={{ color: "var(--color-text-muted)" }}
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+            <InlineColorPicker value={color} onChange={setColor} showClear />
+            <p
+              className="mt-1.5 text-xs"
+              style={{ color: "var(--color-text-muted)" }}
+            >
+              Color-code this page in the sidebar and page list.
             </p>
           </div>
 

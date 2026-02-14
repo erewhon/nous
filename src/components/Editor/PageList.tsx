@@ -116,16 +116,18 @@ const PageListItem = memo(function PageListItem({
         style={{
           backgroundColor: isSelected ? "var(--color-bg-tertiary)" : "transparent",
           color: isSelected ? "var(--color-text-primary)" : "var(--color-text-secondary)",
-          borderLeft: `3px solid ${isSelected ? "var(--color-accent)" : "transparent"}`,
+          borderLeft: `3px solid ${page.color || (isSelected ? "var(--color-accent)" : "transparent")}`,
         }}
       >
         <div
           className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg"
           style={{
-            backgroundColor: isSelected
-              ? "rgba(139, 92, 246, 0.2)"
-              : "var(--color-bg-tertiary)",
-            color: isSelected ? "var(--color-accent)" : "var(--color-text-muted)",
+            backgroundColor: page.color
+              ? `${page.color}20`
+              : isSelected
+                ? "rgba(139, 92, 246, 0.2)"
+                : "var(--color-bg-tertiary)",
+            color: page.color || (isSelected ? "var(--color-accent)" : "var(--color-text-muted)"),
           }}
         >
           <PageTypeIcon pageType={page.pageType} />
@@ -144,8 +146,8 @@ const PageListItem = memo(function PageListItem({
                     key={tag}
                     className="rounded-full text-xs px-2 py-0.5"
                     style={{
-                      backgroundColor: "rgba(139, 92, 246, 0.1)",
-                      color: "var(--color-accent)",
+                      backgroundColor: page.color ? `${page.color}1a` : "rgba(139, 92, 246, 0.1)",
+                      color: page.color || "var(--color-accent)",
                     }}
                     title={tag}
                   >
