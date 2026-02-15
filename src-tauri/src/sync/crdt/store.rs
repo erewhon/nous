@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use uuid::Uuid;
-use yrs::{Map, Transact};
+use yrs::{Map, ReadTxn, Transact, WriteTxn};
 
 use super::converter::{CRDTError, PageDocument};
 use crate::storage::oplog::diff_blocks;
