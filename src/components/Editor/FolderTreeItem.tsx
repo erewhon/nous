@@ -108,6 +108,8 @@ interface FolderTreeItemProps {
   onSmartOrganize?: (pageId: string, pageTitle: string) => void;
   onArchivePage?: (pageId: string) => void;
   onUnarchivePage?: (pageId: string) => void;
+  onArchiveFolder?: (folderId: string) => void;
+  onUnarchiveFolder?: (folderId: string) => void;
   onSetPageColor?: (pageId: string, color: string | undefined) => void;
 }
 
@@ -141,6 +143,8 @@ export const FolderTreeItem = memo(function FolderTreeItem({
   onSmartOrganize,
   onArchivePage,
   onUnarchivePage,
+  onArchiveFolder,
+  onUnarchiveFolder,
   onSetPageColor,
 }: FolderTreeItemProps) {
   const [isEditing, setIsEditing] = useState(false);
@@ -229,13 +233,15 @@ export const FolderTreeItem = memo(function FolderTreeItem({
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     if (!isArchive && (
       (sections && sections.length > 0 && onMoveFolderToSection) ||
-      onMoveFolderToNotebook
+      onMoveFolderToNotebook ||
+      onArchiveFolder ||
+      onUnarchiveFolder
     )) {
       e.preventDefault();
       setContextMenuPos({ x: e.clientX, y: e.clientY });
       setShowContextMenu(true);
     }
-  }, [sections, onMoveFolderToSection, onMoveFolderToNotebook, isArchive]);
+  }, [sections, onMoveFolderToSection, onMoveFolderToNotebook, isArchive, onArchiveFolder, onUnarchiveFolder]);
 
   const handleMoveFolderToSection = useCallback((sectionId: string | null) => {
     if (onMoveFolderToSection) {
@@ -448,6 +454,34 @@ export const FolderTreeItem = memo(function FolderTreeItem({
                 <path d="M12 5v14M5 12h14" />
               </svg>
             </button>
+            {/* Archive folder */}
+            {onArchiveFolder && !folder.isArchived && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onArchiveFolder(folder.id);
+                }}
+                className="flex h-5 w-5 items-center justify-center rounded transition-colors"
+                style={{ color: "var(--color-text-muted)" }}
+                title="Archive folder"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <rect x="2" y="4" width="20" height="5" rx="1" />
+                  <path d="M4 9v9a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9" />
+                  <path d="M10 13h4" />
+                </svg>
+              </button>
+            )}
             {/* Delete folder */}
             <button
               onClick={handleDeleteFolder}
@@ -601,6 +635,71 @@ export const FolderTreeItem = memo(function FolderTreeItem({
               </svg>
               Move to Notebook...
             </button>
+          </>
+        )}
+        {(onArchiveFolder || onUnarchiveFolder) && (
+          <>
+            <div
+              className="my-1 border-t"
+              style={{ borderColor: "var(--color-border)" }}
+            />
+            {!folder.isArchived && onArchiveFolder && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowContextMenu(false);
+                  onArchiveFolder(folder.id);
+                }}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-sm transition-colors hover:bg-[var(--color-bg-tertiary)]"
+                style={{ color: "var(--color-text-primary)" }}
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <rect x="2" y="4" width="20" height="5" rx="1" />
+                  <path d="M4 9v9a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9" />
+                  <path d="M10 13h4" />
+                </svg>
+                Archive Folder
+              </button>
+            )}
+            {folder.isArchived && onUnarchiveFolder && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowContextMenu(false);
+                  onUnarchiveFolder(folder.id);
+                }}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-sm transition-colors hover:bg-[var(--color-bg-tertiary)]"
+                style={{ color: "var(--color-text-primary)" }}
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <rect x="2" y="4" width="20" height="5" rx="1" />
+                  <path d="M4 9v9a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9" />
+                  <path d="M12 16V11" />
+                  <path d="M9 13l3-3 3 3" />
+                </svg>
+                Unarchive Folder
+              </button>
+            )}
           </>
         )}
       </div>

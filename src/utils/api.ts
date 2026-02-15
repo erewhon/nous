@@ -342,6 +342,20 @@ export async function ensureArchiveFolder(notebookId: string): Promise<Folder> {
   return invoke<Folder>("ensure_archive_folder", { notebookId });
 }
 
+export async function archiveFolder(
+  notebookId: string,
+  folderId: string
+): Promise<Folder> {
+  return invoke<Folder>("archive_folder", { notebookId, folderId });
+}
+
+export async function unarchiveFolder(
+  notebookId: string,
+  folderId: string
+): Promise<Folder> {
+  return invoke<Folder>("unarchive_folder", { notebookId, folderId });
+}
+
 // ===== Search API =====
 
 export async function searchPages(

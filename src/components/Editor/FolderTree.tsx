@@ -178,6 +178,8 @@ export function FolderTree({
     createFolder,
     updateFolder,
     deleteFolder: deleteFolderApi,
+    archiveFolder: archiveFolderApi,
+    unarchiveFolder: unarchiveFolderApi,
   } = useFolderStore();
   const { updateNotebook } = useNotebookStore();
   const { updateSection: updateSectionStore } = useSectionStore();
@@ -279,15 +281,22 @@ export function FolderTree({
     return deduplicated;
   }, [pages, showArchived, sectionsEnabled, selectedSectionId]);
 
-  // Filter folders by section
+  // Filter folders by section and archive status
   const visibleFolders = useMemo(() => {
+    let filtered = folders;
+
+    // Hide archived folders unless showArchived is on
+    if (!showArchived) {
+      filtered = filtered.filter((f) => !f.isArchived);
+    }
+
     if (!sectionsEnabled || selectedSectionId === undefined) {
-      return folders;
+      return filtered;
     }
     // null means "unsorted" - show folders with no section
     // Always include archive folder when showArchived is on
-    return folders.filter((f) =>
-      (showArchived && f.folderType === "archive") || (f.sectionId ?? null) === selectedSectionId
+    return filtered.filter((f) =>
+      (showArchived && (f.folderType === "archive" || f.isArchived)) || (f.sectionId ?? null) === selectedSectionId
     );
   }, [folders, sectionsEnabled, selectedSectionId, showArchived]);
 
@@ -627,6 +636,26 @@ END:VCALENDAR`;
     [notebookId, unarchivePage]
   );
 
+  // Handle archiving a folder
+  const handleArchiveFolder = useCallback(
+    async (folderId: string) => {
+      await archiveFolderApi(notebookId, folderId);
+      // Reload pages since pages in the folder are also archived
+      await loadPages(notebookId);
+    },
+    [notebookId, archiveFolderApi, loadPages]
+  );
+
+  // Handle unarchiving a folder
+  const handleUnarchiveFolder = useCallback(
+    async (folderId: string) => {
+      await unarchiveFolderApi(notebookId, folderId);
+      // Reload pages since pages in the folder are also unarchived
+      await loadPages(notebookId);
+    },
+    [notebookId, unarchiveFolderApi, loadPages]
+  );
+
   // Handle setting page color
   const handleSetPageColor = useCallback(
     (pageId: string, color: string | undefined) => {
@@ -890,6 +919,8 @@ END:VCALENDAR`;
           onSmartOrganize={onSmartOrganize}
           onArchivePage={handleArchivePage}
           onUnarchivePage={handleUnarchivePage}
+          onArchiveFolder={handleArchiveFolder}
+          onUnarchiveFolder={handleUnarchiveFolder}
           onSetPageColor={handleSetPageColor}
           onMoveFolderToNotebook={onMoveFolderToNotebook}
         />
@@ -922,6 +953,8 @@ END:VCALENDAR`;
       onSmartOrganize,
       handleArchivePage,
       handleUnarchivePage,
+      handleArchiveFolder,
+      handleUnarchiveFolder,
       handleSetPageColor,
       onMoveFolderToNotebook,
     ]
@@ -945,7 +978,7 @@ END:VCALENDAR`;
   }, [rootPages]);
 
   // Count archived pages
-  const archivedCount = pages.filter((p) => p.isArchived).length;
+  const archivedCount = pages.filter((p) => p.isArchived).length + folders.filter((f) => f.isArchived).length;
 
   // Get active page for drag overlay
   const activePage = activePageId ? pages.find((p) => p.id === activePageId) : null;

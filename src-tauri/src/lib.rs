@@ -460,6 +460,8 @@ pub fn run() {
             commands::reorder_pages,
             commands::ensure_archive_folder,
             commands::move_folder_to_notebook,
+            commands::archive_folder,
+            commands::unarchive_folder,
             // Section commands
             commands::list_sections,
             commands::get_section,

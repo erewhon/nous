@@ -168,6 +168,9 @@ pub struct Folder {
     /// Type of folder (standard or archive)
     #[serde(default)]
     pub folder_type: FolderType,
+    /// Whether this folder is archived
+    #[serde(default)]
+    pub is_archived: bool,
     /// Color for the folder (CSS color string)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
@@ -188,6 +191,7 @@ impl Folder {
             parent_id,
             section_id: None,
             folder_type: FolderType::Standard,
+            is_archived: false,
             color: None,
             position: 0,
             created_at: now,
@@ -204,6 +208,7 @@ impl Folder {
             parent_id: None,
             section_id: None,
             folder_type: FolderType::Archive,
+            is_archived: false,
             color: None,
             position: i32::MAX, // Always last
             created_at: now,

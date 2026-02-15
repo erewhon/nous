@@ -72,6 +72,7 @@ export const FolderSchema = z.object({
   parentId: z.string().uuid().nullable().optional(),
   sectionId: z.string().uuid().nullable().optional(),
   folderType: FolderTypeSchema.default("standard"),
+  isArchived: z.boolean().default(false),
   color: z.string().optional(),
   position: z.number().default(0),
   createdAt: z.string().datetime(),

@@ -1244,6 +1244,7 @@ impl FileStorage {
                 color: source_folder.color.clone(),
                 position: source_folder.position,
                 folder_type: source_folder.folder_type.clone(),
+                is_archived: source_folder.is_archived,
                 created_at: chrono::Utc::now(),
                 updated_at: chrono::Utc::now(),
             };
@@ -1367,6 +1368,7 @@ impl FileStorage {
                 color: src_folder.color.clone(),
                 position: src_folder.position,
                 folder_type: src_folder.folder_type.clone(),
+                is_archived: src_folder.is_archived,
                 created_at: chrono::Utc::now(),
                 updated_at: chrono::Utc::now(),
             };
@@ -1740,6 +1742,7 @@ impl FileStorage {
                 color: src_folder.color.clone(),
                 position: src_folder.position,
                 folder_type: src_folder.folder_type.clone(),
+                is_archived: src_folder.is_archived,
                 created_at: chrono::Utc::now(),
                 updated_at: chrono::Utc::now(),
             };
@@ -2012,6 +2015,98 @@ impl FileStorage {
         self.update_page(&page)?;
 
         Ok(page)
+    }
+
+    /// Archive a folder and all its descendants + their pages
+    pub fn archive_folder(&self, notebook_id: Uuid, folder_id: Uuid) -> Result<Folder> {
+        let all_folders = self.list_folders(notebook_id)?;
+
+        // Collect all descendant folder IDs recursively (same pattern as move_folder_to_notebook)
+        let mut descendant_ids: Vec<Uuid> = vec![folder_id];
+        let mut i = 0;
+        while i < descendant_ids.len() {
+            let parent = descendant_ids[i];
+            for f in &all_folders {
+                if f.parent_id == Some(parent) && !descendant_ids.contains(&f.id) {
+                    descendant_ids.push(f.id);
+                }
+            }
+            i += 1;
+        }
+
+        let descendant_id_set: std::collections::HashSet<Uuid> =
+            descendant_ids.iter().copied().collect();
+
+        // Set is_archived = true on all folders in the set
+        let now = chrono::Utc::now();
+        let mut updated_folders = all_folders;
+        for folder in updated_folders.iter_mut() {
+            if descendant_id_set.contains(&folder.id) {
+                folder.is_archived = true;
+                folder.updated_at = now;
+            }
+        }
+        self.save_folders(notebook_id, &updated_folders)?;
+
+        // Archive all pages in those folders
+        let pages = self.list_all_pages(notebook_id)?;
+        for page in pages {
+            if page.folder_id.map_or(false, |fid| descendant_id_set.contains(&fid)) && !page.is_archived {
+                let mut p = page;
+                p.is_archived = true;
+                p.updated_at = now;
+                self.update_page(&p)?;
+            }
+        }
+
+        // Return the updated root folder
+        self.get_folder(notebook_id, folder_id)
+    }
+
+    /// Unarchive a folder and all its descendants + their pages
+    pub fn unarchive_folder(&self, notebook_id: Uuid, folder_id: Uuid) -> Result<Folder> {
+        let all_folders = self.list_folders(notebook_id)?;
+
+        // Collect all descendant folder IDs recursively
+        let mut descendant_ids: Vec<Uuid> = vec![folder_id];
+        let mut i = 0;
+        while i < descendant_ids.len() {
+            let parent = descendant_ids[i];
+            for f in &all_folders {
+                if f.parent_id == Some(parent) && !descendant_ids.contains(&f.id) {
+                    descendant_ids.push(f.id);
+                }
+            }
+            i += 1;
+        }
+
+        let descendant_id_set: std::collections::HashSet<Uuid> =
+            descendant_ids.iter().copied().collect();
+
+        // Set is_archived = false on all folders in the set
+        let now = chrono::Utc::now();
+        let mut updated_folders = all_folders;
+        for folder in updated_folders.iter_mut() {
+            if descendant_id_set.contains(&folder.id) {
+                folder.is_archived = false;
+                folder.updated_at = now;
+            }
+        }
+        self.save_folders(notebook_id, &updated_folders)?;
+
+        // Unarchive all pages in those folders
+        let pages = self.list_all_pages(notebook_id)?;
+        for page in pages {
+            if page.folder_id.map_or(false, |fid| descendant_id_set.contains(&fid)) && page.is_archived {
+                let mut p = page;
+                p.is_archived = false;
+                p.updated_at = now;
+                self.update_page(&p)?;
+            }
+        }
+
+        // Return the updated root folder
+        self.get_folder(notebook_id, folder_id)
     }
 
     /// Reorder pages within a folder

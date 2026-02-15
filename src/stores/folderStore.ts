@@ -44,6 +44,10 @@ interface FolderActions {
   setShowArchived: (show: boolean) => void;
   toggleShowArchived: () => void;
 
+  // Folder archiving
+  archiveFolder: (notebookId: string, folderId: string) => Promise<void>;
+  unarchiveFolder: (notebookId: string, folderId: string) => Promise<void>;
+
   // Tree building
   buildFolderTree: (pages: Page[]) => PageTreeRoot;
 
@@ -206,6 +210,36 @@ export const useFolderStore = create<FolderStore>()(
         set((state) => ({ showArchived: !state.showArchived }));
       },
 
+      archiveFolder: async (notebookId, folderId) => {
+        set({ error: null });
+        try {
+          await api.archiveFolder(notebookId, folderId);
+          // Reload all folders to pick up descendant changes
+          const folders = await api.listFolders(notebookId);
+          set({ folders });
+        } catch (err) {
+          set({
+            error:
+              err instanceof Error ? err.message : "Failed to archive folder",
+          });
+        }
+      },
+
+      unarchiveFolder: async (notebookId, folderId) => {
+        set({ error: null });
+        try {
+          await api.unarchiveFolder(notebookId, folderId);
+          // Reload all folders to pick up descendant changes
+          const folders = await api.listFolders(notebookId);
+          set({ folders });
+        } catch (err) {
+          set({
+            error:
+              err instanceof Error ? err.message : "Failed to unarchive folder",
+          });
+        }
+      },
+
       buildFolderTree: (pages) => {
         const state = get();
         const { folders, expandedFolderIds, showArchived } = state;
@@ -215,9 +249,14 @@ export const useFolderStore = create<FolderStore>()(
           ? pages
           : pages.filter((p) => !p.isArchived);
 
+        // Filter folders based on archive visibility
+        const visibleFolders = showArchived
+          ? folders
+          : folders.filter((f) => !f.isArchived);
+
         // Build tree structure
         const folderNodes = buildTreeRecursive(
-          folders,
+          visibleFolders,
           visiblePages,
           null,
           expandedFolderIds

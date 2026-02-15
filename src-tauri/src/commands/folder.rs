@@ -305,6 +305,64 @@ pub fn unarchive_page(
     Ok(page)
 }
 
+/// Archive a folder and all its descendants + pages
+#[tauri::command]
+pub fn archive_folder(
+    state: State<AppState>,
+    notebook_id: String,
+    folder_id: String,
+) -> CommandResult<Folder> {
+    let storage = state.storage.lock().unwrap();
+    let nb_id = Uuid::parse_str(&notebook_id).map_err(|e| CommandError {
+        message: format!("Invalid notebook ID: {}", e),
+    })?;
+    let fld_id = Uuid::parse_str(&folder_id).map_err(|e| CommandError {
+        message: format!("Invalid folder ID: {}", e),
+    })?;
+
+    let folder = storage.archive_folder(nb_id, fld_id)?;
+
+    // Auto-commit if git is enabled for this notebook
+    let notebook_path = storage.get_notebook_path(nb_id);
+    if git::is_git_repo(&notebook_path) {
+        let commit_message = format!("Archive folder: {}", folder.name);
+        if let Err(e) = git::commit_all(&notebook_path, &commit_message) {
+            log::warn!("Failed to auto-commit folder archive: {}", e);
+        }
+    }
+
+    Ok(folder)
+}
+
+/// Unarchive a folder and all its descendants + pages
+#[tauri::command]
+pub fn unarchive_folder(
+    state: State<AppState>,
+    notebook_id: String,
+    folder_id: String,
+) -> CommandResult<Folder> {
+    let storage = state.storage.lock().unwrap();
+    let nb_id = Uuid::parse_str(&notebook_id).map_err(|e| CommandError {
+        message: format!("Invalid notebook ID: {}", e),
+    })?;
+    let fld_id = Uuid::parse_str(&folder_id).map_err(|e| CommandError {
+        message: format!("Invalid folder ID: {}", e),
+    })?;
+
+    let folder = storage.unarchive_folder(nb_id, fld_id)?;
+
+    // Auto-commit if git is enabled for this notebook
+    let notebook_path = storage.get_notebook_path(nb_id);
+    if git::is_git_repo(&notebook_path) {
+        let commit_message = format!("Unarchive folder: {}", folder.name);
+        if let Err(e) = git::commit_all(&notebook_path, &commit_message) {
+            log::warn!("Failed to auto-commit folder unarchive: {}", e);
+        }
+    }
+
+    Ok(folder)
+}
+
 /// Reorder folders within a parent
 #[tauri::command]
 pub fn reorder_folders(
