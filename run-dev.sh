@@ -3,6 +3,9 @@
 
 set -e
 
+# Ensure pkg-config can find system libraries (webkit2gtk, soup3, etc.)
+export PKG_CONFIG_PATH="/usr/lib/x86_64-linux-gnu/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+
 source "$(dirname "$0")/setup-python-env.sh"
 
 # Clean up stale Tantivy writer locks from previous crashed sessions
