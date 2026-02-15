@@ -591,3 +591,86 @@ pub fn get_page_content(
         page_type: Some(format!("{:?}", page.page_type).to_lowercase()),
     })
 }
+
+/// Get the operation log for a page (recent entries, newest last).
+#[tauri::command(rename_all = "camelCase")]
+pub fn get_page_oplog(
+    state: State<AppState>,
+    notebook_id: String,
+    page_id: String,
+    limit: Option<usize>,
+) -> CommandResult<Vec<crate::storage::oplog::OplogEntry>> {
+    let storage = state.storage.lock().unwrap();
+    let nb_id = Uuid::parse_str(&notebook_id).map_err(|e| CommandError {
+        message: format!("Invalid notebook ID: {}", e),
+    })?;
+    let pg_id = Uuid::parse_str(&page_id).map_err(|e| CommandError {
+        message: format!("Invalid page ID: {}", e),
+    })?;
+
+    let pages_dir = storage.get_notebook_path(nb_id).join("pages");
+    let oplog_file = crate::storage::oplog::oplog_path(&pages_dir, pg_id);
+
+    let entries = match limit {
+        Some(n) => crate::storage::oplog::read_last_n_entries(&oplog_file, n),
+        None => crate::storage::oplog::read_entries(&oplog_file),
+    };
+
+    Ok(entries)
+}
+
+/// List available snapshots for a page.
+#[tauri::command(rename_all = "camelCase")]
+pub fn list_page_snapshots(
+    state: State<AppState>,
+    notebook_id: String,
+    page_id: String,
+) -> CommandResult<Vec<String>> {
+    let storage = state.storage.lock().unwrap();
+    let nb_id = Uuid::parse_str(&notebook_id).map_err(|e| CommandError {
+        message: format!("Invalid notebook ID: {}", e),
+    })?;
+    let pg_id = Uuid::parse_str(&page_id).map_err(|e| CommandError {
+        message: format!("Invalid page ID: {}", e),
+    })?;
+
+    let pages_dir = storage.get_notebook_path(nb_id).join("pages");
+    let snap_dir = crate::storage::snapshots::snapshots_dir(&pages_dir, pg_id);
+    let names = crate::storage::snapshots::list_snapshots(&snap_dir);
+
+    Ok(names)
+}
+
+/// Restore a page from a specific snapshot.
+#[tauri::command(rename_all = "camelCase")]
+pub fn restore_page_snapshot(
+    state: State<AppState>,
+    notebook_id: String,
+    page_id: String,
+    snapshot_name: String,
+) -> CommandResult<Page> {
+    let storage = state.storage.lock().unwrap();
+    let nb_id = Uuid::parse_str(&notebook_id).map_err(|e| CommandError {
+        message: format!("Invalid notebook ID: {}", e),
+    })?;
+    let pg_id = Uuid::parse_str(&page_id).map_err(|e| CommandError {
+        message: format!("Invalid page ID: {}", e),
+    })?;
+
+    let pages_dir = storage.get_notebook_path(nb_id).join("pages");
+    let snap_dir = crate::storage::snapshots::snapshots_dir(&pages_dir, pg_id);
+
+    let snapshot_page = crate::storage::snapshots::read_snapshot(&snap_dir, &snapshot_name)
+        .ok_or_else(|| CommandError {
+            message: format!("Snapshot '{}' not found", snapshot_name),
+        })?;
+
+    // Write the snapshot content as the current page (preserving the current page's metadata
+    // but restoring the content from the snapshot)
+    let mut current_page = storage.get_page(nb_id, pg_id)?;
+    current_page.content = snapshot_page.content;
+    current_page.updated_at = chrono::Utc::now();
+    storage.update_page(&current_page)?;
+
+    Ok(current_page)
+}

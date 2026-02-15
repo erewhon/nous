@@ -347,6 +347,7 @@ impl FileStorage {
         let content = serde_json::to_string_pretty(&page)?;
         fs::write(&page_path, content)?;
 
+        self.oplog_record_create(&page);
         Ok(page)
     }
 
@@ -361,6 +362,7 @@ impl FileStorage {
         let content = serde_json::to_string_pretty(&page)?;
         fs::write(&page_path, content)?;
 
+        self.oplog_record_create(&page);
         Ok(page)
     }
 
@@ -375,7 +377,33 @@ impl FileStorage {
         let content = serde_json::to_string_pretty(page)?;
         fs::write(&page_path, content)?;
 
+        self.oplog_record_create(page);
         Ok(page.clone())
+    }
+
+    /// Record a "create" oplog entry for a newly created page (best-effort).
+    fn oplog_record_create(&self, page: &Page) {
+        let pages_dir = self.pages_dir(page.notebook_id);
+        let oplog_file = super::oplog::oplog_path(&pages_dir, page.id);
+        let entry = super::oplog::OplogEntry {
+            ts: chrono::Utc::now(),
+            client_id: super::oplog::get_client_id(),
+            op: super::oplog::OpType::Create,
+            content_hash: super::oplog::content_hash(&page.content),
+            prev_hash: "genesis".to_string(),
+            block_changes: page.content.blocks.iter().enumerate().map(|(i, b)| {
+                super::oplog::BlockChange {
+                    block_id: b.id.clone(),
+                    op: super::oplog::BlockOp::Insert,
+                    block_type: Some(b.block_type.clone()),
+                    after_block_id: if i > 0 { Some(page.content.blocks[i - 1].id.clone()) } else { None },
+                }
+            }).collect(),
+            block_count: page.content.blocks.len(),
+        };
+        if let Err(e) = super::oplog::append_entry(&oplog_file, &entry) {
+            log::warn!("Failed to write create oplog for page {}: {}", page.id, e);
+        }
     }
 
     pub fn update_page(&self, page: &Page) -> Result<()> {
@@ -385,8 +413,52 @@ impl FileStorage {
             return Err(StorageError::PageNotFound(page.id));
         }
 
+        // Read old content for oplog diffing (best-effort — don't fail the save)
+        let old_content = fs::read_to_string(&page_path)
+            .ok()
+            .and_then(|s| serde_json::from_str::<Page>(&s).ok())
+            .map(|p| p.content);
+
         let content = serde_json::to_string_pretty(page)?;
         Self::atomic_write(&page_path, &content)?;
+
+        // Append oplog entry (best-effort — never fail the save for oplog issues)
+        let pages_dir = self.pages_dir(page.notebook_id);
+        let oplog_file = super::oplog::oplog_path(&pages_dir, page.id);
+        let new_hash = super::oplog::content_hash(&page.content);
+        let prev_hash = super::oplog::read_last_hash(&oplog_file);
+
+        let block_changes = match &old_content {
+            Some(old) => super::oplog::diff_blocks(old, &page.content),
+            None => Vec::new(),
+        };
+
+        let op = if old_content.is_none() {
+            super::oplog::OpType::Create
+        } else {
+            super::oplog::OpType::Modify
+        };
+
+        let entry = super::oplog::OplogEntry {
+            ts: chrono::Utc::now(),
+            client_id: super::oplog::get_client_id(),
+            op,
+            content_hash: new_hash,
+            prev_hash,
+            block_changes,
+            block_count: page.content.blocks.len(),
+        };
+
+        if let Err(e) = super::oplog::append_entry(&oplog_file, &entry) {
+            log::warn!("Failed to append oplog entry for page {}: {}", page.id, e);
+        }
+
+        // Take a periodic snapshot if enough oplog entries have accumulated
+        if super::snapshots::should_snapshot(&pages_dir, page.id) {
+            if let Err(e) = super::snapshots::take_snapshot(&pages_dir, page) {
+                log::warn!("Failed to take snapshot for page {}: {}", page.id, e);
+            }
+        }
 
         Ok(())
     }

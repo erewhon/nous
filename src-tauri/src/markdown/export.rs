@@ -356,6 +356,7 @@ mod tests {
             last_file_sync: None,
             template_id: None,
             deleted_at: None,
+            color: None,
             is_favorite: false,
             is_daily_note: false,
             daily_note_date: None,

@@ -366,6 +366,10 @@ pub fn run() {
             commands::purge_old_trash,
             commands::move_page_to_parent,
             commands::move_page_to_notebook,
+            // Page history commands
+            commands::get_page_oplog,
+            commands::list_page_snapshots,
+            commands::restore_page_snapshot,
             // Search commands
             commands::search_pages,
             commands::fuzzy_search_pages,
