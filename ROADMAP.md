@@ -815,16 +815,17 @@ Phased plan to make the editor save path bulletproof, add operation logging, int
   - Documentation: `docs/AGENT_PAGE_STORAGE.md`
 
 ### Phase 3: CRDT Integration into Local Save Path
-- [ ] Maintain live Yrs CRDT document per open page
+- [x] Maintain live Yrs CRDT document per open page
   - Load/create `.crdt` file on page open
   - On save, compute Yrs update (diff) instead of full JSON replacement
   - Page JSON derived from CRDT state (source of truth moves to CRDT)
-- [ ] Binary Yrs update log (replay-able)
+- [x] Binary Yrs update log (replay-able)
   - Append binary updates per save, reconstruct state by replaying from last snapshot
   - More space-efficient than JSON oplog
-- [ ] Multi-pane CRDT conflict resolution
+- [x] Multi-pane CRDT conflict resolution
   - Each pane maintains own update stream, merged on save
   - Convergent result — no data loss from concurrent edits
+  - Per-pane base tracking ensures concurrent edits merge correctly
 
 ### Phase 4: Block-Level Version History (see also Section 36)
 - [ ] Block version vectors via CRDT lamport timestamps
