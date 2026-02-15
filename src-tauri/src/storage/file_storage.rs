@@ -87,6 +87,36 @@ impl FileStorage {
         Ok(())
     }
 
+    /// Atomic write: write to a .tmp file then rename.
+    /// rename() is atomic on ext4, APFS, and NTFS, so a crash mid-write
+    /// leaves only the .tmp file — the original is never corrupted.
+    fn atomic_write(path: &std::path::Path, content: &str) -> Result<()> {
+        let tmp_path = path.with_extension("json.tmp");
+        fs::write(&tmp_path, content)?;
+        fs::rename(&tmp_path, path)?;
+        Ok(())
+    }
+
+    /// Recover orphaned .tmp files left by a crash during atomic_write.
+    /// If a .tmp exists but the original doesn't, rename it in place.
+    /// If both exist, the original is authoritative — remove the .tmp.
+    fn recover_tmp_file(path: &std::path::Path) {
+        let tmp_path = path.with_extension("json.tmp");
+        if tmp_path.exists() {
+            if !path.exists() {
+                // Crash after write, before rename — recover
+                if let Err(e) = fs::rename(&tmp_path, path) {
+                    eprintln!("[recovery] Failed to recover {:?}: {}", tmp_path, e);
+                } else {
+                    eprintln!("[recovery] Recovered {:?} from .tmp", path);
+                }
+            } else {
+                // Both exist — original is authoritative, remove stale .tmp
+                let _ = fs::remove_file(&tmp_path);
+            }
+        }
+    }
+
     // ===== Notebook Operations =====
 
     /// Get the notebooks directory path
@@ -258,6 +288,18 @@ impl FileStorage {
             return Err(StorageError::NotebookNotFound(notebook_id));
         }
 
+        // Recover any orphaned .tmp files left by a crash during atomic_write
+        if let Ok(entries) = fs::read_dir(&pages_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().map_or(false, |e| e == "tmp") {
+                    // .json.tmp → strip .tmp to get the target .json path
+                    let target = path.with_extension("");
+                    Self::recover_tmp_file(&target);
+                }
+            }
+        }
+
         let mut pages = Vec::new();
 
         for entry in fs::read_dir(&pages_dir)? {
@@ -344,7 +386,7 @@ impl FileStorage {
         }
 
         let content = serde_json::to_string_pretty(page)?;
-        fs::write(&page_path, content)?;
+        Self::atomic_write(&page_path, &content)?;
 
         Ok(())
     }
@@ -731,6 +773,9 @@ impl FileStorage {
     pub fn list_folders(&self, notebook_id: Uuid) -> Result<Vec<Folder>> {
         let folders_path = self.folders_path(notebook_id);
 
+        // Recover orphaned .tmp if crash happened during atomic write
+        Self::recover_tmp_file(&folders_path);
+
         // If folders.json doesn't exist, return empty vec (migration case)
         if !folders_path.exists() {
             return Ok(Vec::new());
@@ -756,7 +801,7 @@ impl FileStorage {
     fn save_folders(&self, notebook_id: Uuid, folders: &[Folder]) -> Result<()> {
         let folders_path = self.folders_path(notebook_id);
         let content = serde_json::to_string_pretty(folders)?;
-        fs::write(&folders_path, content)?;
+        Self::atomic_write(&folders_path, &content)?;
         Ok(())
     }
 
@@ -923,6 +968,9 @@ impl FileStorage {
     pub fn list_sections(&self, notebook_id: Uuid) -> Result<Vec<Section>> {
         let sections_path = self.sections_path(notebook_id);
 
+        // Recover orphaned .tmp if crash happened during atomic write
+        Self::recover_tmp_file(&sections_path);
+
         // If sections.json doesn't exist, return empty vec
         if !sections_path.exists() {
             return Ok(Vec::new());
@@ -948,7 +996,7 @@ impl FileStorage {
     fn save_sections(&self, notebook_id: Uuid, sections: &[Section]) -> Result<()> {
         let sections_path = self.sections_path(notebook_id);
         let content = serde_json::to_string_pretty(sections)?;
-        fs::write(&sections_path, content)?;
+        Self::atomic_write(&sections_path, &content)?;
         Ok(())
     }
 
@@ -1948,9 +1996,10 @@ impl FileStorage {
     ) -> Result<Page> {
         let mut page = self.get_page(notebook_id, page_id)?;
 
-        // If moving to a specific folder, verify it exists
+        // If moving to a specific folder, verify it exists and sync sectionId
         if let Some(fid) = folder_id {
-            let _ = self.get_folder(notebook_id, fid)?;
+            let folder = self.get_folder(notebook_id, fid)?;
+            page.section_id = folder.section_id;
         }
 
         page.folder_id = folder_id;
@@ -1974,6 +2023,42 @@ impl FileStorage {
         self.update_page(&page)?;
 
         Ok(page)
+    }
+
+    /// Repair pages whose section_id doesn't match their folder's section_id.
+    /// Lightweight: only writes pages that are actually inconsistent.
+    /// Returns the number of pages repaired.
+    pub fn repair_section_consistency(&self, notebook_id: Uuid) -> Result<usize> {
+        let folders = self.list_folders(notebook_id)?;
+        let folder_map: std::collections::HashMap<Uuid, Option<Uuid>> = folders
+            .iter()
+            .map(|f| (f.id, f.section_id))
+            .collect();
+
+        let pages = self.list_pages(notebook_id)?;
+        let mut repaired = 0;
+
+        for page in &pages {
+            if let Some(folder_id) = page.folder_id {
+                if let Some(&folder_section_id) = folder_map.get(&folder_id) {
+                    if page.section_id != folder_section_id {
+                        let mut fixed = page.clone();
+                        fixed.section_id = folder_section_id;
+                        self.update_page(&fixed)?;
+                        repaired += 1;
+                    }
+                }
+            }
+        }
+
+        if repaired > 0 {
+            eprintln!(
+                "[repair] Fixed section_id on {} page(s) in notebook {}",
+                repaired, notebook_id
+            );
+        }
+
+        Ok(repaired)
     }
 
     /// Archive a page (move to archive folder)
@@ -2401,7 +2486,7 @@ impl FileStorage {
 
         let metadata_path = self.metadata_path(page.notebook_id, page.id);
         let content = serde_json::to_string_pretty(page)?;
-        fs::write(&metadata_path, content)?;
+        Self::atomic_write(&metadata_path, &content)?;
         Ok(())
     }
 

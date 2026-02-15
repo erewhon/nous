@@ -1,6 +1,7 @@
 import { useEffect, useRef, useCallback } from "react";
 import EditorJS, { type OutputData, type ToolConstructable } from "@editorjs/editorjs";
 import { crumb } from "../../utils/breadcrumbs";
+import { setPendingSavePromise } from "../../stores/pageStore";
 import Header from "@editorjs/header";
 import List from "@editorjs/list";
 import Quote from "@editorjs/quote";
@@ -349,7 +350,7 @@ export function useEditor({
         // Editor.js's onChange debounce, which can leave the last edit
         // (e.g. a checklist item deletion) unreported if the user
         // switches pages quickly.
-        editor.save()
+        const savePromise = editor.save()
           .then((data) => {
             crumb("editor:cleanup-saved");
             if (data) onUnmountSaveRef.current?.(data);
@@ -358,7 +359,11 @@ export function useEditor({
           .finally(() => {
             crumb("editor:cleanup-destroy");
             editor.destroy();
+            setPendingSavePromise(null);
           });
+
+        // Register so selectPage can await before switching pages
+        setPendingSavePromise(savePromise);
       }
     };
   }, [holderId]);

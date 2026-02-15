@@ -19,6 +19,10 @@ pub fn list_pages(
     let id = Uuid::parse_str(&notebook_id).map_err(|e| CommandError {
         message: format!("Invalid notebook ID: {}", e),
     })?;
+
+    // Repair any page/folder section_id mismatches (lightweight, only writes if needed)
+    let _ = storage.repair_section_consistency(id);
+
     let mut pages = storage.list_pages(id)?;
 
     // Always exclude deleted pages (use list_trash for those)

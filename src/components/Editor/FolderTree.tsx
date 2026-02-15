@@ -301,31 +301,32 @@ export function FolderTree({
   }, [folders, sectionsEnabled, selectedSectionId, showArchived]);
 
   // Get top-level pages for a specific folder (pages without a parent page)
+  const visibleFolderIds = useMemo(
+    () => new Set(visibleFolders.map((f) => f.id)),
+    [visibleFolders]
+  );
+
   const getPagesForFolder = useCallback(
     (folderId: string | null) => {
       const filtered = visiblePages.filter((p) => {
-        const folderMatch = (p.folderId ?? null) === folderId;
         // Use a simple truthy check - if parentPageId has any value, it's a child page
         const noParent = !p.parentPageId;
 
-        // Safety check: if this page has parentPageId but passed the noParent check, something is wrong
-        if (p.parentPageId && noParent) {
-          console.error('[getPagesForFolder] CRITICAL BUG - page has parentPageId but noParent is true:', {
-            id: p.id,
-            title: p.title,
-            parentPageId: p.parentPageId,
-            parentPageIdType: typeof p.parentPageId,
-            parentPageIdValue: JSON.stringify(p.parentPageId),
-            noParent,
-          });
+        if (folderId === null) {
+          // Root: pages with no folder OR pages whose folder is not visible
+          // (safety net — orphaned pages always appear somewhere)
+          const pageFolder = p.folderId ?? null;
+          const folderIsVisible =
+            pageFolder === null || visibleFolderIds.has(pageFolder);
+          return (pageFolder === null || !folderIsVisible) && noParent;
         }
 
-        return folderMatch && noParent;
+        return (p.folderId ?? null) === folderId && noParent;
       });
       const sorted = sortPages(filtered);
       return sorted;
     },
-    [visiblePages, sortPages]
+    [visiblePages, visibleFolderIds, sortPages]
   );
 
   // Get child pages for a specific parent page

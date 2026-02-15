@@ -49,6 +49,15 @@ function scheduleGitAutoCommit(notebookId: string) {
   );
 }
 
+// Pending unmount-save promise. Set by BlockEditor during editor cleanup so
+// selectPage can await it before switching pages.  Module-level (not Zustand)
+// to avoid triggering re-renders.
+let _pendingSavePromise: Promise<void> | null = null;
+
+export function setPendingSavePromise(p: Promise<void> | null) {
+  _pendingSavePromise = p;
+}
+
 // Recent page entry for tracking access history
 export interface RecentPageEntry {
   pageId: string;
@@ -153,7 +162,7 @@ interface PageActions {
   ) => Promise<void>;
 
   // Selection
-  selectPage: (id: string | null) => void;
+  selectPage: (id: string | null) => Promise<void>;
 
   // Pane management
   openPageInNewPane: (pageId: string | null) => void;
@@ -620,9 +629,20 @@ export const usePageStore = create<PageStore>()(
         }
       },
 
-      selectPage: (id) => {
+      selectPage: async (id) => {
         resetCrumbs();
         crumb("selectPage:start");
+
+        // Wait for any pending unmount save from the previous editor
+        if (_pendingSavePromise) {
+          crumb("selectPage:await-pending-save");
+          try {
+            await _pendingSavePromise;
+          } catch {
+            // Save failed — proceed anyway
+          }
+          _pendingSavePromise = null;
+        }
         const t0 = performance.now();
         const state = get();
         const activePaneId = state.activePaneId || state.panes[0]?.id;

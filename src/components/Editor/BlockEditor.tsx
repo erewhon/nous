@@ -251,7 +251,7 @@ export const BlockEditor = memo(forwardRef<BlockEditorRef, BlockEditorProps>(fun
   // Instead, just marks the editor as dirty.  Actual saves happen on:
   //   - Ctrl+S (explicit save)
   //   - Page switch (onUnmountSave)
-  //   - Safety-net timer (every 60s of inactivity)
+  //   - Safety-net timer (5s of inactivity)
   const handleChange = useCallback(
     (data?: OutputData) => {
       crumb(`blockEditor:handleChange:${data ? "withData" : "signal"}`);
@@ -268,7 +268,7 @@ export const BlockEditor = memo(forwardRef<BlockEditorRef, BlockEditorProps>(fun
         });
       }
 
-      // Reset the safety-net timer.  If the user stops editing for 60s,
+      // Reset the safety-net timer.  If the user stops editing for 5s,
       // the safety net will call editor.save() to persist pending changes.
       if (safetyNetTimerRef.current) {
         clearTimeout(safetyNetTimerRef.current);
@@ -278,7 +278,7 @@ export const BlockEditor = memo(forwardRef<BlockEditorRef, BlockEditorProps>(fun
           crumb("blockEditor:safetyNet:fire");
           performSave();
         }
-      }, 60000); // 60 seconds of inactivity
+      }, 5000); // 5 seconds of inactivity
     },
     [onChange, performSave]
   );
@@ -401,11 +401,8 @@ export const BlockEditor = memo(forwardRef<BlockEditorRef, BlockEditorProps>(fun
   }, []);
 
   // Save when the window loses visibility or is about to close.
-  // The 60s safety-net timer is intentionally long (editor.save() freezes
-  // WebKitGTK for 6+ seconds), but that means minor edits can be lost if
-  // the app closes or the user switches away before the timer fires.
-  // A brief freeze is acceptable in these situations since the user isn't
-  // actively editing.
+  // The 5s safety-net timer covers most cases, but this catches scenarios
+  // where the app closes or the user switches away within the timer window.
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.visibilityState === "hidden" && hasUnsavedChangesRef.current) {
