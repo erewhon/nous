@@ -636,7 +636,7 @@ NotebookLM-inspired features for generating study materials from notebook conten
 - [x] **Batch delete in Media Library** - Select and delete multiple media files at once
 - [ ] **Slide templates** - Pre-built slide layouts (title slide, bullet points, image, quote)
 - [ ] **Undo/redo for slides** - History stack for slide edits with keyboard shortcuts
-- [ ] **Video thumbnails** - Generate and display thumbnails in Media Library
+- [x] **Video thumbnails** - Generate and display thumbnails in Media Library
 - [ ] **Re-generate single slide audio** - Regenerate TTS for individual slides without full rebuild
 - [x] **Custom accent colors** - User-defined accent color for slides and infographics
 
@@ -783,6 +783,53 @@ Read iMessage and call history directly from macOS system SQLite databases. The 
 
 ---
 
+## Data Flow Robustness Overhaul
+
+Phased plan to make the editor save path bulletproof, add operation logging, integrate CRDTs into local saves, and enable block-level version history.
+
+### Phase 0: Fix Invisible Pages
+- [x] Backend `move_page_to_folder` syncs `page.section_id` with `folder.section_id`
+- [x] Frontend orphan safety net — pages whose folder is hidden appear at root level
+- [x] `repair_section_consistency` runs on notebook load, fixes stale section metadata
+- [x] Recovered orphaned Astronomy notebook pages
+
+### Phase 1: Atomic Writes & Crash Safety
+- [x] Atomic file writes via temp+rename (`atomic_write` writes `.json.tmp` then renames)
+- [x] Recovery of orphaned `.tmp` files on next load (`recover_tmp_file`)
+- [x] Safety-net auto-save reduced from 60s to 5s
+- [x] `selectPage` awaits pending save promise before switching pages
+
+### Phase 2: Operation Log & Page Versioning
+- [ ] Per-page append-only operation log (JSONL with hash chain)
+  - Each save appends: timestamp, clientId, op type, contentHash, affected blockIds, prevHash
+  - Enables corruption detection (hash mismatch) and recovery
+- [ ] Block-level change tracking in oplog
+  - Diff consecutive saves to identify per-block insert/modify/delete
+  - Enables block-level undo across sessions, blame/attribution
+- [ ] Periodic snapshots with oplog compaction
+  - Keep last N full page JSON snapshots alongside oplog
+  - Compact oldest oplogs when snapshot count exceeds threshold
+
+### Phase 3: CRDT Integration into Local Save Path
+- [ ] Maintain live Yrs CRDT document per open page
+  - Load/create `.crdt` file on page open
+  - On save, compute Yrs update (diff) instead of full JSON replacement
+  - Page JSON derived from CRDT state (source of truth moves to CRDT)
+- [ ] Binary Yrs update log (replay-able)
+  - Append binary updates per save, reconstruct state by replaying from last snapshot
+  - More space-efficient than JSON oplog
+- [ ] Multi-pane CRDT conflict resolution
+  - Each pane maintains own update stream, merged on save
+  - Convergent result — no data loss from concurrent edits
+
+### Phase 4: Block-Level Version History (see also Section 36)
+- [ ] Block version vectors via CRDT lamport timestamps
+- [ ] Block history UI — hover gutter for version count, click for diff history
+- [ ] Block revert — restore individual blocks to previous state
+- [ ] Git correlation — link oplog entries to git commits
+
+---
+
 ## Future Feature Ideas
 
 Inspired by other note-taking and organization software (Notion, Obsidian, Roam, Logseq, Craft, Mem, Evernote, Apple Notes, etc.)
@@ -861,10 +908,11 @@ These features are recommended as high-priority additions:
   - Synced blocks that appear in multiple pages
   - Single source of truth, all instances update together
   - Notion-style synced blocks
-- [ ] **Block-level version history** - Granular change tracking
+- [ ] **Block-level version history** - Granular change tracking (see "Data Flow Robustness Overhaul" Phase 4)
   - Track changes at block level, not just page level
   - See who changed what block and when
   - Restore individual blocks to previous state
+  - Depends on Phase 2 (oplog) and Phase 3 (CRDT) infrastructure
 
 ---
 
