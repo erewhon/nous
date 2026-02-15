@@ -314,6 +314,19 @@ mod tests {
         assert!(h1.starts_with("sha256:"));
     }
 
+    /// Known hash for cross-language compatibility with Python page_storage.py.
+    /// If this test fails, the Python and Rust hashes have diverged.
+    #[test]
+    fn test_content_hash_cross_compat() {
+        let data = make_editor_data(vec![make_block("abc", "paragraph", "hello")]);
+        let hash = content_hash(&data);
+        assert_eq!(
+            hash,
+            "sha256:88be9bf189ecc5accc9152e7f6eb9b66443c26247150c4f441239c8794072339",
+            "Hash must match Python nous_ai.page_storage._content_hash for same input"
+        );
+    }
+
     #[test]
     fn test_diff_blocks_no_changes() {
         let data = make_editor_data(vec![

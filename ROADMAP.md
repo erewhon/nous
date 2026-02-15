@@ -800,15 +800,19 @@ Phased plan to make the editor save path bulletproof, add operation logging, int
 - [x] `selectPage` awaits pending save promise before switching pages
 
 ### Phase 2: Operation Log & Page Versioning
-- [ ] Per-page append-only operation log (JSONL with hash chain)
+- [x] Per-page append-only operation log (JSONL with hash chain)
   - Each save appends: timestamp, clientId, op type, contentHash, affected blockIds, prevHash
   - Enables corruption detection (hash mismatch) and recovery
-- [ ] Block-level change tracking in oplog
+- [x] Block-level change tracking in oplog
   - Diff consecutive saves to identify per-block insert/modify/delete
   - Enables block-level undo across sessions, blame/attribution
-- [ ] Periodic snapshots with oplog compaction
+- [x] Periodic snapshots with oplog compaction
   - Keep last N full page JSON snapshots alongside oplog
   - Compact oldest oplogs when snapshot count exceeds threshold
+- [x] Python page_storage module for external agents (`nous-py/nous_ai/page_storage.py`)
+  - Cross-language compatible content hashing (SHA-256)
+  - Atomic writes, automatic oplog entries with block-level diffs
+  - Documentation: `docs/AGENT_PAGE_STORAGE.md`
 
 ### Phase 3: CRDT Integration into Local Save Path
 - [ ] Maintain live Yrs CRDT document per open page
