@@ -45,7 +45,7 @@ use python_bridge::PythonAI;
 use rag::VectorIndex;
 use search::SearchIndex;
 use storage::FileStorage;
-use sync::{SyncManager, SyncScheduler};
+use sync::{CrdtStore, SyncManager, SyncScheduler};
 use video_server::VideoServer;
 
 pub struct AppState {
@@ -62,6 +62,7 @@ pub struct AppState {
     pub goals_storage: Arc<Mutex<GoalsStorage>>,
     pub contacts_storage: Arc<Mutex<ContactsStorage>>,
     pub sync_manager: Arc<SyncManager>,
+    pub crdt_store: Arc<CrdtStore>,
     pub external_editor: Mutex<ExternalEditorManager>,
     pub external_sources_storage: Arc<Mutex<ExternalSourcesStorage>>,
     pub backup_scheduler: Arc<tokio::sync::Mutex<Option<BackupScheduler>>>,
@@ -173,6 +174,10 @@ pub fn run() {
     let sync_manager = SyncManager::new(data_dir.clone());
     let sync_manager_arc = Arc::new(sync_manager);
 
+    // Initialize CRDT store for live page editing
+    let crdt_store = CrdtStore::new(data_dir.clone());
+    let crdt_store_arc = Arc::new(crdt_store);
+
     // Initialize external editor manager
     let external_editor = ExternalEditorManager::new()
         .expect("Failed to initialize external editor manager");
@@ -240,6 +245,7 @@ pub fn run() {
         goals_storage: goals_storage_arc,
         contacts_storage: contacts_storage_arc,
         sync_manager: sync_manager_arc,
+        crdt_store: crdt_store_arc,
         external_editor: Mutex::new(external_editor),
         external_sources_storage: external_sources_storage_arc,
         backup_scheduler: backup_scheduler_arc,
@@ -301,6 +307,9 @@ pub fn run() {
             // Give the sync manager the app handle so scheduler-triggered syncs
             // can emit events (e.g., sync-pages-updated) to the frontend.
             state.sync_manager.set_app_handle(app.handle().clone());
+
+            // Give the sync manager the CRDT store so it can use live page state
+            state.sync_manager.set_crdt_store(Arc::clone(&state.crdt_store));
 
             // Show the main window (starts hidden to avoid white flash)
             if let Some(window) = app.get_webview_window("main") {
@@ -366,6 +375,8 @@ pub fn run() {
             commands::purge_old_trash,
             commands::move_page_to_parent,
             commands::move_page_to_notebook,
+            commands::open_page_in_pane_crdt,
+            commands::close_pane_for_page,
             // Page history commands
             commands::get_page_oplog,
             commands::list_page_snapshots,

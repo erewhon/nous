@@ -14,7 +14,7 @@ pub use config::{
     SyncConfig, SyncConfigInput, SyncCredentials, SyncManifest, SyncMode, SyncResult, SyncState,
     SyncStatus,
 };
-pub use crdt::{CRDTError, PageDocument};
+pub use crdt::{CRDTError, CrdtStore, PageDocument};
 pub use manager::SyncManager;
 pub use metadata::{LocalAssetState, LocalPageState, LocalSyncState};
 pub use notify::NotifyPushListener;

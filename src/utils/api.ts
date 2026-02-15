@@ -131,13 +131,15 @@ export async function updatePage(
     dailyNoteDate?: string | null; // "YYYY-MM-DD" format, null to clear
     color?: string | null; // CSS color string, null to clear
   },
-  commit?: boolean // Whether to create a git commit (default: false, use true for explicit saves)
+  commit?: boolean, // Whether to create a git commit (default: false, use true for explicit saves)
+  paneId?: string // Editor pane ID for CRDT multi-pane merge
 ): Promise<Page> {
   // Tauri automatically converts camelCase to snake_case for command parameters
   const params: Record<string, unknown> = {
     notebookId,
     pageId,
     commit,
+    paneId,
   };
   if (updates.title !== undefined) params.title = updates.title;
   if (updates.content !== undefined) params.content = updates.content;
@@ -158,6 +160,21 @@ export async function updatePage(
   if (updates.color !== undefined) params.color = updates.color;
 
   return invoke<Page>("update_page", params);
+}
+
+export async function openPageInPaneCrdt(
+  notebookId: string,
+  pageId: string,
+  paneId: string
+): Promise<void> {
+  return invoke("open_page_in_pane_crdt", { notebookId, pageId, paneId });
+}
+
+export async function closePaneForPage(
+  pageId: string,
+  paneId: string
+): Promise<void> {
+  return invoke("close_pane_for_page", { pageId, paneId });
 }
 
 export async function deletePage(

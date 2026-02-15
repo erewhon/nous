@@ -153,6 +153,7 @@ interface BlockEditorProps {
   className?: string;
   notebookId?: string;
   pageId?: string;
+  paneId?: string; // Editor pane ID for CRDT multi-pane merge
   pages?: Array<{ id: string; title: string }>;
 }
 
@@ -180,6 +181,7 @@ export const BlockEditor = memo(forwardRef<BlockEditorRef, BlockEditorProps>(fun
   className = "",
   notebookId,
   pageId,
+  paneId,
   pages = [],
 }, ref) {
   const editorId = useId().replace(/:/g, "-");
@@ -700,7 +702,7 @@ export const BlockEditor = memo(forwardRef<BlockEditorRef, BlockEditorProps>(fun
         // cascade that causes editor.render() → onChange → editor.save() → freeze.
         // The store cache is updated on page switch via onUnmountSave.
         const state = usePageStore.getState();
-        state.updatePageContent(notebookId, pageId, updatedContent as EditorData, false);
+        state.updatePageContent(notebookId, pageId, updatedContent as EditorData, false, paneId);
       }, 0);
     };
 
@@ -708,7 +710,7 @@ export const BlockEditor = memo(forwardRef<BlockEditorRef, BlockEditorProps>(fun
     return () => {
       container.removeEventListener("checklist-data-changed", handleDataChanged);
     };
-  }, [readOnly, pageId, notebookId]);
+  }, [readOnly, pageId, notebookId, paneId]);
 
   // Detect URL paste and offer to clip
   useEffect(() => {

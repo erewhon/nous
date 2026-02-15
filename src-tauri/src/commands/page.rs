@@ -149,9 +149,9 @@ pub fn update_page(
     is_favorite: Option<bool>,
     is_daily_note: Option<bool>,
     daily_note_date: Option<Option<String>>, // Some(Some("YYYY-MM-DD")) to set, Some(None) to clear
-    color: Option<Option<String>>, // Some(Some(hex)) to set, Some(None) to clear
-    #[allow(unused_variables)]
-    commit: Option<bool>, // Whether to create a git commit (default: false)
+    color: Option<Option<String>>,           // Some(Some(hex)) to set, Some(None) to clear
+    #[allow(unused_variables)] commit: Option<bool>, // Whether to create a git commit (default: false)
+    pane_id: Option<String>,                         // Editor pane ID for CRDT multi-pane merge
 ) -> CommandResult<Page> {
     let storage = state.storage.lock().unwrap();
     let nb_id = Uuid::parse_str(&notebook_id).map_err(|e| CommandError {
@@ -167,14 +167,34 @@ pub fn update_page(
         page.title = title;
     }
     if let Some(content) = content {
-        page.content = content;
+        // Route through CRDT store if a pane_id is provided
+        let pane = pane_id.as_deref().unwrap_or("default");
+        match state.crdt_store.apply_save(pg_id, pane, &content) {
+            Ok(Some(canonical)) => {
+                // CRDT produced canonical state (may include other panes' changes)
+                page.content = canonical;
+            }
+            Ok(None) => {
+                // Page not live in CRDT store — use content as-is
+                page.content = content;
+            }
+            Err(e) => {
+                // CRDT error — fall back to direct content (best-effort)
+                log::warn!("CRDT apply_save failed for page {}: {}", pg_id, e);
+                page.content = content;
+            }
+        }
     }
     if let Some(tags) = tags {
         page.tags = tags;
     }
     // Allow setting system_prompt to None (empty string clears it)
     if let Some(prompt) = system_prompt {
-        page.system_prompt = if prompt.is_empty() { None } else { Some(prompt) };
+        page.system_prompt = if prompt.is_empty() {
+            None
+        } else {
+            Some(prompt)
+        };
     }
     // Set system_prompt_mode
     if let Some(mode) = system_prompt_mode {
@@ -185,9 +205,7 @@ pub fn update_page(
     }
     // Allow setting section_id (Some(Some(id)) to set, Some(None) to clear)
     if let Some(sect_id) = section_id {
-        page.section_id = sect_id.map(|id| {
-            Uuid::parse_str(&id).expect("Invalid section ID")
-        });
+        page.section_id = sect_id.map(|id| Uuid::parse_str(&id).expect("Invalid section ID"));
     }
     // Set page_type if provided
     if let Some(pt) = page_type.clone() {
@@ -204,7 +222,11 @@ pub fn update_page(
     }
     // Set file_extension if provided
     if let Some(ext) = file_extension.clone() {
-        page.file_extension = if ext.is_empty() { None } else { Some(ext.clone()) };
+        page.file_extension = if ext.is_empty() {
+            None
+        } else {
+            Some(ext.clone())
+        };
 
         // If this is a file-based page type and source_file is not set, create it
         if page.source_file.is_none() && !ext.is_empty() {
@@ -261,7 +283,9 @@ pub fn update_page(
     state.sync_manager.queue_page_update(nb_id, pg_id);
 
     // Trigger on-save sync if configured
-    state.sync_manager.trigger_onsave_sync_if_needed(nb_id, &state.storage);
+    state
+        .sync_manager
+        .trigger_onsave_sync_if_needed(nb_id, &state.storage);
 
     // Update the search index
     if let Ok(mut search_index) = state.search_index.lock() {
@@ -401,10 +425,7 @@ pub fn restore_page(
 
 /// List all pages in trash for a notebook
 #[tauri::command]
-pub fn list_trash(
-    state: State<AppState>,
-    notebook_id: String,
-) -> CommandResult<Vec<Page>> {
+pub fn list_trash(state: State<AppState>, notebook_id: String) -> CommandResult<Vec<Page>> {
     let storage = state.storage.lock().unwrap();
     let nb_id = Uuid::parse_str(&notebook_id).map_err(|e| CommandError {
         message: format!("Invalid notebook ID: {}", e),
@@ -426,7 +447,9 @@ pub fn purge_old_trash(
     })?;
 
     let retention_days = days.unwrap_or(30);
-    storage.purge_old_trash(nb_id, retention_days).map_err(Into::into)
+    storage
+        .purge_old_trash(nb_id, retention_days)
+        .map_err(Into::into)
 }
 
 /// Move a page from one notebook to another
@@ -463,7 +486,8 @@ pub fn move_page_to_notebook(
         .unwrap_or_else(|_| "Unknown".to_string());
 
     // Move the page
-    let moved_page = storage.move_page_to_notebook(source_nb_id, pg_id, target_nb_id, target_folder)?;
+    let moved_page =
+        storage.move_page_to_notebook(source_nb_id, pg_id, target_nb_id, target_folder)?;
 
     // Update search index - remove from old, add to new
     if let Ok(mut search_index) = state.search_index.lock() {
@@ -673,4 +697,49 @@ pub fn restore_page_snapshot(
     storage.update_page(&current_page)?;
 
     Ok(current_page)
+}
+
+/// Register an editor pane as having opened a page (starts CRDT tracking).
+#[tauri::command(rename_all = "camelCase")]
+pub fn open_page_in_pane_crdt(
+    state: State<AppState>,
+    notebook_id: String,
+    page_id: String,
+    pane_id: String,
+) -> CommandResult<()> {
+    let storage = state.storage.lock().unwrap();
+    let nb_id = Uuid::parse_str(&notebook_id).map_err(|e| CommandError {
+        message: format!("Invalid notebook ID: {}", e),
+    })?;
+    let pg_id = Uuid::parse_str(&page_id).map_err(|e| CommandError {
+        message: format!("Invalid page ID: {}", e),
+    })?;
+
+    let page = storage.get_page(nb_id, pg_id)?;
+    drop(storage); // Release lock before CRDT operations
+
+    state
+        .crdt_store
+        .open_page(nb_id, pg_id, &pane_id, &page.content)
+        .map_err(|e| CommandError {
+            message: format!("Failed to open page in CRDT store: {}", e),
+        })?;
+
+    Ok(())
+}
+
+/// Unregister an editor pane from a page (stops CRDT tracking for that pane).
+#[tauri::command(rename_all = "camelCase")]
+pub fn close_pane_for_page(
+    state: State<AppState>,
+    page_id: String,
+    pane_id: String,
+) -> CommandResult<()> {
+    let pg_id = Uuid::parse_str(&page_id).map_err(|e| CommandError {
+        message: format!("Invalid page ID: {}", e),
+    })?;
+
+    state.crdt_store.close_pane(pg_id, &pane_id);
+
+    Ok(())
 }

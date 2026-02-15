@@ -123,7 +123,8 @@ interface PageActions {
     notebookId: string,
     pageId: string,
     content: EditorData,
-    commit?: boolean // Whether to create a git commit (default: false)
+    commit?: boolean, // Whether to create a git commit (default: false)
+    paneId?: string // Editor pane ID for CRDT multi-pane merge
   ) => Promise<void>;
   // Update page content in local store only (no backend call)
   // Used for optimistic updates when flushing editor on unmount
@@ -384,13 +385,13 @@ export const usePageStore = create<PageStore>()(
         }
       },
 
-      updatePageContent: async (notebookId, pageId, content, commit) => {
+      updatePageContent: async (notebookId, pageId, content, commit, paneId) => {
         // Don't set error state here - it causes re-renders
         try {
           // Save to backend but don't update local store during editing
           // Updating the store causes re-renders that steal focus from the editor
           // Fresh content is fetched when switching pages via selectPage
-          await api.updatePage(notebookId, pageId, { content }, commit);
+          await api.updatePage(notebookId, pageId, { content }, commit, paneId);
 
           // Trigger RAG re-indexing in background (non-blocking)
           // Only index on explicit commits to avoid excessive indexing during typing

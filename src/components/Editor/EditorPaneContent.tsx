@@ -8,6 +8,7 @@ import { useTypewriterScroll } from "../../hooks/useTypewriterScroll";
 import { useFocusHighlight } from "../../hooks/useFocusHighlight";
 import { useUndoHistory } from "../../hooks/useUndoHistory";
 import { BlockEditor, type BlockEditorRef } from "./BlockEditor";
+import * as api from "../../utils/api";
 import { crumb } from "../../utils/breadcrumbs";
 import { PageHeader } from "./PageHeader";
 import { PaneTabBar } from "./PaneTabBar";
@@ -167,6 +168,20 @@ export function EditorPaneContent({
     updateTabTitleInPane,
   ]);
 
+  // Register/unregister this pane with the CRDT store for multi-pane merge
+  useEffect(() => {
+    if (notebookId && pane.pageId) {
+      api.openPageInPaneCrdt(notebookId, pane.pageId, pane.id).catch((e) => {
+        console.warn("Failed to open page in CRDT store:", e);
+      });
+    }
+    return () => {
+      if (pane.pageId) {
+        api.closePaneForPage(pane.pageId, pane.id).catch(() => {});
+      }
+    };
+  }, [notebookId, pane.pageId, pane.id]);
+
   // Memoize the pages list for BlockEditor so it doesn't create a new array
   // reference on every render (which would tear down and recreate MutationObservers)
   const blockEditorPages = useMemo(
@@ -233,7 +248,7 @@ export function EditorPaneContent({
           data: b.data as Record<string, unknown>,
         })),
       };
-      updatePageContent(notebookId, pane.pageId, migratedContent, false);
+      updatePageContent(notebookId, pane.pageId, migratedContent, false, pane.id);
     }
 
     return {
@@ -319,7 +334,7 @@ export function EditorPaneContent({
       // (via onUnmountSave in BlockEditor) and on explicit save (Ctrl+S).
 
       crumb("pane:updatePageContent:start");
-      await updatePageContent(notebookId, pane.pageId, editorData, false);
+      await updatePageContent(notebookId, pane.pageId, editorData, false, pane.id);
       crumb("pane:updatePageContent:done");
 
       // NOTE: We intentionally do NOT call updatePageLinks or setLastSaved here.
@@ -362,7 +377,7 @@ export function EditorPaneContent({
             };
           }),
         };
-        updatePageContent(notebookId, pane.pageId, editorData, false);
+        updatePageContent(notebookId, pane.pageId, editorData, false, pane.id);
         updatePageLinks({
           ...selectedPage,
           content: editorData,
@@ -410,7 +425,7 @@ export function EditorPaneContent({
         // Update local store immediately (optimistic update)
         setPageContentLocal(pane.pageId, editorData);
 
-        await updatePageContent(notebookId, pane.pageId, editorData, true);
+        await updatePageContent(notebookId, pane.pageId, editorData, true, pane.id);
         updatePageLinks({
           ...selectedPage,
           content: editorData,
@@ -742,6 +757,7 @@ export function EditorPaneContent({
                         onBlockRefClick={handleBlockRefClick}
                         notebookId={notebookId}
                         pageId={selectedPage.id}
+                        paneId={pane.id}
                         pages={blockEditorPages}
                         className="min-h-[calc(100vh-300px)]"
                       />

@@ -25,7 +25,7 @@ use super::config::{
     LibrarySyncConfigInput, NotebookMeta, PageMeta, ServerType, SyncConfig, SyncConfigInput,
     SyncCredentials, SyncManifest, SyncState, SyncStatus, SyncResult,
 };
-use super::crdt::PageDocument;
+use super::crdt::{CrdtStore, PageDocument};
 use super::metadata::LocalSyncState;
 use super::queue::{SyncOperation, SyncQueue};
 use super::webdav::{WebDAVClient, WebDAVError};
@@ -67,6 +67,8 @@ pub enum SyncError {
     PageNotFound(Uuid),
     #[error("Keyring error: {0}")]
     Keyring(String),
+    #[error("{0}")]
+    Other(String),
 }
 
 /// Result of syncing a single page
@@ -209,6 +211,8 @@ pub struct SyncManager {
     app_handle: Arc<Mutex<Option<tauri::AppHandle>>>,
     /// Debounce tracking for on-save sync triggers
     onsave_debounce: Arc<Mutex<HashMap<Uuid, std::time::Instant>>>,
+    /// Live CRDT store (set after app initialization)
+    crdt_store: Arc<Mutex<Option<Arc<CrdtStore>>>>,
 }
 
 impl SyncManager {
@@ -224,6 +228,7 @@ impl SyncManager {
             sentinel_counter: std::sync::atomic::AtomicU64::new(0),
             app_handle: Arc::new(Mutex::new(None)),
             onsave_debounce: Arc::new(Mutex::new(HashMap::new())),
+            crdt_store: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -231,6 +236,12 @@ impl SyncManager {
     pub fn set_app_handle(&self, handle: tauri::AppHandle) {
         let mut guard = self.app_handle.lock().unwrap();
         *guard = Some(handle);
+    }
+
+    /// Set the CRDT store for live page state (called after app initialization)
+    pub fn set_crdt_store(&self, store: Arc<CrdtStore>) {
+        let mut guard = self.crdt_store.lock().unwrap();
+        *guard = Some(store);
     }
 
     /// Get the sync directory for a notebook
@@ -1005,6 +1016,9 @@ impl SyncManager {
 
         log::info!("Sync: {} pages to sync out of {} total", page_tasks.len(), total_pages);
 
+        // Get CRDT store reference for live page state
+        let crdt_store_opt: Option<Arc<CrdtStore>> = self.crdt_store.lock().unwrap().clone();
+
         // Process pages concurrently with semaphore
         let outcomes: Vec<PageSyncOutcome> = futures_util::stream::iter(page_tasks)
             .map(|(page, info)| {
@@ -1018,6 +1032,7 @@ impl SyncManager {
                 let nb_id_str = notebook_id.to_string();
                 let nb_name = notebook_name.clone();
                 let page_title = page.title.clone();
+                let crdt_store_ref = crdt_store_opt.clone();
                 async move {
                     let _permit = sem.acquire().await.unwrap();
                     let idx = counter.fetch_add(1, Ordering::Relaxed);
@@ -1033,7 +1048,7 @@ impl SyncManager {
                     }
                     Self::sync_page_concurrent(
                         &data_dir, &client, &config, &info,
-                        &storage, notebook_id, &page,
+                        &storage, notebook_id, &page, crdt_store_ref.as_ref(),
                     ).await
                 }
             })
@@ -1713,10 +1728,11 @@ impl SyncManager {
         storage: &SharedStorage,
         notebook_id: Uuid,
         page: &Page,
+        crdt_store: Option<&Arc<CrdtStore>>,
     ) -> PageSyncOutcome {
         let page_id = page.id;
         match Self::sync_page_concurrent_inner(
-            data_dir, client, config, sync_info, storage, notebook_id, page,
+            data_dir, client, config, sync_info, storage, notebook_id, page, crdt_store,
         ).await {
             Ok((result, sync_mark)) => PageSyncOutcome {
                 page_id,
@@ -1739,20 +1755,29 @@ impl SyncManager {
         storage: &SharedStorage,
         notebook_id: Uuid,
         page: &Page,
+        crdt_store: Option<&Arc<CrdtStore>>,
     ) -> Result<(PageSyncResult, Option<(Option<String>, Vec<u8>)>), SyncError> {
         let crdt_path = Self::crdt_path_for(data_dir, notebook_id, page.id);
         let remote_path = format!("{}/pages/{}.crdt", config.remote_path, page.id);
 
         // 1. Load or create local CRDT
         //
-        // Key decision: when the page was modified locally (needs_sync), we must
-        // rebuild the CRDT from page.content because edits happen in the JSON file,
-        // not in the CRDT. Loading the old CRDT would push stale content.
+        // Phase 3: if the page is live in the CRDT store, use its state directly.
+        // This means edits are already in the CRDT — no need to rebuild from JSON.
         //
-        // When there are NO local changes, we load the existing CRDT so we can
-        // cleanly apply remote updates (the CRDT state matches what's on disk).
+        // Fallback: when the page is not live, use the old behavior:
+        // - needs_sync → rebuild from page.content (edits happened in JSON only)
+        // - !needs_sync → load existing .crdt file
+        let page_is_live = crdt_store
+            .map(|cs| cs.is_live(page.id))
+            .unwrap_or(false);
         let crdt_existed = crdt_path.exists();
-        let local_doc = if crdt_existed && !sync_info.needs_sync {
+        let local_doc = if page_is_live {
+            // Page is open in an editor pane — CRDT store has the authoritative state
+            let state = crdt_store.unwrap().get_encoded_state(page.id)
+                .ok_or_else(|| SyncError::Other("Live page disappeared from CRDT store".into()))?;
+            PageDocument::from_state(&state)?
+        } else if crdt_existed && !sync_info.needs_sync {
             // No local changes — load existing CRDT for potential merge with remote
             let data = std::fs::read(&crdt_path)?;
             PageDocument::from_state(&data)?
@@ -1797,6 +1822,15 @@ impl SyncManager {
                 let remote_etag = fetched_etag.or(remote_etag);
 
                 local_doc.apply_update(&remote_data)?;
+
+                // Push remote changes to live CRDT store so open editors get them
+                if page_is_live {
+                    if let Some(cs) = crdt_store {
+                        if let Err(e) = cs.apply_remote_update(page.id, &remote_data) {
+                            log::warn!("Failed to push remote update to live CRDT store for page {}: {}", page.id, e);
+                        }
+                    }
+                }
 
                 if sync_info.needs_sync {
                     // Merge case
@@ -1865,6 +1899,15 @@ impl SyncManager {
                 match client.get_with_etag(&remote_path).await {
                     Ok((remote_data, _)) => {
                         local_doc.apply_update(&remote_data)?;
+
+                        // Push remote changes to live CRDT store
+                        if page_is_live {
+                            if let Some(cs) = crdt_store {
+                                if let Err(e) = cs.apply_remote_update(page.id, &remote_data) {
+                                    log::warn!("Failed to push conflict-merge update to live CRDT store for page {}: {}", page.id, e);
+                                }
+                            }
+                        }
 
                         let merged_state = local_doc.encode_state();
                         std::fs::write(&crdt_path, &merged_state)?;
