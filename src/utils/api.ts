@@ -52,6 +52,7 @@ export async function updateNotebook(
     aiModel?: string;
     isPinned?: boolean;
     pageSortBy?: string;
+    coverImage?: string;
   }
 ): Promise<Notebook> {
   return invoke<Notebook>("update_notebook", { notebookId, ...updates });
@@ -125,7 +126,8 @@ export async function updatePage(
       | "calendar"
       | "chat"
       | "canvas"
-      | "database";
+      | "database"
+      | "html";
     fileExtension?: string | null;
     isFavorite?: boolean;
     isDailyNote?: boolean;
@@ -1083,6 +1085,39 @@ export async function importOneNote(
   notebookName?: string
 ): Promise<Notebook> {
   return invoke<Notebook>("import_onenote_cmd", { path, notebookName });
+}
+
+// ===== Website Mirror Import API =====
+
+export interface WebsiteMirrorPagePreview {
+  title: string;
+  path: string;
+}
+
+export interface WebsiteMirrorImportPreview {
+  pageCount: number;
+  assetCount: number;
+  folderCount: number;
+  samplePages: WebsiteMirrorPagePreview[];
+  suggestedName: string;
+}
+
+export async function previewWebsiteMirror(
+  mirrorPath: string
+): Promise<WebsiteMirrorImportPreview> {
+  return invoke<WebsiteMirrorImportPreview>("preview_website_mirror_cmd", {
+    mirrorPath,
+  });
+}
+
+export async function importWebsiteMirror(
+  mirrorPath: string,
+  notebookName?: string
+): Promise<Notebook> {
+  return invoke<Notebook>("import_website_mirror_cmd", {
+    mirrorPath,
+    notebookName,
+  });
 }
 
 // ===== Actions API =====

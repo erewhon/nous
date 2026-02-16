@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{Manager, State};
 use uuid::Uuid;
 
 use crate::storage::{FileStorageMode, Page, PageType};
@@ -92,10 +92,17 @@ pub fn import_file_as_page(
     // Index the page in search with file content for text-based pages
     if let Ok(mut search_index) = state.search_index.lock() {
         let index_result = match page.page_type {
-            PageType::Jupyter | PageType::Markdown | PageType::Calendar => {
+            PageType::Jupyter | PageType::Markdown | PageType::Calendar | PageType::Html => {
                 // Read file content for indexing
                 match storage.read_native_file_content(&page) {
-                    Ok(content) => search_index.index_page_with_content(&page, &content),
+                    Ok(raw_content) => {
+                        let content = if page.page_type == PageType::Html {
+                            crate::storage::html_utils::html_to_searchable_text(&raw_content)
+                        } else {
+                            raw_content
+                        };
+                        search_index.index_page_with_content(&page, &content)
+                    }
                     Err(e) => {
                         log::warn!("Failed to read file content for indexing: {}", e);
                         search_index.index_page(&page) // Fallback to basic indexing
@@ -258,6 +265,7 @@ pub fn update_file_content(
 /// Get the file path for a file-based page (for binary files like PDF, EPUB)
 #[tauri::command]
 pub fn get_file_path(
+    app: tauri::AppHandle,
     state: State<AppState>,
     notebook_id: String,
     page_id: String,
@@ -283,6 +291,14 @@ pub fn get_file_path(
     let path = storage.get_file_path(&page).map_err(|e| CommandError {
         message: format!("Failed to get file path: {}", e),
     })?;
+
+    // For Html pages, register the parent directory with asset protocol
+    // so relative assets (CSS, images) resolve correctly in the iframe
+    if page.page_type == PageType::Html {
+        if let Some(parent) = path.parent() {
+            let _ = app.asset_protocol_scope().allow_directory(parent, true);
+        }
+    }
 
     Ok(path.to_string_lossy().to_string())
 }
@@ -365,6 +381,8 @@ pub fn get_supported_page_extensions() -> Vec<String> {
         "epub".to_string(),
         "ics".to_string(),
         "ical".to_string(),
+        "html".to_string(),
+        "htm".to_string(),
     ]
 }
 

@@ -6,8 +6,9 @@ use serde_json;
 use tauri::State;
 use uuid::Uuid;
 
-use crate::rag::{chunk_page, EmbeddingConfig, SemanticSearchResult};
+use crate::rag::{chunk_page, chunk_page_with_text, EmbeddingConfig, SemanticSearchResult};
 use crate::search::SearchResult;
+use crate::storage::PageType;
 use crate::AppState;
 
 use super::CommandError;
@@ -312,10 +313,16 @@ pub fn index_page_embedding(
         message: format!("Failed to get page: {}", e),
     })?;
 
-    drop(storage);
-
-    // Chunk the page
-    let chunks = chunk_page(&page);
+    // For Html pages, read the source file and extract text for chunking
+    let chunks = if page.page_type == PageType::Html {
+        let raw = storage.read_native_file_content(&page).unwrap_or_default();
+        let text = crate::storage::html_utils::html_to_searchable_text(&raw);
+        drop(storage);
+        chunk_page_with_text(&page, &text)
+    } else {
+        drop(storage);
+        chunk_page(&page)
+    };
 
     if chunks.len() != embeddings.len() {
         return Err(CommandError {
@@ -427,9 +434,17 @@ pub fn get_page_chunks(
         message: format!("Failed to get page: {}", e),
     })?;
 
-    drop(storage);
+    // For Html pages, read the source file and extract text for chunking
+    let chunks = if page.page_type == PageType::Html {
+        let raw = storage.read_native_file_content(&page).unwrap_or_default();
+        let text = crate::storage::html_utils::html_to_searchable_text(&raw);
+        drop(storage);
+        chunk_page_with_text(&page, &text)
+    } else {
+        drop(storage);
+        chunk_page(&page)
+    };
 
-    let chunks = chunk_page(&page);
     Ok(chunks.into_iter().map(|c| c.content).collect())
 }
 

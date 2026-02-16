@@ -9,6 +9,7 @@ pub enum ExternalFileFormat {
     Json,
     Markdown,
     PlainText,
+    Html,
 }
 
 impl ExternalFileFormat {
@@ -18,6 +19,7 @@ impl ExternalFileFormat {
             ExternalFileFormat::Json => &["json"],
             ExternalFileFormat::Markdown => &["md", "markdown"],
             ExternalFileFormat::PlainText => &["txt", "text"],
+            ExternalFileFormat::Html => &["html", "htm"],
         }
     }
 
@@ -28,6 +30,7 @@ impl ExternalFileFormat {
             "json" => Some(ExternalFileFormat::Json),
             "md" | "markdown" => Some(ExternalFileFormat::Markdown),
             "txt" | "text" => Some(ExternalFileFormat::PlainText),
+            "html" | "htm" => Some(ExternalFileFormat::Html),
             _ => None,
         }
     }

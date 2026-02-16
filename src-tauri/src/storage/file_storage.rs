@@ -2357,6 +2357,7 @@ impl FileStorage {
             "ics" | "ical" => Some(PageType::Calendar),
             "chat" => Some(PageType::Chat),
             "canvas" => Some(PageType::Canvas),
+            "html" | "htm" => Some(PageType::Html),
             _ => None,
         }
     }

@@ -313,7 +313,7 @@ pub fn read_file_content(path: &Path, format: &ExternalFileFormat) -> Result<Str
                 Ok(raw)
             }
         }
-        ExternalFileFormat::Markdown | ExternalFileFormat::PlainText => Ok(raw),
+        ExternalFileFormat::Markdown | ExternalFileFormat::PlainText | ExternalFileFormat::Html => Ok(raw),
     }
 }
 

@@ -64,6 +64,7 @@ pub fn update_notebook(
     ai_model: Option<String>,
     is_pinned: Option<bool>,
     page_sort_by: Option<String>,
+    cover_image: Option<String>,
 ) -> CommandResult<Notebook> {
     let storage = state.storage.lock().unwrap();
     let id = Uuid::parse_str(&notebook_id).map_err(|e| CommandError {
@@ -113,6 +114,10 @@ pub fn update_notebook(
     // Allow setting page_sort_by to None (empty string clears it)
     if let Some(sort) = page_sort_by {
         notebook.page_sort_by = if sort.is_empty() { None } else { Some(sort) };
+    }
+    // Allow setting cover_image to None (empty string clears it)
+    if let Some(img) = cover_image {
+        notebook.cover_image = if img.is_empty() { None } else { Some(img) };
     }
     notebook.updated_at = chrono::Utc::now();
 

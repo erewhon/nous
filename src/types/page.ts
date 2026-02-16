@@ -36,6 +36,7 @@ export const PageTypeSchema = z.enum([
   "chat", // AI Chat conversation page (.chat)
   "canvas", // Infinite canvas/whiteboard (.canvas)
   "database", // Database/table view (.database)
+  "html", // HTML page (from website mirror import)
 ]);
 export type PageType = z.infer<typeof PageTypeSchema>;
 

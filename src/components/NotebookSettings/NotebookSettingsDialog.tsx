@@ -32,6 +32,7 @@ import {
 } from "../../utils/api";
 import { InlineColorPicker } from "../ColorPicker/ColorPicker";
 import { GitConflictDialog } from "./GitConflictDialog";
+import { uploadCoverImage } from "../../utils/coverImageUpload";
 
 const AI_PROVIDERS: { value: AIProviderType; label: string }[] = [
   { value: "openai", label: "OpenAI" },
@@ -79,6 +80,11 @@ export function NotebookSettingsDialog({
   const [showMoveDialog, setShowMoveDialog] = useState(false);
   const [showMergeDialog, setShowMergeDialog] = useState(false);
   const nameInputRef = useRef<HTMLInputElement>(null);
+  const coverImageInputRef = useRef<HTMLInputElement>(null);
+
+  // Cover image state
+  const [coverImage, setCoverImage] = useState<string | undefined>(undefined);
+  const [isUploadingCoverImage, setIsUploadingCoverImage] = useState(false);
 
   // Git state
   const [gitEnabled, setGitEnabled] = useState(false);
@@ -182,6 +188,7 @@ export function NotebookSettingsDialog({
     if (notebook) {
       setName(notebook.name);
       setColor(notebook.color);
+      setCoverImage(notebook.coverImage);
       setSectionsEnabled(notebook.sectionsEnabled ?? false);
       setSystemPrompt(notebook.systemPrompt || "");
       setSystemPromptMode(notebook.systemPromptMode || "override");
@@ -261,7 +268,7 @@ export function NotebookSettingsDialog({
 
     setIsSaving(true);
     try {
-      await updateNotebook(notebook.id, {
+      const updates: Record<string, unknown> = {
         name: name.trim(),
         color: color || undefined,
         sectionsEnabled,
@@ -269,7 +276,12 @@ export function NotebookSettingsDialog({
         systemPromptMode,
         aiProvider: useAppDefault ? undefined : aiProvider,
         aiModel: useAppDefault ? undefined : aiModel,
-      });
+      };
+      // Include coverImage if it changed (empty string clears it on the backend)
+      if ((coverImage || undefined) !== (notebook.coverImage || undefined)) {
+        updates.coverImage = coverImage || "";
+      }
+      await updateNotebook(notebook.id, updates);
       onClose();
     } finally {
       setIsSaving(false);
@@ -296,6 +308,7 @@ export function NotebookSettingsDialog({
   const hasChanges =
     name !== notebook.name ||
     (color || null) !== (notebook.color || null) ||
+    (coverImage || undefined) !== (notebook.coverImage || undefined) ||
     sectionsEnabled !== (notebook.sectionsEnabled ?? false) ||
     (systemPrompt || "") !== (notebook.systemPrompt || "") ||
     systemPromptMode !== (notebook.systemPromptMode || "override") ||
@@ -373,6 +386,88 @@ export function NotebookSettingsDialog({
               onChange={(c) => setColor(c)}
               showClear={true}
             />
+          </div>
+
+          {/* Cover Image */}
+          <div>
+            <label
+              className="mb-2 block text-sm font-medium"
+              style={{ color: "var(--color-text-primary)" }}
+            >
+              Cover Image
+            </label>
+            <input
+              ref={coverImageInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={async (e) => {
+                const file = e.target.files?.[0];
+                if (!file || !notebook) return;
+                setIsUploadingCoverImage(true);
+                try {
+                  const url = await uploadCoverImage(notebook.id, file);
+                  setCoverImage(url);
+                } catch (err) {
+                  console.error("Failed to upload cover image:", err);
+                } finally {
+                  setIsUploadingCoverImage(false);
+                  if (coverImageInputRef.current) coverImageInputRef.current.value = "";
+                }
+              }}
+            />
+            <div className="flex items-center gap-3">
+              {coverImage ? (
+                <div
+                  className="h-16 w-24 flex-shrink-0 overflow-hidden rounded-md border bg-cover bg-center"
+                  style={{
+                    backgroundImage: `url(${coverImage})`,
+                    borderColor: "var(--color-border)",
+                  }}
+                />
+              ) : (
+                <div
+                  className="flex h-16 w-24 flex-shrink-0 items-center justify-center rounded-md border"
+                  style={{
+                    backgroundColor: "var(--color-bg-tertiary)",
+                    borderColor: "var(--color-border)",
+                    color: "var(--color-text-muted)",
+                  }}
+                >
+                  <IconCoverImage />
+                </div>
+              )}
+              <div className="flex flex-col gap-1.5">
+                <button
+                  onClick={() => coverImageInputRef.current?.click()}
+                  disabled={isUploadingCoverImage}
+                  className="rounded-md px-3 py-1.5 text-xs font-medium transition-colors hover:opacity-90"
+                  style={{
+                    backgroundColor: "var(--color-bg-tertiary)",
+                    color: "var(--color-text-secondary)",
+                  }}
+                >
+                  {isUploadingCoverImage ? "Uploading..." : coverImage ? "Change Image" : "Choose Image"}
+                </button>
+                {coverImage && (
+                  <button
+                    onClick={() => setCoverImage(undefined)}
+                    className="rounded-md px-3 py-1.5 text-xs font-medium transition-colors hover:opacity-90"
+                    style={{
+                      color: "var(--color-text-muted)",
+                    }}
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
+            </div>
+            <p
+              className="mt-1.5 text-xs"
+              style={{ color: "var(--color-text-muted)" }}
+            >
+              Displayed on the cover page and overview card.
+            </p>
           </div>
 
           {/* Sections Toggle */}
@@ -1930,6 +2025,26 @@ function IconMerge() {
       <circle cx="18" cy="18" r="3" />
       <circle cx="6" cy="6" r="3" />
       <path d="M6 21V9a9 9 0 0 0 9 9" />
+    </svg>
+  );
+}
+
+function IconCoverImage() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+      <circle cx="8.5" cy="8.5" r="1.5" />
+      <polyline points="21 15 16 10 5 21" />
     </svg>
   );
 }

@@ -1,6 +1,7 @@
 import { useMemo, memo, useCallback } from "react";
 import type { Notebook } from "../../types/notebook";
 import type { Page } from "../../types/page";
+import { adjustColor } from "../../utils/colorUtils";
 
 interface NotebookCardProps {
   notebook: Notebook;
@@ -18,6 +19,8 @@ export const NotebookCard = memo(function NotebookCard({
   onSettings,
 }: NotebookCardProps) {
   const accentColor = notebook.color || "var(--color-accent)";
+  const hasCoverImage = !!notebook.coverImage;
+  const hasColor = !!notebook.color;
 
   const handleSettings = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
@@ -37,21 +40,55 @@ export const NotebookCard = memo(function NotebookCard({
     }).filter(Boolean).join(" ");
   }, [coverPage]);
 
+  // Card background style
+  const cardStyle = useMemo(() => {
+    const style: React.CSSProperties = {
+      boxShadow: "0 4px 20px rgba(0, 0, 0, 0.15)",
+    };
+
+    if (hasCoverImage) {
+      style.backgroundImage = `url(${notebook.coverImage})`;
+      style.backgroundSize = "cover";
+      style.backgroundPosition = "center";
+    } else if (hasColor) {
+      style.backgroundColor = notebook.color;
+    } else {
+      style.backgroundColor = "var(--color-bg-secondary)";
+    }
+
+    if (hasColor) {
+      style.borderColor = adjustColor(notebook.color!, -30);
+      style.border = "1px solid";
+    } else {
+      style.borderColor = "var(--color-border)";
+      style.border = "1px solid";
+    }
+
+    return style;
+  }, [hasCoverImage, hasColor, notebook.color, notebook.coverImage]);
+
   return (
     <div
       className="group relative flex w-64 flex-col overflow-hidden rounded-lg transition-all duration-300 hover:scale-[1.02] hover:shadow-2xl focus-within:ring-2 focus-within:ring-[--color-accent] focus-within:ring-offset-2"
-      style={{
-        backgroundColor: "var(--color-bg-secondary)",
-        boxShadow: "0 4px 20px rgba(0, 0, 0, 0.15)",
-      }}
+      style={cardStyle}
     >
+      {/* Dark gradient overlay for cover image cards */}
+      {hasCoverImage && (
+        <div
+          className="absolute inset-0 rounded-lg"
+          style={{
+            background: "linear-gradient(to bottom, rgba(0,0,0,0.2) 0%, rgba(0,0,0,0.6) 100%)",
+          }}
+        />
+      )}
+
       {/* Settings button - appears on hover */}
       <button
         onClick={handleSettings}
-        className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-md opacity-0 transition-all hover:bg-[--color-bg-tertiary] group-hover:opacity-100"
+        className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-md opacity-0 transition-all group-hover:opacity-100"
         style={{
-          backgroundColor: "var(--color-bg-secondary)",
-          color: "var(--color-text-muted)",
+          backgroundColor: hasCoverImage ? "rgba(0,0,0,0.5)" : "var(--color-bg-secondary)",
+          color: hasCoverImage ? "white" : "var(--color-text-muted)",
         }}
         title="Notebook settings"
       >
@@ -61,89 +98,139 @@ export const NotebookCard = memo(function NotebookCard({
       {/* Main clickable area */}
       <button
         onClick={onClick}
-        className="flex flex-1 flex-col focus:outline-none"
+        className="relative flex flex-1 flex-col focus:outline-none"
       >
-        {/* Notebook spine */}
-        <div
-          className="absolute left-0 top-0 h-full w-3 transition-all group-hover:w-4"
-          style={{ backgroundColor: accentColor }}
-        />
-
         {/* Notebook cover content */}
-        <div className="ml-3 flex flex-1 flex-col p-5">
-        {/* Cover image/preview area */}
-        <div
-          className="mb-4 flex h-32 items-center justify-center overflow-hidden rounded-md"
-          style={{
-            backgroundColor: `${accentColor}15`,
-          }}
-        >
-          {coverPreview ? (
+        <div className="flex flex-1 flex-col p-5">
+          {/* Cover image/preview area */}
+          <div
+            className="mb-4 flex h-32 items-center justify-center overflow-hidden rounded-md"
+            style={
+              hasCoverImage
+                ? {} // transparent on image cards — image is already the bg
+                : {
+                    backgroundColor: hasColor
+                      ? "rgba(255,255,255,0.15)"
+                      : `${accentColor}15`,
+                  }
+            }
+          >
+            {coverPreview ? (
+              <div
+                className="flex h-full w-full items-center justify-center rounded-md px-3"
+                style={{
+                  backgroundColor: hasCoverImage
+                    ? "rgba(0,0,0,0.45)"
+                    : hasColor
+                      ? "rgba(255,255,255,0.15)"
+                      : "transparent",
+                  backdropFilter: hasCoverImage ? "blur(4px)" : undefined,
+                }}
+              >
+                <p
+                  className="line-clamp-4 text-center text-sm leading-relaxed"
+                  style={{
+                    color: hasCoverImage || hasColor
+                      ? "rgba(255,255,255,0.9)"
+                      : "var(--color-text-secondary)",
+                  }}
+                >
+                  {coverPreview}
+                </p>
+              </div>
+            ) : (
+              <div
+                className="flex h-16 w-16 items-center justify-center rounded-xl"
+                style={{
+                  backgroundColor: hasCoverImage
+                    ? "rgba(255,255,255,0.2)"
+                    : hasColor
+                      ? "rgba(255,255,255,0.2)"
+                      : accentColor,
+                }}
+              >
+                <IconBook size={32} />
+              </div>
+            )}
+          </div>
+
+          {/* Notebook info — with readable background on image/color cards */}
+          <div
+            className="flex-1 rounded-md px-3 py-2"
+            style={
+              hasCoverImage || hasColor
+                ? {
+                    backgroundColor: hasCoverImage
+                      ? "rgba(0,0,0,0.45)"
+                      : "rgba(0,0,0,0.2)",
+                    backdropFilter: hasCoverImage ? "blur(4px)" : undefined,
+                  }
+                : {}
+            }
+          >
+            <h3
+              className="mb-1 text-left text-lg font-semibold line-clamp-2"
+              style={{
+                color: hasCoverImage || hasColor
+                  ? "white"
+                  : "var(--color-text-primary)",
+              }}
+            >
+              {notebook.name}
+            </h3>
             <p
-              className="line-clamp-4 px-3 text-center text-sm leading-relaxed"
-              style={{ color: "var(--color-text-secondary)" }}
+              className="text-left text-sm"
+              style={{
+                color: hasCoverImage || hasColor
+                  ? "rgba(255,255,255,0.7)"
+                  : "var(--color-text-muted)",
+              }}
             >
-              {coverPreview}
+              {pageCount} {pageCount === 1 ? "page" : "pages"}
             </p>
-          ) : (
+          </div>
+
+          {/* Notebook type badge */}
+          {notebook.type === "zettelkasten" && (
             <div
-              className="flex h-16 w-16 items-center justify-center rounded-xl"
-              style={{ backgroundColor: accentColor }}
+              className="mt-3 inline-flex w-fit items-center gap-1 rounded-full px-2 py-0.5 text-xs"
+              style={{
+                backgroundColor: hasCoverImage || hasColor
+                  ? "rgba(255,255,255,0.15)"
+                  : "var(--color-bg-tertiary)",
+                color: hasCoverImage || hasColor
+                  ? "rgba(255,255,255,0.8)"
+                  : "var(--color-text-secondary)",
+              }}
             >
-              <IconBook size={32} />
+              <IconLink size={10} />
+              Zettelkasten
+            </div>
+          )}
+
+          {/* Sections badge */}
+          {notebook.sectionsEnabled && (
+            <div
+              className="mt-2 inline-flex w-fit items-center gap-1 rounded-full px-2 py-0.5 text-xs"
+              style={{
+                backgroundColor: hasCoverImage || hasColor
+                  ? "rgba(255,255,255,0.15)"
+                  : "var(--color-bg-tertiary)",
+                color: hasCoverImage || hasColor
+                  ? "rgba(255,255,255,0.8)"
+                  : "var(--color-text-secondary)",
+              }}
+            >
+              <IconLayers size={10} />
+              Sections
             </div>
           )}
         </div>
 
-        {/* Notebook info */}
-        <div className="flex-1">
-          <h3
-            className="mb-1 text-left text-lg font-semibold line-clamp-2"
-            style={{ color: "var(--color-text-primary)" }}
-          >
-            {notebook.name}
-          </h3>
-          <p
-            className="text-left text-sm"
-            style={{ color: "var(--color-text-muted)" }}
-          >
-            {pageCount} {pageCount === 1 ? "page" : "pages"}
-          </p>
-        </div>
-
-        {/* Notebook type badge */}
-        {notebook.type === "zettelkasten" && (
-          <div
-            className="mt-3 inline-flex w-fit items-center gap-1 rounded-full px-2 py-0.5 text-xs"
-            style={{
-              backgroundColor: "var(--color-bg-tertiary)",
-              color: "var(--color-text-secondary)",
-            }}
-          >
-            <IconLink size={10} />
-            Zettelkasten
-          </div>
-        )}
-
-        {/* Sections badge */}
-        {notebook.sectionsEnabled && (
-          <div
-            className="mt-2 inline-flex w-fit items-center gap-1 rounded-full px-2 py-0.5 text-xs"
-            style={{
-              backgroundColor: "var(--color-bg-tertiary)",
-              color: "var(--color-text-secondary)",
-            }}
-          >
-            <IconLayers size={10} />
-            Sections
-          </div>
-        )}
-      </div>
-
         {/* Hover indicator */}
         <div
-          className="absolute bottom-0 left-3 right-0 h-1 translate-y-full transition-transform group-hover:translate-y-0"
-          style={{ backgroundColor: accentColor }}
+          className="absolute bottom-0 left-0 right-0 h-1 translate-y-full transition-transform group-hover:translate-y-0"
+          style={{ backgroundColor: hasCoverImage || hasColor ? "rgba(255,255,255,0.5)" : accentColor }}
         />
       </button>
     </div>

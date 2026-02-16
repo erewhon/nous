@@ -1939,6 +1939,7 @@ impl ActionExecutor {
                 ExternalFileFormat::Json => "json",
                 ExternalFileFormat::Markdown => "markdown",
                 ExternalFileFormat::PlainText => "text",
+                ExternalFileFormat::Html => "html",
             };
 
             // Build title from template

@@ -464,6 +464,7 @@ pub fn import_evernote_enex(
         position: 0,
         page_sort_by: None,
         daily_notes_config: None,
+        cover_image: None,
         created_at: now,
         updated_at: now,
     };

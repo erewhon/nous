@@ -21,6 +21,7 @@ import { CalendarViewer } from "../Calendar";
 import { ChatEditor } from "../Chat";
 import { CanvasEditor } from "../Canvas";
 import { DatabaseEditor } from "../Database";
+import { HtmlViewer } from "../Html";
 import { OutlinePanel } from "./OutlinePanel";
 import { PomodoroTimer } from "./PomodoroTimer";
 import { BacklinksPanel } from "./BacklinksPanel";
@@ -730,6 +731,14 @@ export function EditorPaneContent({
                     )}
                     {selectedPage.pageType === "calendar" && (
                       <CalendarViewer
+                        key={selectedPage.id}
+                        page={selectedPage}
+                        notebookId={notebookId}
+                        className="min-h-[calc(100vh-300px)]"
+                      />
+                    )}
+                    {selectedPage.pageType === "html" && (
+                      <HtmlViewer
                         key={selectedPage.id}
                         page={selectedPage}
                         notebookId={notebookId}

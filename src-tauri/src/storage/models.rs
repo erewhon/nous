@@ -82,6 +82,8 @@ pub enum PageType {
     Canvas,
     /// Database/table view (.database)
     Database,
+    /// HTML page (from website mirror import)
+    Html,
 }
 
 impl Default for PageType {
@@ -264,6 +266,9 @@ pub struct Notebook {
     /// Daily notes configuration
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub daily_notes_config: Option<DailyNotesConfig>,
+    /// Cover image URL (convertFileSrc URL pointing to an image in notebook assets)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cover_image: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -289,6 +294,7 @@ impl Notebook {
             position: 0,
             page_sort_by: None,
             daily_notes_config: None,
+            cover_image: None,
             created_at: now,
             updated_at: now,
         }

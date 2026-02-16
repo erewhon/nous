@@ -30,6 +30,11 @@ pub fn chunk_page(page: &Page) -> Vec<Chunk> {
     chunk_text_with_ids(&text, page.id, page.notebook_id)
 }
 
+/// Chunk a page using pre-extracted text content (for Html, PDF, etc.).
+pub fn chunk_page_with_text(page: &Page, text: &str) -> Vec<Chunk> {
+    chunk_text_with_ids(text, page.id, page.notebook_id)
+}
+
 /// Chunk raw text into chunks with page/notebook IDs.
 fn chunk_text_with_ids(text: &str, page_id: Uuid, notebook_id: Uuid) -> Vec<Chunk> {
     let text_chunks = sliding_window(text, MAX_CHUNK_CHARS, OVERLAP_CHARS);

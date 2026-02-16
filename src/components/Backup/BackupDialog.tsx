@@ -22,6 +22,8 @@ import {
   importJoplin,
   previewOneNote,
   importOneNote,
+  previewWebsiteMirror,
+  importWebsiteMirror,
   type BackupInfo,
   type NotionImportPreview,
   type ObsidianImportPreview,
@@ -30,6 +32,7 @@ import {
   type OrgmodeImportPreview,
   type JoplinImportPreview,
   type OneNoteImportPreview,
+  type WebsiteMirrorImportPreview,
 } from "../../utils/api";
 import { useNotebookStore } from "../../stores/notebookStore";
 import { useToastStore } from "../../stores/toastStore";
@@ -40,7 +43,7 @@ interface BackupDialogProps {
   onClose: () => void;
 }
 
-type ImportTab = "export" | "import" | "notion" | "obsidian" | "evernote" | "scrivener" | "orgmode" | "joplin" | "onenote" | "backups";
+type ImportTab = "export" | "import" | "notion" | "obsidian" | "evernote" | "scrivener" | "orgmode" | "joplin" | "onenote" | "website" | "backups";
 
 export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
   const [activeTab, setActiveTab] = useState<ImportTab>("export");
@@ -83,6 +86,11 @@ export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
   const [onenotePreview, setOnenotePreview] = useState<OneNoteImportPreview | null>(null);
   const [onenoteSourcePath, setOnenoteSourcePath] = useState<string | null>(null);
   const [onenoteNotebookName, setOnenoteNotebookName] = useState("");
+
+  // Website mirror import state
+  const [websitePreview, setWebsitePreview] = useState<WebsiteMirrorImportPreview | null>(null);
+  const [websiteMirrorPath, setWebsiteMirrorPath] = useState<string | null>(null);
+  const [websiteNotebookName, setWebsiteNotebookName] = useState("");
 
   // Import progress state
   const [importProgress, setImportProgress] = useState<{
@@ -779,6 +787,59 @@ export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
     setError(null);
   };
 
+  // Website mirror import handlers
+  const handleWebsiteSelectFolder = async () => {
+    try {
+      setError(null);
+      setIsLoading(true);
+      const selected = await open({
+        directory: true,
+        title: "Select Website Mirror Folder",
+      });
+      if (!selected) return;
+      const path = typeof selected === "string" ? selected : selected[0];
+      if (!path) return;
+      const preview = await previewWebsiteMirror(path);
+      setWebsitePreview(preview);
+      setWebsiteMirrorPath(path);
+      setWebsiteNotebookName(preview.suggestedName);
+    } catch (err) {
+      setError(`Failed to preview website mirror: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleWebsiteImport = async () => {
+    if (!websiteMirrorPath) return;
+
+    try {
+      setError(null);
+      setIsLoading(true);
+      const notebook = await importWebsiteMirror(
+        websiteMirrorPath,
+        websiteNotebookName || undefined
+      );
+      await loadNotebooks();
+      setSuccess(`Imported "${notebook.name}" from website mirror successfully`);
+      setWebsitePreview(null);
+      setWebsiteMirrorPath(null);
+      setWebsiteNotebookName("");
+      toast.success(`Website mirror imported as "${notebook.name}"`);
+    } catch (err) {
+      setError(`Failed to import website mirror: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleWebsiteCancel = () => {
+    setWebsitePreview(null);
+    setWebsiteMirrorPath(null);
+    setWebsiteNotebookName("");
+    setError(null);
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -826,6 +887,7 @@ export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
               { id: "orgmode" as const, label: "Org-mode", icon: <IconOrgmode /> },
               { id: "joplin" as const, label: "Joplin", icon: <IconJoplin /> },
               { id: "onenote" as const, label: "OneNote", icon: <IconOneNote /> },
+              { id: "website" as const, label: "Website", icon: <IconWebsite /> },
               { id: "backups" as const, label: "Auto-Backups", icon: <IconArchive /> },
             ].map((tab) => (
               <button
@@ -851,7 +913,7 @@ export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
         </div>
 
         {/* Content */}
-        <div className="flex flex-1 flex-col">
+        <div className="flex flex-1 flex-col overflow-hidden">
           {/* Header */}
           <div
             className="flex items-center justify-between border-b px-6 py-4"
@@ -870,6 +932,7 @@ export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
               {activeTab === "orgmode" && "Import from Org-mode"}
               {activeTab === "joplin" && "Import from Joplin"}
               {activeTab === "onenote" && "Import from OneNote"}
+              {activeTab === "website" && "Import Website Mirror"}
               {activeTab === "backups" && "Auto-Backups"}
             </h3>
             <button
@@ -945,7 +1008,7 @@ export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
           )}
 
           {/* Tab Content */}
-          <div className="flex-1 overflow-y-auto p-6">
+          <div className="min-h-0 flex-1 overflow-y-auto p-6">
             {activeTab === "export" && (
               <ExportTab
                 notebooks={notebooks}
@@ -1035,6 +1098,17 @@ export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
                 onImport={handleOnenoteImport}
                 onCancel={handleOnenoteCancel}
                 onNameChange={setOnenoteNotebookName}
+              />
+            )}
+            {activeTab === "website" && (
+              <WebsiteMirrorImportTab
+                isLoading={isLoading}
+                preview={websitePreview}
+                notebookName={websiteNotebookName}
+                onSelectFolder={handleWebsiteSelectFolder}
+                onImport={handleWebsiteImport}
+                onCancel={handleWebsiteCancel}
+                onNameChange={setWebsiteNotebookName}
               />
             )}
             {activeTab === "backups" && (
@@ -3167,5 +3241,222 @@ function IconJoplin({ size = 16 }: { size?: number }) {
       <polyline points="14 2 14 8 20 8" />
       <line x1="9" y1="15" x2="15" y2="15" />
     </svg>
+  );
+}
+
+function IconWebsite({ size = 16 }: { size?: number }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="12" cy="12" r="10" />
+      <line x1="2" y1="12" x2="22" y2="12" />
+      <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+    </svg>
+  );
+}
+
+function WebsiteMirrorImportTab({
+  isLoading,
+  preview,
+  notebookName,
+  onSelectFolder,
+  onImport,
+  onCancel,
+  onNameChange,
+}: {
+  isLoading: boolean;
+  preview: WebsiteMirrorImportPreview | null;
+  notebookName: string;
+  onSelectFolder: () => void;
+  onImport: () => void;
+  onCancel: () => void;
+  onNameChange: (name: string) => void;
+}) {
+  if (!preview) {
+    return (
+      <div className="space-y-6">
+        <p
+          className="text-sm"
+          style={{ color: "var(--color-text-muted)" }}
+        >
+          Import a mirrored website from disk. HTML files will be indexed for search and AI, with full-fidelity rendering in an embedded viewer. Files stay in their original location.
+        </p>
+
+        <div
+          className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed p-12"
+          style={{ borderColor: "var(--color-border)" }}
+        >
+          <div
+            className="mb-4 rounded-full p-4"
+            style={{ backgroundColor: "var(--color-bg-tertiary)" }}
+          >
+            <IconWebsite size={32} />
+          </div>
+          <h4
+            className="mb-2 text-lg font-medium"
+            style={{ color: "var(--color-text-primary)" }}
+          >
+            Import Website Mirror
+          </h4>
+          <p
+            className="mb-6 text-center text-sm"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            Select the folder containing your mirrored website
+          </p>
+          <button
+            onClick={onSelectFolder}
+            disabled={isLoading}
+            className="rounded-lg px-6 py-2.5 text-sm font-medium transition-colors"
+            style={{
+              backgroundColor: "var(--color-accent)",
+              color: "white",
+              opacity: isLoading ? 0.5 : 1,
+            }}
+          >
+            {isLoading ? "Loading..." : "Choose Folder"}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <div
+        className="grid grid-cols-3 gap-4 rounded-lg border p-3"
+        style={{
+          borderColor: "var(--color-border)",
+          backgroundColor: "var(--color-bg-secondary)",
+        }}
+      >
+        <div>
+          <div
+            className="text-2xl font-bold"
+            style={{ color: "var(--color-accent)" }}
+          >
+            {preview.pageCount}
+          </div>
+          <div
+            className="text-xs"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            HTML Pages
+          </div>
+        </div>
+        <div>
+          <div
+            className="text-2xl font-bold"
+            style={{ color: "var(--color-accent)" }}
+          >
+            {preview.folderCount}
+          </div>
+          <div
+            className="text-xs"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            Folders
+          </div>
+        </div>
+        <div>
+          <div
+            className="text-2xl font-bold"
+            style={{ color: "var(--color-accent)" }}
+          >
+            {preview.assetCount}
+          </div>
+          <div
+            className="text-xs"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            Assets
+          </div>
+        </div>
+      </div>
+
+      {preview.samplePages.length > 0 && (
+        <div>
+          <h4
+            className="mb-1 text-sm font-medium"
+            style={{ color: "var(--color-text-primary)" }}
+          >
+            Sample Pages
+          </h4>
+          <div
+            className="max-h-24 space-y-0.5 overflow-y-auto rounded-lg border p-2"
+            style={{
+              borderColor: "var(--color-border)",
+              backgroundColor: "var(--color-bg-secondary)",
+            }}
+          >
+            {preview.samplePages.map((page, i) => (
+              <div key={i} className="min-w-0">
+                <span
+                  className="block truncate text-xs"
+                  style={{ color: "var(--color-text-primary)" }}
+                >
+                  {page.title}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div>
+        <label
+          className="mb-1 block text-sm font-medium"
+          style={{ color: "var(--color-text-primary)" }}
+        >
+          Notebook Name
+        </label>
+        <input
+          type="text"
+          value={notebookName}
+          onChange={(e) => onNameChange(e.target.value)}
+          className="w-full rounded-lg border px-3 py-2 text-sm"
+          style={{
+            borderColor: "var(--color-border)",
+            backgroundColor: "var(--color-bg-primary)",
+            color: "var(--color-text-primary)",
+          }}
+          placeholder="Enter notebook name"
+        />
+      </div>
+
+      <div className="flex justify-end gap-3">
+        <button
+          onClick={onCancel}
+          className="rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+          style={{
+            backgroundColor: "var(--color-bg-tertiary)",
+            color: "var(--color-text-primary)",
+          }}
+        >
+          Cancel
+        </button>
+        <button
+          onClick={onImport}
+          disabled={isLoading}
+          className="rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+          style={{
+            backgroundColor: "var(--color-accent)",
+            color: "white",
+            opacity: isLoading ? 0.5 : 1,
+          }}
+        >
+          {isLoading ? "Importing..." : `Import ${preview.pageCount} Pages`}
+        </button>
+      </div>
+    </div>
   );
 }

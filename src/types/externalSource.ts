@@ -2,7 +2,7 @@ import { z } from "zod";
 
 // ===== External File Format =====
 
-export const ExternalFileFormatSchema = z.enum(["json", "markdown", "plainText"]);
+export const ExternalFileFormatSchema = z.enum(["json", "markdown", "plainText", "html"]);
 
 export type ExternalFileFormat = z.infer<typeof ExternalFileFormatSchema>;
 
@@ -14,6 +14,7 @@ export const EXTERNAL_FILE_FORMATS: {
   { value: "json", label: "JSON", extensions: [".json"] },
   { value: "markdown", label: "Markdown", extensions: [".md", ".markdown"] },
   { value: "plainText", label: "Plain Text", extensions: [".txt", ".text"] },
+  { value: "html", label: "HTML", extensions: [".html", ".htm"] },
 ];
 
 // ===== Processed File Info =====

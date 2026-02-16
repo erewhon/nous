@@ -477,6 +477,9 @@ pub fn run() {
             // Org-mode import commands
             commands::preview_orgmode_cmd,
             commands::import_orgmode_cmd,
+            // Website mirror import commands
+            commands::preview_website_mirror_cmd,
+            commands::import_website_mirror_cmd,
             // Folder commands
             commands::list_folders,
             commands::get_folder,

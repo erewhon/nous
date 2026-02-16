@@ -23,6 +23,7 @@ fn page_type_to_str(page_type: &PageType) -> &'static str {
         PageType::Chat => "chat",
         PageType::Canvas => "canvas",
         PageType::Database => "database",
+        PageType::Html => "html",
     }
 }
 
@@ -338,6 +339,7 @@ impl SearchIndex {
             PageType::Calendar => Self::extract_text_from_calendar(file_content),
             PageType::Pdf | PageType::Epub => Self::extract_text_from_markdown(file_content),
             PageType::Database => Self::extract_text_from_database(file_content),
+            PageType::Html => crate::storage::html_utils::html_to_searchable_text(file_content),
             _ => String::new(),
         };
 
