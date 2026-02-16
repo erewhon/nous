@@ -1,6 +1,14 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { useEnergyStore } from "../../stores/energyStore";
 
+/** Format a Date as YYYY-MM-DD in local time (NOT UTC). */
+function localDateStr(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 type RangeOption = "30d" | "90d" | "365d";
 
 const RANGE_OPTIONS: { value: RangeOption; label: string }[] = [
@@ -35,8 +43,8 @@ function getDateRange(range: RangeOption): { start: string; end: string } {
       break;
   }
   return {
-    start: start.toISOString().split("T")[0],
-    end: end.toISOString().split("T")[0],
+    start: localDateStr(start),
+    end: localDateStr(end),
   };
 }
 
@@ -98,7 +106,7 @@ export function EnergyCalendar() {
         result.push([]);
       }
 
-      const dateStr = currentDate.toISOString().split("T")[0];
+      const dateStr = localDateStr(currentDate);
       const checkin = checkIns.get(dateStr);
       const rangeStart = new Date(start + "T12:00:00");
 

@@ -752,12 +752,11 @@ Read iMessage and call history directly from macOS system SQLite databases. The 
 
 ## Technical Debt & Polish
 
-- [ ] Move video storage from `/tmp/nous-videos` to main data directory
-  - Currently uploaded videos are stored in `/tmp/nous-videos/{notebook_id}/`
-  - This was a workaround for Tauri asset protocol issues with hidden directories
-  - With the embedded HTTP video server, videos can be stored anywhere
-  - Migration needed for existing notebooks with videos in /tmp
-  - Remove legacy asset protocol registration in lib.rs
+- [x] Move video storage from `/tmp/nous-videos` to main data directory
+  - Videos now stay in notebook assets directory, served via embedded HTTP video server
+  - Dynamic allowed_dirs on VideoServer (Arc<RwLock<Vec<PathBuf>>>)
+  - Migration function moves existing /tmp/nous-videos back to notebook assets
+  - Removed legacy asset protocol registration in lib.rs
 - [x] Add comprehensive error handling for file operations
   - Toast notification system (success, error, warning, info)
   - ToastContainer component with auto-dismiss and manual close
@@ -857,6 +856,7 @@ These are the active focus areas:
 
 1. ~~**Data Flow Robustness Overhaul** - Operation logging, CRDT local integration, block-level versioning (Phases 0-4)~~ ✅ Complete
 2. ~~**Energy & Focus Tracking** - Energy-aware daily planning with pattern detection and external agent API~~ ✅ Complete
+3. ~~**Move video storage out of /tmp** - Videos served from notebook assets via HTTP video server~~ ✅ Complete
 
 ---
 

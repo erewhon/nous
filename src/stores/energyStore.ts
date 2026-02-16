@@ -14,6 +14,12 @@ import {
   getEnergyPatterns,
 } from "../utils/api";
 
+/** YYYY-MM-DD in local time (NOT UTC). */
+function localToday(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 interface EnergyState {
   checkIns: Map<string, EnergyCheckIn>;
   patterns: EnergyPattern | null;
@@ -55,7 +61,7 @@ export const useEnergyStore = create<EnergyStore>()((set) => ({
   // Data fetching
   loadTodayCheckIn: async () => {
     try {
-      const today = new Date().toISOString().split("T")[0];
+      const today = localToday();
       const checkIn = await getEnergyCheckIn(today);
       set({ todayCheckIn: checkIn });
       if (checkIn) {
@@ -99,7 +105,7 @@ export const useEnergyStore = create<EnergyStore>()((set) => ({
     set({ isLoading: true, error: null });
     try {
       const checkIn = await apiLogCheckIn(request);
-      const today = new Date().toISOString().split("T")[0];
+      const today = localToday();
       set((state) => {
         const newMap = new Map(state.checkIns);
         newMap.set(checkIn.date, checkIn);
@@ -122,7 +128,7 @@ export const useEnergyStore = create<EnergyStore>()((set) => ({
     set({ isLoading: true, error: null });
     try {
       const checkIn = await apiUpdateCheckIn(date, updates);
-      const today = new Date().toISOString().split("T")[0];
+      const today = localToday();
       set((state) => {
         const newMap = new Map(state.checkIns);
         newMap.set(checkIn.date, checkIn);
@@ -145,7 +151,7 @@ export const useEnergyStore = create<EnergyStore>()((set) => ({
     set({ isLoading: true, error: null });
     try {
       await apiDeleteCheckIn(date);
-      const today = new Date().toISOString().split("T")[0];
+      const today = localToday();
       set((state) => {
         const newMap = new Map(state.checkIns);
         newMap.delete(date);
