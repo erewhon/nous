@@ -177,10 +177,6 @@ function extractTextFromBlock(block: EditorBlock): string {
         stripHtml(String(data.back || ""));
       break;
 
-    case "moodHabit":
-      // No text content to extract
-      break;
-
     case "pdf":
       // Extract text from PDF highlights
       if (Array.isArray(data.highlights)) {

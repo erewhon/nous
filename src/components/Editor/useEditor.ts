@@ -16,7 +16,6 @@ import { CodeBlockTool } from "./CodeBlockTool";
 import { CalloutTool } from "./CalloutTool";
 import { ChecklistTool } from "./ChecklistTool";
 import { FlashcardTool } from "./FlashcardTool";
-import { MoodHabitTool } from "./MoodHabitTool";
 import { HighlighterTool } from "./HighlighterTool";
 import { PDFTool } from "./PDFTool";
 import { VideoTool } from "./VideoTool";
@@ -187,9 +186,6 @@ export function useEditor({
           frontPlaceholder: "Enter question...",
           backPlaceholder: "Enter answer...",
         },
-      },
-      moodHabit: {
-        class: MoodHabitTool as unknown as ToolConstructable,
       },
       database: {
         class: DatabaseBlockTool as unknown as ToolConstructable,

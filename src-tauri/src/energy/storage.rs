@@ -69,11 +69,29 @@ impl EnergyStorage {
         let date = NaiveDate::parse_from_str(&request.date, "%Y-%m-%d")
             .map_err(|e| StorageError::NotFound(format!("Invalid date: {}", e)))?;
 
-        // Validate energy level
-        if request.energy_level < 1 || request.energy_level > 5 {
+        // Require at least one meaningful field
+        if request.energy_level.is_none() && request.mood.is_none() && request.habits.is_empty() {
             return Err(StorageError::NotFound(
-                "Energy level must be between 1 and 5".to_string(),
+                "At least one of energy_level, mood, or habits must be provided".to_string(),
             ));
+        }
+
+        // Validate energy level if provided
+        if let Some(el) = request.energy_level {
+            if el < 1 || el > 5 {
+                return Err(StorageError::NotFound(
+                    "Energy level must be between 1 and 5".to_string(),
+                ));
+            }
+        }
+
+        // Validate mood if provided
+        if let Some(m) = request.mood {
+            if m < 1 || m > 5 {
+                return Err(StorageError::NotFound(
+                    "Mood must be between 1 and 5".to_string(),
+                ));
+            }
         }
 
         // Validate sleep quality if provided
@@ -90,10 +108,25 @@ impl EnergyStorage {
 
         // Check if a check-in exists for this date
         if let Some(existing) = checkins.iter_mut().find(|c| c.date == date) {
-            existing.energy_level = request.energy_level;
-            existing.focus_capacity = request.focus_capacity;
-            existing.sleep_quality = request.sleep_quality;
-            existing.notes = request.notes;
+            // Merge: only overwrite fields that are provided
+            if request.energy_level.is_some() {
+                existing.energy_level = request.energy_level;
+            }
+            if request.mood.is_some() {
+                existing.mood = request.mood;
+            }
+            if !request.focus_capacity.is_empty() {
+                existing.focus_capacity = request.focus_capacity;
+            }
+            if !request.habits.is_empty() {
+                existing.habits = request.habits;
+            }
+            if request.sleep_quality.is_some() {
+                existing.sleep_quality = request.sleep_quality;
+            }
+            if request.notes.is_some() {
+                existing.notes = request.notes;
+            }
             existing.updated_at = now;
             let updated = existing.clone();
             self.save_checkins(&checkins)?;
@@ -103,7 +136,9 @@ impl EnergyStorage {
                 id: Uuid::new_v4(),
                 date,
                 energy_level: request.energy_level,
+                mood: request.mood,
                 focus_capacity: request.focus_capacity,
+                habits: request.habits,
                 sleep_quality: request.sleep_quality,
                 notes: request.notes,
                 created_at: now,
@@ -136,10 +171,21 @@ impl EnergyStorage {
                     "Energy level must be between 1 and 5".to_string(),
                 ));
             }
-            checkin.energy_level = energy_level;
+            checkin.energy_level = Some(energy_level);
+        }
+        if let Some(mood) = updates.mood {
+            if mood < 1 || mood > 5 {
+                return Err(StorageError::NotFound(
+                    "Mood must be between 1 and 5".to_string(),
+                ));
+            }
+            checkin.mood = Some(mood);
         }
         if let Some(focus_capacity) = updates.focus_capacity {
             checkin.focus_capacity = focus_capacity;
+        }
+        if let Some(habits) = updates.habits {
+            checkin.habits = habits;
         }
         if updates.sleep_quality.is_some() {
             if let Some(sq) = updates.sleep_quality {
@@ -200,8 +246,10 @@ impl EnergyStorage {
     ) -> Result<EnergyPattern> {
         let checkins = self.get_checkins_range(start, end)?;
 
-        // Group by day of week
-        let mut day_totals: HashMap<String, (f32, u32)> = HashMap::new();
+        // Group energy by day of week
+        let mut energy_totals: HashMap<String, (f32, u32)> = HashMap::new();
+        let mut mood_totals: HashMap<String, (f32, u32)> = HashMap::new();
+
         for checkin in &checkins {
             let day_name = match checkin.date.weekday() {
                 chrono::Weekday::Mon => "monday",
@@ -212,14 +260,30 @@ impl EnergyStorage {
                 chrono::Weekday::Sat => "saturday",
                 chrono::Weekday::Sun => "sunday",
             };
-            let entry = day_totals
-                .entry(day_name.to_string())
-                .or_insert((0.0, 0));
-            entry.0 += checkin.energy_level as f32;
-            entry.1 += 1;
+
+            if let Some(el) = checkin.energy_level {
+                let entry = energy_totals
+                    .entry(day_name.to_string())
+                    .or_insert((0.0, 0));
+                entry.0 += el as f32;
+                entry.1 += 1;
+            }
+
+            if let Some(m) = checkin.mood {
+                let entry = mood_totals
+                    .entry(day_name.to_string())
+                    .or_insert((0.0, 0));
+                entry.0 += m as f32;
+                entry.1 += 1;
+            }
         }
 
-        let day_of_week_averages: HashMap<String, f32> = day_totals
+        let day_of_week_averages: HashMap<String, f32> = energy_totals
+            .iter()
+            .map(|(day, (total, count))| (day.clone(), total / *count as f32))
+            .collect();
+
+        let mood_day_of_week_averages: HashMap<String, f32> = mood_totals
             .iter()
             .map(|(day, (total, count))| (day.clone(), total / *count as f32))
             .collect();
@@ -241,6 +305,7 @@ impl EnergyStorage {
 
         Ok(EnergyPattern {
             day_of_week_averages,
+            mood_day_of_week_averages,
             current_streak,
             typical_low_days,
             typical_high_days,

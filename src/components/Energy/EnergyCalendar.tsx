@@ -89,7 +89,7 @@ export function EnergyCalendar() {
     const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
     startDate.setDate(startDate.getDate() + mondayOffset);
 
-    const result: { date: string; energy: number; inRange: boolean }[][] = [];
+    const result: { date: string; energy: number; mood: number; habitsDone: number; habitsTotal: number; inRange: boolean }[][] = [];
     let currentDate = new Date(startDate);
 
     while (currentDate <= endDate || result.length === 0 || result[result.length - 1].length < 7) {
@@ -105,6 +105,9 @@ export function EnergyCalendar() {
       result[result.length - 1].push({
         date: dateStr,
         energy: checkin?.energyLevel ?? 0,
+        mood: checkin?.mood ?? 0,
+        habitsDone: checkin?.habits?.filter((h) => h.checked).length ?? 0,
+        habitsTotal: checkin?.habits?.length ?? 0,
         inRange: currentDate >= rangeStart && currentDate <= endDate,
       });
 
@@ -173,7 +176,7 @@ export function EnergyCalendar() {
             className="text-base font-semibold"
             style={{ color: "var(--color-text-primary)" }}
           >
-            Energy Heatmap
+            Check-in Heatmap
           </h2>
           <div className="flex items-center gap-3">
             {/* Range selector */}
@@ -276,7 +279,7 @@ export function EnergyCalendar() {
                       }}
                       title={
                         day.inRange
-                          ? `${formatDate(day.date)}: ${day.energy > 0 ? `${day.energy}/5` : "No data"}`
+                          ? `${formatDate(day.date)}: ${day.energy > 0 ? `Energy ${day.energy}/5` : ""}${day.mood > 0 ? `${day.energy > 0 ? ", " : ""}Mood ${day.mood}/5` : ""}${day.energy === 0 && day.mood === 0 ? "No data" : ""}`
                           : undefined
                       }
                       onMouseEnter={() => setHoveredDate(day.date)}
@@ -323,13 +326,24 @@ export function EnergyCalendar() {
             className="border-t px-5 py-3"
             style={{ borderColor: "var(--color-border)" }}
           >
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 flex-wrap">
               <span
                 className="text-sm font-medium"
                 style={{ color: "var(--color-text-primary)" }}
               >
-                {formatDate(hoveredCheckIn.date)} - Energy {hoveredCheckIn.energyLevel}/5
+                {formatDate(hoveredCheckIn.date)}
               </span>
+              {hoveredCheckIn.mood && (
+                <span className="text-xs" style={{ color: "var(--color-text-secondary)" }}>
+                  {hoveredCheckIn.mood === 1 ? "\u{1F614}" : hoveredCheckIn.mood === 2 ? "\u{1F615}" : hoveredCheckIn.mood === 3 ? "\u{1F610}" : hoveredCheckIn.mood === 4 ? "\u{1F642}" : "\u{1F60A}"}
+                  {" "}Mood {hoveredCheckIn.mood}/5
+                </span>
+              )}
+              {hoveredCheckIn.energyLevel && (
+                <span className="text-xs" style={{ color: "var(--color-text-secondary)" }}>
+                  Energy {hoveredCheckIn.energyLevel}/5
+                </span>
+              )}
               {hoveredCheckIn.focusCapacity.length > 0 && (
                 <span
                   className="text-xs"
@@ -338,6 +352,11 @@ export function EnergyCalendar() {
                   {hoveredCheckIn.focusCapacity
                     .map((f) => FOCUS_LABELS[f] || f)
                     .join(", ")}
+                </span>
+              )}
+              {hoveredCheckIn.habits && hoveredCheckIn.habits.length > 0 && (
+                <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>
+                  Habits {hoveredCheckIn.habits.filter((h) => h.checked).length}/{hoveredCheckIn.habits.length}
                 </span>
               )}
             </div>

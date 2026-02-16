@@ -9,12 +9,21 @@ export const FocusCapacitySchema = z.enum([
 ]);
 export type FocusCapacity = z.infer<typeof FocusCapacitySchema>;
 
+// Habit entry
+export const HabitEntrySchema = z.object({
+  name: z.string(),
+  checked: z.boolean(),
+});
+export type HabitEntry = z.infer<typeof HabitEntrySchema>;
+
 // Energy check-in
 export const EnergyCheckInSchema = z.object({
   id: z.string().uuid(),
   date: z.string(), // YYYY-MM-DD
-  energyLevel: z.number().min(1).max(5),
+  energyLevel: z.number().min(1).max(5).nullable().optional(),
+  mood: z.number().min(1).max(5).nullable().optional(),
   focusCapacity: z.array(FocusCapacitySchema),
+  habits: z.array(HabitEntrySchema).default([]),
   sleepQuality: z.number().min(1).max(4).nullable().optional(),
   notes: z.string().nullable().optional(),
   createdAt: z.string(),
@@ -25,8 +34,10 @@ export type EnergyCheckIn = z.infer<typeof EnergyCheckInSchema>;
 // Create check-in request
 export const CreateCheckInRequestSchema = z.object({
   date: z.string(), // YYYY-MM-DD
-  energyLevel: z.number().min(1).max(5),
+  energyLevel: z.number().min(1).max(5).optional(),
+  mood: z.number().min(1).max(5).optional(),
   focusCapacity: z.array(FocusCapacitySchema),
+  habits: z.array(HabitEntrySchema).default([]),
   sleepQuality: z.number().min(1).max(4).optional(),
   notes: z.string().optional(),
 });
@@ -35,7 +46,9 @@ export type CreateCheckInRequest = z.infer<typeof CreateCheckInRequestSchema>;
 // Update check-in request
 export const UpdateCheckInRequestSchema = z.object({
   energyLevel: z.number().min(1).max(5).optional(),
+  mood: z.number().min(1).max(5).optional(),
   focusCapacity: z.array(FocusCapacitySchema).optional(),
+  habits: z.array(HabitEntrySchema).optional(),
   sleepQuality: z.number().min(1).max(4).optional(),
   notes: z.string().optional(),
 });
@@ -44,6 +57,7 @@ export type UpdateCheckInRequest = z.infer<typeof UpdateCheckInRequestSchema>;
 // Energy pattern (computed)
 export const EnergyPatternSchema = z.object({
   dayOfWeekAverages: z.record(z.string(), z.number()),
+  moodDayOfWeekAverages: z.record(z.string(), z.number()),
   currentStreak: z.number(),
   typicalLowDays: z.array(z.string()),
   typicalHighDays: z.array(z.string()),

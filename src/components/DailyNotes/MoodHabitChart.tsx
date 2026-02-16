@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import * as d3 from "d3";
-import { usePageStore } from "../../stores/pageStore";
+import { useEnergyStore } from "../../stores/energyStore";
 import { useMoodHabitStore } from "../../stores/moodHabitStore";
 
 interface MoodHabitEntry {
@@ -18,43 +18,46 @@ interface MoodHabitChartProps {
 }
 
 export function MoodHabitChart({ isOpen, onClose }: MoodHabitChartProps) {
-  const { pages } = usePageStore();
+  const { checkIns, loadCheckInsRange } = useEnergyStore();
   const { habitList } = useMoodHabitStore();
   const svgRef = useRef<SVGSVGElement>(null);
   const [dateRange, setDateRange] = useState<"7d" | "14d" | "30d">("14d");
 
-  // Extract mood/habit data from daily note pages
+  // Load check-ins when chart opens
+  useEffect(() => {
+    if (isOpen) {
+      const days = dateRange === "7d" ? 7 : dateRange === "14d" ? 14 : 30;
+      const end = new Date();
+      const start = new Date();
+      start.setDate(start.getDate() - days);
+      loadCheckInsRange(
+        start.toISOString().split("T")[0],
+        end.toISOString().split("T")[0]
+      );
+    }
+  }, [isOpen, dateRange, loadCheckInsRange]);
+
+  // Build MoodHabitEntry[] from checkIns map
   const entries = useMemo((): MoodHabitEntry[] => {
     const results: MoodHabitEntry[] = [];
 
-    for (const page of pages) {
-      if (!page.dailyNoteDate || !page.content?.blocks) continue;
-
-      for (const block of page.content.blocks) {
-        if (block.type !== "moodHabit") continue;
-        const data = block.data as {
-          mood?: number;
-          habits?: { name: string; checked: boolean }[];
-          date?: string;
-        };
-
-        const habitsMap: Record<string, boolean> = {};
-        if (data.habits) {
-          for (const h of data.habits) {
-            habitsMap[h.name] = h.checked;
-          }
+    for (const [date, checkIn] of checkIns) {
+      const habitsMap: Record<string, boolean> = {};
+      if (checkIn.habits) {
+        for (const h of checkIn.habits) {
+          habitsMap[h.name] = h.checked;
         }
-
-        results.push({
-          date: data.date || page.dailyNoteDate,
-          mood: data.mood || 0,
-          habits: habitsMap,
-        });
       }
+
+      results.push({
+        date,
+        mood: checkIn.mood ?? 0,
+        habits: habitsMap,
+      });
     }
 
     return results.sort((a, b) => a.date.localeCompare(b.date));
-  }, [pages]);
+  }, [checkIns]);
 
   // Filter by date range
   const filteredEntries = useMemo(() => {
