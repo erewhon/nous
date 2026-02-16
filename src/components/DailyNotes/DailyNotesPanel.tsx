@@ -3,13 +3,17 @@ import { useDailyNotesStore } from "../../stores/dailyNotesStore";
 import { useNotebookStore } from "../../stores/notebookStore";
 import { usePageStore } from "../../stores/pageStore";
 import { useTemplateStore } from "../../stores/templateStore";
+import { useEnergyStore } from "../../stores/energyStore";
 import { DailyNotesCalendar } from "./DailyNotesCalendar";
 import { DailyNotesList } from "./DailyNotesList";
 import { MoodHabitChart } from "./MoodHabitChart";
 import { RollupDialog } from "./RollupDialog";
 import { ReflectionPrompts } from "./ReflectionPrompts";
 import { DigestPanel } from "./DigestPanel";
+import { EnergyCheckInDialog } from "../Energy/EnergyCheckInDialog";
+import { EnergyCalendar } from "../Energy/EnergyCalendar";
 import type { Page, EditorData } from "../../types/page";
+import type { FocusCapacity, CreateCheckInRequest } from "../../types/energy";
 
 interface DailyNotesPanelProps {
   isOpen?: boolean;
@@ -55,6 +59,13 @@ export function DailyNotesPanel({ isOpen: isOpenProp, onClose: onCloseProp }: Da
 
   const { selectedNotebookId } = useNotebookStore();
   const { selectPage } = usePageStore();
+  const {
+    todayCheckIn,
+    loadTodayCheckIn,
+    submitCheckIn: energySubmitCheckIn,
+    openCheckIn: energyOpenCheckIn,
+    openCalendar: energyOpenCalendar,
+  } = useEnergyStore();
 
   const [showMoodChart, setShowMoodChart] = useState(false);
   const [showRollup, setShowRollup] = useState(false);
@@ -68,6 +79,31 @@ export function DailyNotesPanel({ isOpen: isOpenProp, onClose: onCloseProp }: Da
       loadDailyNotes(selectedNotebookId);
     }
   }, [isOpen, selectedNotebookId, loadDailyNotes]);
+
+  // Load today's energy check-in when panel opens
+  useEffect(() => {
+    if (isOpen) {
+      loadTodayCheckIn();
+    }
+  }, [isOpen, loadTodayCheckIn]);
+
+  // Quick energy check-in handler (inline 1-tap)
+  const handleQuickEnergy = useCallback(
+    async (level: number) => {
+      const today = new Date().toISOString().split("T")[0];
+      const request: CreateCheckInRequest = {
+        date: today,
+        energyLevel: level,
+        focusCapacity: [],
+      };
+      try {
+        await energySubmitCheckIn(request);
+      } catch {
+        // Error handled in store
+      }
+    },
+    [energySubmitCheckIn]
+  );
 
   // Reload when month changes
   const handleMonthChange = useCallback(
@@ -316,6 +352,93 @@ export function DailyNotesPanel({ isOpen: isOpenProp, onClose: onCloseProp }: Da
         </button>
       </div>
 
+      {/* Energy Check-in Prompt */}
+      <div
+        className="border-b px-4 py-2"
+        style={{ borderColor: "var(--color-border)" }}
+      >
+        {todayCheckIn ? (
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="text-sm">
+                {todayCheckIn.energyLevel === 1
+                  ? "\u{1F629}"
+                  : todayCheckIn.energyLevel === 2
+                    ? "\u{1F614}"
+                    : todayCheckIn.energyLevel === 3
+                      ? "\u{1F610}"
+                      : todayCheckIn.energyLevel === 4
+                        ? "\u{1F60A}"
+                        : "\u{26A1}"}
+              </span>
+              <span
+                className="text-xs font-medium"
+                style={{ color: "var(--color-text-secondary)" }}
+              >
+                Energy {todayCheckIn.energyLevel}/5
+                {todayCheckIn.focusCapacity.length > 0 && (
+                  <span style={{ color: "var(--color-text-muted)" }}>
+                    {" - "}
+                    {todayCheckIn.focusCapacity
+                      .map((f: FocusCapacity) =>
+                        f === "deepWork"
+                          ? "Deep"
+                          : f === "lightWork"
+                            ? "Light"
+                            : f === "physical"
+                              ? "Physical"
+                              : "Creative"
+                      )
+                      .join(", ")}
+                  </span>
+                )}
+              </span>
+            </div>
+            <button
+              onClick={() => energyOpenCheckIn()}
+              className="rounded px-2 py-0.5 text-[10px] transition-colors hover:bg-[--color-bg-tertiary]"
+              style={{ color: "var(--color-text-muted)" }}
+            >
+              Edit
+            </button>
+          </div>
+        ) : (
+          <div>
+            <div
+              className="mb-1.5 text-[10px] font-medium uppercase tracking-wide"
+              style={{ color: "var(--color-text-muted)" }}
+            >
+              How's your energy?
+            </div>
+            <div className="flex items-center gap-1">
+              {[
+                { v: 1, e: "\u{1F629}" },
+                { v: 2, e: "\u{1F614}" },
+                { v: 3, e: "\u{1F610}" },
+                { v: 4, e: "\u{1F60A}" },
+                { v: 5, e: "\u{26A1}" },
+              ].map((level) => (
+                <button
+                  key={level.v}
+                  onClick={() => handleQuickEnergy(level.v)}
+                  className="flex h-7 w-7 items-center justify-center rounded-md text-sm transition-colors hover:bg-[--color-bg-tertiary]"
+                  title={`Energy ${level.v}/5`}
+                >
+                  {level.e}
+                </button>
+              ))}
+              <button
+                onClick={() => energyOpenCheckIn()}
+                className="ml-auto rounded px-2 py-0.5 text-[10px] transition-colors hover:bg-[--color-bg-tertiary]"
+                style={{ color: "var(--color-text-muted)" }}
+              >
+                More
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* Calendar */}
       <div className="border-b px-4 py-3" style={{ borderColor: "var(--color-border)" }}>
         <DailyNotesCalendar
@@ -451,6 +574,29 @@ export function DailyNotesPanel({ isOpen: isOpenProp, onClose: onCloseProp }: Da
           </svg>
           Rollup
         </button>
+        <button
+          onClick={() => energyOpenCalendar()}
+          className="flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs transition-colors hover:bg-[--color-bg-tertiary]"
+          style={{
+            borderColor: "var(--color-border)",
+            color: "var(--color-text-secondary)",
+          }}
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+          </svg>
+          Energy
+        </button>
       </div>
 
       {/* Recent notes list */}
@@ -481,6 +627,8 @@ export function DailyNotesPanel({ isOpen: isOpenProp, onClose: onCloseProp }: Da
       </div>
 
       {/* Dialogs */}
+      <EnergyCheckInDialog />
+      <EnergyCalendar />
       <MoodHabitChart
         isOpen={showMoodChart}
         onClose={() => setShowMoodChart(false)}

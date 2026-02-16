@@ -6,6 +6,7 @@ use tauri::Manager;
 mod actions;
 mod commands;
 mod contacts;
+mod energy;
 mod freeze_watchdog;
 pub mod encryption;
 mod evernote;
@@ -38,6 +39,7 @@ use encryption::EncryptionManager;
 use external_editor::ExternalEditorManager;
 use external_sources::ExternalSourcesStorage;
 use flashcards::FlashcardStorage;
+use energy::EnergyStorage;
 use goals::GoalsStorage;
 use inbox::InboxStorage;
 use library::LibraryStorage;
@@ -60,6 +62,7 @@ pub struct AppState {
     pub inbox_storage: Arc<Mutex<InboxStorage>>,
     pub flashcard_storage: Mutex<FlashcardStorage>,
     pub goals_storage: Arc<Mutex<GoalsStorage>>,
+    pub energy_storage: Arc<Mutex<EnergyStorage>>,
     pub contacts_storage: Arc<Mutex<ContactsStorage>>,
     pub sync_manager: Arc<SyncManager>,
     pub crdt_store: Arc<CrdtStore>,
@@ -165,6 +168,11 @@ pub fn run() {
         .expect("Failed to initialize goals storage");
     let goals_storage_arc = Arc::new(Mutex::new(goals_storage));
 
+    // Initialize energy storage
+    let energy_storage = EnergyStorage::new(data_dir.clone())
+        .expect("Failed to initialize energy storage");
+    let energy_storage_arc = Arc::new(Mutex::new(energy_storage));
+
     // Initialize contacts storage
     let contacts_storage = ContactsStorage::new(data_dir.clone())
         .expect("Failed to initialize contacts storage");
@@ -243,6 +251,7 @@ pub fn run() {
         inbox_storage: inbox_storage_arc,
         flashcard_storage: Mutex::new(flashcard_storage),
         goals_storage: goals_storage_arc,
+        energy_storage: energy_storage_arc,
         contacts_storage: contacts_storage_arc,
         sync_manager: sync_manager_arc,
         crdt_store: crdt_store_arc,
@@ -533,6 +542,14 @@ pub fn run() {
             commands::check_auto_goals,
             commands::get_goals_summary,
             commands::toggle_goal_today,
+            // Energy commands
+            commands::log_energy_checkin,
+            commands::get_energy_checkin,
+            commands::get_energy_checkins_range,
+            commands::update_energy_checkin,
+            commands::delete_energy_checkin,
+            commands::get_energy_patterns,
+            commands::get_energy_log,
             // Contacts commands
             commands::list_contacts,
             commands::get_contact,

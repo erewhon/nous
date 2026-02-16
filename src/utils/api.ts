@@ -2333,6 +2333,83 @@ export async function toggleGoalToday(goalId: string): Promise<GoalProgress> {
   return invoke<GoalProgress>("toggle_goal_today", { goalId });
 }
 
+// ===== Energy API =====
+
+import type {
+  EnergyCheckIn,
+  EnergyPattern,
+  CreateCheckInRequest,
+  UpdateCheckInRequest,
+} from "../types/energy";
+
+/**
+ * Log an energy check-in (creates or updates for the given date)
+ */
+export async function logEnergyCheckIn(
+  request: CreateCheckInRequest
+): Promise<EnergyCheckIn> {
+  return invoke<EnergyCheckIn>("log_energy_checkin", { request });
+}
+
+/**
+ * Get an energy check-in for a specific date
+ */
+export async function getEnergyCheckIn(
+  date: string
+): Promise<EnergyCheckIn | null> {
+  return invoke<EnergyCheckIn | null>("get_energy_checkin", { date });
+}
+
+/**
+ * Get energy check-ins within a date range
+ */
+export async function getEnergyCheckInsRange(
+  startDate: string,
+  endDate: string
+): Promise<EnergyCheckIn[]> {
+  return invoke<EnergyCheckIn[]>("get_energy_checkins_range", {
+    startDate,
+    endDate,
+  });
+}
+
+/**
+ * Update an existing energy check-in
+ */
+export async function updateEnergyCheckIn(
+  date: string,
+  updates: UpdateCheckInRequest
+): Promise<EnergyCheckIn> {
+  return invoke<EnergyCheckIn>("update_energy_checkin", { date, updates });
+}
+
+/**
+ * Delete an energy check-in
+ */
+export async function deleteEnergyCheckIn(date: string): Promise<void> {
+  return invoke("delete_energy_checkin", { date });
+}
+
+/**
+ * Get energy patterns for a date range
+ */
+export async function getEnergyPatterns(
+  startDate: string,
+  endDate: string
+): Promise<EnergyPattern> {
+  return invoke<EnergyPattern>("get_energy_patterns", {
+    startDate,
+    endDate,
+  });
+}
+
+/**
+ * Get the full energy log (all check-ins)
+ */
+export async function getEnergyLog(): Promise<EnergyCheckIn[]> {
+  return invoke<EnergyCheckIn[]>("get_energy_log");
+}
+
 // ===== Contacts API =====
 
 import type {
