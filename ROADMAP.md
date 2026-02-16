@@ -856,7 +856,7 @@ These features are recommended as high-priority additions:
 These are the active focus areas:
 
 1. **Data Flow Robustness Overhaul** - Operation logging, CRDT local integration, block-level versioning (Phases 2-4)
-2. **Energy & Focus Tracking** - Energy-aware daily planning with pattern detection and external agent API
+2. ~~**Energy & Focus Tracking** - Energy-aware daily planning with pattern detection and external agent API~~ ✅ Complete
 
 ---
 
@@ -983,31 +983,26 @@ These are the active focus areas:
   - D3 mood line chart and habit completion bars
   - Date range filtering (7/14/30 days)
   - Habits persisted via Zustand store
-- [ ] **Energy & focus tracking** - Energy-aware daily planning
+- [x] **Energy & focus tracking** - Energy-aware daily planning
   - Morning check-in: quick 1-click energy level (1-5) and focus capacity (deep work / light work / physical / creative)
   - Optional: sleep quality, notes ("didn't sleep well", "feeling restless")
   - Stored as structured JSON alongside daily note (not just an editor block)
+  - Combined daily check-in with mood, energy, and habits in DailyNotesPanel
   - Pattern detection over time:
-    - Day-of-week energy trends ("Mondays tend to be low-energy")
-    - Correlation with sleep, mood, and activity types
-    - Streak and rhythm visibility (when do productive runs happen?)
-  - Context-aware nudges on low-energy days:
-    - Surface light tasks from task list (admin, organizing, review)
-    - Suggest physical/hands-on activities when mental focus is low
-    - "Gentle start" suggestions (small wins to build momentum)
+    - Day-of-week energy and mood trends
+    - Streak and rhythm visibility
   - Integration with existing systems:
-    - Goals: weight goal difficulty by current energy level
-    - Daily notes: auto-insert energy check-in block
-    - Tasks: tag tasks by energy requirement (deep/light/physical)
+    - Daily notes: combined check-in widget at top of panel
     - Mood tracker: energy as separate axis from mood on charts
+    - Habits: configurable habit tracking with completion bars
   - External agent API:
     - JSON export of energy/focus history for external planning agents
     - Tauri commands: `get_energy_log`, `log_energy_checkin`
     - Agents can read patterns and factor energy into scheduling recommendations
   - Visualizations:
-    - Energy heatmap (calendar grid, color-coded by energy level)
-    - Energy vs. productivity correlation chart
-    - Weekly energy rhythm overlay on habit/goal charts
+    - Check-in heatmap (calendar grid, color-coded by energy level)
+    - Mood line chart and habit completion bars
+    - WebDAV sync for energy check-ins across devices
 
 ---
 
