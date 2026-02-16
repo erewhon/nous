@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { GoalProgress } from "../../types/goals";
+import { localDateStr } from "../../utils/dateLocal";
 
 interface StreakCalendarProps {
   goalId: string;
@@ -42,8 +43,8 @@ export function StreakCalendar({
       const startDate = new Date(today);
       startDate.setDate(startDate.getDate() - weeks * 7);
 
-      const start = startDate.toISOString().split("T")[0];
-      const end = today.toISOString().split("T")[0];
+      const start = localDateStr(startDate);
+      const end = localDateStr(today);
 
       try {
         const progress = await loadProgress(goalId, start, end);
@@ -52,7 +53,7 @@ export function StreakCalendar({
         const result: DayData[] = [];
         const current = new Date(startDate);
         while (current <= today) {
-          const dateStr = current.toISOString().split("T")[0];
+          const dateStr = localDateStr(current);
           const p = progressMap.get(dateStr);
           result.push({
             date: dateStr,

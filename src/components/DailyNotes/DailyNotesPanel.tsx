@@ -13,6 +13,7 @@ import { ReflectionPrompts } from "./ReflectionPrompts";
 import { DigestPanel } from "./DigestPanel";
 import { EnergyCheckInDialog } from "../Energy/EnergyCheckInDialog";
 import { EnergyCalendar } from "../Energy/EnergyCalendar";
+import { localToday } from "../../utils/dateLocal";
 import type { Page, EditorData } from "../../types/page";
 import type { CreateCheckInRequest } from "../../types/energy";
 
@@ -93,7 +94,7 @@ export function DailyNotesPanel({ isOpen: isOpenProp, onClose: onCloseProp }: Da
   // Quick mood check-in handler (inline 1-tap, preserves existing fields)
   const handleQuickMood = useCallback(
     async (level: number) => {
-      const today = new Date().toISOString().split("T")[0];
+      const today = localToday();
       const request: CreateCheckInRequest = {
         date: today,
         mood: level,
@@ -113,7 +114,7 @@ export function DailyNotesPanel({ isOpen: isOpenProp, onClose: onCloseProp }: Da
   // Quick energy check-in handler (inline 1-tap, preserves existing fields)
   const handleQuickEnergy = useCallback(
     async (level: number) => {
-      const today = new Date().toISOString().split("T")[0];
+      const today = localToday();
       const request: CreateCheckInRequest = {
         date: today,
         energyLevel: level,
@@ -133,7 +134,7 @@ export function DailyNotesPanel({ isOpen: isOpenProp, onClose: onCloseProp }: Da
   // Quick habit toggle handler (preserves existing fields)
   const handleHabitToggle = useCallback(
     async (habitName: string) => {
-      const today = new Date().toISOString().split("T")[0];
+      const today = localToday();
       // Build current habits list, toggling the specified one
       const currentHabits = todayCheckIn?.habits ?? habitList.map((name) => ({ name, checked: false }));
       const updatedHabits = currentHabits.map((h) =>
@@ -275,7 +276,7 @@ export function DailyNotesPanel({ isOpen: isOpenProp, onClose: onCloseProp }: Da
     [selectDate, selectPage]
   );
 
-  const today = new Date().toISOString().split("T")[0];
+  const today = localToday();
   const isToday = selectedDate === today;
   const hasNoteForSelectedDate = datesWithNotes.has(selectedDate);
 

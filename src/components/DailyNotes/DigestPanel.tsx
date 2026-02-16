@@ -1,5 +1,6 @@
 import { useState, useCallback } from "react";
 import { useDigestStore, type DailyDigest } from "../../stores/digestStore";
+import { localToday } from "../../utils/dateLocal";
 
 interface DigestPanelProps {
   notebookId: string;
@@ -7,7 +8,7 @@ interface DigestPanelProps {
 }
 
 function getToday(): string {
-  return new Date().toISOString().split("T")[0];
+  return localToday();
 }
 
 function formatDate(dateStr: string): string {

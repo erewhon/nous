@@ -1,7 +1,8 @@
 import type { Task } from "../../types/tasks";
+import { localToday } from "../../utils/dateLocal";
 
 function getTodayStr(): string {
-  return new Date().toISOString().split("T")[0];
+  return localToday();
 }
 
 const PRIORITY_COLORS: Record<string, string> = {

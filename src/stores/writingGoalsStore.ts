@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import { localToday, localDateStr } from "../utils/dateLocal";
 
 export type GoalPeriod = "daily" | "session";
 
@@ -27,7 +28,7 @@ interface WritingGoalsState {
 }
 
 function getTodayStr(): string {
-  return new Date().toISOString().split("T")[0];
+  return localToday();
 }
 
 function computeStreak(history: DayHistory[], targetWords: number): number {
@@ -45,7 +46,7 @@ function computeStreak(history: DayHistory[], targetWords: number): number {
     // Today not recorded yet — check if yesterday starts the streak
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
-    const yesterdayStr = yesterday.toISOString().split("T")[0];
+    const yesterdayStr = localDateStr(yesterday);
     if (sorted[0].date !== yesterdayStr) return 0;
   }
 
@@ -54,7 +55,7 @@ function computeStreak(history: DayHistory[], targetWords: number): number {
 
   for (let i = idx; i < sorted.length; i++) {
     const entryDate = sorted[i].date;
-    const expected = expectedDate.toISOString().split("T")[0];
+    const expected = localDateStr(expectedDate);
 
     if (entryDate !== expected) break;
     if (sorted[i].words >= targetWords) {

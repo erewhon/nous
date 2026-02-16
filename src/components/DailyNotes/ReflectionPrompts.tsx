@@ -6,6 +6,7 @@ import {
 } from "../../utils/api";
 import { usePageStore } from "../../stores/pageStore";
 import { calculatePageStats } from "../../utils/pageStats";
+import { localToday, localDateStr } from "../../utils/dateLocal";
 import {
   PROMPT_CATEGORIES,
   FALLBACK_PROMPTS,
@@ -30,12 +31,10 @@ export function ReflectionPrompts({ notebookId }: ReflectionPromptsProps) {
       setIsLoading(true);
       try {
         // Get recent daily notes (last 7 days)
-        const endDate = new Date().toISOString().split("T")[0];
-        const startDate = new Date(
+        const endDate = localToday();
+        const startDate = localDateStr(new Date(
           Date.now() - 7 * 24 * 60 * 60 * 1000
-        )
-          .toISOString()
-          .split("T")[0];
+        ));
 
         const notes = await listDailyNotes(notebookId, startDate, endDate);
 

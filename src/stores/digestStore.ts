@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { usePageStore } from "./pageStore";
 import { aiSummarizePages, type PageSummaryInput } from "../utils/api";
+import { localToday, localDateStr } from "../utils/dateLocal";
 
 export interface DailyDigest {
   id: string; // "{notebookId}-{date}"
@@ -58,7 +59,7 @@ function extractPlainText(content?: { blocks: Array<{ type: string; data: Record
 }
 
 function getToday(): string {
-  return new Date().toISOString().split("T")[0];
+  return localToday();
 }
 
 export const useDigestStore = create<DigestStore>()(
@@ -77,7 +78,7 @@ export const useDigestStore = create<DigestStore>()(
           const dayPages = pages.filter((p) => {
             if (p.notebookId !== notebookId) return false;
             if (!p.updatedAt) return false;
-            const pageDate = new Date(p.updatedAt).toISOString().split("T")[0];
+            const pageDate = localDateStr(new Date(p.updatedAt));
             return pageDate === targetDate;
           });
 

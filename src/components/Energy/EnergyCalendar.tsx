@@ -1,13 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { useEnergyStore } from "../../stores/energyStore";
-
-/** Format a Date as YYYY-MM-DD in local time (NOT UTC). */
-function localDateStr(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
+import { localDateStr } from "../../utils/dateLocal";
 
 type RangeOption = "30d" | "90d" | "365d";
 

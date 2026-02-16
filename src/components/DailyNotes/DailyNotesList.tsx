@@ -1,4 +1,5 @@
 import type { Page } from "../../types/page";
+import { localToday, localDateStr } from "../../utils/dateLocal";
 
 interface DailyNotesListProps {
   notes: Page[];
@@ -28,8 +29,8 @@ function formatDate(dateStr: string): string {
 }
 
 function getRelativeDate(dateStr: string): string | null {
-  const today = new Date().toISOString().split("T")[0];
-  const yesterday = new Date(Date.now() - 86400000).toISOString().split("T")[0];
+  const today = localToday();
+  const yesterday = localDateStr(new Date(Date.now() - 86400000));
 
   if (dateStr === today) return "Today";
   if (dateStr === yesterday) return "Yesterday";

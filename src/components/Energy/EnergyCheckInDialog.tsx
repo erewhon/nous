@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useEnergyStore } from "../../stores/energyStore";
 import { useMoodHabitStore } from "../../stores/moodHabitStore";
+import { localToday } from "../../utils/dateLocal";
 import type { FocusCapacity, CreateCheckInRequest, HabitEntry } from "../../types/energy";
 import { MoodHabitSettings } from "../DailyNotes/MoodHabitSettings";
 
@@ -58,9 +59,7 @@ export function EnergyCheckInDialog() {
   const [showHabitSettings, setShowHabitSettings] = useState(false);
 
   // Determine which date we're editing
-  const today = new Date();
-  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
-  const targetDate = editingDate || todayStr;
+  const targetDate = editingDate || localToday();
   const existingCheckIn = editingDate
     ? checkIns.get(editingDate)
     : todayCheckIn;

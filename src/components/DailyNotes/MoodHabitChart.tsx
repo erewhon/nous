@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import * as d3 from "d3";
 import { useEnergyStore } from "../../stores/energyStore";
 import { useMoodHabitStore } from "../../stores/moodHabitStore";
+import { localDateStr } from "../../utils/dateLocal";
 
 interface MoodHabitEntry {
   date: string;
@@ -31,8 +32,8 @@ export function MoodHabitChart({ isOpen, onClose }: MoodHabitChartProps) {
       const start = new Date();
       start.setDate(start.getDate() - days);
       loadCheckInsRange(
-        start.toISOString().split("T")[0],
-        end.toISOString().split("T")[0]
+        localDateStr(start),
+        localDateStr(end)
       );
     }
   }, [isOpen, dateRange, loadCheckInsRange]);
@@ -64,7 +65,7 @@ export function MoodHabitChart({ isOpen, onClose }: MoodHabitChartProps) {
     const days = dateRange === "7d" ? 7 : dateRange === "14d" ? 14 : 30;
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - days);
-    const cutoffStr = cutoff.toISOString().split("T")[0];
+    const cutoffStr = localDateStr(cutoff);
     return entries.filter((e) => e.date >= cutoffStr);
   }, [entries, dateRange]);
 

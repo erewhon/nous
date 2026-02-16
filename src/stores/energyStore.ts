@@ -13,12 +13,7 @@ import {
   deleteEnergyCheckIn as apiDeleteCheckIn,
   getEnergyPatterns,
 } from "../utils/api";
-
-/** YYYY-MM-DD in local time (NOT UTC). */
-function localToday(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
+import { localToday } from "../utils/dateLocal";
 
 interface EnergyState {
   checkIns: Map<string, EnergyCheckIn>;

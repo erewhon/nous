@@ -31,6 +31,7 @@ import { useToastStore } from "../../stores/toastStore";
 import { useDrawingStore } from "../../stores/drawingStore";
 import { WritingGoalProgress } from "./WritingGoalProgress";
 import { WritingGoalSettings } from "./WritingGoalSettings";
+import { localToday } from "../../utils/dateLocal";
 import type { PageStats } from "../../utils/pageStats";
 
 interface PageHeaderProps {
@@ -89,7 +90,7 @@ export function PageHeader({
   const [showWritingGoalSettings, setShowWritingGoalSettings] = useState(false);
   const [showDailyNoteDialog, setShowDailyNoteDialog] = useState(false);
   const [dailyNoteDate, setDailyNoteDate] = useState(
-    new Date().toISOString().split("T")[0]
+    localToday()
   );
   const inputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);

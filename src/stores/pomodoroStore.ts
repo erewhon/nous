@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import { localToday } from "../utils/dateLocal";
 
 export type PomodoroMode = "work" | "shortBreak" | "longBreak";
 
@@ -32,7 +33,7 @@ interface PomodoroState {
 }
 
 function getTodayStr(): string {
-  return new Date().toISOString().split("T")[0];
+  return localToday();
 }
 
 function getDurationForMode(mode: PomodoroMode, settings: PomodoroSettings): number {

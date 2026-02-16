@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { localToday, localDateStr } from "../../utils/dateLocal";
 
 interface DailyNotesCalendarProps {
   selectedDate: string; // "YYYY-MM-DD"
@@ -39,7 +40,7 @@ export function DailyNotesCalendar({
   onSelectDate,
   onMonthChange,
 }: DailyNotesCalendarProps) {
-  const today = new Date().toISOString().split("T")[0];
+  const today = localToday();
 
   // Parse selected date to get year and month
   const [year, month] = useMemo(() => {
@@ -64,7 +65,7 @@ export function DailyNotesCalendar({
     const prevMonthDays = prevMonth.getDate();
     for (let i = firstDayOfWeek - 1; i >= 0; i--) {
       const dayNum = prevMonthDays - i;
-      const date = new Date(year, month - 1, dayNum).toISOString().split("T")[0];
+      const date = localDateStr(new Date(year, month - 1, dayNum));
       result.push({
         date,
         dayNum,
@@ -77,7 +78,7 @@ export function DailyNotesCalendar({
 
     // Days of current month
     for (let dayNum = 1; dayNum <= daysInMonth; dayNum++) {
-      const date = new Date(year, month, dayNum).toISOString().split("T")[0];
+      const date = localDateStr(new Date(year, month, dayNum));
       result.push({
         date,
         dayNum,
@@ -91,7 +92,7 @@ export function DailyNotesCalendar({
     // Days from next month to fill the grid (6 rows * 7 days = 42 cells)
     const remaining = 42 - result.length;
     for (let dayNum = 1; dayNum <= remaining; dayNum++) {
-      const date = new Date(year, month + 1, dayNum).toISOString().split("T")[0];
+      const date = localDateStr(new Date(year, month + 1, dayNum));
       result.push({
         date,
         dayNum,
@@ -106,12 +107,12 @@ export function DailyNotesCalendar({
   }, [year, month, selectedDate, datesWithNotes, today]);
 
   const goToPrevMonth = () => {
-    const newDate = new Date(year, month - 1, 1).toISOString().split("T")[0];
+    const newDate = localDateStr(new Date(year, month - 1, 1));
     onMonthChange?.(newDate);
   };
 
   const goToNextMonth = () => {
-    const newDate = new Date(year, month + 1, 1).toISOString().split("T")[0];
+    const newDate = localDateStr(new Date(year, month + 1, 1));
     onMonthChange?.(newDate);
   };
 

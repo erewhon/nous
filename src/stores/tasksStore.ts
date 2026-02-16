@@ -1,9 +1,10 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { Task, TaskView, TaskSummary, CreateTaskRequest, UpdateTaskRequest, RecurrencePattern } from "../types/tasks";
+import { localToday, localDateStr } from "../utils/dateLocal";
 
 function getTodayStr(): string {
-  return new Date().toISOString().split("T")[0];
+  return localToday();
 }
 
 function getNextRecurrence(dueDate: string, recurrence: RecurrencePattern): string | null {
@@ -24,7 +25,7 @@ function getNextRecurrence(dueDate: string, recurrence: RecurrencePattern): stri
       break;
   }
 
-  const nextDate = date.toISOString().split("T")[0];
+  const nextDate = localDateStr(date);
 
   if (recurrence.endDate && nextDate > recurrence.endDate) {
     return null;
