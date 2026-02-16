@@ -295,9 +295,26 @@ export function FolderTree({
     }
     // null means "unsorted" - show folders with no section
     // Always include archive folder when showArchived is on
-    return filtered.filter((f) =>
+    const sectionMatched = filtered.filter((f) =>
       (showArchived && (f.folderType === "archive" || f.isArchived)) || (f.sectionId ?? null) === selectedSectionId
     );
+
+    // Also include ancestor folders needed to reach section-matched folders.
+    // Without this, a folder assigned to a section whose parent has no section
+    // would be invisible (the tree is rendered hierarchically).
+    const matchedIds = new Set(sectionMatched.map((f) => f.id));
+    const folderMap = new Map(filtered.map((f) => [f.id, f]));
+    for (const f of sectionMatched) {
+      let parentId = f.parentId;
+      while (parentId && !matchedIds.has(parentId)) {
+        const parent = folderMap.get(parentId);
+        if (!parent) break;
+        matchedIds.add(parentId);
+        parentId = parent.parentId;
+      }
+    }
+
+    return filtered.filter((f) => matchedIds.has(f.id));
   }, [folders, sectionsEnabled, selectedSectionId, showArchived]);
 
   // Get top-level pages for a specific folder (pages without a parent page)
