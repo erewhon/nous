@@ -6,6 +6,7 @@ import type {
   SearchResult,
   Folder,
   Section,
+  BlockHistoryEntry,
 } from "../types/page";
 import type {
   SyncConfigInput,
@@ -2865,4 +2866,44 @@ export async function unmarkDailyNote(
   pageId: string
 ): Promise<Page> {
   return invoke<Page>("unmark_daily_note", { notebookId, pageId });
+}
+
+// ===== Block History API =====
+
+export async function getBlockVersionCounts(
+  notebookId: string,
+  pageId: string
+): Promise<Record<string, number>> {
+  return invoke<Record<string, number>>("get_block_version_counts", {
+    notebookId,
+    pageId,
+  });
+}
+
+export async function getBlockHistory(
+  notebookId: string,
+  pageId: string,
+  blockId: string,
+  limit?: number
+): Promise<BlockHistoryEntry[]> {
+  return invoke<BlockHistoryEntry[]>("get_block_history", {
+    notebookId,
+    pageId,
+    blockId,
+    limit,
+  });
+}
+
+export async function revertBlock(
+  notebookId: string,
+  pageId: string,
+  blockId: string,
+  snapshotName: string
+): Promise<Page> {
+  return invoke<Page>("revert_block", {
+    notebookId,
+    pageId,
+    blockId,
+    snapshotName,
+  });
 }

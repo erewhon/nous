@@ -828,10 +828,10 @@ Phased plan to make the editor save path bulletproof, add operation logging, int
   - Per-pane base tracking ensures concurrent edits merge correctly
 
 ### Phase 4: Block-Level Version History (see also Section 36)
-- [ ] Block version vectors via CRDT lamport timestamps
-- [ ] Block history UI — hover gutter for version count, click for diff history
-- [ ] Block revert — restore individual blocks to previous state
-- [ ] Git correlation — link oplog entries to git commits
+- [x] Block version counts via oplog analysis (pragmatic alternative to CRDT lamport timestamps)
+- [x] Block history UI — hover gutter for version count, click for diff history panel
+- [x] Block revert — restore individual blocks to previous snapshot state
+- [x] Git correlation — `git_commit_id` field on `OplogEntry`, linked in block history
 
 ---
 
@@ -855,7 +855,7 @@ These features are recommended as high-priority additions:
 
 These are the active focus areas:
 
-1. **Data Flow Robustness Overhaul** - Operation logging, CRDT local integration, block-level versioning (Phases 2-4)
+1. ~~**Data Flow Robustness Overhaul** - Operation logging, CRDT local integration, block-level versioning (Phases 0-4)~~ ✅ Complete
 2. ~~**Energy & Focus Tracking** - Energy-aware daily planning with pattern detection and external agent API~~ ✅ Complete
 
 ---
@@ -920,11 +920,10 @@ These are the active focus areas:
   - Synced blocks that appear in multiple pages
   - Single source of truth, all instances update together
   - Notion-style synced blocks
-- [ ] **Block-level version history** - Granular change tracking (see "Data Flow Robustness Overhaul" Phase 4)
+- [x] **Block-level version history** - Granular change tracking (see "Data Flow Robustness Overhaul" Phase 4)
   - Track changes at block level, not just page level
   - See who changed what block and when
   - Restore individual blocks to previous state
-  - Depends on Phase 2 (oplog) and Phase 3 (CRDT) infrastructure
 
 ---
 

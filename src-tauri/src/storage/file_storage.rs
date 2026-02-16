@@ -400,6 +400,7 @@ impl FileStorage {
                 }
             }).collect(),
             block_count: page.content.blocks.len(),
+            git_commit_id: None,
         };
         if let Err(e) = super::oplog::append_entry(&oplog_file, &entry) {
             log::warn!("Failed to write create oplog for page {}: {}", page.id, e);
@@ -447,6 +448,7 @@ impl FileStorage {
             prev_hash,
             block_changes,
             block_count: page.content.blocks.len(),
+            git_commit_id: None,
         };
 
         if let Err(e) = super::oplog::append_entry(&oplog_file, &entry) {

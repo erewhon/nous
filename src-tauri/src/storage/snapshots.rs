@@ -114,6 +114,45 @@ pub fn read_snapshot(snap_dir: &Path, name: &str) -> Option<Page> {
     serde_json::from_str(&content).ok()
 }
 
+/// Get a specific block's data from a snapshot.
+/// Returns the block data as a JSON value if found.
+pub fn get_block_at_snapshot(
+    snap_dir: &Path,
+    name: &str,
+    block_id: &str,
+) -> Option<serde_json::Value> {
+    let page = read_snapshot(snap_dir, name)?;
+    page.content
+        .blocks
+        .iter()
+        .find(|b| b.id == block_id)
+        .map(|b| {
+            serde_json::json!({
+                "id": b.id,
+                "type": b.block_type,
+                "data": b.data,
+            })
+        })
+}
+
+/// Find the nearest snapshot at or before a given timestamp.
+pub fn find_nearest_snapshot(snap_dir: &Path, ts: &chrono::DateTime<chrono::Utc>) -> Option<String> {
+    let names = list_snapshots(snap_dir);
+    // Snapshots are named YYYYMMDD_HHMMSS, sorted chronologically.
+    // Find the last one whose timestamp is <= the given ts.
+    let target = ts.format("%Y%m%d_%H%M%S").to_string();
+    let mut best: Option<String> = None;
+    for name in &names {
+        if name.as_str() <= target.as_str() {
+            best = Some(name.clone());
+        } else {
+            break;
+        }
+    }
+    // If no snapshot is before this timestamp, return the earliest one
+    best.or_else(|| names.first().cloned())
+}
+
 /// Read the metadata for the most recent snapshot.
 fn read_latest_meta(snap_dir: &Path) -> Option<SnapshotMeta> {
     let names = list_snapshots(snap_dir);

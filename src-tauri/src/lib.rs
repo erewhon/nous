@@ -155,6 +155,11 @@ pub fn run() {
     storage::migration::migrate_global_to_library(&data_dir, &library_path)
         .expect("Failed to migrate global data to library");
 
+    // Migrate videos from /tmp/nous-videos back to notebook assets
+    if let Err(e) = storage::migration::migrate_tmp_videos(&library_path) {
+        log::warn!("Failed to migrate /tmp/nous-videos: {}", e);
+    }
+
     // Initialize action storage (library-scoped)
     let action_storage = ActionStorage::new(library_path.clone())
         .expect("Failed to initialize action storage");
@@ -295,17 +300,6 @@ pub fn run() {
                 }
             }
 
-            // Register /tmp/nous-videos for video assets (workaround for hidden directory issues)
-            let video_tmp_dir = std::path::PathBuf::from("/tmp/nous-videos");
-            if let Err(e) = std::fs::create_dir_all(&video_tmp_dir) {
-                log::warn!("Failed to create /tmp/nous-videos directory: {}", e);
-            }
-            if let Err(e) = app.asset_protocol_scope().allow_directory(&video_tmp_dir, true) {
-                log::error!("Failed to register /tmp/nous-videos with asset protocol: {}", e);
-            } else {
-                log::info!("Successfully registered /tmp/nous-videos with asset protocol");
-            }
-
             // Devtools: uncomment to enable for debugging
             // if let Some(window) = app.get_webview_window("main") {
             //     window.open_devtools();
@@ -338,16 +332,19 @@ pub fn run() {
 
             // Start the video streaming server
             let video_server_handle = state.video_server.clone();
+            let library_path_for_video = {
+                let lib_storage = state.library_storage.lock().unwrap();
+                lib_storage.get_current_library().map(|l| l.path.clone()).ok()
+            };
             tauri::async_runtime::spawn(async move {
-                // Allow serving videos from the data directory and /tmp
-                let allowed_dirs = if let Ok(data_dir) = storage::FileStorage::default_data_dir() {
-                    vec![
-                        data_dir,
-                        std::path::PathBuf::from("/tmp"),
-                    ]
-                } else {
-                    vec![std::path::PathBuf::from("/tmp")]
-                };
+                // Allow serving videos from the data directory and the current library path
+                let mut allowed_dirs = Vec::new();
+                if let Ok(data_dir) = storage::FileStorage::default_data_dir() {
+                    allowed_dirs.push(data_dir);
+                }
+                if let Some(lib_path) = library_path_for_video {
+                    allowed_dirs.push(lib_path);
+                }
 
                 match video_server::start_server(allowed_dirs).await {
                     Ok(server) => {
@@ -395,6 +392,10 @@ pub fn run() {
             commands::get_page_oplog,
             commands::list_page_snapshots,
             commands::restore_page_snapshot,
+            // Block-level history commands
+            commands::get_block_version_counts,
+            commands::get_block_history,
+            commands::revert_block,
             // Search commands
             commands::search_pages,
             commands::fuzzy_search_pages,

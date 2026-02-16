@@ -62,6 +62,27 @@ pub struct OplogEntry {
     pub block_changes: Vec<BlockChange>,
     /// Number of blocks in the page after this operation
     pub block_count: usize,
+    /// Git commit ID created during this save (if git is enabled)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_commit_id: Option<String>,
+}
+
+/// A single entry in a block's history timeline
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BlockHistoryEntry {
+    pub ts: DateTime<Utc>,
+    pub op: BlockOp,
+    pub block_type: Option<String>,
+    /// The full block data at this point in history (if recoverable from snapshots)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub block_data: Option<serde_json::Value>,
+    /// Snapshot name that contains this block state (for revert)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub snapshot_name: Option<String>,
+    /// Git commit ID if available
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub git_commit_id: Option<String>,
 }
 
 /// Compute SHA-256 hash of page content JSON
@@ -411,6 +432,7 @@ mod tests {
                 after_block_id: None,
             }],
             block_count: 5,
+            git_commit_id: None,
         };
 
         append_entry(&path, &entry).unwrap();
@@ -444,6 +466,7 @@ mod tests {
             prev_hash: "genesis".to_string(),
             block_changes: vec![],
             block_count: 1,
+            git_commit_id: None,
         };
         append_entry(&path, &entry1).unwrap();
 
@@ -455,6 +478,7 @@ mod tests {
             prev_hash: "sha256:aaa".to_string(),
             block_changes: vec![],
             block_count: 2,
+            git_commit_id: None,
         };
         append_entry(&path, &entry2).unwrap();
 
@@ -469,6 +493,7 @@ mod tests {
             prev_hash: "sha256:WRONG".to_string(),
             block_changes: vec![],
             block_count: 3,
+            git_commit_id: None,
         };
         append_entry(&path, &entry3).unwrap();
 

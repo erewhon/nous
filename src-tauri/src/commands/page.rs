@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use tauri::State;
 use uuid::Uuid;
 
@@ -742,4 +744,158 @@ pub fn close_pane_for_page(
     state.crdt_store.close_pane(pg_id, &pane_id);
 
     Ok(())
+}
+
+/// Get edit counts for all blocks on a page (derived from oplog).
+#[tauri::command(rename_all = "camelCase")]
+pub fn get_block_version_counts(
+    state: State<AppState>,
+    notebook_id: String,
+    page_id: String,
+) -> CommandResult<HashMap<String, usize>> {
+    let storage = state.storage.lock().unwrap();
+    let nb_id = Uuid::parse_str(&notebook_id).map_err(|e| CommandError {
+        message: format!("Invalid notebook ID: {}", e),
+    })?;
+    let pg_id = Uuid::parse_str(&page_id).map_err(|e| CommandError {
+        message: format!("Invalid page ID: {}", e),
+    })?;
+
+    let pages_dir = storage.get_notebook_path(nb_id).join("pages");
+    let oplog_file = crate::storage::oplog::oplog_path(&pages_dir, pg_id);
+    let entries = crate::storage::oplog::read_entries(&oplog_file);
+
+    let mut counts: HashMap<String, usize> = HashMap::new();
+    for entry in &entries {
+        for change in &entry.block_changes {
+            // Only count Modify ops as "edits" (Insert is initial creation)
+            if change.op == crate::storage::oplog::BlockOp::Modify {
+                *counts.entry(change.block_id.clone()).or_insert(0) += 1;
+            }
+        }
+    }
+
+    Ok(counts)
+}
+
+/// Get the history of a specific block from the oplog and snapshots.
+#[tauri::command(rename_all = "camelCase")]
+pub fn get_block_history(
+    state: State<AppState>,
+    notebook_id: String,
+    page_id: String,
+    block_id: String,
+    limit: Option<usize>,
+) -> CommandResult<Vec<crate::storage::oplog::BlockHistoryEntry>> {
+    let storage = state.storage.lock().unwrap();
+    let nb_id = Uuid::parse_str(&notebook_id).map_err(|e| CommandError {
+        message: format!("Invalid notebook ID: {}", e),
+    })?;
+    let pg_id = Uuid::parse_str(&page_id).map_err(|e| CommandError {
+        message: format!("Invalid page ID: {}", e),
+    })?;
+
+    let pages_dir = storage.get_notebook_path(nb_id).join("pages");
+    let oplog_file = crate::storage::oplog::oplog_path(&pages_dir, pg_id);
+    let entries = crate::storage::oplog::read_entries(&oplog_file);
+    let snap_dir = crate::storage::snapshots::snapshots_dir(&pages_dir, pg_id);
+
+    let max = limit.unwrap_or(50);
+    let mut history: Vec<crate::storage::oplog::BlockHistoryEntry> = Vec::new();
+
+    for entry in &entries {
+        for change in &entry.block_changes {
+            if change.block_id == block_id {
+                // Try to find block data from the nearest snapshot
+                let nearest_snap =
+                    crate::storage::snapshots::find_nearest_snapshot(&snap_dir, &entry.ts);
+                let (block_data, snapshot_name) = match &nearest_snap {
+                    Some(snap_name) => {
+                        let data = crate::storage::snapshots::get_block_at_snapshot(
+                            &snap_dir, snap_name, &block_id,
+                        );
+                        (data, Some(snap_name.clone()))
+                    }
+                    None => (None, None),
+                };
+
+                history.push(crate::storage::oplog::BlockHistoryEntry {
+                    ts: entry.ts,
+                    op: change.op.clone(),
+                    block_type: change.block_type.clone(),
+                    block_data,
+                    snapshot_name,
+                    git_commit_id: entry.git_commit_id.clone(),
+                });
+            }
+        }
+    }
+
+    // Reverse to get newest first, then cap
+    history.reverse();
+    history.truncate(max);
+
+    Ok(history)
+}
+
+/// Revert a single block to its state at a given snapshot.
+#[tauri::command(rename_all = "camelCase")]
+pub fn revert_block(
+    state: State<AppState>,
+    notebook_id: String,
+    page_id: String,
+    block_id: String,
+    snapshot_name: String,
+) -> CommandResult<Page> {
+    let storage = state.storage.lock().unwrap();
+    let nb_id = Uuid::parse_str(&notebook_id).map_err(|e| CommandError {
+        message: format!("Invalid notebook ID: {}", e),
+    })?;
+    let pg_id = Uuid::parse_str(&page_id).map_err(|e| CommandError {
+        message: format!("Invalid page ID: {}", e),
+    })?;
+
+    let pages_dir = storage.get_notebook_path(nb_id).join("pages");
+    let snap_dir = crate::storage::snapshots::snapshots_dir(&pages_dir, pg_id);
+
+    // Load the snapshot and find the block
+    let snapshot_page = crate::storage::snapshots::read_snapshot(&snap_dir, &snapshot_name)
+        .ok_or_else(|| CommandError {
+            message: format!("Snapshot '{}' not found", snapshot_name),
+        })?;
+
+    let snapshot_block = snapshot_page
+        .content
+        .blocks
+        .iter()
+        .find(|b| b.id == block_id)
+        .ok_or_else(|| CommandError {
+            message: format!(
+                "Block '{}' not found in snapshot '{}'",
+                block_id, snapshot_name
+            ),
+        })?;
+
+    // Load current page and replace the block
+    let mut current_page = storage.get_page(nb_id, pg_id)?;
+    let mut found = false;
+    for block in &mut current_page.content.blocks {
+        if block.id == block_id {
+            block.data = snapshot_block.data.clone();
+            block.block_type = snapshot_block.block_type.clone();
+            found = true;
+            break;
+        }
+    }
+
+    if !found {
+        return Err(CommandError {
+            message: format!("Block '{}' not found in current page", block_id),
+        });
+    }
+
+    current_page.updated_at = chrono::Utc::now();
+    storage.update_page(&current_page)?;
+
+    Ok(current_page)
 }

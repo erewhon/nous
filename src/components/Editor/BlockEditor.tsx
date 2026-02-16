@@ -6,6 +6,8 @@ import { useEmacsMode } from "./useEmacsMode";
 import { useBlockDragHandles } from "./useBlockDragHandles";
 import { useChecklistEnhancer } from "./useChecklistEnhancer";
 import { useHeaderCollapse } from "./useHeaderCollapse";
+import { useBlockVersionBadges } from "./useBlockVersionBadges";
+import { BlockHistoryPanel } from "./BlockHistoryPanel";
 import { VimModeIndicator } from "./VimModeIndicator";
 import { WikiLinkAutocomplete } from "./WikiLinkAutocomplete";
 import { BlockRefAutocomplete } from "./BlockRefAutocomplete";
@@ -201,6 +203,12 @@ export const BlockEditor = memo(forwardRef<BlockEditorRef, BlockEditorProps>(fun
   // Track vim mode state for indicator (used by useVimMode callback)
   const [, setCurrentVimMode] = useState<VimMode>("normal");
 
+  // Block history panel state
+  const [blockHistoryBlockId, setBlockHistoryBlockId] = useState<string | null>(null);
+
+  // Page data version for block version badges (debounced refresh)
+  const pageDataVersion = usePageStore((s) => s.pageDataVersion);
+
   // Refs to access useEditor functions inside callbacks defined before useEditor.
   // useEditor takes handleChange as a prop, but handleChange/performSave need
   // save(), markClean(), and isSavingRef from useEditor — refs break the cycle.
@@ -374,6 +382,17 @@ export const BlockEditor = memo(forwardRef<BlockEditorRef, BlockEditorProps>(fun
     editorRef: editor,
     holderId,
     enabled: !readOnly,
+  });
+
+  // Block version badges (CSS-only gutter badges showing edit count)
+  useBlockVersionBadges({
+    containerRef: containerRef as React.RefObject<HTMLElement>,
+    holderId,
+    notebookId,
+    pageId,
+    pageDataVersion,
+    enabled: !readOnly && !!notebookId && !!pageId,
+    onBlockHistoryOpen: setBlockHistoryBlockId,
   });
 
   // When initialData changes from outside (e.g., after an action modifies a page),
@@ -794,6 +813,28 @@ export const BlockEditor = memo(forwardRef<BlockEditorRef, BlockEditorProps>(fun
         <div className="pointer-events-none fixed bottom-16 left-4 z-50">
           <VimModeIndicator mode={vimMode} pendingKeys={pendingKeys} />
         </div>
+      )}
+      {/* Block history panel */}
+      {blockHistoryBlockId && notebookId && pageId && (
+        <BlockHistoryPanel
+          notebookId={notebookId}
+          pageId={pageId}
+          blockId={blockHistoryBlockId}
+          onClose={() => setBlockHistoryBlockId(null)}
+          onRevert={async () => {
+            // Re-render editor with updated page content
+            const { invoke } = await import("@tauri-apps/api/core");
+            const updatedPage = await invoke<{ content: OutputData }>("get_page", {
+              notebookId,
+              pageId,
+            });
+            if (updatedPage?.content) {
+              render(updatedPage.content);
+              contentSnapshotRef.current = updatedPage.content;
+              onChange?.(updatedPage.content);
+            }
+          }}
+        />
       )}
     </div>
   );

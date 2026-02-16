@@ -162,3 +162,13 @@ export const SearchResultSchema = z.object({
 });
 
 export type SearchResult = z.infer<typeof SearchResultSchema>;
+
+// Block history entry (from oplog)
+export interface BlockHistoryEntry {
+  ts: string;
+  op: "insert" | "modify" | "delete" | "move";
+  blockType?: string;
+  blockData?: Record<string, unknown>;
+  snapshotName?: string;
+  gitCommitId?: string;
+}
