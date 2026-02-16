@@ -225,7 +225,7 @@ pub async fn switch_library(state: State<'_, AppState>, library_id: String) -> C
 
     // Add the new library path to the video server's allowed directories
     {
-        let server_guard = state.video_server.blocking_lock();
+        let server_guard = state.video_server.lock().await;
         if let Some(ref server) = *server_guard {
             server.add_allowed_dir(library.path.clone());
         }
