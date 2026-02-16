@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import * as d3 from "d3";
 import { useEnergyStore } from "../../stores/energyStore";
 import { useMoodHabitStore } from "../../stores/moodHabitStore";
-import { localDateStr } from "../../utils/dateLocal";
+import { localDateStr, parseLocalDate } from "../../utils/dateLocal";
 
 interface MoodHabitEntry {
   date: string;
@@ -93,7 +93,7 @@ export function MoodHabitChart({ isOpen, onClose }: MoodHabitChartProps) {
 
     const xScale = d3
       .scaleTime()
-      .domain(d3.extent(moodEntries, (d) => new Date(d.date)) as [Date, Date])
+      .domain(d3.extent(moodEntries, (d) => parseLocalDate(d.date)) as [Date, Date])
       .range([0, innerWidth]);
 
     const yScale = d3.scaleLinear().domain([1, 5]).range([innerHeight, 0]);
@@ -122,7 +122,7 @@ export function MoodHabitChart({ isOpen, onClose }: MoodHabitChartProps) {
     // Line
     const line = d3
       .line<MoodHabitEntry>()
-      .x((d) => xScale(new Date(d.date)))
+      .x((d) => xScale(parseLocalDate(d.date)))
       .y((d) => yScale(d.mood))
       .curve(d3.curveMonotoneX);
 
@@ -138,7 +138,7 @@ export function MoodHabitChart({ isOpen, onClose }: MoodHabitChartProps) {
       .data(moodEntries)
       .enter()
       .append("circle")
-      .attr("cx", (d) => xScale(new Date(d.date)))
+      .attr("cx", (d) => xScale(parseLocalDate(d.date)))
       .attr("cy", (d) => yScale(d.mood))
       .attr("r", 4)
       .attr("fill", (d) => MOOD_COLORS[d.mood])

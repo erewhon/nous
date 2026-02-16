@@ -7,7 +7,7 @@ import {
   listDailyNotes,
   getOrCreateTodayDailyNote,
 } from "../utils/api";
-import { localToday, localDateStr } from "../utils/dateLocal";
+import { localToday, localDateStr, parseLocalDate } from "../utils/dateLocal";
 
 // Settings for Daily Notes feature
 interface DailyNotesSettings {
@@ -68,7 +68,7 @@ function getTodayDate(): string {
 
 // Helper to get month range
 function getMonthRange(date: string): { startDate: string; endDate: string } {
-  const d = new Date(date);
+  const d = parseLocalDate(date);
   const year = d.getFullYear();
   const month = d.getMonth();
   const startDate = localDateStr(new Date(year, month, 1));
@@ -78,7 +78,7 @@ function getMonthRange(date: string): { startDate: string; endDate: string } {
 
 // Helper to add days to a date
 function addDays(date: string, days: number): string {
-  const d = new Date(date);
+  const d = parseLocalDate(date);
   d.setDate(d.getDate() + days);
   return localDateStr(d);
 }

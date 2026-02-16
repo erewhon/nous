@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { GoalProgress } from "../../types/goals";
-import { localDateStr } from "../../utils/dateLocal";
+import { localDateStr, parseLocalDate } from "../../utils/dateLocal";
 
 interface StreakCalendarProps {
   goalId: string;
@@ -99,7 +99,7 @@ function DailyCalendar({ days }: { days: DayData[] }) {
   let currentWeek: DayData[] = [];
 
   // Pad the beginning with empty days if first day isn't Sunday
-  const firstDate = new Date(days[0]?.date || new Date());
+  const firstDate = days[0]?.date ? parseLocalDate(days[0].date) : new Date();
   const firstDayOfWeek = firstDate.getDay();
   for (let i = 0; i < firstDayOfWeek; i++) {
     currentWeek.push({ date: "", completed: false });
@@ -129,7 +129,7 @@ function DailyCalendar({ days }: { days: DayData[] }) {
     const firstValidDay = week.find((d) => d.date);
     if (!firstValidDay) return null;
 
-    const date = new Date(firstValidDay.date);
+    const date = parseLocalDate(firstValidDay.date);
     const month = date.getMonth();
 
     if (weekIndex === 0) {
@@ -140,7 +140,7 @@ function DailyCalendar({ days }: { days: DayData[] }) {
     const prevValidDay = prevWeek.find((d) => d.date);
     if (!prevValidDay) return monthNames[month];
 
-    const prevMonth = new Date(prevValidDay.date).getMonth();
+    const prevMonth = parseLocalDate(prevValidDay.date).getMonth();
     return month !== prevMonth ? monthNames[month] : null;
   });
 
@@ -232,7 +232,7 @@ function WeeklyCalendar({ days }: { days: DayData[] }) {
 
   // Find the first Sunday
   let currentIndex = 0;
-  const firstDate = new Date(days[0]?.date || new Date());
+  const firstDate = days[0]?.date ? parseLocalDate(days[0].date) : new Date();
   const daysUntilSunday = firstDate.getDay();
 
   // Skip partial first week if it doesn't start on Sunday
@@ -265,7 +265,7 @@ function WeeklyCalendar({ days }: { days: DayData[] }) {
   const weekMonthLabels: (string | null)[] = weeksData.map((week, weekIndex) => {
     if (!week.weekStart) return null;
 
-    const date = new Date(week.weekStart);
+    const date = parseLocalDate(week.weekStart);
     const month = date.getMonth();
 
     if (weekIndex === 0) {
@@ -275,13 +275,13 @@ function WeeklyCalendar({ days }: { days: DayData[] }) {
     const prevWeek = weeksData[weekIndex - 1];
     if (!prevWeek?.weekStart) return monthNames[month];
 
-    const prevMonth = new Date(prevWeek.weekStart).getMonth();
+    const prevMonth = parseLocalDate(prevWeek.weekStart).getMonth();
     return month !== prevMonth ? monthNames[month] : null;
   });
 
   const formatWeekRange = (start: string, end: string) => {
-    const startDate = new Date(start);
-    const endDate = new Date(end);
+    const startDate = parseLocalDate(start);
+    const endDate = parseLocalDate(end);
     const startMonth = monthNames[startDate.getMonth()];
     const endMonth = monthNames[endDate.getMonth()];
 

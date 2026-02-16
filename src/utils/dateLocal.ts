@@ -20,3 +20,16 @@ export function localDateStr(d: Date): string {
 export function localToday(): string {
   return localDateStr(new Date());
 }
+
+/**
+ * Parse a YYYY-MM-DD string as a local-time Date (at noon).
+ *
+ * IMPORTANT: Never use `new Date("YYYY-MM-DD")` for date-only strings.
+ * The JS spec parses date-only ISO strings as UTC midnight, which shifts
+ * the date backward in western timezones (e.g., "2026-02-16" becomes
+ * Feb 15 at 4pm in UTC-8).
+ */
+export function parseLocalDate(dateStr: string): Date {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}

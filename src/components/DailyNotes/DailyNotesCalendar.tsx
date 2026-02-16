@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { localToday, localDateStr } from "../../utils/dateLocal";
+import { localToday, localDateStr, parseLocalDate } from "../../utils/dateLocal";
 
 interface DailyNotesCalendarProps {
   selectedDate: string; // "YYYY-MM-DD"
@@ -44,7 +44,7 @@ export function DailyNotesCalendar({
 
   // Parse selected date to get year and month
   const [year, month] = useMemo(() => {
-    const d = new Date(selectedDate);
+    const d = parseLocalDate(selectedDate);
     return [d.getFullYear(), d.getMonth()];
   }, [selectedDate]);
 

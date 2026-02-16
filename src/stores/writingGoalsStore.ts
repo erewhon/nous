@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { localToday, localDateStr } from "../utils/dateLocal";
+import { localToday, localDateStr, parseLocalDate } from "../utils/dateLocal";
 
 export type GoalPeriod = "daily" | "session";
 
@@ -51,7 +51,7 @@ function computeStreak(history: DayHistory[], targetWords: number): number {
   }
 
   const idx = startIdx === -1 ? 0 : 0;
-  let expectedDate = new Date(sorted[idx].date);
+  let expectedDate = parseLocalDate(sorted[idx].date);
 
   for (let i = idx; i < sorted.length; i++) {
     const entryDate = sorted[i].date;
