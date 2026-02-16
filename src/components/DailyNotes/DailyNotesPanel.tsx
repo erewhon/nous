@@ -63,7 +63,9 @@ export function DailyNotesPanel({ isOpen: isOpenProp, onClose: onCloseProp }: Da
   const { selectPage } = usePageStore();
   const {
     todayCheckIn,
+    checkIns,
     loadTodayCheckIn,
+    loadCheckInsRange,
     submitCheckIn: energySubmitCheckIn,
     openCheckIn: energyOpenCheckIn,
     openCalendar: energyOpenCalendar,
@@ -77,6 +79,14 @@ export function DailyNotesPanel({ isOpen: isOpenProp, onClose: onCloseProp }: Da
   const isOpen = isOpenProp !== undefined ? isOpenProp : isPanelOpen;
   const handleClose = onCloseProp || closePanel;
 
+  const today = localToday();
+  const isToday = selectedDate === today;
+
+  // Check-in for the currently selected date
+  const selectedCheckIn = isToday
+    ? todayCheckIn
+    : (checkIns.get(selectedDate) ?? null);
+
   // Load daily notes when panel opens or notebook changes
   useEffect(() => {
     if (isOpen && selectedNotebookId) {
@@ -84,23 +94,26 @@ export function DailyNotesPanel({ isOpen: isOpenProp, onClose: onCloseProp }: Da
     }
   }, [isOpen, selectedNotebookId, loadDailyNotes]);
 
-  // Load today's energy check-in when panel opens
+  // Load energy check-in for selected date
   useEffect(() => {
     if (isOpen) {
-      loadTodayCheckIn();
+      if (isToday) {
+        loadTodayCheckIn();
+      } else {
+        loadCheckInsRange(selectedDate, selectedDate);
+      }
     }
-  }, [isOpen, loadTodayCheckIn]);
+  }, [isOpen, selectedDate, isToday, loadTodayCheckIn, loadCheckInsRange]);
 
   // Quick mood check-in handler (inline 1-tap, preserves existing fields)
   const handleQuickMood = useCallback(
     async (level: number) => {
-      const today = localToday();
       const request: CreateCheckInRequest = {
-        date: today,
+        date: selectedDate,
         mood: level,
-        energyLevel: todayCheckIn?.energyLevel ?? undefined,
-        focusCapacity: todayCheckIn?.focusCapacity ?? [],
-        habits: todayCheckIn?.habits ?? [],
+        energyLevel: selectedCheckIn?.energyLevel ?? undefined,
+        focusCapacity: selectedCheckIn?.focusCapacity ?? [],
+        habits: selectedCheckIn?.habits ?? [],
       };
       try {
         await energySubmitCheckIn(request);
@@ -108,19 +121,18 @@ export function DailyNotesPanel({ isOpen: isOpenProp, onClose: onCloseProp }: Da
         // Error handled in store
       }
     },
-    [energySubmitCheckIn, todayCheckIn]
+    [energySubmitCheckIn, selectedCheckIn, selectedDate]
   );
 
   // Quick energy check-in handler (inline 1-tap, preserves existing fields)
   const handleQuickEnergy = useCallback(
     async (level: number) => {
-      const today = localToday();
       const request: CreateCheckInRequest = {
-        date: today,
+        date: selectedDate,
         energyLevel: level,
-        mood: todayCheckIn?.mood ?? undefined,
-        focusCapacity: todayCheckIn?.focusCapacity ?? [],
-        habits: todayCheckIn?.habits ?? [],
+        mood: selectedCheckIn?.mood ?? undefined,
+        focusCapacity: selectedCheckIn?.focusCapacity ?? [],
+        habits: selectedCheckIn?.habits ?? [],
       };
       try {
         await energySubmitCheckIn(request);
@@ -128,15 +140,14 @@ export function DailyNotesPanel({ isOpen: isOpenProp, onClose: onCloseProp }: Da
         // Error handled in store
       }
     },
-    [energySubmitCheckIn, todayCheckIn]
+    [energySubmitCheckIn, selectedCheckIn, selectedDate]
   );
 
   // Quick habit toggle handler (preserves existing fields)
   const handleHabitToggle = useCallback(
     async (habitName: string) => {
-      const today = localToday();
       // Build current habits list, toggling the specified one
-      const currentHabits = todayCheckIn?.habits ?? habitList.map((name) => ({ name, checked: false }));
+      const currentHabits = selectedCheckIn?.habits ?? habitList.map((name) => ({ name, checked: false }));
       const updatedHabits = currentHabits.map((h) =>
         h.name === habitName ? { ...h, checked: !h.checked } : h
       );
@@ -147,10 +158,10 @@ export function DailyNotesPanel({ isOpen: isOpenProp, onClose: onCloseProp }: Da
         }
       }
       const request: CreateCheckInRequest = {
-        date: today,
-        mood: todayCheckIn?.mood ?? undefined,
-        energyLevel: todayCheckIn?.energyLevel ?? undefined,
-        focusCapacity: todayCheckIn?.focusCapacity ?? [],
+        date: selectedDate,
+        mood: selectedCheckIn?.mood ?? undefined,
+        energyLevel: selectedCheckIn?.energyLevel ?? undefined,
+        focusCapacity: selectedCheckIn?.focusCapacity ?? [],
         habits: updatedHabits,
       };
       try {
@@ -159,7 +170,7 @@ export function DailyNotesPanel({ isOpen: isOpenProp, onClose: onCloseProp }: Da
         // Error handled in store
       }
     },
-    [energySubmitCheckIn, todayCheckIn, habitList]
+    [energySubmitCheckIn, selectedCheckIn, selectedDate, habitList]
   );
 
   // Reload when month changes
@@ -276,8 +287,6 @@ export function DailyNotesPanel({ isOpen: isOpenProp, onClose: onCloseProp }: Da
     [selectDate, selectPage]
   );
 
-  const today = localToday();
-  const isToday = selectedDate === today;
   const hasNoteForSelectedDate = datesWithNotes.has(selectedDate);
 
   if (!isOpen) return null;
@@ -414,38 +423,38 @@ export function DailyNotesPanel({ isOpen: isOpenProp, onClose: onCloseProp }: Da
         className="border-b px-4 py-2"
         style={{ borderColor: "var(--color-border)" }}
       >
-        {todayCheckIn && (todayCheckIn.mood || todayCheckIn.energyLevel) ? (
+        {selectedCheckIn && (selectedCheckIn.mood || selectedCheckIn.energyLevel) ? (
           <div>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3 text-xs font-medium" style={{ color: "var(--color-text-secondary)" }}>
-                {todayCheckIn.mood && (
+                {selectedCheckIn.mood && (
                   <span>
-                    {todayCheckIn.mood === 1 ? "\u{1F614}" : todayCheckIn.mood === 2 ? "\u{1F615}" : todayCheckIn.mood === 3 ? "\u{1F610}" : todayCheckIn.mood === 4 ? "\u{1F642}" : "\u{1F60A}"}
-                    {" "}Mood {todayCheckIn.mood}/5
+                    {selectedCheckIn.mood === 1 ? "\u{1F614}" : selectedCheckIn.mood === 2 ? "\u{1F615}" : selectedCheckIn.mood === 3 ? "\u{1F610}" : selectedCheckIn.mood === 4 ? "\u{1F642}" : "\u{1F60A}"}
+                    {" "}Mood {selectedCheckIn.mood}/5
                   </span>
                 )}
-                {todayCheckIn.energyLevel && (
+                {selectedCheckIn.energyLevel && (
                   <span>
-                    {todayCheckIn.energyLevel === 1 ? "\u{1F629}" : todayCheckIn.energyLevel === 2 ? "\u{1F614}" : todayCheckIn.energyLevel === 3 ? "\u{1F610}" : todayCheckIn.energyLevel === 4 ? "\u{1F60A}" : "\u{26A1}"}
-                    {" "}Energy {todayCheckIn.energyLevel}/5
+                    {selectedCheckIn.energyLevel === 1 ? "\u{1F629}" : selectedCheckIn.energyLevel === 2 ? "\u{1F614}" : selectedCheckIn.energyLevel === 3 ? "\u{1F610}" : selectedCheckIn.energyLevel === 4 ? "\u{1F60A}" : "\u{26A1}"}
+                    {" "}Energy {selectedCheckIn.energyLevel}/5
                   </span>
                 )}
               </div>
               <button
-                onClick={() => energyOpenCheckIn()}
+                onClick={() => energyOpenCheckIn(selectedDate)}
                 className="rounded px-2 py-0.5 text-[10px] transition-colors hover:bg-[--color-bg-tertiary]"
                 style={{ color: "var(--color-text-muted)" }}
               >
                 Edit
               </button>
             </div>
-            {todayCheckIn.habits.length > 0 && (
+            {selectedCheckIn.habits.length > 0 && (
               <div
                 className="mt-1 text-[11px]"
                 style={{ color: "var(--color-text-muted)" }}
               >
-                {todayCheckIn.habits.filter((h) => h.checked).map((h) => h.name).join(", ") || "No habits checked"}
-                {" "}({todayCheckIn.habits.filter((h) => h.checked).length}/{todayCheckIn.habits.length})
+                {selectedCheckIn.habits.filter((h) => h.checked).map((h) => h.name).join(", ") || "No habits checked"}
+                {" "}({selectedCheckIn.habits.filter((h) => h.checked).length}/{selectedCheckIn.habits.length})
               </div>
             )}
           </div>
@@ -459,7 +468,7 @@ export function DailyNotesPanel({ isOpen: isOpenProp, onClose: onCloseProp }: Da
                 Daily Check-in
               </div>
               <button
-                onClick={() => energyOpenCheckIn()}
+                onClick={() => energyOpenCheckIn(selectedDate)}
                 className="rounded px-2 py-0.5 text-[10px] transition-colors hover:bg-[--color-bg-tertiary]"
                 style={{ color: "var(--color-text-muted)" }}
               >
@@ -510,7 +519,7 @@ export function DailyNotesPanel({ isOpen: isOpenProp, onClose: onCloseProp }: Da
             {habitList.length > 0 && (
               <div className="flex flex-wrap gap-1.5 mt-1">
                 {habitList.map((habit) => {
-                  const checked = todayCheckIn?.habits?.find((h) => h.name === habit)?.checked ?? false;
+                  const checked = selectedCheckIn?.habits?.find((h) => h.name === habit)?.checked ?? false;
                   return (
                     <button
                       key={habit}
