@@ -12,6 +12,7 @@ use tauri::Emitter;
 use tokio::sync::Semaphore;
 
 use crate::contacts::{Contact, ContactActivity, ContactsStorage};
+use crate::energy::{EnergyCheckIn, EnergyStorage};
 use crate::goals::{Goal, GoalProgress, GoalsStorage};
 use crate::inbox::{InboxItem, InboxStorage};
 use crate::library::LibraryStorage;
@@ -44,6 +45,9 @@ pub type SharedInboxStorage = Arc<Mutex<InboxStorage>>;
 
 /// Type alias for shared contacts storage
 pub type SharedContactsStorage = Arc<Mutex<ContactsStorage>>;
+
+/// Type alias for shared energy storage
+pub type SharedEnergyStorage = Arc<Mutex<EnergyStorage>>;
 
 #[derive(Error, Debug)]
 pub enum SyncError {
@@ -171,6 +175,13 @@ pub struct SyncInboxUpdated {
 pub struct SyncContactsUpdated {
     pub contacts_changed: bool,
     pub activities_changed: bool,
+}
+
+/// Event payload emitted when energy sync completes with changes.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncEnergyUpdated {
+    pub energy_changed: bool,
 }
 
 /// Sentinel file content written after successful push
@@ -3458,6 +3469,86 @@ impl SyncManager {
         Ok(merged_changed)
     }
 
+    /// Sync energy check-ins between local and remote.
+    /// Uses updated_at timestamp for conflict resolution (newer wins).
+    async fn sync_energy(
+        &self,
+        client: &WebDAVClient,
+        library_base_path: &str,
+        energy_storage: &SharedEnergyStorage,
+    ) -> Result<bool, SyncError> {
+        let remote_path = format!("{}/energy/checkins.json", library_base_path);
+
+        // Read local check-ins
+        let local_checkins = {
+            let es = energy_storage.lock().unwrap();
+            es.list_checkins().unwrap_or_default()
+        };
+
+        // Fetch remote check-ins
+        let remote_checkins: Vec<EnergyCheckIn> = match client.get(&remote_path).await {
+            Ok(data) => serde_json::from_slice(&data).unwrap_or_default(),
+            Err(WebDAVError::NotFound(_)) => Vec::new(),
+            Err(e) => return Err(e.into()),
+        };
+
+        // Build maps by date (unique key for energy check-ins)
+        let mut local_map: HashMap<chrono::NaiveDate, EnergyCheckIn> =
+            local_checkins.iter().map(|c| (c.date, c.clone())).collect();
+        let remote_map: HashMap<chrono::NaiveDate, EnergyCheckIn> =
+            remote_checkins.iter().map(|c| (c.date, c.clone())).collect();
+
+        let mut merged_changed = false;
+
+        // Merge remote entries into local
+        for (date, remote_checkin) in &remote_map {
+            match local_map.get(date) {
+                None => {
+                    // Remote only — pull it
+                    local_map.insert(*date, remote_checkin.clone());
+                    merged_changed = true;
+                }
+                Some(local_checkin) => {
+                    // Both exist — newer updated_at wins
+                    if remote_checkin.updated_at > local_checkin.updated_at {
+                        local_map.insert(*date, remote_checkin.clone());
+                        merged_changed = true;
+                    }
+                }
+            }
+        }
+
+        // Build merged list sorted by date
+        let mut merged: Vec<EnergyCheckIn> = local_map.into_values().collect();
+        merged.sort_by_key(|c| c.date);
+
+        // Check if remote needs updating (local-only entries or local wins)
+        let remote_needs_update = merged.len() != remote_checkins.len()
+            || merged.iter().any(|c| !remote_map.contains_key(&c.date))
+            || merged.iter().any(|c| {
+                remote_map
+                    .get(&c.date)
+                    .map_or(false, |r| c.updated_at > r.updated_at)
+            });
+
+        // Write back locally if changed
+        if merged_changed {
+            let es = energy_storage.lock().unwrap();
+            es.replace_checkins(&merged).map_err(SyncError::Storage)?;
+        }
+
+        // Push merged to remote if remote differs
+        if remote_needs_update || merged_changed {
+            let data = serde_json::to_vec_pretty(&merged)?;
+            let _ = client
+                .mkdir_p(&format!("{}/energy", library_base_path))
+                .await;
+            client.put(&remote_path, &data, None).await?;
+        }
+
+        Ok(merged_changed)
+    }
+
     /// Sync all notebooks in a library (notebooks synced concurrently)
     pub async fn sync_library(
         &self,
@@ -3467,6 +3558,7 @@ impl SyncManager {
         goals_storage: &SharedGoalsStorage,
         inbox_storage: &SharedInboxStorage,
         contacts_storage: &SharedContactsStorage,
+        energy_storage: &SharedEnergyStorage,
         app_handle: Option<&tauri::AppHandle>,
     ) -> Result<SyncResult, SyncError> {
         let start = std::time::Instant::now();
@@ -3842,6 +3934,56 @@ impl SyncManager {
                 }
                 Err(e) => {
                     log::warn!("Library sync: failed to get credentials for contacts: {}", e);
+                }
+            }
+        }
+
+        // Sync energy after contacts
+        if let Some(ref lib_config) = library_config {
+            match self.get_library_credentials(library_id) {
+                Ok(creds) => {
+                    match WebDAVClient::new(lib_config.server_url.clone(), creds) {
+                        Ok(energy_client) => {
+                            let base_path = &lib_config.remote_base_path;
+
+                            let energy_changed = match self
+                                .sync_energy(&energy_client, base_path, energy_storage)
+                                .await
+                            {
+                                Ok(changed) => {
+                                    log::info!("Library sync: energy sync complete, changed={}", changed);
+                                    changed
+                                }
+                                Err(e) => {
+                                    log::warn!("Library sync: energy sync failed: {}", e);
+                                    false
+                                }
+                            };
+
+                            if energy_changed {
+                                let event_payload = SyncEnergyUpdated { energy_changed };
+
+                                let emitted = if let Some(app) = app_handle {
+                                    app.emit("sync-energy-updated", event_payload.clone()).is_ok()
+                                } else {
+                                    false
+                                };
+
+                                if !emitted {
+                                    let handle_guard = self.app_handle.lock().unwrap();
+                                    if let Some(ref handle) = *handle_guard {
+                                        let _ = handle.emit("sync-energy-updated", event_payload);
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            log::warn!("Library sync: failed to create WebDAV client for energy: {}", e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    log::warn!("Library sync: failed to get credentials for energy: {}", e);
                 }
             }
         }

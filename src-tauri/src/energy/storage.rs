@@ -178,6 +178,11 @@ impl EnergyStorage {
         Ok(())
     }
 
+    /// Replace all check-ins (used by sync merge)
+    pub fn replace_checkins(&self, checkins: &[EnergyCheckIn]) -> Result<()> {
+        self.save_checkins(checkins)
+    }
+
     /// Save all check-ins to file
     fn save_checkins(&self, checkins: &[EnergyCheckIn]) -> Result<()> {
         let json = serde_json::to_string_pretty(checkins)?;

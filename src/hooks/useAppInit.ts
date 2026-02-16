@@ -5,6 +5,7 @@ import { usePageStore } from "../stores/pageStore";
 import { useSectionStore } from "../stores/sectionStore";
 import { useGoalsStore } from "../stores/goalsStore";
 import { useContactStore } from "../stores/contactStore";
+import { useEnergyStore } from "../stores/energyStore";
 import { useWindowLibrary } from "../contexts/WindowContext";
 
 // Check goals every 15 minutes
@@ -22,6 +23,7 @@ export function useAppInit() {
   const { sections, selectedSectionId, selectSection, loadSections } = useSectionStore();
   const { loadGoals, checkAutoGoals, loadSummary } = useGoalsStore();
   const { loadContacts: loadContactsFromStore } = useContactStore();
+  const loadTodayCheckIn = useEnergyStore((s) => s.loadTodayCheckIn);
   const { library } = useWindowLibrary();
   const goalsIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const restoredForNotebookRef = useRef<string | null>(null);
@@ -150,6 +152,25 @@ export function useAppInit() {
       if (unlisten) unlisten();
     };
   }, [loadContactsFromStore]);
+
+  // Listen for sync-energy-updated events from the backend.
+  // When sync pulls energy check-in changes from remote, refresh displays.
+  useEffect(() => {
+    let unlisten: UnlistenFn | null = null;
+
+    const setup = async () => {
+      unlisten = await listen("sync-energy-updated", () => {
+        console.log("[sync] Energy updated by sync, refreshing");
+        loadTodayCheckIn();
+      });
+    };
+
+    setup();
+
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, [loadTodayCheckIn]);
 
   // Listen for sync-notebook-updated events from the backend.
   // When sync pulls notebook metadata or section changes, reload them.

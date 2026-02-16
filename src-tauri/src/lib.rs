@@ -230,6 +230,7 @@ pub fn run() {
         Arc::clone(&goals_storage_arc),
         Arc::clone(&inbox_storage_arc),
         Arc::clone(&contacts_storage_arc),
+        Arc::clone(&energy_storage_arc),
     );
     let sync_scheduler_arc = Arc::new(tokio::sync::Mutex::new(Some(sync_scheduler)));
 
