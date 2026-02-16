@@ -385,7 +385,14 @@ export function DailyNotesPanel({ isOpen: isOpenProp, onClose: onCloseProp }: Da
           >
             {formatSelectedDate(selectedDate)}
           </span>
-          {!isToday && (
+          {isToday ? (
+            <span
+              className="rounded-md px-2 py-0.5 text-xs font-medium"
+              style={{ color: "var(--color-accent)" }}
+            >
+              Today
+            </span>
+          ) : (
             <button
               onClick={goToToday}
               className="rounded-md px-2 py-0.5 text-xs transition-colors hover:bg-[--color-bg-tertiary]"
