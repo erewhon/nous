@@ -166,6 +166,63 @@ pub async fn switch_library(state: State<'_, AppState>, library_id: String) -> C
             .map_err(|e| LibraryCommandError::new(&format!("Failed to init search: {}", e)))?;
     }
 
+    // Reinitialize goals storage with new library path
+    {
+        let mut goals_storage = state
+            .goals_storage
+            .lock()
+            .map_err(|e| LibraryCommandError::new(&format!("Lock error: {}", e)))?;
+
+        *goals_storage = crate::goals::GoalsStorage::new(library.path.clone())
+            .map_err(|e| LibraryCommandError::new(&format!("Failed to init goals storage: {}", e)))?;
+    }
+
+    // Reinitialize inbox storage with new library path
+    {
+        let mut inbox_storage = state
+            .inbox_storage
+            .lock()
+            .map_err(|e| LibraryCommandError::new(&format!("Lock error: {}", e)))?;
+
+        *inbox_storage = crate::inbox::InboxStorage::new(library.path.clone())
+            .map_err(|e| LibraryCommandError::new(&format!("Failed to init inbox storage: {}", e)))?;
+    }
+
+    // Reinitialize action storage with new library path
+    {
+        let mut action_storage = state
+            .action_storage
+            .lock()
+            .map_err(|e| LibraryCommandError::new(&format!("Lock error: {}", e)))?;
+
+        *action_storage = crate::actions::ActionStorage::new(library.path.clone())
+            .map_err(|e| LibraryCommandError::new(&format!("Failed to init action storage: {}", e)))?;
+    }
+
+    // Reinitialize vector index with new library path (bug fix: was not reinitialized)
+    {
+        let mut vector_index = state
+            .vector_index
+            .lock()
+            .map_err(|e| LibraryCommandError::new(&format!("Lock error: {}", e)))?;
+
+        *vector_index = crate::rag::VectorIndex::new(library.vector_db_path())
+            .map_err(|e| LibraryCommandError::new(&format!("Failed to init vector index: {}", e)))?;
+    }
+
+    // Reinitialize flashcard storage with new library path (bug fix: was not reinitialized)
+    {
+        let mut flashcard_storage = state
+            .flashcard_storage
+            .lock()
+            .map_err(|e| LibraryCommandError::new(&format!("Lock error: {}", e)))?;
+
+        *flashcard_storage = crate::flashcards::FlashcardStorage::new(library.path.join("notebooks"));
+    }
+
+    // Reinitialize CRDT store with new library path (bug fix: was not reinitialized)
+    state.crdt_store.set_data_dir(library.path.clone());
+
     log::info!("Switched to library '{}' at {:?}", library.name, library.path);
     Ok(library)
 }

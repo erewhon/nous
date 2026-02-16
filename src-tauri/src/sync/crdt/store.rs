@@ -30,20 +30,36 @@ struct LivePage {
 /// In-memory store of live CRDT documents for open pages.
 pub struct CrdtStore {
     live: Mutex<HashMap<Uuid, LivePage>>,
-    data_dir: PathBuf,
+    data_dir: Mutex<PathBuf>,
 }
 
 impl CrdtStore {
     pub fn new(data_dir: PathBuf) -> Self {
         Self {
             live: Mutex::new(HashMap::new()),
-            data_dir,
+            data_dir: Mutex::new(data_dir),
         }
+    }
+
+    /// Update the data directory (used on library switch).
+    ///
+    /// Clears all live pages (they belong to the old library) and updates the path.
+    pub fn set_data_dir(&self, new_path: PathBuf) {
+        {
+            let mut live = self.live.lock().unwrap();
+            live.clear();
+        }
+        {
+            let mut data_dir = self.data_dir.lock().unwrap();
+            *data_dir = new_path;
+        }
+        log::info!("CrdtStore: data_dir updated, all live pages cleared");
     }
 
     /// CRDT state file path: {data_dir}/notebooks/{notebook_id}/sync/pages/{page_id}.crdt
     fn crdt_path(&self, notebook_id: Uuid, page_id: Uuid) -> PathBuf {
-        self.data_dir
+        let data_dir = self.data_dir.lock().unwrap();
+        data_dir
             .join("notebooks")
             .join(notebook_id.to_string())
             .join("sync")
@@ -53,7 +69,8 @@ impl CrdtStore {
 
     /// Binary updates log path: {data_dir}/notebooks/{notebook_id}/sync/pages/{page_id}.updates
     fn updates_path(&self, notebook_id: Uuid, page_id: Uuid) -> PathBuf {
-        self.data_dir
+        let data_dir = self.data_dir.lock().unwrap();
+        data_dir
             .join("notebooks")
             .join(notebook_id.to_string())
             .join("sync")

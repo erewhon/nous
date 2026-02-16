@@ -1,5 +1,6 @@
 pub mod backup;
 mod file_storage;
+pub mod migration;
 mod models;
 pub mod oplog;
 pub mod snapshots;

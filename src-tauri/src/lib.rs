@@ -151,20 +151,24 @@ pub fn run() {
     log::info!("Python AI bridge path: {:?}", nous_py_path);
     let python_ai = PythonAI::new(nous_py_path);
 
-    // Initialize action storage
-    let action_storage = ActionStorage::new(data_dir.clone())
+    // Run one-time migration of global data into the library directory
+    storage::migration::migrate_global_to_library(&data_dir, &library_path)
+        .expect("Failed to migrate global data to library");
+
+    // Initialize action storage (library-scoped)
+    let action_storage = ActionStorage::new(library_path.clone())
         .expect("Failed to initialize action storage");
 
-    // Initialize inbox storage
-    let inbox_storage = InboxStorage::new(data_dir.clone())
+    // Initialize inbox storage (library-scoped)
+    let inbox_storage = InboxStorage::new(library_path.clone())
         .expect("Failed to initialize inbox storage");
     let inbox_storage_arc = Arc::new(Mutex::new(inbox_storage));
 
-    // Initialize flashcard storage
-    let flashcard_storage = FlashcardStorage::new(data_dir.join("notebooks"));
+    // Initialize flashcard storage (library-scoped)
+    let flashcard_storage = FlashcardStorage::new(library_path.join("notebooks"));
 
-    // Initialize goals storage
-    let goals_storage = GoalsStorage::new(data_dir.clone())
+    // Initialize goals storage (library-scoped)
+    let goals_storage = GoalsStorage::new(library_path.clone())
         .expect("Failed to initialize goals storage");
     let goals_storage_arc = Arc::new(Mutex::new(goals_storage));
 
@@ -182,8 +186,8 @@ pub fn run() {
     let sync_manager = SyncManager::new(data_dir.clone());
     let sync_manager_arc = Arc::new(sync_manager);
 
-    // Initialize CRDT store for live page editing
-    let crdt_store = CrdtStore::new(data_dir.clone());
+    // Initialize CRDT store for live page editing (library-scoped)
+    let crdt_store = CrdtStore::new(library_path.clone());
     let crdt_store_arc = Arc::new(crdt_store);
 
     // Initialize external editor manager

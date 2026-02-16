@@ -115,6 +115,26 @@ impl Library {
     pub fn sync_queue_path(&self) -> PathBuf {
         self.path.join("sync_queue.json")
     }
+
+    /// Get the goals directory for this library
+    pub fn goals_path(&self) -> PathBuf {
+        self.path.join("goals")
+    }
+
+    /// Get the inbox directory for this library
+    pub fn inbox_path(&self) -> PathBuf {
+        self.path.join("inbox")
+    }
+
+    /// Get the actions directory for this library
+    pub fn actions_path(&self) -> PathBuf {
+        self.path.join("actions")
+    }
+
+    /// Get the vector database path for this library
+    pub fn vector_db_path(&self) -> PathBuf {
+        self.path.join(".nous").join("vectors.db")
+    }
 }
 
 /// Statistics about a library
