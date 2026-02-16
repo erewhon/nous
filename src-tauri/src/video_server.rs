@@ -14,7 +14,7 @@ use axum::{
 };
 use rand::Rng;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio::net::TcpListener;
@@ -25,8 +25,8 @@ use tokio::sync::oneshot;
 pub struct VideoServerState {
     /// Random access token required for all requests.
     pub token: String,
-    /// Allowed base directories for serving videos.
-    pub allowed_dirs: Vec<PathBuf>,
+    /// Allowed base directories for serving videos (dynamically updatable).
+    pub allowed_dirs: Arc<RwLock<Vec<PathBuf>>>,
 }
 
 /// Query parameters for video requests.
@@ -46,6 +46,8 @@ pub struct VideoServer {
     pub token: String,
     /// Shutdown signal sender.
     shutdown_tx: Option<oneshot::Sender<()>>,
+    /// Shared reference to the allowed directories list.
+    allowed_dirs: Arc<RwLock<Vec<PathBuf>>>,
 }
 
 impl VideoServer {
@@ -63,6 +65,16 @@ impl VideoServer {
             encoded_path,
             self.token
         )
+    }
+
+    /// Add a directory to the allowed list for serving videos.
+    pub fn add_allowed_dir(&self, dir: PathBuf) {
+        if let Ok(mut dirs) = self.allowed_dirs.write() {
+            if !dirs.contains(&dir) {
+                log::info!("Video server: adding allowed dir {:?}", dir);
+                dirs.push(dir);
+            }
+        }
     }
 
     /// Stop the server gracefully.
@@ -95,7 +107,7 @@ fn get_video_mime_type(path: &PathBuf) -> Option<&'static str> {
 }
 
 /// Validate that a path is within allowed directories and doesn't contain traversal attempts.
-fn validate_path(path: &str, allowed_dirs: &[PathBuf]) -> Result<PathBuf, &'static str> {
+fn validate_path(path: &str, allowed_dirs: &RwLock<Vec<PathBuf>>) -> Result<PathBuf, &'static str> {
     let path = PathBuf::from(path);
 
     // Check for path traversal attempts in the original path
@@ -109,13 +121,15 @@ fn validate_path(path: &str, allowed_dirs: &[PathBuf]) -> Result<PathBuf, &'stat
         .canonicalize()
         .map_err(|_| "Failed to resolve path")?;
 
+    let dirs = allowed_dirs.read().map_err(|_| "Failed to read allowed dirs")?;
+
     // If allowed_dirs is empty, allow any path (for development)
-    if allowed_dirs.is_empty() {
+    if dirs.is_empty() {
         return Ok(canonical);
     }
 
     // Check if the canonical path is within any allowed directory
-    for allowed in allowed_dirs {
+    for allowed in dirs.iter() {
         if let Ok(allowed_canonical) = allowed.canonicalize() {
             if canonical.starts_with(&allowed_canonical) {
                 return Ok(canonical);
@@ -310,9 +324,10 @@ pub async fn start_server(
         .map(char::from)
         .collect();
 
+    let shared_dirs = Arc::new(RwLock::new(allowed_dirs));
     let state = Arc::new(VideoServerState {
         token: token.clone(),
-        allowed_dirs,
+        allowed_dirs: Arc::clone(&shared_dirs),
     });
 
     let app = Router::new()
@@ -347,6 +362,7 @@ pub async fn start_server(
         port,
         token,
         shutdown_tx: Some(shutdown_tx),
+        allowed_dirs: shared_dirs,
     })
 }
 

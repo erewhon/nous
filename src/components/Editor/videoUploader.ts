@@ -74,15 +74,8 @@ export function createVideoUploader(config: VideoUploaderConfig) {
 
         console.log("Video written successfully");
 
-        // Save video to a non-hidden directory to workaround asset protocol scope issues
-        // The asset protocol has issues with paths containing .local on Linux
-        const videoPath = await invoke<string>("save_video_asset", {
-          notebookId: config.notebookId,
-          filename,
-          sourcePath: filePath,
-        });
-
-        console.log("Video saved to:", videoPath);
+        // Video stays in notebook assets — served via embedded HTTP video server
+        const videoPath = filePath;
 
         // Generate thumbnail from video
         let thumbnailUrl = "";

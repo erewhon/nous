@@ -5,6 +5,7 @@ import { copyFile } from "@tauri-apps/plugin-fs";
 import * as api from "../../utils/api";
 import type { MediaAssetInfo } from "../../utils/api";
 import { useToastStore } from "../../stores/toastStore";
+import { getVideoStreamUrl } from "../../utils/videoUrl";
 
 interface MediaLibraryProps {
   notebookId: string;
@@ -147,6 +148,16 @@ export function MediaLibrary({ notebookId, isOpen, onClose }: MediaLibraryProps)
   };
 
   if (!isOpen) return null;
+
+  // Helper to resolve video src URLs via the video server
+  const VideoPreview = ({ path }: { path: string }) => {
+    const [src, setSrc] = useState<string | null>(null);
+    useEffect(() => {
+      getVideoStreamUrl(path).then(setSrc).catch(() => setSrc(null));
+    }, [path]);
+    if (!src) return null;
+    return <video src={src} className="h-full w-full object-cover" muted />;
+  };
 
   return (
     <div
@@ -348,11 +359,7 @@ export function MediaLibrary({ notebookId, isOpen, onClose }: MediaLibraryProps)
                       </div>
                     )}
                     {asset.mediaType === "video" ? (
-                      <video
-                        src={convertFileSrc(asset.path)}
-                        className="h-full w-full object-cover"
-                        muted
-                      />
+                      <VideoPreview path={asset.path} />
                     ) : asset.filename.endsWith(".svg") ? (
                       <svg
                         xmlns="http://www.w3.org/2000/svg"

@@ -125,12 +125,14 @@ export class VideoTool implements BlockTool {
     try {
       const { invoke } = await import("@tauri-apps/api/core");
 
+      // Ensure the symlink exists so the video server can reach the file
       const linkedPath = await invoke<string>("link_external_video", {
         sourcePath: this.data.localPath,
       });
 
-      // Construct asset URL manually - use http://asset.localhost format
-      this.data.url = `http://asset.localhost${linkedPath}`;
+      // Use video server URL instead of asset protocol
+      const { getVideoStreamUrl } = await import("../../utils/videoUrl");
+      this.data.url = await getVideoStreamUrl(linkedPath);
       this.cleanupReactRoots();
       this.wrapper.innerHTML = "";
       this.renderVideoPlayer();
@@ -466,17 +468,18 @@ export class VideoTool implements BlockTool {
     }
 
     try {
-      // Create a symlink in the app's data directory to bypass asset protocol scope issues
       const { invoke } = await import("@tauri-apps/api/core");
 
+      // Create a symlink so the video server can reach the file
       const linkedPath = await invoke<string>("link_external_video", {
         sourcePath: cleanPath,
       });
 
-      // Construct asset URL manually - use http://asset.localhost format
-      const assetUrl = `http://asset.localhost${linkedPath}`;
+      // Use video server URL
+      const { getVideoStreamUrl } = await import("../../utils/videoUrl");
+      const streamUrl = await getVideoStreamUrl(linkedPath);
 
-      this.data.url = assetUrl;
+      this.data.url = streamUrl;
       this.data.isExternal = true;
       this.data.externalType = "direct";
       this.data.originalName = cleanPath.split(/[/\\]/).pop() || "Local Video";
@@ -661,15 +664,18 @@ export class VideoTool implements BlockTool {
       this.videoEl = document.createElement("video");
       this.videoEl.classList.add("video-element");
 
-      // Check if URL is a file path that needs to be converted to asset URL
+      // Check if URL is a file path that needs to be converted to a stream URL
       const isFilePath = this.data.url.startsWith("/") || /^[a-zA-Z]:[/\\]/.test(this.data.url);
       if (isFilePath && !this.data.isExternal) {
-        // Convert file path to asset URL for the native video player
-        import("@tauri-apps/api/core").then(({ convertFileSrc }) => {
-          if (this.videoEl) {
-            const assetUrl = decodeURI(convertFileSrc(this.data.url));
-            this.videoEl.src = assetUrl;
-          }
+        // Get video server stream URL for the file path
+        import("../../utils/videoUrl").then(({ getVideoStreamUrl }) => {
+          getVideoStreamUrl(this.data.url).then((streamUrl) => {
+            if (this.videoEl) {
+              this.videoEl.src = streamUrl;
+            }
+          }).catch((err) => {
+            console.error("Failed to get video stream URL:", err);
+          });
         });
       } else {
         this.videoEl.src = this.data.url;
@@ -679,10 +685,10 @@ export class VideoTool implements BlockTool {
       this.videoEl.preload = "auto"; // Load the video data
       this.videoEl.playsInline = true;
 
-      // For external/linked files, we need to handle loading differently
+      // For external/linked files, set crossOrigin for remote URLs
       if (this.data.isExternal) {
-        // Set crossOrigin for external URLs (not for local asset:// URLs)
-        if (!this.data.url.startsWith("asset://") && !this.data.url.startsWith("https://asset.localhost")) {
+        // Don't set crossOrigin for localhost video server URLs
+        if (!this.data.url.includes("127.0.0.1") && !this.data.url.includes("localhost")) {
           this.videoEl.crossOrigin = "anonymous";
         }
       }

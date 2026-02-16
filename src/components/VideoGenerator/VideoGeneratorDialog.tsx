@@ -6,12 +6,12 @@ import { useToastStore } from "../../stores/toastStore";
 import { SlideList } from "./SlidePreview";
 import { SlideEditor } from "./SlideEditor";
 import { VideoProgress } from "./VideoProgress";
-import { convertFileSrc } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { save } from "@tauri-apps/plugin-dialog";
 import { copyFile } from "@tauri-apps/plugin-fs";
 import type { SlideContent, VideoTheme } from "../../types/videoGenerate";
 import { ASPECT_RATIO_PRESETS } from "../../types/videoGenerate";
+import { getVideoStreamUrl } from "../../utils/videoUrl";
 
 interface VideoProgressPayload {
   currentSlide: number;
@@ -152,6 +152,28 @@ export function VideoGeneratorDialog({
       return () => window.removeEventListener("keydown", handleKeyDown);
     }
   }, [isOpen, handleKeyDown]);
+
+  // Helper to resolve video src URLs via the video server
+  const VideoPreviewPlayer = ({ videoPath }: { videoPath: string }) => {
+    const [src, setSrc] = useState<string | null>(null);
+    useEffect(() => {
+      getVideoStreamUrl(videoPath).then(setSrc).catch(() => setSrc(null));
+    }, [videoPath]);
+    return (
+      <div
+        className="rounded-lg overflow-hidden border"
+        style={{ borderColor: "var(--color-border)" }}
+      >
+        {src ? (
+          <video src={src} controls className="w-full" style={{ maxHeight: "400px" }} />
+        ) : (
+          <div className="flex items-center justify-center h-32" style={{ color: "var(--color-text-muted)" }}>
+            Loading video...
+          </div>
+        )}
+      </div>
+    );
+  };
 
   if (!isOpen) return null;
 
@@ -388,17 +410,7 @@ export function VideoGeneratorDialog({
               </div>
 
               {/* Video preview */}
-              <div
-                className="rounded-lg overflow-hidden border"
-                style={{ borderColor: "var(--color-border)" }}
-              >
-                <video
-                  src={convertFileSrc(videoStore.result.videoPath)}
-                  controls
-                  className="w-full"
-                  style={{ maxHeight: "400px" }}
-                />
-              </div>
+              <VideoPreviewPlayer videoPath={videoStore.result.videoPath} />
 
               {/* Info and actions */}
               <div className="flex items-center justify-between">

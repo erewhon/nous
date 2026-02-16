@@ -57,44 +57,24 @@ pub fn get_asset_data_url(file_path: String) -> CommandResult<String> {
     Ok(format!("data:{};base64,{}", mime_type, b64))
 }
 
-/// Move a video file to a non-hidden directory for asset protocol access.
-/// The Tauri asset protocol has issues with hidden directories (.local) on Linux.
+/// Return the source path for a video asset.
+///
+/// Videos are now served via the embedded HTTP video server, so they can stay
+/// in the notebook's assets directory (no need to copy to /tmp).
 #[tauri::command]
 pub fn save_video_asset(
-    app: AppHandle,
-    notebook_id: String,
-    filename: String,
+    _app: AppHandle,
+    _notebook_id: String,
+    _filename: String,
     source_path: String,
 ) -> CommandResult<String> {
-    // Use /tmp/nous-videos/ which has no hidden directories in the path
-    let video_dir = PathBuf::from("/tmp/nous-videos").join(&notebook_id);
-
-    fs::create_dir_all(&video_dir).map_err(|e| CommandError {
-        message: format!("Failed to create video directory: {}", e),
-    })?;
-
-    let dest_path = video_dir.join(&filename);
-    let source = PathBuf::from(&source_path);
-
-    // Move the file from the hidden location to /tmp
-    fs::rename(&source, &dest_path).or_else(|_| {
-        // If rename fails (cross-device), copy and delete
-        fs::copy(&source, &dest_path).and_then(|_| fs::remove_file(&source))
-    }).map_err(|e| CommandError {
-        message: format!("Failed to move video file: {}", e),
-    })?;
-
-    // Register with asset protocol scope
-    if let Err(e) = app.asset_protocol_scope().allow_file(&dest_path) {
-        log::warn!("Failed to register video with asset protocol: {}", e);
+    let path = PathBuf::from(&source_path);
+    if !path.exists() {
+        return Err(CommandError {
+            message: format!("Video file not found: {}", source_path),
+        });
     }
-
-    dest_path
-        .to_str()
-        .map(|s| s.to_string())
-        .ok_or_else(|| CommandError {
-            message: "Invalid path encoding".to_string(),
-        })
+    Ok(source_path)
 }
 
 /// Get the assets directory path for a notebook

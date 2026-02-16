@@ -223,6 +223,14 @@ pub async fn switch_library(state: State<'_, AppState>, library_id: String) -> C
     // Reinitialize CRDT store with new library path (bug fix: was not reinitialized)
     state.crdt_store.set_data_dir(library.path.clone());
 
+    // Add the new library path to the video server's allowed directories
+    {
+        let server_guard = state.video_server.blocking_lock();
+        if let Some(ref server) = *server_guard {
+            server.add_allowed_dir(library.path.clone());
+        }
+    }
+
     log::info!("Switched to library '{}' at {:?}", library.name, library.path);
     Ok(library)
 }
