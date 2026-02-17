@@ -213,11 +213,7 @@ pub fn inbox_apply_actions(
                         page.content = EditorData {
                             time: Some(chrono::Utc::now().timestamp_millis()),
                             version: Some("2.28.0".to_string()),
-                            blocks: vec![crate::storage::EditorBlock {
-                                id: format!("{:x}", chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0) % 0xFFFFFFFFFF),
-                                block_type: "paragraph".to_string(),
-                                data: serde_json::json!({ "text": item.content }),
-                            }],
+                            blocks: crate::markdown::parse_markdown_to_blocks(&item.content),
                         };
 
                         if let Err(e) = storage.update_page(&page) {
@@ -241,13 +237,9 @@ pub fn inbox_apply_actions(
                 // Append to existing page
                 match storage.get_page(notebook_id, page_id) {
                     Ok(mut page) => {
-                        // Add content as new paragraph
-                        let new_block = crate::storage::EditorBlock {
-                            id: format!("{:x}", chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0) % 0xFFFFFFFFFF),
-                            block_type: "paragraph".to_string(),
-                            data: serde_json::json!({ "text": item.content }),
-                        };
-                        page.content.blocks.push(new_block);
+                        // Parse markdown and append blocks
+                        let new_blocks = crate::markdown::parse_markdown_to_blocks(&item.content);
+                        page.content.blocks.extend(new_blocks);
 
                         if let Err(e) = storage.update_page(&page) {
                             result.errors.push(format!("Failed to update page: {}", e));
@@ -282,11 +274,7 @@ pub fn inbox_apply_actions(
                             page.content = EditorData {
                                 time: Some(chrono::Utc::now().timestamp_millis()),
                                 version: Some("2.28.0".to_string()),
-                                blocks: vec![crate::storage::EditorBlock {
-                                    id: format!("{:x}", chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0) % 0xFFFFFFFFFF),
-                                    block_type: "paragraph".to_string(),
-                                    data: serde_json::json!({ "text": item.content }),
-                                }],
+                                blocks: crate::markdown::parse_markdown_to_blocks(&item.content),
                             };
                             let _ = storage.update_page(&page);
                             result.created_pages.push(page.id);

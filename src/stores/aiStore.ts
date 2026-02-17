@@ -194,8 +194,8 @@ const DEFAULT_PANEL_WIDTH = 480;
 const DEFAULT_PANEL_HEIGHT = 650;
 const MIN_PANEL_WIDTH = 320;
 const MIN_PANEL_HEIGHT = 400;
-const MAX_PANEL_WIDTH = 800;
-const MAX_PANEL_HEIGHT = 900;
+const MAX_PANEL_WIDTH = 1200;
+const MAX_PANEL_HEIGHT = 1200;
 
 const defaultPanelState: AIPanelState = {
   isPinned: false,

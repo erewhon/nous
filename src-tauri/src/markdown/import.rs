@@ -118,7 +118,7 @@ fn parse_datetime(s: &str) -> Option<DateTime<Utc>> {
 }
 
 /// Parse markdown body into Editor.js blocks
-fn parse_markdown_to_blocks(markdown: &str) -> Vec<EditorBlock> {
+pub fn parse_markdown_to_blocks(markdown: &str) -> Vec<EditorBlock> {
     // Enable tables extension
     let mut options = Options::empty();
     options.insert(Options::ENABLE_TABLES);
