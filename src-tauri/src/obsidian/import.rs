@@ -347,6 +347,7 @@ pub fn import_obsidian_vault(
         page_sort_by: None,
         daily_notes_config: None,
         cover_image: None,
+        mirror_path: None,
         created_at: now,
         updated_at: now,
     };

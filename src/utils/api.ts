@@ -1120,6 +1120,19 @@ export async function importWebsiteMirror(
   });
 }
 
+export interface RescanSummary {
+  added: number;
+  updated: number;
+  deleted: number;
+  skippedArchived: number;
+}
+
+export async function rescanWebsiteMirror(
+  notebookId: string
+): Promise<RescanSummary> {
+  return invoke<RescanSummary>("rescan_website_mirror_cmd", { notebookId });
+}
+
 // ===== Actions API =====
 
 import type {

@@ -871,6 +871,11 @@ impl FileStorage {
             .ok_or(StorageError::FolderNotFound(folder_id))
     }
 
+    /// Save all folders for a notebook (public, for use by import commands)
+    pub fn save_folders_public(&self, notebook_id: Uuid, folders: &[Folder]) -> Result<()> {
+        self.save_folders(notebook_id, folders)
+    }
+
     /// Save all folders for a notebook
     fn save_folders(&self, notebook_id: Uuid, folders: &[Folder]) -> Result<()> {
         let folders_path = self.folders_path(notebook_id);

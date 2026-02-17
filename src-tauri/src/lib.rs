@@ -480,6 +480,7 @@ pub fn run() {
             // Website mirror import commands
             commands::preview_website_mirror_cmd,
             commands::import_website_mirror_cmd,
+            commands::rescan_website_mirror_cmd,
             // Folder commands
             commands::list_folders,
             commands::get_folder,

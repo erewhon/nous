@@ -797,6 +797,7 @@ pub fn import_joplin(
         page_sort_by: None,
         daily_notes_config: None,
         cover_image: None,
+        mirror_path: None,
         created_at: now,
         updated_at: now,
     };
@@ -1143,6 +1144,7 @@ where
         page_sort_by: None,
         daily_notes_config: None,
         cover_image: None,
+        mirror_path: None,
         created_at: now,
         updated_at: now,
     };

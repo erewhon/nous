@@ -269,6 +269,9 @@ pub struct Notebook {
     /// Cover image URL (convertFileSrc URL pointing to an image in notebook assets)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cover_image: Option<String>,
+    /// Path to the website mirror directory (for re-scan support)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mirror_path: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -295,6 +298,7 @@ impl Notebook {
             page_sort_by: None,
             daily_notes_config: None,
             cover_image: None,
+            mirror_path: None,
             created_at: now,
             updated_at: now,
         }

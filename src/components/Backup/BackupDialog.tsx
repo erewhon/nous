@@ -24,6 +24,7 @@ import {
   importOneNote,
   previewWebsiteMirror,
   importWebsiteMirror,
+  rescanWebsiteMirror,
   type BackupInfo,
   type NotionImportPreview,
   type ObsidianImportPreview,
@@ -1109,6 +1110,15 @@ export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
                 onImport={handleWebsiteImport}
                 onCancel={handleWebsiteCancel}
                 onNameChange={setWebsiteNotebookName}
+                notebooks={notebooks}
+                onRescanComplete={(msg) => {
+                  setSuccess(msg);
+                  toast.success(msg);
+                }}
+                onRescanError={(msg) => {
+                  setError(msg);
+                  toast.error(msg);
+                }}
               />
             )}
             {activeTab === "backups" && (
@@ -3272,6 +3282,9 @@ function WebsiteMirrorImportTab({
   onImport,
   onCancel,
   onNameChange,
+  notebooks,
+  onRescanComplete,
+  onRescanError,
 }: {
   isLoading: boolean;
   preview: WebsiteMirrorImportPreview | null;
@@ -3280,183 +3293,262 @@ function WebsiteMirrorImportTab({
   onImport: () => void;
   onCancel: () => void;
   onNameChange: (name: string) => void;
+  notebooks: Notebook[];
+  onRescanComplete: (message: string) => void;
+  onRescanError: (message: string) => void;
 }) {
-  if (!preview) {
-    return (
-      <div className="space-y-6">
-        <p
-          className="text-sm"
-          style={{ color: "var(--color-text-muted)" }}
-        >
-          Import a mirrored website from disk. HTML files will be indexed for search and AI, with full-fidelity rendering in an embedded viewer. Files stay in their original location.
-        </p>
+  const [rescanning, setRescanning] = useState<string | null>(null);
 
-        <div
-          className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed p-12"
-          style={{ borderColor: "var(--color-border)" }}
-        >
-          <div
-            className="mb-4 rounded-full p-4"
-            style={{ backgroundColor: "var(--color-bg-tertiary)" }}
-          >
-            <IconWebsite size={32} />
-          </div>
-          <h4
-            className="mb-2 text-lg font-medium"
-            style={{ color: "var(--color-text-primary)" }}
-          >
-            Import Website Mirror
-          </h4>
-          <p
-            className="mb-6 text-center text-sm"
-            style={{ color: "var(--color-text-muted)" }}
-          >
-            Select the folder containing your mirrored website
-          </p>
-          <button
-            onClick={onSelectFolder}
-            disabled={isLoading}
-            className="rounded-lg px-6 py-2.5 text-sm font-medium transition-colors"
-            style={{
-              backgroundColor: "var(--color-accent)",
-              color: "white",
-              opacity: isLoading ? 0.5 : 1,
-            }}
-          >
-            {isLoading ? "Loading..." : "Choose Folder"}
-          </button>
-        </div>
-      </div>
-    );
-  }
+  const mirrorNotebooks = notebooks.filter((n) => n.mirrorPath);
+
+  const handleRescan = async (notebook: Notebook) => {
+    try {
+      setRescanning(notebook.id);
+      const summary = await rescanWebsiteMirror(notebook.id);
+      const parts = [];
+      if (summary.added > 0) parts.push(`added ${summary.added}`);
+      if (summary.updated > 0) parts.push(`updated ${summary.updated}`);
+      if (summary.deleted > 0) parts.push(`removed ${summary.deleted}`);
+      if (summary.skippedArchived > 0) parts.push(`skipped ${summary.skippedArchived} archived`);
+      const msg = parts.length > 0
+        ? `Re-scan "${notebook.name}": ${parts.join(", ")}`
+        : `Re-scan "${notebook.name}": no changes found`;
+      onRescanComplete(msg);
+    } catch (err) {
+      onRescanError(`Re-scan failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setRescanning(null);
+    }
+  };
 
   return (
-    <div className="space-y-3">
-      <div
-        className="grid grid-cols-3 gap-4 rounded-lg border p-3"
-        style={{
-          borderColor: "var(--color-border)",
-          backgroundColor: "var(--color-bg-secondary)",
-        }}
-      >
-        <div>
-          <div
-            className="text-2xl font-bold"
-            style={{ color: "var(--color-accent)" }}
-          >
-            {preview.pageCount}
-          </div>
-          <div
-            className="text-xs"
+    <div className="space-y-6">
+      {!preview ? (
+        <>
+          <p
+            className="text-sm"
             style={{ color: "var(--color-text-muted)" }}
           >
-            HTML Pages
-          </div>
-        </div>
-        <div>
-          <div
-            className="text-2xl font-bold"
-            style={{ color: "var(--color-accent)" }}
-          >
-            {preview.folderCount}
-          </div>
-          <div
-            className="text-xs"
-            style={{ color: "var(--color-text-muted)" }}
-          >
-            Folders
-          </div>
-        </div>
-        <div>
-          <div
-            className="text-2xl font-bold"
-            style={{ color: "var(--color-accent)" }}
-          >
-            {preview.assetCount}
-          </div>
-          <div
-            className="text-xs"
-            style={{ color: "var(--color-text-muted)" }}
-          >
-            Assets
-          </div>
-        </div>
-      </div>
+            Import a mirrored website from disk. HTML files will be indexed for search and AI, with full-fidelity rendering in an embedded viewer. Files stay in their original location.
+          </p>
 
-      {preview.samplePages.length > 0 && (
-        <div>
-          <h4
-            className="mb-1 text-sm font-medium"
-            style={{ color: "var(--color-text-primary)" }}
-          >
-            Sample Pages
-          </h4>
           <div
-            className="max-h-24 space-y-0.5 overflow-y-auto rounded-lg border p-2"
+            className="flex flex-col items-center justify-center rounded-xl border-2 border-dashed p-12"
+            style={{ borderColor: "var(--color-border)" }}
+          >
+            <div
+              className="mb-4 rounded-full p-4"
+              style={{ backgroundColor: "var(--color-bg-tertiary)" }}
+            >
+              <IconWebsite size={32} />
+            </div>
+            <h4
+              className="mb-2 text-lg font-medium"
+              style={{ color: "var(--color-text-primary)" }}
+            >
+              Import Website Mirror
+            </h4>
+            <p
+              className="mb-6 text-center text-sm"
+              style={{ color: "var(--color-text-muted)" }}
+            >
+              Select the folder containing your mirrored website
+            </p>
+            <button
+              onClick={onSelectFolder}
+              disabled={isLoading}
+              className="rounded-lg px-6 py-2.5 text-sm font-medium transition-colors"
+              style={{
+                backgroundColor: "var(--color-accent)",
+                color: "white",
+                opacity: isLoading ? 0.5 : 1,
+              }}
+            >
+              {isLoading ? "Loading..." : "Choose Folder"}
+            </button>
+          </div>
+        </>
+      ) : (
+        <div className="space-y-3">
+          <div
+            className="grid grid-cols-3 gap-4 rounded-lg border p-3"
             style={{
               borderColor: "var(--color-border)",
               backgroundColor: "var(--color-bg-secondary)",
             }}
           >
-            {preview.samplePages.map((page, i) => (
-              <div key={i} className="min-w-0">
-                <span
-                  className="block truncate text-xs"
-                  style={{ color: "var(--color-text-primary)" }}
+            <div>
+              <div
+                className="text-2xl font-bold"
+                style={{ color: "var(--color-accent)" }}
+              >
+                {preview.pageCount}
+              </div>
+              <div
+                className="text-xs"
+                style={{ color: "var(--color-text-muted)" }}
+              >
+                HTML Pages
+              </div>
+            </div>
+            <div>
+              <div
+                className="text-2xl font-bold"
+                style={{ color: "var(--color-accent)" }}
+              >
+                {preview.folderCount}
+              </div>
+              <div
+                className="text-xs"
+                style={{ color: "var(--color-text-muted)" }}
+              >
+                Folders
+              </div>
+            </div>
+            <div>
+              <div
+                className="text-2xl font-bold"
+                style={{ color: "var(--color-accent)" }}
+              >
+                {preview.assetCount}
+              </div>
+              <div
+                className="text-xs"
+                style={{ color: "var(--color-text-muted)" }}
+              >
+                Assets
+              </div>
+            </div>
+          </div>
+
+          {preview.samplePages.length > 0 && (
+            <div>
+              <h4
+                className="mb-1 text-sm font-medium"
+                style={{ color: "var(--color-text-primary)" }}
+              >
+                Sample Pages
+              </h4>
+              <div
+                className="max-h-24 space-y-0.5 overflow-y-auto rounded-lg border p-2"
+                style={{
+                  borderColor: "var(--color-border)",
+                  backgroundColor: "var(--color-bg-secondary)",
+                }}
+              >
+                {preview.samplePages.map((page, i) => (
+                  <div key={i} className="min-w-0">
+                    <span
+                      className="block truncate text-xs"
+                      style={{ color: "var(--color-text-primary)" }}
+                    >
+                      {page.title}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div>
+            <label
+              className="mb-1 block text-sm font-medium"
+              style={{ color: "var(--color-text-primary)" }}
+            >
+              Notebook Name
+            </label>
+            <input
+              type="text"
+              value={notebookName}
+              onChange={(e) => onNameChange(e.target.value)}
+              className="w-full rounded-lg border px-3 py-2 text-sm"
+              style={{
+                borderColor: "var(--color-border)",
+                backgroundColor: "var(--color-bg-primary)",
+                color: "var(--color-text-primary)",
+              }}
+              placeholder="Enter notebook name"
+            />
+          </div>
+
+          <div className="flex justify-end gap-3">
+            <button
+              onClick={onCancel}
+              className="rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+              style={{
+                backgroundColor: "var(--color-bg-tertiary)",
+                color: "var(--color-text-primary)",
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={onImport}
+              disabled={isLoading}
+              className="rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+              style={{
+                backgroundColor: "var(--color-accent)",
+                color: "white",
+                opacity: isLoading ? 0.5 : 1,
+              }}
+            >
+              {isLoading ? "Importing..." : `Import ${preview.pageCount} Pages`}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {mirrorNotebooks.length > 0 && (
+        <div>
+          <h4
+            className="mb-2 text-sm font-medium"
+            style={{ color: "var(--color-text-primary)" }}
+          >
+            Re-scan Existing Mirrors
+          </h4>
+          <div
+            className="space-y-2 rounded-lg border p-3"
+            style={{
+              borderColor: "var(--color-border)",
+              backgroundColor: "var(--color-bg-secondary)",
+            }}
+          >
+            {mirrorNotebooks.map((nb) => (
+              <div
+                key={nb.id}
+                className="flex items-center justify-between gap-3"
+              >
+                <div className="min-w-0 flex-1">
+                  <div
+                    className="truncate text-sm font-medium"
+                    style={{ color: "var(--color-text-primary)" }}
+                  >
+                    {nb.name}
+                  </div>
+                  <div
+                    className="truncate text-xs"
+                    style={{ color: "var(--color-text-muted)" }}
+                  >
+                    {nb.mirrorPath}
+                  </div>
+                </div>
+                <button
+                  onClick={() => handleRescan(nb)}
+                  disabled={rescanning !== null}
+                  className="flex-shrink-0 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors"
+                  style={{
+                    backgroundColor: "var(--color-bg-tertiary)",
+                    color: "var(--color-text-primary)",
+                    opacity: rescanning !== null ? 0.5 : 1,
+                  }}
                 >
-                  {page.title}
-                </span>
+                  {rescanning === nb.id ? "Scanning..." : "Re-scan"}
+                </button>
               </div>
             ))}
           </div>
         </div>
       )}
-
-      <div>
-        <label
-          className="mb-1 block text-sm font-medium"
-          style={{ color: "var(--color-text-primary)" }}
-        >
-          Notebook Name
-        </label>
-        <input
-          type="text"
-          value={notebookName}
-          onChange={(e) => onNameChange(e.target.value)}
-          className="w-full rounded-lg border px-3 py-2 text-sm"
-          style={{
-            borderColor: "var(--color-border)",
-            backgroundColor: "var(--color-bg-primary)",
-            color: "var(--color-text-primary)",
-          }}
-          placeholder="Enter notebook name"
-        />
-      </div>
-
-      <div className="flex justify-end gap-3">
-        <button
-          onClick={onCancel}
-          className="rounded-lg px-4 py-2 text-sm font-medium transition-colors"
-          style={{
-            backgroundColor: "var(--color-bg-tertiary)",
-            color: "var(--color-text-primary)",
-          }}
-        >
-          Cancel
-        </button>
-        <button
-          onClick={onImport}
-          disabled={isLoading}
-          className="rounded-lg px-4 py-2 text-sm font-medium transition-colors"
-          style={{
-            backgroundColor: "var(--color-accent)",
-            color: "white",
-            opacity: isLoading ? 0.5 : 1,
-          }}
-        >
-          {isLoading ? "Importing..." : `Import ${preview.pageCount} Pages`}
-        </button>
-      </div>
     </div>
   );
 }

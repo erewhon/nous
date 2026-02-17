@@ -32,6 +32,7 @@ export const NotebookSchema = z.object({
   pageSortBy: PageSortOptionSchema.optional(),
   dailyNotesConfig: DailyNotesConfigSchema.optional(),
   coverImage: z.string().optional(),
+  mirrorPath: z.string().optional(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });
