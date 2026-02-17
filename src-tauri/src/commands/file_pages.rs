@@ -1,5 +1,6 @@
 //! Commands for file-based pages (markdown, PDF, Jupyter, EPUB, calendar)
 
+use std::io::Cursor;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
@@ -301,6 +302,75 @@ pub fn get_file_path(
     }
 
     Ok(path.to_string_lossy().to_string())
+}
+
+/// Readable HTML content extracted via readability
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReadableHtmlResponse {
+    pub title: String,
+    pub content: String,
+}
+
+/// Extract readable article content from an HTML page using readability
+#[tauri::command(rename_all = "camelCase")]
+pub fn get_readable_html(
+    app: tauri::AppHandle,
+    state: State<AppState>,
+    notebook_id: String,
+    page_id: String,
+) -> CommandResult<ReadableHtmlResponse> {
+    let storage = state.storage.lock().map_err(|e| CommandError {
+        message: format!("Failed to acquire storage lock: {}", e),
+    })?;
+
+    let notebook_uuid = Uuid::parse_str(&notebook_id).map_err(|e| CommandError {
+        message: format!("Invalid notebook ID: {}", e),
+    })?;
+
+    let page_uuid = Uuid::parse_str(&page_id).map_err(|e| CommandError {
+        message: format!("Invalid page ID: {}", e),
+    })?;
+
+    let page = storage
+        .get_page_any_type(notebook_uuid, page_uuid)
+        .map_err(|e| CommandError {
+            message: format!("Page not found: {}", e),
+        })?;
+
+    if page.page_type != PageType::Html {
+        return Err(CommandError {
+            message: format!("Page is not an HTML page: {:?}", page.page_type),
+        });
+    }
+
+    let path = storage.get_file_path(&page).map_err(|e| CommandError {
+        message: format!("Failed to get file path: {}", e),
+    })?;
+
+    // Register parent directory with asset protocol (same as get_file_path)
+    if let Some(parent) = path.parent() {
+        let _ = app.asset_protocol_scope().allow_directory(parent, true);
+    }
+
+    let bytes = std::fs::read(&path).map_err(|e| CommandError {
+        message: format!("Failed to read HTML file: {}", e),
+    })?;
+
+    let url_str = format!("file://{}", path.to_string_lossy());
+    let url = reqwest::Url::parse(&url_str).map_err(|e| CommandError {
+        message: format!("Failed to parse file URL: {}", e),
+    })?;
+
+    let mut cursor = Cursor::new(&bytes);
+    let product = readability::extractor::extract(&mut cursor, &url).map_err(|e| CommandError {
+        message: format!("Failed to extract readable content: {}", e),
+    })?;
+
+    Ok(ReadableHtmlResponse {
+        title: product.title,
+        content: product.content,
+    })
 }
 
 /// Check if a linked file has been modified externally

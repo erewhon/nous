@@ -672,6 +672,7 @@ pub fn run() {
             commands::get_file_content,
             commands::update_file_content,
             commands::get_file_path,
+            commands::get_readable_html,
             commands::check_linked_file_modified,
             commands::mark_linked_file_synced,
             commands::get_supported_page_extensions,

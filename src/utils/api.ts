@@ -2035,6 +2035,24 @@ export async function getFilePath(
 }
 
 /**
+ * Extract readable article content from an HTML page using readability
+ */
+export interface ReadableHtmlResponse {
+  title: string;
+  content: string;
+}
+
+export async function getReadableHtml(
+  notebookId: string,
+  pageId: string
+): Promise<ReadableHtmlResponse> {
+  return invoke<ReadableHtmlResponse>("get_readable_html", {
+    notebookId,
+    pageId,
+  });
+}
+
+/**
  * Check if a linked file has been modified externally
  */
 export async function checkLinkedFileModified(
