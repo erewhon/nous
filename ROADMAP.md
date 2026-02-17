@@ -1222,6 +1222,36 @@ A command-line interface for viewing and searching notebook content without laun
 
 ---
 
+### 47. MCP Server for AI Agents
+
+Expose Nous notebooks to external AI agents (Claude Code, etc.) via the Model Context Protocol.
+
+- [x] **MCP server** - Python FastMCP server (`nous-py/nous_mcp/`)
+  - 8 tools: list_notebooks, list_sections, list_folders, list_pages, get_page, search_pages, create_page, append_to_page
+  - Name resolution (case-insensitive exact match, then prefix match, UUID support)
+  - Multi-library support via `--library` flag or `NOUS_LIBRARY` env var
+  - Editor.js → Markdown conversion (Python port of export.rs, including wiki-link/block-ref)
+  - Write operations use NousPageStorage (atomic writes + oplog)
+  - Configured as `nous-mcp` script entry point in pyproject.toml
+- [ ] **Richer markdown-to-blocks conversion** - Parse markdown headers, lists, code blocks (not just paragraphs)
+- [ ] **Page update tool** - Replace full page content (not just append)
+- [ ] **Folder/tag management tools** - Create folders, manage tags via MCP
+
+---
+
+### 48. Distribution & Packaging
+
+- [ ] **Homebrew Linux binaries** - Add Linux builds to Homebrew tap
+  - Produce `nous-{target}.tar.gz` tarballs in CI (alongside existing .deb/.AppImage/.dmg)
+  - Create `Formula/nous.rb` with platform-conditional URLs (x86_64 + aarch64 Linux, aarch64 macOS)
+  - Update release workflow to compute SHA-256s for all tarballs and template into formula
+  - Keep existing `Casks/nous.rb` for macOS users who prefer `brew install --cask`
+  - Requires verifying Tauri binary runs standalone without bundled webview resources
+- [ ] **Flatpak/Snap packaging** - Alternative Linux distribution channels
+- [ ] **AUR package** - Arch Linux user repository
+
+---
+
 ## Notes
 
 - Priority order within sections is flexible
