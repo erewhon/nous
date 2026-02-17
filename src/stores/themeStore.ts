@@ -1,5 +1,8 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import { libraryScopedKey } from "../utils/libraryStorage";
+
+const THEME_STORE_KEY = libraryScopedKey("nous-theme");
 
 export type ThemeMode = "light" | "dark" | "system";
 export type ColorScheme = "default" | "catppuccin" | "nord" | "dracula" | "tufte";
@@ -587,7 +590,7 @@ export const useThemeStore = create<ThemeState>()(
       },
     }),
     {
-      name: "nous-theme",
+      name: THEME_STORE_KEY,
       partialize: (state) => ({ settings: state.settings, showPageStats: state.showPageStats, showOutline: state.showOutline, uiMode: state.uiMode, notebookSortBy: state.notebookSortBy, pageSortBy: state.pageSortBy, panelWidths: state.panelWidths, autoHidePanels: state.autoHidePanels, zenModeSettings: state.zenModeSettings, showRecentPages: state.showRecentPages, showFavoritePages: state.showFavoritePages, pinnedToolButtons: state.pinnedToolButtons }),
       onRehydrateStorage: () => (state) => {
         if (state) {

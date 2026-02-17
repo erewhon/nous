@@ -8,6 +8,7 @@
 import { useState, useEffect, useMemo } from "react";
 import type { Library } from "../types/library";
 import * as api from "../utils/api";
+import { getPersistedLibraryId } from "../utils/libraryStorage";
 
 export interface WindowContext {
   /** Library ID from URL, or null if using current library */
@@ -61,6 +62,21 @@ export function useWindowContext(): WindowContext {
         } else {
           // Load current library (for main window)
           const lib = await api.getCurrentLibrary();
+
+          // Bootstrap: ensure the persisted library ID matches so that
+          // library-scoped store keys (aiStore, themeStore) are correct.
+          // On first load after this update, or after a backend library change
+          // that wasn't via switchLibrary, this triggers a one-time reload.
+          const persistedId = getPersistedLibraryId();
+          if (persistedId !== lib.id) {
+            const raw = localStorage.getItem("nous-library");
+            const stored = raw ? JSON.parse(raw) : { state: {} };
+            stored.state = { ...stored.state, currentLibraryId: lib.id };
+            localStorage.setItem("nous-library", JSON.stringify(stored));
+            window.location.reload();
+            return;
+          }
+
           setLibrary(lib);
         }
       } catch (e) {

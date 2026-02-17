@@ -3,6 +3,9 @@ import { persist } from "zustand/middleware";
 import { invoke } from "@tauri-apps/api/core";
 import type { ChatMessage, ProviderType, ProviderConfig, ModelConfig } from "../types/ai";
 import { createDefaultProviderConfig, DEFAULT_MODELS } from "../types/ai";
+import { libraryScopedKey } from "../utils/libraryStorage";
+
+const AI_STORE_KEY = libraryScopedKey("nous-ai-settings");
 
 interface AISettings {
   // Multi-provider configuration
@@ -572,7 +575,7 @@ export const useAIStore = create<AIState>()(
       },
     }),
     {
-      name: "nous-ai-settings",
+      name: AI_STORE_KEY,
       version: 2, // Increment when making breaking changes
       // Persist settings and panel state, not conversation
       partialize: (state) => ({

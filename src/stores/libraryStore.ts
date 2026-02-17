@@ -155,9 +155,8 @@ export const useLibraryStore = create<LibraryState>()(
     }),
     {
       name: "nous-library",
-      partialize: () => ({
-        // Only persist the current library ID for quick restore
-        // Full data is fetched from backend
+      partialize: (state) => ({
+        currentLibraryId: state.currentLibrary?.id ?? null,
       }),
     }
   )
