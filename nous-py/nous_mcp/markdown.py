@@ -254,3 +254,180 @@ def _strip_html(text: str) -> str:
 
 def _escape_yaml(s: str) -> str:
     return s.replace("\\", "\\\\").replace('"', '\\"')
+
+
+# ---------------------------------------------------------------------------
+# Markdown → Editor.js blocks (import direction)
+# ---------------------------------------------------------------------------
+
+_HEADER_RE = re.compile(r"^(#{1,6})\s+(.+)$")
+_CHECKLIST_RE = re.compile(r"^[-*]\s+\[([ xX])\]\s*(.*)")
+_ORDERED_RE = re.compile(r"^\d+\.\s+(.*)")
+_UNORDERED_RE = re.compile(r"^[-*]\s+(.*)")
+_HR_RE = re.compile(r"^(?:---+|___+|\*\*\*+)\s*$")
+
+
+def _block_id() -> str:
+    from uuid import uuid4
+
+    return str(uuid4())[:8]
+
+
+def markdown_to_blocks(text: str) -> list[dict]:
+    """Convert markdown text to Editor.js blocks.
+
+    Handles headers, paragraphs, unordered/ordered lists, checklists,
+    fenced code blocks, blockquotes, and horizontal rules.
+    """
+    if not text:
+        return []
+
+    blocks: list[dict] = []
+    lines = text.split("\n")
+    i = 0
+
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+
+        # Skip blank lines
+        if not stripped:
+            i += 1
+            continue
+
+        # Fenced code block
+        if stripped.startswith("```"):
+            language = stripped[3:].strip()
+            code_lines: list[str] = []
+            i += 1
+            while i < len(lines):
+                if lines[i].strip().startswith("```"):
+                    i += 1
+                    break
+                code_lines.append(lines[i])
+                i += 1
+            blocks.append({
+                "id": _block_id(),
+                "type": "code",
+                "data": {"code": "\n".join(code_lines), "language": language},
+            })
+            continue
+
+        # Header
+        m = _HEADER_RE.match(stripped)
+        if m:
+            blocks.append({
+                "id": _block_id(),
+                "type": "header",
+                "data": {"text": m.group(2).strip(), "level": len(m.group(1))},
+            })
+            i += 1
+            continue
+
+        # Horizontal rule (before list checks since --- starts with -)
+        if _HR_RE.match(stripped):
+            blocks.append({
+                "id": _block_id(),
+                "type": "delimiter",
+                "data": {},
+            })
+            i += 1
+            continue
+
+        # Checklist (before unordered list since - [ ] starts with -)
+        m = _CHECKLIST_RE.match(stripped)
+        if m:
+            items: list[dict] = []
+            while i < len(lines):
+                cm = _CHECKLIST_RE.match(lines[i].strip())
+                if not cm:
+                    break
+                items.append({
+                    "text": cm.group(2),
+                    "checked": cm.group(1).lower() == "x",
+                })
+                i += 1
+            blocks.append({
+                "id": _block_id(),
+                "type": "checklist",
+                "data": {"items": items},
+            })
+            continue
+
+        # Ordered list
+        m = _ORDERED_RE.match(stripped)
+        if m:
+            ol_items: list[str] = []
+            while i < len(lines):
+                om = _ORDERED_RE.match(lines[i].strip())
+                if not om:
+                    break
+                ol_items.append(om.group(1))
+                i += 1
+            blocks.append({
+                "id": _block_id(),
+                "type": "list",
+                "data": {"style": "ordered", "items": ol_items},
+            })
+            continue
+
+        # Unordered list
+        m = _UNORDERED_RE.match(stripped)
+        if m:
+            ul_items: list[str] = []
+            while i < len(lines):
+                um = _UNORDERED_RE.match(lines[i].strip())
+                if not um:
+                    break
+                ul_items.append(um.group(1))
+                i += 1
+            blocks.append({
+                "id": _block_id(),
+                "type": "list",
+                "data": {"style": "unordered", "items": ul_items},
+            })
+            continue
+
+        # Blockquote
+        if stripped.startswith(">"):
+            quote_lines: list[str] = []
+            while i < len(lines):
+                qs = lines[i].strip()
+                if not qs.startswith(">"):
+                    break
+                quote_lines.append(qs[1:].lstrip())
+                i += 1
+            blocks.append({
+                "id": _block_id(),
+                "type": "quote",
+                "data": {"text": "\n".join(quote_lines)},
+            })
+            continue
+
+        # Paragraph — collect consecutive non-blank, non-special lines
+        para_lines: list[str] = []
+        while i < len(lines):
+            ps = lines[i].strip()
+            if not ps:
+                break
+            if (
+                _HEADER_RE.match(ps)
+                or _HR_RE.match(ps)
+                or _CHECKLIST_RE.match(ps)
+                or _ORDERED_RE.match(ps)
+                or _UNORDERED_RE.match(ps)
+                or ps.startswith("```")
+                or ps.startswith(">")
+            ):
+                break
+            para_lines.append(ps)
+            i += 1
+
+        if para_lines:
+            blocks.append({
+                "id": _block_id(),
+                "type": "paragraph",
+                "data": {"text": "<br>".join(para_lines)},
+            })
+
+    return blocks

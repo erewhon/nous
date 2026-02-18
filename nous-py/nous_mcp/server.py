@@ -11,11 +11,10 @@ import logging
 import os
 import sys
 from datetime import UTC, datetime
-from uuid import uuid4
 
 from mcp.server.fastmcp import FastMCP
 
-from nous_mcp.markdown import export_page_to_markdown
+from nous_mcp.markdown import export_page_to_markdown, markdown_to_blocks
 from nous_mcp.storage import NousStorage
 
 # All logging to stderr (stdout is reserved for JSON-RPC on stdio transport)
@@ -304,22 +303,12 @@ def append_to_page(
 
 
 def _markdown_to_blocks(text: str) -> list[dict]:
-    """Convert simple markdown text to Editor.js paragraph blocks.
+    """Convert markdown text to Editor.js blocks.
 
-    Splits on blank lines. Each chunk becomes a paragraph block.
+    Handles headers, lists, checklists, code blocks, blockquotes,
+    horizontal rules, and paragraphs.
     """
-    if not text:
-        return []
-
-    paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
-    blocks = []
-    for p in paragraphs:
-        blocks.append({
-            "id": str(uuid4())[:8],
-            "type": "paragraph",
-            "data": {"text": p},
-        })
-    return blocks
+    return markdown_to_blocks(text)
 
 
 # ---------------------------------------------------------------------------
