@@ -305,6 +305,61 @@ def append_to_page(
     }, indent=2)
 
 
+@mcp.tool()
+def update_page(
+    notebook: str,
+    page: str,
+    content: str | None = None,
+    title: str | None = None,
+    tags: str | None = None,
+) -> str:
+    """Replace the content, title, or tags of an existing page.
+
+    Args:
+        notebook: Notebook name or UUID.
+        page: Page title (prefix match) or UUID.
+        content: New markdown content (replaces all existing blocks).
+        title: New page title.
+        tags: New comma-separated tags (replaces all existing tags).
+
+    Returns JSON with id, title of the updated page.
+    """
+    storage = _get_storage()
+    nb = storage.resolve_notebook(notebook)
+    pg = storage.resolve_page(nb["id"], page)
+
+    from nous_ai.page_storage import NousPageStorage
+
+    page_storage = NousPageStorage(data_dir=storage.library_path, client_id="nous-mcp")
+
+    updated_content = None
+    if content is not None:
+        blocks = _markdown_to_blocks(content)
+        existing = pg.get("content", {"version": "2.28.0"})
+        updated_content = {
+            "time": int(datetime.now(UTC).timestamp() * 1000),
+            "version": existing.get("version", "2.28.0"),
+            "blocks": blocks,
+        }
+
+    tag_list = None
+    if tags is not None:
+        tag_list = [t.strip() for t in tags.split(",") if t.strip()]
+
+    updated = page_storage.update_page(
+        notebook_id=nb["id"],
+        page_id=pg["id"],
+        content=updated_content,
+        title=title,
+        tags=tag_list,
+    )
+
+    return json.dumps({
+        "id": updated["id"],
+        "title": updated["title"],
+    }, indent=2)
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

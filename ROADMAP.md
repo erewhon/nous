@@ -1235,7 +1235,7 @@ Expose Nous notebooks to external AI agents (Claude Code, etc.) via the Model Co
   - Configured as `nous-mcp` script entry point in pyproject.toml
 - [x] **Section support on `create_page`** - Add `section` parameter (name/UUID) so pages can be placed in sections; underlying NousPageStorage already supports `section_id`
 - [x] **Richer markdown-to-blocks conversion** - Parse `#` headers, `- ` unordered lists, `1. ` ordered lists, `- [ ]` checklists, ``` code blocks, `> ` blockquotes, `---` delimiters (not just paragraphs)
-- [ ] **Page update tool** - Replace full page content (not just append)
+- [x] **Page update tool** - Replace full page content, title, or tags (not just append)
 - [ ] **Folder/tag management tools** - Create folders, manage tags via MCP
 
 ---
