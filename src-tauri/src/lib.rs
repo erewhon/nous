@@ -319,11 +319,6 @@ pub fn run() {
             // Give the sync manager the CRDT store so it can use live page state
             state.sync_manager.set_crdt_store(Arc::clone(&state.crdt_store));
 
-            // Show the main window (starts hidden to avoid white flash)
-            if let Some(window) = app.get_webview_window("main") {
-                let _ = window.show();
-            }
-
             // Start the freeze watchdog (Rust-side ping/pong to detect frontend freezes)
             freeze_watchdog::start_watchdog(
                 app.handle().clone(),
