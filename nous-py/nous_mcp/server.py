@@ -206,6 +206,7 @@ def create_page(
     content: str | None = None,
     tags: str | None = None,
     folder: str | None = None,
+    section: str | None = None,
 ) -> str:
     """Create a new page in a notebook.
 
@@ -215,6 +216,7 @@ def create_page(
         content: Optional markdown text content. Paragraphs are split on blank lines.
         tags: Optional comma-separated tags (e.g. "tag1, tag2").
         folder: Optional folder name or UUID to place the page in.
+        section: Optional section name or UUID to place the page in.
 
     Returns JSON with id, title, notebookId of the created page.
     """
@@ -225,6 +227,11 @@ def create_page(
     if folder:
         f = storage.resolve_folder(nb["id"], folder)
         folder_id = f["id"]
+
+    section_id = None
+    if section:
+        sec = storage.resolve_section(nb["id"], section)
+        section_id = sec["id"]
 
     tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
 
@@ -240,6 +247,7 @@ def create_page(
         blocks=blocks,
         tags=tag_list,
         folder_id=folder_id,
+        section_id=section_id,
     )
 
     return json.dumps({
