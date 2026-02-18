@@ -180,6 +180,46 @@ class NousStorage:
         folders = self.list_folders(notebook_id, include_archived=True)
         return _resolve_name(name_or_id, folders, key="name")
 
+    def create_folder(
+        self,
+        notebook_id: str,
+        name: str,
+        parent_id: str | None = None,
+        section_id: str | None = None,
+    ) -> dict:
+        """Create a new folder. Returns dict with id, name."""
+        from uuid import uuid4
+
+        path = self._notebook_dir(notebook_id) / "folders.json"
+        try:
+            folders = json.loads(path.read_text()) if path.exists() else []
+        except (json.JSONDecodeError, OSError):
+            folders = []
+
+        max_pos = max(
+            (f.get("position", 0) for f in folders if f.get("parentId") == parent_id),
+            default=-1,
+        )
+
+        folder = {
+            "id": str(uuid4()),
+            "notebookId": notebook_id,
+            "name": name,
+            "parentId": parent_id,
+            "sectionId": section_id,
+            "isArchived": False,
+            "position": max_pos + 1,
+            "folderType": "Standard",
+        }
+        folders.append(folder)
+
+        # Atomic write
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(folders, indent=2) + "\n")
+        tmp.rename(path)
+
+        return {"id": folder["id"], "name": folder["name"]}
+
     # --- Pages ---
 
     def _pages_dir(self, notebook_id: str) -> Path:

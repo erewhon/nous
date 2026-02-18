@@ -360,6 +360,149 @@ def update_page(
     }, indent=2)
 
 
+@mcp.tool()
+def create_folder(
+    notebook: str,
+    name: str,
+    parent: str | None = None,
+    section: str | None = None,
+) -> str:
+    """Create a new folder in a notebook.
+
+    Args:
+        notebook: Notebook name or UUID.
+        name: Folder name.
+        parent: Optional parent folder name or UUID for nesting.
+        section: Optional section name or UUID to place the folder in.
+
+    Returns JSON with id, name of the created folder.
+    """
+    storage = _get_storage()
+    nb = storage.resolve_notebook(notebook)
+
+    parent_id = None
+    if parent:
+        p = storage.resolve_folder(nb["id"], parent)
+        parent_id = p["id"]
+
+    section_id = None
+    if section:
+        sec = storage.resolve_section(nb["id"], section)
+        section_id = sec["id"]
+
+    folder = storage.create_folder(
+        nb["id"], name, parent_id=parent_id, section_id=section_id
+    )
+
+    return json.dumps({
+        "id": folder["id"],
+        "name": folder["name"],
+    }, indent=2)
+
+
+@mcp.tool()
+def move_page(
+    notebook: str,
+    page: str,
+    folder: str | None = None,
+    section: str | None = None,
+) -> str:
+    """Move a page to a different folder and/or section.
+
+    Args:
+        notebook: Notebook name or UUID.
+        page: Page title (prefix match) or UUID.
+        folder: Target folder name or UUID. Omit to move to notebook root.
+        section: Target section name or UUID.
+
+    Returns JSON with id, title, folderId, sectionId of the moved page.
+    """
+    storage = _get_storage()
+    nb = storage.resolve_notebook(notebook)
+    pg = storage.resolve_page(nb["id"], page)
+
+    folder_id = None
+    if folder:
+        f = storage.resolve_folder(nb["id"], folder)
+        folder_id = f["id"]
+
+    section_id = None
+    if section:
+        sec = storage.resolve_section(nb["id"], section)
+        section_id = sec["id"]
+
+    from nous_ai.page_storage import NousPageStorage
+
+    page_storage = NousPageStorage(data_dir=storage.library_path, client_id="nous-mcp")
+
+    extra: dict[str, str | None] = {"folderId": folder_id}
+    if section_id is not None:
+        extra["sectionId"] = section_id
+
+    updated = page_storage.update_page(
+        notebook_id=nb["id"],
+        page_id=pg["id"],
+        extra_fields=extra,
+    )
+
+    return json.dumps({
+        "id": updated["id"],
+        "title": updated["title"],
+        "folderId": updated.get("folderId"),
+        "sectionId": updated.get("sectionId"),
+    }, indent=2)
+
+
+@mcp.tool()
+def manage_tags(
+    notebook: str,
+    page: str,
+    add: str | None = None,
+    remove: str | None = None,
+) -> str:
+    """Add or remove tags on a page without replacing all existing tags.
+
+    Args:
+        notebook: Notebook name or UUID.
+        page: Page title (prefix match) or UUID.
+        add: Comma-separated tags to add.
+        remove: Comma-separated tags to remove.
+
+    Returns JSON with id, title, tags of the updated page.
+    """
+    storage = _get_storage()
+    nb = storage.resolve_notebook(notebook)
+    pg = storage.resolve_page(nb["id"], page)
+
+    existing_tags: list[str] = pg.get("tags", [])
+    tag_set = list(dict.fromkeys(existing_tags))  # preserve order, dedup
+
+    if add:
+        for t in add.split(","):
+            t = t.strip()
+            if t and t not in tag_set:
+                tag_set.append(t)
+
+    if remove:
+        remove_set = {t.strip().lower() for t in remove.split(",") if t.strip()}
+        tag_set = [t for t in tag_set if t.lower() not in remove_set]
+
+    from nous_ai.page_storage import NousPageStorage
+
+    page_storage = NousPageStorage(data_dir=storage.library_path, client_id="nous-mcp")
+    updated = page_storage.update_page(
+        notebook_id=nb["id"],
+        page_id=pg["id"],
+        tags=tag_set,
+    )
+
+    return json.dumps({
+        "id": updated["id"],
+        "title": updated["title"],
+        "tags": updated.get("tags", []),
+    }, indent=2)
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
