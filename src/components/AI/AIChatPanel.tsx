@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useAIStore, AI_PANEL_CONSTRAINTS } from "../../stores/aiStore";
@@ -138,6 +138,14 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
   useEffect(() => {
     setChatModelOverride(null);
   }, [effectiveNotebookId]);
+
+  // Validate defaultModel against enabled models — fall back to first enabled if stale
+  const enabledModels = getEnabledModels();
+  const effectiveDefaultModel = useMemo(() => {
+    const isDefaultEnabled = enabledModels.some((m) => m.model.id === settings.defaultModel);
+    if (isDefaultEnabled) return settings.defaultModel;
+    return enabledModels[0]?.model.id || settings.defaultModel;
+  }, [settings.defaultModel, enabledModels]);
 
   // Handle locking context to current page
   const handleLockContext = useCallback(() => {
@@ -917,7 +925,7 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
         if (currentPage?.aiModel) return currentPage.aiModel;
         if (currentSection?.aiModel) return currentSection.aiModel;
         if (currentNotebook?.aiModel) return currentNotebook.aiModel;
-        return settings.defaultModel;
+        return effectiveDefaultModel;
       };
 
       const resolvedModel = resolveModel();
@@ -1249,7 +1257,7 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
 
       {/* Settings hint if no API key */}
       {(() => {
-        const activeModel = chatModelOverride || currentPage?.aiModel || currentSection?.aiModel || currentNotebook?.aiModel || settings.defaultModel;
+        const activeModel = chatModelOverride || currentPage?.aiModel || currentSection?.aiModel || currentNotebook?.aiModel || effectiveDefaultModel;
         const activeProvider = getProviderForModel(activeModel);
         const activeProviderConfig = getProviderConfig(activeProvider);
         const needsKey = activeProvider !== "ollama" && activeProvider !== "lmstudio" && !activeProviderConfig?.apiKey;
@@ -1833,10 +1841,10 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
                   color: "var(--color-success)",
                 }}
               >
-                {getProviderForModel(chatModelOverride || currentPage?.aiModel || currentSection?.aiModel || currentNotebook?.aiModel || settings.defaultModel)}
+                {getProviderForModel(chatModelOverride || currentPage?.aiModel || currentSection?.aiModel || currentNotebook?.aiModel || effectiveDefaultModel)}
               </span>
               <span>
-                {chatModelOverride || currentPage?.aiModel || currentSection?.aiModel || currentNotebook?.aiModel || settings.defaultModel || "default"}
+                {chatModelOverride || currentPage?.aiModel || currentSection?.aiModel || currentNotebook?.aiModel || effectiveDefaultModel || "default"}
               </span>
               {(chatModelOverride || currentPage?.aiModel || currentSection?.aiModel || currentNotebook?.aiModel) && (
                 <span
@@ -1900,7 +1908,7 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
                       </div>
                       {models.map((model) => {
                         const isActive = chatModelOverride === model.id ||
-                          (!chatModelOverride && model.id === (currentPage?.aiModel || currentSection?.aiModel || currentNotebook?.aiModel || settings.defaultModel));
+                          (!chatModelOverride && model.id === (currentPage?.aiModel || currentSection?.aiModel || currentNotebook?.aiModel || effectiveDefaultModel));
                         return (
                           <button
                             key={model.id}
