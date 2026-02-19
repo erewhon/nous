@@ -597,6 +597,7 @@ export async function aiChatStream(
     currentNotebookId?: string;
     providerType?: string;
     apiKey?: string;
+    baseUrl?: string;
     model?: string;
     temperature?: number;
     maxTokens?: number;
@@ -611,6 +612,7 @@ export async function aiChatStream(
     currentNotebookId: options?.currentNotebookId,
     providerType: options?.providerType,
     apiKey: options?.apiKey,
+    baseUrl: options?.baseUrl,
     model: options?.model,
     temperature: options?.temperature,
     maxTokens: options?.maxTokens,

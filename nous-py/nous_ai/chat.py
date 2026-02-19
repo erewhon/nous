@@ -240,6 +240,7 @@ async def chat(
     messages: list[dict[str, str]],
     provider_type: str = "openai",
     api_key: str | None = None,
+    base_url: str | None = None,
     model: str | None = None,
     temperature: float = 0.7,
     max_tokens: int = 4096,
@@ -252,6 +253,7 @@ async def chat(
         messages: List of message dicts with 'role' and 'content' keys.
         provider_type: One of 'openai', 'anthropic', 'ollama'.
         api_key: API key for the provider (not needed for ollama).
+        base_url: Custom base URL for the provider (for vLLM, LMStudio, etc.).
         model: Model to use (uses provider default if not specified).
         temperature: Sampling temperature (0.0 to 2.0).
         max_tokens: Maximum tokens in response.
@@ -262,6 +264,7 @@ async def chat(
     config = ProviderConfig(
         provider_type=ProviderType(provider_type),
         api_key=api_key,
+        base_url=base_url,
         model=model or "",
         temperature=temperature,
         max_tokens=max_tokens,
@@ -287,6 +290,7 @@ async def chat_with_context(
     conversation_history: list[dict[str, str]] | None = None,
     provider_type: str = "openai",
     api_key: str | None = None,
+    base_url: str | None = None,
     model: str | None = None,
     temperature: float = 0.7,
     max_tokens: int = 4096,
@@ -333,6 +337,7 @@ async def chat_with_context(
         messages=messages,
         provider_type=provider_type,
         api_key=api_key,
+        base_url=base_url,
         model=model,
         temperature=temperature,
         max_tokens=max_tokens,
@@ -347,6 +352,7 @@ async def chat_with_tools(
     current_notebook_id: str | None = None,
     provider_type: str = "openai",
     api_key: str | None = None,
+    base_url: str | None = None,
     model: str | None = None,
     temperature: float = 0.7,
     max_tokens: int = 4096,
@@ -380,6 +386,7 @@ async def chat_with_tools(
     config = ProviderConfig(
         provider_type=ProviderType(provider_type),
         api_key=api_key,
+        base_url=base_url,
         model=model or "",
         temperature=temperature,
         max_tokens=max_tokens,
@@ -439,7 +446,7 @@ Example: If user says "Create a Python function that calculates factorial" - you
     tokens_used = None
 
     if provider_type == "openai":
-        client = AsyncOpenAI(api_key=api_key)
+        client = AsyncOpenAI(api_key=api_key, base_url=base_url)
 
         # Build OpenAI messages
         oai_messages: list[dict[str, Any]] = [{"role": "system", "content": system_message}]
@@ -891,12 +898,16 @@ def chat_sync(
     messages: list[dict[str, str]],
     provider_type: str = "openai",
     api_key: str | None = None,
+    base_url: str | None = None,
     model: str | None = None,
     temperature: float = 0.7,
     max_tokens: int = 4096,
 ) -> dict[str, Any]:
     """Synchronous wrapper for chat function."""
-    return asyncio.run(chat(messages, provider_type, api_key, model, temperature, max_tokens))
+    return asyncio.run(
+        chat(messages, provider_type, api_key, base_url=base_url, model=model,
+             temperature=temperature, max_tokens=max_tokens)
+    )
 
 
 def chat_with_context_sync(
@@ -905,6 +916,7 @@ def chat_with_context_sync(
     conversation_history: list[dict[str, str]] | None = None,
     provider_type: str = "openai",
     api_key: str | None = None,
+    base_url: str | None = None,
     model: str | None = None,
     temperature: float = 0.7,
     max_tokens: int = 4096,
@@ -917,9 +929,10 @@ def chat_with_context_sync(
             conversation_history,
             provider_type,
             api_key,
-            model,
-            temperature,
-            max_tokens,
+            base_url=base_url,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
         )
     )
 
@@ -1026,6 +1039,7 @@ async def chat_with_tools_stream(
     current_notebook_id: str | None = None,
     provider_type: str = "openai",
     api_key: str | None = None,
+    base_url: str | None = None,
     model: str | None = None,
     temperature: float = 0.7,
     max_tokens: int = 4096,
@@ -1052,6 +1066,7 @@ async def chat_with_tools_stream(
     config = ProviderConfig(
         provider_type=ProviderType(provider_type),
         api_key=api_key,
+        base_url=base_url,
         model=model or "",
         temperature=temperature,
         max_tokens=max_tokens,
@@ -1131,7 +1146,7 @@ Example: If user says "Create a Python function that calculates factorial" - you
             raise ValueError(f"No API key provided for {provider_type}. Please configure your API key in Settings > AI Providers.")
 
     if provider_type == "openai":
-        client = AsyncOpenAI(api_key=api_key)
+        client = AsyncOpenAI(api_key=api_key, base_url=base_url)
 
         oai_messages: list[dict[str, Any]] = [{"role": "system", "content": system_message}]
         if conversation_history:
@@ -1364,13 +1379,14 @@ Example: If user says "Create a Python function that calculates factorial" - you
                 _emit_chunks_with_delay(callback, "chunk", response_content)
 
     else:
-        # Ollama - fall back to non-streaming
+        # Ollama/LMStudio/other - fall back to non-streaming
         result = await chat_with_context(
             user_message,
             page_context,
             conversation_history,
             provider_type,
             api_key,
+            base_url,
             model,
             temperature,
             max_tokens,
@@ -1408,6 +1424,7 @@ def chat_with_tools_stream_sync(
     current_notebook_id: str | None = None,
     provider_type: str = "openai",
     api_key: str | None = None,
+    base_url: str | None = None,
     model: str | None = None,
     temperature: float = 0.7,
     max_tokens: int = 4096,
@@ -1430,6 +1447,7 @@ def chat_with_tools_stream_sync(
                 current_notebook_id,
                 provider_type,
                 api_key,
+                base_url,
                 model,
                 temperature,
                 max_tokens,

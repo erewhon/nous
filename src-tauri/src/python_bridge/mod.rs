@@ -82,6 +82,7 @@ pub struct PagesSummaryResult {
 pub struct AIConfig {
     pub provider_type: String,
     pub api_key: Option<String>,
+    pub base_url: Option<String>,
     pub model: Option<String>,
     pub temperature: Option<f64>,
     pub max_tokens: Option<i64>,
@@ -92,6 +93,7 @@ impl Default for AIConfig {
         Self {
             provider_type: "openai".to_string(),
             api_key: None,
+            base_url: None,
             model: None,
             temperature: Some(0.7),
             max_tokens: Some(4096),
@@ -1084,6 +1086,9 @@ impl PythonAI {
 
                 if let Some(api_key) = config.api_key {
                     kwargs.set_item("api_key", api_key)?;
+                }
+                if let Some(base_url) = config.base_url {
+                    kwargs.set_item("base_url", base_url)?;
                 }
                 if let Some(model) = config.model {
                     kwargs.set_item("model", model)?;

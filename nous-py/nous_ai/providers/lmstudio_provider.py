@@ -11,10 +11,13 @@ class LMStudioProvider(BaseProvider):
 
     def __init__(self, config: ProviderConfig) -> None:
         super().__init__(config)
-        # LMStudio default server URL
+        # LMStudio/vLLM default server URL
         base_url = config.base_url or "http://localhost:1234/v1"
+        # OpenAI SDK expects base_url to end with /v1
+        if not base_url.rstrip("/").endswith("/v1"):
+            base_url = base_url.rstrip("/") + "/v1"
         self.client = AsyncOpenAI(
-            api_key="lm-studio",  # LMStudio doesn't require a real API key
+            api_key=config.api_key or "lm-studio",  # Local providers may not need a real key
             base_url=base_url,
         )
 

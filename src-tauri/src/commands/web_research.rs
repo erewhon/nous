@@ -261,6 +261,7 @@ pub fn summarize_research(
         model,
         temperature: Some(0.5),
         max_tokens: Some(2000),
+        ..Default::default()
     };
 
     python_ai

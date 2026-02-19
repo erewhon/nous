@@ -32,6 +32,7 @@ pub async fn generate_study_guide(
         model,
         temperature: temperature.or(Some(0.7)),
         max_tokens: max_tokens.or(Some(4096)),
+        ..Default::default()
     };
 
     let options = if depth.is_some() || focus_areas.is_some() || num_practice_questions.is_some() {
@@ -81,6 +82,7 @@ pub async fn generate_faq(
         model,
         temperature: temperature.or(Some(0.7)),
         max_tokens: max_tokens.or(Some(4096)),
+        ..Default::default()
     };
 
     tauri::async_runtime::spawn_blocking(move || {
@@ -121,6 +123,7 @@ pub async fn ai_generate_flashcards(
         model,
         temperature: temperature.or(Some(0.7)),
         max_tokens: max_tokens.or(Some(4096)),
+        ..Default::default()
     };
 
     tauri::async_runtime::spawn_blocking(move || {
@@ -160,6 +163,7 @@ pub async fn generate_briefing(
         model,
         temperature: temperature.or(Some(0.7)),
         max_tokens: max_tokens.or(Some(4096)),
+        ..Default::default()
     };
 
     tauri::async_runtime::spawn_blocking(move || {
@@ -198,6 +202,7 @@ pub async fn extract_timeline(
         model,
         temperature: temperature.or(Some(0.7)),
         max_tokens: max_tokens.or(Some(4096)),
+        ..Default::default()
     };
 
     tauri::async_runtime::spawn_blocking(move || {
@@ -237,6 +242,7 @@ pub async fn extract_concepts(
         model,
         temperature: temperature.or(Some(0.7)),
         max_tokens: max_tokens.or(Some(4096)),
+        ..Default::default()
     };
 
     tauri::async_runtime::spawn_blocking(move || {
@@ -277,6 +283,7 @@ pub async fn chat_with_citations(
         model,
         temperature: temperature.or(Some(0.7)),
         max_tokens: max_tokens.or(Some(4096)),
+        ..Default::default()
     };
 
     tauri::async_runtime::spawn_blocking(move || {

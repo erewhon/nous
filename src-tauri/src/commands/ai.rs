@@ -32,6 +32,7 @@ pub fn ai_chat(
         model,
         temperature,
         max_tokens,
+        ..Default::default()
     };
 
     python_ai.chat(messages, config).map_err(|e| CommandError {
@@ -62,6 +63,7 @@ pub fn ai_chat_with_context(
         model,
         temperature,
         max_tokens,
+        ..Default::default()
     };
 
     python_ai
@@ -92,6 +94,7 @@ pub fn ai_summarize_page(
         model,
         temperature: Some(0.5),
         max_tokens: Some(1000),
+        ..Default::default()
     };
 
     python_ai
@@ -121,6 +124,7 @@ pub fn ai_suggest_tags(
         model,
         temperature: Some(0.3),
         max_tokens: Some(100),
+        ..Default::default()
     };
 
     python_ai
@@ -153,6 +157,7 @@ pub fn ai_suggest_related_pages(
         model,
         temperature: Some(0.3),
         max_tokens: Some(1000),
+        ..Default::default()
     };
 
     python_ai
@@ -185,6 +190,7 @@ pub async fn ai_chat_with_tools(
         model,
         temperature,
         max_tokens,
+        ..Default::default()
     };
 
     // Run the blocking Python call on a separate thread
@@ -225,6 +231,7 @@ pub async fn ai_chat_stream(
     current_notebook_id: Option<String>,
     provider_type: Option<String>,
     api_key: Option<String>,
+    base_url: Option<String>,
     model: Option<String>,
     temperature: Option<f64>,
     max_tokens: Option<i64>,
@@ -235,6 +242,7 @@ pub async fn ai_chat_stream(
     let config = AIConfig {
         provider_type: provider_type.unwrap_or_else(|| "openai".to_string()),
         api_key,
+        base_url,
         model,
         temperature,
         max_tokens,
@@ -333,6 +341,7 @@ pub async fn ai_summarize_pages(
         model,
         temperature: Some(0.5),
         max_tokens: Some(4096),
+        ..Default::default()
     };
 
     tauri::async_runtime::spawn_blocking(move || {

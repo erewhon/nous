@@ -928,6 +928,7 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
         currentNotebookId: selectedNotebookId || undefined,
         providerType: resolvedProvider,
         apiKey: resolvedProviderConfig?.apiKey || undefined,
+        baseUrl: resolvedProviderConfig?.baseUrl || undefined,
         model: resolvedModel || undefined,
         temperature: settings.temperature,
         maxTokens: settings.maxTokens,
