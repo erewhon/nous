@@ -133,6 +133,12 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
     ? sections.find((s) => s.id === currentPage.sectionId)
     : undefined;
 
+  // Reset chat model override when notebook changes (so notebook/section/page defaults take effect)
+  const effectiveNotebookId = currentNotebook?.id;
+  useEffect(() => {
+    setChatModelOverride(null);
+  }, [effectiveNotebookId]);
+
   // Handle locking context to current page
   const handleLockContext = useCallback(() => {
     if (currentPage && currentNotebook) {
