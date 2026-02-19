@@ -81,14 +81,16 @@ class NousStorage:
             pages_dir = d / "pages"
             page_count = len(list(pages_dir.glob("*.json"))) if pages_dir.exists() else 0
 
-            results.append({
-                "id": nb["id"],
-                "name": nb.get("name", ""),
-                "icon": nb.get("icon"),
-                "sectionsEnabled": nb.get("sectionsEnabled", False),
-                "archived": nb.get("archived", False),
-                "pageCount": page_count,
-            })
+            results.append(
+                {
+                    "id": nb["id"],
+                    "name": nb.get("name", ""),
+                    "icon": nb.get("icon"),
+                    "sectionsEnabled": nb.get("sectionsEnabled", False),
+                    "archived": nb.get("archived", False),
+                    "pageCount": page_count,
+                }
+            )
 
         return results
 
@@ -159,14 +161,16 @@ class NousStorage:
                 continue
             if section_id and f.get("sectionId") != section_id:
                 continue
-            results.append({
-                "id": f["id"],
-                "name": f.get("name", ""),
-                "parentId": f.get("parentId"),
-                "sectionId": f.get("sectionId"),
-                "isArchived": f.get("isArchived", False),
-                "position": f.get("position", 0),
-            })
+            results.append(
+                {
+                    "id": f["id"],
+                    "name": f.get("name", ""),
+                    "parentId": f.get("parentId"),
+                    "sectionId": f.get("sectionId"),
+                    "isArchived": f.get("isArchived", False),
+                    "position": f.get("position", 0),
+                }
+            )
 
         return results
 
@@ -220,6 +224,63 @@ class NousStorage:
 
         return {"id": folder["id"], "name": folder["name"]}
 
+    # --- Files / Databases ---
+
+    def _files_dir(self, notebook_id: str) -> Path:
+        return self._notebook_dir(notebook_id) / "files"
+
+    def _database_path(self, notebook_id: str, page_id: str) -> Path:
+        return self._files_dir(notebook_id) / f"{page_id}.database"
+
+    def read_database_content(self, notebook_id: str, page_id: str) -> dict | None:
+        """Read and parse the .database JSON file for a database page."""
+        path = self._database_path(notebook_id, page_id)
+        if not path.exists():
+            return None
+        try:
+            return json.loads(path.read_text())
+        except (json.JSONDecodeError, OSError):
+            return None
+
+    def write_database_content(self, notebook_id: str, page_id: str, content: dict) -> None:
+        """Atomic write of .database file (write .tmp then rename)."""
+        files_dir = self._files_dir(notebook_id)
+        files_dir.mkdir(parents=True, exist_ok=True)
+        db_path = self._database_path(notebook_id, page_id)
+        tmp = db_path.with_suffix(".database.tmp")
+        tmp.write_text(json.dumps(content, indent=2) + "\n")
+        tmp.rename(db_path)
+
+    def list_database_pages(
+        self,
+        notebook_id: str,
+        folder_id: str | None = None,
+        section_id: str | None = None,
+    ) -> list[dict]:
+        """List pages with pageType == 'database', enriched with property/row counts."""
+        pages = self.list_pages(
+            notebook_id, folder_id=folder_id, section_id=section_id, limit=10000
+        )
+        results = []
+        for p in pages:
+            if p.get("pageType") != "database":
+                continue
+            db = self.read_database_content(notebook_id, p["id"])
+            prop_count = len(db.get("properties", [])) if db else 0
+            row_count = len(db.get("rows", [])) if db else 0
+            results.append(
+                {
+                    "id": p["id"],
+                    "title": p["title"],
+                    "tags": p.get("tags", []),
+                    "folderId": p.get("folderId"),
+                    "sectionId": p.get("sectionId"),
+                    "propertyCount": prop_count,
+                    "rowCount": row_count,
+                }
+            )
+        return results
+
     # --- Pages ---
 
     def _pages_dir(self, notebook_id: str) -> Path:
@@ -253,17 +314,19 @@ class NousStorage:
             if tag and tag.lower() not in [t.lower() for t in page.get("tags", [])]:
                 continue
 
-            results.append({
-                "id": page["id"],
-                "title": page.get("title", ""),
-                "tags": page.get("tags", []),
-                "folderId": page.get("folderId"),
-                "sectionId": page.get("sectionId"),
-                "pageType": page.get("pageType", "standard"),
-                "isArchived": page.get("isArchived", False),
-                "updatedAt": page.get("updatedAt", ""),
-                "createdAt": page.get("createdAt", ""),
-            })
+            results.append(
+                {
+                    "id": page["id"],
+                    "title": page.get("title", ""),
+                    "tags": page.get("tags", []),
+                    "folderId": page.get("folderId"),
+                    "sectionId": page.get("sectionId"),
+                    "pageType": page.get("pageType", "standard"),
+                    "isArchived": page.get("isArchived", False),
+                    "updatedAt": page.get("updatedAt", ""),
+                    "createdAt": page.get("createdAt", ""),
+                }
+            )
 
         # Sort by updatedAt descending
         results.sort(key=lambda p: p.get("updatedAt", ""), reverse=True)

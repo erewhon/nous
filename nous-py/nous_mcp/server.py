@@ -11,6 +11,7 @@ import logging
 import os
 import sys
 from datetime import UTC, datetime
+from uuid import uuid4
 
 from mcp.server.fastmcp import FastMCP
 
@@ -250,11 +251,14 @@ def create_page(
         section_id=section_id,
     )
 
-    return json.dumps({
-        "id": page["id"],
-        "title": page["title"],
-        "notebookId": nb["id"],
-    }, indent=2)
+    return json.dumps(
+        {
+            "id": page["id"],
+            "title": page["title"],
+            "notebookId": nb["id"],
+        },
+        indent=2,
+    )
 
 
 @mcp.tool()
@@ -298,11 +302,14 @@ def append_to_page(
         content=updated_content,
     )
 
-    return json.dumps({
-        "id": pg["id"],
-        "title": pg["title"],
-        "blocksAdded": len(new_blocks),
-    }, indent=2)
+    return json.dumps(
+        {
+            "id": pg["id"],
+            "title": pg["title"],
+            "blocksAdded": len(new_blocks),
+        },
+        indent=2,
+    )
 
 
 @mcp.tool()
@@ -354,10 +361,13 @@ def update_page(
         tags=tag_list,
     )
 
-    return json.dumps({
-        "id": updated["id"],
-        "title": updated["title"],
-    }, indent=2)
+    return json.dumps(
+        {
+            "id": updated["id"],
+            "title": updated["title"],
+        },
+        indent=2,
+    )
 
 
 @mcp.tool()
@@ -390,14 +400,15 @@ def create_folder(
         sec = storage.resolve_section(nb["id"], section)
         section_id = sec["id"]
 
-    folder = storage.create_folder(
-        nb["id"], name, parent_id=parent_id, section_id=section_id
-    )
+    folder = storage.create_folder(nb["id"], name, parent_id=parent_id, section_id=section_id)
 
-    return json.dumps({
-        "id": folder["id"],
-        "name": folder["name"],
-    }, indent=2)
+    return json.dumps(
+        {
+            "id": folder["id"],
+            "name": folder["name"],
+        },
+        indent=2,
+    )
 
 
 @mcp.tool()
@@ -445,12 +456,15 @@ def move_page(
         extra_fields=extra,
     )
 
-    return json.dumps({
-        "id": updated["id"],
-        "title": updated["title"],
-        "folderId": updated.get("folderId"),
-        "sectionId": updated.get("sectionId"),
-    }, indent=2)
+    return json.dumps(
+        {
+            "id": updated["id"],
+            "title": updated["title"],
+            "folderId": updated.get("folderId"),
+            "sectionId": updated.get("sectionId"),
+        },
+        indent=2,
+    )
 
 
 @mcp.tool()
@@ -496,11 +510,481 @@ def manage_tags(
         tags=tag_set,
     )
 
-    return json.dumps({
-        "id": updated["id"],
-        "title": updated["title"],
-        "tags": updated.get("tags", []),
-    }, indent=2)
+    return json.dumps(
+        {
+            "id": updated["id"],
+            "title": updated["title"],
+            "tags": updated.get("tags", []),
+        },
+        indent=2,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Database tools
+# ---------------------------------------------------------------------------
+
+OPTION_COLORS = [
+    "#ef4444",
+    "#f97316",
+    "#eab308",
+    "#22c55e",
+    "#06b6d4",
+    "#3b82f6",
+    "#8b5cf6",
+    "#ec4899",
+    "#6b7280",
+    "#a855f7",
+]
+
+
+def _build_property(spec: dict, color_index: int) -> tuple[dict, int]:
+    """Convert a user-friendly property spec to a full PropertyDef with UUIDs.
+
+    Returns (property_dict, updated_color_index).
+    """
+    prop: dict = {
+        "id": str(uuid4()),
+        "name": spec["name"],
+        "type": spec["type"],
+    }
+    if spec["type"] in ("select", "multiSelect") and "options" in spec:
+        options = []
+        for label in spec["options"]:
+            options.append(
+                {
+                    "id": str(uuid4()),
+                    "label": label,
+                    "color": OPTION_COLORS[color_index % len(OPTION_COLORS)],
+                }
+            )
+            color_index += 1
+        prop["options"] = options
+    return prop, color_index
+
+
+def _resolve_cell_value(value: object, prop: dict) -> object:
+    """Resolve a user-friendly cell value to the internal storage format.
+
+    For select: label string → option ID string.
+    For multiSelect: list of label strings → list of option ID strings.
+    Auto-creates missing options.
+    """
+    if prop["type"] == "select" and isinstance(value, str):
+        options = prop.get("options", [])
+        for opt in options:
+            if opt["label"].lower() == value.lower():
+                return opt["id"]
+        # Auto-create option
+        new_opt = {
+            "id": str(uuid4()),
+            "label": value,
+            "color": OPTION_COLORS[len(options) % len(OPTION_COLORS)],
+        }
+        options.append(new_opt)
+        prop["options"] = options
+        return new_opt["id"]
+
+    if prop["type"] == "multiSelect" and isinstance(value, list):
+        options = prop.get("options", [])
+        result_ids = []
+        for label in value:
+            found = False
+            for opt in options:
+                if opt["label"].lower() == label.lower():
+                    result_ids.append(opt["id"])
+                    found = True
+                    break
+            if not found:
+                new_opt = {
+                    "id": str(uuid4()),
+                    "label": label,
+                    "color": OPTION_COLORS[len(options) % len(OPTION_COLORS)],
+                }
+                options.append(new_opt)
+                prop["options"] = options
+                result_ids.append(new_opt["id"])
+        return result_ids
+
+    return value
+
+
+def _resolve_option_label(value: object, prop: dict) -> object:
+    """Resolve internal cell value to display labels (for table output)."""
+    if prop["type"] == "select" and isinstance(value, str):
+        for opt in prop.get("options", []):
+            if opt["id"] == value:
+                return opt["label"]
+        return value
+
+    if prop["type"] == "multiSelect" and isinstance(value, list):
+        labels = []
+        opt_map = {opt["id"]: opt["label"] for opt in prop.get("options", [])}
+        for v in value:
+            labels.append(opt_map.get(v, v))
+        return ", ".join(labels)
+
+    if isinstance(value, bool):
+        return str(value).lower()
+
+    return value if value is not None else ""
+
+
+def _format_database_as_table(db_content: dict, title: str) -> str:
+    """Render database content as a markdown table with YAML frontmatter."""
+    properties = db_content.get("properties", [])
+    rows = db_content.get("rows", [])
+
+    # Frontmatter
+    prop_summary = ", ".join(f"{p['name']} ({p['type']})" for p in properties)
+    lines = [
+        "---",
+        f"title: {title}",
+        f"properties: {prop_summary}",
+        f"rows: {len(rows)}",
+        "---",
+        "",
+    ]
+
+    if not properties:
+        lines.append("(no properties defined)")
+        return "\n".join(lines)
+
+    # Header row
+    headers = [p["name"] for p in properties]
+    lines.append("| " + " | ".join(headers) + " |")
+    lines.append("|" + "|".join("---" for _ in headers) + "|")
+
+    # Data rows
+    for row in rows:
+        cells = row.get("cells", {})
+        values = []
+        for p in properties:
+            raw = cells.get(p["id"])
+            display = _resolve_option_label(raw, p)
+            # Escape pipes in cell values
+            values.append(str(display).replace("|", "\\|"))
+        lines.append("| " + " | ".join(values) + " |")
+
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def list_databases(
+    notebook: str,
+    folder: str | None = None,
+    section: str | None = None,
+) -> str:
+    """List databases in a notebook.
+
+    Args:
+        notebook: Notebook name or UUID (case-insensitive prefix match supported).
+        folder: Optional folder name or UUID to filter by.
+        section: Optional section name or UUID to filter by.
+
+    Returns JSON array of databases with id, title, tags, folderId,
+    sectionId, propertyCount, rowCount.
+    """
+    storage = _get_storage()
+    nb = storage.resolve_notebook(notebook)
+
+    folder_id = None
+    if folder:
+        f = storage.resolve_folder(nb["id"], folder)
+        folder_id = f["id"]
+
+    section_id = None
+    if section:
+        sec = storage.resolve_section(nb["id"], section)
+        section_id = sec["id"]
+
+    databases = storage.list_database_pages(nb["id"], folder_id=folder_id, section_id=section_id)
+    return json.dumps(databases, indent=2)
+
+
+@mcp.tool()
+def get_database(
+    notebook: str,
+    database: str,
+    format: str = "table",
+) -> str:
+    """Get the full content of a database.
+
+    Args:
+        notebook: Notebook name or UUID.
+        database: Database title (prefix match) or UUID.
+        format: Output format — "table" (default, markdown table with
+            YAML frontmatter) or "json" (raw database JSON).
+
+    Returns the database content in the requested format.
+    """
+    storage = _get_storage()
+    nb = storage.resolve_notebook(notebook)
+    pg = storage.resolve_page(nb["id"], database)
+
+    if pg.get("pageType") != "database":
+        page_type = pg.get("pageType")
+        raise ValueError(f"Page '{pg.get('title')}' is not a database (pageType: {page_type})")
+
+    db_content = storage.read_database_content(nb["id"], pg["id"])
+    if db_content is None:
+        raise ValueError(f"Database file not found for page '{pg.get('title')}'")
+
+    if format == "json":
+        return json.dumps(db_content, indent=2)
+
+    return _format_database_as_table(db_content, pg.get("title", ""))
+
+
+@mcp.tool()
+def create_database(
+    notebook: str,
+    title: str,
+    properties: str,
+    folder: str | None = None,
+    section: str | None = None,
+    tags: str | None = None,
+) -> str:
+    """Create a new database in a notebook.
+
+    Args:
+        notebook: Notebook name or UUID.
+        title: Database title.
+        properties: JSON string describing columns, e.g.
+            '[{"name": "Name", "type": "text"},
+            {"name": "Status", "type": "select",
+            "options": ["Todo", "In Progress", "Done"]}]'.
+            Supported types: text, number, select, multiSelect,
+            checkbox, date, url.
+        folder: Optional folder name or UUID to place the database in.
+        section: Optional section name or UUID.
+        tags: Optional comma-separated tags.
+
+    Returns JSON with id, title, notebookId, propertyCount.
+    """
+    storage = _get_storage()
+    nb = storage.resolve_notebook(notebook)
+
+    folder_id = None
+    if folder:
+        f = storage.resolve_folder(nb["id"], folder)
+        folder_id = f["id"]
+
+    section_id = None
+    if section:
+        sec = storage.resolve_section(nb["id"], section)
+        section_id = sec["id"]
+
+    tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
+
+    prop_specs = json.loads(properties)
+    built_properties = []
+    color_idx = 0
+    for spec in prop_specs:
+        prop, color_idx = _build_property(spec, color_idx)
+        built_properties.append(prop)
+
+    # Pre-generate page ID so we can reference it in sourceFile
+    page_id = str(uuid4())
+
+    # Create the page metadata
+    from nous_ai.page_storage import NousPageStorage
+
+    page_storage = NousPageStorage(data_dir=storage.library_path, client_id="nous-mcp")
+    page = page_storage.create_page(
+        notebook_id=nb["id"],
+        title=title,
+        blocks=[],
+        tags=tag_list,
+        folder_id=folder_id,
+        section_id=section_id,
+        page_id=page_id,
+        extra_fields={
+            "pageType": "database",
+            "sourceFile": f"files/{page_id}.database",
+            "storageMode": "embedded",
+            "fileExtension": "database",
+        },
+    )
+
+    # Create the .database file
+    db_content = {
+        "version": 2,
+        "properties": built_properties,
+        "rows": [],
+        "views": [
+            {
+                "id": str(uuid4()),
+                "name": "Table",
+                "type": "table",
+                "sorts": [],
+                "filters": [],
+                "config": {},
+            }
+        ],
+    }
+    storage.write_database_content(nb["id"], page_id, db_content)
+
+    return json.dumps(
+        {
+            "id": page["id"],
+            "title": page["title"],
+            "notebookId": nb["id"],
+            "propertyCount": len(built_properties),
+        },
+        indent=2,
+    )
+
+
+@mcp.tool()
+def add_database_rows(
+    notebook: str,
+    database: str,
+    rows: str,
+) -> str:
+    """Add rows to a database.
+
+    Args:
+        notebook: Notebook name or UUID.
+        database: Database title (prefix match) or UUID.
+        rows: JSON string of rows to add, e.g.
+            '[{"Name": "Task 1", "Status": "Todo"}]'.
+            Use property names as keys. For select/multiSelect,
+            use option labels (new options are auto-created).
+
+    Returns JSON with databaseId, rowsAdded, totalRows.
+    """
+    storage = _get_storage()
+    nb = storage.resolve_notebook(notebook)
+    pg = storage.resolve_page(nb["id"], database)
+
+    if pg.get("pageType") != "database":
+        raise ValueError(f"Page '{pg.get('title')}' is not a database")
+
+    db_content = storage.read_database_content(nb["id"], pg["id"])
+    if db_content is None:
+        raise ValueError(f"Database file not found for page '{pg.get('title')}'")
+
+    properties = db_content.get("properties", [])
+    prop_by_name = {p["name"].lower(): p for p in properties}
+
+    row_specs = json.loads(rows)
+    now = datetime.now(UTC).isoformat()
+
+    new_rows = []
+    for spec in row_specs:
+        cells: dict = {}
+        for key, value in spec.items():
+            prop = prop_by_name.get(key.lower())
+            if prop is None:
+                continue
+            cells[prop["id"]] = _resolve_cell_value(value, prop)
+
+        new_rows.append(
+            {
+                "id": str(uuid4()),
+                "cells": cells,
+                "createdAt": now,
+                "updatedAt": now,
+            }
+        )
+
+    db_content["rows"].extend(new_rows)
+    storage.write_database_content(nb["id"], pg["id"], db_content)
+
+    # Touch page updatedAt
+    from nous_ai.page_storage import NousPageStorage
+
+    page_storage = NousPageStorage(data_dir=storage.library_path, client_id="nous-mcp")
+    page_storage.update_page(notebook_id=nb["id"], page_id=pg["id"])
+
+    return json.dumps(
+        {
+            "databaseId": pg["id"],
+            "rowsAdded": len(new_rows),
+            "totalRows": len(db_content["rows"]),
+        },
+        indent=2,
+    )
+
+
+@mcp.tool()
+def update_database_rows(
+    notebook: str,
+    database: str,
+    updates: str,
+) -> str:
+    """Update rows in a database.
+
+    Args:
+        notebook: Notebook name or UUID.
+        database: Database title (prefix match) or UUID.
+        updates: JSON string of updates, e.g.
+            '[{"row": 0, "cells": {"Status": "Done"}}]'.
+            "row" can be a 0-based index or a row UUID.
+            Cell keys are property names; select values are
+            option labels.
+
+    Returns JSON with databaseId, rowsUpdated.
+    """
+    storage = _get_storage()
+    nb = storage.resolve_notebook(notebook)
+    pg = storage.resolve_page(nb["id"], database)
+
+    if pg.get("pageType") != "database":
+        raise ValueError(f"Page '{pg.get('title')}' is not a database")
+
+    db_content = storage.read_database_content(nb["id"], pg["id"])
+    if db_content is None:
+        raise ValueError(f"Database file not found for page '{pg.get('title')}'")
+
+    properties = db_content.get("properties", [])
+    prop_by_name = {p["name"].lower(): p for p in properties}
+    existing_rows = db_content.get("rows", [])
+    row_id_map = {r["id"]: i for i, r in enumerate(existing_rows)}
+
+    update_specs = json.loads(updates)
+    now = datetime.now(UTC).isoformat()
+    updated_count = 0
+
+    for spec in update_specs:
+        row_ref = spec["row"]
+        # Resolve row by index or UUID
+        if isinstance(row_ref, int):
+            if row_ref < 0 or row_ref >= len(existing_rows):
+                continue
+            row_idx = row_ref
+        else:
+            row_idx = row_id_map.get(str(row_ref))
+            if row_idx is None:
+                continue
+
+        row = existing_rows[row_idx]
+        for key, value in spec.get("cells", {}).items():
+            prop = prop_by_name.get(key.lower())
+            if prop is None:
+                continue
+            row["cells"][prop["id"]] = _resolve_cell_value(value, prop)
+
+        row["updatedAt"] = now
+        updated_count += 1
+
+    db_content["rows"] = existing_rows
+    storage.write_database_content(nb["id"], pg["id"], db_content)
+
+    # Touch page updatedAt
+    from nous_ai.page_storage import NousPageStorage
+
+    page_storage = NousPageStorage(data_dir=storage.library_path, client_id="nous-mcp")
+    page_storage.update_page(notebook_id=nb["id"], page_id=pg["id"])
+
+    return json.dumps(
+        {
+            "databaseId": pg["id"],
+            "rowsUpdated": updated_count,
+        },
+        indent=2,
+    )
 
 
 # ---------------------------------------------------------------------------
