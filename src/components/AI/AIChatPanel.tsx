@@ -614,6 +614,21 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
               browserResult: String(error),
             });
           }
+        } else if (action.tool.startsWith("nous_")) {
+          // Storage tools execute in Python — just acknowledge and reload
+          created.push({
+            type: "info",
+            name: `${action.tool} completed`,
+          });
+          // Reload pages if the tool might have modified data
+          if (
+            selectedNotebookId &&
+            !action.tool.startsWith("nous_list") &&
+            !action.tool.startsWith("nous_get") &&
+            !action.tool.startsWith("nous_search")
+          ) {
+            await loadPages(selectedNotebookId);
+          }
         } else if (action.tool === "create_page") {
           const args = action.arguments as unknown as CreatePageArgs;
 

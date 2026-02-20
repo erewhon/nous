@@ -29,7 +29,7 @@ def parse_mcp_tool_name(namespaced_name: str) -> tuple[str, str]:
     """Parse 'mcp:server:tool' -> (server_name, tool_name)."""
     if not is_mcp_tool(namespaced_name):
         raise ValueError(f"Not an MCP tool: {namespaced_name}")
-    parts = namespaced_name[len(MCP_TOOL_PREFIX):].split(":", 1)
+    parts = namespaced_name[len(MCP_TOOL_PREFIX) :].split(":", 1)
     if len(parts) != 2:
         raise ValueError(f"Invalid MCP tool name format: {namespaced_name}")
     return parts[0], parts[1]
@@ -45,17 +45,22 @@ def convert_mcp_tools_to_openai_format(mcp_tools: list[MCPTool]) -> list[dict]:
     tools = []
     for tool in mcp_tools:
         namespaced_name = format_mcp_tool_name(tool.server_name, tool.name)
-        tools.append({
-            "type": "function",
-            "function": {
-                "name": namespaced_name,
-                "description": tool.description or f"MCP tool: {tool.name} from {tool.server_name}",
-                "parameters": tool.input_schema if tool.input_schema else {
-                    "type": "object",
-                    "properties": {},
+        tools.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": namespaced_name,
+                    "description": tool.description
+                    or f"MCP tool: {tool.name} from {tool.server_name}",
+                    "parameters": tool.input_schema
+                    if tool.input_schema
+                    else {
+                        "type": "object",
+                        "properties": {},
+                    },
                 },
-            },
-        })
+            }
+        )
     return tools
 
 
@@ -92,6 +97,7 @@ def _split_into_chunks(text: str, chunk_size: int = 20) -> Generator[str, None, 
 def _emit_chunks_with_delay(callback: Any, event_type: str, text: str) -> None:
     """Emit text chunks with a small delay for streaming effect."""
     import time
+
     for chunk in _split_into_chunks(text):
         callback({"type": event_type, "content": chunk})
         time.sleep(0.02)  # 20ms delay between chunks for visible streaming
@@ -107,18 +113,15 @@ NOTEBOOK_TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "name": {
-                        "type": "string",
-                        "description": "The name of the notebook to create"
-                    },
+                    "name": {"type": "string", "description": "The name of the notebook to create"},
                     "description": {
                         "type": "string",
-                        "description": "Optional description of the notebook's purpose"
-                    }
+                        "description": "Optional description of the notebook's purpose",
+                    },
                 },
-                "required": ["name"]
-            }
-        }
+                "required": ["name"],
+            },
+        },
     },
     {
         "type": "function",
@@ -130,12 +133,9 @@ NOTEBOOK_TOOLS = [
                 "properties": {
                     "notebook_name": {
                         "type": "string",
-                        "description": "Name of the notebook to create the page in. Use 'current' for the currently selected notebook, or specify a notebook name."
+                        "description": "Name of the notebook to create the page in. Use 'current' for the currently selected notebook, or specify a notebook name.",
                     },
-                    "title": {
-                        "type": "string",
-                        "description": "Title of the page"
-                    },
+                    "title": {"type": "string", "description": "Title of the page"},
                     "content_blocks": {
                         "type": "array",
                         "description": "Array of content blocks in Editor.js format",
@@ -144,26 +144,33 @@ NOTEBOOK_TOOLS = [
                             "properties": {
                                 "type": {
                                     "type": "string",
-                                    "enum": ["paragraph", "header", "list", "checklist", "code", "quote"],
-                                    "description": "Type of the block"
+                                    "enum": [
+                                        "paragraph",
+                                        "header",
+                                        "list",
+                                        "checklist",
+                                        "code",
+                                        "quote",
+                                    ],
+                                    "description": "Type of the block",
                                 },
                                 "data": {
                                     "type": "object",
-                                    "description": "Block-specific data. For paragraph: {text}. For header: {text, level}. For list: {style, items}. For checklist: {items: [{text, checked}]}. For code: {code, language}. For quote: {text, caption}."
-                                }
+                                    "description": "Block-specific data. For paragraph: {text}. For header: {text, level}. For list: {style, items}. For checklist: {items: [{text, checked}]}. For code: {code, language}. For quote: {text, caption}.",
+                                },
                             },
-                            "required": ["type", "data"]
-                        }
+                            "required": ["type", "data"],
+                        },
                     },
                     "tags": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Optional tags for the page"
-                    }
+                        "description": "Optional tags for the page",
+                    },
                 },
-                "required": ["notebook_name", "title", "content_blocks"]
-            }
-        }
+                "required": ["notebook_name", "title", "content_blocks"],
+            },
+        },
     },
     {
         "type": "function",
@@ -175,17 +182,17 @@ NOTEBOOK_TOOLS = [
                 "properties": {
                     "action_name": {
                         "type": "string",
-                        "description": "Name of the action to run. This can be a partial match - the system will find the best matching action."
+                        "description": "Name of the action to run. This can be a partial match - the system will find the best matching action.",
                     },
                     "variables": {
                         "type": "object",
                         "description": "Optional variables to pass to the action. Keys are variable names, values are strings.",
-                        "additionalProperties": {"type": "string"}
-                    }
+                        "additionalProperties": {"type": "string"},
+                    },
                 },
-                "required": ["action_name"]
-            }
-        }
+                "required": ["action_name"],
+            },
+        },
     },
     {
         "type": "function",
@@ -197,13 +204,20 @@ NOTEBOOK_TOOLS = [
                 "properties": {
                     "category": {
                         "type": "string",
-                        "enum": ["agileResults", "dailyRoutines", "weeklyReviews", "organization", "custom", "all"],
-                        "description": "Filter by action category. Use 'all' to see all actions."
+                        "enum": [
+                            "agileResults",
+                            "dailyRoutines",
+                            "weeklyReviews",
+                            "organization",
+                            "custom",
+                            "all",
+                        ],
+                        "description": "Filter by action category. Use 'all' to see all actions.",
                     }
                 },
-                "required": []
-            }
-        }
+                "required": [],
+            },
+        },
     },
 ]
 
@@ -218,22 +232,842 @@ BROWSER_TOOL = {
             "properties": {
                 "task": {
                     "type": "string",
-                    "description": "Detailed description of what to do in the browser. Be specific about: the website to visit, actions to take, and what information to extract. Example: 'Go to github.com/browser-use/browser-use and extract the number of stars and the latest release version'"
+                    "description": "Detailed description of what to do in the browser. Be specific about: the website to visit, actions to take, and what information to extract. Example: 'Go to github.com/browser-use/browser-use and extract the number of stars and the latest release version'",
                 },
                 "capture_screenshot": {
                     "type": "boolean",
                     "description": "Whether to capture a screenshot of the final page state",
-                    "default": False
-                }
+                    "default": False,
+                },
             },
-            "required": ["task"]
-        }
-    }
+            "required": ["task"],
+        },
+    },
 }
 
 # Add browser tool only if browser-use is available
 if BROWSER_USE_AVAILABLE:
     NOTEBOOK_TOOLS.append(BROWSER_TOOL)
+
+# Storage tools — these execute directly in Python via NousStorage/NousPageStorage
+STORAGE_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "nous_list_notebooks",
+            "description": "List all notebooks. Returns JSON with id, name, pageCount.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "nous_list_sections",
+            "description": "List sections in a notebook.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "notebook": {
+                        "type": "string",
+                        "description": "Notebook name (case-insensitive prefix match)",
+                    }
+                },
+                "required": ["notebook"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "nous_list_folders",
+            "description": "List folders in a notebook.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "notebook": {
+                        "type": "string",
+                        "description": "Notebook name (case-insensitive prefix match)",
+                    },
+                    "section": {
+                        "type": "string",
+                        "description": "Optional section name to filter by",
+                    },
+                },
+                "required": ["notebook"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "nous_list_pages",
+            "description": (
+                "List pages in a notebook, sorted by last updated."
+                " Returns JSON with id, title, tags, pageType, updatedAt."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "notebook": {
+                        "type": "string",
+                        "description": "Notebook name (case-insensitive prefix match)",
+                    },
+                    "folder": {
+                        "type": "string",
+                        "description": "Optional folder name to filter by",
+                    },
+                    "section": {
+                        "type": "string",
+                        "description": "Optional section name to filter by",
+                    },
+                    "tag": {
+                        "type": "string",
+                        "description": "Optional tag to filter by",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max pages to return (default 50)",
+                    },
+                },
+                "required": ["notebook"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "nous_get_page",
+            "description": (
+                "Get the full content of a page as markdown."
+                " Use this to read page content before answering questions about it."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "notebook": {
+                        "type": "string",
+                        "description": "Notebook name",
+                    },
+                    "page": {
+                        "type": "string",
+                        "description": "Page title (prefix match) or UUID",
+                    },
+                    "format": {
+                        "type": "string",
+                        "enum": ["markdown", "json"],
+                        "description": "Output format (default markdown)",
+                    },
+                },
+                "required": ["notebook", "page"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "nous_search_pages",
+            "description": (
+                "Search for pages by text content or title. Returns matches with snippets."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search query (case-insensitive substring)",
+                    },
+                    "notebook": {
+                        "type": "string",
+                        "description": "Optional notebook name to limit search to",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max results (default 20)",
+                    },
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "nous_append_to_page",
+            "description": "Append markdown content to an existing page.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "notebook": {
+                        "type": "string",
+                        "description": "Notebook name",
+                    },
+                    "page": {
+                        "type": "string",
+                        "description": "Page title (prefix match) or UUID",
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Markdown text to append",
+                    },
+                },
+                "required": ["notebook", "page", "content"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "nous_update_page",
+            "description": ("Replace the content, title, or tags of an existing page."),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "notebook": {
+                        "type": "string",
+                        "description": "Notebook name",
+                    },
+                    "page": {
+                        "type": "string",
+                        "description": "Page title (prefix match) or UUID",
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "New markdown content (replaces all blocks)",
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "New page title",
+                    },
+                    "tags": {
+                        "type": "string",
+                        "description": "New comma-separated tags (replaces all)",
+                    },
+                },
+                "required": ["notebook", "page"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "nous_create_folder",
+            "description": "Create a new folder in a notebook.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "notebook": {
+                        "type": "string",
+                        "description": "Notebook name",
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "Folder name",
+                    },
+                    "parent": {
+                        "type": "string",
+                        "description": "Optional parent folder name for nesting",
+                    },
+                    "section": {
+                        "type": "string",
+                        "description": "Optional section name",
+                    },
+                },
+                "required": ["notebook", "name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "nous_move_page",
+            "description": "Move a page to a different folder and/or section.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "notebook": {
+                        "type": "string",
+                        "description": "Notebook name",
+                    },
+                    "page": {
+                        "type": "string",
+                        "description": "Page title (prefix match) or UUID",
+                    },
+                    "folder": {
+                        "type": "string",
+                        "description": "Target folder name. Omit to move to root.",
+                    },
+                    "section": {
+                        "type": "string",
+                        "description": "Target section name",
+                    },
+                },
+                "required": ["notebook", "page"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "nous_manage_tags",
+            "description": "Add or remove tags on a page.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "notebook": {
+                        "type": "string",
+                        "description": "Notebook name",
+                    },
+                    "page": {
+                        "type": "string",
+                        "description": "Page title (prefix match) or UUID",
+                    },
+                    "add": {
+                        "type": "string",
+                        "description": "Comma-separated tags to add",
+                    },
+                    "remove": {
+                        "type": "string",
+                        "description": "Comma-separated tags to remove",
+                    },
+                },
+                "required": ["notebook", "page"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "nous_list_databases",
+            "description": (
+                "List databases in a notebook."
+                " Returns JSON with id, title, propertyCount, rowCount."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "notebook": {
+                        "type": "string",
+                        "description": "Notebook name",
+                    },
+                    "folder": {
+                        "type": "string",
+                        "description": "Optional folder name to filter by",
+                    },
+                    "section": {
+                        "type": "string",
+                        "description": "Optional section name to filter by",
+                    },
+                },
+                "required": ["notebook"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "nous_get_database",
+            "description": ("Get the full content of a database as a markdown table or JSON."),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "notebook": {
+                        "type": "string",
+                        "description": "Notebook name",
+                    },
+                    "database": {
+                        "type": "string",
+                        "description": "Database title (prefix match) or UUID",
+                    },
+                    "format": {
+                        "type": "string",
+                        "enum": ["table", "json"],
+                        "description": "Output format (default table)",
+                    },
+                },
+                "required": ["notebook", "database"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "nous_create_database",
+            "description": (
+                "Create a new database with typed columns."
+                " Supported types: text, number, select, multiSelect,"
+                " checkbox, date, url."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "notebook": {
+                        "type": "string",
+                        "description": "Notebook name",
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Database title",
+                    },
+                    "properties": {
+                        "type": "string",
+                        "description": (
+                            "JSON array of columns, e.g."
+                            ' \'[{"name":"Name","type":"text"},'
+                            '{"name":"Status","type":"select",'
+                            '"options":["Todo","Done"]}]\''
+                        ),
+                    },
+                    "folder": {
+                        "type": "string",
+                        "description": "Optional folder name",
+                    },
+                    "section": {
+                        "type": "string",
+                        "description": "Optional section name",
+                    },
+                    "tags": {
+                        "type": "string",
+                        "description": "Optional comma-separated tags",
+                    },
+                },
+                "required": ["notebook", "title", "properties"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "nous_add_database_rows",
+            "description": (
+                "Add rows to a database. Use property names as keys."
+                " For select fields, use option labels."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "notebook": {
+                        "type": "string",
+                        "description": "Notebook name",
+                    },
+                    "database": {
+                        "type": "string",
+                        "description": "Database title (prefix match) or UUID",
+                    },
+                    "rows": {
+                        "type": "string",
+                        "description": (
+                            'JSON array of rows, e.g. \'[{"Name":"Task 1","Status":"Todo"}]\''
+                        ),
+                    },
+                },
+                "required": ["notebook", "database", "rows"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "nous_update_database_rows",
+            "description": (
+                "Update rows in a database by index or UUID. Cell keys are property names."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "notebook": {
+                        "type": "string",
+                        "description": "Notebook name",
+                    },
+                    "database": {
+                        "type": "string",
+                        "description": "Database title (prefix match) or UUID",
+                    },
+                    "updates": {
+                        "type": "string",
+                        "description": (
+                            'JSON array of updates, e.g. \'[{"row":0,"cells":{"Status":"Done"}}]\''
+                        ),
+                    },
+                },
+                "required": ["notebook", "database", "updates"],
+            },
+        },
+    },
+]
+
+# Names of tools that execute in Python via NousStorage
+STORAGE_TOOL_NAMES = {t["function"]["name"] for t in STORAGE_TOOLS}
+
+# Add storage tools to the main tool list
+NOTEBOOK_TOOLS.extend(STORAGE_TOOLS)
+
+
+def _execute_storage_tool(func_name: str, func_args: dict) -> str:
+    """Execute a storage tool directly in Python.
+
+    Returns a JSON string result. These tools bypass the frontend action
+    pipeline and operate directly on the Nous data files.
+    """
+    from datetime import UTC, datetime
+    from uuid import uuid4
+
+    from nous_ai.database_helpers import (
+        build_property,
+        format_database_as_table,
+        resolve_cell_value,
+    )
+    from nous_ai.page_storage import NousPageStorage
+    from nous_mcp.markdown import export_page_to_markdown, markdown_to_blocks
+    from nous_mcp.storage import NousStorage
+
+    storage = NousStorage.from_library_name()
+    page_storage = NousPageStorage(data_dir=storage.library_path, client_id="nous-agent")
+
+    def _resolve_notebook(name: str) -> dict:
+        return storage.resolve_notebook(name)
+
+    def _resolve_folder_id(nb_id: str, folder: str | None) -> str | None:
+        if not folder:
+            return None
+        return storage.resolve_folder(nb_id, folder)["id"]
+
+    def _resolve_section_id(nb_id: str, section: str | None) -> str | None:
+        if not section:
+            return None
+        return storage.resolve_section(nb_id, section)["id"]
+
+    try:
+        if func_name == "nous_list_notebooks":
+            notebooks = storage.list_notebooks()
+            return json.dumps(notebooks, indent=2)
+
+        if func_name == "nous_list_sections":
+            nb = _resolve_notebook(func_args["notebook"])
+            sections = storage.list_sections(nb["id"])
+            return json.dumps(sections, indent=2)
+
+        if func_name == "nous_list_folders":
+            nb = _resolve_notebook(func_args["notebook"])
+            section_id = _resolve_section_id(nb["id"], func_args.get("section"))
+            folders = storage.list_folders(nb["id"], section_id=section_id)
+            return json.dumps(folders, indent=2)
+
+        if func_name == "nous_list_pages":
+            nb = _resolve_notebook(func_args["notebook"])
+            folder_id = _resolve_folder_id(nb["id"], func_args.get("folder"))
+            section_id = _resolve_section_id(nb["id"], func_args.get("section"))
+            pages = storage.list_pages(
+                nb["id"],
+                folder_id=folder_id,
+                section_id=section_id,
+                tag=func_args.get("tag"),
+                limit=func_args.get("limit", 50),
+            )
+            return json.dumps(pages, indent=2)
+
+        if func_name == "nous_get_page":
+            nb = _resolve_notebook(func_args["notebook"])
+            pg = storage.resolve_page(nb["id"], func_args["page"])
+            fmt = func_args.get("format", "markdown")
+            if fmt == "json":
+                return json.dumps(pg, indent=2)
+            return export_page_to_markdown(pg)
+
+        if func_name == "nous_search_pages":
+            notebook_id = None
+            if func_args.get("notebook"):
+                nb = _resolve_notebook(func_args["notebook"])
+                notebook_id = nb["id"]
+            results = storage.search_pages(
+                func_args["query"],
+                notebook_id=notebook_id,
+                limit=func_args.get("limit", 20),
+            )
+            return json.dumps(results, indent=2)
+
+        if func_name == "nous_append_to_page":
+            nb = _resolve_notebook(func_args["notebook"])
+            pg = storage.resolve_page(nb["id"], func_args["page"])
+            new_blocks = markdown_to_blocks(func_args["content"])
+            if not new_blocks:
+                return json.dumps({"id": pg["id"], "title": pg["title"], "blocksAdded": 0})
+            existing = pg.get("content", {"version": "2.28.0", "blocks": []})
+            updated_content = {
+                "time": int(datetime.now(UTC).timestamp() * 1000),
+                "version": existing.get("version", "2.28.0"),
+                "blocks": existing.get("blocks", []) + new_blocks,
+            }
+            page_storage.update_page(
+                notebook_id=nb["id"],
+                page_id=pg["id"],
+                content=updated_content,
+            )
+            return json.dumps(
+                {
+                    "id": pg["id"],
+                    "title": pg["title"],
+                    "blocksAdded": len(new_blocks),
+                }
+            )
+
+        if func_name == "nous_update_page":
+            nb = _resolve_notebook(func_args["notebook"])
+            pg = storage.resolve_page(nb["id"], func_args["page"])
+            updated_content = None
+            if func_args.get("content") is not None:
+                blocks = markdown_to_blocks(func_args["content"])
+                existing = pg.get("content", {"version": "2.28.0"})
+                updated_content = {
+                    "time": int(datetime.now(UTC).timestamp() * 1000),
+                    "version": existing.get("version", "2.28.0"),
+                    "blocks": blocks,
+                }
+            tag_list = None
+            if func_args.get("tags") is not None:
+                tag_list = [t.strip() for t in func_args["tags"].split(",") if t.strip()]
+            updated = page_storage.update_page(
+                notebook_id=nb["id"],
+                page_id=pg["id"],
+                content=updated_content,
+                title=func_args.get("title"),
+                tags=tag_list,
+            )
+            return json.dumps(
+                {
+                    "id": updated["id"],
+                    "title": updated["title"],
+                }
+            )
+
+        if func_name == "nous_create_folder":
+            nb = _resolve_notebook(func_args["notebook"])
+            parent_id = _resolve_folder_id(nb["id"], func_args.get("parent"))
+            section_id = _resolve_section_id(nb["id"], func_args.get("section"))
+            folder = storage.create_folder(
+                nb["id"],
+                func_args["name"],
+                parent_id=parent_id,
+                section_id=section_id,
+            )
+            return json.dumps(folder)
+
+        if func_name == "nous_move_page":
+            nb = _resolve_notebook(func_args["notebook"])
+            pg = storage.resolve_page(nb["id"], func_args["page"])
+            folder_id = _resolve_folder_id(nb["id"], func_args.get("folder"))
+            section_id = _resolve_section_id(nb["id"], func_args.get("section"))
+            extra: dict[str, str | None] = {"folderId": folder_id}
+            if section_id is not None:
+                extra["sectionId"] = section_id
+            updated = page_storage.update_page(
+                notebook_id=nb["id"],
+                page_id=pg["id"],
+                extra_fields=extra,
+            )
+            return json.dumps(
+                {
+                    "id": updated["id"],
+                    "title": updated["title"],
+                    "folderId": updated.get("folderId"),
+                    "sectionId": updated.get("sectionId"),
+                }
+            )
+
+        if func_name == "nous_manage_tags":
+            nb = _resolve_notebook(func_args["notebook"])
+            pg = storage.resolve_page(nb["id"], func_args["page"])
+            existing_tags: list[str] = pg.get("tags", [])
+            tag_set = list(dict.fromkeys(existing_tags))
+            if func_args.get("add"):
+                for t in func_args["add"].split(","):
+                    t = t.strip()
+                    if t and t not in tag_set:
+                        tag_set.append(t)
+            if func_args.get("remove"):
+                remove_set = {
+                    t.strip().lower() for t in func_args["remove"].split(",") if t.strip()
+                }
+                tag_set = [t for t in tag_set if t.lower() not in remove_set]
+            updated = page_storage.update_page(
+                notebook_id=nb["id"],
+                page_id=pg["id"],
+                tags=tag_set,
+            )
+            return json.dumps(
+                {
+                    "id": updated["id"],
+                    "title": updated["title"],
+                    "tags": updated.get("tags", []),
+                }
+            )
+
+        # --- Database tools ---
+
+        if func_name == "nous_list_databases":
+            nb = _resolve_notebook(func_args["notebook"])
+            folder_id = _resolve_folder_id(nb["id"], func_args.get("folder"))
+            section_id = _resolve_section_id(nb["id"], func_args.get("section"))
+            databases = storage.list_database_pages(
+                nb["id"], folder_id=folder_id, section_id=section_id
+            )
+            return json.dumps(databases, indent=2)
+
+        if func_name == "nous_get_database":
+            nb = _resolve_notebook(func_args["notebook"])
+            pg = storage.resolve_page(nb["id"], func_args["database"])
+            if pg.get("pageType") != "database":
+                return json.dumps({"error": f"'{pg.get('title')}' is not a database"})
+            db_content = storage.read_database_content(nb["id"], pg["id"])
+            if db_content is None:
+                return json.dumps({"error": f"Database file not found for '{pg.get('title')}'"})
+            fmt = func_args.get("format", "table")
+            if fmt == "json":
+                return json.dumps(db_content, indent=2)
+            return format_database_as_table(db_content, pg.get("title", ""))
+
+        if func_name == "nous_create_database":
+            nb = _resolve_notebook(func_args["notebook"])
+            folder_id = _resolve_folder_id(nb["id"], func_args.get("folder"))
+            section_id = _resolve_section_id(nb["id"], func_args.get("section"))
+            tag_list = []
+            if func_args.get("tags"):
+                tag_list = [t.strip() for t in func_args["tags"].split(",") if t.strip()]
+            prop_specs = json.loads(func_args["properties"])
+            built_properties = []
+            color_idx = 0
+            for spec in prop_specs:
+                prop, color_idx = build_property(spec, color_idx)
+                built_properties.append(prop)
+
+            page_id = str(uuid4())
+            page = page_storage.create_page(
+                notebook_id=nb["id"],
+                title=func_args["title"],
+                blocks=[],
+                tags=tag_list,
+                folder_id=folder_id,
+                section_id=section_id,
+                page_id=page_id,
+                extra_fields={
+                    "pageType": "database",
+                    "sourceFile": f"files/{page_id}.database",
+                    "storageMode": "embedded",
+                    "fileExtension": "database",
+                },
+            )
+            db_content = {
+                "version": 2,
+                "properties": built_properties,
+                "rows": [],
+                "views": [
+                    {
+                        "id": str(uuid4()),
+                        "name": "Table",
+                        "type": "table",
+                        "sorts": [],
+                        "filters": [],
+                        "config": {},
+                    }
+                ],
+            }
+            storage.write_database_content(nb["id"], page_id, db_content)
+            return json.dumps(
+                {
+                    "id": page["id"],
+                    "title": page["title"],
+                    "notebookId": nb["id"],
+                    "propertyCount": len(built_properties),
+                }
+            )
+
+        if func_name == "nous_add_database_rows":
+            nb = _resolve_notebook(func_args["notebook"])
+            pg = storage.resolve_page(nb["id"], func_args["database"])
+            if pg.get("pageType") != "database":
+                return json.dumps({"error": f"'{pg.get('title')}' is not a database"})
+            db_content = storage.read_database_content(nb["id"], pg["id"])
+            if db_content is None:
+                return json.dumps({"error": "Database file not found"})
+
+            properties = db_content.get("properties", [])
+            prop_by_name = {p["name"].lower(): p for p in properties}
+            row_specs = json.loads(func_args["rows"])
+            now = datetime.now(UTC).isoformat()
+            new_rows = []
+            for spec in row_specs:
+                cells: dict = {}
+                for key, value in spec.items():
+                    prop = prop_by_name.get(key.lower())
+                    if prop is None:
+                        continue
+                    cells[prop["id"]] = resolve_cell_value(value, prop)
+                new_rows.append(
+                    {
+                        "id": str(uuid4()),
+                        "cells": cells,
+                        "createdAt": now,
+                        "updatedAt": now,
+                    }
+                )
+            db_content["rows"].extend(new_rows)
+            storage.write_database_content(nb["id"], pg["id"], db_content)
+            page_storage.update_page(notebook_id=nb["id"], page_id=pg["id"])
+            return json.dumps(
+                {
+                    "databaseId": pg["id"],
+                    "rowsAdded": len(new_rows),
+                    "totalRows": len(db_content["rows"]),
+                }
+            )
+
+        if func_name == "nous_update_database_rows":
+            nb = _resolve_notebook(func_args["notebook"])
+            pg = storage.resolve_page(nb["id"], func_args["database"])
+            if pg.get("pageType") != "database":
+                return json.dumps({"error": f"'{pg.get('title')}' is not a database"})
+            db_content = storage.read_database_content(nb["id"], pg["id"])
+            if db_content is None:
+                return json.dumps({"error": "Database file not found"})
+
+            properties = db_content.get("properties", [])
+            prop_by_name = {p["name"].lower(): p for p in properties}
+            existing_rows = db_content.get("rows", [])
+            row_id_map = {r["id"]: i for i, r in enumerate(existing_rows)}
+            update_specs = json.loads(func_args["updates"])
+            now = datetime.now(UTC).isoformat()
+            updated_count = 0
+            for spec in update_specs:
+                row_ref = spec["row"]
+                if isinstance(row_ref, int):
+                    if row_ref < 0 or row_ref >= len(existing_rows):
+                        continue
+                    row_idx = row_ref
+                else:
+                    row_idx = row_id_map.get(str(row_ref))
+                    if row_idx is None:
+                        continue
+                row = existing_rows[row_idx]
+                for key, value in spec.get("cells", {}).items():
+                    prop = prop_by_name.get(key.lower())
+                    if prop is None:
+                        continue
+                    row["cells"][prop["id"]] = resolve_cell_value(value, prop)
+                row["updatedAt"] = now
+                updated_count += 1
+            db_content["rows"] = existing_rows
+            storage.write_database_content(nb["id"], pg["id"], db_content)
+            page_storage.update_page(notebook_id=nb["id"], page_id=pg["id"])
+            return json.dumps(
+                {
+                    "databaseId": pg["id"],
+                    "rowsUpdated": updated_count,
+                }
+            )
+
+        return json.dumps({"error": f"Unknown storage tool: {func_name}"})
+
+    except Exception as e:
+        return json.dumps({"error": str(e)})
 
 
 async def chat(
@@ -313,7 +1147,9 @@ async def chat_with_context(
     messages: list[dict[str, str]] = []
 
     # Build system prompt with page context
-    system_parts = ["You are a helpful AI assistant integrated into a personal notebook application."]
+    system_parts = [
+        "You are a helpful AI assistant integrated into a personal notebook application."
+    ]
 
     if page_context:
         ctx = PageContext(**page_context)
@@ -398,15 +1234,37 @@ async def chat_with_tools(
     # Strong tool usage instructions - always appended
     tool_instructions = """
 CRITICAL TOOL USAGE INSTRUCTIONS:
-You have tools available: create_page, create_notebook, run_action, list_actions.
+You have tools for creating and managing content in the notebook application.
 
-When the user asks you to "create", "write", "make", "generate", or "save" ANY content (code, notes, documentation, etc.):
-1. You MUST use the create_page tool to actually create the page
-2. Do NOT just write the content in your response - actually CALL the create_page tool
-3. The create_page tool takes: notebook_name ("current" for selected notebook), title, content_blocks (array), and optional tags
-4. After calling create_page, provide a brief summary of what you created
+Page creation tools:
+- create_page: Create a new page with Editor.js blocks (notebook_name, title, content_blocks, tags)
+- create_notebook: Create a new notebook
 
-Example: If user says "Create a Python function that calculates factorial" - you should call create_page with the code, NOT just write the code in your response.
+Content management tools (nous_* prefix):
+- nous_list_notebooks, nous_list_pages, nous_list_folders, nous_list_sections: Browse notebook structure
+- nous_get_page: Read a page's full content as markdown
+- nous_search_pages: Search across all pages by title or content
+- nous_append_to_page: Add content to an existing page
+- nous_update_page: Replace content, title, or tags of a page
+- nous_create_folder: Create a folder in a notebook
+- nous_move_page: Move a page to a different folder/section
+- nous_manage_tags: Add or remove tags on a page
+
+Database tools:
+- nous_create_database: Create a structured database with typed columns
+- nous_list_databases: List databases in a notebook
+- nous_get_database: Read database content as a markdown table
+- nous_add_database_rows: Add rows to a database
+- nous_update_database_rows: Update existing database rows
+
+Action tools:
+- run_action: Run a custom automation workflow
+- list_actions: List available actions
+
+When the user asks you to "create", "write", "make", "generate", or "save" content:
+1. MUST use create_page or nous_create_database to actually create it
+2. Do NOT just write content in your response - CALL the appropriate tool
+3. After calling the tool, provide a brief summary of what you created
 """
 
     # Build system prompt - use custom prompt if provided, otherwise use default
@@ -424,7 +1282,9 @@ Example: If user says "Create a Python function that calculates factorial" - you
         system_parts.append(f"\nExisting notebooks: {', '.join(notebook_names)}")
 
     if current_notebook_id and available_notebooks:
-        current_nb = next((n for n in available_notebooks if n.get("id") == current_notebook_id), None)
+        current_nb = next(
+            (n for n in available_notebooks if n.get("id") == current_notebook_id), None
+        )
         if current_nb:
             system_parts.append(f"Currently selected notebook: {current_nb.get('name')}")
 
@@ -473,21 +1333,23 @@ Example: If user says "Create a Python function that calculates factorial" - you
         # Process tool calls if any
         while choice.finish_reason == "tool_calls" and choice.message.tool_calls:
             # Add assistant message with tool calls
-            oai_messages.append({
-                "role": "assistant",
-                "content": choice.message.content,
-                "tool_calls": [
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments
+            oai_messages.append(
+                {
+                    "role": "assistant",
+                    "content": choice.message.content,
+                    "tool_calls": [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments,
+                            },
                         }
-                    }
-                    for tc in choice.message.tool_calls
-                ]
-            })
+                        for tc in choice.message.tool_calls
+                    ],
+                }
+            )
 
             # Process each tool call
             for tool_call in choice.message.tool_calls:
@@ -512,17 +1374,17 @@ Example: If user says "Create a Python function that calculates factorial" - you
                 elif func_name == "list_actions":
                     result = "Listing actions"
                 elif func_name == "browse_web":
-                    task_preview = func_args.get('task', '')[:100]
+                    task_preview = func_args.get("task", "")[:100]
                     result = f"Browser task initiated: {task_preview}..."
+                elif func_name in STORAGE_TOOL_NAMES:
+                    result = _execute_storage_tool(func_name, func_args)
                 else:
                     result = "Action completed"
 
                 # Add tool result message
-                oai_messages.append({
-                    "role": "tool",
-                    "tool_call_id": tool_call.id,
-                    "content": result
-                })
+                oai_messages.append(
+                    {"role": "tool", "tool_call_id": tool_call.id, "content": result}
+                )
 
             # Continue conversation after tool calls
             response = await client.chat.completions.create(
@@ -549,7 +1411,7 @@ Example: If user says "Create a Python function that calculates factorial" - you
             {
                 "name": t["function"]["name"],
                 "description": t["function"]["description"],
-                "input_schema": t["function"]["parameters"]
+                "input_schema": t["function"]["parameters"],
             }
             for t in NOTEBOOK_TOOLS
         ]
@@ -604,16 +1466,16 @@ Example: If user says "Create a Python function that calculates factorial" - you
                     elif func_name == "list_actions":
                         result = "Listing actions"
                     elif func_name == "browse_web":
-                        task_preview = func_args.get('task', '')[:100]
+                        task_preview = func_args.get("task", "")[:100]
                         result = f"Browser task initiated: {task_preview}..."
+                    elif func_name in STORAGE_TOOL_NAMES:
+                        result = _execute_storage_tool(func_name, func_args)
                     else:
                         result = "Action completed"
 
-                    tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": block.id,
-                        "content": result
-                    })
+                    tool_results.append(
+                        {"type": "tool_result", "tool_use_id": block.id, "content": result}
+                    )
 
             # Add tool results
             ant_messages.append({"role": "user", "content": tool_results})
@@ -864,6 +1726,7 @@ Respond in the following JSON format:
     content = response.content
     try:
         import json
+
         # Find JSON in response
         start = content.find("{")
         end = content.rfind("}") + 1
@@ -905,8 +1768,15 @@ def chat_sync(
 ) -> dict[str, Any]:
     """Synchronous wrapper for chat function."""
     return asyncio.run(
-        chat(messages, provider_type, api_key, base_url=base_url, model=model,
-             temperature=temperature, max_tokens=max_tokens)
+        chat(
+            messages,
+            provider_type,
+            api_key,
+            base_url=base_url,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
     )
 
 
@@ -1078,10 +1948,12 @@ async def chat_with_tools_stream(
     if library_path:
         try:
             from nous_ai.mcp_client import get_manager
+
             mcp_manager = get_manager(library_path)
             mcp_tools = await mcp_manager.get_all_tools()
         except Exception as e:
             import logging
+
             logging.getLogger(__name__).warning(f"Failed to load MCP tools: {e}")
 
     # Merge NOTEBOOK_TOOLS with MCP tools
@@ -1092,15 +1964,37 @@ async def chat_with_tools_stream(
     # Strong tool usage instructions - always appended
     tool_instructions = """
 CRITICAL TOOL USAGE INSTRUCTIONS:
-You have tools available: create_page, create_notebook, run_action, list_actions.
+You have tools for creating and managing content in the notebook application.
 
-When the user asks you to "create", "write", "make", "generate", or "save" ANY content (code, notes, documentation, etc.):
-1. You MUST use the create_page tool to actually create the page
-2. Do NOT just write the content in your response - actually CALL the create_page tool
-3. The create_page tool takes: notebook_name ("current" for selected notebook), title, content_blocks (array), and optional tags
-4. After calling create_page, provide a brief summary of what you created
+Page creation tools:
+- create_page: Create a new page with Editor.js blocks (notebook_name, title, content_blocks, tags)
+- create_notebook: Create a new notebook
 
-Example: If user says "Create a Python function that calculates factorial" - you should call create_page with the code, NOT just write the code in your response.
+Content management tools (nous_* prefix):
+- nous_list_notebooks, nous_list_pages, nous_list_folders, nous_list_sections: Browse notebook structure
+- nous_get_page: Read a page's full content as markdown
+- nous_search_pages: Search across all pages by title or content
+- nous_append_to_page: Add content to an existing page
+- nous_update_page: Replace content, title, or tags of a page
+- nous_create_folder: Create a folder in a notebook
+- nous_move_page: Move a page to a different folder/section
+- nous_manage_tags: Add or remove tags on a page
+
+Database tools:
+- nous_create_database: Create a structured database with typed columns
+- nous_list_databases: List databases in a notebook
+- nous_get_database: Read database content as a markdown table
+- nous_add_database_rows: Add rows to a database
+- nous_update_database_rows: Update existing database rows
+
+Action tools:
+- run_action: Run a custom automation workflow
+- list_actions: List available actions
+
+When the user asks you to "create", "write", "make", "generate", or "save" content:
+1. MUST use create_page or nous_create_database to actually create it
+2. Do NOT just write content in your response - CALL the appropriate tool
+3. After calling the tool, provide a brief summary of what you created
 """
 
     # Build system prompt - use custom prompt if provided, otherwise use default
@@ -1118,7 +2012,9 @@ Example: If user says "Create a Python function that calculates factorial" - you
         system_parts.append(f"\nExisting notebooks: {', '.join(notebook_names)}")
 
     if current_notebook_id and available_notebooks:
-        current_nb = next((n for n in available_notebooks if n.get("id") == current_notebook_id), None)
+        current_nb = next(
+            (n for n in available_notebooks if n.get("id") == current_notebook_id), None
+        )
         if current_nb:
             system_parts.append(f"Currently selected notebook: {current_nb.get('name')}")
 
@@ -1141,9 +2037,14 @@ Example: If user says "Create a Python function that calculates factorial" - you
     # Validate API key for cloud providers
     if provider_type in ("openai", "anthropic") and not api_key:
         import os
-        env_key = os.environ.get("OPENAI_API_KEY" if provider_type == "openai" else "ANTHROPIC_API_KEY")
+
+        env_key = os.environ.get(
+            "OPENAI_API_KEY" if provider_type == "openai" else "ANTHROPIC_API_KEY"
+        )
         if not env_key:
-            raise ValueError(f"No API key provided for {provider_type}. Please configure your API key in Settings > AI Providers.")
+            raise ValueError(
+                f"No API key provided for {provider_type}. Please configure your API key in Settings > AI Providers."
+            )
 
     if provider_type == "openai":
         client = AsyncOpenAI(api_key=api_key, base_url=base_url)
@@ -1171,21 +2072,23 @@ Example: If user says "Create a Python function that calculates factorial" - you
 
         # Process tool calls if any
         while choice.finish_reason == "tool_calls" and choice.message.tool_calls:
-            oai_messages.append({
-                "role": "assistant",
-                "content": choice.message.content,
-                "tool_calls": [
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments
+            oai_messages.append(
+                {
+                    "role": "assistant",
+                    "content": choice.message.content,
+                    "tool_calls": [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments,
+                            },
                         }
-                    }
-                    for tc in choice.message.tool_calls
-                ]
-            })
+                        for tc in choice.message.tool_calls
+                    ],
+                }
+            )
 
             for tool_call in choice.message.tool_calls:
                 func_name = tool_call.function.name
@@ -1207,7 +2110,11 @@ Example: If user says "Create a Python function that calculates factorial" - you
                         server_name, tool_name = parse_mcp_tool_name(func_name)
                         mcp_result = await mcp_manager.call_tool(server_name, tool_name, func_args)
                         if mcp_result.success:
-                            result = str(mcp_result.content) if mcp_result.content else "Tool executed successfully"
+                            result = (
+                                str(mcp_result.content)
+                                if mcp_result.content
+                                else "Tool executed successfully"
+                            )
                         else:
                             result = f"Tool error: {mcp_result.error}"
                     else:
@@ -1221,16 +2128,16 @@ Example: If user says "Create a Python function that calculates factorial" - you
                 elif func_name == "list_actions":
                     result = "Listing actions"
                 elif func_name == "browse_web":
-                    task_preview = func_args.get('task', '')[:100]
+                    task_preview = func_args.get("task", "")[:100]
                     result = f"Browser task initiated: {task_preview}..."
+                elif func_name in STORAGE_TOOL_NAMES:
+                    result = _execute_storage_tool(func_name, func_args)
                 else:
                     result = "Action completed"
 
-                oai_messages.append({
-                    "role": "tool",
-                    "tool_call_id": tool_call.id,
-                    "content": result
-                })
+                oai_messages.append(
+                    {"role": "tool", "tool_call_id": tool_call.id, "content": result}
+                )
 
             # Continue with streaming for the final response
             response = await client.chat.completions.create(
@@ -1257,6 +2164,7 @@ Example: If user says "Create a Python function that calculates factorial" - you
 
     elif provider_type == "anthropic":
         import logging
+
         logger = logging.getLogger(__name__)
 
         client = AsyncAnthropic(api_key=api_key)
@@ -1265,7 +2173,7 @@ Example: If user says "Create a Python function that calculates factorial" - you
             {
                 "name": t["function"]["name"],
                 "description": t["function"]["description"],
-                "input_schema": t["function"]["parameters"]
+                "input_schema": t["function"]["parameters"],
             }
             for t in all_tools
         ]
@@ -1323,9 +2231,15 @@ Example: If user says "Create a Python function that calculates factorial" - you
                     if is_mcp_tool(func_name):
                         if mcp_manager:
                             server_name, tool_name = parse_mcp_tool_name(func_name)
-                            mcp_result = await mcp_manager.call_tool(server_name, tool_name, func_args)
+                            mcp_result = await mcp_manager.call_tool(
+                                server_name, tool_name, func_args
+                            )
                             if mcp_result.success:
-                                result = str(mcp_result.content) if mcp_result.content else "Tool executed successfully"
+                                result = (
+                                    str(mcp_result.content)
+                                    if mcp_result.content
+                                    else "Tool executed successfully"
+                                )
                             else:
                                 result = f"Tool error: {mcp_result.error}"
                         else:
@@ -1339,16 +2253,16 @@ Example: If user says "Create a Python function that calculates factorial" - you
                     elif func_name == "list_actions":
                         result = "Listing actions"
                     elif func_name == "browse_web":
-                        task_preview = func_args.get('task', '')[:100]
+                        task_preview = func_args.get("task", "")[:100]
                         result = f"Browser task initiated: {task_preview}..."
+                    elif func_name in STORAGE_TOOL_NAMES:
+                        result = _execute_storage_tool(func_name, func_args)
                     else:
                         result = "Action completed"
 
-                    tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": block.id,
-                        "content": result
-                    })
+                    tool_results.append(
+                        {"type": "tool_result", "tool_use_id": block.id, "content": result}
+                    )
 
             ant_messages.append({"role": "user", "content": tool_results})
 
@@ -1398,11 +2312,13 @@ Example: If user says "Create a Python function that calculates factorial" - you
         _emit_chunks_with_delay(callback, "chunk", response_content)
 
     # Emit done event
-    callback({
-        "type": "done",
-        "model": response_model,
-        "tokens_used": tokens_used,
-    })
+    callback(
+        {
+            "type": "done",
+            "model": response_model,
+            "tokens_used": tokens_used,
+        }
+    )
 
     return {
         "content": response_content,
@@ -1460,9 +2376,13 @@ def chat_with_tools_stream_sync(
         error_message = str(e)
         # Check for common issues and provide helpful messages
         if "api_key" in error_message.lower() or "authentication" in error_message.lower():
-            error_message = f"API key error: {error_message}. Please check your API key in Settings."
+            error_message = (
+                f"API key error: {error_message}. Please check your API key in Settings."
+            )
         elif "rate limit" in error_message.lower():
-            error_message = f"Rate limit exceeded: {error_message}. Please wait a moment and try again."
+            error_message = (
+                f"Rate limit exceeded: {error_message}. Please wait a moment and try again."
+            )
         elif "model" in error_message.lower() and "not found" in error_message.lower():
             error_message = f"Model not found: {error_message}. Please check your model settings."
 
@@ -1510,9 +2430,7 @@ def discover_chat_models_sync(provider: str, base_url: str) -> list[dict[str, st
                 data = json.loads(resp.read().decode())
                 models = data.get("data", [])
                 return [
-                    {"id": m.get("id", ""), "name": m.get("id", "")}
-                    for m in models
-                    if m.get("id")
+                    {"id": m.get("id", ""), "name": m.get("id", "")} for m in models if m.get("id")
                 ]
         else:
             return []

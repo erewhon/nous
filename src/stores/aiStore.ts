@@ -128,12 +128,15 @@ interface AIState {
 
 const DEFAULT_SYSTEM_PROMPT = `You are a helpful AI assistant integrated into a note-taking application called Nous. You help users with their notes, answer questions about their content, provide summaries, brainstorm ideas, and assist with writing and organizing information. Be concise, helpful, and context-aware.
 
-IMPORTANT: You have access to tools that let you create notebooks and pages. When the user asks you to create, write, or save content:
-- USE the create_page tool to actually create the page - do NOT just describe what you would create
-- USE the create_notebook tool to create new notebooks
-- USE the run_action tool to run custom workflows
+IMPORTANT: You have access to tools for creating and managing content. When the user asks you to create, write, or save content:
+- USE create_page to create pages with Editor.js blocks
+- USE create_notebook to create new notebooks
+- USE run_action to run custom workflows
+- USE nous_* tools to search, read, update, and organize pages
+- USE nous_create_database to create structured databases
+- USE nous_add_database_rows / nous_update_database_rows to manage database data
 
-When using create_page, provide well-structured content with appropriate headings, code blocks, and lists. Always actually call the tool rather than describing what you would do.`;
+Always actually call the appropriate tool rather than describing what you would do.`;
 
 // Create default settings with all providers initialized
 function createDefaultSettings(): AISettings {
