@@ -1227,7 +1227,7 @@ A command-line interface for viewing and searching notebook content without laun
 Expose Nous notebooks to external AI agents (Claude Code, etc.) via the Model Context Protocol.
 
 - [x] **MCP server** - Python FastMCP server (`nous-py/nous_mcp/`)
-  - 8 tools: list_notebooks, list_sections, list_folders, list_pages, get_page, search_pages, create_page, append_to_page
+  - 17 tools for pages, folders, tags, search, and databases
   - Name resolution (case-insensitive exact match, then prefix match, UUID support)
   - Multi-library support via `--library` flag or `NOUS_LIBRARY` env var
   - Editor.js → Markdown conversion (Python port of export.rs, including wiki-link/block-ref)
@@ -1237,6 +1237,13 @@ Expose Nous notebooks to external AI agents (Claude Code, etc.) via the Model Co
 - [x] **Richer markdown-to-blocks conversion** - Parse `#` headers, `- ` unordered lists, `1. ` ordered lists, `- [ ]` checklists, ``` code blocks, `> ` blockquotes, `---` delimiters (not just paragraphs)
 - [x] **Page update tool** - Replace full page content, title, or tags (not just append)
 - [x] **Folder/tag management tools** - Create folders, move pages between folders, add/remove tags via MCP
+- [x] **Database tools** - CRUD for database pages via MCP
+  - list_databases: list databases with property/row counts, filterable by folder/section
+  - get_database: read as markdown table (with YAML frontmatter) or raw JSON; resolves select option IDs to labels
+  - create_database: create with typed columns (text, number, select, multiSelect, checkbox, date, url); auto-generates UUIDs, option colors, default Table view
+  - add_database_rows: add rows using property names and option labels (not IDs); auto-creates new select options
+  - update_database_rows: update rows by 0-based index or UUID; same name/label resolution
+  - Atomic .database file writes (write .tmp then rename)
 
 ---
 
