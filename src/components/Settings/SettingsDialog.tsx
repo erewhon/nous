@@ -271,9 +271,7 @@ function AISettingsContent() {
     discoverModels,
   } = useAIStore();
 
-  const [expandedProvider, setExpandedProvider] = useState<ProviderType | null>(
-    settings.defaultProvider
-  );
+  const [expandedProvider, setExpandedProvider] = useState<ProviderType | null>(null);
   const [discoveryResult, setDiscoveryResult] = useState<
     Record<string, string>
   >({});
@@ -809,6 +807,19 @@ function ProviderAccordion({
                     >
                       {model.name}
                     </span>
+                    {model.contextLength && (
+                      <span
+                        className="rounded px-1.5 py-0.5 text-xs"
+                        style={{
+                          backgroundColor: "var(--color-bg-secondary)",
+                          color: "var(--color-text-muted)",
+                        }}
+                      >
+                        {model.contextLength >= 1_000_000
+                          ? `${(model.contextLength / 1_000_000).toFixed(1)}M ctx`
+                          : `${Math.round(model.contextLength / 1000)}K ctx`}
+                      </span>
+                    )}
                     {model.isCustom && (
                       <span
                         className="rounded px-1.5 py-0.5 text-xs"

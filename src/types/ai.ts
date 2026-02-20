@@ -11,6 +11,7 @@ export const ModelConfigSchema = z.object({
   enabled: z.boolean(),        // Show in model selectors
   isDefault: z.boolean(),      // Is this a built-in default model
   isCustom: z.boolean(),       // User-added model
+  contextLength: z.number().optional(), // Max context window (tokens), discovered from API
 });
 
 export type ModelConfig = z.infer<typeof ModelConfigSchema>;

@@ -1501,10 +1501,13 @@ When the user asks you to "create", "write", "make", "generate", or "save" conte
                 thinking_content = block.thinking
 
     else:
-        # Ollama/LMStudio/other — use OpenAI-compatible endpoint with tools
+        # Ollama/LMStudio/vLLM/other — use OpenAI-compatible endpoint with tools
         local_base_url = base_url or (
-            "http://localhost:11434/v1" if provider_type == "ollama" else "http://localhost:1234/v1"
+            "http://localhost:11434" if provider_type == "ollama" else "http://localhost:1234/v1"
         )
+        # Ensure /v1 suffix for OpenAI-compatible API
+        if not local_base_url.rstrip("/").endswith("/v1"):
+            local_base_url = local_base_url.rstrip("/") + "/v1"
         client = AsyncOpenAI(api_key="not-needed", base_url=local_base_url)
 
         oai_messages: list[dict[str, Any]] = [{"role": "system", "content": system_message}]
@@ -2368,10 +2371,13 @@ When the user asks you to "create", "write", "make", "generate", or "save" conte
                 _emit_chunks_with_delay(callback, "chunk", response_content)
 
     else:
-        # Ollama/LMStudio/other — use OpenAI-compatible endpoint with tools
+        # Ollama/LMStudio/vLLM/other — use OpenAI-compatible endpoint with tools
         local_base_url = base_url or (
-            "http://localhost:11434/v1" if provider_type == "ollama" else "http://localhost:1234/v1"
+            "http://localhost:11434" if provider_type == "ollama" else "http://localhost:1234/v1"
         )
+        # Ensure /v1 suffix for OpenAI-compatible API
+        if not local_base_url.rstrip("/").endswith("/v1"):
+            local_base_url = local_base_url.rstrip("/") + "/v1"
         client = AsyncOpenAI(api_key="not-needed", base_url=local_base_url)
 
         oai_messages: list[dict[str, Any]] = [{"role": "system", "content": system_message}]
@@ -2564,7 +2570,29 @@ def chat_with_tools_stream_sync(
         }
 
 
-def discover_chat_models_sync(provider: str, base_url: str) -> list[dict[str, str]]:
+def _ollama_get_context_length(base_url: str, model_name: str) -> int | None:
+    """Get context length for an Ollama model via /api/show."""
+    import urllib.request
+    import urllib.error
+
+    try:
+        url = f"{base_url.rstrip('/')}/api/show"
+        body = json.dumps({"model": model_name, "verbose": True}).encode()
+        req = urllib.request.Request(url, data=body, method="POST")
+        req.add_header("Content-Type", "application/json")
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode())
+            model_info = data.get("model_info", {})
+            # Context length key is prefixed with model family, e.g. "llama.context_length"
+            for key, value in model_info.items():
+                if key.endswith(".context_length") and isinstance(value, (int, float)):
+                    return int(value)
+    except (urllib.error.URLError, OSError, json.JSONDecodeError, KeyError):
+        pass
+    return None
+
+
+def discover_chat_models_sync(provider: str, base_url: str) -> list[dict[str, Any]]:
     """Discover available chat models from a local provider.
 
     Args:
@@ -2572,7 +2600,7 @@ def discover_chat_models_sync(provider: str, base_url: str) -> list[dict[str, st
         base_url: Base URL of the provider server.
 
     Returns:
-        List of dicts with 'id' and 'name' keys.
+        List of dicts with 'id', 'name', and optional 'context_length' keys.
     """
     import urllib.request
     import urllib.error
@@ -2584,19 +2612,35 @@ def discover_chat_models_sync(provider: str, base_url: str) -> list[dict[str, st
             with urllib.request.urlopen(req, timeout=5) as resp:
                 data = json.loads(resp.read().decode())
                 models = data.get("models", [])
-                return [
-                    {"id": m.get("name", ""), "name": m.get("name", "")}
-                    for m in models
-                    if m.get("name")
-                ]
+                results = []
+                for m in models:
+                    name = m.get("name", "")
+                    if not name:
+                        continue
+                    entry: dict[str, Any] = {"id": name, "name": name}
+                    ctx = _ollama_get_context_length(base_url, name)
+                    if ctx is not None:
+                        entry["context_length"] = ctx
+                    results.append(entry)
+                return results
         elif provider == "lmstudio":
-            url = f"{base_url.rstrip('/')}/v1/models"
+            # Normalize: strip /v1 if present, then add /v1/models
+            clean_url = base_url.rstrip("/")
+            if clean_url.endswith("/v1"):
+                clean_url = clean_url[:-3]
+            url = f"{clean_url}/v1/models"
             req = urllib.request.Request(url, method="GET")
             with urllib.request.urlopen(req, timeout=5) as resp:
                 data = json.loads(resp.read().decode())
                 models = data.get("data", [])
                 return [
-                    {"id": m.get("id", ""), "name": m.get("id", "")} for m in models if m.get("id")
+                    {
+                        "id": m.get("id", ""),
+                        "name": m.get("id", ""),
+                        **({"context_length": m["max_model_len"]} if m.get("max_model_len") else {}),
+                    }
+                    for m in models
+                    if m.get("id")
                 ]
         else:
             return []

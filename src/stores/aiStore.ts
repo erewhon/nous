@@ -77,7 +77,7 @@ interface AIState {
   setProviderBaseUrl: (type: ProviderType, baseUrl: string) => void;
 
   // Model management actions
-  addModel: (providerType: ProviderType, model: { id: string; name: string }) => void;
+  addModel: (providerType: ProviderType, model: { id: string; name: string; contextLength?: number }) => void;
   removeModel: (providerType: ProviderType, modelId: string) => void;
   toggleModel: (providerType: ProviderType, modelId: string, enabled: boolean) => void;
 
@@ -288,7 +288,14 @@ export const useAIStore = create<AIState>()(
                     ...p,
                     models: [
                       ...p.models,
-                      { ...model, enabled: true, isDefault: false, isCustom: true },
+                      {
+                        id: model.id,
+                        name: model.name,
+                        enabled: true,
+                        isDefault: false,
+                        isCustom: true,
+                        ...(model.contextLength ? { contextLength: model.contextLength } : {}),
+                      },
                     ],
                   }
                 : p
@@ -516,7 +523,7 @@ export const useAIStore = create<AIState>()(
         try {
           const providerConfig = get().settings.providers.find((p) => p.type === providerType);
           const baseUrl = providerConfig?.baseUrl || (providerType === "ollama" ? "http://localhost:11434" : "http://localhost:1234");
-          const models = await invoke<Array<{ id: string; name: string }>>("discover_ai_models", {
+          const models = await invoke<Array<{ id: string; name: string; contextLength?: number }>>("discover_ai_models", {
             provider: providerType,
             baseUrl,
           });
@@ -524,8 +531,25 @@ export const useAIStore = create<AIState>()(
           let added = 0;
           for (const model of models) {
             if (!existingIds.has(model.id)) {
-              get().addModel(providerType, { id: model.id, name: model.name });
+              get().addModel(providerType, model);
               added++;
+            } else if (model.contextLength) {
+              // Update context length on existing models
+              set((state) => ({
+                settings: {
+                  ...state.settings,
+                  providers: state.settings.providers.map((p) =>
+                    p.type === providerType
+                      ? {
+                          ...p,
+                          models: p.models.map((m) =>
+                            m.id === model.id ? { ...m, contextLength: model.contextLength } : m
+                          ),
+                        }
+                      : p
+                  ),
+                },
+              }));
             }
           }
           return { found: models.length, added };

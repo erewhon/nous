@@ -2814,6 +2814,9 @@ impl PythonAI {
                         .get("name")
                         .and_then(|v| v.extract::<String>(py).ok())
                         .unwrap_or_default(),
+                    context_length: model_dict
+                        .get("context_length")
+                        .and_then(|v| v.extract::<u64>(py).ok()),
                 });
             }
 
@@ -3617,6 +3620,7 @@ pub struct DiscoveredModel {
 pub struct DiscoveredChatModel {
     pub id: String,
     pub name: String,
+    pub context_length: Option<u64>,
 }
 
 // ===== Infographic Generation Types =====
