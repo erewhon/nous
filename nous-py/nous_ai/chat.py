@@ -1501,22 +1501,97 @@ When the user asks you to "create", "write", "make", "generate", or "save" conte
                 thinking_content = block.thinking
 
     else:
-        # Ollama doesn't support native tool use, fall back to regular chat
-        # with instructions to output JSON actions
-        result = await chat_with_context(
-            user_message,
-            page_context,
-            conversation_history,
-            provider_type,
-            api_key,
-            model,
-            temperature,
-            max_tokens,
+        # Ollama/LMStudio/other — use OpenAI-compatible endpoint with tools
+        local_base_url = base_url or (
+            "http://localhost:11434/v1" if provider_type == "ollama" else "http://localhost:1234/v1"
         )
-        return {
-            **result,
-            "actions": [],
-        }
+        client = AsyncOpenAI(api_key="not-needed", base_url=local_base_url)
+
+        oai_messages: list[dict[str, Any]] = [{"role": "system", "content": system_message}]
+        if conversation_history:
+            oai_messages.extend(conversation_history)
+        oai_messages.append({"role": "user", "content": user_message})
+
+        response = await client.chat.completions.create(
+            model=config.model,
+            messages=oai_messages,
+            tools=NOTEBOOK_TOOLS,
+            tool_choice="auto",
+            temperature=config.temperature,
+            max_tokens=config.max_tokens,
+        )
+
+        response_model = response.model or config.model
+        if response.usage:
+            tokens_used = response.usage.total_tokens
+
+        choice = response.choices[0]
+
+        while choice.finish_reason == "tool_calls" and choice.message.tool_calls:
+            oai_messages.append(
+                {
+                    "role": "assistant",
+                    "content": choice.message.content,
+                    "tool_calls": [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments,
+                            },
+                        }
+                        for tc in choice.message.tool_calls
+                    ],
+                }
+            )
+
+            for tool_call in choice.message.tool_calls:
+                func_name = tool_call.function.name
+                func_args = json.loads(tool_call.function.arguments)
+
+                action = {
+                    "tool": func_name,
+                    "arguments": func_args,
+                    "tool_call_id": tool_call.id,
+                }
+                actions.append(action)
+
+                if func_name == "create_notebook":
+                    result = f"Created notebook: {func_args.get('name')}"
+                elif func_name == "create_page":
+                    result = f"Created page: {func_args.get('title')} in {func_args.get('notebook_name')}"
+                elif func_name == "run_action":
+                    result = f"Running action: {func_args.get('action_name')}"
+                elif func_name == "list_actions":
+                    result = "Listing actions"
+                elif func_name == "browse_web":
+                    task_preview = func_args.get("task", "")[:100]
+                    result = f"Browser task initiated: {task_preview}..."
+                elif func_name in STORAGE_TOOL_NAMES:
+                    result = _execute_storage_tool(func_name, func_args)
+                else:
+                    result = "Action completed"
+
+                oai_messages.append(
+                    {"role": "tool", "tool_call_id": tool_call.id, "content": result}
+                )
+
+            response = await client.chat.completions.create(
+                model=config.model,
+                messages=oai_messages,
+                tools=NOTEBOOK_TOOLS,
+                tool_choice="auto",
+                temperature=config.temperature,
+                max_tokens=config.max_tokens,
+            )
+
+            if response.usage:
+                tokens_used = (tokens_used or 0) + response.usage.total_tokens
+
+            choice = response.choices[0]
+
+        response_content = choice.message.content or ""
 
     return {
         "content": response_content,
@@ -2293,23 +2368,114 @@ When the user asks you to "create", "write", "make", "generate", or "save" conte
                 _emit_chunks_with_delay(callback, "chunk", response_content)
 
     else:
-        # Ollama/LMStudio/other - fall back to non-streaming
-        result = await chat_with_context(
-            user_message,
-            page_context,
-            conversation_history,
-            provider_type,
-            api_key,
-            base_url,
-            model,
-            temperature,
-            max_tokens,
+        # Ollama/LMStudio/other — use OpenAI-compatible endpoint with tools
+        local_base_url = base_url or (
+            "http://localhost:11434/v1" if provider_type == "ollama" else "http://localhost:1234/v1"
         )
-        response_content = result.get("content", "")
-        response_model = result.get("model", "")
-        tokens_used = result.get("tokens_used", 0) or 0
-        # Emit in chunks with delay for streaming effect
-        _emit_chunks_with_delay(callback, "chunk", response_content)
+        client = AsyncOpenAI(api_key="not-needed", base_url=local_base_url)
+
+        oai_messages: list[dict[str, Any]] = [{"role": "system", "content": system_message}]
+        if conversation_history:
+            oai_messages.extend(conversation_history)
+        oai_messages.append({"role": "user", "content": user_message})
+
+        response = await client.chat.completions.create(
+            model=config.model,
+            messages=oai_messages,
+            tools=all_tools,
+            tool_choice="auto",
+            temperature=config.temperature,
+            max_tokens=config.max_tokens,
+        )
+
+        response_model = response.model or config.model
+        if response.usage:
+            tokens_used = response.usage.total_tokens
+
+        choice = response.choices[0]
+
+        while choice.finish_reason == "tool_calls" and choice.message.tool_calls:
+            oai_messages.append(
+                {
+                    "role": "assistant",
+                    "content": choice.message.content,
+                    "tool_calls": [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments,
+                            },
+                        }
+                        for tc in choice.message.tool_calls
+                    ],
+                }
+            )
+
+            for tool_call in choice.message.tool_calls:
+                func_name = tool_call.function.name
+                func_args = json.loads(tool_call.function.arguments)
+
+                action = {
+                    "tool": func_name,
+                    "arguments": func_args,
+                    "tool_call_id": tool_call.id,
+                }
+                actions.append(action)
+                callback({"type": "action", **action})
+
+                if is_mcp_tool(func_name):
+                    if mcp_manager:
+                        server_name, tool_name = parse_mcp_tool_name(func_name)
+                        mcp_result = await mcp_manager.call_tool(server_name, tool_name, func_args)
+                        if mcp_result.success:
+                            result = (
+                                str(mcp_result.content)
+                                if mcp_result.content
+                                else "Tool executed successfully"
+                            )
+                        else:
+                            result = f"Tool error: {mcp_result.error}"
+                    else:
+                        result = "MCP server not available"
+                elif func_name == "create_notebook":
+                    result = f"Created notebook: {func_args.get('name')}"
+                elif func_name == "create_page":
+                    result = f"Created page: {func_args.get('title')} in {func_args.get('notebook_name')}"
+                elif func_name == "run_action":
+                    result = f"Running action: {func_args.get('action_name')}"
+                elif func_name == "list_actions":
+                    result = "Listing actions"
+                elif func_name == "browse_web":
+                    task_preview = func_args.get("task", "")[:100]
+                    result = f"Browser task initiated: {task_preview}..."
+                elif func_name in STORAGE_TOOL_NAMES:
+                    result = _execute_storage_tool(func_name, func_args)
+                else:
+                    result = "Action completed"
+
+                oai_messages.append(
+                    {"role": "tool", "tool_call_id": tool_call.id, "content": result}
+                )
+
+            response = await client.chat.completions.create(
+                model=config.model,
+                messages=oai_messages,
+                tools=all_tools,
+                tool_choice="auto",
+                temperature=config.temperature,
+                max_tokens=config.max_tokens,
+            )
+
+            if response.usage:
+                tokens_used = (tokens_used or 0) + response.usage.total_tokens
+
+            choice = response.choices[0]
+
+        if choice.message.content:
+            response_content = choice.message.content
+            _emit_chunks_with_delay(callback, "chunk", response_content)
 
     # Emit done event
     callback(
