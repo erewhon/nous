@@ -499,28 +499,77 @@ function AISettingsContent() {
           </div>
 
           {/* Max Tokens */}
-          <div>
-            <label
-              className="mb-2 block text-xs font-medium"
-              style={{ color: "var(--color-text-muted)" }}
-            >
-              Max Tokens
-            </label>
-            <input
-              type="number"
-              min="100"
-              max="32000"
-              step="100"
-              value={settings.maxTokens}
-              onChange={(e) => setMaxTokens(parseInt(e.target.value) || 4096)}
-              className="w-full rounded-lg border px-3 py-2 text-sm outline-none transition-colors focus:border-[--color-accent]"
-              style={{
-                backgroundColor: "var(--color-bg-tertiary)",
-                borderColor: "var(--color-border)",
-                color: "var(--color-text-primary)",
-              }}
-            />
-          </div>
+          {(() => {
+            const selectedModel = enabledModels.find(
+              (m) => m.model.id === settings.defaultModel
+            );
+            const maxContext = selectedModel?.model.contextLength;
+            const formatTokens = (n: number) =>
+              n >= 1_000_000
+                ? `${(n / 1_000_000).toFixed(1)}M`
+                : n >= 1000
+                  ? `${Math.round(n / 1000)}K`
+                  : `${n}`;
+            return maxContext ? (
+              <div>
+                <div className="mb-2 flex items-center justify-between">
+                  <label
+                    className="text-xs font-medium"
+                    style={{ color: "var(--color-text-muted)" }}
+                  >
+                    Max Tokens
+                  </label>
+                  <span
+                    className="text-xs"
+                    style={{ color: "var(--color-text-muted)" }}
+                  >
+                    {formatTokens(settings.maxTokens)} / {formatTokens(maxContext)}
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min="256"
+                  max={maxContext}
+                  step={maxContext > 32000 ? 1024 : 256}
+                  value={Math.min(settings.maxTokens, maxContext)}
+                  onChange={(e) => setMaxTokens(parseInt(e.target.value))}
+                  className="w-full accent-[--color-accent]"
+                />
+                <div
+                  className="mt-1 flex justify-between text-xs"
+                  style={{ color: "var(--color-text-muted)" }}
+                >
+                  <span>256</span>
+                  <span>{formatTokens(maxContext)}</span>
+                </div>
+              </div>
+            ) : (
+              <div>
+                <label
+                  className="mb-2 block text-xs font-medium"
+                  style={{ color: "var(--color-text-muted)" }}
+                >
+                  Max Tokens
+                </label>
+                <input
+                  type="number"
+                  min="100"
+                  max="1000000"
+                  step="100"
+                  value={settings.maxTokens}
+                  onChange={(e) =>
+                    setMaxTokens(parseInt(e.target.value) || 4096)
+                  }
+                  className="w-full rounded-lg border px-3 py-2 text-sm outline-none transition-colors focus:border-[--color-accent]"
+                  style={{
+                    backgroundColor: "var(--color-bg-tertiary)",
+                    borderColor: "var(--color-border)",
+                    color: "var(--color-text-primary)",
+                  }}
+                />
+              </div>
+            );
+          })()}
         </div>
       </div>
     </div>
