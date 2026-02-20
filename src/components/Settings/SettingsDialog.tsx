@@ -102,27 +102,27 @@ const PROVIDER_INFO: Record<
 > = {
   openai: {
     label: "OpenAI",
-    description: "GPT-4o, GPT-4, o1 models",
+    description: "GPT-4o, o1 models — OpenAI API",
     needsApiKey: true,
   },
   anthropic: {
     label: "Anthropic",
-    description: "Claude Sonnet, Opus, Haiku",
+    description: "Claude Sonnet, Opus, Haiku — Anthropic API",
     needsApiKey: true,
   },
   ollama: {
     label: "Ollama",
-    description: "Local models (Llama, Mistral, etc.)",
+    description: "Local models via Ollama — OpenAI-compatible API",
     needsApiKey: false,
   },
   lmstudio: {
-    label: "LM Studio",
-    description: "Local models via LM Studio",
+    label: "OpenAI Compatible",
+    description: "vLLM, LM Studio, or any OpenAI-compatible server",
     needsApiKey: false,
   },
   bedrock: {
     label: "AWS Bedrock",
-    description: "Claude, Titan, Llama via AWS",
+    description: "Claude, Titan, Llama — AWS Bedrock API",
     needsApiKey: true,
     needsRegion: true,
     apiKeyPlaceholder: "access_key:secret_key (or leave empty for IAM)",
