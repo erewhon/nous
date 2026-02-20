@@ -342,6 +342,13 @@ function AISettingsContent() {
         }))
     );
 
+  // Auto-correct stale defaultModel
+  useEffect(() => {
+    if (enabledModels.length > 0 && !enabledModels.some((m) => m.model.id === settings.defaultModel)) {
+      setDefaultModel(enabledModels[0].model.id);
+    }
+  }, [enabledModels, settings.defaultModel, setDefaultModel]);
+
   return (
     <div className="space-y-6">
       {/* Provider Accordions */}
