@@ -2033,3 +2033,51 @@
 .db-formula-config {
   margin-top: 4px;
 }
+
+/* Formula autocomplete dropdown */
+.db-formula-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  max-height: 240px;
+  overflow-y: auto;
+  font-family: monospace;
+  font-size: 13px;
+  margin-top: 2px;
+}
+
+.db-formula-dropdown-category {
+  padding: 4px 8px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.db-formula-dropdown-item {
+  padding: 6px 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.db-formula-dropdown-item:hover,
+.db-formula-dropdown-item.selected {
+  background: var(--bg-hover);
+}
+
+.db-formula-dropdown-item-name {
+  font-weight: 500;
+}
+
+.db-formula-dropdown-item-hint {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}

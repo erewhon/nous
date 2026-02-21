@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useState, useRef, useCallback } from "react";
 import type { PropertyDef, PropertyType, SelectOption, CellValue, NumberFormat, FormulaConfig } from "../../types/database";
 import { pickNextColor } from "./CellEditors";
 import { evaluateFormula } from "./formulaEvaluator";
+import { useFormulaAutocomplete, FormulaDropdown } from "./FormulaAutocomplete";
 
 interface PropertyEditorProps {
   property: PropertyDef;
@@ -379,6 +380,30 @@ function FormulaEditor({
   const [expression, setExpression] = useState(formulaConfig?.expression ?? "");
   const [validationError, setValidationError] = useState<string | null>(null);
   const [showFunctions, setShowFunctions] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const columns = allProperties.map((p) => ({ name: p.name, type: p.type }));
+
+  const onExpressionChange = useCallback((newExpr: string, cursorPos: number) => {
+    setExpression(newExpr);
+    requestAnimationFrame(() => {
+      const ta = textareaRef.current;
+      if (ta) {
+        ta.focus();
+        ta.setSelectionRange(cursorPos, cursorPos);
+      }
+    });
+  }, []);
+
+  const {
+    dropdownVisible,
+    dropdownItems,
+    selectedIndex,
+    handleKeyDown,
+    handleInput,
+    dismiss,
+    acceptSuggestion,
+  } = useFormulaAutocomplete(textareaRef, columns, expression, onExpressionChange);
 
   const handleBlur = () => {
     // Validate expression
@@ -394,6 +419,7 @@ function FormulaEditor({
       setValidationError(null);
     }
     onUpdate({ ...formulaConfig, expression });
+    dismiss();
   };
 
   const insertColumn = (name: string) => {
@@ -404,14 +430,26 @@ function FormulaEditor({
   return (
     <div className="db-pe-section">
       <label className="db-pe-label">Expression</label>
-      <textarea
-        className="db-pe-input db-formula-textarea"
-        placeholder="e.g. Price * Quantity"
-        value={expression}
-        onChange={(e) => setExpression(e.target.value)}
-        onBlur={handleBlur}
-        rows={3}
-      />
+      <div style={{ position: "relative" }}>
+        <textarea
+          ref={textareaRef}
+          className="db-pe-input db-formula-textarea"
+          placeholder="e.g. Price * Quantity"
+          value={expression}
+          onChange={(e) => setExpression(e.target.value)}
+          onKeyDown={handleKeyDown}
+          onInput={handleInput}
+          onBlur={handleBlur}
+          rows={3}
+        />
+        {dropdownVisible && (
+          <FormulaDropdown
+            items={dropdownItems}
+            selectedIndex={selectedIndex}
+            onSelect={acceptSuggestion}
+          />
+        )}
+      </div>
       {validationError && (
         <div className="db-formula-validation-error">{validationError}</div>
       )}
