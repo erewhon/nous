@@ -201,7 +201,7 @@ export const ActionCard = memo(function ActionCard({
         {/* Enable/disable toggle */}
         <button
           onClick={handleToggleEnabled}
-          className="flex-shrink-0 rounded-full p-1 transition-colors"
+          className="flex-shrink-0 w-9 h-5 rounded-full p-0.5 transition-colors"
           style={{
             backgroundColor: action.enabled
               ? "var(--color-accent)"
