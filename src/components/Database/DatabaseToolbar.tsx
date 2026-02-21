@@ -243,7 +243,7 @@ export function DatabaseToolbar({
         {/* Export CSV */}
         <button
           className="db-toolbar-btn"
-          onClick={() => exportDatabaseAsCsv(properties, rows, title || "database", pageLinkPages, computedValues)}
+          onClick={() => exportDatabaseAsCsv(properties, rows, title || "database", pageLinkPages, computedValues, view.filters, view.sorts)}
         >
           <svg
             xmlns="http://www.w3.org/2000/svg"

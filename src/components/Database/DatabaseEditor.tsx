@@ -21,6 +21,7 @@ import { DatabaseList } from "./DatabaseList";
 import { DatabaseBoard } from "./DatabaseBoard";
 import { DatabaseGallery } from "./DatabaseGallery";
 import { DatabaseCalendar } from "./DatabaseCalendar";
+import { DatabaseChart } from "./DatabaseChart";
 import { useRelationContext } from "./useRelationContext";
 import * as api from "../../utils/api";
 import "./database-styles.css";
@@ -450,6 +451,14 @@ export function DatabaseEditor({
             onUpdateContent={handleUpdateContent}
             onUpdateView={handleUpdateView}
             relationContext={relationContext}
+          />
+        );
+      case "chart":
+        return (
+          <DatabaseChart
+            content={content}
+            view={activeView}
+            onUpdateView={handleUpdateView}
           />
         );
       default:

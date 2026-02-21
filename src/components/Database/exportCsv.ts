@@ -1,4 +1,5 @@
-import type { PropertyDef, DatabaseRow, CellValue } from "../../types/database";
+import type { PropertyDef, DatabaseRow, CellValue, DatabaseFilter, DatabaseSort } from "../../types/database";
+import { applyFilter, compareCellValues } from "./DatabaseTable";
 
 function escapeCsvField(value: string): string {
   if (value.includes('"') || value.includes(",") || value.includes("\n")) {
@@ -12,13 +13,41 @@ export function exportDatabaseAsCsv(
   rows: DatabaseRow[],
   filename: string,
   pages?: Array<{ id: string; title: string }>,
-  computedValues?: Map<string, Map<string, CellValue>>
+  computedValues?: Map<string, Map<string, CellValue>>,
+  filters?: DatabaseFilter[],
+  sorts?: DatabaseSort[]
 ): void {
+  // Apply filters/sorts from the active view
+  let exportRows = [...rows];
+
+  if (filters && filters.length > 0) {
+    for (const filter of filters) {
+      const prop = properties.find((p) => p.id === filter.propertyId);
+      if (!prop) continue;
+      exportRows = exportRows.filter((row) => {
+        const cellVal = row.cells[filter.propertyId] ?? null;
+        return applyFilter(cellVal, filter.operator, filter.value, prop);
+      });
+    }
+  }
+
+  if (sorts && sorts.length > 0) {
+    exportRows.sort((a, b) => {
+      for (const sort of sorts) {
+        const aVal = a.cells[sort.propertyId] ?? null;
+        const bVal = b.cells[sort.propertyId] ?? null;
+        const cmp = compareCellValues(aVal, bVal);
+        if (cmp !== 0) return sort.direction === "asc" ? cmp : -cmp;
+      }
+      return 0;
+    });
+  }
+
   // Header row
   const header = properties.map((p) => escapeCsvField(p.name)).join(",");
 
   // Data rows
-  const dataRows = rows.map((row) => {
+  const dataRows = exportRows.map((row) => {
     return properties
       .map((prop) => {
         const val = row.cells[prop.id];

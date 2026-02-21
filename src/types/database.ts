@@ -65,7 +65,7 @@ export type FormulaConfig = z.infer<typeof FormulaConfigSchema>;
 
 // Number formatting configuration
 export const NumberFormatSchema = z.object({
-  style: z.enum(["plain", "currency", "percent"]).default("plain"),
+  style: z.enum(["plain", "currency", "percent", "progressBar"]).default("plain"),
   decimals: z.number().optional(),
   thousandsSeparator: z.boolean().optional(),
   currencySymbol: z.string().optional(),
@@ -143,6 +143,7 @@ export const DatabaseViewTypeSchema = z.enum([
   "gallery",
   "list",
   "calendar",
+  "chart",
 ]);
 export type DatabaseViewType = z.infer<typeof DatabaseViewTypeSchema>;
 
@@ -174,12 +175,28 @@ export const CalendarViewConfigSchema = z.object({
 });
 export type CalendarViewConfig = z.infer<typeof CalendarViewConfigSchema>;
 
+export const ChartTypeSchema = z.enum(["bar", "line", "pie"]);
+export type ChartType = z.infer<typeof ChartTypeSchema>;
+
+export const ChartAggregationSchema = z.enum(["count", "sum", "average", "min", "max"]);
+export type ChartAggregation = z.infer<typeof ChartAggregationSchema>;
+
+export const ChartViewConfigSchema = z.object({
+  chartType: ChartTypeSchema,
+  xAxisPropertyId: z.string(),
+  yAxisPropertyId: z.string().optional(),
+  aggregation: ChartAggregationSchema,
+  colorPropertyId: z.string().optional(),
+});
+export type ChartViewConfig = z.infer<typeof ChartViewConfigSchema>;
+
 export const ViewConfigSchema = z.union([
   TableViewConfigSchema,
   BoardViewConfigSchema,
   GalleryViewConfigSchema,
   ListViewConfigSchema,
   CalendarViewConfigSchema,
+  ChartViewConfigSchema,
 ]);
 
 export const SummaryAggregationSchema = z.enum([
@@ -493,7 +510,8 @@ export function createDatabaseFromObjectType(objectType: ObjectType): DatabaseCo
   const viewName = viewType === "board" ? "Board" :
     viewType === "gallery" ? "Gallery" :
     viewType === "list" ? "List" :
-    viewType === "calendar" ? "Calendar" : "Table";
+    viewType === "calendar" ? "Calendar" :
+    viewType === "chart" ? "Chart" : "Table";
 
   return {
     version: 2,

@@ -2081,3 +2081,136 @@
   font-size: 11px;
   color: var(--text-tertiary);
 }
+
+/* --- Chart View --- */
+
+.db-chart-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.db-chart-config {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 4px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.db-chart-config-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.db-chart-config-label {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.db-chart-config-select {
+  padding: 3px 6px;
+  font-size: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: var(--color-bg-secondary);
+  color: var(--color-text-primary);
+  cursor: pointer;
+  max-width: 140px;
+}
+
+.db-chart-type-btns {
+  display: flex;
+  gap: 2px;
+}
+
+.db-chart-type-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 6px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.db-chart-type-btn:hover {
+  background: var(--color-bg-tertiary);
+}
+
+.db-chart-type-btn-active {
+  background: var(--color-accent);
+  color: white;
+  border-color: var(--color-accent);
+}
+
+.db-chart-container {
+  position: relative;
+  min-height: 300px;
+  height: 400px;
+  width: 100%;
+}
+
+.db-chart-container svg {
+  display: block;
+}
+
+.db-chart-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
+.db-chart-tooltip {
+  display: none;
+  position: absolute;
+  padding: 4px 10px;
+  background: var(--color-bg-elevated);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  font-size: 12px;
+  pointer-events: none;
+  white-space: nowrap;
+  z-index: 10;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+/* --- Progress Bar --- */
+
+.db-progress-bar {
+  position: relative;
+  width: 100%;
+  height: 18px;
+  background: var(--color-bg-tertiary);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.db-progress-fill {
+  height: 100%;
+  background: var(--color-accent);
+  border-radius: 4px;
+  transition: width 0.2s ease;
+}
+
+.db-progress-label {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  mix-blend-mode: difference;
+}

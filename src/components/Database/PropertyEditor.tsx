@@ -326,6 +326,7 @@ function NumberFormatEditor({
         <option value="plain">Plain</option>
         <option value="currency">Currency</option>
         <option value="percent">Percent</option>
+        <option value="progressBar">Progress bar</option>
       </select>
       <div className="db-pe-numfmt-row">
         <label className="db-pe-label">Decimals</label>

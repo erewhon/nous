@@ -908,25 +908,25 @@ These are the active focus areas:
 Building on the existing database foundation (table, board, gallery, list, calendar views, relations, rollups, object types).
 
 #### Formula & Computed Columns
-- [ ] **Formula property type** - Computed values from other columns
+- [x] **Formula property type** - Computed values from other columns *(done: `formulaEvaluator.ts` with full expression parser, 20+ built-in functions including `if`, `concat`, `round`, `dateAdd`, `dateDiff`, `now`; `FormulaAutocomplete.tsx`; `FormulaConfig` on PropertyDef; `FormulaCell` renderer; topological sort for dependency order)*
   - Expression language supporting arithmetic, string, date, and logical operations
   - Reference other properties by name (e.g., `Price * Quantity`, `concat(First, " ", Last)`)
   - Built-in functions: `now()`, `if()`, `length()`, `sum()`, `dateAdd()`, `format()`, etc.
   - Auto-recalculate on dependency changes
   - Formula editor with syntax highlighting and autocomplete
-- [ ] **Number formatting** - Display options for number properties
+- [x] **Number formatting** - Display options for number properties *(done: `NumberFormat` schema with plain/currency/percent/progressBar styles, `formatNumber.ts` with decimals, thousands separator, currency symbol)*
   - Currency ($, EUR, GBP, etc.), percentage, comma-separated
   - Decimal places configuration
-  - Progress bar display mode (0-100)
+  - [x] Progress bar display mode (0-100)
 
 #### Charts & Summary Views
-- [ ] **Chart view** - Visualize database data
+- [x] **Chart view** - Visualize database data *(done: `DatabaseChart.tsx` with D3.js bar/line/pie charts, config panel for chart type/axes/aggregation/color)*
   - Bar, line, pie/donut chart types (D3.js, consistent with existing visualizations)
   - Configure X/Y axes from database properties
   - Aggregate functions (count, sum, average, min, max)
   - Group by select/multi-select/date properties
   - Chart saved as a view (alongside table, board, gallery, etc.)
-- [ ] **Summary row** - Aggregate footer for table view
+- [x] **Summary row** - Aggregate footer for table view *(done: `computeSummary.ts` with all aggregation types, `SummaryFooterCell` with per-column dropdown in table footer, `propertySummaries` stored per-view)*
   - Per-column summary: sum, average, count, min, max, count empty/not empty
   - Configurable per property (dropdown in column header)
   - Sticky at bottom of table
@@ -936,8 +936,8 @@ Building on the existing database foundation (table, board, gallery, list, calen
   - Built-in templates: CRM contacts, project tracker, reading list, habit tracker, inventory
   - Save current database schema as template (properties + views, no rows)
   - Create database from template
-- [ ] **CSV export** - Export database rows
-  - Export current view (respecting filters/sorts) or all rows
+- [x] **CSV export** - Export database rows *(done: `exportCsv.ts` with header row, select option label resolution, formula computed values, view filter/sort respect)*
+  - [x] Export current view (respecting filters/sorts) or all rows
   - Property names as headers, select options resolved to labels
   - Download as .csv file
 - [ ] **Duplicate database** - Copy schema and optionally rows

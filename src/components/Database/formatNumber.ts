@@ -38,5 +38,10 @@ export function formatNumber(value: number, format?: NumberFormat): string {
     return `${formatted}%`;
   }
 
+  if (style === "progressBar") {
+    // Return plain number string; the visual bar is rendered by the cell component
+    return `${value}%`;
+  }
+
   return formatted;
 }

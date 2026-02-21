@@ -72,6 +72,29 @@ export function NumberCell({ value, onChange, numberFormat }: CellEditorProps & 
   }, [editing]);
 
   if (!editing) {
+    // Progress bar display mode
+    if (numberFormat?.style === "progressBar" && value != null) {
+      const numVal = Number(value);
+      const clampedWidth = Math.max(0, Math.min(100, numVal));
+      return (
+        <div
+          className="db-cell-display db-cell-number"
+          onDoubleClick={() => {
+            setDraft(value != null ? String(value) : "");
+            setEditing(true);
+          }}
+        >
+          <div className="db-progress-bar">
+            <div
+              className="db-progress-fill"
+              style={{ width: `${clampedWidth}%` }}
+            />
+            <span className="db-progress-label">{numVal}%</span>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div
         className="db-cell-display db-cell-number"
