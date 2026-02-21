@@ -4,6 +4,7 @@ import type { Action, ActionCategory } from "../../types/action";
 import { ACTION_CATEGORIES } from "../../types/action";
 import { ActionCard } from "./ActionCard";
 import { ActionProgressDialog } from "./ActionProgressDialog";
+import { ScheduleView } from "./ScheduleView";
 
 interface ActionLibraryProps {
   isOpen: boolean;
@@ -18,9 +19,11 @@ export function ActionLibrary({
 }: ActionLibraryProps) {
   const {
     actions,
+    scheduledActions,
     isLoading,
     error,
     loadActions,
+    loadScheduledActions,
     deleteAction,
     setEnabled,
     openActionEditor,
@@ -32,6 +35,7 @@ export function ActionLibrary({
     closeProgressDialog,
   } = useActionStore();
 
+  const [view, setView] = useState<"library" | "schedule">("library");
   const [selectedCategory, setSelectedCategory] = useState<ActionCategory | "all">("all");
   const [runningActionId, setRunningActionId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
@@ -42,6 +46,12 @@ export function ActionLibrary({
       loadActions();
     }
   }, [isOpen, loadActions]);
+
+  useEffect(() => {
+    if (isOpen && view === "schedule") {
+      loadScheduledActions();
+    }
+  }, [isOpen, view, loadScheduledActions]);
 
   if (!isOpen) return null;
 
@@ -158,6 +168,36 @@ export function ActionLibrary({
             </p>
           </div>
           <div className="flex items-center gap-2">
+            {/* View tabs */}
+            <div
+              className="flex rounded-lg p-0.5"
+              style={{ backgroundColor: "var(--color-bg-tertiary)" }}
+            >
+              <button
+                onClick={() => setView("library")}
+                className="rounded-md px-3 py-1.5 text-sm font-medium transition-colors"
+                style={{
+                  backgroundColor:
+                    view === "library" ? "var(--color-accent)" : "transparent",
+                  color:
+                    view === "library" ? "white" : "var(--color-text-secondary)",
+                }}
+              >
+                Library
+              </button>
+              <button
+                onClick={() => setView("schedule")}
+                className="rounded-md px-3 py-1.5 text-sm font-medium transition-colors"
+                style={{
+                  backgroundColor:
+                    view === "schedule" ? "var(--color-accent)" : "transparent",
+                  color:
+                    view === "schedule" ? "white" : "var(--color-text-secondary)",
+                }}
+              >
+                Schedule
+              </button>
+            </div>
             <button
               onClick={handleCreateNew}
               className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-white transition-colors hover:opacity-90"
@@ -192,8 +232,8 @@ export function ActionLibrary({
           </div>
         )}
 
-        {/* Search and filters */}
-        <div
+        {/* Search and filters (library view only) */}
+        {view === "library" && <div
           className="flex items-center gap-4 border-b px-6 py-3"
           style={{ borderColor: "var(--color-border)" }}
         >
@@ -273,11 +313,16 @@ export function ActionLibrary({
           >
             Hide disabled
           </button>
-        </div>
+        </div>}
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-6">
-          {isLoading ? (
+          {view === "schedule" ? (
+            <ScheduleView
+              scheduledActions={scheduledActions}
+              onRunNow={handleRun}
+            />
+          ) : isLoading ? (
             <div className="flex items-center justify-center py-12">
               <IconSpinner className="h-8 w-8 animate-spin" />
             </div>
