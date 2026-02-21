@@ -702,13 +702,18 @@ STORAGE_TOOL_NAMES = {t["function"]["name"] for t in STORAGE_TOOLS}
 NOTEBOOK_TOOLS.extend(STORAGE_TOOLS)
 
 
-def _execute_storage_tool(func_name: str, func_args: dict) -> str:
+def _execute_storage_tool(func_name: str, func_args: dict, library_path: str | None = None) -> str:
     """Execute a storage tool directly in Python.
 
     Returns a JSON string result. These tools bypass the frontend action
     pipeline and operate directly on the Nous data files.
+
+    Args:
+        library_path: Path to the current library. If provided, uses this library
+                      instead of the default library.
     """
     from datetime import UTC, datetime
+    from pathlib import Path
     from uuid import uuid4
 
     from nous_ai.database_helpers import (
@@ -720,7 +725,10 @@ def _execute_storage_tool(func_name: str, func_args: dict) -> str:
     from nous_mcp.markdown import export_page_to_markdown, markdown_to_blocks
     from nous_mcp.storage import NousStorage
 
-    storage = NousStorage.from_library_name()
+    if library_path:
+        storage = NousStorage(Path(library_path))
+    else:
+        storage = NousStorage.from_library_name()
     page_storage = NousPageStorage(data_dir=storage.library_path, client_id="nous-agent")
 
     def _resolve_notebook(name: str) -> dict:
@@ -1286,7 +1294,11 @@ When the user asks you to "create", "write", "make", "generate", or "save" conte
             (n for n in available_notebooks if n.get("id") == current_notebook_id), None
         )
         if current_nb:
-            system_parts.append(f"Currently selected notebook: {current_nb.get('name')}")
+            system_parts.append(
+                f"Currently selected notebook: {current_nb.get('name')}. "
+                f"ALWAYS use this notebook for creating pages, databases, and other content "
+                f"unless the user explicitly specifies a different notebook."
+            )
 
     if page_context:
         ctx = PageContext(**page_context)
@@ -2094,7 +2106,11 @@ When the user asks you to "create", "write", "make", "generate", or "save" conte
             (n for n in available_notebooks if n.get("id") == current_notebook_id), None
         )
         if current_nb:
-            system_parts.append(f"Currently selected notebook: {current_nb.get('name')}")
+            system_parts.append(
+                f"Currently selected notebook: {current_nb.get('name')}. "
+                f"ALWAYS use this notebook for creating pages, databases, and other content "
+                f"unless the user explicitly specifies a different notebook."
+            )
 
     if page_context:
         ctx = PageContext(**page_context)
@@ -2209,7 +2225,7 @@ When the user asks you to "create", "write", "make", "generate", or "save" conte
                     task_preview = func_args.get("task", "")[:100]
                     result = f"Browser task initiated: {task_preview}..."
                 elif func_name in STORAGE_TOOL_NAMES:
-                    result = _execute_storage_tool(func_name, func_args)
+                    result = _execute_storage_tool(func_name, func_args, library_path=library_path)
                 else:
                     result = "Action completed"
 
@@ -2334,7 +2350,7 @@ When the user asks you to "create", "write", "make", "generate", or "save" conte
                         task_preview = func_args.get("task", "")[:100]
                         result = f"Browser task initiated: {task_preview}..."
                     elif func_name in STORAGE_TOOL_NAMES:
-                        result = _execute_storage_tool(func_name, func_args)
+                        result = _execute_storage_tool(func_name, func_args, library_path=library_path)
                     else:
                         result = "Action completed"
 
@@ -2457,7 +2473,7 @@ When the user asks you to "create", "write", "make", "generate", or "save" conte
                     task_preview = func_args.get("task", "")[:100]
                     result = f"Browser task initiated: {task_preview}..."
                 elif func_name in STORAGE_TOOL_NAMES:
-                    result = _execute_storage_tool(func_name, func_args)
+                    result = _execute_storage_tool(func_name, func_args, library_path=library_path)
                 else:
                     result = "Action completed"
 
