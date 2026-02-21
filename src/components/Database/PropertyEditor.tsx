@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { PropertyDef, PropertyType, SelectOption, CellValue } from "../../types/database";
+import type { PropertyDef, PropertyType, SelectOption, CellValue, NumberFormat } from "../../types/database";
 import { pickNextColor } from "./CellEditors";
 
 interface PropertyEditorProps {
@@ -150,6 +150,14 @@ export function PropertyEditor({ property, onUpdate, onDelete, onClose }: Proper
         </div>
       )}
 
+      {/* Number format */}
+      {property.type === "number" && (
+        <NumberFormatEditor
+          format={property.numberFormat}
+          onChange={(fmt) => onUpdate({ numberFormat: fmt })}
+        />
+      )}
+
       {/* Default value */}
       {property.type !== "relation" && property.type !== "rollup" && (
         <div className="db-pe-section">
@@ -263,6 +271,82 @@ function DefaultValueEditor({
         />
       );
   }
+}
+
+// Number format editor
+function NumberFormatEditor({
+  format,
+  onChange,
+}: {
+  format?: NumberFormat;
+  onChange: (fmt: NumberFormat | undefined) => void;
+}) {
+  const style = format?.style ?? "plain";
+  const decimals = format?.decimals;
+  const thousandsSeparator = format?.thousandsSeparator ?? false;
+  const currencySymbol = format?.currencySymbol ?? "$";
+
+  const update = (patch: Partial<NumberFormat>) => {
+    onChange({ style, thousandsSeparator, currencySymbol, ...format, ...patch });
+  };
+
+  return (
+    <div className="db-pe-section">
+      <label className="db-pe-label">Format</label>
+      <select
+        className="db-pe-select"
+        value={style}
+        onChange={(e) => {
+          const s = e.target.value as NumberFormat["style"];
+          if (s === "plain" && !thousandsSeparator && decimals == null) {
+            onChange(undefined);
+          } else {
+            update({ style: s });
+          }
+        }}
+      >
+        <option value="plain">Plain</option>
+        <option value="currency">Currency</option>
+        <option value="percent">Percent</option>
+      </select>
+      <div className="db-pe-numfmt-row">
+        <label className="db-pe-label">Decimals</label>
+        <input
+          className="db-pe-input"
+          type="number"
+          min={0}
+          max={10}
+          placeholder="Auto"
+          value={decimals != null ? decimals : ""}
+          onChange={(e) => {
+            const v = e.target.value;
+            update({ decimals: v === "" ? undefined : Number(v) });
+          }}
+          style={{ width: 70 }}
+        />
+      </div>
+      <label className="db-pe-default-checkbox">
+        <input
+          type="checkbox"
+          checked={thousandsSeparator}
+          onChange={(e) => update({ thousandsSeparator: e.target.checked })}
+        />
+        <span>Thousands separator</span>
+      </label>
+      {style === "currency" && (
+        <div className="db-pe-numfmt-row">
+          <label className="db-pe-label">Symbol</label>
+          <input
+            className="db-pe-input"
+            type="text"
+            value={currencySymbol}
+            onChange={(e) => update({ currencySymbol: e.target.value })}
+            style={{ width: 60 }}
+          />
+        </div>
+      )}
+    </div>
+  );
 }
 
 // Type icon component for column headers

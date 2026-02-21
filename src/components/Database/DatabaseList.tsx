@@ -8,6 +8,7 @@ import type {
   SelectOption,
 } from "../../types/database";
 import { createDefaultRow } from "../../types/database";
+import { formatNumber } from "./formatNumber";
 import { pickNextColor } from "./CellEditors";
 import type { RelationContext } from "./useRelationContext";
 import { DatabaseRowDetail } from "./DatabaseRowDetail";
@@ -169,6 +170,9 @@ export function DatabaseList({
       return val
         .map((id) => prop.options?.find((o) => o.id === id)?.label ?? id)
         .join(", ");
+    }
+    if (prop.type === "number" && typeof val === "number") {
+      return formatNumber(val, prop.numberFormat);
     }
     if (prop.type === "checkbox") return val ? "Yes" : "No";
     if (prop.type === "relation" && Array.isArray(val)) {

@@ -446,7 +446,9 @@ export function DatabaseEditor({
       <DatabaseToolbar
         properties={content.properties}
         view={activeView}
+        rows={content.rows}
         rowCount={content.rows.length}
+        title={page?.title}
         onAddProperty={handleAddProperty}
         onUpdateSorts={handleUpdateSorts}
         onUpdateFilters={handleUpdateFilters}

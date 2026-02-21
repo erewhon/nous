@@ -9,6 +9,7 @@ import type {
   PropertyDef,
 } from "../../types/database";
 import { createDefaultRow } from "../../types/database";
+import { formatNumber } from "./formatNumber";
 import { pickNextColor } from "./CellEditors";
 import type { RelationContext } from "./useRelationContext";
 import { DatabaseRowDetail } from "./DatabaseRowDetail";
@@ -228,6 +229,9 @@ export function DatabaseGallery({
             .slice(0, 30)}
         </a>
       );
+    }
+    if (prop.type === "number" && typeof val === "number") {
+      return formatNumber(val, prop.numberFormat);
     }
     if (prop.type === "relation" && Array.isArray(val)) {
       const targets = relationContext?.targets.get(prop.id) ?? [];

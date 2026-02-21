@@ -108,7 +108,7 @@ export function DatabaseRowDetail({
         case "text":
           return <TextCell value={value} onChange={onChange} />;
         case "number":
-          return <NumberCell value={value} onChange={onChange} />;
+          return <NumberCell value={value} onChange={onChange} numberFormat={prop.numberFormat} />;
         case "checkbox":
           return <CheckboxCell value={value} onChange={onChange} />;
         case "date":

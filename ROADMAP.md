@@ -857,6 +857,8 @@ These are the active focus areas:
 1. ~~**Data Flow Robustness Overhaul** - Operation logging, CRDT local integration, block-level versioning (Phases 0-4)~~ ✅ Complete
 2. ~~**Energy & Focus Tracking** - Energy-aware daily planning with pattern detection and external agent API~~ ✅ Complete
 3. ~~**Move video storage out of /tmp** - Videos served from notebook assets via HTTP video server~~ ✅ Complete
+4. **Database Improvements (Phase 2)** - Formula columns, charts, templates, CSV export (Section 35b)
+5. **AI Chat Session Retention** - Persist conversations with tool call history across restarts (Section 49)
 
 ---
 
@@ -900,6 +902,58 @@ These are the active focus areas:
   - Auto-updating via Zustand page store subscription
   - Inline config editor for filters, sort, and limit
   - Click result to navigate to page
+
+### 35b. Database Improvements (Phase 2)
+
+Building on the existing database foundation (table, board, gallery, list, calendar views, relations, rollups, object types).
+
+#### Formula & Computed Columns
+- [ ] **Formula property type** - Computed values from other columns
+  - Expression language supporting arithmetic, string, date, and logical operations
+  - Reference other properties by name (e.g., `Price * Quantity`, `concat(First, " ", Last)`)
+  - Built-in functions: `now()`, `if()`, `length()`, `sum()`, `dateAdd()`, `format()`, etc.
+  - Auto-recalculate on dependency changes
+  - Formula editor with syntax highlighting and autocomplete
+- [ ] **Number formatting** - Display options for number properties
+  - Currency ($, EUR, GBP, etc.), percentage, comma-separated
+  - Decimal places configuration
+  - Progress bar display mode (0-100)
+
+#### Charts & Summary Views
+- [ ] **Chart view** - Visualize database data
+  - Bar, line, pie/donut chart types (D3.js, consistent with existing visualizations)
+  - Configure X/Y axes from database properties
+  - Aggregate functions (count, sum, average, min, max)
+  - Group by select/multi-select/date properties
+  - Chart saved as a view (alongside table, board, gallery, etc.)
+- [ ] **Summary row** - Aggregate footer for table view
+  - Per-column summary: sum, average, count, min, max, count empty/not empty
+  - Configurable per property (dropdown in column header)
+  - Sticky at bottom of table
+
+#### Templates & Import/Export
+- [ ] **Database templates** - Pre-built database schemas
+  - Built-in templates: CRM contacts, project tracker, reading list, habit tracker, inventory
+  - Save current database schema as template (properties + views, no rows)
+  - Create database from template
+- [ ] **CSV export** - Export database rows
+  - Export current view (respecting filters/sorts) or all rows
+  - Property names as headers, select options resolved to labels
+  - Download as .csv file
+- [ ] **Duplicate database** - Copy schema and optionally rows
+  - Copy to same or different notebook
+  - Option to include or exclude row data
+
+#### UI Polish
+- [ ] **Conditional formatting** - Visual rules for cells
+  - Highlight cells based on value (e.g., red if overdue, green if complete)
+  - Rules per property: contains, equals, greater/less than, is empty
+  - Background color or text color change
+- [ ] **Column pinning** - Freeze columns in table view
+  - Pin first N columns so they stay visible during horizontal scroll
+- [ ] **Bulk row operations** - Multi-select rows
+  - Checkbox column for row selection
+  - Bulk delete, bulk edit property value, bulk tag
 
 ---
 
@@ -1257,6 +1311,47 @@ Expose Nous notebooks to external AI agents (Claude Code, etc.) via the Model Co
   - Requires verifying Tauri binary runs standalone without bundled webview resources
 - [ ] **Flatpak/Snap packaging** - Alternative Linux distribution channels
 - [ ] **AUR package** - Arch Linux user repository
+
+---
+
+### 49. AI Chat Session Retention
+
+Persist AI chat conversations (from the sidebar panel) across app restarts, including full tool call history, so users can resume conversations and review what the AI did.
+
+#### Session Persistence
+- [ ] **Save chat sessions** - Persist sidebar AI conversations to disk
+  - Store as JSON files in library data directory (`{library}/ai_sessions/`)
+  - Each session: id, title, messages, created_at, updated_at, model, notebook context
+  - Auto-save on each message (append-friendly format)
+  - Auto-title from first user message (or AI-generated title)
+- [ ] **Session list** - Browse and resume past conversations
+  - Session list panel (replaces empty chat state)
+  - Sort by last updated, search by title/content
+  - Resume any session with full context restored
+  - Delete sessions
+- [ ] **Auto-resume** - Restore last active session on panel open
+  - Remember which session was active per notebook (or globally)
+  - "New conversation" button to start fresh
+
+#### Tool Call History
+- [ ] **Persist tool calls and results** - Full tool execution record
+  - Store tool call name, arguments, result, and timing in message history
+  - Distinguish between Nous tools (create_page, etc.), MCP tools, and proxy tools
+  - Store created item references (page IDs, database IDs) for navigation
+- [ ] **Tool call UI in chat** - Display tool activity in conversation
+  - Collapsible tool call cards showing: tool name, arguments, result preview
+  - Visual distinction (icon + muted styling) from regular messages
+  - Click-to-navigate for created pages/databases
+  - Error states for failed tool calls
+- [ ] **Conversation context window** - Manage context for long sessions
+  - Configurable context window (last N messages sent to model)
+  - Session summary/compression for long conversations
+  - Show indicator when older messages are outside context window
+
+#### Future Enhancements
+- [ ] **Export chat session** - Save conversation as markdown page
+- [ ] **Branch conversations** - Fork a session at any message (similar to Chat Page branching)
+- [ ] **Session templates** - Pre-configured sessions with system prompts (e.g., "Database Builder", "Research Assistant")
 
 ---
 

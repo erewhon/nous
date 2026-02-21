@@ -381,7 +381,7 @@ export function DatabaseTable({
       case "text":
         return <TextCell value={value} onChange={onChange} />;
       case "number":
-        return <NumberCell value={value} onChange={onChange} />;
+        return <NumberCell value={value} onChange={onChange} numberFormat={prop.numberFormat} />;
       case "checkbox":
         return <CheckboxCell value={value} onChange={onChange} />;
       case "date":
@@ -606,7 +606,7 @@ function applyFilter(
   cellVal: CellValue,
   operator: string,
   filterVal: CellValue,
-  _prop: PropertyDef
+  prop: PropertyDef
 ): boolean {
   switch (operator) {
     case "isEmpty":
@@ -622,15 +622,42 @@ function applyFilter(
         !(Array.isArray(cellVal) && cellVal.length === 0)
       );
     case "equals":
+      if (prop.type === "checkbox") {
+        return cellVal === (filterVal === "true" || filterVal === true);
+      }
+      if (prop.type === "multiSelect" && Array.isArray(cellVal)) {
+        return cellVal.includes(String(filterVal ?? ""));
+      }
+      // select: both are option IDs; text/number: string comparison
       return String(cellVal ?? "") === String(filterVal ?? "");
+    case "notEquals":
+      if (prop.type === "checkbox") {
+        return cellVal !== (filterVal === "true" || filterVal === true);
+      }
+      if (prop.type === "multiSelect" && Array.isArray(cellVal)) {
+        return !cellVal.includes(String(filterVal ?? ""));
+      }
+      return String(cellVal ?? "") !== String(filterVal ?? "");
     case "contains":
       return String(cellVal ?? "")
         .toLowerCase()
         .includes(String(filterVal ?? "").toLowerCase());
+    case "doesNotContain":
+      return !String(cellVal ?? "")
+        .toLowerCase()
+        .includes(String(filterVal ?? "").toLowerCase());
     case "gt":
       return Number(cellVal) > Number(filterVal);
+    case "gte":
+      return Number(cellVal) >= Number(filterVal);
     case "lt":
       return Number(cellVal) < Number(filterVal);
+    case "lte":
+      return Number(cellVal) <= Number(filterVal);
+    case "before":
+      return String(cellVal ?? "") < String(filterVal ?? "");
+    case "after":
+      return String(cellVal ?? "") > String(filterVal ?? "");
     default:
       return true;
   }

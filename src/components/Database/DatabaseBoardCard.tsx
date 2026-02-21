@@ -1,4 +1,5 @@
 import type { DatabaseRow, PropertyDef } from "../../types/database";
+import { formatNumber } from "./formatNumber";
 
 interface DatabaseBoardCardProps {
   row: DatabaseRow;
@@ -79,6 +80,10 @@ export function DatabaseBoardCard({
     if (prop.type === "rollup") {
       // Rollup values are not available in card context (no relation context passed)
       return null;
+    }
+
+    if (prop.type === "number" && typeof val === "number") {
+      return <span className="db-board-card-text">{formatNumber(val, prop.numberFormat)}</span>;
     }
 
     return <span className="db-board-card-text">{String(val)}</span>;

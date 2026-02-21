@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import type { CellValue, SelectOption } from "../../types/database";
+import type { CellValue, SelectOption, NumberFormat } from "../../types/database";
+import { formatNumber } from "./formatNumber";
 import { SELECT_COLORS } from "../../types/database";
 
 interface CellEditorProps {
@@ -61,7 +62,7 @@ export function TextCell({ value, onChange }: CellEditorProps) {
 }
 
 // Number cell
-export function NumberCell({ value, onChange }: CellEditorProps) {
+export function NumberCell({ value, onChange, numberFormat }: CellEditorProps & { numberFormat?: NumberFormat }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value != null ? String(value) : "");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -79,7 +80,7 @@ export function NumberCell({ value, onChange }: CellEditorProps) {
           setEditing(true);
         }}
       >
-        {value != null ? String(value) : ""}
+        {value != null ? formatNumber(Number(value), numberFormat) : ""}
       </div>
     );
   }

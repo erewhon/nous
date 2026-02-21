@@ -54,6 +54,15 @@ export const RollupConfigSchema = z.object({
 });
 export type RollupConfig = z.infer<typeof RollupConfigSchema>;
 
+// Number formatting configuration
+export const NumberFormatSchema = z.object({
+  style: z.enum(["plain", "currency", "percent"]).default("plain"),
+  decimals: z.number().optional(),
+  thousandsSeparator: z.boolean().optional(),
+  currencySymbol: z.string().optional(),
+});
+export type NumberFormat = z.infer<typeof NumberFormatSchema>;
+
 // Cell value can be various types
 export const CellValueSchema = z.union([
   z.string(),
@@ -73,6 +82,7 @@ export const PropertyDefSchema = z.object({
   width: z.number().optional(),
   relationConfig: RelationConfigSchema.optional(),
   rollupConfig: RollupConfigSchema.optional(),
+  numberFormat: NumberFormatSchema.optional(),
   defaultValue: CellValueSchema.optional(),
 });
 export type PropertyDef = z.infer<typeof PropertyDefSchema>;

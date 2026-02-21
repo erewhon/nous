@@ -8,15 +8,20 @@ import type {
   DatabaseView,
   TableViewConfig,
   DatabaseContentV2,
+  DatabaseRow,
   RollupConfig,
   RollupAggregation,
+  CellValue,
 } from "../../types/database";
 import { PropertyTypeIcon } from "./PropertyEditor";
+import { exportDatabaseAsCsv } from "./exportCsv";
 
 interface DatabaseToolbarProps {
   properties: PropertyDef[];
   view: DatabaseView;
+  rows: DatabaseRow[];
   rowCount: number;
+  title?: string;
   onAddProperty: (
     name: string,
     type: PropertyType,
@@ -46,7 +51,9 @@ const TYPE_OPTIONS: { value: PropertyType; label: string }[] = [
 export function DatabaseToolbar({
   properties,
   view,
+  rows,
   rowCount,
+  title,
   onAddProperty,
   onUpdateSorts,
   onUpdateFilters,
@@ -224,6 +231,26 @@ export function DatabaseToolbar({
             )}
           </div>
         )}
+        {/* Export CSV */}
+        <button
+          className="db-toolbar-btn"
+          onClick={() => exportDatabaseAsCsv(properties, rows, title || "database")}
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+          >
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="7 10 12 15 17 10" />
+            <line x1="12" y1="15" x2="12" y2="3" />
+          </svg>
+          Export
+        </button>
       </div>
 
       <div className="db-toolbar-right">
@@ -544,6 +571,69 @@ function SortPopover({
   );
 }
 
+// Operators by property type
+const OPERATORS_BY_TYPE: Record<string, { value: string; label: string }[]> = {
+  text: [
+    { value: "contains", label: "Contains" },
+    { value: "doesNotContain", label: "Does not contain" },
+    { value: "equals", label: "Equals" },
+    { value: "notEquals", label: "Not equals" },
+    { value: "isEmpty", label: "Is empty" },
+    { value: "isNotEmpty", label: "Is not empty" },
+  ],
+  url: [
+    { value: "contains", label: "Contains" },
+    { value: "doesNotContain", label: "Does not contain" },
+    { value: "equals", label: "Equals" },
+    { value: "notEquals", label: "Not equals" },
+    { value: "isEmpty", label: "Is empty" },
+    { value: "isNotEmpty", label: "Is not empty" },
+  ],
+  number: [
+    { value: "equals", label: "=" },
+    { value: "notEquals", label: "\u2260" },
+    { value: "gt", label: ">" },
+    { value: "gte", label: "\u2265" },
+    { value: "lt", label: "<" },
+    { value: "lte", label: "\u2264" },
+    { value: "isEmpty", label: "Is empty" },
+    { value: "isNotEmpty", label: "Is not empty" },
+  ],
+  select: [
+    { value: "equals", label: "Equals" },
+    { value: "notEquals", label: "Not equals" },
+    { value: "isEmpty", label: "Is empty" },
+    { value: "isNotEmpty", label: "Is not empty" },
+  ],
+  multiSelect: [
+    { value: "equals", label: "Contains" },
+    { value: "notEquals", label: "Does not contain" },
+    { value: "isEmpty", label: "Is empty" },
+    { value: "isNotEmpty", label: "Is not empty" },
+  ],
+  checkbox: [
+    { value: "equals", label: "Is" },
+    { value: "isEmpty", label: "Is empty" },
+    { value: "isNotEmpty", label: "Is not empty" },
+  ],
+  date: [
+    { value: "equals", label: "Equals" },
+    { value: "before", label: "Before" },
+    { value: "after", label: "After" },
+    { value: "isEmpty", label: "Is empty" },
+    { value: "isNotEmpty", label: "Is not empty" },
+  ],
+};
+
+function getOperatorsForType(type: string) {
+  return OPERATORS_BY_TYPE[type] ?? OPERATORS_BY_TYPE.text;
+}
+
+function getDefaultOperator(type: string) {
+  const ops = getOperatorsForType(type);
+  return ops[0]?.value ?? "contains";
+}
+
 // Filter Popover
 function FilterPopover({
   properties,
@@ -567,9 +657,10 @@ function FilterPopover({
 
   const addFilter = () => {
     if (properties.length > 0) {
+      const prop = properties[0];
       onUpdateFilters([
         ...filters,
-        { propertyId: properties[0].id, operator: "contains", value: "" },
+        { propertyId: prop.id, operator: getDefaultOperator(prop.type), value: "" },
       ]);
     }
   };
@@ -584,67 +675,156 @@ function FilterPopover({
     );
   };
 
+  const handlePropertyChange = (idx: number, newPropertyId: string) => {
+    const newProp = properties.find((p) => p.id === newPropertyId);
+    if (!newProp) return;
+    const currentOp = filters[idx].operator;
+    const validOps = getOperatorsForType(newProp.type);
+    const isValid = validOps.some((o) => o.value === currentOp);
+    updateFilter(idx, {
+      propertyId: newPropertyId,
+      ...(isValid ? {} : { operator: getDefaultOperator(newProp.type) }),
+      value: "",
+    });
+  };
+
   return (
     <div ref={ref} className="db-popover">
       <div className="db-popover-title">Filter</div>
-      {filters.map((filter, idx) => (
-        <div key={idx} className="db-popover-row">
-          <select
-            className="db-pe-select"
-            value={filter.propertyId}
-            onChange={(e) => updateFilter(idx, { propertyId: e.target.value })}
-          >
-            {properties.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-          <select
-            className="db-pe-select"
-            value={filter.operator}
-            onChange={(e) => updateFilter(idx, { operator: e.target.value })}
-          >
-            <option value="contains">Contains</option>
-            <option value="equals">Equals</option>
-            <option value="isEmpty">Is empty</option>
-            <option value="isNotEmpty">Is not empty</option>
-            <option value="gt">Greater than</option>
-            <option value="lt">Less than</option>
-          </select>
-          {filter.operator !== "isEmpty" &&
-            filter.operator !== "isNotEmpty" && (
-              <input
-                className="db-pe-input"
-                value={String(filter.value ?? "")}
-                onChange={(e) => updateFilter(idx, { value: e.target.value })}
-                placeholder="Value"
+      {filters.map((filter, idx) => {
+        const prop = properties.find((p) => p.id === filter.propertyId);
+        const propType = prop?.type ?? "text";
+        const operators = getOperatorsForType(propType);
+        const needsValue = filter.operator !== "isEmpty" && filter.operator !== "isNotEmpty";
+
+        return (
+          <div key={idx} className="db-popover-row">
+            <select
+              className="db-pe-select"
+              value={filter.propertyId}
+              onChange={(e) => handlePropertyChange(idx, e.target.value)}
+            >
+              {properties.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+            <select
+              className="db-pe-select"
+              value={filter.operator}
+              onChange={(e) => updateFilter(idx, { operator: e.target.value })}
+            >
+              {operators.map((op) => (
+                <option key={op.value} value={op.value}>
+                  {op.label}
+                </option>
+              ))}
+            </select>
+            {needsValue && (
+              <FilterValueInput
+                propType={propType}
+                options={prop?.options}
+                value={filter.value}
+                onChange={(v) => updateFilter(idx, { value: v })}
               />
             )}
-          <button
-            className="db-popover-remove"
-            onClick={() => removeFilter(idx)}
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="12"
-              height="12"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
+            <button
+              className="db-popover-remove"
+              onClick={() => removeFilter(idx)}
             >
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
-          </button>
-        </div>
-      ))}
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+          </div>
+        );
+      })}
       <button className="db-popover-action" onClick={addFilter}>
         Add filter
       </button>
     </div>
   );
+}
+
+// Type-aware filter value input
+function FilterValueInput({
+  propType,
+  options,
+  value,
+  onChange,
+}: {
+  propType: string;
+  options?: { id: string; label: string; color: string }[];
+  value: CellValue;
+  onChange: (v: CellValue) => void;
+}) {
+  switch (propType) {
+    case "number":
+      return (
+        <input
+          className="db-pe-input"
+          type="number"
+          value={String(value ?? "")}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="Value"
+        />
+      );
+    case "date":
+      return (
+        <input
+          className="db-pe-input"
+          type="date"
+          value={String(value ?? "")}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      );
+    case "select":
+    case "multiSelect":
+      return (
+        <select
+          className="db-pe-select"
+          value={String(value ?? "")}
+          onChange={(e) => onChange(e.target.value)}
+        >
+          <option value="">Select...</option>
+          {(options ?? []).map((opt) => (
+            <option key={opt.id} value={opt.id}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
+      );
+    case "checkbox":
+      return (
+        <select
+          className="db-pe-select"
+          value={String(value ?? "")}
+          onChange={(e) => onChange(e.target.value)}
+        >
+          <option value="true">Checked</option>
+          <option value="false">Unchecked</option>
+        </select>
+      );
+    default:
+      return (
+        <input
+          className="db-pe-input"
+          value={String(value ?? "")}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="Value"
+        />
+      );
+  }
 }
 
 // Group By Popover
