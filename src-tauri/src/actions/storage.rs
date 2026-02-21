@@ -7,7 +7,7 @@ use crate::actions::models::{Action, ActionUpdate};
 use crate::storage::StorageError;
 
 /// Version for built-in actions — bump this to force regeneration
-const BUILTIN_ACTIONS_VERSION: u32 = 6;
+const BUILTIN_ACTIONS_VERSION: u32 = 7;
 
 /// Storage for custom actions
 /// Actions are stored in ~/.local/share/nous/actions/
@@ -44,11 +44,13 @@ impl ActionStorage {
         for mut action in get_builtin_actions() {
             let path = self.action_path(action.id);
             if needs_regen || !path.exists() {
-                // Preserve the user's enabled and triggers settings from the existing file
+                // Preserve the user's enabled setting from the existing file.
+                // Triggers are NOT preserved — version bumps push new trigger
+                // configurations (e.g. adding a schedule). User trigger edits via
+                // update_action() will persist until the next version bump.
                 if needs_regen {
                     if let Ok(existing) = self.load_action_from_path(&path) {
                         action.enabled = existing.enabled;
-                        action.triggers = existing.triggers;
                     }
                 }
                 let content = serde_json::to_string_pretty(&action)?;
