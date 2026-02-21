@@ -8,6 +8,7 @@ import type {
   DatabaseSort,
   DatabaseFilter,
   RollupConfig,
+  FormulaConfig,
 } from "../../types/database";
 import {
   migrateDatabaseContent,
@@ -164,7 +165,8 @@ export function DatabaseEditor({
       name: string,
       type: PropertyType,
       relationConfig?: { databasePageId: string },
-      rollupConfig?: RollupConfig
+      rollupConfig?: RollupConfig,
+      formulaConfig?: FormulaConfig
     ) => {
       if (type === "relation" && relationConfig && notebookId && page) {
         // Bidirectional: create forward property in this DB, then back-relation in target DB
@@ -235,6 +237,19 @@ export function DatabaseEditor({
               name,
               type: "rollup" as const,
               rollupConfig,
+            },
+          ],
+        }));
+      } else if (type === "formula" && formulaConfig) {
+        handleUpdateContent((prev) => ({
+          ...prev,
+          properties: [
+            ...prev.properties,
+            {
+              id: crypto.randomUUID(),
+              name,
+              type: "formula" as const,
+              formulaConfig,
             },
           ],
         }));
@@ -475,6 +490,7 @@ export function DatabaseEditor({
         targetContents={relationContext.targetContents}
         onDeleteProperty={handleDeleteProperty}
         pageLinkPages={pageLinkPages}
+        computedValues={relationContext.formulaValues}
       />
       {renderActiveView()}
     </div>

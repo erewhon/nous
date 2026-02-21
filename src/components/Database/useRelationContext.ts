@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import type {
   DatabaseContentV2,
   CellValue,
@@ -7,6 +7,11 @@ import type {
 import { migrateDatabaseContent } from "../../types/database";
 import type { RelationTarget } from "./CellEditors";
 import * as api from "../../utils/api";
+import {
+  evaluateFormula,
+  extractColumnReferences,
+  topologicalSortFormulas,
+} from "./formulaEvaluator";
 
 export interface RelationContext {
   /** propertyId → picker targets (row id + title) */
@@ -17,6 +22,10 @@ export interface RelationContext {
   backRelationValues: Map<string, Map<string, string[]>>;
   /** rollup propId → rowId → computed value */
   rollupValues: Map<string, Map<string, CellValue>>;
+  /** formula propId → rowId → computed value */
+  formulaValues: Map<string, Map<string, CellValue>>;
+  /** formula propId → rowId → error message */
+  formulaErrors: Map<string, Map<string, string>>;
   /** Edit a back-relation: mutates the source database */
   updateBackRelation: (
     backPropId: string,
@@ -52,6 +61,128 @@ export function useRelationContext(
 
   const properties = content?.properties ?? [];
   const rows = content?.rows ?? [];
+
+  // Compute formula values synchronously (no async deps needed)
+  const { formulaValues, formulaErrors } = useMemo(() => {
+    const fValues = new Map<string, Map<string, CellValue>>();
+    const fErrors = new Map<string, Map<string, string>>();
+
+    if (!content) return { formulaValues: fValues, formulaErrors: fErrors };
+
+    const formulaProps = properties.filter(
+      (p) => p.type === "formula" && p.formulaConfig?.expression
+    );
+    if (formulaProps.length === 0) return { formulaValues: fValues, formulaErrors: fErrors };
+
+    // Build name→id and id→name maps
+    const nameToId = new Map(properties.map((p) => [p.name, p.id]));
+    const idToProp = new Map(properties.map((p) => [p.id, p]));
+
+    // Build dependency graph: formulaPropId → set of formula propIds it depends on
+    const formulaIdSet = new Set(formulaProps.map((p) => p.id));
+    const formulaDeps = new Map<string, string[]>();
+    for (const fp of formulaProps) {
+      const colRefs = extractColumnReferences(fp.formulaConfig!.expression);
+      const depIds = colRefs
+        .map((name) => nameToId.get(name))
+        .filter((id): id is string => id != null && formulaIdSet.has(id));
+      formulaDeps.set(fp.id, depIds);
+    }
+
+    // Topological sort
+    let sortedIds: string[];
+    try {
+      sortedIds = topologicalSortFormulas(formulaDeps);
+    } catch {
+      // Circular reference — mark all formulas as error
+      for (const fp of formulaProps) {
+        const errMap = new Map<string, string>();
+        for (const row of rows) {
+          errMap.set(row.id, "Circular reference");
+        }
+        fErrors.set(fp.id, errMap);
+        fValues.set(fp.id, new Map());
+      }
+      return { formulaValues: fValues, formulaErrors: fErrors };
+    }
+
+    // Evaluate formulas in topological order
+    // Track already-computed formula values per row for dependent formulas
+    const computedByRow = new Map<string, Map<string, CellValue>>(); // rowId → propId → value
+    for (const row of rows) {
+      computedByRow.set(row.id, new Map());
+    }
+
+    for (const propId of sortedIds) {
+      const fp = idToProp.get(propId)!;
+      const expression = fp.formulaConfig!.expression;
+      const valMap = new Map<string, CellValue>();
+      const errMap = new Map<string, string>();
+
+      for (const row of rows) {
+        // Build context: column name → value
+        const ctx: Record<string, CellValue> = {};
+        for (const prop of properties) {
+          if (prop.id === propId) continue; // skip self
+
+          const colName = prop.name;
+
+          // Check if this is a formula we already computed
+          const computed = computedByRow.get(row.id);
+          if (computed?.has(prop.id)) {
+            ctx[colName] = computed.get(prop.id)!;
+            continue;
+          }
+
+          // Check rollup values
+          if (prop.type === "rollup") {
+            ctx[colName] = rollupValues.get(prop.id)?.get(row.id) ?? null;
+            continue;
+          }
+
+          // Resolve select/multiSelect to labels
+          if (prop.type === "select") {
+            const cellVal = row.cells[prop.id];
+            if (typeof cellVal === "string" && prop.options) {
+              const opt = prop.options.find((o) => o.id === cellVal);
+              ctx[colName] = opt?.label ?? cellVal;
+            } else {
+              ctx[colName] = cellVal ?? null;
+            }
+            continue;
+          }
+          if (prop.type === "multiSelect") {
+            const cellVal = row.cells[prop.id];
+            if (Array.isArray(cellVal) && prop.options) {
+              const labels = cellVal
+                .map((id) => prop.options!.find((o) => o.id === id)?.label ?? id)
+                .join(", ");
+              ctx[colName] = labels;
+            } else {
+              ctx[colName] = cellVal ?? null;
+            }
+            continue;
+          }
+
+          // Regular cell value
+          ctx[colName] = row.cells[prop.id] ?? null;
+        }
+
+        const result = evaluateFormula(expression, ctx);
+        if (result.error) {
+          errMap.set(row.id, result.error);
+        } else {
+          valMap.set(row.id, result.value ?? null);
+          computedByRow.get(row.id)!.set(propId, result.value ?? null);
+        }
+      }
+
+      fValues.set(propId, valMap);
+      if (errMap.size > 0) fErrors.set(propId, errMap);
+    }
+
+    return { formulaValues: fValues, formulaErrors: fErrors };
+  }, [properties, rows, content, rollupValues]);
 
   // Load all target database contents
   useEffect(() => {
@@ -295,6 +426,8 @@ export function useRelationContext(
     targetContents,
     backRelationValues,
     rollupValues,
+    formulaValues,
+    formulaErrors,
     updateBackRelation,
   };
 }

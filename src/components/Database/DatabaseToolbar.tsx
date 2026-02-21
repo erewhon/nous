@@ -12,6 +12,7 @@ import type {
   RollupConfig,
   RollupAggregation,
   CellValue,
+  FormulaConfig,
 } from "../../types/database";
 import { PropertyTypeIcon } from "./PropertyEditor";
 import { exportDatabaseAsCsv } from "./exportCsv";
@@ -26,7 +27,8 @@ interface DatabaseToolbarProps {
     name: string,
     type: PropertyType,
     relationConfig?: { databasePageId: string },
-    rollupConfig?: RollupConfig
+    rollupConfig?: RollupConfig,
+    formulaConfig?: FormulaConfig
   ) => void;
   onUpdateSorts: (sorts: DatabaseSort[]) => void;
   onUpdateFilters: (filters: DatabaseFilter[]) => void;
@@ -35,6 +37,7 @@ interface DatabaseToolbarProps {
   targetContents?: Map<string, DatabaseContentV2>;
   onDeleteProperty?: (propertyId: string) => void;
   pageLinkPages?: Array<{ id: string; title: string }>;
+  computedValues?: Map<string, Map<string, CellValue>>;
 }
 
 const TYPE_OPTIONS: { value: PropertyType; label: string }[] = [
@@ -48,6 +51,7 @@ const TYPE_OPTIONS: { value: PropertyType; label: string }[] = [
   { value: "pageLink", label: "Page Link" },
   { value: "relation", label: "Relation" },
   { value: "rollup", label: "Rollup" },
+  { value: "formula", label: "Formula" },
 ];
 
 export function DatabaseToolbar({
@@ -63,6 +67,7 @@ export function DatabaseToolbar({
   databasePages,
   targetContents,
   pageLinkPages,
+  computedValues,
 }: DatabaseToolbarProps) {
   const [showAddProp, setShowAddProp] = useState(false);
   const [showSort, setShowSort] = useState(false);
@@ -118,13 +123,14 @@ export function DatabaseToolbar({
               setNewPropName={setNewPropName}
               newPropType={newPropType}
               setNewPropType={setNewPropType}
-              onAdd={(relationConfig, rollupConfig) => {
+              onAdd={(relationConfig, rollupConfig, formulaConfig) => {
                 if (newPropName.trim()) {
                   onAddProperty(
                     newPropName.trim(),
                     newPropType,
                     relationConfig,
-                    rollupConfig
+                    rollupConfig,
+                    formulaConfig
                   );
                   setNewPropName("");
                   setNewPropType("text");
@@ -237,7 +243,7 @@ export function DatabaseToolbar({
         {/* Export CSV */}
         <button
           className="db-toolbar-btn"
-          onClick={() => exportDatabaseAsCsv(properties, rows, title || "database", pageLinkPages)}
+          onClick={() => exportDatabaseAsCsv(properties, rows, title || "database", pageLinkPages, computedValues)}
         >
           <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -297,7 +303,8 @@ function AddPropertyPopover({
   setNewPropType: (v: PropertyType) => void;
   onAdd: (
     relationConfig?: { databasePageId: string },
-    rollupConfig?: RollupConfig
+    rollupConfig?: RollupConfig,
+    formulaConfig?: FormulaConfig
   ) => void;
   onClose: () => void;
   databasePages?: Page[];
@@ -305,6 +312,8 @@ function AddPropertyPopover({
   targetContents?: Map<string, DatabaseContentV2>;
 }) {
   const [relationTargetPageId, setRelationTargetPageId] = useState<string>("");
+  // Formula config state
+  const [formulaExpression, setFormulaExpression] = useState<string>("");
   // Rollup config state
   const [rollupRelationId, setRollupRelationId] = useState<string>("");
   const [rollupTargetPropId, setRollupTargetPropId] = useState<string>("");
@@ -348,10 +357,13 @@ function AddPropertyPopover({
         targetPropertyId: rollupTargetPropId,
         aggregation: rollupAggregation,
       });
+    } else if (newPropType === "formula" && formulaExpression.trim()) {
+      onAdd(undefined, undefined, { expression: formulaExpression.trim() });
     } else {
       onAdd();
     }
     setRelationTargetPageId("");
+    setFormulaExpression("");
     setRollupRelationId("");
     setRollupTargetPropId("");
     setRollupAggregation("count");
@@ -360,7 +372,8 @@ function AddPropertyPopover({
   const isAddDisabled =
     (newPropType === "relation" && !relationTargetPageId) ||
     (newPropType === "rollup" &&
-      (!rollupRelationId || !rollupTargetPropId || !rollupAggregation));
+      (!rollupRelationId || !rollupTargetPropId || !rollupAggregation)) ||
+    (newPropType === "formula" && !formulaExpression.trim());
 
   return (
     <div ref={ref} className="db-popover">
@@ -408,6 +421,20 @@ function AddPropertyPopover({
               No other databases in this notebook
             </div>
           )}
+        </div>
+      )}
+      {newPropType === "formula" && (
+        <div className="db-formula-config">
+          <label className="db-pe-label">Expression</label>
+          <input
+            className="db-pe-input"
+            placeholder="e.g. Price * Quantity"
+            value={formulaExpression}
+            onChange={(e) => setFormulaExpression(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !isAddDisabled) handleAdd();
+            }}
+          />
         </div>
       )}
       {newPropType === "rollup" && (
@@ -627,6 +654,13 @@ const OPERATORS_BY_TYPE: Record<string, { value: string; label: string }[]> = {
     { value: "isNotEmpty", label: "Is not empty" },
   ],
   pageLink: [
+    { value: "isEmpty", label: "Is empty" },
+    { value: "isNotEmpty", label: "Is not empty" },
+  ],
+  formula: [
+    { value: "equals", label: "Equals" },
+    { value: "notEquals", label: "Not equals" },
+    { value: "contains", label: "Contains" },
     { value: "isEmpty", label: "Is empty" },
     { value: "isNotEmpty", label: "Is not empty" },
   ],

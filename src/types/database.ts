@@ -12,6 +12,7 @@ export const PropertyTypeSchema = z.enum([
   "relation",
   "rollup",
   "pageLink",
+  "formula",
 ]);
 export type PropertyType = z.infer<typeof PropertyTypeSchema>;
 
@@ -55,6 +56,13 @@ export const RollupConfigSchema = z.object({
 });
 export type RollupConfig = z.infer<typeof RollupConfigSchema>;
 
+// Formula configuration — computed columns
+export const FormulaConfigSchema = z.object({
+  expression: z.string(),
+  resultType: z.enum(["string", "number", "boolean", "date"]).optional(),
+});
+export type FormulaConfig = z.infer<typeof FormulaConfigSchema>;
+
 // Number formatting configuration
 export const NumberFormatSchema = z.object({
   style: z.enum(["plain", "currency", "percent"]).default("plain"),
@@ -83,6 +91,7 @@ export const PropertyDefSchema = z.object({
   width: z.number().optional(),
   relationConfig: RelationConfigSchema.optional(),
   rollupConfig: RollupConfigSchema.optional(),
+  formulaConfig: FormulaConfigSchema.optional(),
   numberFormat: NumberFormatSchema.optional(),
   defaultValue: CellValueSchema.optional(),
 });

@@ -21,6 +21,7 @@ import {
   MultiSelectCell,
   RelationCell,
   RollupCell,
+  FormulaCell,
   PageLinkCell,
   pickNextColor,
 } from "./CellEditors";
@@ -59,6 +60,21 @@ export function DatabaseTable({
   const collapsedGroups = tableConfig.collapsedGroups ?? [];
   const propertySummaries = view.propertySummaries ?? {};
 
+  // Resolve cell value: check formula → rollup → raw cell
+  const resolveCellValue = useCallback(
+    (row: DatabaseRow, propId: string): CellValue => {
+      const prop = content.properties.find((p) => p.id === propId);
+      if (prop?.type === "formula") {
+        return relationContext?.formulaValues.get(propId)?.get(row.id) ?? null;
+      }
+      if (prop?.type === "rollup") {
+        return relationContext?.rollupValues.get(propId)?.get(row.id) ?? null;
+      }
+      return row.cells[propId] ?? null;
+    },
+    [content.properties, relationContext]
+  );
+
   // Sort and filter rows
   const displayRows = useMemo(() => {
     let rows = [...content.rows];
@@ -68,7 +84,7 @@ export function DatabaseTable({
       const prop = content.properties.find((p) => p.id === filter.propertyId);
       if (!prop) continue;
       rows = rows.filter((row) => {
-        const cellVal = row.cells[filter.propertyId];
+        const cellVal = resolveCellValue(row, filter.propertyId);
         return applyFilter(cellVal, filter.operator, filter.value, prop);
       });
     }
@@ -77,8 +93,8 @@ export function DatabaseTable({
     if (sorts.length > 0) {
       rows.sort((a, b) => {
         for (const sort of sorts) {
-          const aVal = a.cells[sort.propertyId];
-          const bVal = b.cells[sort.propertyId];
+          const aVal = resolveCellValue(a, sort.propertyId);
+          const bVal = resolveCellValue(b, sort.propertyId);
           const cmp = compareCellValues(aVal, bVal);
           if (cmp !== 0) return sort.direction === "asc" ? cmp : -cmp;
         }
@@ -87,7 +103,7 @@ export function DatabaseTable({
     }
 
     return rows;
-  }, [content.rows, sorts, filters, content.properties]);
+  }, [content.rows, sorts, filters, content.properties, resolveCellValue]);
 
   // Group rows
   const groupedRows = useMemo(() => {
@@ -347,6 +363,15 @@ export function DatabaseTable({
     const value = row.cells[prop.id] ?? null;
     const onChange = (v: CellValue) => handleCellChange(row.id, prop.id, v);
 
+    // Formula — read-only computed value
+    if (prop.type === "formula") {
+      const formulaVal =
+        relationContext?.formulaValues.get(prop.id)?.get(row.id) ?? null;
+      const formulaErr =
+        relationContext?.formulaErrors.get(prop.id)?.get(row.id);
+      return <FormulaCell value={formulaVal} error={formulaErr} />;
+    }
+
     // Rollup — read-only computed value
     if (prop.type === "rollup") {
       const rollupVal =
@@ -517,6 +542,7 @@ export function DatabaseTable({
                       }
                       onDelete={() => handleDeleteProperty(prop.id)}
                       onClose={() => setEditingProperty(null)}
+                      allProperties={content.properties}
                     />
                   )}
                 </th>
@@ -590,6 +616,7 @@ export function DatabaseTable({
                   prop={prop}
                   aggregation={propertySummaries[prop.id] as SummaryAggregation | undefined}
                   rows={displayRows}
+                  computedValues={relationContext?.formulaValues}
                   onSetAggregation={(agg) => {
                     onUpdateView((prev) => ({
                       ...prev,
@@ -630,11 +657,13 @@ function SummaryFooterCell({
   prop,
   aggregation,
   rows,
+  computedValues,
   onSetAggregation,
 }: {
   prop: PropertyDef;
   aggregation?: SummaryAggregation;
   rows: DatabaseRow[];
+  computedValues?: Map<string, Map<string, CellValue>>;
   onSetAggregation: (agg: SummaryAggregation) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -654,7 +683,7 @@ function SummaryFooterCell({
   const validAggregations = getAggregationsForType(prop.type);
   const hasValue = aggregation && aggregation !== "none";
   const displayValue = hasValue
-    ? computeSummary(rows, prop.id, aggregation, prop)
+    ? computeSummary(rows, prop.id, aggregation, prop, computedValues)
     : null;
 
   return (

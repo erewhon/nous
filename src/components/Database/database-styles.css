@@ -1924,3 +1924,112 @@
   background-color: var(--color-bg-active, var(--color-bg-hover));
   text-decoration: underline;
 }
+
+/* ── Formula column styles ── */
+
+.db-formula-cell {
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  min-height: 32px;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+.db-formula-cell-number {
+  font-variant-numeric: tabular-nums;
+}
+
+.db-formula-cell-error {
+  color: var(--color-danger, #ef4444);
+  cursor: help;
+  font-size: 12px;
+}
+
+.db-formula-error-icon {
+  margin-right: 4px;
+  font-size: 13px;
+}
+
+.db-formula-textarea {
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  font-size: 12px;
+  resize: vertical;
+  min-height: 60px;
+  line-height: 1.5;
+}
+
+.db-formula-validation-error {
+  font-size: 11px;
+  color: var(--color-danger, #ef4444);
+  margin-top: 4px;
+  padding: 4px 6px;
+  background: var(--color-danger-bg, rgba(239, 68, 68, 0.1));
+  border-radius: 4px;
+}
+
+.db-formula-columns {
+  margin-top: 8px;
+}
+
+.db-formula-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.db-formula-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--color-bg-hover);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+}
+
+.db-formula-chip:hover {
+  background: var(--color-bg-active, var(--color-bg-hover));
+  color: var(--color-text-primary);
+}
+
+.db-formula-result-type {
+  margin-top: 8px;
+}
+
+.db-formula-fn-toggle {
+  margin-top: 8px;
+  background: none;
+  border: none;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 2px 0;
+  text-decoration: underline;
+}
+
+.db-formula-fn-toggle:hover {
+  color: var(--color-text-secondary);
+}
+
+.db-formula-fn-ref {
+  margin-top: 4px;
+  padding: 8px;
+  background: var(--color-bg-hover);
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--color-text-secondary);
+}
+
+.db-formula-fn-ref div {
+  margin-bottom: 2px;
+}
+
+.db-formula-config {
+  margin-top: 4px;
+}

@@ -552,6 +552,31 @@ export function PageLinkCell({
   );
 }
 
+// Formula cell — read-only display of computed formula values
+export function FormulaCell({ value, error }: { value: CellValue; error?: string }) {
+  if (error) {
+    return (
+      <div className="db-formula-cell db-formula-cell-error" title={error}>
+        <span className="db-formula-error-icon">&#9888;</span> Error
+      </div>
+    );
+  }
+
+  if (value == null || value === "") {
+    return <div className="db-formula-cell db-cell-placeholder">-</div>;
+  }
+
+  if (typeof value === "boolean") {
+    return <div className="db-formula-cell">{value ? "true" : "false"}</div>;
+  }
+
+  if (typeof value === "number") {
+    return <div className="db-formula-cell db-formula-cell-number">{String(value)}</div>;
+  }
+
+  return <div className="db-formula-cell">{String(value)}</div>;
+}
+
 // Rollup cell — read-only display of computed values
 export function RollupCell({ value }: { value: CellValue }) {
   if (value == null || value === "") {

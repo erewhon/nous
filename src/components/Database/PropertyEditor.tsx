@@ -1,12 +1,14 @@
 import { useState } from "react";
-import type { PropertyDef, PropertyType, SelectOption, CellValue, NumberFormat } from "../../types/database";
+import type { PropertyDef, PropertyType, SelectOption, CellValue, NumberFormat, FormulaConfig } from "../../types/database";
 import { pickNextColor } from "./CellEditors";
+import { evaluateFormula } from "./formulaEvaluator";
 
 interface PropertyEditorProps {
   property: PropertyDef;
   onUpdate: (updates: Partial<PropertyDef>) => void;
   onDelete: () => void;
   onClose: () => void;
+  allProperties?: PropertyDef[];
 }
 
 const PROPERTY_TYPE_LABELS: Record<PropertyType, string> = {
@@ -20,9 +22,10 @@ const PROPERTY_TYPE_LABELS: Record<PropertyType, string> = {
   relation: "Relation",
   rollup: "Rollup",
   pageLink: "Page Link",
+  formula: "Formula",
 };
 
-export function PropertyEditor({ property, onUpdate, onDelete, onClose }: PropertyEditorProps) {
+export function PropertyEditor({ property, onUpdate, onDelete, onClose, allProperties }: PropertyEditorProps) {
   const [name, setName] = useState(property.name);
   const [newOptionLabel, setNewOptionLabel] = useState("");
 
@@ -100,6 +103,10 @@ export function PropertyEditor({ property, onUpdate, onDelete, onClose }: Proper
           <div className="db-pe-readonly">
             Rollup
           </div>
+        ) : property.type === "formula" ? (
+          <div className="db-pe-readonly">
+            Formula
+          </div>
         ) : (
           <select
             className="db-pe-select"
@@ -159,8 +166,17 @@ export function PropertyEditor({ property, onUpdate, onDelete, onClose }: Proper
         />
       )}
 
+      {/* Formula editor */}
+      {property.type === "formula" && (
+        <FormulaEditor
+          formulaConfig={property.formulaConfig}
+          onUpdate={(cfg) => onUpdate({ formulaConfig: cfg })}
+          allProperties={(allProperties ?? []).filter((p) => p.id !== property.id)}
+        />
+      )}
+
       {/* Default value */}
-      {property.type !== "relation" && property.type !== "rollup" && property.type !== "pageLink" && (
+      {property.type !== "relation" && property.type !== "rollup" && property.type !== "pageLink" && property.type !== "formula" && (
         <div className="db-pe-section">
           <label className="db-pe-label">Default value</label>
           <DefaultValueEditor
@@ -350,6 +366,110 @@ function NumberFormatEditor({
   );
 }
 
+// Formula editor component
+function FormulaEditor({
+  formulaConfig,
+  onUpdate,
+  allProperties,
+}: {
+  formulaConfig?: FormulaConfig;
+  onUpdate: (cfg: FormulaConfig) => void;
+  allProperties: PropertyDef[];
+}) {
+  const [expression, setExpression] = useState(formulaConfig?.expression ?? "");
+  const [validationError, setValidationError] = useState<string | null>(null);
+  const [showFunctions, setShowFunctions] = useState(false);
+
+  const handleBlur = () => {
+    // Validate expression
+    if (expression.trim()) {
+      const result = evaluateFormula(expression, {});
+      // Only show parse errors, not "Unknown column" errors (those are expected)
+      if (result.error && !result.error.startsWith("Unknown column")) {
+        setValidationError(result.error);
+      } else {
+        setValidationError(null);
+      }
+    } else {
+      setValidationError(null);
+    }
+    onUpdate({ ...formulaConfig, expression });
+  };
+
+  const insertColumn = (name: string) => {
+    const ref = /\s/.test(name) ? `\`${name}\`` : name;
+    setExpression((prev) => prev + ref);
+  };
+
+  return (
+    <div className="db-pe-section">
+      <label className="db-pe-label">Expression</label>
+      <textarea
+        className="db-pe-input db-formula-textarea"
+        placeholder="e.g. Price * Quantity"
+        value={expression}
+        onChange={(e) => setExpression(e.target.value)}
+        onBlur={handleBlur}
+        rows={3}
+      />
+      {validationError && (
+        <div className="db-formula-validation-error">{validationError}</div>
+      )}
+      <div className="db-formula-columns">
+        <span className="db-pe-label">Columns:</span>
+        <div className="db-formula-chips">
+          {allProperties.map((p) => (
+            <button
+              key={p.id}
+              className="db-formula-chip"
+              onClick={() => insertColumn(p.name)}
+              title={`Insert ${p.name}`}
+            >
+              {p.name}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="db-formula-result-type">
+        <label className="db-pe-label">Result type (optional)</label>
+        <select
+          className="db-pe-select"
+          value={formulaConfig?.resultType ?? ""}
+          onChange={(e) =>
+            onUpdate({
+              ...formulaConfig,
+              expression: expression,
+              resultType: (e.target.value || undefined) as FormulaConfig["resultType"],
+            })
+          }
+        >
+          <option value="">Auto</option>
+          <option value="string">String</option>
+          <option value="number">Number</option>
+          <option value="boolean">Boolean</option>
+          <option value="date">Date</option>
+        </select>
+      </div>
+      <button
+        className="db-formula-fn-toggle"
+        onClick={() => setShowFunctions(!showFunctions)}
+      >
+        {showFunctions ? "Hide" : "Show"} function reference
+      </button>
+      {showFunctions && (
+        <div className="db-formula-fn-ref">
+          <div><strong>Conditional:</strong> if(cond, then, else)</div>
+          <div><strong>String:</strong> concat, length, lower, upper, contains, replace, trim</div>
+          <div><strong>Math:</strong> abs, round, floor, ceil, min, max, sqrt, pow</div>
+          <div><strong>Date:</strong> now, dateAdd(date, n, unit), dateDiff(d1, d2, unit)</div>
+          <div><strong>Convert:</strong> toNumber, toString, empty</div>
+          <div><strong>Operators:</strong> + - * / % == != {"<"} {">"} {"<="} {">="} && || !</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Type icon component for column headers
 export function PropertyTypeIcon({ type }: { type: PropertyType }) {
   switch (type) {
@@ -412,6 +532,12 @@ export function PropertyTypeIcon({ type }: { type: PropertyType }) {
       return (
         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" /><path d="M14 2v4a2 2 0 0 0 2 2h4" /><path d="M9 13h6" /><path d="M9 17h3" />
+        </svg>
+      );
+    case "formula":
+      return (
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M18 4H6a2 2 0 0 0-2 2v2" /><path d="m6 12 4 4-4 4" /><path d="M14 16h6" />
         </svg>
       );
   }

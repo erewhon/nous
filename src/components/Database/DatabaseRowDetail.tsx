@@ -15,6 +15,7 @@ import {
   MultiSelectCell,
   RelationCell,
   RollupCell,
+  FormulaCell,
   PageLinkCell,
 } from "./CellEditors";
 import type { RelationContext } from "./useRelationContext";
@@ -66,6 +67,15 @@ export function DatabaseRowDetail({
     (prop: PropertyDef) => {
       const value = row.cells[prop.id] ?? null;
       const onChange = (v: CellValue) => onCellChange(prop.id, v);
+
+      // Formula — read-only
+      if (prop.type === "formula") {
+        const formulaVal =
+          relationContext?.formulaValues.get(prop.id)?.get(row.id) ?? null;
+        const formulaErr =
+          relationContext?.formulaErrors.get(prop.id)?.get(row.id);
+        return <FormulaCell value={formulaVal} error={formulaErr} />;
+      }
 
       // Rollup — read-only
       if (prop.type === "rollup") {

@@ -137,6 +137,12 @@ export function DatabaseList({
     const prop = content.properties.find((p) => p.id === propertyId);
     if (!prop) return "";
 
+    // Formula
+    if (prop.type === "formula") {
+      const v = relationContext?.formulaValues.get(prop.id)?.get(row.id);
+      return v != null ? String(v) : "";
+    }
+
     // Rollup
     if (prop.type === "rollup") {
       const v = relationContext?.rollupValues.get(prop.id)?.get(row.id);

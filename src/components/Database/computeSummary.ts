@@ -46,6 +46,11 @@ const AGGREGATIONS_BY_TYPE: Record<PropertyType, SummaryAggregation[]> = {
   pageLink: [
     "none", "count", "percent_empty", "percent_not_empty",
   ],
+  formula: [
+    "none", "count", "countValues", "countUnique",
+    "sum", "average", "min", "max", "range",
+    "percent_empty", "percent_not_empty",
+  ],
 };
 
 export function getAggregationsForType(type: PropertyType): SummaryAggregation[] {
@@ -60,14 +65,16 @@ export function computeSummary(
   rows: DatabaseRow[],
   propertyId: string,
   aggregation: SummaryAggregation,
-  prop: PropertyDef
+  prop: PropertyDef,
+  computedValues?: Map<string, Map<string, import("../../types/database").CellValue>>
 ): string {
   if (aggregation === "none") return "";
 
   const total = rows.length;
   if (total === 0) return aggregation === "count" ? "0" : "-";
 
-  const values = rows.map((r) => r.cells[propertyId]);
+  const formulaMap = computedValues?.get(propertyId);
+  const values = rows.map((r) => formulaMap?.get(r.id) ?? r.cells[propertyId]);
 
   switch (aggregation) {
     case "count":

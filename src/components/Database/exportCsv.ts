@@ -1,4 +1,4 @@
-import type { PropertyDef, DatabaseRow } from "../../types/database";
+import type { PropertyDef, DatabaseRow, CellValue } from "../../types/database";
 
 function escapeCsvField(value: string): string {
   if (value.includes('"') || value.includes(",") || value.includes("\n")) {
@@ -11,7 +11,8 @@ export function exportDatabaseAsCsv(
   properties: PropertyDef[],
   rows: DatabaseRow[],
   filename: string,
-  pages?: Array<{ id: string; title: string }>
+  pages?: Array<{ id: string; title: string }>,
+  computedValues?: Map<string, Map<string, CellValue>>
 ): void {
   // Header row
   const header = properties.map((p) => escapeCsvField(p.name)).join(",");
@@ -46,6 +47,11 @@ export function exportDatabaseAsCsv(
               return escapeCsvField(page?.title ?? val);
             }
             return "";
+          }
+          case "formula": {
+            const computed = computedValues?.get(prop.id)?.get(row.id);
+            if (computed == null) return "";
+            return escapeCsvField(String(computed));
           }
           default:
             return escapeCsvField(String(val));

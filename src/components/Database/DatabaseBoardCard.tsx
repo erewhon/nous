@@ -1,4 +1,4 @@
-import type { DatabaseRow, PropertyDef } from "../../types/database";
+import type { DatabaseRow, PropertyDef, CellValue } from "../../types/database";
 import { formatNumber } from "./formatNumber";
 
 interface DatabaseBoardCardProps {
@@ -7,6 +7,7 @@ interface DatabaseBoardCardProps {
   onClick: () => void;
   dragHandleProps?: Record<string, unknown>;
   pageLinkPages?: Array<{ id: string; title: string }>;
+  formulaValues?: Map<string, Map<string, CellValue>>;
 }
 
 export function DatabaseBoardCard({
@@ -15,6 +16,7 @@ export function DatabaseBoardCard({
   onClick,
   dragHandleProps,
   pageLinkPages,
+  formulaValues,
 }: DatabaseBoardCardProps) {
   const titleProp = properties.find((p) => p.type === "text");
   const title = titleProp ? String(row.cells[titleProp.id] ?? "") : "";
@@ -77,6 +79,12 @@ export function DatabaseBoardCard({
           {val.length > 2 && <span className="db-board-card-more">+{val.length - 2}</span>}
         </span>
       );
+    }
+
+    if (prop.type === "formula") {
+      const fv = formulaValues?.get(prop.id)?.get(row.id);
+      if (fv == null || fv === "") return null;
+      return <span className="db-board-card-text">{String(fv)}</span>;
     }
 
     if (prop.type === "rollup") {

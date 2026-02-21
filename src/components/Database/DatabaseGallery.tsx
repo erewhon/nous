@@ -145,6 +145,13 @@ export function DatabaseGallery({
   );
 
   const renderPropValue = (prop: PropertyDef, row: DatabaseRow) => {
+    // Formula
+    if (prop.type === "formula") {
+      const v = relationContext?.formulaValues.get(prop.id)?.get(row.id);
+      if (v == null || v === "") return null;
+      return <span className="db-formula-cell">{String(v)}</span>;
+    }
+
     // Rollup
     if (prop.type === "rollup") {
       const v = relationContext?.rollupValues.get(prop.id)?.get(row.id);

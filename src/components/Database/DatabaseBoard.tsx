@@ -316,6 +316,7 @@ export function DatabaseBoard({
               onCardClick={setSelectedRowId}
               onAddCard={() => handleAddCard(col.id)}
               pageLinkPages={pageLinkPages}
+              formulaValues={relationContext?.formulaValues}
             />
           ))}
         </div>
@@ -326,6 +327,7 @@ export function DatabaseBoard({
               properties={content.properties}
               onClick={() => {}}
               pageLinkPages={pageLinkPages}
+              formulaValues={relationContext?.formulaValues}
             />
           )}
         </DragOverlay>
@@ -359,6 +361,7 @@ function BoardColumn({
   onCardClick,
   onAddCard,
   pageLinkPages,
+  formulaValues,
 }: {
   id: string;
   label: string;
@@ -368,6 +371,7 @@ function BoardColumn({
   onCardClick: (rowId: string) => void;
   onAddCard: () => void;
   pageLinkPages?: Array<{ id: string; title: string }>;
+  formulaValues?: Map<string, Map<string, CellValue>>;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id });
 
@@ -393,6 +397,7 @@ function BoardColumn({
             properties={properties}
             onClick={() => onCardClick(row.id)}
             pageLinkPages={pageLinkPages}
+            formulaValues={formulaValues}
           />
         ))}
       </div>
@@ -419,11 +424,13 @@ function DraggableCard({
   properties,
   onClick,
   pageLinkPages,
+  formulaValues,
 }: {
   row: DatabaseRow;
   properties: PropertyDef[];
   onClick: () => void;
   pageLinkPages?: Array<{ id: string; title: string }>;
+  formulaValues?: Map<string, Map<string, CellValue>>;
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } =
     useDraggable({
@@ -439,7 +446,7 @@ function DraggableCard({
 
   return (
     <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
-      <DatabaseBoardCard row={row} properties={properties} onClick={onClick} pageLinkPages={pageLinkPages} />
+      <DatabaseBoardCard row={row} properties={properties} onClick={onClick} pageLinkPages={pageLinkPages} formulaValues={formulaValues} />
     </div>
   );
 }
