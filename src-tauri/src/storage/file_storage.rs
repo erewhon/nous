@@ -160,6 +160,26 @@ impl FileStorage {
         self.notebook_dir(notebook_id).join("sections.json")
     }
 
+    /// Resolve source and target paths for an embedded source file.
+    /// Database files (prefixed with "files/") live at `{notebook_dir}/files/...`,
+    /// while other embedded files live under `{notebook_dir}/assets/embedded/`.
+    fn resolve_source_file_paths(
+        &self,
+        source_notebook_id: Uuid,
+        target_notebook_id: Uuid,
+        source_file: &str,
+    ) -> (PathBuf, PathBuf) {
+        if source_file.starts_with("files/") {
+            let src = self.notebook_dir(source_notebook_id).join(source_file);
+            let tgt = self.notebook_dir(target_notebook_id).join(source_file);
+            (src, tgt)
+        } else {
+            let src = self.notebook_assets_dir(source_notebook_id).join("embedded").join(source_file);
+            let tgt = self.notebook_assets_dir(target_notebook_id).join("embedded").join(source_file);
+            (src, tgt)
+        }
+    }
+
     pub fn list_notebooks(&self) -> Result<Vec<Notebook>> {
         let notebooks_path = self.base_path.join("notebooks");
 
@@ -576,11 +596,27 @@ impl FileStorage {
         // Handle non-standard pages (markdown, pdf, etc.) that have source files
         if let Some(ref source_file) = page.source_file {
             if page.storage_mode == Some(FileStorageMode::Embedded) {
-                // Copy embedded source file
-                let source_path = source_assets_dir.join("embedded").join(source_file);
-                let target_path = target_embedded_dir.join(source_file);
-                if source_path.exists() {
-                    fs::copy(&source_path, &target_path)?;
+                if source_file.starts_with("files/") {
+                    // Database files: stored at {notebook_dir}/files/{page_id}.database
+                    let source_notebook = self.notebook_dir(source_notebook_id);
+                    let target_notebook = self.notebook_dir(target_notebook_id);
+                    let source_path = source_notebook.join(source_file);
+                    let target_path = target_notebook.join(source_file);
+                    if source_path.exists() {
+                        if let Some(parent) = target_path.parent() {
+                            fs::create_dir_all(parent)?;
+                        }
+                        fs::copy(&source_path, &target_path)?;
+                        // Remove from source notebook
+                        let _ = fs::remove_file(&source_path);
+                    }
+                } else {
+                    // Other embedded files: stored under assets/embedded/
+                    let source_path = source_assets_dir.join("embedded").join(source_file);
+                    let target_path = target_embedded_dir.join(source_file);
+                    if source_path.exists() {
+                        fs::copy(&source_path, &target_path)?;
+                    }
                 }
             }
         }
@@ -1555,10 +1591,9 @@ impl FileStorage {
                     // Copy embedded source file if applicable
                     if moved.storage_mode == Some(crate::storage::FileStorageMode::Embedded) {
                         if let Some(ref source_file) = moved.source_file {
-                            let src = self.notebook_assets_dir(source_notebook_id)
-                                .join("embedded").join(source_file);
-                            let tgt = self.notebook_assets_dir(target_notebook_id)
-                                .join("embedded").join(source_file);
+                            let (src, tgt) = self.resolve_source_file_paths(
+                                source_notebook_id, target_notebook_id, source_file,
+                            );
                             if src.exists() {
                                 if let Some(parent) = tgt.parent() {
                                     let _ = fs::create_dir_all(parent);
@@ -1594,8 +1629,9 @@ impl FileStorage {
                     // Also delete source embedded file (it was copied, not moved)
                     if moved.storage_mode == Some(crate::storage::FileStorageMode::Embedded) {
                         if let Some(ref source_file) = moved.source_file {
-                            let src = self.notebook_assets_dir(source_notebook_id)
-                                .join("embedded").join(source_file);
+                            let (src, _) = self.resolve_source_file_paths(
+                                source_notebook_id, target_notebook_id, source_file,
+                            );
                             if src.exists() {
                                 let _ = fs::remove_file(&src);
                             }
@@ -1945,14 +1981,9 @@ impl FileStorage {
                     // Copy embedded source file if applicable
                     if moved.storage_mode == Some(crate::storage::FileStorageMode::Embedded) {
                         if let Some(ref source_file) = moved.source_file {
-                            let src = self
-                                .notebook_assets_dir(source_notebook_id)
-                                .join("embedded")
-                                .join(source_file);
-                            let tgt = self
-                                .notebook_assets_dir(target_notebook_id)
-                                .join("embedded")
-                                .join(source_file);
+                            let (src, tgt) = self.resolve_source_file_paths(
+                                source_notebook_id, target_notebook_id, source_file,
+                            );
                             if src.exists() {
                                 if let Some(parent) = tgt.parent() {
                                     let _ = fs::create_dir_all(parent);
@@ -2000,10 +2031,9 @@ impl FileStorage {
                     // Delete source embedded file
                     if moved.storage_mode == Some(crate::storage::FileStorageMode::Embedded) {
                         if let Some(ref source_file) = moved.source_file {
-                            let src = self
-                                .notebook_assets_dir(source_notebook_id)
-                                .join("embedded")
-                                .join(source_file);
+                            let (src, _) = self.resolve_source_file_paths(
+                                source_notebook_id, target_notebook_id, source_file,
+                            );
                             if src.exists() {
                                 let _ = fs::remove_file(&src);
                             }
