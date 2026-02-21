@@ -7,7 +7,7 @@ use crate::actions::models::{Action, ActionUpdate};
 use crate::storage::StorageError;
 
 /// Version for built-in actions — bump this to force regeneration
-const BUILTIN_ACTIONS_VERSION: u32 = 5;
+const BUILTIN_ACTIONS_VERSION: u32 = 6;
 
 /// Storage for custom actions
 /// Actions are stored in ~/.local/share/nous/actions/
@@ -44,10 +44,11 @@ impl ActionStorage {
         for mut action in get_builtin_actions() {
             let path = self.action_path(action.id);
             if needs_regen || !path.exists() {
-                // Preserve the user's enabled setting from the existing file
+                // Preserve the user's enabled and triggers settings from the existing file
                 if needs_regen {
                     if let Ok(existing) = self.load_action_from_path(&path) {
                         action.enabled = existing.enabled;
+                        action.triggers = existing.triggers;
                     }
                 }
                 let content = serde_json::to_string_pretty(&action)?;
@@ -134,23 +135,27 @@ impl ActionStorage {
     ) -> Result<Action, StorageError> {
         let mut action = self.get_action(action_id)?;
 
-        // Built-in actions: only allow toggling enabled
+        // Built-in actions: only allow toggling enabled and editing triggers
         if action.is_built_in {
-            let only_enabled = updates.name.is_none()
+            let only_allowed = updates.name.is_none()
                 && updates.description.is_none()
                 && updates.icon.is_none()
                 && updates.category.is_none()
-                && updates.triggers.is_none()
                 && updates.steps.is_none()
                 && updates.variables.is_none();
 
-            if !only_enabled || updates.enabled.is_none() {
+            if !only_allowed || (updates.enabled.is_none() && updates.triggers.is_none()) {
                 return Err(StorageError::InvalidOperation(
-                    "Only the enabled field can be changed on built-in actions".to_string(),
+                    "Only enabled and triggers can be changed on built-in actions".to_string(),
                 ));
             }
 
-            action.enabled = updates.enabled.unwrap();
+            if let Some(enabled) = updates.enabled {
+                action.enabled = enabled;
+            }
+            if let Some(triggers) = updates.triggers {
+                action.triggers = triggers;
+            }
             action.updated_at = chrono::Utc::now();
 
             let path = self.action_path(action_id);

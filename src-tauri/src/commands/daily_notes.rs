@@ -256,7 +256,7 @@ pub fn unmark_daily_note(
 }
 
 /// Format a date string into a nice title
-fn format_daily_note_title(date: &str) -> String {
+pub(crate) fn format_daily_note_title(date: &str) -> String {
     // Parse YYYY-MM-DD
     let parts: Vec<&str> = date.split('-').collect();
     if parts.len() != 3 {

@@ -671,6 +671,11 @@ impl ActionExecutor {
     ) -> Result<(), ExecutionError> {
         log::info!("CarryForward: Starting execution");
 
+        // Check if this action targets daily notes (so we create a proper daily note if needed)
+        let targets_daily_note = find_existing
+            .map(|s| s.is_daily_note == Some(true))
+            .unwrap_or(false);
+
         // Find the destination page first (if it exists) so we can exclude it from sources
         let dest_page_id = if let Some(existing_selector) = find_existing {
             let mut pages = self.find_pages(existing_selector, context)?;
@@ -701,10 +706,6 @@ impl ActionExecutor {
             "CarryForward: After excluding destination, {} source pages remain",
             source_pages.len()
         );
-        if source_pages.is_empty() {
-            log::info!("CarryForward: No source pages found (excluding destination)");
-            return Ok(()); // Nothing to carry forward
-        }
 
         // Extract incomplete checklist items from source pages with source tracking
         let mut items_with_source: Vec<CarriedItem> = Vec::new();
@@ -782,73 +783,132 @@ impl ActionExecutor {
             }
         }
 
-        if incomplete_items.is_empty() {
-            return Ok(()); // No incomplete items
+        // If no source pages and destination already exists (or not a daily note), nothing to do
+        if source_pages.is_empty() && existing_page.is_some() {
+            log::info!("CarryForward: No source pages and destination exists, nothing to do");
+            return Ok(());
+        }
+
+        // If no incomplete items AND destination already exists, nothing to carry forward
+        if incomplete_items.is_empty() && existing_page.is_some() {
+            log::info!("CarryForward: No incomplete items and destination exists, nothing to do");
+            return Ok(());
+        }
+
+        // If no incomplete items AND not targeting daily notes, skip (no page to create)
+        if incomplete_items.is_empty() && !targets_daily_note {
+            log::info!("CarryForward: No incomplete items and not a daily note action, skipping");
+            return Ok(());
         }
 
         // Deduplicate while preserving order
         let mut seen = std::collections::HashSet::new();
         incomplete_items.retain(|item| seen.insert(item.clone()));
 
-        let carry_forward_blocks = build_carry_forward_blocks(&incomplete_items);
+        let carry_forward_blocks = if incomplete_items.is_empty() {
+            Vec::new()
+        } else {
+            build_carry_forward_blocks(&incomplete_items)
+        };
 
         if let Some(mut existing) = existing_page {
-            // Remove any pre-existing "Carried Forward" section to avoid duplicates
-            existing.content.blocks = remove_carried_forward_section(existing.content.blocks);
+            if !carry_forward_blocks.is_empty() {
+                // Remove any pre-existing "Carried Forward" section to avoid duplicates
+                existing.content.blocks = remove_carried_forward_section(existing.content.blocks);
 
-            // Insert at the right position
-            let insert_pos = if let Some(section_name) = insert_after_section {
-                find_section_end(&existing.content.blocks, section_name)
-            } else {
-                existing.content.blocks.len()
-            };
+                // Insert at the right position
+                let insert_pos = if let Some(section_name) = insert_after_section {
+                    find_section_end(&existing.content.blocks, section_name)
+                } else {
+                    existing.content.blocks.len()
+                };
 
-            let mut new_blocks = existing.content.blocks.clone();
-            for (i, block) in carry_forward_blocks.into_iter().enumerate() {
-                new_blocks.insert(insert_pos + i, block);
+                let mut new_blocks = existing.content.blocks.clone();
+                for (i, block) in carry_forward_blocks.into_iter().enumerate() {
+                    new_blocks.insert(insert_pos + i, block);
+                }
+                existing.content.blocks = new_blocks;
+                existing.content.time = Some(chrono::Utc::now().timestamp_millis());
+
+                let storage = self.storage.lock().map_err(|e| {
+                    ExecutionError::StepFailed(format!("Failed to lock storage: {}", e))
+                })?;
+                storage.update_page(&existing)?;
+                context.modified_pages.push(existing.id.to_string());
+
+                log::info!(
+                    "CarryForward: Inserted {} items into existing page '{}'",
+                    incomplete_items.len(),
+                    existing.title
+                );
             }
-            existing.content.blocks = new_blocks;
-            existing.content.time = Some(chrono::Utc::now().timestamp_millis());
-
-            let storage = self.storage.lock().map_err(|e| {
-                ExecutionError::StepFailed(format!("Failed to lock storage: {}", e))
-            })?;
-            storage.update_page(&existing)?;
-            context.modified_pages.push(existing.id.to_string());
-
-            log::info!(
-                "CarryForward: Inserted {} items into existing page '{}'",
-                incomplete_items.len(),
-                existing.title
-            );
         } else {
             // Create new destination page
             let storage = self.storage.lock().map_err(|e| {
                 ExecutionError::StepFailed(format!("Failed to lock storage: {}", e))
             })?;
 
-            let title = self
-                .variable_resolver
-                .substitute(title_template, &context.variables);
-            let mut page = storage.create_page(notebook_id, title)?;
+            if targets_daily_note {
+                // Create a proper daily note with correct metadata
+                let today = Local::now().format("%Y-%m-%d").to_string();
+                let title = crate::commands::format_daily_note_title(&today);
 
-            // Set template_id if provided
-            if let Some(tpl_id) = template_id {
-                page.template_id = Some(tpl_id.clone());
+                let mut page = storage.create_page(notebook_id, title)?;
+                page.is_daily_note = true;
+                page.daily_note_date = Some(today);
+
+                // Set template_id if provided
+                if let Some(tpl_id) = template_id {
+                    page.template_id = Some(tpl_id.clone());
+                }
+
+                // Place in the daily notes folder if configured
+                let notebook = storage.get_notebook(notebook_id)?;
+                if let Some(folder_id) = notebook
+                    .daily_notes_config
+                    .as_ref()
+                    .and_then(|c| c.folder_id)
+                {
+                    page.folder_id = Some(folder_id);
+                }
+
+                // Set content with carried forward blocks (may be empty)
+                if !carry_forward_blocks.is_empty() {
+                    page.content.blocks = carry_forward_blocks;
+                    page.content.time = Some(chrono::Utc::now().timestamp_millis());
+                }
+                storage.update_page(&page)?;
+                context.created_pages.push(page.id.to_string());
+
+                log::info!(
+                    "CarryForward: Created daily note '{}' with {} carried items",
+                    page.title,
+                    incomplete_items.len()
+                );
+            } else {
+                let title = self
+                    .variable_resolver
+                    .substitute(title_template, &context.variables);
+                let mut page = storage.create_page(notebook_id, title)?;
+
+                // Set template_id if provided
+                if let Some(tpl_id) = template_id {
+                    page.template_id = Some(tpl_id.clone());
+                }
+
+                // Set content with carried forward blocks
+                page.content.blocks = carry_forward_blocks;
+                page.content.time = Some(chrono::Utc::now().timestamp_millis());
+                storage.update_page(&page)?;
+
+                context.created_pages.push(page.id.to_string());
+
+                log::info!(
+                    "CarryForward: Created new page '{}' with {} items",
+                    page.title,
+                    incomplete_items.len()
+                );
             }
-
-            // Set content with carried forward blocks
-            page.content.blocks = carry_forward_blocks;
-            page.content.time = Some(chrono::Utc::now().timestamp_millis());
-            storage.update_page(&page)?;
-
-            context.created_pages.push(page.id.to_string());
-
-            log::info!(
-                "CarryForward: Created new page '{}' with {} items",
-                page.title,
-                incomplete_items.len()
-            );
         }
 
         // Now update source pages to mark carried items as done with "(carried forward)" suffix

@@ -417,8 +417,8 @@ fn create_carry_forward_daily_notes_action() -> Action {
 
     Action {
         id,
-        name: "Carry Forward Daily Notes".to_string(),
-        description: "Copy incomplete checklist items from recent daily notes to today's daily note"
+        name: "Daily Note + Carry Forward".to_string(),
+        description: "Create today's daily note and carry forward incomplete checklist items from recent daily notes"
             .to_string(),
         icon: Some("calendar-arrow-right".to_string()),
         category: ActionCategory::DailyRoutines,
@@ -430,7 +430,14 @@ fn create_carry_forward_daily_notes_action() -> Action {
                     "daily note carry".to_string(),
                     "yesterday daily note".to_string(),
                     "carry tasks from yesterday".to_string(),
+                    "create daily note".to_string(),
                 ],
+            },
+            ActionTrigger::Scheduled {
+                schedule: Schedule::Daily {
+                    time: "07:00".to_string(),
+                    skip_weekends: false,
+                },
             },
         ],
         steps: vec![ActionStep::CarryForwardItems {
