@@ -35,6 +35,7 @@ export function ActionLibrary({
   const [selectedCategory, setSelectedCategory] = useState<ActionCategory | "all">("all");
   const [runningActionId, setRunningActionId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [hideDisabled, setHideDisabled] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
@@ -94,6 +95,7 @@ export function ActionLibrary({
       !searchQuery ||
       action.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       action.description.toLowerCase().includes(searchQuery.toLowerCase());
+    if (hideDisabled && !action.enabled) return false;
     return matchesCategory && matchesSearch;
   });
 
@@ -255,6 +257,22 @@ export function ActionLibrary({
               </button>
             ))}
           </div>
+
+          {/* Hide disabled toggle */}
+          <button
+            onClick={() => setHideDisabled((v) => !v)}
+            className="rounded-lg px-3 py-1.5 text-sm font-medium transition-colors whitespace-nowrap"
+            style={{
+              backgroundColor: hideDisabled
+                ? "var(--color-accent)"
+                : "var(--color-bg-tertiary)",
+              color: hideDisabled
+                ? "white"
+                : "var(--color-text-secondary)",
+            }}
+          >
+            Hide disabled
+          </button>
         </div>
 
         {/* Content */}

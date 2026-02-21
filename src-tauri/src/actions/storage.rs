@@ -41,9 +41,15 @@ impl ActionStorage {
             .unwrap_or(0);
         let needs_regen = current < BUILTIN_ACTIONS_VERSION;
 
-        for action in get_builtin_actions() {
+        for mut action in get_builtin_actions() {
             let path = self.action_path(action.id);
             if needs_regen || !path.exists() {
+                // Preserve the user's enabled setting from the existing file
+                if needs_regen {
+                    if let Ok(existing) = self.load_action_from_path(&path) {
+                        action.enabled = existing.enabled;
+                    }
+                }
                 let content = serde_json::to_string_pretty(&action)?;
                 fs::write(&path, content)?;
                 log::info!("Created built-in action: {}", action.name);
@@ -128,11 +134,30 @@ impl ActionStorage {
     ) -> Result<Action, StorageError> {
         let mut action = self.get_action(action_id)?;
 
-        // Don't allow updating built-in actions
+        // Built-in actions: only allow toggling enabled
         if action.is_built_in {
-            return Err(StorageError::InvalidOperation(
-                "Cannot update built-in actions".to_string(),
-            ));
+            let only_enabled = updates.name.is_none()
+                && updates.description.is_none()
+                && updates.icon.is_none()
+                && updates.category.is_none()
+                && updates.triggers.is_none()
+                && updates.steps.is_none()
+                && updates.variables.is_none();
+
+            if !only_enabled || updates.enabled.is_none() {
+                return Err(StorageError::InvalidOperation(
+                    "Only the enabled field can be changed on built-in actions".to_string(),
+                ));
+            }
+
+            action.enabled = updates.enabled.unwrap();
+            action.updated_at = chrono::Utc::now();
+
+            let path = self.action_path(action_id);
+            let content = serde_json::to_string_pretty(&action)?;
+            fs::write(&path, content)?;
+
+            return Ok(action);
         }
 
         // Apply updates

@@ -199,29 +199,27 @@ export const ActionCard = memo(function ActionCard({
         </div>
 
         {/* Enable/disable toggle */}
-        {!action.isBuiltIn && (
-          <button
-            onClick={handleToggleEnabled}
-            className="flex-shrink-0 rounded-full p-1 transition-colors"
+        <button
+          onClick={handleToggleEnabled}
+          className="flex-shrink-0 rounded-full p-1 transition-colors"
+          style={{
+            backgroundColor: action.enabled
+              ? "var(--color-accent)"
+              : "var(--color-bg-tertiary)",
+          }}
+          title={action.enabled ? "Disable action" : "Enable action"}
+        >
+          <div
+            className={`h-4 w-4 rounded-full transition-transform ${
+              action.enabled ? "translate-x-4" : "translate-x-0"
+            }`}
             style={{
               backgroundColor: action.enabled
-                ? "var(--color-accent)"
-                : "var(--color-bg-tertiary)",
+                ? "white"
+                : "var(--color-text-muted)",
             }}
-            title={action.enabled ? "Disable action" : "Enable action"}
-          >
-            <div
-              className={`h-4 w-4 rounded-full transition-transform ${
-                action.enabled ? "translate-x-4" : "translate-x-0"
-              }`}
-              style={{
-                backgroundColor: action.enabled
-                  ? "white"
-                  : "var(--color-text-muted)",
-              }}
-            />
-          </button>
-        )}
+          />
+        </button>
       </div>
 
       {/* Category and triggers */}
