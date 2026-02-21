@@ -28,12 +28,15 @@ export function useAppInit() {
   const goalsIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const restoredForNotebookRef = useRef<string | null>(null);
 
-  // Load notebooks when library is available
+  const loadAllFavorites = usePageStore((s) => s.loadAllFavorites);
+
+  // Load notebooks and cross-notebook favorites when library is available
   useEffect(() => {
     if (library) {
       loadNotebooks();
+      loadAllFavorites();
     }
-  }, [loadNotebooks, library]);
+  }, [loadNotebooks, loadAllFavorites, library]);
 
   // Validate persisted selectedNotebookId still exists after notebooks load
   useEffect(() => {

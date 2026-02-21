@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { Page, EditorData } from "../types/page";
+import type { Page, EditorData, FavoritePageEntry } from "../types/page";
 import * as api from "../utils/api";
 import { crumb, resetCrumbs } from "../utils/breadcrumbs";
 import { useRAGStore } from "./ragStore";
@@ -93,6 +93,8 @@ interface PageState {
   pageDataVersion: number;
   // Recent pages tracking
   recentPages: RecentPageEntry[];
+  // Cross-notebook favorites (fetched from backend, not persisted)
+  allFavoritePages: FavoritePageEntry[];
 }
 
 interface PageActions {
@@ -190,6 +192,7 @@ interface PageActions {
   // Favorites
   toggleFavorite: (notebookId: string, pageId: string) => Promise<void>;
   getFavoritePages: () => Page[];
+  loadAllFavorites: () => Promise<void>;
 
   // Refresh pages modified by backend (e.g., after action execution)
   refreshPages: (pageIds: string[]) => Promise<void>;
@@ -224,6 +227,7 @@ export const usePageStore = create<PageStore>()(
       error: null,
       pageDataVersion: 0,
       recentPages: [],
+      allFavoritePages: [],
 
       // Actions
       loadPages: async (notebookId, includeArchived) => {
@@ -1043,6 +1047,21 @@ export const usePageStore = create<PageStore>()(
           });
           set((state) => ({
             pages: state.pages.map((p) => (p.id === pageId ? updatedPage : p)),
+            // Optimistically update cross-notebook favorites
+            allFavoritePages: newFavorite
+              ? [
+                  {
+                    id: updatedPage.id,
+                    notebookId: updatedPage.notebookId,
+                    notebookName:
+                      state.allFavoritePages.find((f) => f.notebookId === updatedPage.notebookId)?.notebookName ?? "",
+                    title: updatedPage.title,
+                    pageType: updatedPage.pageType,
+                    updatedAt: updatedPage.updatedAt,
+                  },
+                  ...state.allFavoritePages,
+                ]
+              : state.allFavoritePages.filter((f) => f.id !== pageId),
           }));
         } catch (err) {
           set({
@@ -1055,6 +1074,15 @@ export const usePageStore = create<PageStore>()(
       getFavoritePages: () => {
         const { pages } = get();
         return pages.filter((p) => p.isFavorite && !p.deletedAt);
+      },
+
+      loadAllFavorites: async () => {
+        try {
+          const entries = await api.getAllFavoritePages();
+          set({ allFavoritePages: entries });
+        } catch (err) {
+          console.warn("Failed to load cross-notebook favorites:", err);
+        }
       },
 
       // Refresh pages modified by backend (e.g., after action execution)

@@ -164,6 +164,30 @@ export const SearchResultSchema = z.object({
 
 export type SearchResult = z.infer<typeof SearchResultSchema>;
 
+// Cross-notebook favorite page entry (lightweight — no content)
+export const FavoritePageEntrySchema = z.object({
+  id: z.string().uuid(),
+  notebookId: z.string().uuid(),
+  notebookName: z.string(),
+  title: z.string(),
+  pageType: PageTypeSchema,
+  updatedAt: z.string().datetime(),
+});
+
+export type FavoritePageEntry = z.infer<typeof FavoritePageEntrySchema>;
+
+// Pinned section entry (stored client-side in themeStore)
+export const PinnedSectionEntrySchema = z.object({
+  sectionId: z.string().uuid(),
+  notebookId: z.string().uuid(),
+  sectionName: z.string(),
+  sectionColor: z.string().optional(),
+  notebookName: z.string(),
+  pinnedAt: z.string().datetime(),
+});
+
+export type PinnedSectionEntry = z.infer<typeof PinnedSectionEntrySchema>;
+
 // Block history entry (from oplog)
 export interface BlockHistoryEntry {
   ts: string;

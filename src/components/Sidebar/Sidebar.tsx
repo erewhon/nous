@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import type { Page } from "../../types/page";
 import { useNotebookStore } from "../../stores/notebookStore";
 import { usePageStore } from "../../stores/pageStore";
+import { useSectionStore } from "../../stores/sectionStore";
 import { useActionStore } from "../../stores/actionStore";
 import { useInboxStore } from "../../stores/inboxStore";
 import { useFlashcardStore } from "../../stores/flashcardStore";
@@ -34,7 +35,11 @@ interface SidebarProps {
 
 export function Sidebar({ width = 256 }: SidebarProps) {
   const { selectedNotebookId, selectNotebook, createNotebook, getVisibleNotebooks, showArchived, toggleShowArchived, getArchivedNotebooks } = useNotebookStore();
-  const { pages, selectedPageId, getRecentPages, clearRecentPages, getFavoritePages, selectPage } = usePageStore();
+  const { pages, selectedPageId, getRecentPages, clearRecentPages, selectPage } = usePageStore();
+  const allFavoritePages = usePageStore((s) => s.allFavoritePages);
+  const { selectSection } = useSectionStore();
+  const pinnedSections = useThemeStore((s) => s.pinnedSections);
+  const removePinnedSection = useThemeStore((s) => s.removePinnedSection);
   const visibleNotebooks = getVisibleNotebooks();
   const archivedCount = getArchivedNotebooks().length;
   const openActionLibrary = useActionStore((state) => state.openActionLibrary);
@@ -54,9 +59,11 @@ export function Sidebar({ width = 256 }: SidebarProps) {
   const [favoritesExpanded, setFavoritesExpanded] = useState(true);
   const [showAllRecent, setShowAllRecent] = useState(false);
 
-  // Get recent and favorite pages
+  // Get recent pages
   const recentPages = getRecentPages(showAllRecent ? 20 : 5);
-  const favoritePages = getFavoritePages();
+
+  // Combined favorites: pinned sections + cross-notebook favorite pages
+  const hasFavorites = pinnedSections.length > 0 || allFavoritePages.length > 0;
 
   return (
     <aside
@@ -305,8 +312,8 @@ export function Sidebar({ width = 256 }: SidebarProps) {
         </div>
       )}
 
-      {/* Favorites Section */}
-      {showFavoritePages && favoritePages.length > 0 && (
+      {/* Favorites Section — pinned sections + cross-notebook favorite pages */}
+      {showFavoritePages && hasFavorites && (
         <div className="px-3">
           <button
             onClick={() => setFavoritesExpanded(!favoritesExpanded)}
@@ -340,27 +347,59 @@ export function Sidebar({ width = 256 }: SidebarProps) {
           </button>
           {favoritesExpanded && (
             <ul className="space-y-0.5 pb-2">
-              {favoritePages.map((page) => {
-                const notebook = visibleNotebooks.find((n) => n.id === page.notebookId);
-                return (
-                  <li key={page.id}>
-                    <button
-                      onClick={() => {
-                        if (notebook) {
-                          selectNotebook(notebook.id);
-                        }
-                        selectPage(page.id);
-                      }}
-                      className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-[--color-bg-tertiary]"
-                      style={{ color: "var(--color-text-secondary)" }}
-                      title={`${page.title} (${notebook?.name || "Unknown notebook"})`}
+              {/* Pinned sections first */}
+              {pinnedSections.map((pinned) => (
+                <li key={`section-${pinned.sectionId}`}>
+                  <button
+                    onClick={() => {
+                      selectNotebook(pinned.notebookId);
+                      selectSection(pinned.sectionId);
+                    }}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      removePinnedSection(pinned.sectionId);
+                    }}
+                    className="group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-[--color-bg-tertiary]"
+                    style={{ color: "var(--color-text-secondary)" }}
+                    title={`${pinned.sectionName} — ${pinned.notebookName} (right-click to unpin)`}
+                  >
+                    <span
+                      className="h-2.5 w-2.5 flex-shrink-0 rounded-full"
+                      style={{ backgroundColor: pinned.sectionColor || "var(--color-text-muted)" }}
+                    />
+                    <span className="flex-1 truncate">{pinned.sectionName}</span>
+                    <span
+                      className="truncate text-[10px]"
+                      style={{ color: "var(--color-text-muted)", maxWidth: "80px" }}
                     >
-                      <IconStarFilled />
-                      <span className="flex-1 truncate">{page.title}</span>
-                    </button>
-                  </li>
-                );
-              })}
+                      {pinned.notebookName}
+                    </span>
+                  </button>
+                </li>
+              ))}
+              {/* Cross-notebook favorite pages */}
+              {allFavoritePages.map((fav) => (
+                <li key={fav.id}>
+                  <button
+                    onClick={() => {
+                      selectNotebook(fav.notebookId);
+                      selectPage(fav.id);
+                    }}
+                    className="group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-[--color-bg-tertiary]"
+                    style={{ color: "var(--color-text-secondary)" }}
+                    title={`${fav.title} — ${fav.notebookName}`}
+                  >
+                    <IconStarFilled />
+                    <span className="flex-1 truncate">{fav.title}</span>
+                    <span
+                      className="truncate text-[10px]"
+                      style={{ color: "var(--color-text-muted)", maxWidth: "80px" }}
+                    >
+                      {fav.notebookName}
+                    </span>
+                  </button>
+                </li>
+              ))}
             </ul>
           )}
         </div>

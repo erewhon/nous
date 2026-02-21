@@ -7,6 +7,7 @@ import type {
   Folder,
   Section,
   BlockHistoryEntry,
+  FavoritePageEntry,
 } from "../types/page";
 import type {
   SyncConfigInput,
@@ -238,6 +239,10 @@ export async function movePageToNotebook(
     targetNotebookId,
     targetFolderId,
   });
+}
+
+export async function getAllFavoritePages(): Promise<FavoritePageEntry[]> {
+  return invoke<FavoritePageEntry[]>("get_all_favorite_pages");
 }
 
 export async function moveFolderToNotebook(

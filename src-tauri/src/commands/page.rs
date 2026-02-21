@@ -1,13 +1,26 @@
 use std::collections::HashMap;
 
+use chrono::{DateTime, Utc};
 use tauri::State;
 use uuid::Uuid;
 
 use crate::git;
-use crate::storage::{EditorData, Page};
+use crate::storage::{EditorData, Page, PageType};
 use crate::AppState;
 
 use super::notebook::CommandError;
+
+/// Lightweight entry for cross-notebook favorites (no page content).
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FavoritePageEntry {
+    pub id: String,
+    pub notebook_id: String,
+    pub notebook_name: String,
+    pub title: String,
+    pub page_type: PageType,
+    pub updated_at: DateTime<Utc>,
+}
 
 type CommandResult<T> = Result<T, CommandError>;
 
@@ -898,4 +911,39 @@ pub fn revert_block(
     storage.update_page(&current_page)?;
 
     Ok(current_page)
+}
+
+/// Get all favorite pages across all notebooks (lightweight — no page content).
+#[tauri::command]
+pub fn get_all_favorite_pages(state: State<AppState>) -> CommandResult<Vec<FavoritePageEntry>> {
+    let storage = state.storage.lock().unwrap();
+    let notebooks = storage.list_notebooks()?;
+
+    let mut entries = Vec::new();
+    for notebook in &notebooks {
+        if notebook.archived {
+            continue;
+        }
+        let pages = match storage.list_pages(notebook.id) {
+            Ok(p) => p,
+            Err(_) => continue,
+        };
+        for page in &pages {
+            if page.is_favorite && page.deleted_at.is_none() {
+                entries.push(FavoritePageEntry {
+                    id: page.id.to_string(),
+                    notebook_id: notebook.id.to_string(),
+                    notebook_name: notebook.name.clone(),
+                    title: page.title.clone(),
+                    page_type: page.page_type.clone(),
+                    updated_at: page.updated_at,
+                });
+            }
+        }
+    }
+
+    // Sort by updated_at descending (most recently updated first)
+    entries.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+
+    Ok(entries)
 }

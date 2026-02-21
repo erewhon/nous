@@ -392,6 +392,7 @@ pub fn run() {
             commands::move_page_to_notebook,
             commands::open_page_in_pane_crdt,
             commands::close_pane_for_page,
+            commands::get_all_favorite_pages,
             // Page history commands
             commands::get_page_oplog,
             commands::list_page_snapshots,

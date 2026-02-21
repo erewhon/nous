@@ -438,6 +438,8 @@ export function EditorArea() {
                   onDeleteSection={(sectionId, moveItemsTo) => deleteSection(selectedNotebook.id, sectionId, moveItemsTo)}
                   onReorderSections={(sectionIds) => reorderSections(selectedNotebook.id, sectionIds)}
                   unassignedPagesCount={unassignedPagesCount}
+                  notebookId={selectedNotebook.id}
+                  notebookName={selectedNotebook.name}
                 />
               </div>
             )}

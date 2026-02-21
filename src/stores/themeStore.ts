@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { libraryScopedKey } from "../utils/libraryStorage";
+import type { PinnedSectionEntry } from "../types/page";
 
 const THEME_STORE_KEY = libraryScopedKey("nous-theme");
 
@@ -80,8 +81,12 @@ interface ThemeState {
   zenMode: boolean;  // Distraction-free writing mode
   zenModeSettings: ZenModeSettings;  // Zen mode configuration (persisted)
   pinnedToolButtons: ToolButtonId[];
+  pinnedSections: PinnedSectionEntry[];
   setPinnedToolButtons: (buttons: ToolButtonId[]) => void;
   togglePinnedToolButton: (buttonId: ToolButtonId) => void;
+  togglePinnedSection: (entry: PinnedSectionEntry) => void;
+  removePinnedSection: (sectionId: string) => void;
+  isPinnedSection: (sectionId: string) => boolean;
   setMode: (mode: ThemeMode) => void;
   setColorScheme: (scheme: ColorScheme) => void;
   setFontFamily: (font: FontFamily) => void;
@@ -411,6 +416,7 @@ export const useThemeStore = create<ThemeState>()(
       zenMode: false,  // Always starts as false (not persisted)
       zenModeSettings: DEFAULT_ZEN_MODE_SETTINGS,
       pinnedToolButtons: DEFAULT_PINNED_TOOL_BUTTONS,
+      pinnedSections: [],
 
       setPinnedToolButtons: (buttons) => {
         set({ pinnedToolButtons: buttons });
@@ -424,6 +430,26 @@ export const useThemeStore = create<ThemeState>()(
           }
           return { pinnedToolButtons: [...current, buttonId] };
         });
+      },
+
+      togglePinnedSection: (entry) => {
+        set((state) => {
+          const exists = state.pinnedSections.some((s) => s.sectionId === entry.sectionId);
+          if (exists) {
+            return { pinnedSections: state.pinnedSections.filter((s) => s.sectionId !== entry.sectionId) };
+          }
+          return { pinnedSections: [...state.pinnedSections, entry] };
+        });
+      },
+
+      removePinnedSection: (sectionId) => {
+        set((state) => ({
+          pinnedSections: state.pinnedSections.filter((s) => s.sectionId !== sectionId),
+        }));
+      },
+
+      isPinnedSection: (sectionId) => {
+        return get().pinnedSections.some((s) => s.sectionId === sectionId);
       },
 
       setMode: (mode) => {
@@ -591,7 +617,7 @@ export const useThemeStore = create<ThemeState>()(
     }),
     {
       name: THEME_STORE_KEY,
-      partialize: (state) => ({ settings: state.settings, showPageStats: state.showPageStats, showOutline: state.showOutline, uiMode: state.uiMode, notebookSortBy: state.notebookSortBy, pageSortBy: state.pageSortBy, panelWidths: state.panelWidths, autoHidePanels: state.autoHidePanels, zenModeSettings: state.zenModeSettings, showRecentPages: state.showRecentPages, showFavoritePages: state.showFavoritePages, pinnedToolButtons: state.pinnedToolButtons }),
+      partialize: (state) => ({ settings: state.settings, showPageStats: state.showPageStats, showOutline: state.showOutline, uiMode: state.uiMode, notebookSortBy: state.notebookSortBy, pageSortBy: state.pageSortBy, panelWidths: state.panelWidths, autoHidePanels: state.autoHidePanels, zenModeSettings: state.zenModeSettings, showRecentPages: state.showRecentPages, showFavoritePages: state.showFavoritePages, pinnedToolButtons: state.pinnedToolButtons, pinnedSections: state.pinnedSections }),
       onRehydrateStorage: () => (state) => {
         if (state) {
           // Resolve system theme on rehydration
@@ -634,6 +660,10 @@ export const useThemeStore = create<ThemeState>()(
           // Migration: ensure pinnedToolButtons exists with defaults
           if (!state.pinnedToolButtons || !Array.isArray(state.pinnedToolButtons)) {
             state.pinnedToolButtons = DEFAULT_PINNED_TOOL_BUTTONS;
+          }
+          // Migration: ensure pinnedSections exists
+          if (!state.pinnedSections || !Array.isArray(state.pinnedSections)) {
+            state.pinnedSections = [];
           }
           // Apply theme after rehydration
           setTimeout(() => state.applyTheme(), 0);

@@ -16,7 +16,7 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import type { Section } from "../../types/page";
+import type { Section, PinnedSectionEntry } from "../../types/page";
 import { useThemeStore } from "../../stores/themeStore";
 import { SectionSettingsDialog } from "./SectionSettingsDialog";
 
@@ -45,6 +45,9 @@ interface SectionListProps {
   onReorderSections?: (sectionIds: string[]) => Promise<void>;
   // Count of pages that don't have a section assigned
   unassignedPagesCount?: number;
+  // For section pinning
+  notebookId?: string;
+  notebookName?: string;
 }
 
 interface SortableSectionItemProps {
@@ -52,6 +55,8 @@ interface SortableSectionItemProps {
   isSelected: boolean;
   onSelect: () => void;
   onEdit: () => void;
+  isPinned?: boolean;
+  onTogglePin?: () => void;
 }
 
 function SortableSectionItem({
@@ -59,6 +64,8 @@ function SortableSectionItem({
   isSelected,
   onSelect,
   onEdit,
+  isPinned,
+  onTogglePin,
 }: SortableSectionItemProps) {
   const {
     attributes,
@@ -117,6 +124,32 @@ function SortableSectionItem({
           }}
         />
         <span className="flex-1 truncate">{section.name}</span>
+        {/* Pin button on hover */}
+        {onTogglePin && (
+          <span
+            className={`transition-opacity ${isPinned ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onTogglePin();
+            }}
+            title={isPinned ? "Unpin from sidebar" : "Pin to sidebar"}
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill={isPinned ? "currentColor" : "none"}
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              style={{ color: isPinned ? "var(--color-accent)" : "var(--color-text-muted)" }}
+            >
+              <path d="M12 17v5M9 2h6l1 7h2l-1 4H7L6 9h2z" />
+            </svg>
+          </span>
+        )}
         {/* Edit button on hover */}
         <span
           className="opacity-0 group-hover:opacity-100 transition-opacity"
@@ -156,6 +189,8 @@ export function SectionList({
   onDeleteSection,
   onReorderSections,
   unassignedPagesCount = 0,
+  notebookId,
+  notebookName,
 }: SectionListProps) {
   const [editingSection, setEditingSection] = useState<Section | null>(null);
   const [isCreating, setIsCreating] = useState(false);
@@ -163,6 +198,8 @@ export function SectionList({
   const [showSortMenu, setShowSortMenu] = useState(false);
   const autoHidePanels = useThemeStore((state) => state.autoHidePanels);
   const setAutoHidePanels = useThemeStore((state) => state.setAutoHidePanels);
+  const togglePinnedSection = useThemeStore((state) => state.togglePinnedSection);
+  const isPinnedSection = useThemeStore((state) => state.isPinnedSection);
 
   // Sort sections based on selected option
   const sortedSections = useMemo(() => {
@@ -398,6 +435,18 @@ export function SectionList({
                     isSelected={selectedSectionId === section.id}
                     onSelect={() => onSelectSection(section.id)}
                     onEdit={() => setEditingSection(section)}
+                    isPinned={isPinnedSection(section.id)}
+                    onTogglePin={notebookId && notebookName ? () => {
+                      const entry: PinnedSectionEntry = {
+                        sectionId: section.id,
+                        notebookId,
+                        sectionName: section.name,
+                        sectionColor: section.color,
+                        notebookName,
+                        pinnedAt: new Date().toISOString(),
+                      };
+                      togglePinnedSection(entry);
+                    } : undefined}
                   />
                 ))}
               </SortableContext>
@@ -437,6 +486,40 @@ export function SectionList({
                     }}
                   />
                   <span className="flex-1 truncate">{section.name}</span>
+                  {/* Pin button on hover */}
+                  {notebookId && notebookName && (
+                    <span
+                      className={`transition-opacity ${isPinnedSection(section.id) ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const entry: PinnedSectionEntry = {
+                          sectionId: section.id,
+                          notebookId,
+                          sectionName: section.name,
+                          sectionColor: section.color,
+                          notebookName,
+                          pinnedAt: new Date().toISOString(),
+                        };
+                        togglePinnedSection(entry);
+                      }}
+                      title={isPinnedSection(section.id) ? "Unpin from sidebar" : "Pin to sidebar"}
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="12"
+                        height="12"
+                        viewBox="0 0 24 24"
+                        fill={isPinnedSection(section.id) ? "currentColor" : "none"}
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        style={{ color: isPinnedSection(section.id) ? "var(--color-accent)" : "var(--color-text-muted)" }}
+                      >
+                        <path d="M12 17v5M9 2h6l1 7h2l-1 4H7L6 9h2z" />
+                      </svg>
+                    </span>
+                  )}
                   {/* Edit button on hover */}
                   <span
                     className="opacity-0 group-hover:opacity-100 transition-opacity"

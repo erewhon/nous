@@ -335,6 +335,8 @@ export function OverviewLayout() {
                 onUpdateSection={(sectionId, updates) => updateSection(selectedNotebook.id, sectionId, updates)}
                 onDeleteSection={(sectionId, moveItemsTo) => deleteSection(selectedNotebook.id, sectionId, moveItemsTo)}
                 onReorderSections={(sectionIds) => reorderSections(selectedNotebook.id, sectionIds)}
+                notebookId={selectedNotebook.id}
+                notebookName={selectedNotebook.name}
               />
             </div>
             <ResizeHandle direction="horizontal" onResize={handleSectionsResize} />
