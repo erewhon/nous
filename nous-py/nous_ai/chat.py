@@ -19,6 +19,14 @@ from nous_ai.browser_automation import BROWSER_USE_AVAILABLE
 # MCP tool namespace prefix
 MCP_TOOL_PREFIX = "mcp:"
 
+# Strip <tool_call>...</tool_call> tags that leak from models without native tool calling
+_TOOL_CALL_TAG_RE = re.compile(r"</?tool_call>", re.DOTALL)
+
+
+def _strip_tool_call_tags(text: str) -> str:
+    """Remove <tool_call> XML tags from text to prevent raw markup in chat."""
+    return _TOOL_CALL_TAG_RE.sub("", text).strip()
+
 
 def is_mcp_tool(tool_name: str) -> bool:
     """Check if a tool name refers to an MCP tool."""
@@ -2252,9 +2260,10 @@ When the user asks you to "create", "write", "make", "generate", or "save" conte
         if choice.finish_reason != "tool_calls":
             # If we have content from the non-streaming response, emit it
             if choice.message.content:
-                response_content = choice.message.content
+                response_content = _strip_tool_call_tags(choice.message.content)
                 # Emit in chunks with delay for visible streaming effect
-                _emit_chunks_with_delay(callback, "chunk", response_content)
+                if response_content:
+                    _emit_chunks_with_delay(callback, "chunk", response_content)
 
     elif provider_type == "anthropic":
         import logging
@@ -2496,8 +2505,9 @@ When the user asks you to "create", "write", "make", "generate", or "save" conte
             choice = response.choices[0]
 
         if choice.message.content:
-            response_content = choice.message.content
-            _emit_chunks_with_delay(callback, "chunk", response_content)
+            response_content = _strip_tool_call_tags(choice.message.content)
+            if response_content:
+                _emit_chunks_with_delay(callback, "chunk", response_content)
 
     # Emit done event
     callback(
