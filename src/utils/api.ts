@@ -1354,6 +1354,43 @@ export async function inboxClearProcessed(): Promise<number> {
   return invoke<number>("inbox_clear_processed");
 }
 
+// ========== Chat Session Operations ==========
+
+export async function chatSessionCreate(
+  title?: string
+): Promise<import("../types/chatSession").ChatSession> {
+  return invoke("chat_session_create", { title });
+}
+
+export async function chatSessionSave(
+  session: import("../types/chatSession").ChatSession
+): Promise<void> {
+  return invoke("chat_session_save", { session });
+}
+
+export async function chatSessionGet(
+  id: string
+): Promise<import("../types/chatSession").ChatSession> {
+  return invoke("chat_session_get", { id });
+}
+
+export async function chatSessionList(): Promise<
+  import("../types/chatSession").ChatSessionSummary[]
+> {
+  return invoke("chat_session_list");
+}
+
+export async function chatSessionDelete(id: string): Promise<void> {
+  return invoke("chat_session_delete", { id });
+}
+
+export async function chatSessionUpdateTitle(
+  id: string,
+  title: string
+): Promise<void> {
+  return invoke("chat_session_update_title", { id, title });
+}
+
 // ========== Git Operations ==========
 
 export interface GitStatus {

@@ -7,7 +7,9 @@ import { useNotebookStore } from "../../stores/notebookStore";
 import { useSectionStore } from "../../stores/sectionStore";
 import { useRAGStore } from "../../stores/ragStore";
 import { useInboxStore } from "../../stores/inboxStore";
+import { useChatSessionStore } from "../../stores/chatSessionStore";
 import type { SemanticSearchResult } from "../../types/rag";
+import type { ChatSession, SessionMessage } from "../../types/chatSession";
 import {
   aiChatStream,
   createNotebook as apiCreateNotebook,
@@ -57,6 +59,10 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
   const [showModelSelector, setShowModelSelector] = useState(false);
   const [ragContext, setRagContext] = useState<SemanticSearchResult[]>([]);
   const [showRagContext, setShowRagContext] = useState(false);
+  const [showSessionList, setShowSessionList] = useState(false);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleInput, setTitleInput] = useState("");
+  const currentSessionRef = useRef<ChatSession | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -84,7 +90,17 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
     getProviderForModel,
     getProviderConfig,
     setPendingPrompt,
+    setActiveSessionId,
   } = useAIStore();
+  const {
+    sessions,
+    loadSessions,
+    createSession: createChatSession,
+    loadSession: loadChatSession,
+    saveSession: saveChatSession,
+    deleteSession: deleteChatSession,
+    renameSession,
+  } = useChatSessionStore();
   const { selectedPageId, pages, loadPages, updatePageContent, createPage, createSubpage } = usePageStore();
   const { notebooks, selectedNotebookId, loadNotebooks } = useNotebookStore();
   const { sections } = useSectionStore();
@@ -278,6 +294,48 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
       setTimeout(() => inputRef.current?.focus(), 100);
     }
   }, [isOpen]);
+
+  // Load session list when panel opens
+  useEffect(() => {
+    if (isOpen) {
+      loadSessions();
+    }
+  }, [isOpen, loadSessions]);
+
+  // Auto-resume active session on panel open
+  useEffect(() => {
+    if (isOpen && panel.activeSessionId && !currentSessionRef.current && !isStreamingRef.current) {
+      loadChatSession(panel.activeSessionId).then((session) => {
+        currentSessionRef.current = session;
+        // Restore display messages from session
+        const restored: DisplayMessage[] = session.messages.map((m) => ({
+          role: m.role as DisplayMessage["role"],
+          content: m.content,
+          thinking: m.thinking,
+          stats: m.stats ? {
+            elapsedMs: m.stats.elapsedMs,
+            tokensUsed: m.stats.tokensUsed,
+            tokensPerSecond: m.stats.tokensPerSecond,
+            model: m.stats.model,
+          } : undefined,
+        }));
+        setDisplayMessages(restored);
+        // Restore conversation store messages (for history sent to AI)
+        const storeMessages: ChatMessage[] = session.messages.map((m) => ({
+          role: m.role as ChatMessage["role"],
+          content: m.content,
+        }));
+        // We need to set these without triggering additional effects
+        isStreamingRef.current = true;
+        storeMessages.forEach((m) => addMessage(m));
+        setTimeout(() => { isStreamingRef.current = false; }, 50);
+        setShowSessionList(false);
+      }).catch((err) => {
+        console.warn("Failed to resume session:", err);
+        setActiveSessionId(null);
+      });
+    }
+  }, [isOpen, panel.activeSessionId]);
 
   // Auto-submit pending prompt when panel opens
   useEffect(() => {
@@ -717,6 +775,16 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
     });
   };
 
+  // Helper to persist current session state
+  const persistSession = useCallback(async (session: ChatSession) => {
+    try {
+      session.updatedAt = new Date().toISOString();
+      await saveChatSession(session);
+    } catch (err) {
+      console.warn("Failed to persist session:", err);
+    }
+  }, [saveChatSession]);
+
   const handleSubmit = async () => {
     if (!input.trim() || conversation.isLoading) return;
 
@@ -727,6 +795,30 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
       role: "user",
       content: input.trim(),
     };
+
+    // Auto-create session if none exists
+    let session = currentSessionRef.current;
+    if (!session) {
+      const title = userMessage.content.slice(0, 80);
+      try {
+        session = await createChatSession(title);
+        currentSessionRef.current = session;
+        setActiveSessionId(session.id);
+      } catch (err) {
+        console.warn("Failed to create session:", err);
+      }
+    }
+
+    // Add user message to session
+    if (session) {
+      const userSessionMsg: SessionMessage = {
+        role: "user",
+        content: userMessage.content,
+        timestamp: new Date().toISOString(),
+      };
+      session.messages.push(userSessionMsg);
+      persistSession(session);
+    }
 
     // Add user message immediately
     addMessage(userMessage);
@@ -1021,6 +1113,34 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
         }
         return newMessages;
       });
+
+      // Save assistant message to session
+      if (currentSessionRef.current && accumulatedContent) {
+        const assistantSessionMsg: SessionMessage = {
+          role: "assistant",
+          content: accumulatedContent,
+          thinking: accumulatedThinking || undefined,
+          toolCalls: pendingActions.length > 0
+            ? pendingActions.map((a) => ({
+                tool: a.tool,
+                arguments: a.arguments,
+                toolCallId: a.toolCallId,
+              }))
+            : undefined,
+          stats: {
+            elapsedMs,
+            tokensUsed: tokensUsed || undefined,
+            tokensPerSecond: tokensPerSecond || undefined,
+            model: responseModel || undefined,
+          },
+          timestamp: new Date().toISOString(),
+        };
+        currentSessionRef.current.messages.push(assistantSessionMsg);
+        if (responseModel) {
+          currentSessionRef.current.model = responseModel;
+        }
+        persistSession(currentSessionRef.current);
+      }
     } catch (error) {
       console.error("AI chat error:", error);
       const elapsedMs = Date.now() - startTime;
@@ -1143,6 +1263,19 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
         onMouseDown={handleDragStart}
       >
         <div className="flex items-center gap-3">
+          {/* Back to sessions button */}
+          {(currentSessionRef.current || displayMessages.length > 0) && (
+            <button
+              onClick={() => {
+                setShowSessionList(true);
+              }}
+              className="flex h-8 w-8 items-center justify-center rounded-lg transition-all hover:bg-[--color-bg-tertiary]"
+              style={{ color: "var(--color-text-muted)" }}
+              title="Session history"
+            >
+              <IconList />
+            </button>
+          )}
           <div
             className="flex h-9 w-9 items-center justify-center rounded-xl"
             style={{
@@ -1153,12 +1286,44 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
           </div>
           <div>
             <div className="flex items-center gap-2">
+              {currentSessionRef.current && editingTitle ? (
+                <input
+                  autoFocus
+                  value={titleInput}
+                  onChange={(e) => setTitleInput(e.target.value)}
+                  onBlur={() => {
+                    if (titleInput.trim() && currentSessionRef.current) {
+                      currentSessionRef.current.title = titleInput.trim();
+                      renameSession(currentSessionRef.current.id, titleInput.trim());
+                    }
+                    setEditingTitle(false);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                    if (e.key === "Escape") setEditingTitle(false);
+                  }}
+                  className="font-semibold bg-transparent border-b outline-none text-sm"
+                  style={{
+                    color: "var(--color-text-primary)",
+                    borderColor: "var(--color-accent)",
+                    width: "160px",
+                  }}
+                />
+              ) : (
               <span
-                className="font-semibold"
+                className="font-semibold cursor-pointer"
                 style={{ color: "var(--color-text-primary)" }}
+                onClick={() => {
+                  if (currentSessionRef.current) {
+                    setTitleInput(currentSessionRef.current.title);
+                    setEditingTitle(true);
+                  }
+                }}
+                title={currentSessionRef.current ? "Click to rename" : undefined}
               >
-                AI Assistant
+                {currentSessionRef.current ? currentSessionRef.current.title : "AI Assistant"}
               </span>
+              )}
               {panel.isPinned && (
                 <span
                   className="rounded-full px-1.5 py-0.5 text-[10px] font-medium"
@@ -1263,12 +1428,17 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
             <IconSettings />
           </button>
           <button
-            onClick={clearConversation}
+            onClick={() => {
+              clearConversation();
+              currentSessionRef.current = null;
+              setDisplayMessages([]);
+              setShowSessionList(false);
+            }}
             className="flex h-8 w-8 items-center justify-center rounded-lg transition-all hover:bg-[--color-bg-tertiary]"
             style={{ color: "var(--color-text-muted)" }}
-            title="Clear conversation"
+            title="New conversation"
           >
-            <IconTrash />
+            <IconPlus />
           </button>
           <button
             onClick={handleClose}
@@ -1309,7 +1479,127 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-5">
-        {displayMessages.length === 0 && !conversation.isLoading ? (
+        {showSessionList ? (
+          /* Session list view */
+          <div className="space-y-2">
+            <div className="flex items-center justify-between mb-4">
+              <h3
+                className="font-semibold text-sm"
+                style={{ color: "var(--color-text-primary)" }}
+              >
+                Conversations
+              </h3>
+              <button
+                onClick={() => {
+                  clearConversation();
+                  currentSessionRef.current = null;
+                  setDisplayMessages([]);
+                  setShowSessionList(false);
+                }}
+                className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs transition-colors"
+                style={{
+                  background: "linear-gradient(to right, var(--color-accent), var(--color-accent-secondary))",
+                  color: "white",
+                }}
+              >
+                <IconPlus />
+                New
+              </button>
+            </div>
+            {sessions.length === 0 ? (
+              <div
+                className="text-center py-8 text-sm"
+                style={{ color: "var(--color-text-muted)" }}
+              >
+                No conversations yet
+              </div>
+            ) : (
+              sessions.map((s) => (
+                <div
+                  key={s.id}
+                  className="group flex items-center gap-3 rounded-xl p-3 cursor-pointer transition-colors hover:bg-[--color-bg-tertiary]"
+                  style={{
+                    backgroundColor: s.id === panel.activeSessionId ? "rgba(139, 92, 246, 0.1)" : undefined,
+                    border: "1px solid var(--color-border)",
+                  }}
+                  onClick={async () => {
+                    try {
+                      const loaded = await loadChatSession(s.id);
+                      currentSessionRef.current = loaded;
+                      setActiveSessionId(loaded.id);
+                      const restored: DisplayMessage[] = loaded.messages.map((m) => ({
+                        role: m.role as DisplayMessage["role"],
+                        content: m.content,
+                        thinking: m.thinking,
+                        stats: m.stats ? {
+                          elapsedMs: m.stats.elapsedMs,
+                          tokensUsed: m.stats.tokensUsed,
+                          tokensPerSecond: m.stats.tokensPerSecond,
+                          model: m.stats.model,
+                        } : undefined,
+                      }));
+                      isStreamingRef.current = true;
+                      // Clear and re-add to conversation store
+                      clearConversation();
+                      setActiveSessionId(loaded.id);
+                      loaded.messages.forEach((m) => addMessage({
+                        role: m.role as ChatMessage["role"],
+                        content: m.content,
+                      }));
+                      setDisplayMessages(restored);
+                      setTimeout(() => { isStreamingRef.current = false; }, 50);
+                      setShowSessionList(false);
+                    } catch (err) {
+                      console.error("Failed to load session:", err);
+                    }
+                  }}
+                >
+                  <div className="flex-1 min-w-0">
+                    <div
+                      className="text-sm font-medium truncate"
+                      style={{ color: "var(--color-text-primary)" }}
+                    >
+                      {s.title}
+                    </div>
+                    <div
+                      className="text-xs mt-0.5 flex items-center gap-2"
+                      style={{ color: "var(--color-text-muted)" }}
+                    >
+                      <span>{s.messageCount} messages</span>
+                      <span>{formatRelativeTime(s.updatedAt)}</span>
+                    </div>
+                  </div>
+                  <button
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      await deleteChatSession(s.id);
+                      if (currentSessionRef.current?.id === s.id) {
+                        currentSessionRef.current = null;
+                        clearConversation();
+                        setDisplayMessages([]);
+                      }
+                    }}
+                    className="opacity-0 group-hover:opacity-100 flex h-7 w-7 items-center justify-center rounded-lg transition-all hover:bg-[--color-bg-secondary]"
+                    style={{ color: "var(--color-text-muted)" }}
+                    title="Delete conversation"
+                  >
+                    <IconTrash />
+                  </button>
+                </div>
+              ))
+            )}
+            {/* Back to current conversation */}
+            {currentSessionRef.current && (
+              <button
+                onClick={() => setShowSessionList(false)}
+                className="w-full mt-3 rounded-lg px-3 py-2 text-xs text-center transition-colors hover:bg-[--color-bg-tertiary]"
+                style={{ color: "var(--color-text-muted)" }}
+              >
+                Back to current conversation
+              </button>
+            )}
+          </div>
+        ) : displayMessages.length === 0 && !conversation.isLoading ? (
           <div className="flex h-full flex-col items-center justify-center text-center">
             <div
               className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl"
@@ -1339,6 +1629,19 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
               >
                 Context loaded from "{currentPage.title}"
               </p>
+            )}
+            {sessions.length > 0 && (
+              <button
+                onClick={() => setShowSessionList(true)}
+                className="mt-4 flex items-center gap-2 rounded-lg px-4 py-2 text-sm transition-colors hover:bg-[--color-bg-tertiary]"
+                style={{
+                  color: "var(--color-text-muted)",
+                  border: "1px solid var(--color-border)",
+                }}
+              >
+                <IconList />
+                View past conversations ({sessions.length})
+              </button>
             )}
           </div>
         ) : (
@@ -1981,7 +2284,64 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
   );
 }
 
+// Helpers
+function formatRelativeTime(dateStr: string): string {
+  const date = new Date(dateStr);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  if (diffMins < 1) return "just now";
+  if (diffMins < 60) return `${diffMins}m ago`;
+  const diffHours = Math.floor(diffMins / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays < 7) return `${diffDays}d ago`;
+  return date.toLocaleDateString();
+}
+
 // Icons
+function IconList() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <line x1="8" y1="6" x2="21" y2="6" />
+      <line x1="8" y1="12" x2="21" y2="12" />
+      <line x1="8" y1="18" x2="21" y2="18" />
+      <line x1="3" y1="6" x2="3.01" y2="6" />
+      <line x1="3" y1="12" x2="3.01" y2="12" />
+      <line x1="3" y1="18" x2="3.01" y2="18" />
+    </svg>
+  );
+}
+
+function IconPlus() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <line x1="12" y1="5" x2="12" y2="19" />
+      <line x1="5" y1="12" x2="19" y2="12" />
+    </svg>
+  );
+}
+
 function IconSparkles({ style }: { style?: React.CSSProperties }) {
   return (
     <svg

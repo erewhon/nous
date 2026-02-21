@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 use tauri::Manager;
 
 mod actions;
+mod chat_sessions;
 mod commands;
 mod contacts;
 mod energy;
@@ -33,6 +34,7 @@ pub mod sync;
 mod video_server;
 
 use actions::{ActionExecutor, ActionScheduler, ActionStorage};
+use chat_sessions::ChatSessionStorage;
 use commands::BackupScheduler;
 use contacts::ContactsStorage;
 use encryption::EncryptionManager;
@@ -71,6 +73,7 @@ pub struct AppState {
     pub backup_scheduler: Arc<tokio::sync::Mutex<Option<BackupScheduler>>>,
     pub sync_scheduler: Arc<tokio::sync::Mutex<Option<SyncScheduler>>>,
     pub video_server: Arc<tokio::sync::Mutex<Option<VideoServer>>>,
+    pub chat_session_storage: Arc<Mutex<ChatSessionStorage>>,
     pub encryption_manager: Arc<EncryptionManager>,
 }
 
@@ -187,6 +190,11 @@ pub fn run() {
         .expect("Failed to initialize contacts storage");
     let contacts_storage_arc = Arc::new(Mutex::new(contacts_storage));
 
+    // Initialize chat session storage (library-scoped)
+    let chat_session_storage = ChatSessionStorage::new(library_path.clone())
+        .expect("Failed to initialize chat session storage");
+    let chat_session_storage_arc = Arc::new(Mutex::new(chat_session_storage));
+
     // Initialize sync manager
     let sync_manager = SyncManager::new(data_dir.clone());
     let sync_manager_arc = Arc::new(sync_manager);
@@ -267,6 +275,7 @@ pub fn run() {
         crdt_store: crdt_store_arc,
         external_editor: Mutex::new(external_editor),
         external_sources_storage: external_sources_storage_arc,
+        chat_session_storage: chat_session_storage_arc,
         backup_scheduler: backup_scheduler_arc,
         sync_scheduler: sync_scheduler_arc,
         video_server: video_server_arc,
@@ -759,6 +768,13 @@ pub fn run() {
             commands::get_or_create_today_daily_note,
             commands::mark_as_daily_note,
             commands::unmark_daily_note,
+            // Chat session commands
+            commands::chat_session_create,
+            commands::chat_session_save,
+            commands::chat_session_get,
+            commands::chat_session_list,
+            commands::chat_session_delete,
+            commands::chat_session_update_title,
             // Freeze watchdog
             freeze_watchdog::freeze_pong,
         ])

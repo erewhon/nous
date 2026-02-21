@@ -52,6 +52,7 @@ interface AIPanelState {
   size: AIPanelSize;
   isDetached: boolean; // true = floating mode with custom position
   position: AIPanelPosition | null; // null = default bottom-right position
+  activeSessionId: string | null; // persisted so we can auto-resume
 }
 
 interface ConversationState {
@@ -117,6 +118,9 @@ interface AIState {
   // Model discovery
   isDiscoveringModels: boolean;
   discoverModels: (providerType: ProviderType) => Promise<{ found: number; added: number }>;
+
+  // Session actions
+  setActiveSessionId: (id: string | null) => void;
 
   // Conversation actions
   addMessage: (message: ChatMessage) => void;
@@ -210,6 +214,7 @@ const defaultPanelState: AIPanelState = {
   },
   isDetached: false,
   position: null,
+  activeSessionId: null,
 };
 
 // Export constants for use in components
@@ -558,6 +563,11 @@ export const useAIStore = create<AIState>()(
         }
       },
 
+      setActiveSessionId: (id) =>
+        set((state) => ({
+          panel: { ...state.panel, activeSessionId: id },
+        })),
+
       addMessage: (message) =>
         set((state) => ({
           conversation: {
@@ -568,6 +578,7 @@ export const useAIStore = create<AIState>()(
 
       clearConversation: () =>
         set((state) => ({
+          panel: { ...state.panel, activeSessionId: null },
           conversation: {
             ...state.conversation,
             messages: [],
@@ -592,7 +603,7 @@ export const useAIStore = create<AIState>()(
 
       openPanelWithPrompt: (prompt) => {
         set((state) => ({
-          panel: { ...state.panel, isOpen: true },
+          panel: { ...state.panel, isOpen: true, activeSessionId: null },
           conversation: {
             ...state.conversation,
             messages: [], // Clear conversation for fresh context
