@@ -35,6 +35,7 @@ export interface ToolCallRecord {
   arguments: unknown;
   toolCallId: string;
   result?: string;
+  error?: string;
 }
 
 /** Response timing and token statistics */

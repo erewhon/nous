@@ -9,7 +9,8 @@ import { useRAGStore } from "../../stores/ragStore";
 import { useInboxStore } from "../../stores/inboxStore";
 import { useChatSessionStore } from "../../stores/chatSessionStore";
 import type { SemanticSearchResult } from "../../types/rag";
-import type { ChatSession, SessionMessage } from "../../types/chatSession";
+import type { ChatSession, SessionMessage, ToolCallRecord } from "../../types/chatSession";
+import { useToastStore } from "../../stores/toastStore";
 import {
   aiChatStream,
   createNotebook as apiCreateNotebook,
@@ -26,15 +27,19 @@ interface AIChatPanelProps {
   onOpenSettings?: () => void;
 }
 
-// Track created items to show in UI
-interface CreatedItem {
-  type: "notebook" | "page" | "action" | "info" | "browser";
-  name: string;
-  notebookName?: string;
-  browserResult?: string;
+// Tool call status tracking
+type ToolCallStatus = "pending" | "executing" | "success" | "error";
+
+interface DisplayToolCall {
+  toolCallId: string;
+  tool: string;
+  arguments: unknown;
+  status: ToolCallStatus;
+  result?: string;
+  error?: string;
 }
 
-// Extended message with optional thinking and stats
+// Extended message with optional thinking, stats, and tool calls
 interface DisplayMessage {
   role: "user" | "assistant" | "system";
   content: string;
@@ -45,11 +50,12 @@ interface DisplayMessage {
     tokensPerSecond?: number;
     model?: string;
   };
+  toolCalls?: DisplayToolCall[];
 }
 
 export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSettings }: AIChatPanelProps) {
   const [input, setInput] = useState("");
-  const [createdItems, setCreatedItems] = useState<CreatedItem[]>([]);
+  const [expandedToolCalls, setExpandedToolCalls] = useState<Set<string>>(new Set());
   const [statusText, setStatusText] = useState<string>("");
   const [displayMessages, setDisplayMessages] = useState<DisplayMessage[]>([]);
   const [expandedThinking, setExpandedThinking] = useState<Set<number>>(new Set());
@@ -110,6 +116,7 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
     settings: ragSettings,
     getContext: getRagContext
   } = useRAGStore();
+  const toast = useToastStore();
 
   // Use props if provided, otherwise use store state
   const isOpen = isOpenProp !== undefined ? isOpenProp : panel.isOpen;
@@ -318,6 +325,14 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
             tokensPerSecond: m.stats.tokensPerSecond,
             model: m.stats.model,
           } : undefined,
+          toolCalls: m.toolCalls?.map(tc => ({
+            toolCallId: tc.toolCallId,
+            tool: tc.tool,
+            arguments: tc.arguments,
+            status: (tc.error ? "error" : "success") as ToolCallStatus,
+            result: tc.result,
+            error: tc.error,
+          })),
         }));
         setDisplayMessages(restored);
         // Restore conversation store messages (for history sent to AI)
@@ -519,8 +534,8 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
     // Reload pages to refresh the view
     await loadPages(selectedNotebookId);
 
-    setCreatedItems(prev => [...prev, { type: "info", name: `Appended to "${currentPage.title}"` }]);
-  }, [currentPage, selectedNotebookId, markdownToBlocks, updatePageContent, loadPages]);
+    toast.success(`Appended to "${currentPage.title}"`);
+  }, [currentPage, selectedNotebookId, markdownToBlocks, updatePageContent, loadPages, toast]);
 
   // Create a new page with the AI response
   const handleCreateNewPage = useCallback(async (content: string) => {
@@ -552,8 +567,8 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
     // Reload pages
     await loadPages(selectedNotebookId);
 
-    setCreatedItems(prev => [...prev, { type: "page", name: title }]);
-  }, [selectedNotebookId, markdownToBlocks, createPage, updatePageContent, loadPages]);
+    toast.success(`Created page "${title}"`);
+  }, [selectedNotebookId, markdownToBlocks, createPage, updatePageContent, loadPages, toast]);
 
   // Create a subpage under the current page with the AI response
   const handleCreateSubpage = useCallback(async (content: string) => {
@@ -585,100 +600,67 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
     // Reload pages
     await loadPages(selectedNotebookId);
 
-    setCreatedItems(prev => [...prev, { type: "page", name: `${title} (subpage of ${currentPage.title})` }]);
-  }, [selectedNotebookId, currentPage, markdownToBlocks, createSubpage, updatePageContent, loadPages]);
+    toast.success(`Created subpage "${title}" under "${currentPage.title}"`);
+  }, [selectedNotebookId, currentPage, markdownToBlocks, createSubpage, updatePageContent, loadPages, toast]);
 
-  // Execute AI actions (create notebooks/pages)
-  const executeActions = useCallback(async (actions: AIAction[]): Promise<CreatedItem[]> => {
-    const created: CreatedItem[] = [];
-    // Keep track of newly created notebooks (refresh the list once)
+  // Execute AI actions (create notebooks/pages) with per-action progress reporting
+  const executeActions = useCallback(async (
+    actions: AIAction[],
+    onProgress?: (toolCallId: string, status: ToolCallStatus, result?: string, error?: string) => void,
+  ): Promise<ToolCallRecord[]> => {
+    const records: ToolCallRecord[] = [];
     let needsNotebookRefresh = false;
     let notebooksSnapshot = [...notebooks];
 
     for (const action of actions) {
+      const record: ToolCallRecord = {
+        tool: action.tool,
+        arguments: action.arguments,
+        toolCallId: action.toolCallId,
+      };
+      onProgress?.(action.toolCallId, "executing");
+
       try {
         if (action.tool === "create_notebook") {
           const args = action.arguments as unknown as CreateNotebookArgs;
           const newNotebook = await apiCreateNotebook(args.name);
           notebooksSnapshot.push(newNotebook);
           needsNotebookRefresh = true;
-          created.push({ type: "notebook", name: args.name });
+          record.result = `Created notebook "${args.name}"`;
         } else if (action.tool === "run_action") {
           const args = action.arguments as unknown as { action_name: string; variables?: Record<string, string> };
-          try {
-            const { runActionByName } = await import("../../utils/api");
-            const result = await runActionByName(args.action_name, {
-              variables: args.variables,
-              currentNotebookId: selectedNotebookId || undefined,
-            });
-            created.push({
-              type: "action",
-              name: args.action_name,
-              notebookName: `${result.stepsCompleted} steps completed`,
-            });
-            // Reload pages if the action might have created some
-            if (selectedNotebookId) {
-              await loadPages(selectedNotebookId);
-            }
-          } catch (error) {
-            console.error(`Failed to run action ${args.action_name}:`, error);
+          const { runActionByName } = await import("../../utils/api");
+          const result = await runActionByName(args.action_name, {
+            variables: args.variables,
+            currentNotebookId: selectedNotebookId || undefined,
+          });
+          record.result = `Ran action "${args.action_name}" (${result.stepsCompleted} steps)`;
+          if (selectedNotebookId) {
+            await loadPages(selectedNotebookId);
           }
         } else if (action.tool === "list_actions") {
-          // list_actions is informational - just acknowledge it
-          // The AI will format the response based on the tool result
-          created.push({
-            type: "info",
-            name: "Listed available actions",
-          });
+          record.result = "Listed available actions";
         } else if (action.tool === "browse_web") {
           const args = action.arguments as unknown as { task: string; capture_screenshot?: boolean };
-          try {
-            // Get AI settings for provider config
-            const { getActiveProviderType, getActiveApiKey, getActiveModel } = useAIStore.getState();
-            const activeApiKey = getActiveApiKey();
-            if (!activeApiKey) {
-              created.push({
-                type: "browser",
-                name: "Browser task",
-                browserResult: "Error: No API key configured for AI provider",
-              });
-              continue;
-            }
-            const result = await runBrowserTask(
-              args.task,
-              getActiveProviderType(),
-              activeApiKey,
-              getActiveModel(),
-              args.capture_screenshot ?? false
-            );
-            if (result.success) {
-              created.push({
-                type: "browser",
-                name: "Browser task completed",
-                browserResult: result.content,
-              });
-            } else {
-              created.push({
-                type: "browser",
-                name: "Browser task failed",
-                browserResult: result.error || "Unknown error",
-              });
-            }
-          } catch (error) {
-            console.error("Browser automation error:", error);
-            created.push({
-              type: "browser",
-              name: "Browser task error",
-              browserResult: String(error),
-            });
+          const { getActiveProviderType, getActiveApiKey, getActiveModel } = useAIStore.getState();
+          const activeApiKey = getActiveApiKey();
+          if (!activeApiKey) {
+            throw new Error("No API key configured for AI provider");
+          }
+          const result = await runBrowserTask(
+            args.task,
+            getActiveProviderType(),
+            activeApiKey,
+            getActiveModel(),
+            args.capture_screenshot ?? false
+          );
+          if (result.success) {
+            record.result = result.content || "Browser task completed";
+          } else {
+            throw new Error(result.error || "Browser task failed");
           }
         } else if (action.tool.startsWith("nous_")) {
-          // Storage tools execute in Python — just acknowledge and reload
-          created.push({
-            type: "info",
-            name: `${action.tool} completed`,
-          });
-          // Reload pages if the tool might have modified data
+          record.result = `${action.tool} completed`;
           if (
             selectedNotebookId &&
             !action.tool.startsWith("nous_list") &&
@@ -689,13 +671,10 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
           }
         } else if (action.tool === "create_page") {
           const args = action.arguments as unknown as CreatePageArgs;
-
-          // Find the target notebook
           let targetNotebookId = selectedNotebookId;
           let targetNotebookName = currentNotebook?.name || "current notebook";
 
           if (args.notebook_name !== "current") {
-            // Look for the notebook by name (in snapshot that includes new notebooks)
             const targetNotebook = notebooksSnapshot.find(
               (n) => n.name.toLowerCase() === args.notebook_name.toLowerCase()
             );
@@ -703,25 +682,19 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
               targetNotebookId = targetNotebook.id;
               targetNotebookName = targetNotebook.name;
             } else {
-              // Create the notebook if it doesn't exist
               const newNotebook = await apiCreateNotebook(args.notebook_name);
               notebooksSnapshot.push(newNotebook);
               needsNotebookRefresh = true;
               targetNotebookId = newNotebook.id;
               targetNotebookName = newNotebook.name;
-              created.push({ type: "notebook", name: args.notebook_name });
             }
           }
 
           if (!targetNotebookId) {
-            console.error("No target notebook found for page creation");
-            continue;
+            throw new Error("No target notebook found for page creation");
           }
 
-          // Create the page
           const newPage = await apiCreatePage(targetNotebookId, args.title);
-
-          // Convert content blocks to EditorData format
           const editorData: EditorData = {
             time: Date.now(),
             version: "2.28.2",
@@ -731,35 +704,33 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
               data: block.data as Record<string, unknown>,
             })),
           };
-
-          // Update page with content and optionally tags
           const updates: { content: EditorData; tags?: string[] } = { content: editorData };
           if (args.tags && args.tags.length > 0) {
             updates.tags = args.tags;
           }
           await apiUpdatePage(targetNotebookId, newPage.id, updates);
-
-          created.push({
-            type: "page",
-            name: args.title,
-            notebookName: targetNotebookName,
-          });
+          record.result = `Created page "${args.title}" in ${targetNotebookName}`;
         }
+
+        onProgress?.(action.toolCallId, "success", record.result);
       } catch (error) {
+        const errMsg = error instanceof Error ? error.message : String(error);
         console.error(`Failed to execute action ${action.tool}:`, error);
+        record.error = errMsg;
+        onProgress?.(action.toolCallId, "error", undefined, errMsg);
       }
+      records.push(record);
     }
 
     // Refresh stores once at the end
     if (needsNotebookRefresh) {
       await loadNotebooks();
     }
-    // Reload pages for the current notebook if any pages were created
-    if (selectedNotebookId && created.some(c => c.type === "page")) {
+    if (selectedNotebookId && records.some(r => r.tool === "create_page" && !r.error)) {
       await loadPages(selectedNotebookId);
     }
 
-    return created;
+    return records;
   }, [selectedNotebookId, currentNotebook, notebooks, loadNotebooks, loadPages]);
 
   // Toggle thinking expansion
@@ -825,7 +796,6 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
     setDisplayMessages(prev => [...prev, { role: "user", content: userMessage.content }]);
     setInput("");
     setLoading(true);
-    setCreatedItems([]); // Clear previous created items
     setRagContext([]); // Clear previous RAG context
 
     // Fetch RAG context if enabled
@@ -903,6 +873,23 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
               tool: data.tool,
               arguments: data.arguments,
               toolCallId: data.toolCallId,
+            });
+            // Add pending tool call card to the assistant message
+            setDisplayMessages(prev => {
+              const newMessages = [...prev];
+              if (newMessages[assistantMsgIndex]) {
+                const existingCalls = newMessages[assistantMsgIndex].toolCalls || [];
+                newMessages[assistantMsgIndex] = {
+                  ...newMessages[assistantMsgIndex],
+                  toolCalls: [...existingCalls, {
+                    toolCallId: data.toolCallId,
+                    tool: data.tool,
+                    arguments: data.arguments,
+                    status: "pending",
+                  }],
+                };
+              }
+              return newMessages;
             });
             break;
 
@@ -1071,11 +1058,23 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
       console.log("[AI Stream] Command completed. elapsedMs:", elapsedMs);
       console.log("[AI Stream] Final values - model:", responseModel, "tokens:", tokensUsed, "content length:", accumulatedContent.length);
 
-      // Execute any pending actions
+      // Execute any pending actions with per-card progress
+      let actionRecords: ToolCallRecord[] = [];
       if (pendingActions.length > 0) {
         setStatusText("Creating notebooks and pages...");
-        const created = await executeActions(pendingActions);
-        setCreatedItems(created);
+        const onProgress = (toolCallId: string, status: ToolCallStatus, result?: string, error?: string) => {
+          setDisplayMessages(prev => {
+            const newMessages = [...prev];
+            if (newMessages[assistantMsgIndex]) {
+              const tcs = newMessages[assistantMsgIndex].toolCalls?.map(tc =>
+                tc.toolCallId === toolCallId ? { ...tc, status, result, error } : tc
+              );
+              newMessages[assistantMsgIndex] = { ...newMessages[assistantMsgIndex], toolCalls: tcs };
+            }
+            return newMessages;
+          });
+        };
+        actionRecords = await executeActions(pendingActions, onProgress);
       }
 
       // Add final message to conversation store
@@ -1120,13 +1119,7 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
           role: "assistant",
           content: accumulatedContent,
           thinking: accumulatedThinking || undefined,
-          toolCalls: pendingActions.length > 0
-            ? pendingActions.map((a) => ({
-                tool: a.tool,
-                arguments: a.arguments,
-                toolCallId: a.toolCallId,
-              }))
-            : undefined,
+          toolCalls: actionRecords.length > 0 ? actionRecords : undefined,
           stats: {
             elapsedMs,
             tokensUsed: tokensUsed || undefined,
@@ -1537,6 +1530,14 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
                           tokensPerSecond: m.stats.tokensPerSecond,
                           model: m.stats.model,
                         } : undefined,
+                        toolCalls: m.toolCalls?.map(tc => ({
+                          toolCallId: tc.toolCallId,
+                          tool: tc.tool,
+                          arguments: tc.arguments,
+                          status: (tc.error ? "error" : "success") as ToolCallStatus,
+                          result: tc.result,
+                          error: tc.error,
+                        })),
                       }));
                       isStreamingRef.current = true;
                       // Clear and re-add to conversation store
@@ -1769,6 +1770,26 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
                       </div>
                     )}
                   </div>
+                  {/* Tool call cards */}
+                  {msg.toolCalls && msg.toolCalls.length > 0 && (
+                    <div className="mt-2 space-y-1">
+                      {msg.toolCalls.map(tc => (
+                        <ToolCallCard
+                          key={tc.toolCallId}
+                          tc={tc}
+                          expanded={expandedToolCalls.has(tc.toolCallId)}
+                          onToggle={() => {
+                            setExpandedToolCalls(prev => {
+                              const next = new Set(prev);
+                              if (next.has(tc.toolCallId)) next.delete(tc.toolCallId);
+                              else next.add(tc.toolCallId);
+                              return next;
+                            });
+                          }}
+                        />
+                      ))}
+                    </div>
+                  )}
                   {/* Stats for assistant messages */}
                   {msg.role === "assistant" && msg.stats && (
                     <div
@@ -2051,65 +2072,6 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
                     ))}
                   </div>
                 )}
-              </div>
-            )}
-            {/* Show created items */}
-            {createdItems.length > 0 && (
-              <div
-                className="rounded-xl border p-4"
-                style={{
-                  backgroundColor: "rgba(166, 227, 161, 0.1)",
-                  borderColor: "var(--color-success)",
-                }}
-              >
-                <div className="flex items-center gap-2 mb-3">
-                  <IconCheck style={{ color: "var(--color-success)" }} />
-                  <span
-                    className="text-sm font-medium"
-                    style={{ color: "var(--color-success)" }}
-                  >
-                    Created {createdItems.length} item{createdItems.length > 1 ? "s" : ""}
-                  </span>
-                </div>
-                <div className="space-y-2">
-                  {createdItems.map((item, i) => (
-                    <div
-                      key={i}
-                      className="flex items-start gap-2 text-sm"
-                      style={{ color: "var(--color-text-secondary)" }}
-                    >
-                      {item.type === "notebook" && <IconBook style={{ width: 14, height: 14, flexShrink: 0, marginTop: 2 }} />}
-                      {item.type === "page" && <IconFile style={{ width: 14, height: 14, flexShrink: 0, marginTop: 2 }} />}
-                      {item.type === "browser" && <IconGlobe style={{ width: 14, height: 14, flexShrink: 0, marginTop: 2 }} />}
-                      {item.type === "action" && <IconZap style={{ width: 14, height: 14, flexShrink: 0, marginTop: 2 }} />}
-                      {item.type === "info" && <IconCheck style={{ width: 14, height: 14, flexShrink: 0, marginTop: 2 }} />}
-                      <div className="flex-1">
-                        {item.type === "notebook" && (
-                          <>Notebook: <strong style={{ color: "var(--color-text-primary)" }}>{item.name}</strong></>
-                        )}
-                        {item.type === "page" && (
-                          <>Page: <strong style={{ color: "var(--color-text-primary)" }}>{item.name}</strong> in {item.notebookName}</>
-                        )}
-                        {item.type === "action" && (
-                          <>Action: <strong style={{ color: "var(--color-text-primary)" }}>{item.name}</strong> {item.notebookName && `(${item.notebookName})`}</>
-                        )}
-                        {item.type === "info" && (
-                          <>{item.name}</>
-                        )}
-                        {item.type === "browser" && (
-                          <div>
-                            <strong style={{ color: "var(--color-text-primary)" }}>{item.name}</strong>
-                            {item.browserResult && (
-                              <div className="mt-1 text-xs whitespace-pre-wrap" style={{ color: "var(--color-text-secondary)", maxHeight: 200, overflow: "auto" }}>
-                                {item.browserResult.length > 500 ? item.browserResult.slice(0, 500) + "..." : item.browserResult}
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
               </div>
             )}
             <div ref={messagesEndRef} />
@@ -2728,5 +2690,140 @@ function IconTarget() {
       <circle cx="12" cy="12" r="6" />
       <circle cx="12" cy="12" r="2" />
     </svg>
+  );
+}
+
+function IconSpinner() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="animate-spin"
+      style={{ color: "var(--color-accent)" }}
+    >
+      <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+    </svg>
+  );
+}
+
+function IconXSmall() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{ color: "var(--color-error)" }}
+    >
+      <path d="M18 6L6 18M6 6l12 12" />
+    </svg>
+  );
+}
+
+// Tool call display helpers
+function truncateJson(obj: unknown): string {
+  const s = JSON.stringify(obj);
+  return s && s.length > 60 ? s.slice(0, 60) + "..." : s || "";
+}
+
+function getToolCallDisplay(tc: DisplayToolCall): { icon: React.ReactNode; label: string; summary: string } {
+  const args = tc.arguments as Record<string, unknown> | null;
+  switch (tc.tool) {
+    case "create_notebook":
+      return { icon: <IconBook style={{ width: 12, height: 12 }} />, label: "Create Notebook", summary: String(args?.name || "") };
+    case "create_page":
+      return { icon: <IconFile style={{ width: 12, height: 12 }} />, label: "Create Page", summary: String(args?.title || "") };
+    case "run_action":
+      return { icon: <IconZap style={{ width: 12, height: 12 }} />, label: "Run Action", summary: String(args?.action_name || "") };
+    case "list_actions":
+      return { icon: <IconList />, label: "List Actions", summary: "" };
+    case "browse_web":
+      return { icon: <IconGlobe style={{ width: 12, height: 12 }} />, label: "Browse Web", summary: String(args?.task || "").slice(0, 60) };
+    default:
+      if (tc.tool.startsWith("nous_")) {
+        const toolLabel = tc.tool.replace("nous_", "").replace(/_/g, " ");
+        return { icon: <IconSparkles style={{ width: 12, height: 12 }} />, label: toolLabel, summary: truncateJson(args) };
+      }
+      return { icon: <IconZap style={{ width: 12, height: 12 }} />, label: tc.tool, summary: truncateJson(args) };
+  }
+}
+
+function ToolCallCard({ tc, expanded, onToggle }: { tc: DisplayToolCall; expanded: boolean; onToggle: () => void }) {
+  const display = getToolCallDisplay(tc);
+
+  return (
+    <div
+      className="rounded-lg border overflow-hidden"
+      style={{
+        borderColor: tc.status === "error" ? "var(--color-error, #f38ba8)" : "var(--color-border)",
+        backgroundColor: "var(--color-bg-tertiary)",
+      }}
+    >
+      <button
+        onClick={onToggle}
+        className="flex items-center gap-2 w-full px-3 py-2 text-xs text-left hover:opacity-80 transition-opacity"
+      >
+        {tc.status === "pending" && (
+          <span
+            className="w-2 h-2 rounded-full flex-shrink-0"
+            style={{ backgroundColor: "var(--color-text-muted)" }}
+          />
+        )}
+        {tc.status === "executing" && <IconSpinner />}
+        {tc.status === "success" && <IconCheck style={{ width: 12, height: 12, color: "var(--color-success)" }} />}
+        {tc.status === "error" && <IconXSmall />}
+        {display.icon}
+        <span className="font-medium" style={{ color: "var(--color-text-primary)" }}>
+          {display.label}
+        </span>
+        {display.summary && (
+          <span className="flex-1 truncate" style={{ color: "var(--color-text-muted)" }}>
+            {display.summary}
+          </span>
+        )}
+        <IconChevron
+          style={{
+            width: 10,
+            height: 10,
+            flexShrink: 0,
+            transform: expanded ? "rotate(180deg)" : "rotate(0deg)",
+            transition: "transform 0.2s",
+          }}
+        />
+      </button>
+      {(tc.result || tc.error) && (
+        <div
+          className="px-3 pb-2 text-xs"
+          style={{ color: tc.status === "error" ? "var(--color-error, #f38ba8)" : "var(--color-success)" }}
+        >
+          {tc.error || tc.result}
+        </div>
+      )}
+      {expanded && (
+        <div
+          className="px-3 pb-2 text-xs border-t"
+          style={{ borderColor: "var(--color-border)" }}
+        >
+          <pre
+            className="whitespace-pre-wrap font-mono overflow-auto max-h-32 mt-2"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            {JSON.stringify(tc.arguments, null, 2)}
+          </pre>
+        </div>
+      )}
+    </div>
   );
 }
