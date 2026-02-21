@@ -840,13 +840,24 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
       // Build page context if a page is selected
       let pageContext: PageContext | undefined;
       if (currentPage) {
-        pageContext = {
-          pageId: currentPage.id,
-          title: currentPage.title,
-          content: extractPlainText(currentPage.content),
-          tags: currentPage.tags,
-          notebookName: currentNotebook?.name,
-        };
+        try {
+          pageContext = {
+            pageId: currentPage.id,
+            title: currentPage.title,
+            content: currentPage.content?.blocks ? extractPlainText(currentPage.content) : "",
+            tags: currentPage.tags,
+            notebookName: currentNotebook?.name,
+          };
+        } catch (e) {
+          console.warn("Failed to build page context:", e);
+          pageContext = {
+            pageId: currentPage.id,
+            title: currentPage.title,
+            content: "",
+            tags: currentPage.tags,
+            notebookName: currentNotebook?.name,
+          };
+        }
       }
 
       // Build available notebooks list
