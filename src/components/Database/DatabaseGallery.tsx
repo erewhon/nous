@@ -23,6 +23,8 @@ interface DatabaseGalleryProps {
   ) => void;
   onUpdateView: (updater: (prev: DatabaseView) => DatabaseView) => void;
   relationContext?: RelationContext;
+  pageLinkPages?: Array<{ id: string; title: string }>;
+  onNavigatePageLink?: (pageId: string) => void;
 }
 
 export function DatabaseGallery({
@@ -30,6 +32,8 @@ export function DatabaseGallery({
   view,
   onUpdateContent,
   relationContext,
+  pageLinkPages,
+  onNavigatePageLink,
 }: DatabaseGalleryProps) {
   const [selectedRowId, setSelectedRowId] = useState<string | null>(null);
 
@@ -249,6 +253,21 @@ export function DatabaseGallery({
         </span>
       );
     }
+    if (prop.type === "pageLink" && typeof val === "string") {
+      const linked = pageLinkPages?.find((p) => p.id === val);
+      if (!linked) return null;
+      return (
+        <span
+          className="db-pagelink-pill"
+          onClick={(e) => {
+            e.stopPropagation();
+            onNavigatePageLink?.(linked.id);
+          }}
+        >
+          {linked.title || "Untitled"}
+        </span>
+      );
+    }
     return String(val);
   };
 
@@ -316,6 +335,8 @@ export function DatabaseGallery({
           onClose={() => setSelectedRowId(null)}
           onDelete={() => handleDeleteRow(selectedRow.id)}
           relationContext={relationContext}
+          pageLinkPages={pageLinkPages}
+          onNavigatePageLink={onNavigatePageLink}
         />
       )}
     </div>

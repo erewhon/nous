@@ -33,6 +33,8 @@ interface DatabaseBoardProps {
   ) => void;
   onUpdateView: (updater: (prev: DatabaseView) => DatabaseView) => void;
   relationContext?: RelationContext;
+  pageLinkPages?: Array<{ id: string; title: string }>;
+  onNavigatePageLink?: (pageId: string) => void;
 }
 
 const NO_VALUE_COLUMN = "__no_value__";
@@ -42,6 +44,8 @@ export function DatabaseBoard({
   view,
   onUpdateContent,
   relationContext,
+  pageLinkPages,
+  onNavigatePageLink,
 }: DatabaseBoardProps) {
   const [selectedRowId, setSelectedRowId] = useState<string | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -311,6 +315,7 @@ export function DatabaseBoard({
               properties={content.properties}
               onCardClick={setSelectedRowId}
               onAddCard={() => handleAddCard(col.id)}
+              pageLinkPages={pageLinkPages}
             />
           ))}
         </div>
@@ -320,6 +325,7 @@ export function DatabaseBoard({
               row={activeRow}
               properties={content.properties}
               onClick={() => {}}
+              pageLinkPages={pageLinkPages}
             />
           )}
         </DragOverlay>
@@ -336,6 +342,8 @@ export function DatabaseBoard({
           onClose={() => setSelectedRowId(null)}
           onDelete={() => handleDeleteRow(selectedRow.id)}
           relationContext={relationContext}
+          pageLinkPages={pageLinkPages}
+          onNavigatePageLink={onNavigatePageLink}
         />
       )}
     </>
@@ -350,6 +358,7 @@ function BoardColumn({
   properties,
   onCardClick,
   onAddCard,
+  pageLinkPages,
 }: {
   id: string;
   label: string;
@@ -358,6 +367,7 @@ function BoardColumn({
   properties: PropertyDef[];
   onCardClick: (rowId: string) => void;
   onAddCard: () => void;
+  pageLinkPages?: Array<{ id: string; title: string }>;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id });
 
@@ -382,6 +392,7 @@ function BoardColumn({
             row={row}
             properties={properties}
             onClick={() => onCardClick(row.id)}
+            pageLinkPages={pageLinkPages}
           />
         ))}
       </div>
@@ -407,10 +418,12 @@ function DraggableCard({
   row,
   properties,
   onClick,
+  pageLinkPages,
 }: {
   row: DatabaseRow;
   properties: PropertyDef[];
   onClick: () => void;
+  pageLinkPages?: Array<{ id: string; title: string }>;
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } =
     useDraggable({
@@ -426,7 +439,7 @@ function DraggableCard({
 
   return (
     <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
-      <DatabaseBoardCard row={row} properties={properties} onClick={onClick} />
+      <DatabaseBoardCard row={row} properties={properties} onClick={onClick} pageLinkPages={pageLinkPages} />
     </div>
   );
 }

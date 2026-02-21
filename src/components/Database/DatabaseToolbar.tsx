@@ -34,6 +34,7 @@ interface DatabaseToolbarProps {
   databasePages?: Page[];
   targetContents?: Map<string, DatabaseContentV2>;
   onDeleteProperty?: (propertyId: string) => void;
+  pageLinkPages?: Array<{ id: string; title: string }>;
 }
 
 const TYPE_OPTIONS: { value: PropertyType; label: string }[] = [
@@ -44,6 +45,7 @@ const TYPE_OPTIONS: { value: PropertyType; label: string }[] = [
   { value: "checkbox", label: "Checkbox" },
   { value: "date", label: "Date" },
   { value: "url", label: "URL" },
+  { value: "pageLink", label: "Page Link" },
   { value: "relation", label: "Relation" },
   { value: "rollup", label: "Rollup" },
 ];
@@ -60,6 +62,7 @@ export function DatabaseToolbar({
   onUpdateView,
   databasePages,
   targetContents,
+  pageLinkPages,
 }: DatabaseToolbarProps) {
   const [showAddProp, setShowAddProp] = useState(false);
   const [showSort, setShowSort] = useState(false);
@@ -234,7 +237,7 @@ export function DatabaseToolbar({
         {/* Export CSV */}
         <button
           className="db-toolbar-btn"
-          onClick={() => exportDatabaseAsCsv(properties, rows, title || "database")}
+          onClick={() => exportDatabaseAsCsv(properties, rows, title || "database", pageLinkPages)}
         >
           <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -620,6 +623,10 @@ const OPERATORS_BY_TYPE: Record<string, { value: string; label: string }[]> = {
     { value: "equals", label: "Equals" },
     { value: "before", label: "Before" },
     { value: "after", label: "After" },
+    { value: "isEmpty", label: "Is empty" },
+    { value: "isNotEmpty", label: "Is not empty" },
+  ],
+  pageLink: [
     { value: "isEmpty", label: "Is empty" },
     { value: "isNotEmpty", label: "Is not empty" },
   ],

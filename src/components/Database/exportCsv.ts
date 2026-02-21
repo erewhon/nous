@@ -10,7 +10,8 @@ function escapeCsvField(value: string): string {
 export function exportDatabaseAsCsv(
   properties: PropertyDef[],
   rows: DatabaseRow[],
-  filename: string
+  filename: string,
+  pages?: Array<{ id: string; title: string }>
 ): void {
   // Header row
   const header = properties.map((p) => escapeCsvField(p.name)).join(",");
@@ -39,6 +40,13 @@ export function exportDatabaseAsCsv(
             return val === true ? "true" : "false";
           case "number":
             return String(val);
+          case "pageLink": {
+            if (typeof val === "string") {
+              const page = pages?.find((p) => p.id === val);
+              return escapeCsvField(page?.title ?? val);
+            }
+            return "";
+          }
           default:
             return escapeCsvField(String(val));
         }

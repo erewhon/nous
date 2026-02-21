@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useRef, useEffect } from "react";
 import type {
   DatabaseContentV2,
   DatabaseView,
@@ -8,6 +8,7 @@ import type {
   SelectOption,
   DatabaseSort,
   TableViewConfig,
+  SummaryAggregation,
 } from "../../types/database";
 import { createDefaultRow } from "../../types/database";
 import {
@@ -20,10 +21,12 @@ import {
   MultiSelectCell,
   RelationCell,
   RollupCell,
+  PageLinkCell,
   pickNextColor,
 } from "./CellEditors";
 import type { RelationContext } from "./useRelationContext";
 import { PropertyEditor, PropertyTypeIcon } from "./PropertyEditor";
+import { computeSummary, getAggregationsForType, SUMMARY_LABELS } from "./computeSummary";
 
 interface DatabaseTableProps {
   content: DatabaseContentV2;
@@ -33,6 +36,8 @@ interface DatabaseTableProps {
   ) => void;
   onUpdateView: (updater: (prev: DatabaseView) => DatabaseView) => void;
   relationContext?: RelationContext;
+  pageLinkPages?: Array<{ id: string; title: string }>;
+  onNavigatePageLink?: (pageId: string) => void;
 }
 
 export function DatabaseTable({
@@ -41,6 +46,8 @@ export function DatabaseTable({
   onUpdateContent,
   onUpdateView,
   relationContext,
+  pageLinkPages,
+  onNavigatePageLink,
 }: DatabaseTableProps) {
   const [editingProperty, setEditingProperty] = useState<string | null>(null);
 
@@ -50,6 +57,7 @@ export function DatabaseTable({
   const tableConfig = view.config as TableViewConfig;
   const groupByPropertyId = tableConfig.groupByPropertyId ?? null;
   const collapsedGroups = tableConfig.collapsedGroups ?? [];
+  const propertySummaries = view.propertySummaries ?? {};
 
   // Sort and filter rows
   const displayRows = useMemo(() => {
@@ -414,6 +422,15 @@ export function DatabaseTable({
             targets={relationContext?.targets.get(prop.id) ?? []}
           />
         );
+      case "pageLink":
+        return (
+          <PageLinkCell
+            value={value}
+            onChange={onChange}
+            pages={pageLinkPages}
+            onNavigate={onNavigatePageLink}
+          />
+        );
       default:
         return <TextCell value={value} onChange={onChange} />;
     }
@@ -560,6 +577,33 @@ export function DatabaseTable({
             renderRowGroup(displayRows, 0)
           )}
         </tbody>
+        <tfoot className="db-tfoot">
+          <tr>
+            <td className="db-footer-label">
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M18 7V4H6v3" /><path d="M18 20v-3H6v3" /><path d="M6 12h12" />
+              </svg>
+            </td>
+            {content.properties.map((prop) => (
+              <td key={prop.id} className="db-footer-cell" style={{ width: getColWidth(prop) }}>
+                <SummaryFooterCell
+                  prop={prop}
+                  aggregation={propertySummaries[prop.id] as SummaryAggregation | undefined}
+                  rows={displayRows}
+                  onSetAggregation={(agg) => {
+                    onUpdateView((prev) => ({
+                      ...prev,
+                      propertySummaries: {
+                        ...prev.propertySummaries,
+                        [prop.id]: agg,
+                      },
+                    }));
+                  }}
+                />
+              </td>
+            ))}
+          </tr>
+        </tfoot>
       </table>
 
       {/* Add row button */}
@@ -577,6 +621,67 @@ export function DatabaseTable({
         </svg>
         New row
       </button>
+    </div>
+  );
+}
+
+// Summary footer cell — shows computed aggregate or "Calculate" placeholder
+function SummaryFooterCell({
+  prop,
+  aggregation,
+  rows,
+  onSetAggregation,
+}: {
+  prop: PropertyDef;
+  aggregation?: SummaryAggregation;
+  rows: DatabaseRow[];
+  onSetAggregation: (agg: SummaryAggregation) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handle = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handle);
+    return () => document.removeEventListener("mousedown", handle);
+  }, [open]);
+
+  const validAggregations = getAggregationsForType(prop.type);
+  const hasValue = aggregation && aggregation !== "none";
+  const displayValue = hasValue
+    ? computeSummary(rows, prop.id, aggregation, prop)
+    : null;
+
+  return (
+    <div className="db-footer-cell-inner" ref={dropdownRef}>
+      <div
+        className={`db-footer-cell-display ${hasValue ? "db-footer-cell-value" : ""}`}
+        onClick={() => setOpen(!open)}
+      >
+        {hasValue ? (
+          <>{SUMMARY_LABELS[aggregation]}: {displayValue}</>
+        ) : (
+          <span className="db-footer-cell-placeholder">Calculate</span>
+        )}
+      </div>
+      {open && (
+        <div className="db-select-dropdown db-summary-dropdown">
+          {validAggregations.map((agg) => (
+            <button
+              key={agg}
+              className={`db-select-option ${aggregation === agg ? "db-select-option-checked" : ""}`}
+              onClick={() => { onSetAggregation(agg); setOpen(false); }}
+            >
+              {SUMMARY_LABELS[agg]}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

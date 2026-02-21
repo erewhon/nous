@@ -6,6 +6,7 @@ interface DatabaseBoardCardProps {
   properties: PropertyDef[];
   onClick: () => void;
   dragHandleProps?: Record<string, unknown>;
+  pageLinkPages?: Array<{ id: string; title: string }>;
 }
 
 export function DatabaseBoardCard({
@@ -13,6 +14,7 @@ export function DatabaseBoardCard({
   properties,
   onClick,
   dragHandleProps,
+  pageLinkPages,
 }: DatabaseBoardCardProps) {
   const titleProp = properties.find((p) => p.type === "text");
   const title = titleProp ? String(row.cells[titleProp.id] ?? "") : "";
@@ -80,6 +82,12 @@ export function DatabaseBoardCard({
     if (prop.type === "rollup") {
       // Rollup values are not available in card context (no relation context passed)
       return null;
+    }
+
+    if (prop.type === "pageLink" && typeof val === "string") {
+      const linked = pageLinkPages?.find((p) => p.id === val);
+      if (!linked) return null;
+      return <span className="db-pagelink-pill">{linked.title || "Untitled"}</span>;
     }
 
     if (prop.type === "number" && typeof val === "number") {

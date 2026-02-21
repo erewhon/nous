@@ -19,6 +19,7 @@ const PROPERTY_TYPE_LABELS: Record<PropertyType, string> = {
   url: "URL",
   relation: "Relation",
   rollup: "Rollup",
+  pageLink: "Page Link",
 };
 
 export function PropertyEditor({ property, onUpdate, onDelete, onClose }: PropertyEditorProps) {
@@ -159,7 +160,7 @@ export function PropertyEditor({ property, onUpdate, onDelete, onClose }: Proper
       )}
 
       {/* Default value */}
-      {property.type !== "relation" && property.type !== "rollup" && (
+      {property.type !== "relation" && property.type !== "rollup" && property.type !== "pageLink" && (
         <div className="db-pe-section">
           <label className="db-pe-label">Default value</label>
           <DefaultValueEditor
@@ -405,6 +406,12 @@ export function PropertyTypeIcon({ type }: { type: PropertyType }) {
       return (
         <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M12 2v20" /><path d="M2 12h20" /><path d="m4 4 4 4" /><path d="m4 20 4-4" /><path d="m20 4-4 4" /><path d="m20 20-4-4" />
+        </svg>
+      );
+    case "pageLink":
+      return (
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" /><path d="M14 2v4a2 2 0 0 0 2 2h4" /><path d="M9 13h6" /><path d="M9 17h3" />
         </svg>
       );
   }

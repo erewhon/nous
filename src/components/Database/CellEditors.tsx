@@ -457,6 +457,101 @@ export function RelationCell({
   );
 }
 
+// Page link cell — single page reference with navigation
+export function PageLinkCell({
+  value,
+  onChange,
+  pages = [],
+  onNavigate,
+}: {
+  value: CellValue;
+  onChange: (value: CellValue) => void;
+  pages?: Array<{ id: string; title: string }>;
+  onNavigate?: (pageId: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  const linkedPage = typeof value === "string"
+    ? pages.find((p) => p.id === value)
+    : null;
+
+  const filteredPages = search
+    ? pages.filter((p) => p.title.toLowerCase().includes(search.toLowerCase()))
+    : pages;
+
+  useEffect(() => {
+    if (!open) return;
+    const handle = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setOpen(false);
+        setSearch("");
+      }
+    };
+    document.addEventListener("mousedown", handle);
+    return () => document.removeEventListener("mousedown", handle);
+  }, [open]);
+
+  useEffect(() => {
+    if (open) searchRef.current?.focus();
+  }, [open]);
+
+  return (
+    <div className="db-cell-select" ref={dropdownRef}>
+      <div className="db-cell-display" onClick={() => setOpen(!open)}>
+        {linkedPage ? (
+          <span
+            className="db-pagelink-pill"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (onNavigate) onNavigate(linkedPage.id);
+            }}
+          >
+            {linkedPage.title || "Untitled"}
+          </span>
+        ) : (
+          <span className="db-cell-placeholder">Link page...</span>
+        )}
+      </div>
+      {open && (
+        <div className="db-select-dropdown db-relation-dropdown">
+          <div className="db-relation-search">
+            <input
+              ref={searchRef}
+              type="text"
+              placeholder="Search pages..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="db-select-add-input"
+            />
+          </div>
+          <button
+            className="db-select-option"
+            onClick={() => { onChange(null); setOpen(false); setSearch(""); }}
+          >
+            <span className="db-cell-placeholder">Clear</span>
+          </button>
+          {filteredPages.length === 0 ? (
+            <div className="db-relation-empty">No pages found</div>
+          ) : (
+            filteredPages.map((p) => (
+              <button
+                key={p.id}
+                className={`db-select-option ${value === p.id ? "db-select-option-checked" : ""}`}
+                onClick={() => { onChange(p.id); setOpen(false); setSearch(""); }}
+              >
+                <span className="db-relation-target-title">{p.title || "Untitled"}</span>
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Rollup cell — read-only display of computed values
 export function RollupCell({ value }: { value: CellValue }) {
   if (value == null || value === "") {

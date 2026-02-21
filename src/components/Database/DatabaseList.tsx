@@ -22,6 +22,8 @@ interface DatabaseListProps {
   ) => void;
   onUpdateView: (updater: (prev: DatabaseView) => DatabaseView) => void;
   relationContext?: RelationContext;
+  pageLinkPages?: Array<{ id: string; title: string }>;
+  onNavigatePageLink?: (pageId: string) => void;
 }
 
 export function DatabaseList({
@@ -29,6 +31,8 @@ export function DatabaseList({
   view,
   onUpdateContent,
   relationContext,
+  pageLinkPages,
+  onNavigatePageLink,
 }: DatabaseListProps) {
   const [selectedRowId, setSelectedRowId] = useState<string | null>(null);
 
@@ -182,6 +186,10 @@ export function DatabaseList({
         .filter(Boolean)
         .join(", ");
     }
+    if (prop.type === "pageLink" && typeof val === "string") {
+      const linked = pageLinkPages?.find((p) => p.id === val);
+      return linked?.title ?? "";
+    }
     return String(val);
   };
 
@@ -265,6 +273,8 @@ export function DatabaseList({
           onClose={() => setSelectedRowId(null)}
           onDelete={() => handleDeleteRow(selectedRow.id)}
           relationContext={relationContext}
+          pageLinkPages={pageLinkPages}
+          onNavigatePageLink={onNavigatePageLink}
         />
       )}
     </div>

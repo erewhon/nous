@@ -15,6 +15,7 @@ import {
   MultiSelectCell,
   RelationCell,
   RollupCell,
+  PageLinkCell,
 } from "./CellEditors";
 import type { RelationContext } from "./useRelationContext";
 
@@ -26,6 +27,8 @@ interface DatabaseRowDetailProps {
   onClose: () => void;
   onDelete: () => void;
   relationContext?: RelationContext;
+  pageLinkPages?: Array<{ id: string; title: string }>;
+  onNavigatePageLink?: (pageId: string) => void;
 }
 
 export function DatabaseRowDetail({
@@ -36,6 +39,8 @@ export function DatabaseRowDetail({
   onClose,
   onDelete,
   relationContext,
+  pageLinkPages,
+  onNavigatePageLink,
 }: DatabaseRowDetailProps) {
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -141,11 +146,20 @@ export function DatabaseRowDetail({
               targets={relationContext?.targets.get(prop.id) ?? []}
             />
           );
+        case "pageLink":
+          return (
+            <PageLinkCell
+              value={value}
+              onChange={onChange}
+              pages={pageLinkPages}
+              onNavigate={onNavigatePageLink}
+            />
+          );
         default:
           return <TextCell value={value} onChange={onChange} />;
       }
     },
-    [row, onCellChange, onAddSelectOption, relationContext]
+    [row, onCellChange, onAddSelectOption, relationContext, pageLinkPages, onNavigatePageLink]
   );
 
   // Title: first text property value

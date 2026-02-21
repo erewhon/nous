@@ -11,6 +11,7 @@ export const PropertyTypeSchema = z.enum([
   "url",
   "relation",
   "rollup",
+  "pageLink",
 ]);
 export type PropertyType = z.infer<typeof PropertyTypeSchema>;
 
@@ -172,6 +173,21 @@ export const ViewConfigSchema = z.union([
   CalendarViewConfigSchema,
 ]);
 
+export const SummaryAggregationSchema = z.enum([
+  "none",
+  "count",
+  "countValues",
+  "countUnique",
+  "sum",
+  "average",
+  "min",
+  "max",
+  "range",
+  "percent_empty",
+  "percent_not_empty",
+]);
+export type SummaryAggregation = z.infer<typeof SummaryAggregationSchema>;
+
 export const DatabaseViewSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -180,6 +196,7 @@ export const DatabaseViewSchema = z.object({
   filters: z.array(DatabaseFilterSchema),
   config: ViewConfigSchema,
   propertyWidths: z.record(z.string(), z.number()).optional(),
+  propertySummaries: z.record(z.string(), SummaryAggregationSchema).optional(),
 });
 export type DatabaseView = z.infer<typeof DatabaseViewSchema>;
 

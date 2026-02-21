@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import type { Page } from "../../types/page";
 import { usePageStore } from "../../stores/pageStore";
 import type {
@@ -344,6 +344,16 @@ export function DatabaseEditor({
     (p) => p.pageType === "database" && p.id !== page?.id
   );
 
+  // Lightweight page list for pageLink columns
+  const pageLinkPages = useMemo(
+    () => allPages.map((p) => ({ id: p.id, title: p.title })),
+    [allPages]
+  );
+
+  const onNavigatePageLink = useCallback((pageId: string) => {
+    usePageStore.getState().selectPage(pageId);
+  }, []);
+
   if (isLoading) {
     return (
       <div className={`db-loading ${className ?? ""}`}>
@@ -377,6 +387,8 @@ export function DatabaseEditor({
             onUpdateContent={handleUpdateContent}
             onUpdateView={handleUpdateView}
             relationContext={relationContext}
+            pageLinkPages={pageLinkPages}
+            onNavigatePageLink={onNavigatePageLink}
           />
         );
       case "list":
@@ -387,6 +399,8 @@ export function DatabaseEditor({
             onUpdateContent={handleUpdateContent}
             onUpdateView={handleUpdateView}
             relationContext={relationContext}
+            pageLinkPages={pageLinkPages}
+            onNavigatePageLink={onNavigatePageLink}
           />
         );
       case "board":
@@ -397,6 +411,8 @@ export function DatabaseEditor({
             onUpdateContent={handleUpdateContent}
             onUpdateView={handleUpdateView}
             relationContext={relationContext}
+            pageLinkPages={pageLinkPages}
+            onNavigatePageLink={onNavigatePageLink}
           />
         );
       case "gallery":
@@ -407,6 +423,8 @@ export function DatabaseEditor({
             onUpdateContent={handleUpdateContent}
             onUpdateView={handleUpdateView}
             relationContext={relationContext}
+            pageLinkPages={pageLinkPages}
+            onNavigatePageLink={onNavigatePageLink}
           />
         );
       case "calendar":
@@ -456,6 +474,7 @@ export function DatabaseEditor({
         databasePages={databasePages}
         targetContents={relationContext.targetContents}
         onDeleteProperty={handleDeleteProperty}
+        pageLinkPages={pageLinkPages}
       />
       {renderActiveView()}
     </div>
