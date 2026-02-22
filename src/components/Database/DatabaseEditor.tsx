@@ -26,6 +26,14 @@ import { useRelationContext } from "./useRelationContext";
 import * as api from "../../utils/api";
 import "./database-styles.css";
 
+export interface DatabaseUndoRedoState {
+  canUndo: boolean;
+  canRedo: boolean;
+  historyCount: number;
+  onUndo: () => void;
+  onRedo: () => void;
+}
+
 interface DatabaseEditorProps {
   // File-based mode (full-page database)
   page?: Page;
@@ -36,6 +44,8 @@ interface DatabaseEditorProps {
   // Shared
   className?: string;
   compact?: boolean;
+  // Undo/redo state callback
+  onUndoRedoStateChange?: (state: DatabaseUndoRedoState) => void;
 }
 
 export function DatabaseEditor({
@@ -45,6 +55,7 @@ export function DatabaseEditor({
   onContentChange,
   className,
   compact,
+  onUndoRedoStateChange,
 }: DatabaseEditorProps) {
   const isInlineMode = !!initialContent;
   const [content, setContent] = useState<DatabaseContentV2 | null>(null);
@@ -55,6 +66,15 @@ export function DatabaseEditor({
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Undo/redo stacks
+  const MAX_UNDO = 30;
+  const undoStackRef = useRef<DatabaseContentV2[]>([]);
+  const redoStackRef = useRef<DatabaseContentV2[]>([]);
+  const pendingBaselineRef = useRef<DatabaseContentV2 | null>(null);
+  const snapshotTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isLoadingRef = useRef(true);
+  const [undoRedoVersion, setUndoRedoVersion] = useState(0);
+
   // Load content
   useEffect(() => {
     if (isInlineMode) {
@@ -62,6 +82,7 @@ export function DatabaseEditor({
       setContent(initialContent!);
       setActiveViewId(initialContent!.views[0]?.id ?? null);
       setIsLoading(false);
+      isLoadingRef.current = false;
       return;
     }
     if (!notebookId || !page) return;
@@ -94,6 +115,7 @@ export function DatabaseEditor({
         }
       } finally {
         setIsLoading(false);
+        isLoadingRef.current = false;
       }
     };
     loadContent();
@@ -133,15 +155,55 @@ export function DatabaseEditor({
   useEffect(() => {
     return () => {
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+      if (snapshotTimerRef.current) clearTimeout(snapshotTimerRef.current);
     };
   }, []);
 
-  // Content updater
+  // Flush pending baseline into undo stack
+  const flushPendingBaseline = useCallback(() => {
+    if (pendingBaselineRef.current) {
+      undoStackRef.current = [
+        ...undoStackRef.current.slice(-(MAX_UNDO - 1)),
+        pendingBaselineRef.current,
+      ];
+      redoStackRef.current = [];
+      pendingBaselineRef.current = null;
+      setUndoRedoVersion((v) => v + 1);
+    }
+    if (snapshotTimerRef.current) {
+      clearTimeout(snapshotTimerRef.current);
+      snapshotTimerRef.current = null;
+    }
+  }, []);
+
+  // Content updater — captures undo baselines
   const handleUpdateContent = useCallback(
     (updater: (prev: DatabaseContentV2) => DatabaseContentV2) => {
       setContent((prev) => {
         if (!prev) return prev;
         const updated = updater(prev);
+
+        // Undo snapshot: on first call in a burst, capture `prev` as baseline
+        if (!isLoadingRef.current && !pendingBaselineRef.current) {
+          pendingBaselineRef.current = structuredClone(prev);
+        }
+        // Reset the quiet timer — after 800ms of quiet, commit baseline
+        if (snapshotTimerRef.current) {
+          clearTimeout(snapshotTimerRef.current);
+        }
+        snapshotTimerRef.current = setTimeout(() => {
+          if (pendingBaselineRef.current) {
+            undoStackRef.current = [
+              ...undoStackRef.current.slice(-(MAX_UNDO - 1)),
+              pendingBaselineRef.current,
+            ];
+            redoStackRef.current = [];
+            pendingBaselineRef.current = null;
+            setUndoRedoVersion((v) => v + 1);
+          }
+          snapshotTimerRef.current = null;
+        }, 800);
+
         saveContent(updated);
         return updated;
       });
@@ -350,6 +412,69 @@ export function DatabaseEditor({
     },
     [handleUpdateView]
   );
+
+  // Undo handler
+  const handleUndo = useCallback(() => {
+    flushPendingBaseline();
+    if (undoStackRef.current.length === 0) return;
+    setContent((prev) => {
+      if (!prev) return prev;
+      const baseline = undoStackRef.current.pop()!;
+      redoStackRef.current.push(structuredClone(prev));
+      setUndoRedoVersion((v) => v + 1);
+      saveContent(baseline);
+      return baseline;
+    });
+  }, [flushPendingBaseline, saveContent]);
+
+  // Redo handler
+  const handleRedo = useCallback(() => {
+    if (redoStackRef.current.length === 0) return;
+    setContent((prev) => {
+      if (!prev) return prev;
+      const redoState = redoStackRef.current.pop()!;
+      undoStackRef.current.push(structuredClone(prev));
+      setUndoRedoVersion((v) => v + 1);
+      saveContent(redoState);
+      return redoState;
+    });
+  }, [saveContent]);
+
+  // Keyboard shortcuts: Ctrl+Z / Ctrl+Shift+Z
+  useEffect(() => {
+    if (isInlineMode) return; // inline databases don't own keyboard shortcuts
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Skip when focused in input/textarea (native undo handles in-cell editing)
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+
+      if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) {
+        e.preventDefault();
+        handleUndo();
+      } else if (
+        (e.ctrlKey || e.metaKey) && e.key === "z" && e.shiftKey
+      ) {
+        e.preventDefault();
+        handleRedo();
+      } else if ((e.ctrlKey || e.metaKey) && e.key === "y") {
+        e.preventDefault();
+        handleRedo();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [isInlineMode, handleUndo, handleRedo]);
+
+  // Report undo/redo state to parent
+  useEffect(() => {
+    onUndoRedoStateChange?.({
+      canUndo: undoStackRef.current.length > 0 || pendingBaselineRef.current !== null,
+      canRedo: redoStackRef.current.length > 0,
+      historyCount: undoStackRef.current.length,
+      onUndo: handleUndo,
+      onRedo: handleRedo,
+    });
+  }, [undoRedoVersion, onUndoRedoStateChange, handleUndo, handleRedo]);
 
   // Hooks must be called before any conditional returns
   const relationContext = useRelationContext(notebookId, page?.id, content);

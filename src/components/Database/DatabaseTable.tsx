@@ -1,4 +1,5 @@
-import { useState, useCallback, useMemo, useRef, useEffect } from "react";
+import { useState, useCallback, useMemo, useRef, useEffect, useLayoutEffect } from "react";
+import { createPortal } from "react-dom";
 import type {
   DatabaseContentV2,
   DatabaseView,
@@ -52,6 +53,21 @@ export function DatabaseTable({
   onNavigatePageLink,
 }: DatabaseTableProps) {
   const [editingProperty, setEditingProperty] = useState<string | null>(null);
+  const headerRefs = useRef<Map<string, HTMLElement>>(new Map());
+  const [editorPos, setEditorPos] = useState<{ top: number; left: number } | null>(null);
+
+  // Position the property editor portal when editingProperty changes
+  useLayoutEffect(() => {
+    if (!editingProperty) {
+      setEditorPos(null);
+      return;
+    }
+    const el = headerRefs.current.get(editingProperty);
+    if (el) {
+      const rect = el.getBoundingClientRect();
+      setEditorPos({ top: rect.bottom + 2, left: rect.left });
+    }
+  }, [editingProperty]);
 
   const sorts = view.sorts;
   const filters = view.filters;
@@ -60,6 +76,16 @@ export function DatabaseTable({
   const groupByPropertyId = tableConfig.groupByPropertyId ?? null;
   const collapsedGroups = tableConfig.collapsedGroups ?? [];
   const propertySummaries = view.propertySummaries ?? {};
+  const hiddenPropertyIds = (tableConfig as TableViewConfig & { hiddenPropertyIds?: string[] }).hiddenPropertyIds ?? [];
+
+  // Visible properties — filters out hidden columns, but always keeps the first (title) property
+  const visibleProperties = useMemo(() => {
+    if (hiddenPropertyIds.length === 0) return content.properties;
+    const hiddenSet = new Set(hiddenPropertyIds);
+    return content.properties.filter(
+      (prop, idx) => idx === 0 || !hiddenSet.has(prop.id)
+    );
+  }, [content.properties, hiddenPropertyIds]);
 
   // Resolve cell value: check formula → rollup → raw cell
   const resolveCellValue = useCallback(
@@ -462,7 +488,7 @@ export function DatabaseTable({
     }
   };
 
-  const colCount = content.properties.length + 1; // +1 for row num column
+  const colCount = visibleProperties.length + 1; // +1 for row num column
 
   const renderRowGroup = (rows: DatabaseRow[], startIdx: number) =>
     rows.map((row, idx) => (
@@ -487,7 +513,7 @@ export function DatabaseTable({
             </svg>
           </button>
         </td>
-        {content.properties.map((prop) => {
+        {visibleProperties.map((prop) => {
           const cfCSS = conditionalStyleToCSS(
             evaluateConditionalFormat(prop, resolveCellValue(row, prop.id))
           );
@@ -510,11 +536,15 @@ export function DatabaseTable({
         <thead>
           <tr>
             <th className="db-row-num-header">#</th>
-            {content.properties.map((prop) => {
+            {visibleProperties.map((prop) => {
               const sort = sorts.find((s) => s.propertyId === prop.id);
               return (
                 <th
                   key={prop.id}
+                  ref={(el) => {
+                    if (el) headerRefs.current.set(prop.id, el);
+                    else headerRefs.current.delete(prop.id);
+                  }}
                   className="db-col-header"
                   style={{ width: getColWidth(prop) }}
                 >
@@ -540,17 +570,6 @@ export function DatabaseTable({
                     className="db-col-resize"
                     onMouseDown={(e) => handleResizeStart(e, prop.id)}
                   />
-                  {editingProperty === prop.id && (
-                    <PropertyEditor
-                      property={prop}
-                      onUpdate={(updates) =>
-                        handlePropertyUpdate(prop.id, updates)
-                      }
-                      onDelete={() => handleDeleteProperty(prop.id)}
-                      onClose={() => setEditingProperty(null)}
-                      allProperties={content.properties}
-                    />
-                  )}
                 </th>
               );
             })}
@@ -616,7 +635,7 @@ export function DatabaseTable({
                 <path d="M18 7V4H6v3" /><path d="M18 20v-3H6v3" /><path d="M6 12h12" />
               </svg>
             </td>
-            {content.properties.map((prop) => (
+            {visibleProperties.map((prop) => (
               <td key={prop.id} className="db-footer-cell" style={{ width: getColWidth(prop) }}>
                 <SummaryFooterCell
                   prop={prop}
@@ -654,6 +673,33 @@ export function DatabaseTable({
         </svg>
         New row
       </button>
+
+      {/* Property editor rendered via portal to escape table overflow clipping */}
+      {editingProperty && editorPos && (() => {
+        const prop = content.properties.find((p) => p.id === editingProperty);
+        if (!prop) return null;
+        return createPortal(
+          <div
+            style={{
+              position: "fixed",
+              top: editorPos.top,
+              left: editorPos.left,
+              zIndex: 100,
+            }}
+          >
+            <PropertyEditor
+              property={prop}
+              onUpdate={(updates) =>
+                handlePropertyUpdate(prop.id, updates)
+              }
+              onDelete={() => handleDeleteProperty(prop.id)}
+              onClose={() => setEditingProperty(null)}
+              allProperties={content.properties}
+            />
+          </div>,
+          document.body
+        );
+      })()}
     </div>
   );
 }

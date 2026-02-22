@@ -446,11 +446,9 @@
 
 /* Property Editor Popover */
 .db-property-editor {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  z-index: 30;
   min-width: 240px;
+  max-height: 80vh;
+  overflow-y: auto;
   background-color: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
   border-radius: 8px;

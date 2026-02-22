@@ -20,7 +20,7 @@ import { EpubReader } from "../Epub";
 import { CalendarViewer } from "../Calendar";
 import { ChatEditor } from "../Chat";
 import { CanvasEditor } from "../Canvas";
-import { DatabaseEditor } from "../Database";
+import { DatabaseEditor, type DatabaseUndoRedoState } from "../Database";
 import { HtmlViewer } from "../Html";
 import { OutlinePanel } from "./OutlinePanel";
 import { PomodoroTimer } from "./PomodoroTimer";
@@ -73,6 +73,7 @@ export function EditorPaneContent({
   // Separate state for explicit save indicator only (Ctrl+S) — NOT updated during auto-save
   const [lastSavedDisplay, setLastSavedDisplay] = useState<Date | null>(null);
   const [showHistoryPanel, setShowHistoryPanel] = useState(false);
+  const [dbUndoState, setDbUndoState] = useState<DatabaseUndoRedoState | null>(null);
   const editorScrollRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<BlockEditorRef>(null);
 
@@ -631,22 +632,21 @@ export function EditorPaneContent({
                   zenMode={zenMode}
                   onExitZenMode={() => setZenMode(false)}
                   onEnterZenMode={() => setZenMode(true)}
-                  historyCount={0}
-                  canUndo={false}
-                  canRedo={false}
-                  onUndo={() => {}}
-                  onRedo={() => {}}
+                  historyCount={dbUndoState?.historyCount ?? 0}
+                  canUndo={dbUndoState?.canUndo ?? false}
+                  canRedo={dbUndoState?.canRedo ?? false}
+                  onUndo={dbUndoState?.onUndo ?? (() => {})}
+                  onRedo={dbUndoState?.onRedo ?? (() => {})}
                 />
               </div>
-              <div className="flex-1 overflow-y-auto px-8 py-6">
-                <div className="mx-auto" style={{ maxWidth: "var(--editor-max-width)" }}>
-                  <DatabaseEditor
-                    key={selectedPage.id}
-                    page={selectedPage}
-                    notebookId={notebookId}
-                    className="min-h-[calc(100vh-300px)]"
-                  />
-                </div>
+              <div className="flex-1 overflow-y-auto px-4 py-6">
+                <DatabaseEditor
+                  key={selectedPage.id}
+                  page={selectedPage}
+                  notebookId={notebookId}
+                  className="min-h-[calc(100vh-300px)]"
+                  onUndoRedoStateChange={setDbUndoState}
+                />
               </div>
             </>
           ) : (

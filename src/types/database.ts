@@ -166,6 +166,7 @@ export type DatabaseViewType = z.infer<typeof DatabaseViewTypeSchema>;
 export const TableViewConfigSchema = z.object({
   groupByPropertyId: z.string().nullable().optional(),
   collapsedGroups: z.array(z.string()).optional(),
+  hiddenPropertyIds: z.array(z.string()).optional(),
 });
 export type TableViewConfig = z.infer<typeof TableViewConfigSchema>;
 

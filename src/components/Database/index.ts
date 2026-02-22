@@ -1,4 +1,5 @@
 export { DatabaseEditor } from "./DatabaseEditor";
+export type { DatabaseUndoRedoState } from "./DatabaseEditor";
 export { DatabaseTable } from "./DatabaseTable";
 export { DatabaseList } from "./DatabaseList";
 export { DatabaseBoard } from "./DatabaseBoard";

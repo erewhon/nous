@@ -73,6 +73,7 @@ export function DatabaseToolbar({
   const [showSort, setShowSort] = useState(false);
   const [showFilter, setShowFilter] = useState(false);
   const [showGroup, setShowGroup] = useState(false);
+  const [showProperties, setShowProperties] = useState(false);
   const [newPropName, setNewPropName] = useState("");
   const [newPropType, setNewPropType] = useState<PropertyType>("text");
 
@@ -236,6 +237,61 @@ export function DatabaseToolbar({
                 groupByPropertyId={groupByPropertyId}
                 onSetGroupBy={handleSetGroupBy}
                 onClose={() => setShowGroup(false)}
+              />
+            )}
+          </div>
+        )}
+        {/* Properties (column visibility, table view only) */}
+        {view.type === "table" && (
+          <div className="db-toolbar-btn-group">
+            <button
+              className={`db-toolbar-btn ${
+                ((view.config as TableViewConfig).hiddenPropertyIds?.length ?? 0) > 0
+                  ? "db-toolbar-btn-active"
+                  : ""
+              }`}
+              onClick={() => setShowProperties(!showProperties)}
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
+              Properties
+              {((view.config as TableViewConfig).hiddenPropertyIds?.length ?? 0) > 0 && (
+                <span className="db-toolbar-badge">
+                  {(view.config as TableViewConfig).hiddenPropertyIds!.length} hidden
+                </span>
+              )}
+            </button>
+            {showProperties && (
+              <PropertiesPopover
+                properties={properties}
+                hiddenPropertyIds={(view.config as TableViewConfig).hiddenPropertyIds ?? []}
+                onToggleProperty={(propertyId) => {
+                  onUpdateView((prev) => {
+                    const cfg = prev.config as TableViewConfig;
+                    const current = cfg.hiddenPropertyIds ?? [];
+                    const isHidden = current.includes(propertyId);
+                    return {
+                      ...prev,
+                      config: {
+                        ...prev.config,
+                        hiddenPropertyIds: isHidden
+                          ? current.filter((id) => id !== propertyId)
+                          : [...current, propertyId],
+                      },
+                    };
+                  });
+                }}
+                onClose={() => setShowProperties(false)}
               />
             )}
           </div>
@@ -866,6 +922,59 @@ function FilterValueInput({
         />
       );
   }
+}
+
+// Properties Popover (column visibility)
+function PropertiesPopover({
+  properties,
+  hiddenPropertyIds,
+  onToggleProperty,
+  onClose,
+}: {
+  properties: PropertyDef[];
+  hiddenPropertyIds: string[];
+  onToggleProperty: (propertyId: string) => void;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const handle = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    };
+    document.addEventListener("mousedown", handle);
+    return () => document.removeEventListener("mousedown", handle);
+  }, [onClose]);
+
+  const hiddenSet = new Set(hiddenPropertyIds);
+
+  return (
+    <div ref={ref} className="db-popover">
+      <div className="db-popover-title">Properties</div>
+      {properties.map((prop, idx) => {
+        const isTitle = idx === 0;
+        const isVisible = !hiddenSet.has(prop.id);
+        return (
+          <label
+            key={prop.id}
+            className={`db-select-option db-properties-option ${isTitle ? "db-properties-option-disabled" : ""}`}
+            style={{ display: "flex", alignItems: "center", gap: "8px", cursor: isTitle ? "default" : "pointer" }}
+          >
+            <input
+              type="checkbox"
+              checked={isTitle || isVisible}
+              disabled={isTitle}
+              onChange={() => {
+                if (!isTitle) onToggleProperty(prop.id);
+              }}
+              style={{ accentColor: "var(--color-accent)" }}
+            />
+            <PropertyTypeIcon type={prop.type} />
+            <span>{prop.name}</span>
+          </label>
+        );
+      })}
+    </div>
+  );
 }
 
 // Group By Popover
