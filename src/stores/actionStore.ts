@@ -22,6 +22,62 @@ import {
   setActionEnabled,
 } from "../utils/api";
 import { usePageStore } from "./pageStore";
+import { useTemplateStore } from "./templateStore";
+import type { EditorData } from "../types/page";
+
+/**
+ * After an action creates pages with a template_id, the backend only stores the
+ * template_id as metadata — it can't apply the template content because templates
+ * live in the frontend templateStore. This helper merges template blocks with any
+ * existing blocks (e.g. carry forward items) for newly created pages.
+ */
+async function applyTemplatesForCreatedPages(createdPageIds: string[]) {
+  if (createdPageIds.length === 0) return;
+
+  const pages = usePageStore.getState().pages;
+  const templates = useTemplateStore.getState().templates;
+
+  for (const pageId of createdPageIds) {
+    const page = pages.find((p) => p.id === pageId);
+    if (!page?.templateId) continue;
+
+    const template = templates.find((t) => t.id === page.templateId);
+    if (!template || template.content.blocks.length === 0) continue;
+
+    // Clone template blocks with new IDs
+    const templateBlocks = template.content.blocks.map((block) => ({
+      ...block,
+      id: crypto.randomUUID(),
+      data: { ...block.data },
+    }));
+
+    // Existing blocks on the page (e.g. carry forward items from the action)
+    const existingBlocks = page.content?.blocks ?? [];
+
+    // Merge: template blocks first, then existing blocks appended
+    const mergedBlocks =
+      existingBlocks.length > 0
+        ? [...templateBlocks, ...existingBlocks]
+        : templateBlocks;
+
+    const mergedContent: EditorData = {
+      time: Date.now(),
+      version: template.content.version,
+      blocks: mergedBlocks,
+    };
+
+    // Persist to backend
+    await usePageStore.getState().updatePageContent(page.notebookId, pageId, mergedContent);
+
+    // Update in store
+    usePageStore.setState((state) => ({
+      pages: state.pages.map((p) =>
+        p.id === pageId ? { ...p, content: mergedContent } : p
+      ),
+      pageDataVersion: state.pageDataVersion + 1,
+    }));
+  }
+}
 
 interface ActionState {
   actions: Action[];
@@ -219,6 +275,8 @@ export const useActionStore = create<ActionStore>()((set, get) => ({
       if (affectedPages.length > 0) {
         await usePageStore.getState().refreshPages(affectedPages);
       }
+      // Apply template content for newly created pages (templates are frontend-only)
+      await applyTemplatesForCreatedPages(result.createdPages);
       set({ isLoading: false });
       return result;
     } catch (error) {
@@ -244,6 +302,8 @@ export const useActionStore = create<ActionStore>()((set, get) => ({
       if (affectedPages.length > 0) {
         await usePageStore.getState().refreshPages(affectedPages);
       }
+      // Apply template content for newly created pages (templates are frontend-only)
+      await applyTemplatesForCreatedPages(result.createdPages);
       set({ isLoading: false });
       return result;
     } catch (error) {
@@ -468,6 +528,9 @@ export const useActionStore = create<ActionStore>()((set, get) => ({
       if (affectedPages.length > 0) {
         await usePageStore.getState().refreshPages(affectedPages);
       }
+
+      // Apply template content for newly created pages (templates are frontend-only)
+      await applyTemplatesForCreatedPages(result.createdPages);
 
       return result;
     } catch (error) {

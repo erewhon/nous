@@ -245,6 +245,55 @@ export function DailyNotesPanel({ isOpen: isOpenProp, onClose: onCloseProp }: Da
         }
       } else {
         selectPage(note.id);
+
+        // Check if existing note needs template content applied
+        // (happens when a scheduled action created the note on the backend
+        //  without applying frontend-only template content)
+        if (existingPage.templateId) {
+          const template = useTemplateStore.getState().templates.find(
+            (t) => t.id === existingPage.templateId
+          );
+          if (template && template.content.blocks.length > 0) {
+            const pageBlocks = existingPage.content?.blocks ?? [];
+            const templateHeaders = template.content.blocks
+              .filter((b) => b.type === "header")
+              .map((b) => (b.data as Record<string, unknown>).text as string);
+            const pageHeaders = pageBlocks
+              .filter((b) => b.type === "header")
+              .map((b) => (b.data as Record<string, unknown>).text as string);
+            const hasTemplateContent = templateHeaders.some((th) =>
+              pageHeaders.includes(th)
+            );
+
+            if (!hasTemplateContent) {
+              // Template wasn't applied — merge template blocks with existing content
+              const templateBlocks = template.content.blocks.map((block) => ({
+                ...block,
+                id: crypto.randomUUID(),
+                data: { ...block.data },
+              }));
+              const mergedContent: EditorData = {
+                time: Date.now(),
+                version: template.content.version,
+                blocks:
+                  pageBlocks.length > 0
+                    ? [...templateBlocks, ...pageBlocks]
+                    : templateBlocks,
+              };
+              await updatePageContent(
+                selectedNotebookId,
+                note.id,
+                mergedContent
+              );
+              usePageStore.setState((state) => ({
+                pages: state.pages.map((p) =>
+                  p.id === note.id ? { ...p, content: mergedContent } : p
+                ),
+                pageDataVersion: state.pageDataVersion + 1,
+              }));
+            }
+          }
+        }
       }
     } catch (err) {
       console.error("Failed to open daily note:", err);
