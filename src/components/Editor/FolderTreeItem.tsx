@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, memo, useCallback } from "react";
+import { useState, useRef, useEffect, useLayoutEffect, memo, useCallback } from "react";
 import { useDraggable, useDroppable } from "@dnd-kit/core";
 import type { Folder, Page, PageType, Section } from "../../types/page";
 
@@ -172,6 +172,23 @@ export const FolderTreeItem = memo(function FolderTreeItem({
       document.removeEventListener("mousedown", handleMouseDown);
       document.removeEventListener("keydown", handleKeyDown);
     };
+  }, [showContextMenu]);
+
+  // Reposition folder context menu after render if it overflows the viewport
+  useLayoutEffect(() => {
+    if (!showContextMenu || !contextMenuRef.current) return;
+    const el = contextMenuRef.current;
+    const rect = el.getBoundingClientRect();
+    let { x, y } = contextMenuPos;
+    if (rect.right > window.innerWidth) {
+      x = Math.max(8, window.innerWidth - rect.width - 8);
+    }
+    if (rect.bottom > window.innerHeight) {
+      y = Math.max(8, window.innerHeight - rect.height - 8);
+    }
+    if (x !== contextMenuPos.x || y !== contextMenuPos.y) {
+      setContextMenuPos({ x, y });
+    }
   }, [showContextMenu]);
 
   // Make folder a drop target
@@ -876,14 +893,26 @@ const DraggablePageItem = memo(function DraggablePageItem({
       }
     : undefined;
 
+  // Reposition context menu after render if it overflows the viewport
+  useLayoutEffect(() => {
+    if (!showContextMenu || !pageContextMenuRef.current) return;
+    const el = pageContextMenuRef.current;
+    const rect = el.getBoundingClientRect();
+    let { x, y } = contextMenuPos;
+    if (rect.right > window.innerWidth) {
+      x = Math.max(8, window.innerWidth - rect.width - 8);
+    }
+    if (rect.bottom > window.innerHeight) {
+      y = Math.max(8, window.innerHeight - rect.height - 8);
+    }
+    if (x !== contextMenuPos.x || y !== contextMenuPos.y) {
+      setContextMenuPos({ x, y });
+    }
+  }, [showContextMenu]);
+
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
-    // Adjust position to stay within viewport
-    const menuWidth = 200;
-    const menuHeight = 400;
-    const x = e.clientX + menuWidth > window.innerWidth ? window.innerWidth - menuWidth - 8 : e.clientX;
-    const y = e.clientY + menuHeight > window.innerHeight ? Math.max(8, window.innerHeight - menuHeight - 8) : e.clientY;
-    setContextMenuPos({ x, y });
+    setContextMenuPos({ x: e.clientX, y: e.clientY });
     setShowContextMenu(true);
   }, []);
 
