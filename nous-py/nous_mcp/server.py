@@ -9,8 +9,10 @@ import argparse
 import json
 import logging
 import os
+import re
 import sys
 from datetime import UTC, datetime
+from html import unescape as html_unescape
 from uuid import uuid4
 
 from mcp.server.fastmcp import FastMCP
@@ -521,6 +523,97 @@ def manage_tags(
             "id": updated["id"],
             "title": updated["title"],
             "tags": updated.get("tags", []),
+        },
+        indent=2,
+    )
+
+
+@mcp.tool()
+def toggle_checklist_item(
+    notebook: str,
+    page: str,
+    item: str,
+    checked: bool | None = None,
+) -> str:
+    """Toggle or set the checked state of a checklist item.
+
+    Args:
+        notebook: Notebook name or UUID.
+        page: Page title (prefix match) or UUID.
+        item: Text of the checklist item to match (case-insensitive substring).
+        checked: Explicitly set to true or false. If omitted, toggles current state.
+
+    Returns JSON with id, title, item text, and new checked state.
+    """
+    storage = _get_storage()
+    nb = storage.resolve_notebook(notebook)
+    pg = storage.resolve_page(nb["id"], page)
+
+    content = pg.get("content", {})
+    blocks = content.get("blocks", [])
+
+    query = item.lower().strip()
+    matches: list[tuple[int, int, dict, str]] = []
+
+    for block_idx, block in enumerate(blocks):
+        if block.get("type") != "checklist":
+            continue
+        items = block.get("data", {}).get("items", [])
+        for item_idx, ci in enumerate(items):
+            raw_text = ci.get("text", "")
+            # Strip HTML tags and decode entities for matching
+            clean = re.sub(r"<[^>]+>", "", raw_text)
+            clean = html_unescape(clean).replace("\xa0", " ").strip()
+            if query in clean.lower():
+                matches.append((block_idx, item_idx, ci, clean))
+
+    if len(matches) == 0:
+        raise ValueError(
+            f"No checklist item matching '{item}' found on page '{pg.get('title')}'"
+        )
+
+    if len(matches) > 1:
+        # Try exact match
+        exact = [(bi, ii, ci, t) for bi, ii, ci, t in matches if t.lower() == query]
+        if len(exact) == 1:
+            matches = exact
+        else:
+            match_list = "\n".join(
+                f"  - [{'x' if m[2].get('checked') else ' '}] {m[3]}"
+                for m in matches
+            )
+            raise ValueError(
+                f"Multiple checklist items match '{item}'. Be more specific:\n{match_list}"
+            )
+
+    block_idx, item_idx, matched_item, clean_text = matches[0]
+
+    old_checked = matched_item.get("checked", False)
+    new_checked = (not old_checked) if checked is None else checked
+
+    blocks[block_idx]["data"]["items"][item_idx]["checked"] = new_checked
+
+    updated_content = {
+        "time": int(datetime.now(UTC).timestamp() * 1000),
+        "version": content.get("version", "2.28.0"),
+        "blocks": blocks,
+    }
+
+    from nous_ai.page_storage import NousPageStorage
+
+    page_storage = NousPageStorage(data_dir=storage.library_path, client_id="nous-mcp")
+    page_storage.update_page(
+        notebook_id=nb["id"],
+        page_id=pg["id"],
+        content=updated_content,
+    )
+
+    return json.dumps(
+        {
+            "id": pg["id"],
+            "title": pg.get("title"),
+            "item": clean_text,
+            "checked": new_checked,
         },
         indent=2,
     )
