@@ -77,6 +77,7 @@ export function DatabaseTable({
   const collapsedGroups = tableConfig.collapsedGroups ?? [];
   const propertySummaries = view.propertySummaries ?? {};
   const hiddenPropertyIds = (tableConfig as TableViewConfig & { hiddenPropertyIds?: string[] }).hiddenPropertyIds ?? [];
+  const pinnedColumnCount = tableConfig.pinnedColumnCount ?? 0;
 
   // Visible properties — filters out hidden columns, but always keeps the first (title) property
   const visibleProperties = useMemo(() => {
@@ -385,6 +386,75 @@ export function DatabaseTable({
   const getColWidth = (prop: PropertyDef) =>
     propertyWidths[prop.id] ?? prop.width ?? 150;
 
+  // Compute cumulative left offsets for pinned columns
+  const ROW_NUM_WIDTH = 40;
+  const pinnedStyles = useMemo(() => {
+    const styles: Array<React.CSSProperties> = [];
+    let left = ROW_NUM_WIDTH;
+    for (let i = 0; i < visibleProperties.length; i++) {
+      if (i < pinnedColumnCount) {
+        const isLast = i === pinnedColumnCount - 1;
+        styles.push({
+          position: "sticky",
+          left,
+          zIndex: 3,
+          backgroundColor: "var(--color-bg-secondary)",
+          boxShadow: isLast ? "2px 0 4px rgba(0,0,0,0.1)" : undefined,
+        });
+        left += getColWidth(visibleProperties[i]);
+      } else {
+        styles.push({});
+      }
+    }
+    return styles;
+  }, [visibleProperties, pinnedColumnCount, propertyWidths]);
+
+  // Sticky style for pinned header cells (higher z-index than body)
+  const pinnedHeaderStyles = useMemo(() => {
+    return pinnedStyles.map((s) =>
+      s.position ? { ...s, zIndex: 4 } : s
+    );
+  }, [pinnedStyles]);
+
+  // Sticky style for pinned footer cells
+  const pinnedFooterStyles = useMemo(() => {
+    return pinnedStyles.map((s) =>
+      s.position ? { ...s, zIndex: 1 } : s
+    );
+  }, [pinnedStyles]);
+
+  // Row-num sticky style
+  const rowNumStickyStyle: React.CSSProperties = {
+    position: "sticky",
+    left: 0,
+    zIndex: 3,
+    backgroundColor: "var(--color-bg-secondary)",
+  };
+
+  const rowNumHeaderStickyStyle: React.CSSProperties = {
+    ...rowNumStickyStyle,
+    zIndex: 4,
+  };
+
+  // Toggle pin on a column
+  const handleTogglePin = useCallback(
+    (colIndex: number) => {
+      onUpdateView((prev) => {
+        const cfg = prev.config as TableViewConfig;
+        const current = cfg.pinnedColumnCount ?? 0;
+        const newCount = colIndex < current ? colIndex : colIndex + 1;
+        return {
+          ...prev,
+          config: {
+            ...prev.config,
+            pinnedColumnCount: newCount > 0 ? newCount : undefined,
+          },
+        };
+      });
+    },
+    [onUpdateView]
+  );
+
   // Render cell based on property type
   const renderCell = (prop: PropertyDef, row: DatabaseRow) => {
     const value = row.cells[prop.id] ?? null;
@@ -491,53 +561,66 @@ export function DatabaseTable({
   const colCount = visibleProperties.length + 1; // +1 for row num column
 
   const renderRowGroup = (rows: DatabaseRow[], startIdx: number) =>
-    rows.map((row, idx) => (
-      <tr key={row.id} className="db-row">
-        <td className="db-row-num">
-          <span className="db-row-num-text">{startIdx + idx + 1}</span>
-          <button
-            className="db-row-delete"
-            onClick={() => handleDeleteRow(row.id)}
-            title="Delete row"
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="12"
-              height="12"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
+    rows.map((row, idx) => {
+      // Row bg color for pinned cells (match zebra striping)
+      const isEven = idx % 2 === 0;
+      const rowBg = isEven ? "var(--color-bg-primary)" : "var(--color-bg-secondary)";
+      return (
+        <tr key={row.id} className="db-row">
+          <td className="db-row-num" style={rowNumStickyStyle}>
+            <span className="db-row-num-text">{startIdx + idx + 1}</span>
+            <button
+              className="db-row-delete"
+              onClick={() => handleDeleteRow(row.id)}
+              title="Delete row"
             >
-              <path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
-            </svg>
-          </button>
-        </td>
-        {visibleProperties.map((prop) => {
-          const cfCSS = conditionalStyleToCSS(
-            evaluateConditionalFormat(prop, resolveCellValue(row, prop.id))
-          );
-          return (
-            <td
-              key={prop.id}
-              className="db-cell"
-              style={{ width: getColWidth(prop), ...cfCSS }}
-            >
-              {renderCell(prop, row)}
-            </td>
-          );
-        })}
-      </tr>
-    ));
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+              </svg>
+            </button>
+          </td>
+          {visibleProperties.map((prop, colIdx) => {
+            const cfCSS = conditionalStyleToCSS(
+              evaluateConditionalFormat(prop, resolveCellValue(row, prop.id))
+            );
+            const pinStyle = pinnedStyles[colIdx];
+            const isPinned = !!pinStyle.position;
+            return (
+              <td
+                key={prop.id}
+                className={`db-cell${isPinned ? " db-cell-pinned" : ""}`}
+                style={{
+                  width: getColWidth(prop),
+                  ...cfCSS,
+                  ...pinStyle,
+                  ...(isPinned ? { backgroundColor: rowBg } : {}),
+                }}
+              >
+                {renderCell(prop, row)}
+              </td>
+            );
+          })}
+        </tr>
+      );
+    });
 
   return (
     <div className="db-table-wrapper">
       <table className="db-table">
         <thead>
           <tr>
-            <th className="db-row-num-header">#</th>
-            {visibleProperties.map((prop) => {
+            <th className="db-row-num-header" style={rowNumHeaderStickyStyle}>#</th>
+            {visibleProperties.map((prop, colIdx) => {
               const sort = sorts.find((s) => s.propertyId === prop.id);
+              const isPinned = colIdx < pinnedColumnCount;
               return (
                 <th
                   key={prop.id}
@@ -545,8 +628,8 @@ export function DatabaseTable({
                     if (el) headerRefs.current.set(prop.id, el);
                     else headerRefs.current.delete(prop.id);
                   }}
-                  className="db-col-header"
-                  style={{ width: getColWidth(prop) }}
+                  className={`db-col-header${isPinned ? " db-col-pinned" : ""}`}
+                  style={{ width: getColWidth(prop), ...pinnedHeaderStyles[colIdx] }}
                 >
                   <div
                     className="db-col-header-content"
@@ -565,6 +648,28 @@ export function DatabaseTable({
                         {sort.direction === "asc" ? "\u2191" : "\u2193"}
                       </span>
                     )}
+                    <button
+                      className={`db-col-pin-icon${isPinned ? " db-col-pin-active" : ""}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleTogglePin(colIdx);
+                      }}
+                      title={isPinned ? "Unpin column" : "Pin column"}
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="12"
+                        height="12"
+                        viewBox="0 0 24 24"
+                        fill={isPinned ? "currentColor" : "none"}
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <path d="M12 17v5M9 2h6l-1 7h4l-7 8V9H7l2-7z" />
+                      </svg>
+                    </button>
                   </div>
                   <div
                     className="db-col-resize"
@@ -630,13 +735,13 @@ export function DatabaseTable({
         </tbody>
         <tfoot className="db-tfoot">
           <tr>
-            <td className="db-footer-label">
+            <td className="db-footer-label" style={{ ...rowNumStickyStyle, zIndex: 1 }}>
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M18 7V4H6v3" /><path d="M18 20v-3H6v3" /><path d="M6 12h12" />
               </svg>
             </td>
-            {visibleProperties.map((prop) => (
-              <td key={prop.id} className="db-footer-cell" style={{ width: getColWidth(prop) }}>
+            {visibleProperties.map((prop, colIdx) => (
+              <td key={prop.id} className="db-footer-cell" style={{ width: getColWidth(prop), ...pinnedFooterStyles[colIdx] }}>
                 <SummaryFooterCell
                   prop={prop}
                   aggregation={propertySummaries[prop.id] as SummaryAggregation | undefined}

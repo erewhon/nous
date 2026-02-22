@@ -205,6 +205,47 @@
   background-color: var(--color-accent);
 }
 
+/* Column Pin Icon */
+.db-col-pin-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: auto;
+  padding: 2px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  border-radius: 3px;
+  opacity: 0;
+  flex-shrink: 0;
+  transition: opacity 0.15s, color 0.15s;
+}
+
+.db-col-header:hover .db-col-pin-icon {
+  opacity: 0.6;
+}
+
+.db-col-header:hover .db-col-pin-icon:hover {
+  opacity: 1;
+  color: var(--color-accent);
+  background-color: var(--color-bg-tertiary);
+}
+
+.db-col-pin-icon.db-col-pin-active {
+  opacity: 1;
+  color: var(--color-accent);
+}
+
+/* Pinned cell hover override — match row hover bg */
+.db-row:hover .db-cell-pinned {
+  background-color: var(--color-bg-tertiary) !important;
+}
+
+.db-row:hover .db-row-num {
+  background-color: var(--color-bg-tertiary) !important;
+}
+
 /* Rows */
 .db-row {
   transition: background-color 0.1s;

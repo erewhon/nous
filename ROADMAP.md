@@ -945,7 +945,7 @@ Building on the existing database foundation (table, board, gallery, list, calen
   - Option to include or exclude row data
 
 #### UI Polish
-- [ ] **Conditional formatting** - Visual rules for cells
+- [x] **Conditional formatting** - Visual rules for cells
   - Highlight cells based on value (e.g., red if overdue, green if complete)
   - Rules per property: contains, equals, greater/less than, is empty
   - Background color or text color change

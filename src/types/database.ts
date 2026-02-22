@@ -167,6 +167,7 @@ export const TableViewConfigSchema = z.object({
   groupByPropertyId: z.string().nullable().optional(),
   collapsedGroups: z.array(z.string()).optional(),
   hiddenPropertyIds: z.array(z.string()).optional(),
+  pinnedColumnCount: z.number().optional(),
 });
 export type TableViewConfig = z.infer<typeof TableViewConfigSchema>;
 
