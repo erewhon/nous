@@ -56,6 +56,11 @@ export function DatabaseTable({
   const headerRefs = useRef<Map<string, HTMLElement>>(new Map());
   const [editorPos, setEditorPos] = useState<{ top: number; left: number } | null>(null);
 
+  // Bulk row selection
+  const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(new Set());
+  const hasSelection = selectedRowIds.size > 0;
+  const selectAllRef = useRef<HTMLInputElement>(null);
+
   // Position the property editor portal when editingProperty changes
   useLayoutEffect(() => {
     if (!editingProperty) {
@@ -271,6 +276,77 @@ export function DatabaseTable({
       }));
     },
     [onUpdateContent]
+  );
+
+  // Prune stale selections when rows change (e.g. undo/redo)
+  useEffect(() => {
+    setSelectedRowIds((prev) => {
+      if (prev.size === 0) return prev;
+      const currentIds = new Set(content.rows.map((r) => r.id));
+      const pruned = new Set<string>();
+      for (const id of prev) {
+        if (currentIds.has(id)) pruned.add(id);
+      }
+      return pruned.size === prev.size ? prev : pruned;
+    });
+  }, [content.rows]);
+
+  // Toggle single row selection
+  const toggleRowSelection = useCallback((rowId: string) => {
+    setSelectedRowIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(rowId)) next.delete(rowId);
+      else next.add(rowId);
+      return next;
+    });
+  }, []);
+
+  // Select-all toggle (operates on displayRows)
+  const handleSelectAll = useCallback(() => {
+    const allDisplayIds = displayRows.map((r) => r.id);
+    setSelectedRowIds((prev) => {
+      const allSelected = allDisplayIds.every((id) => prev.has(id));
+      if (allSelected) return new Set();
+      return new Set(allDisplayIds);
+    });
+  }, [displayRows]);
+
+  // Update indeterminate state for select-all checkbox
+  useEffect(() => {
+    if (!selectAllRef.current) return;
+    const allDisplayIds = displayRows.map((r) => r.id);
+    const selectedCount = allDisplayIds.filter((id) => selectedRowIds.has(id)).length;
+    selectAllRef.current.indeterminate =
+      selectedCount > 0 && selectedCount < allDisplayIds.length;
+  }, [selectedRowIds, displayRows]);
+
+  // Bulk delete
+  const handleBulkDelete = useCallback(() => {
+    onUpdateContent((prev) => ({
+      ...prev,
+      rows: prev.rows.filter((r) => !selectedRowIds.has(r.id)),
+    }));
+    setSelectedRowIds(new Set());
+  }, [onUpdateContent, selectedRowIds]);
+
+  // Bulk edit: set a value for a property across all selected rows
+  const handleBulkEdit = useCallback(
+    (propertyId: string, value: CellValue) => {
+      onUpdateContent((prev) => ({
+        ...prev,
+        rows: prev.rows.map((r) =>
+          selectedRowIds.has(r.id)
+            ? {
+                ...r,
+                cells: { ...r.cells, [propertyId]: value },
+                updatedAt: new Date().toISOString(),
+              }
+            : r
+        ),
+      }));
+      setSelectedRowIds(new Set());
+    },
+    [onUpdateContent, selectedRowIds]
   );
 
   // Property update handler
@@ -565,10 +641,17 @@ export function DatabaseTable({
       // Row bg color for pinned cells (match zebra striping)
       const isEven = idx % 2 === 0;
       const rowBg = isEven ? "var(--color-bg-primary)" : "var(--color-bg-secondary)";
+      const isSelected = selectedRowIds.has(row.id);
       return (
-        <tr key={row.id} className="db-row">
+        <tr key={row.id} className={`db-row${isSelected ? " db-row-selected" : ""}`}>
           <td className="db-row-num" style={rowNumStickyStyle}>
             <span className="db-row-num-text">{startIdx + idx + 1}</span>
+            <input
+              type="checkbox"
+              className="db-row-select-checkbox"
+              checked={isSelected}
+              onChange={() => toggleRowSelection(row.id)}
+            />
             <button
               className="db-row-delete"
               onClick={() => handleDeleteRow(row.id)}
@@ -613,11 +696,24 @@ export function DatabaseTable({
     });
 
   return (
-    <div className="db-table-wrapper">
+    <div className={`db-table-wrapper${hasSelection ? " db-table-selecting" : ""}`}>
       <table className="db-table">
         <thead>
           <tr>
-            <th className="db-row-num-header" style={rowNumHeaderStickyStyle}>#</th>
+            <th className="db-row-num-header" style={rowNumHeaderStickyStyle}>
+              {hasSelection ? (
+                <input
+                  ref={selectAllRef}
+                  type="checkbox"
+                  className="db-select-all-checkbox"
+                  checked={displayRows.length > 0 && displayRows.every((r) => selectedRowIds.has(r.id))}
+                  onChange={handleSelectAll}
+                  title="Select all"
+                />
+              ) : (
+                "#"
+              )}
+            </th>
             {visibleProperties.map((prop, colIdx) => {
               const sort = sorts.find((s) => s.propertyId === prop.id);
               const isPinned = colIdx < pinnedColumnCount;
@@ -763,6 +859,36 @@ export function DatabaseTable({
         </tfoot>
       </table>
 
+      {/* Bulk action bar */}
+      {hasSelection && (
+        <div className="db-bulk-bar">
+          <span className="db-bulk-bar-count">
+            {selectedRowIds.size} row{selectedRowIds.size !== 1 ? "s" : ""} selected
+          </span>
+          <div className="db-bulk-bar-separator" />
+          <button
+            className="db-bulk-bar-btn db-bulk-bar-btn-danger"
+            onClick={handleBulkDelete}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+            </svg>
+            Delete
+          </button>
+          <BulkEditButton
+            properties={content.properties}
+            onApply={handleBulkEdit}
+          />
+          <div className="db-bulk-bar-separator" />
+          <button
+            className="db-bulk-bar-btn"
+            onClick={() => setSelectedRowIds(new Set())}
+          >
+            Deselect
+          </button>
+        </div>
+      )}
+
       {/* Add row button */}
       <button className="db-add-row" onClick={handleAddRow}>
         <svg
@@ -866,6 +992,183 @@ function SummaryFooterCell({
               {SUMMARY_LABELS[agg]}
             </button>
           ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Bulk edit button — picks a property, then shows a value editor
+function BulkEditButton({
+  properties,
+  onApply,
+}: {
+  properties: PropertyDef[];
+  onApply: (propertyId: string, value: CellValue) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [selectedProp, setSelectedProp] = useState<PropertyDef | null>(null);
+  const [editValue, setEditValue] = useState<string>("");
+  const popoverRef = useRef<HTMLDivElement>(null);
+
+  // Editable property types (exclude computed)
+  const editableProps = properties.filter(
+    (p) =>
+      p.type !== "formula" &&
+      p.type !== "rollup" &&
+      !(p.type === "relation" && p.relationConfig?.direction === "back")
+  );
+
+  useEffect(() => {
+    if (!open) return;
+    const handle = (e: MouseEvent) => {
+      if (popoverRef.current && !popoverRef.current.contains(e.target as Node)) {
+        setOpen(false);
+        setSelectedProp(null);
+        setEditValue("");
+      }
+    };
+    document.addEventListener("mousedown", handle);
+    return () => document.removeEventListener("mousedown", handle);
+  }, [open]);
+
+  const handleApply = () => {
+    if (!selectedProp) return;
+    let value: CellValue;
+    switch (selectedProp.type) {
+      case "number":
+        value = editValue ? Number(editValue) : null;
+        break;
+      case "checkbox":
+        value = editValue === "true";
+        break;
+      case "select":
+        value = editValue || null;
+        break;
+      case "multiSelect":
+        value = editValue ? [editValue] : [];
+        break;
+      default:
+        value = editValue || null;
+    }
+    onApply(selectedProp.id, value);
+    setOpen(false);
+    setSelectedProp(null);
+    setEditValue("");
+  };
+
+  return (
+    <div className="db-bulk-edit-anchor" ref={popoverRef}>
+      <button
+        className="db-bulk-bar-btn"
+        onClick={() => {
+          setOpen(!open);
+          setSelectedProp(null);
+          setEditValue("");
+        }}
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+        </svg>
+        Edit property
+      </button>
+      {open && (
+        <div className="db-bulk-edit-popover">
+          {!selectedProp ? (
+            <>
+              <div className="db-bulk-edit-title">Choose property</div>
+              {editableProps.map((prop) => (
+                <button
+                  key={prop.id}
+                  className="db-bulk-edit-prop-btn"
+                  onClick={() => {
+                    setSelectedProp(prop);
+                    setEditValue("");
+                  }}
+                >
+                  <span className="db-col-header-icon">
+                    <PropertyTypeIcon type={prop.type} />
+                  </span>
+                  {prop.name}
+                </button>
+              ))}
+            </>
+          ) : (
+            <div className="db-bulk-edit-value-section">
+              <button
+                className="db-bulk-edit-back"
+                onClick={() => {
+                  setSelectedProp(null);
+                  setEditValue("");
+                }}
+              >
+                ← Back
+              </button>
+              <div className="db-bulk-edit-prop-name">{selectedProp.name}</div>
+              {selectedProp.type === "checkbox" ? (
+                <div className="db-bulk-edit-checkbox-row">
+                  <input
+                    type="checkbox"
+                    checked={editValue === "true"}
+                    onChange={(e) =>
+                      setEditValue(e.target.checked ? "true" : "false")
+                    }
+                    style={{ accentColor: "var(--color-accent)" }}
+                  />
+                  <span className="db-bulk-edit-checkbox-label">
+                    {editValue === "true" ? "Checked" : "Unchecked"}
+                  </span>
+                </div>
+              ) : selectedProp.type === "select" ||
+                selectedProp.type === "multiSelect" ? (
+                <select
+                  className="db-bulk-edit-input"
+                  value={editValue}
+                  onChange={(e) => setEditValue(e.target.value)}
+                >
+                  <option value="">— None —</option>
+                  {(selectedProp.options ?? []).map((opt) => (
+                    <option key={opt.id} value={opt.id}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              ) : selectedProp.type === "number" ? (
+                <input
+                  type="number"
+                  className="db-bulk-edit-input"
+                  value={editValue}
+                  onChange={(e) => setEditValue(e.target.value)}
+                  placeholder="Enter number..."
+                  autoFocus
+                />
+              ) : selectedProp.type === "date" ? (
+                <input
+                  type="date"
+                  className="db-bulk-edit-input"
+                  value={editValue}
+                  onChange={(e) => setEditValue(e.target.value)}
+                  autoFocus
+                />
+              ) : (
+                <input
+                  type="text"
+                  className="db-bulk-edit-input"
+                  value={editValue}
+                  onChange={(e) => setEditValue(e.target.value)}
+                  placeholder="Enter value..."
+                  autoFocus
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleApply();
+                  }}
+                />
+              )}
+              <button className="db-bulk-edit-apply" onClick={handleApply}>
+                Apply
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>
