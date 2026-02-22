@@ -6,6 +6,7 @@ import { useSectionStore } from "../stores/sectionStore";
 import { useGoalsStore } from "../stores/goalsStore";
 import { useContactStore } from "../stores/contactStore";
 import { useEnergyStore } from "../stores/energyStore";
+import { useInboxStore } from "../stores/inboxStore";
 import { useWindowLibrary } from "../contexts/WindowContext";
 
 // Check goals every 15 minutes
@@ -174,6 +175,25 @@ export function useAppInit() {
       if (unlisten) unlisten();
     };
   }, [loadTodayCheckIn]);
+
+  // Listen for mcp-inbox-updated events from the file watcher.
+  // When the MCP server writes inbox items to disk, refresh the inbox store.
+  useEffect(() => {
+    let unlisten: UnlistenFn | null = null;
+
+    const setup = async () => {
+      unlisten = await listen("mcp-inbox-updated", () => {
+        console.log("[mcp-watcher] Inbox updated externally, refreshing");
+        useInboxStore.getState().loadItems();
+      });
+    };
+
+    setup();
+
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, []);
 
   // Listen for sync-notebook-updated events from the backend.
   // When sync pulls notebook metadata or section changes, reload them.

@@ -9,6 +9,7 @@ mod commands;
 mod contacts;
 mod energy;
 mod freeze_watchdog;
+mod mcp_watcher;
 pub mod encryption;
 mod evernote;
 mod external_editor;
@@ -75,6 +76,8 @@ pub struct AppState {
     pub video_server: Arc<tokio::sync::Mutex<Option<VideoServer>>>,
     pub chat_session_storage: Arc<Mutex<ChatSessionStorage>>,
     pub encryption_manager: Arc<EncryptionManager>,
+    /// Keeps the MCP file watcher alive for the app's lifetime.
+    pub _mcp_watcher: Mutex<Option<notify::PollWatcher>>,
 }
 
 /// Look for a bundled Python distribution next to the running binary.
@@ -280,13 +283,16 @@ pub fn run() {
         sync_scheduler: sync_scheduler_arc,
         video_server: video_server_arc,
         encryption_manager,
+        _mcp_watcher: Mutex::new(None),
     };
 
     let watchdog_state = Arc::new(freeze_watchdog::WatchdogState::new());
+    let write_tracker = mcp_watcher::WriteTracker::default();
 
     tauri::Builder::default()
         .manage(state)
         .manage(Arc::clone(&watchdog_state))
+        .manage(write_tracker)
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(move |app| {
@@ -333,6 +339,27 @@ pub fn run() {
                 app.handle().clone(),
                 Arc::clone(&watchdog_state),
             );
+
+            // Start the MCP file watcher for live UI refresh
+            {
+                let watcher_lib_path = {
+                    let lib_storage = state.library_storage.lock().unwrap();
+                    lib_storage.get_current_library().map(|l| l.path.clone()).ok()
+                };
+                if let Some(lib_path) = watcher_lib_path {
+                    match mcp_watcher::start_library_watcher(app.handle().clone(), lib_path) {
+                        Ok(watcher) => {
+                            if let Ok(mut w) = state._mcp_watcher.lock() {
+                                *w = Some(watcher);
+                            }
+                            log::info!("MCP library watcher started");
+                        }
+                        Err(e) => {
+                            log::warn!("Failed to start MCP library watcher: {}", e);
+                        }
+                    }
+                }
+            }
 
             // Start the video streaming server
             let video_server_handle = state.video_server.clone();

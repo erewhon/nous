@@ -1,4 +1,4 @@
-"""Read-only data access for Nous notebooks, sections, folders, and pages.
+"""Data access for Nous notebooks, sections, folders, pages, inbox, goals, and daily notes.
 
 Handles library discovery, name resolution, and provides a high-level API
 for the MCP server tools.
@@ -10,6 +10,7 @@ import json
 import logging
 import re
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -363,6 +364,143 @@ class NousStorage:
                 continue
 
         return _resolve_name(title_or_id, all_pages, key="title")
+
+    # --- Inbox ---
+
+    def _inbox_dir(self) -> Path:
+        return self.library_path / "inbox"
+
+    def list_inbox_items(self, include_processed: bool = False) -> list[dict]:
+        inbox_dir = self._inbox_dir()
+        if not inbox_dir.exists():
+            return []
+
+        results = []
+        for path in inbox_dir.glob("*.json"):
+            try:
+                item = json.loads(path.read_text())
+            except (json.JSONDecodeError, OSError):
+                continue
+
+            if not include_processed and item.get("isProcessed", False):
+                continue
+
+            results.append(item)
+
+        # Sort by capturedAt descending
+        results.sort(key=lambda i: i.get("capturedAt", ""), reverse=True)
+        return results
+
+    def get_inbox_item(self, item_id: str) -> dict | None:
+        path = self._inbox_dir() / f"{item_id}.json"
+        if not path.exists():
+            return None
+        try:
+            return json.loads(path.read_text())
+        except (json.JSONDecodeError, OSError):
+            return None
+
+    def write_inbox_item(self, item: dict) -> None:
+        inbox_dir = self._inbox_dir()
+        inbox_dir.mkdir(parents=True, exist_ok=True)
+        path = inbox_dir / f"{item['id']}.json"
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(item, indent=2) + "\n")
+        tmp.rename(path)
+
+    def delete_inbox_item(self, item_id: str) -> bool:
+        path = self._inbox_dir() / f"{item_id}.json"
+        if not path.exists():
+            return False
+        path.unlink()
+        return True
+
+    # --- Daily Notes ---
+
+    def list_daily_notes(self, notebook_id: str, limit: int = 10) -> list[dict]:
+        pages_dir = self._pages_dir(notebook_id)
+        if not pages_dir.exists():
+            return []
+
+        results = []
+        for path in pages_dir.glob("*.json"):
+            try:
+                page = json.loads(path.read_text())
+            except (json.JSONDecodeError, OSError):
+                continue
+
+            if not page.get("isDailyNote", False):
+                continue
+            if page.get("isArchived", False):
+                continue
+
+            results.append({
+                "id": page["id"],
+                "title": page.get("title", ""),
+                "dailyNoteDate": page.get("dailyNoteDate", ""),
+                "tags": page.get("tags", []),
+                "folderId": page.get("folderId"),
+                "sectionId": page.get("sectionId"),
+                "updatedAt": page.get("updatedAt", ""),
+                "createdAt": page.get("createdAt", ""),
+            })
+
+        # Sort by dailyNoteDate descending
+        results.sort(key=lambda p: p.get("dailyNoteDate", ""), reverse=True)
+        return results[:limit]
+
+    def get_daily_note(self, notebook_id: str, date: str) -> dict | None:
+        """Find a daily note page matching the given date (YYYY-MM-DD)."""
+        pages_dir = self._pages_dir(notebook_id)
+        if not pages_dir.exists():
+            return None
+
+        for path in pages_dir.glob("*.json"):
+            try:
+                page = json.loads(path.read_text())
+            except (json.JSONDecodeError, OSError):
+                continue
+
+            if page.get("isDailyNote") and page.get("dailyNoteDate") == date:
+                return page
+
+        return None
+
+    # --- Goals ---
+
+    def _goals_dir(self) -> Path:
+        return self.library_path / "goals"
+
+    def list_goals(self, include_archived: bool = False) -> list[dict]:
+        path = self._goals_dir() / "goals.json"
+        if not path.exists():
+            return []
+        try:
+            goals = json.loads(path.read_text())
+        except (json.JSONDecodeError, OSError):
+            return []
+
+        if not include_archived:
+            goals = [g for g in goals if g.get("archivedAt") is None]
+
+        return goals
+
+    def get_goal_progress(self, goal_id: str) -> list[dict]:
+        path = self._goals_dir() / "progress" / f"{goal_id}.json"
+        if not path.exists():
+            return []
+        try:
+            return json.loads(path.read_text())
+        except (json.JSONDecodeError, OSError):
+            return []
+
+    def write_goal_progress(self, goal_id: str, entries: list[dict]) -> None:
+        progress_dir = self._goals_dir() / "progress"
+        progress_dir.mkdir(parents=True, exist_ok=True)
+        path = progress_dir / f"{goal_id}.json"
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(entries, indent=2) + "\n")
+        tmp.rename(path)
 
     # --- Search ---
 

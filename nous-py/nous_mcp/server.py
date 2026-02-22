@@ -948,6 +948,303 @@ def update_database_rows(
 
 
 # ---------------------------------------------------------------------------
+# Inbox tools
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def inbox_list(include_processed: bool = False) -> str:
+    """List inbox items.
+
+    Args:
+        include_processed: Include processed items (default false).
+
+    Returns JSON array of items with id, title, content, tags, capturedAt, source, isProcessed.
+    """
+    storage = _get_storage()
+    items = storage.list_inbox_items(include_processed=include_processed)
+    return json.dumps(items, indent=2)
+
+
+@mcp.tool()
+def inbox_capture(
+    title: str,
+    content: str = "",
+    tags: str = "",
+    source: str = "mcp",
+) -> str:
+    """Create a new inbox item.
+
+    Args:
+        title: Title of the inbox item.
+        content: Optional text content (plain text or markdown).
+        tags: Optional comma-separated tags.
+        source: Source identifier (default "mcp").
+
+    Returns JSON with id, title, capturedAt of the created item.
+    """
+    storage = _get_storage()
+
+    tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
+    now = datetime.now(UTC).isoformat()
+
+    item = {
+        "id": str(uuid4()),
+        "title": title,
+        "content": content,
+        "tags": tag_list,
+        "capturedAt": now,
+        "updatedAt": now,
+        "source": {"type": "api", "source": source},
+        "classification": None,
+        "isProcessed": False,
+    }
+
+    storage.write_inbox_item(item)
+
+    return json.dumps(
+        {
+            "id": item["id"],
+            "title": item["title"],
+            "capturedAt": item["capturedAt"],
+        },
+        indent=2,
+    )
+
+
+@mcp.tool()
+def inbox_delete(item_id: str) -> str:
+    """Delete an inbox item by ID.
+
+    Args:
+        item_id: The UUID of the inbox item to delete.
+
+    Returns JSON with id and deleted status.
+    """
+    storage = _get_storage()
+    deleted = storage.delete_inbox_item(item_id)
+    if not deleted:
+        raise ValueError(f"Inbox item not found: {item_id}")
+    return json.dumps({"id": item_id, "deleted": True}, indent=2)
+
+
+# ---------------------------------------------------------------------------
+# Daily notes tools
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def list_daily_notes(
+    notebook: str,
+    limit: int = 10,
+) -> str:
+    """List recent daily notes in a notebook.
+
+    Args:
+        notebook: Notebook name or UUID.
+        limit: Maximum number of daily notes to return (default 10).
+
+    Returns JSON array of daily notes with id, title, dailyNoteDate, tags.
+    """
+    storage = _get_storage()
+    nb = storage.resolve_notebook(notebook)
+    notes = storage.list_daily_notes(nb["id"], limit=limit)
+    return json.dumps(notes, indent=2)
+
+
+@mcp.tool()
+def get_daily_note(
+    notebook: str,
+    date: str,
+) -> str:
+    """Get the daily note for a specific date.
+
+    Args:
+        notebook: Notebook name or UUID.
+        date: Date in YYYY-MM-DD format.
+
+    Returns the daily note content in markdown format, or an error if not found.
+    """
+    storage = _get_storage()
+    nb = storage.resolve_notebook(notebook)
+    page = storage.get_daily_note(nb["id"], date)
+    if page is None:
+        raise ValueError(f"No daily note found for {date} in notebook '{nb.get('name')}'")
+
+    return export_page_to_markdown(page)
+
+
+@mcp.tool()
+def create_daily_note(
+    notebook: str,
+    date: str,
+    content: str = "",
+) -> str:
+    """Create a daily note for a specific date.
+
+    Args:
+        notebook: Notebook name or UUID.
+        date: Date in YYYY-MM-DD format.
+        content: Optional markdown content for the note.
+
+    Returns JSON with id, title, dailyNoteDate of the created page.
+    """
+    storage = _get_storage()
+    nb = storage.resolve_notebook(notebook)
+
+    # Check if daily note already exists for this date
+    existing = storage.get_daily_note(nb["id"], date)
+    if existing:
+        raise ValueError(
+            f"Daily note already exists for {date}: '{existing.get('title')}' (id: {existing['id']})"
+        )
+
+    # Format title like the Tauri backend: "Daily Note - Monday, January 6, 2025"
+    from datetime import date as date_type
+
+    parsed_date = date_type.fromisoformat(date)
+    title = f"Daily Note - {parsed_date.strftime('%A, %B %-d, %Y')}"
+
+    blocks = _markdown_to_blocks(content) if content else []
+
+    from nous_ai.page_storage import NousPageStorage
+
+    page_storage = NousPageStorage(data_dir=storage.library_path, client_id="nous-mcp")
+    page = page_storage.create_page(
+        notebook_id=nb["id"],
+        title=title,
+        blocks=blocks,
+        extra_fields={
+            "isDailyNote": True,
+            "dailyNoteDate": date,
+        },
+    )
+
+    return json.dumps(
+        {
+            "id": page["id"],
+            "title": page["title"],
+            "dailyNoteDate": date,
+            "notebookId": nb["id"],
+        },
+        indent=2,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Goals tools
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def list_goals(include_archived: bool = False) -> str:
+    """List all goals.
+
+    Args:
+        include_archived: Include archived goals (default false).
+
+    Returns JSON array of goals with id, name, description, frequency, trackingType, etc.
+    """
+    storage = _get_storage()
+    goals = storage.list_goals(include_archived=include_archived)
+
+    # Return a summary view
+    results = []
+    for g in goals:
+        results.append({
+            "id": g["id"],
+            "name": g.get("name", ""),
+            "description": g.get("description"),
+            "frequency": g.get("frequency", "Daily"),
+            "trackingType": g.get("trackingType", "Manual"),
+            "createdAt": g.get("createdAt", ""),
+            "archivedAt": g.get("archivedAt"),
+        })
+
+    return json.dumps(results, indent=2)
+
+
+@mcp.tool()
+def get_goal_progress(
+    goal_id: str,
+    limit: int = 30,
+) -> str:
+    """Get recent progress entries for a goal.
+
+    Args:
+        goal_id: The UUID of the goal.
+        limit: Maximum number of entries to return (default 30).
+
+    Returns JSON array of progress entries with goalId, date, completed, value.
+    """
+    storage = _get_storage()
+    entries = storage.get_goal_progress(goal_id)
+
+    # Sort by date descending and limit
+    entries.sort(key=lambda e: e.get("date", ""), reverse=True)
+    entries = entries[:limit]
+
+    return json.dumps(entries, indent=2)
+
+
+@mcp.tool()
+def record_goal_progress(
+    goal_id: str,
+    date: str,
+    completed: bool = True,
+    value: float | None = None,
+) -> str:
+    """Record progress for a goal on a specific date.
+
+    Args:
+        goal_id: The UUID of the goal.
+        date: Date in YYYY-MM-DD format.
+        completed: Whether the goal was completed (default true).
+        value: Optional numeric value (e.g., pages edited, commits made).
+
+    Returns JSON with goalId, date, completed, value.
+    """
+    storage = _get_storage()
+
+    # Verify goal exists
+    goals = storage.list_goals(include_archived=True)
+    goal = None
+    for g in goals:
+        if g["id"] == goal_id:
+            goal = g
+            break
+    if goal is None:
+        raise ValueError(f"Goal not found: {goal_id}")
+
+    # Load existing progress
+    entries = storage.get_goal_progress(goal_id)
+
+    # Update or append entry for this date
+    entry_data = {
+        "goalId": goal_id,
+        "date": date,
+        "completed": completed,
+        "autoDetected": False,
+    }
+    if value is not None:
+        entry_data["value"] = int(value)
+
+    updated = False
+    for i, entry in enumerate(entries):
+        if entry.get("date") == date:
+            entries[i] = entry_data
+            updated = True
+            break
+
+    if not updated:
+        entries.append(entry_data)
+
+    storage.write_goal_progress(goal_id, entries)
+
+    return json.dumps(entry_data, indent=2)
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
