@@ -8,6 +8,8 @@ import { useTypewriterScroll } from "../../hooks/useTypewriterScroll";
 import { useFocusHighlight } from "../../hooks/useFocusHighlight";
 import { useUndoHistory } from "../../hooks/useUndoHistory";
 import { BlockEditor, type BlockEditorRef } from "./BlockEditor";
+import { PageSearchBar } from "./PageSearchBar";
+import { usePageSearch } from "./usePageSearch";
 import * as api from "../../utils/api";
 import { crumb } from "../../utils/breadcrumbs";
 import { PageHeader } from "./PageHeader";
@@ -73,6 +75,7 @@ export function EditorPaneContent({
   // Separate state for explicit save indicator only (Ctrl+S) — NOT updated during auto-save
   const [lastSavedDisplay, setLastSavedDisplay] = useState<Date | null>(null);
   const [showHistoryPanel, setShowHistoryPanel] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
   const [dbUndoState, setDbUndoState] = useState<DatabaseUndoRedoState | null>(null);
   const editorScrollRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<BlockEditorRef>(null);
@@ -120,6 +123,62 @@ export function EditorPaneContent({
     containerRef: editorScrollRef,
   });
 
+  // Editor keymap for Ctrl+F pass-through in emacs mode
+  const editorKeymap = useThemeStore((state) => state.settings.editorKeymap);
+
+  // Derive holderId from DOM — the BlockEditor creates a div with id="editor-{useId()}"
+  const editorHolderId = useMemo(() => {
+    if (!showSearch) return "";
+    return editorScrollRef.current?.querySelector(".block-editor")?.id || "";
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showSearch, selectedPage?.id]);
+
+  // In-page search (Ctrl+F)
+  const search = usePageSearch({
+    holderId: editorHolderId,
+    scrollContainerRef: editorScrollRef,
+    active: showSearch && isStandardPage,
+  });
+
+  // Close search and clear highlights
+  const handleCloseSearch = useCallback(() => {
+    setShowSearch(false);
+    search.clear();
+  }, [search]);
+
+  // Ctrl+F handler
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "f" && !e.shiftKey) {
+        if (!isActive) return;
+        // Let emacs Ctrl+f pass through when focus is in editor
+        if (
+          editorKeymap === "emacs" &&
+          editorScrollRef.current?.contains(document.activeElement)
+        ) {
+          return;
+        }
+        e.preventDefault();
+        e.stopPropagation();
+        // Pre-fill with text selection
+        const selectedText = window.getSelection()?.toString().trim() || "";
+        setShowSearch(true);
+        if (selectedText) search.setQuery(selectedText);
+      }
+    };
+    document.addEventListener("keydown", handler, true); // capture phase
+    return () => document.removeEventListener("keydown", handler, true);
+  }, [isActive, editorKeymap, search]);
+
+  // Close search on page switch
+  useEffect(() => {
+    if (showSearch) {
+      setShowSearch(false);
+      search.clear();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedPage?.id]);
+
   // Handle ESC key to exit zen mode
   useEffect(() => {
     if (!zenMode) return;
@@ -132,7 +191,7 @@ export function EditorPaneContent({
         document.querySelector("[data-radix-portal]") ||
         document.querySelector(".command-palette-backdrop");
 
-      if (e.key === "Escape" && !hasOpenModal) {
+      if (e.key === "Escape" && !hasOpenModal && !showSearch) {
         e.preventDefault();
         setZenMode(false);
       }
@@ -140,7 +199,7 @@ export function EditorPaneContent({
 
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [zenMode, setZenMode]);
+  }, [zenMode, setZenMode, showSearch]);
 
   // Ensure current page is in tabs - replace non-pinned tab for "one page at a time" behavior
   useEffect(() => {
@@ -690,6 +749,24 @@ export function EditorPaneContent({
                   className={`flex-1 overflow-y-auto ${zenMode ? "zen-editor-scroll" : "px-8 py-6"}`}
                   style={zenMode ? { padding: "4rem 2rem" } : undefined}
                 >
+                  {showSearch && isStandardPage && editorHolderId && (
+                    <div
+                      className="sticky top-0 z-40 flex justify-end pointer-events-none"
+                      style={{ padding: "0 2rem", marginBottom: "-2rem" }}
+                    >
+                      <div className="pointer-events-auto">
+                        <PageSearchBar
+                          query={search.query}
+                          onQueryChange={search.setQuery}
+                          currentIndex={search.currentIndex}
+                          totalCount={search.totalCount}
+                          onNext={search.goToNext}
+                          onPrevious={search.goToPrevious}
+                          onClose={handleCloseSearch}
+                        />
+                      </div>
+                    </div>
+                  )}
                   <div
                     className={`mx-auto ${zenMode ? "zen-editor-container" : ""}`}
                     style={{

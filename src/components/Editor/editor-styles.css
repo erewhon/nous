@@ -4013,3 +4013,93 @@ block-ref.broken {
   font-size: 13px;
   color: var(--color-text-muted);
 }
+
+/* ===== In-page search (Ctrl+F) ===== */
+
+/* CSS Custom Highlight API — zero DOM mutations */
+::highlight(page-search) {
+  background-color: rgba(250, 204, 21, 0.3);
+  color: inherit;
+}
+
+::highlight(page-search-current) {
+  background-color: rgba(250, 204, 21, 0.6);
+  color: inherit;
+}
+
+/* Search bar — floating at top-right, VS Code style */
+.page-search-bar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 6px;
+  margin-top: 8px;
+  background: var(--color-bg-elevated, var(--color-bg-secondary));
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.page-search-bar__icon {
+  display: flex;
+  align-items: center;
+  color: var(--color-text-muted);
+  padding: 0 4px 0 2px;
+  flex-shrink: 0;
+}
+
+.page-search-bar__input {
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  color: var(--color-text-primary);
+  font-size: 13px;
+  padding: 3px 8px;
+  width: 200px;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.page-search-bar__input:focus {
+  border-color: var(--color-accent, #6366f1);
+}
+
+.page-search-bar__input::placeholder {
+  color: var(--color-text-muted);
+}
+
+.page-search-bar__count {
+  color: var(--color-text-muted);
+  font-size: 12px;
+  padding: 0 6px;
+  min-width: 60px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.page-search-bar__btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background-color 0.1s ease, color 0.1s ease;
+}
+
+.page-search-bar__btn:hover:not(:disabled) {
+  background: var(--color-bg-tertiary, rgba(255, 255, 255, 0.08));
+  color: var(--color-text-primary);
+}
+
+.page-search-bar__btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
