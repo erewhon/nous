@@ -14,6 +14,7 @@ interface AISettings {
   defaultModel: string;  // Format: "provider:model" or just "model" for default provider
   temperature: number;
   maxTokens: number;
+  maxContextMessages: number; // Number of conversation messages to include as context (default 10)
   systemPrompt: string; // App-level default system prompt
 }
 
@@ -87,6 +88,7 @@ interface AIState {
   setDefaultModel: (model: string) => void;
   setTemperature: (temperature: number) => void;
   setMaxTokens: (maxTokens: number) => void;
+  setMaxContextMessages: (maxContextMessages: number) => void;
   setSystemPrompt: (systemPrompt: string) => void;
 
   // Helper to get provider config
@@ -158,6 +160,7 @@ function createDefaultSettings(): AISettings {
     defaultModel: "gpt-4o",
     temperature: 0.7,
     maxTokens: 4096,
+    maxContextMessages: 10,
     systemPrompt: DEFAULT_SYSTEM_PROMPT,
   };
 }
@@ -166,7 +169,12 @@ function createDefaultSettings(): AISettings {
 function migrateSettings(stored: unknown): AISettings {
   // Check if it's already the new format
   if (stored && typeof stored === "object" && "providers" in stored) {
-    return stored as AISettings;
+    const settings = stored as AISettings;
+    // Ensure newer fields have defaults
+    if (settings.maxContextMessages === undefined) {
+      settings.maxContextMessages = 10;
+    }
+    return settings;
   }
 
   // Check if it's the legacy format
@@ -368,6 +376,11 @@ export const useAIStore = create<AIState>()(
       setMaxTokens: (maxTokens) =>
         set((state) => ({
           settings: { ...state.settings, maxTokens },
+        })),
+
+      setMaxContextMessages: (maxContextMessages) =>
+        set((state) => ({
+          settings: { ...state.settings, maxContextMessages: Math.max(2, Math.min(50, maxContextMessages)) },
         })),
 
       setSystemPrompt: (systemPrompt) =>

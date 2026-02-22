@@ -267,6 +267,7 @@ function AISettingsContent() {
     setDefaultModel,
     setTemperature,
     setMaxTokens,
+    setMaxContextMessages,
     isDiscoveringModels,
     discoverModels,
   } = useAIStore();
@@ -577,6 +578,46 @@ function AISettingsContent() {
               </div>
             );
           })()}
+
+          {/* Context Messages */}
+          <div>
+            <div className="mb-2 flex items-center justify-between">
+              <label
+                className="text-xs font-medium"
+                style={{ color: "var(--color-text-muted)" }}
+              >
+                Context Messages
+              </label>
+              <span
+                className="text-xs"
+                style={{ color: "var(--color-text-muted)" }}
+              >
+                {settings.maxContextMessages}
+              </span>
+            </div>
+            <input
+              type="range"
+              min="2"
+              max="50"
+              step="1"
+              value={settings.maxContextMessages}
+              onChange={(e) => setMaxContextMessages(parseInt(e.target.value))}
+              className="w-full accent-[--color-accent]"
+            />
+            <div
+              className="mt-1 flex justify-between text-xs"
+              style={{ color: "var(--color-text-muted)" }}
+            >
+              <span>2</span>
+              <span>50</span>
+            </div>
+            <p
+              className="mt-1 text-xs"
+              style={{ color: "var(--color-text-muted)", opacity: 0.7 }}
+            >
+              Number of recent messages sent as conversation context
+            </p>
+          </div>
         </div>
       </div>
     </div>

@@ -1,3 +1,12 @@
+/** A branch in a chat session conversation */
+export interface ChatSessionBranch {
+  id: string;
+  name: string;
+  parentBranch: string;       // "main" for root branches
+  forkPointIndex: number;     // index in messages array where branch forked
+  createdAt: string;
+}
+
 /** A full chat session with all messages */
 export interface ChatSession {
   id: string;
@@ -7,6 +16,8 @@ export interface ChatSession {
   notebookContext: string | null;
   createdAt: string;
   updatedAt: string;
+  branches?: ChatSessionBranch[];
+  currentBranch?: string;     // defaults to "main"
 }
 
 /** Lightweight summary for listing sessions */
@@ -27,6 +38,7 @@ export interface SessionMessage {
   toolCalls?: ToolCallRecord[];
   stats?: MessageStats;
   timestamp: string;
+  branchId?: string;          // defaults to "main"
 }
 
 /** Record of a tool call */

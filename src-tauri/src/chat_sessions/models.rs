@@ -13,6 +13,10 @@ pub struct ChatSession {
     pub notebook_context: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub branches: Vec<ChatSessionBranch>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_branch: Option<String>,
 }
 
 impl ChatSession {
@@ -26,6 +30,8 @@ impl ChatSession {
             notebook_context: None,
             created_at: now,
             updated_at: now,
+            branches: Vec::new(),
+            current_branch: None,
         }
     }
 }
@@ -55,6 +61,8 @@ pub struct SessionMessage {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stats: Option<MessageStats>,
     pub timestamp: DateTime<Utc>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch_id: Option<String>,
 }
 
 /// Record of a tool call made during an assistant response
@@ -66,6 +74,19 @@ pub struct ToolCallRecord {
     pub tool_call_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub result: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// A branch in a chat session conversation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatSessionBranch {
+    pub id: String,
+    pub name: String,
+    pub parent_branch: String,
+    pub fork_point_index: usize,
+    pub created_at: DateTime<Utc>,
 }
 
 /// Response timing and token statistics

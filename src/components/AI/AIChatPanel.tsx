@@ -9,7 +9,7 @@ import { useRAGStore } from "../../stores/ragStore";
 import { useInboxStore } from "../../stores/inboxStore";
 import { useChatSessionStore } from "../../stores/chatSessionStore";
 import type { SemanticSearchResult } from "../../types/rag";
-import type { ChatSession, SessionMessage, ToolCallRecord } from "../../types/chatSession";
+import type { ChatSession, ChatSessionBranch, SessionMessage, ToolCallRecord } from "../../types/chatSession";
 import { useToastStore } from "../../stores/toastStore";
 import {
   aiChatStream,
@@ -68,6 +68,8 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
   const [showSessionList, setShowSessionList] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleInput, setTitleInput] = useState("");
+  const [showBranchSelector, setShowBranchSelector] = useState(false);
+  const [showExportMenu, setShowExportMenu] = useState(false);
   const currentSessionRef = useRef<ChatSession | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -289,6 +291,23 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
       document.removeEventListener("mouseup", handleMouseUp);
     };
   }, [isDragging, panel.size.width, panel.size.height, setPanelPosition]);
+
+  // Close dropdowns on outside click
+  useEffect(() => {
+    if (!showBranchSelector && !showExportMenu) return;
+    const handleClick = () => {
+      setShowBranchSelector(false);
+      setShowExportMenu(false);
+    };
+    // Delay to avoid closing on the same click that opened it
+    const timer = setTimeout(() => {
+      document.addEventListener("click", handleClick);
+    }, 0);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener("click", handleClick);
+    };
+  }, [showBranchSelector, showExportMenu]);
 
   // Scroll to bottom when messages change or loading state changes
   useEffect(() => {
@@ -756,6 +775,170 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
     }
   }, [saveChatSession]);
 
+  // --- Branch helpers ---
+  const getSessionBranchLineage = useCallback((branches: ChatSessionBranch[], branchId: string): string[] => {
+    const lineage: string[] = [branchId];
+    if (branchId === "main") return lineage;
+    let currentId = branchId;
+    while (currentId !== "main") {
+      const branch = branches.find(b => b.id === currentId);
+      if (!branch) break;
+      lineage.push(branch.parentBranch);
+      currentId = branch.parentBranch;
+    }
+    return lineage;
+  }, []);
+
+  const getMessagesForBranch = useCallback((
+    messages: SessionMessage[],
+    branches: ChatSessionBranch[],
+    currentBranch: string
+  ): SessionMessage[] => {
+    if (currentBranch === "main") {
+      return messages.filter(m => (m.branchId || "main") === "main");
+    }
+
+    const lineage = getSessionBranchLineage(branches, currentBranch);
+    const reversedLineage = [...lineage].reverse(); // main -> ... -> current
+
+    // Build a map of fork points for each branch (keyed by branch id)
+    const forkPoints = new Map<string, number>();
+    for (const branch of branches) {
+      forkPoints.set(branch.id, branch.forkPointIndex);
+    }
+
+    const result: SessionMessage[] = [];
+
+    for (let i = 0; i < reversedLineage.length; i++) {
+      const branchId = reversedLineage[i];
+      const nextBranchId = reversedLineage[i + 1];
+      // forkPointIndex is the message index (within display) where the next branch forks
+      const forkPointIdx = nextBranchId !== undefined ? forkPoints.get(nextBranchId) : undefined;
+
+      // Collect messages belonging to this branch, stopping at fork point
+      const branchMsgs = messages.filter(m => (m.branchId || "main") === branchId);
+      if (forkPointIdx !== undefined) {
+        // Include messages up to and including the fork point
+        result.push(...branchMsgs.slice(0, forkPointIdx + 1));
+      } else {
+        result.push(...branchMsgs);
+      }
+    }
+
+    return result;
+  }, [getSessionBranchLineage]);
+
+  // Get visible display messages (filtered by branch)
+  const visibleDisplayMessages = useMemo(() => {
+    const session = currentSessionRef.current;
+    if (!session || !session.branches?.length) {
+      // No branches, show all messages
+      return displayMessages;
+    }
+    const currentBranch = session.currentBranch || "main";
+    if (currentBranch === "main" && !session.messages.some(m => m.branchId && m.branchId !== "main")) {
+      return displayMessages;
+    }
+    // Filter display messages to match the branch-visible session messages
+    const visibleSessionMsgs = getMessagesForBranch(session.messages, session.branches, currentBranch);
+    // Map by index — display messages parallel session messages
+    const visibleIndices = new Set<number>();
+    let sessionIdx = 0;
+    for (let i = 0; i < session.messages.length && sessionIdx < visibleSessionMsgs.length; i++) {
+      if (session.messages[i] === visibleSessionMsgs[sessionIdx]) {
+        visibleIndices.add(i);
+        sessionIdx++;
+      }
+    }
+    return displayMessages.filter((_, i) => visibleIndices.has(i));
+  }, [displayMessages, currentSessionRef.current?.currentBranch, currentSessionRef.current?.branches, currentSessionRef.current?.messages, getMessagesForBranch]);
+
+  const handleCreateBranch = useCallback((messageIndex: number) => {
+    const session = currentSessionRef.current;
+    if (!session) return;
+
+    const branches = session.branches || [];
+    const branchNum = branches.length + 1;
+    const newBranch: ChatSessionBranch = {
+      id: crypto.randomUUID(),
+      name: `Branch ${branchNum}`,
+      parentBranch: session.currentBranch || "main",
+      forkPointIndex: messageIndex,
+      createdAt: new Date().toISOString(),
+    };
+
+    session.branches = [...branches, newBranch];
+    session.currentBranch = newBranch.id;
+    persistSession(session);
+    // Force re-render
+    setDisplayMessages(prev => [...prev]);
+  }, [persistSession]);
+
+  const handleSwitchBranch = useCallback((branchId: string) => {
+    const session = currentSessionRef.current;
+    if (!session) return;
+    session.currentBranch = branchId;
+    persistSession(session);
+    setShowBranchSelector(false);
+    // Force re-render
+    setDisplayMessages(prev => [...prev]);
+  }, [persistSession]);
+
+  // --- Export helper ---
+  const exportSessionToMarkdown = useCallback((session: ChatSession): string => {
+    const lines: string[] = [];
+    lines.push(`# ${session.title}`);
+    lines.push(`Model: ${session.model || "default"} | Created: ${new Date(session.createdAt).toLocaleString()}`);
+    lines.push("---");
+    lines.push("");
+
+    for (const msg of session.messages) {
+      if (msg.role === "user") {
+        lines.push(`**User:** ${msg.content}`);
+      } else if (msg.role === "assistant") {
+        lines.push(`**Assistant:** ${msg.content}`);
+        if (msg.thinking) {
+          lines.push(`> *Thinking: ${msg.thinking.slice(0, 200)}${msg.thinking.length > 200 ? "..." : ""}*`);
+        }
+      }
+      if (msg.toolCalls) {
+        for (const tc of msg.toolCalls) {
+          const args = typeof tc.arguments === "string" ? tc.arguments : JSON.stringify(tc.arguments);
+          const result = tc.error ? `Error: ${tc.error}` : tc.result || "done";
+          lines.push(`**Tool:** ${tc.tool}(${args.slice(0, 100)}) → ${result.slice(0, 200)}`);
+        }
+      }
+      lines.push("");
+      lines.push("---");
+      lines.push("");
+    }
+
+    return lines.join("\n");
+  }, []);
+
+  const handleExportCopy = useCallback(() => {
+    const session = currentSessionRef.current;
+    if (!session) return;
+    const md = exportSessionToMarkdown(session);
+    navigator.clipboard.writeText(md);
+    toast.success("Copied session to clipboard");
+    setShowExportMenu(false);
+  }, [exportSessionToMarkdown, toast]);
+
+  const handleExportDownload = useCallback(() => {
+    const session = currentSessionRef.current;
+    if (!session) return;
+    const md = exportSessionToMarkdown(session);
+    const blob = new Blob([md], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${session.title.replace(/[^a-z0-9]/gi, "_").slice(0, 50)}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setShowExportMenu(false);
+  }, [exportSessionToMarkdown]);
+
   const handleSubmit = async () => {
     if (!input.trim() || conversation.isLoading) return;
 
@@ -782,10 +965,12 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
 
     // Add user message to session
     if (session) {
+      const currentBranch = session.currentBranch || "main";
       const userSessionMsg: SessionMessage = {
         role: "user",
         content: userMessage.content,
         timestamp: new Date().toISOString(),
+        branchId: currentBranch !== "main" ? currentBranch : undefined,
       };
       session.messages.push(userSessionMsg);
       persistSession(session);
@@ -1042,7 +1227,18 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
       // Start the streaming request - command now waits for completion
       await aiChatStream(userMessage.content, {
         pageContext,
-        conversationHistory: conversation.messages.slice(-10),
+        conversationHistory: (() => {
+          // If on a branch, use branch-filtered messages for context
+          const session = currentSessionRef.current;
+          if (session?.branches?.length && session.currentBranch && session.currentBranch !== "main") {
+            const branchMsgs = getMessagesForBranch(session.messages, session.branches, session.currentBranch);
+            return branchMsgs.slice(-settings.maxContextMessages).map(m => ({
+              role: m.role as ChatMessage["role"],
+              content: m.content,
+            }));
+          }
+          return conversation.messages.slice(-settings.maxContextMessages);
+        })(),
         availableNotebooks,
         currentNotebookId: selectedNotebookId || undefined,
         providerType: resolvedProvider,
@@ -1115,6 +1311,7 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
 
       // Save assistant message to session
       if (currentSessionRef.current && accumulatedContent) {
+        const currentBranch = currentSessionRef.current.currentBranch || "main";
         const assistantSessionMsg: SessionMessage = {
           role: "assistant",
           content: accumulatedContent,
@@ -1127,6 +1324,7 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
             model: responseModel || undefined,
           },
           timestamp: new Date().toISOString(),
+          branchId: currentBranch !== "main" ? currentBranch : undefined,
         };
         currentSessionRef.current.messages.push(assistantSessionMsg);
         if (responseModel) {
@@ -1317,6 +1515,66 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
                 {currentSessionRef.current ? currentSessionRef.current.title : "AI Assistant"}
               </span>
               )}
+              {/* Branch indicator + selector */}
+              {currentSessionRef.current?.branches?.length ? (
+                <div className="relative">
+                  <button
+                    onClick={() => setShowBranchSelector(!showBranchSelector)}
+                    className="flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium transition-colors hover:opacity-80"
+                    style={{
+                      backgroundColor: (currentSessionRef.current.currentBranch || "main") !== "main"
+                        ? "rgba(249, 115, 22, 0.2)"
+                        : "rgba(139, 92, 246, 0.1)",
+                      color: (currentSessionRef.current.currentBranch || "main") !== "main"
+                        ? "var(--color-warning)"
+                        : "var(--color-text-muted)",
+                    }}
+                    title="Switch branch"
+                  >
+                    <IconBranch style={{ width: 9, height: 9 }} />
+                    {(() => {
+                      const cb = currentSessionRef.current.currentBranch || "main";
+                      if (cb === "main") return "main";
+                      const branch = currentSessionRef.current.branches?.find(b => b.id === cb);
+                      return branch?.name || cb;
+                    })()}
+                    <IconChevron style={{ width: 8, height: 8, transform: showBranchSelector ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s" }} />
+                  </button>
+                  {showBranchSelector && (
+                    <div
+                      className="absolute top-full left-0 mt-1 min-w-[140px] rounded-lg border p-1 shadow-lg z-50"
+                      style={{
+                        backgroundColor: "var(--color-bg-secondary)",
+                        borderColor: "var(--color-border)",
+                      }}
+                    >
+                      <button
+                        onClick={() => handleSwitchBranch("main")}
+                        className="w-full rounded px-2 py-1.5 text-left text-xs transition-colors hover:bg-[--color-bg-tertiary] flex items-center justify-between"
+                        style={{
+                          color: (currentSessionRef.current.currentBranch || "main") === "main" ? "var(--color-accent)" : "var(--color-text-primary)",
+                        }}
+                      >
+                        <span>main</span>
+                        {(currentSessionRef.current.currentBranch || "main") === "main" && <IconCheck style={{ width: 10, height: 10 }} />}
+                      </button>
+                      {currentSessionRef.current.branches?.map(b => (
+                        <button
+                          key={b.id}
+                          onClick={() => handleSwitchBranch(b.id)}
+                          className="w-full rounded px-2 py-1.5 text-left text-xs transition-colors hover:bg-[--color-bg-tertiary] flex items-center justify-between"
+                          style={{
+                            color: currentSessionRef.current?.currentBranch === b.id ? "var(--color-accent)" : "var(--color-text-primary)",
+                          }}
+                        >
+                          <span>{b.name}</span>
+                          {currentSessionRef.current?.currentBranch === b.id && <IconCheck style={{ width: 10, height: 10 }} />}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : null}
               {panel.isPinned && (
                 <span
                   className="rounded-full px-1.5 py-0.5 text-[10px] font-medium"
@@ -1411,6 +1669,43 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
             >
               <IconResize />
             </button>
+          )}
+          {/* Export button */}
+          {currentSessionRef.current && (
+            <div className="relative">
+              <button
+                onClick={() => setShowExportMenu(!showExportMenu)}
+                className="flex h-8 w-8 items-center justify-center rounded-lg transition-all hover:bg-[--color-bg-tertiary]"
+                style={{ color: "var(--color-text-muted)" }}
+                title="Export conversation"
+              >
+                <IconExport />
+              </button>
+              {showExportMenu && (
+                <div
+                  className="absolute top-full right-0 mt-1 min-w-[160px] rounded-lg border p-1 shadow-lg z-50"
+                  style={{
+                    backgroundColor: "var(--color-bg-secondary)",
+                    borderColor: "var(--color-border)",
+                  }}
+                >
+                  <button
+                    onClick={handleExportCopy}
+                    className="w-full rounded px-3 py-2 text-left text-xs transition-colors hover:bg-[--color-bg-tertiary]"
+                    style={{ color: "var(--color-text-primary)" }}
+                  >
+                    Copy to clipboard
+                  </button>
+                  <button
+                    onClick={handleExportDownload}
+                    className="w-full rounded px-3 py-2 text-left text-xs transition-colors hover:bg-[--color-bg-tertiary]"
+                    style={{ color: "var(--color-text-primary)" }}
+                  >
+                    Download as .md
+                  </button>
+                </div>
+              )}
+            </div>
           )}
           <button
             onClick={onOpenSettings}
@@ -1600,7 +1895,7 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
               </button>
             )}
           </div>
-        ) : displayMessages.length === 0 && !conversation.isLoading ? (
+        ) : visibleDisplayMessages.length === 0 && !conversation.isLoading ? (
           <div className="flex h-full flex-col items-center justify-center text-center">
             <div
               className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl"
@@ -1647,12 +1942,28 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
           </div>
         ) : (
           <div className="space-y-5">
-            {displayMessages.map((msg, i) => (
+            {visibleDisplayMessages.map((msg, i) => (
               <div
                 key={i}
-                className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
+                className={`group/msg relative flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
               >
                 <div className="max-w-[85%]">
+                  {/* Branch button on user messages */}
+                  {msg.role === "user" && currentSessionRef.current && (
+                    <div className="flex justify-end mb-1">
+                      <button
+                        onClick={() => handleCreateBranch(i)}
+                        className="opacity-0 group-hover/msg:opacity-100 flex items-center gap-1 text-xs rounded px-1.5 py-0.5 transition-opacity"
+                        style={{
+                          color: "var(--color-text-muted)",
+                        }}
+                        title="Branch from here"
+                      >
+                        <IconBranch style={{ width: 10, height: 10 }} />
+                        Branch
+                      </button>
+                    </div>
+                  )}
                   {/* Thinking section (collapsible) */}
                   {msg.thinking && (
                     <div className="mb-2">
@@ -2709,6 +3020,48 @@ function IconSpinner() {
       style={{ color: "var(--color-accent)" }}
     >
       <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+    </svg>
+  );
+}
+
+function IconBranch({ style }: { style?: React.CSSProperties }) {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={style}
+    >
+      <line x1="6" y1="3" x2="6" y2="15" />
+      <circle cx="18" cy="6" r="3" />
+      <circle cx="6" cy="18" r="3" />
+      <path d="M18 9a9 9 0 0 1-9 9" />
+    </svg>
+  );
+}
+
+function IconExport() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="7 10 12 15 17 10" />
+      <line x1="12" y1="15" x2="12" y2="3" />
     </svg>
   );
 }
