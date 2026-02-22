@@ -2214,3 +2214,45 @@
   color: var(--color-text-primary);
   mix-blend-mode: difference;
 }
+
+/* Conditional format rule editor */
+.db-cf-rule {
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  padding: 6px;
+  margin-bottom: 6px;
+}
+
+.db-cf-rule-row {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+
+.db-cf-rule-row > .db-pe-select,
+.db-cf-rule-row > .db-pe-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.db-cf-colors {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.db-cf-color-label {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}
+
+.db-cf-preview {
+  margin-top: 4px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+  text-align: center;
+}

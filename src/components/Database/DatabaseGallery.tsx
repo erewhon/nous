@@ -14,6 +14,7 @@ import { pickNextColor } from "./CellEditors";
 import type { RelationContext } from "./useRelationContext";
 import { DatabaseRowDetail } from "./DatabaseRowDetail";
 import { compareCellValues, applyFilter } from "./DatabaseTable";
+import { evaluateConditionalFormat, conditionalStyleToCSS } from "./conditionalFormat";
 
 interface DatabaseGalleryProps {
   content: DatabaseContentV2;
@@ -304,8 +305,11 @@ export function DatabaseGallery({
               {displayProps.slice(0, 4).map((prop) => {
                 const rendered = renderPropValue(prop, row);
                 if (!rendered) return null;
+                const cfCSS = conditionalStyleToCSS(
+                  evaluateConditionalFormat(prop, row.cells[prop.id] ?? null)
+                );
                 return (
-                  <div key={prop.id} className="db-gallery-card-row">
+                  <div key={prop.id} className="db-gallery-card-row" style={cfCSS}>
                     <span className="db-gallery-card-label">{prop.name}</span>
                     <span className="db-gallery-card-value">{rendered}</span>
                   </div>

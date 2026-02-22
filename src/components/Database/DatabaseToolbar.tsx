@@ -602,7 +602,7 @@ function SortPopover({
 }
 
 // Operators by property type
-const OPERATORS_BY_TYPE: Record<string, { value: string; label: string }[]> = {
+export const OPERATORS_BY_TYPE: Record<string, { value: string; label: string }[]> = {
   text: [
     { value: "contains", label: "Contains" },
     { value: "doesNotContain", label: "Does not contain" },
@@ -666,11 +666,11 @@ const OPERATORS_BY_TYPE: Record<string, { value: string; label: string }[]> = {
   ],
 };
 
-function getOperatorsForType(type: string) {
+export function getOperatorsForType(type: string) {
   return OPERATORS_BY_TYPE[type] ?? OPERATORS_BY_TYPE.text;
 }
 
-function getDefaultOperator(type: string) {
+export function getDefaultOperator(type: string) {
   const ops = getOperatorsForType(type);
   return ops[0]?.value ?? "contains";
 }

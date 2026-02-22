@@ -1,5 +1,6 @@
 import type { DatabaseRow, PropertyDef, CellValue } from "../../types/database";
 import { formatNumber } from "./formatNumber";
+import { evaluateConditionalFormat, conditionalStyleToCSS } from "./conditionalFormat";
 
 interface DatabaseBoardCardProps {
   row: DatabaseRow;
@@ -111,8 +112,11 @@ export function DatabaseBoardCard({
       {secondaryProps.map((prop) => {
         const rendered = renderValue(prop);
         if (!rendered) return null;
+        const cfCSS = conditionalStyleToCSS(
+          evaluateConditionalFormat(prop, row.cells[prop.id] ?? null)
+        );
         return (
-          <div key={prop.id} className="db-board-card-prop">
+          <div key={prop.id} className="db-board-card-prop" style={cfCSS}>
             {rendered}
           </div>
         );

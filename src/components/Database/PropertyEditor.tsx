@@ -1,8 +1,9 @@
 import { useState, useRef, useCallback } from "react";
-import type { PropertyDef, PropertyType, SelectOption, CellValue, NumberFormat, FormulaConfig } from "../../types/database";
+import type { PropertyDef, PropertyType, SelectOption, CellValue, NumberFormat, FormulaConfig, ConditionalFormatRule } from "../../types/database";
 import { pickNextColor } from "./CellEditors";
 import { evaluateFormula } from "./formulaEvaluator";
 import { useFormulaAutocomplete, FormulaDropdown } from "./FormulaAutocomplete";
+import { getOperatorsForType, getDefaultOperator } from "./DatabaseToolbar";
 
 interface PropertyEditorProps {
   property: PropertyDef;
@@ -187,6 +188,14 @@ export function PropertyEditor({ property, onUpdate, onDelete, onClose, allPrope
             onChange={(val) => onUpdate({ defaultValue: val ?? undefined })}
           />
         </div>
+      )}
+
+      {/* Conditional formatting */}
+      {property.type !== "relation" && property.type !== "rollup" && property.type !== "pageLink" && (
+        <ConditionalFormatEditor
+          property={property}
+          onUpdate={onUpdate}
+        />
       )}
 
       {/* Delete */}
@@ -507,6 +516,188 @@ function FormulaEditor({
       )}
     </div>
   );
+}
+
+// Conditional format rule editor
+function ConditionalFormatEditor({
+  property,
+  onUpdate,
+}: {
+  property: PropertyDef;
+  onUpdate: (updates: Partial<PropertyDef>) => void;
+}) {
+  const rules = property.conditionalFormats ?? [];
+
+  const addRule = () => {
+    const newRule: ConditionalFormatRule = {
+      id: crypto.randomUUID(),
+      operator: getDefaultOperator(property.type),
+      value: "",
+      style: { backgroundColor: "#22c55e30", textColor: "#22c55e" },
+    };
+    onUpdate({ conditionalFormats: [...rules, newRule] });
+  };
+
+  const updateRule = (id: string, patch: Partial<ConditionalFormatRule>) => {
+    onUpdate({
+      conditionalFormats: rules.map((r) =>
+        r.id === id ? { ...r, ...patch } : r
+      ),
+    });
+  };
+
+  const removeRule = (id: string) => {
+    const updated = rules.filter((r) => r.id !== id);
+    onUpdate({ conditionalFormats: updated.length > 0 ? updated : undefined });
+  };
+
+  const operators = getOperatorsForType(property.type);
+
+  return (
+    <div className="db-pe-section">
+      <label className="db-pe-label">Conditional formatting</label>
+      {rules.map((rule) => {
+        const needsValue = rule.operator !== "isEmpty" && rule.operator !== "isNotEmpty";
+        return (
+          <div key={rule.id} className="db-cf-rule">
+            <div className="db-cf-rule-row">
+              <select
+                className="db-pe-select"
+                value={rule.operator}
+                onChange={(e) => updateRule(rule.id, { operator: e.target.value, value: "" })}
+              >
+                {operators.map((op) => (
+                  <option key={op.value} value={op.value}>{op.label}</option>
+                ))}
+              </select>
+              {needsValue && (
+                <CFValueInput
+                  propType={property.type}
+                  options={property.options}
+                  value={rule.value}
+                  onChange={(v) => updateRule(rule.id, { value: v })}
+                />
+              )}
+            </div>
+            <div className="db-cf-colors">
+              <label className="db-cf-color-label">
+                BG
+                <input
+                  type="color"
+                  value={(rule.style.backgroundColor ?? "#22c55e").replace(/[0-9a-f]{2}$/i, "")}
+                  onChange={(e) =>
+                    updateRule(rule.id, {
+                      style: { ...rule.style, backgroundColor: e.target.value + "30" },
+                    })
+                  }
+                  className="db-pe-color-input"
+                />
+              </label>
+              <label className="db-cf-color-label">
+                Text
+                <input
+                  type="color"
+                  value={rule.style.textColor ?? "#22c55e"}
+                  onChange={(e) =>
+                    updateRule(rule.id, {
+                      style: { ...rule.style, textColor: e.target.value },
+                    })
+                  }
+                  className="db-pe-color-input"
+                />
+              </label>
+              <button className="db-pe-option-remove" onClick={() => removeRule(rule.id)}>
+                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+            <div
+              className="db-cf-preview"
+              style={{
+                backgroundColor: rule.style.backgroundColor,
+                color: rule.style.textColor,
+              }}
+            >
+              Preview
+            </div>
+          </div>
+        );
+      })}
+      <button className="db-pe-add-btn" onClick={addRule}>
+        Add rule
+      </button>
+    </div>
+  );
+}
+
+// Value input for conditional format rules (mirrors FilterValueInput)
+function CFValueInput({
+  propType,
+  options,
+  value,
+  onChange,
+}: {
+  propType: string;
+  options?: SelectOption[];
+  value: CellValue;
+  onChange: (v: CellValue) => void;
+}) {
+  switch (propType) {
+    case "number":
+      return (
+        <input
+          className="db-pe-input"
+          type="number"
+          value={String(value ?? "")}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="Value"
+        />
+      );
+    case "date":
+      return (
+        <input
+          className="db-pe-input"
+          type="date"
+          value={String(value ?? "")}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      );
+    case "select":
+    case "multiSelect":
+      return (
+        <select
+          className="db-pe-select"
+          value={String(value ?? "")}
+          onChange={(e) => onChange(e.target.value)}
+        >
+          <option value="">Select...</option>
+          {(options ?? []).map((opt) => (
+            <option key={opt.id} value={opt.id}>{opt.label}</option>
+          ))}
+        </select>
+      );
+    case "checkbox":
+      return (
+        <select
+          className="db-pe-select"
+          value={String(value ?? "")}
+          onChange={(e) => onChange(e.target.value)}
+        >
+          <option value="true">Checked</option>
+          <option value="false">Unchecked</option>
+        </select>
+      );
+    default:
+      return (
+        <input
+          className="db-pe-input"
+          value={String(value ?? "")}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="Value"
+        />
+      );
+  }
 }
 
 // Type icon component for column headers

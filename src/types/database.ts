@@ -82,6 +82,21 @@ export const CellValueSchema = z.union([
 ]);
 export type CellValue = z.infer<typeof CellValueSchema>;
 
+// Conditional formatting
+export const ConditionalFormatStyleSchema = z.object({
+  backgroundColor: z.string().optional(),
+  textColor: z.string().optional(),
+});
+export type ConditionalFormatStyle = z.infer<typeof ConditionalFormatStyleSchema>;
+
+export const ConditionalFormatRuleSchema = z.object({
+  id: z.string(),
+  operator: z.string(),
+  value: CellValueSchema,
+  style: ConditionalFormatStyleSchema,
+});
+export type ConditionalFormatRule = z.infer<typeof ConditionalFormatRuleSchema>;
+
 // Property (column) definition
 export const PropertyDefSchema = z.object({
   id: z.string(),
@@ -94,6 +109,7 @@ export const PropertyDefSchema = z.object({
   formulaConfig: FormulaConfigSchema.optional(),
   numberFormat: NumberFormatSchema.optional(),
   defaultValue: CellValueSchema.optional(),
+  conditionalFormats: z.array(ConditionalFormatRuleSchema).optional(),
 });
 export type PropertyDef = z.infer<typeof PropertyDefSchema>;
 

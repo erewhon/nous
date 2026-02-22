@@ -28,6 +28,7 @@ import {
 import type { RelationContext } from "./useRelationContext";
 import { PropertyEditor, PropertyTypeIcon } from "./PropertyEditor";
 import { computeSummary, getAggregationsForType, SUMMARY_LABELS } from "./computeSummary";
+import { evaluateConditionalFormat, conditionalStyleToCSS } from "./conditionalFormat";
 
 interface DatabaseTableProps {
   content: DatabaseContentV2;
@@ -486,15 +487,20 @@ export function DatabaseTable({
             </svg>
           </button>
         </td>
-        {content.properties.map((prop) => (
-          <td
-            key={prop.id}
-            className="db-cell"
-            style={{ width: getColWidth(prop) }}
-          >
-            {renderCell(prop, row)}
-          </td>
-        ))}
+        {content.properties.map((prop) => {
+          const cfCSS = conditionalStyleToCSS(
+            evaluateConditionalFormat(prop, resolveCellValue(row, prop.id))
+          );
+          return (
+            <td
+              key={prop.id}
+              className="db-cell"
+              style={{ width: getColWidth(prop), ...cfCSS }}
+            >
+              {renderCell(prop, row)}
+            </td>
+          );
+        })}
       </tr>
     ));
 
