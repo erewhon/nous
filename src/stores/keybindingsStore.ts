@@ -21,7 +21,8 @@ export type KeybindingAction =
   | "zenMode"
   | "dailyNote"
   | "toggleFavorite"
-  | "webClipper";
+  | "webClipper"
+  | "toggleOutline";
 
 // Keybinding definition
 export interface Keybinding {
@@ -169,6 +170,13 @@ export const DEFAULT_KEYBINDINGS: Keybinding[] = [
     label: "Web Clipper",
     description: "Clip a web page",
     key: "l",
+    modifiers: { ctrl: true, shift: true, alt: false },
+  },
+  {
+    action: "toggleOutline",
+    label: "Toggle Outline",
+    description: "Toggle the outline/TOC panel",
+    key: "o",
     modifiers: { ctrl: true, shift: true, alt: false },
   },
 ];

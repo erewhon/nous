@@ -31,6 +31,7 @@ export interface PanelWidths {
   sidebar: number;      // Default 256px
   sections: number;     // Default 192px
   folderTree: number;   // Default 256px
+  outline: number;      // Default 220px
 }
 
 // Unified auto-hide setting for all panels
@@ -40,18 +41,21 @@ const DEFAULT_PANEL_WIDTHS: PanelWidths = {
   sidebar: 256,
   sections: 192,
   folderTree: 256,
+  outline: 220,
 };
 
 const MIN_PANEL_WIDTHS: PanelWidths = {
   sidebar: 180,
   sections: 140,
   folderTree: 180,
+  outline: 160,
 };
 
 const MAX_PANEL_WIDTHS: PanelWidths = {
   sidebar: 400,
   sections: 300,
   folderTree: 400,
+  outline: 360,
 };
 
 interface ThemeSettings {

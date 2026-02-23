@@ -31,6 +31,7 @@ import { SimilarPagesPanel } from "./SimilarPagesPanel";
 import type { EditorData, Page } from "../../types/page";
 import { calculatePageStats, type PageStats } from "../../utils/pageStats";
 import { useWritingGoalsStore } from "../../stores/writingGoalsStore";
+import { useKeybindingsStore } from "../../stores/keybindingsStore";
 
 interface EditorPaneContentProps {
   pane: EditorPane;
@@ -200,6 +201,28 @@ export function EditorPaneContent({
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [zenMode, setZenMode, showSearch]);
+
+  // Toggle outline keyboard shortcut
+  const outlineBinding = useKeybindingsStore((s) => s.getKeybinding("toggleOutline"));
+  useEffect(() => {
+    if (!isActive || !outlineBinding) return;
+
+    const handler = (e: KeyboardEvent) => {
+      const ctrlMatch = e.ctrlKey || e.metaKey;
+      if (
+        ctrlMatch === outlineBinding.modifiers.ctrl &&
+        e.shiftKey === outlineBinding.modifiers.shift &&
+        e.altKey === outlineBinding.modifiers.alt &&
+        e.key.toLowerCase() === outlineBinding.key.toLowerCase()
+      ) {
+        e.preventDefault();
+        toggleOutline();
+      }
+    };
+
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [isActive, outlineBinding, toggleOutline]);
 
   // Ensure current page is in tabs - replace non-pinned tab for "one page at a time" behavior
   useEffect(() => {

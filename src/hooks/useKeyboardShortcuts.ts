@@ -21,6 +21,7 @@ interface KeyboardShortcuts {
   onDailyNote?: () => void;
   onToggleFavorite?: () => void;
   onWebClipper?: () => void;
+  onToggleOutline?: () => void;
 }
 
 // Map action names to callback property names
@@ -44,6 +45,7 @@ const ACTION_TO_CALLBACK: Record<KeybindingAction, keyof KeyboardShortcuts> = {
   dailyNote: "onDailyNote",
   toggleFavorite: "onToggleFavorite",
   webClipper: "onWebClipper",
+  toggleOutline: "onToggleOutline",
 };
 
 export function useKeyboardShortcuts(callbacks: KeyboardShortcuts) {
