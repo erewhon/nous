@@ -1810,6 +1810,15 @@
   background-color: var(--color-bg-tertiary);
 }
 
+.db-object-type-picker-category {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 8px 10px 2px;
+}
+
 /* Default value inputs in ObjectTypeManager */
 .db-ot-default-input {
   font-size: 11px;

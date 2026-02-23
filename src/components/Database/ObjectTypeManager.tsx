@@ -395,8 +395,19 @@ interface ObjectTypePickerProps {
   onManageTypes: () => void;
 }
 
+const TEMPLATE_CATEGORIES: { label: string; typeIds: string[] }[] = [
+  { label: "Productivity", typeIds: ["builtin-project", "builtin-task", "builtin-meeting", "builtin-habit"] },
+  { label: "People & Sales", typeIds: ["builtin-person", "builtin-crm"] },
+  { label: "Collections", typeIds: ["builtin-book", "builtin-recipe", "builtin-inventory"] },
+];
+
 export function ObjectTypePicker({ onSelect, onManageTypes }: ObjectTypePickerProps) {
   const allTypes = useObjectTypeStore((s) => s.getAllTypes());
+
+  // Group built-in types by category, collect custom types separately
+  const typeById = new Map(allTypes.map((t) => [t.id, t]));
+  const categorizedIds = new Set(TEMPLATE_CATEGORIES.flatMap((c) => c.typeIds));
+  const customTypes = allTypes.filter((t) => !categorizedIds.has(t.id));
 
   return (
     <div className="db-object-type-picker">
@@ -422,21 +433,50 @@ export function ObjectTypePicker({ onSelect, onManageTypes }: ObjectTypePickerPr
           <span className="db-object-type-card-desc">Start from scratch with a single text column</span>
         </div>
       </button>
-      {allTypes.map((ot) => (
-        <button
-          key={ot.id}
-          className="db-object-type-picker-option"
-          onClick={() => onSelect(ot)}
-        >
-          <span className="db-object-type-card-icon">{ot.icon}</span>
-          <div className="db-object-type-card-info">
-            <span className="db-object-type-card-name">{ot.name}</span>
-            {ot.description && (
-              <span className="db-object-type-card-desc">{ot.description}</span>
-            )}
+      {TEMPLATE_CATEGORIES.map((cat) => {
+        const types = cat.typeIds.map((id) => typeById.get(id)).filter(Boolean) as ObjectType[];
+        if (types.length === 0) return null;
+        return (
+          <div key={cat.label}>
+            <div className="db-object-type-picker-category">{cat.label}</div>
+            {types.map((ot) => (
+              <button
+                key={ot.id}
+                className="db-object-type-picker-option"
+                onClick={() => onSelect(ot)}
+              >
+                <span className="db-object-type-card-icon">{ot.icon}</span>
+                <div className="db-object-type-card-info">
+                  <span className="db-object-type-card-name">{ot.name}</span>
+                  {ot.description && (
+                    <span className="db-object-type-card-desc">{ot.description}</span>
+                  )}
+                </div>
+              </button>
+            ))}
           </div>
-        </button>
-      ))}
+        );
+      })}
+      {customTypes.length > 0 && (
+        <div>
+          <div className="db-object-type-picker-category">Custom</div>
+          {customTypes.map((ot) => (
+            <button
+              key={ot.id}
+              className="db-object-type-picker-option"
+              onClick={() => onSelect(ot)}
+            >
+              <span className="db-object-type-card-icon">{ot.icon}</span>
+              <div className="db-object-type-card-info">
+                <span className="db-object-type-card-name">{ot.name}</span>
+                {ot.description && (
+                  <span className="db-object-type-card-desc">{ot.description}</span>
+                )}
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
