@@ -2248,8 +2248,13 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
                       </button>
                       <button
                         onClick={async () => {
-                          const title = msg.content.split("\n")[0].replace(/^#+\s*/, "").slice(0, 100) || "AI Response";
-                          await quickCapture(title, msg.content, ["ai-chat"]);
+                          try {
+                            const title = msg.content.split("\n")[0].replace(/^#+\s*/, "").slice(0, 100) || "AI Response";
+                            await quickCapture(title, msg.content, ["ai-chat"]);
+                            toast.success("Saved to inbox");
+                          } catch (e) {
+                            toast.error(`Failed to save to inbox: ${e}`);
+                          }
                         }}
                         className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs transition-colors hover:opacity-80"
                         style={{
