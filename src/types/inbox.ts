@@ -7,6 +7,11 @@ export const CaptureSourceSchema = z.union([
   z.object({ type: z.literal("email"), from: z.string() }),
   z.object({ type: z.literal("api"), source: z.string() }),
   z.object({ type: z.literal("import"), format: z.string() }),
+  z.object({
+    type: z.literal("monitor"),
+    target_name: z.string(),
+    target_id: z.string(),
+  }),
 ]);
 
 export type CaptureSource = z.infer<typeof CaptureSourceSchema>;

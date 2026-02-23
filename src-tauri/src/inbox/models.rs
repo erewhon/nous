@@ -75,6 +75,11 @@ pub enum CaptureSource {
     Api { source: String },
     /// Imported from another format
     Import { format: String },
+    /// Captured from app monitor
+    Monitor {
+        target_name: String,
+        target_id: String,
+    },
 }
 
 /// AI classification result for an inbox item

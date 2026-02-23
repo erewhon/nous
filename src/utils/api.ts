@@ -3017,3 +3017,73 @@ export async function revertBlock(
     snapshotName,
   });
 }
+
+// ===== Monitor API =====
+
+import type {
+  MonitorTarget,
+  CaptureEvent,
+  WindowInfo,
+  CreateTargetRequest,
+  UpdateTargetRequest,
+} from "../types/monitor";
+
+export async function monitorListTargets(): Promise<MonitorTarget[]> {
+  return invoke<MonitorTarget[]>("monitor_list_targets");
+}
+
+export async function monitorGetTarget(targetId: string): Promise<MonitorTarget> {
+  return invoke<MonitorTarget>("monitor_get_target", { targetId });
+}
+
+export async function monitorCreateTarget(
+  request: CreateTargetRequest
+): Promise<MonitorTarget> {
+  return invoke<MonitorTarget>("monitor_create_target", { request });
+}
+
+export async function monitorUpdateTarget(
+  targetId: string,
+  request: UpdateTargetRequest
+): Promise<MonitorTarget> {
+  return invoke<MonitorTarget>("monitor_update_target", { targetId, request });
+}
+
+export async function monitorDeleteTarget(targetId: string): Promise<void> {
+  return invoke<void>("monitor_delete_target", { targetId });
+}
+
+export async function monitorCaptureNow(targetId: string): Promise<void> {
+  return invoke<void>("monitor_capture_now", { targetId });
+}
+
+export async function monitorListEvents(
+  targetId?: string,
+  limit?: number
+): Promise<CaptureEvent[]> {
+  return invoke<CaptureEvent[]>("monitor_list_events", { targetId, limit });
+}
+
+export async function monitorMarkRead(eventId: string): Promise<CaptureEvent> {
+  return invoke<CaptureEvent>("monitor_mark_read", { eventId });
+}
+
+export async function monitorDismissEvent(eventId: string): Promise<void> {
+  return invoke<void>("monitor_dismiss_event", { eventId });
+}
+
+export async function monitorStart(): Promise<void> {
+  return invoke<void>("monitor_start");
+}
+
+export async function monitorStop(): Promise<void> {
+  return invoke<void>("monitor_stop");
+}
+
+export async function monitorListWindows(): Promise<WindowInfo[]> {
+  return invoke<WindowInfo[]>("monitor_list_windows");
+}
+
+export async function monitorUnreadCount(): Promise<number> {
+  return invoke<number>("monitor_unread_count");
+}

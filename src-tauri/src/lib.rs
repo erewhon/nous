@@ -19,6 +19,7 @@ mod git;
 mod goals;
 pub mod inbox;
 mod joplin;
+mod monitor;
 pub mod library;
 pub mod markdown;
 mod notion;
@@ -46,6 +47,7 @@ use energy::EnergyStorage;
 use goals::GoalsStorage;
 use inbox::InboxStorage;
 use library::LibraryStorage;
+use monitor::MonitorStorage;
 use python_bridge::PythonAI;
 use rag::VectorIndex;
 use search::SearchIndex;
@@ -76,6 +78,8 @@ pub struct AppState {
     pub video_server: Arc<tokio::sync::Mutex<Option<VideoServer>>>,
     pub chat_session_storage: Arc<Mutex<ChatSessionStorage>>,
     pub encryption_manager: Arc<EncryptionManager>,
+    pub monitor_storage: Arc<Mutex<MonitorStorage>>,
+    pub monitor_scheduler: Mutex<Option<monitor::scheduler::MonitorScheduler>>,
     /// Keeps the MCP file watcher alive for the app's lifetime.
     pub _mcp_watcher: Mutex<Option<notify::PollWatcher>>,
 }
@@ -174,6 +178,11 @@ pub fn run() {
     let inbox_storage = InboxStorage::new(library_path.clone())
         .expect("Failed to initialize inbox storage");
     let inbox_storage_arc = Arc::new(Mutex::new(inbox_storage));
+
+    // Initialize monitor storage (library-scoped)
+    let monitor_storage = MonitorStorage::new(library_path.clone())
+        .expect("Failed to initialize monitor storage");
+    let monitor_storage_arc = Arc::new(Mutex::new(monitor_storage));
 
     // Initialize flashcard storage (library-scoped)
     let flashcard_storage = FlashcardStorage::new(library_path.join("notebooks"));
@@ -283,6 +292,8 @@ pub fn run() {
         sync_scheduler: sync_scheduler_arc,
         video_server: video_server_arc,
         encryption_manager,
+        monitor_storage: monitor_storage_arc,
+        monitor_scheduler: Mutex::new(None),
         _mcp_watcher: Mutex::new(None),
     };
 
@@ -601,6 +612,20 @@ pub fn run() {
             commands::inbox_apply_actions,
             commands::inbox_delete,
             commands::inbox_clear_processed,
+            // Monitor commands
+            commands::monitor_list_targets,
+            commands::monitor_get_target,
+            commands::monitor_create_target,
+            commands::monitor_update_target,
+            commands::monitor_delete_target,
+            commands::monitor_capture_now,
+            commands::monitor_list_events,
+            commands::monitor_mark_read,
+            commands::monitor_dismiss_event,
+            commands::monitor_start,
+            commands::monitor_stop,
+            commands::monitor_list_windows,
+            commands::monitor_unread_count,
             // Goals commands
             commands::list_goals,
             commands::list_active_goals,

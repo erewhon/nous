@@ -3761,6 +3761,55 @@ impl PythonAI {
             Ok(value)
         })
     }
+
+    /// Analyze a screenshot using AI vision (multimodal)
+    pub fn analyze_screenshot(
+        &self,
+        image_path: &str,
+        watch_instructions: Option<&str>,
+    ) -> Result<serde_json::Value> {
+        Python::attach(|py| {
+            self.setup_python_path(py)?;
+
+            let vision_module = py.import("nous_ai.vision")?;
+            let analyze_fn = vision_module.getattr("analyze_screenshot_sync")?;
+
+            let kwargs = PyDict::new(py);
+            kwargs.set_item("image_path", image_path)?;
+            if let Some(instructions) = watch_instructions {
+                kwargs.set_item("watch_instructions", instructions)?;
+            }
+
+            let result = analyze_fn.call((), Some(&kwargs))?;
+            let json_str = py
+                .import("json")?
+                .call_method1("dumps", (result,))?
+                .extract::<String>()?;
+
+            Ok(serde_json::from_str(&json_str).unwrap_or(serde_json::Value::Null))
+        })
+    }
+
+    /// Scrape accessibility tree from a window
+    pub fn scrape_accessibility(&self, window_name: &str) -> Result<serde_json::Value> {
+        Python::attach(|py| {
+            self.setup_python_path(py)?;
+
+            let a11y_module = py.import("nous_ai.accessibility")?;
+            let scrape_fn = a11y_module.getattr("scrape_window_atspi_sync")?;
+
+            let kwargs = PyDict::new(py);
+            kwargs.set_item("window_name", window_name)?;
+
+            let result = scrape_fn.call((), Some(&kwargs))?;
+            let json_str = py
+                .import("json")?
+                .call_method1("dumps", (result,))?
+                .extract::<String>()?;
+
+            Ok(serde_json::from_str(&json_str).unwrap_or(serde_json::Value::Null))
+        })
+    }
 }
 
 // ===== Audio Generation Types =====

@@ -9,6 +9,7 @@ import { RAGSettings } from "./RAGSettings";
 import { BackupScheduleSettings } from "./BackupScheduleSettings";
 import { ExternalSourcesSettings } from "./ExternalSourcesSettings";
 import { DailyNotesSettings } from "./DailyNotesSettings";
+import { MonitorSettings } from "./MonitorSettings";
 import { LibrarySettingsPanel } from "../Library";
 import type { ProviderType, ProviderConfig } from "../../types/ai";
 import type { TTSProviderType } from "../../types/audio";
@@ -28,7 +29,8 @@ interface SettingsDialogProps {
     | "backup"
     | "audio"
     | "external-sources"
-    | "daily-notes";
+    | "daily-notes"
+    | "monitor";
 }
 
 type TabId =
@@ -44,7 +46,8 @@ type TabId =
   | "audio"
   | "voice"
   | "external-sources"
-  | "daily-notes";
+  | "daily-notes"
+  | "monitor";
 
 interface TabCategory {
   name: string;
@@ -88,6 +91,7 @@ const TAB_CATEGORIES: TabCategory[] = [
     name: "Integrations",
     tabs: [
       { id: "mcp", label: "MCP Servers", icon: <IconPlug /> },
+      { id: "monitor", label: "Monitor", icon: <IconMonitor /> },
     ],
   },
 ];
@@ -249,6 +253,7 @@ export function SettingsDialog({
             {activeTab === "mcp" && <MCPServersSettings />}
             {activeTab === "web-research" && <WebResearchSettingsContent />}
             {activeTab === "external-sources" && <ExternalSourcesSettings />}
+            {activeTab === "monitor" && <MonitorSettings />}
           </div>
         </div>
       </div>
@@ -2280,6 +2285,25 @@ function IconKeyboard() {
       <path d="M14 12h.01" />
       <path d="M18 12h.01" />
       <path d="M8 16h8" />
+    </svg>
+  );
+}
+
+function IconMonitor() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+      <circle cx="12" cy="12" r="3" />
     </svg>
   );
 }

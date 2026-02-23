@@ -19,7 +19,7 @@ export type FocusHighlightMode = "sentence" | "paragraph" | "none";
 export type ToolButtonId =
   | "quick-capture" | "web-clipper" | "inbox" | "flashcards" | "tasks"
   | "goals" | "people" | "daily-notes" | "ai-chat" | "actions"
-  | "graph-view" | "random-note" | "settings";
+  | "graph-view" | "random-note" | "settings" | "monitor";
 
 export interface ZenModeSettings {
   typewriterScrolling: boolean;

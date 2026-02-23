@@ -11,6 +11,7 @@ import { useThemeStore, type ToolButtonId } from "../../stores/themeStore";
 import { useDailyNotesStore } from "../../stores/dailyNotesStore";
 import { useTasksStore } from "../../stores/tasksStore";
 import { useContactStore } from "../../stores/contactStore";
+import { useMonitorStore } from "../../stores/monitorStore";
 import { NotebookList } from "../NotebookList/NotebookList";
 import { LibrarySwitcher } from "../Library";
 import {
@@ -49,6 +50,7 @@ export function Sidebar({ width = 256 }: SidebarProps) {
   const { togglePanel: toggleDailyNotes } = useDailyNotesStore();
   const { summary: tasksSummary, togglePanel: toggleTasks } = useTasksStore();
   const { togglePanel: togglePeople } = useContactStore();
+  const { openMonitorPanel, unreadCount: monitorUnread } = useMonitorStore();
   const autoHidePanels = useThemeStore((state) => state.autoHidePanels);
   const setAutoHidePanels = useThemeStore((state) => state.setAutoHidePanels);
   const showRecentPages = useThemeStore((state) => state.showRecentPages);
@@ -442,6 +444,8 @@ export function Sidebar({ width = 256 }: SidebarProps) {
         goalStreak={goalsSummary?.highestStreak ?? 0}
         tasksOverdue={tasksSummary.overdueCount}
         tasksDueToday={tasksSummary.dueTodayCount}
+        openMonitorPanel={openMonitorPanel}
+        monitorUnread={monitorUnread}
       />
       {/* Notebook count and archive toggle */}
       <div
@@ -615,6 +619,8 @@ interface SidebarToolDockProps {
   goalStreak: number;
   tasksOverdue: number;
   tasksDueToday: number;
+  openMonitorPanel: () => void;
+  monitorUnread: number;
 }
 
 // --- SortableToolButton for compact bar ---
@@ -698,6 +704,8 @@ function SidebarToolDock({
   goalStreak,
   tasksOverdue,
   tasksDueToday,
+  openMonitorPanel,
+  monitorUnread,
 }: SidebarToolDockProps) {
   const [moreOpen, setMoreOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -834,6 +842,13 @@ function SidebarToolDock({
       onClick: openRandomNote,
     },
     {
+      id: "monitor",
+      label: "Monitor",
+      icon: "M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z",
+      onClick: openMonitorPanel,
+      badge: monitorUnread,
+    },
+    {
       id: "settings",
       label: "Settings",
       icon: "M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z",
@@ -844,6 +859,7 @@ function SidebarToolDock({
     openQuickCapture, openInboxPanel, toggleFlashcards, toggleTasks, toggleGoals,
     togglePeople, toggleDailyNotes, openActionLibrary, openRandomNote, dispatchKey,
     inboxCount, flashcardsDue, taskBadge, taskBadgeUrgent, goalStreak,
+    openMonitorPanel, monitorUnread,
   ]);
 
   const buttonMap = useMemo(
