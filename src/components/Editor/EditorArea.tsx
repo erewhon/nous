@@ -61,6 +61,7 @@ export function EditorArea() {
   const { viewerState, closeViewer } = usePDFStore();
   const { viewerState: videoViewerState } = useVideoStore();
   const { annotationState } = useDrawingStore();
+  const sidebarMode = useThemeStore((state) => state.sidebarMode);
   const panelWidths = useThemeStore((state) => state.panelWidths);
   const setPanelWidth = useThemeStore((state) => state.setPanelWidth);
   const autoHidePanels = useThemeStore((state) => state.autoHidePanels);
@@ -410,10 +411,13 @@ export function EditorArea() {
     );
   }
 
+  // In rail mode, sections and folder tree are rendered in the accordion panel
+  const showInlinePanels = sidebarMode !== "rail";
+
   return (
     <div className="flex h-full">
-      {/* Sections panel - shown when sections are enabled, hidden in zen mode */}
-      {selectedNotebook.sectionsEnabled && !zenMode && (
+      {/* Sections panel - shown when sections are enabled, hidden in zen mode and rail mode */}
+      {showInlinePanels && selectedNotebook.sectionsEnabled && !zenMode && (
         <>
           <div
             className="flex-shrink-0 border-r overflow-hidden"
@@ -450,8 +454,8 @@ export function EditorArea() {
         </>
       )}
 
-      {/* Page list panel with folder tree - hidden in zen mode */}
-      {!zenMode && (
+      {/* Page list panel with folder tree - hidden in zen mode and rail mode */}
+      {showInlinePanels && !zenMode && (
         <>
           <div
             className="flex-shrink-0 border-r overflow-hidden"

@@ -51,6 +51,7 @@ export function Sidebar({ width = 256 }: SidebarProps) {
   const { summary: tasksSummary, togglePanel: toggleTasks } = useTasksStore();
   const { togglePanel: togglePeople } = useContactStore();
   const { openMonitorPanel, unreadCount: monitorUnread } = useMonitorStore();
+  const setSidebarMode = useThemeStore((state) => state.setSidebarMode);
   const autoHidePanels = useThemeStore((state) => state.autoHidePanels);
   const setAutoHidePanels = useThemeStore((state) => state.setAutoHidePanels);
   const showRecentPages = useThemeStore((state) => state.showRecentPages);
@@ -105,6 +106,14 @@ export function Sidebar({ width = 256 }: SidebarProps) {
           </span>
         </div>
         <div className="flex items-center gap-1">
+          <button
+            onClick={() => setSidebarMode("rail")}
+            className="flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
+            style={{ color: "var(--color-text-muted)" }}
+            title="Collapse to icon rail"
+          >
+            <IconLayoutSidebarCollapse />
+          </button>
           <button
             onClick={() => setAutoHidePanels(!autoHidePanels)}
             className="flex h-7 w-7 items-center justify-center rounded-md transition-colors hover:bg-[--color-bg-tertiary]"
@@ -487,6 +496,26 @@ function IconArchive() {
       <rect x="2" y="4" width="20" height="5" rx="2" />
       <path d="M4 9v9a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9" />
       <path d="M10 13h4" />
+    </svg>
+  );
+}
+
+function IconLayoutSidebarCollapse() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <path d="M9 3v18" />
+      <path d="M14 9l3 3-3 3" />
     </svg>
   );
 }

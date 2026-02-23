@@ -13,6 +13,7 @@ export type UIMode = "classic" | "overview";
 export type NotebookSortOption = "position" | "name-asc" | "name-desc" | "updated" | "created" | "pages";
 export type PageSortOption = "position" | "name-asc" | "name-desc" | "updated" | "created";
 export type EditorKeymap = "standard" | "vim" | "emacs";
+export type SidebarMode = "full" | "rail";
 
 export type FocusHighlightMode = "sentence" | "paragraph" | "none";
 
@@ -77,6 +78,7 @@ interface ThemeState {
   notebookSortBy: NotebookSortOption;
   pageSortBy: PageSortOption;
   panelWidths: PanelWidths;
+  sidebarMode: SidebarMode;  // "full" = classic 3-panel, "rail" = icon rail + accordion
   autoHidePanels: boolean;  // Auto-hide all panels together
   panelsHovered: boolean;   // Track hover state for auto-hide (all panels as one)
   showRecentPages: boolean;   // Show Recent section in sidebar
@@ -105,6 +107,7 @@ interface ThemeState {
   setNotebookSortBy: (sort: NotebookSortOption) => void;
   setPageSortBy: (sort: PageSortOption) => void;
   setPanelWidth: (panel: keyof PanelWidths, width: number) => void;
+  setSidebarMode: (mode: SidebarMode) => void;
   setAutoHidePanels: (enabled: boolean) => void;
   setPanelsHovered: (hovered: boolean) => void;
   setShowRecentPages: (show: boolean) => void;
@@ -412,6 +415,7 @@ export const useThemeStore = create<ThemeState>()(
       notebookSortBy: "name-asc" as NotebookSortOption,
       pageSortBy: "position" as PageSortOption,
       panelWidths: DEFAULT_PANEL_WIDTHS,
+      sidebarMode: "full" as SidebarMode,
       autoHidePanels: false,
       panelsHovered: false,
       showRecentPages: true,
@@ -540,6 +544,10 @@ export const useThemeStore = create<ThemeState>()(
         }));
       },
 
+      setSidebarMode: (mode) => {
+        set({ sidebarMode: mode });
+      },
+
       setAutoHidePanels: (enabled) => {
         set({
           autoHidePanels: enabled,
@@ -621,7 +629,7 @@ export const useThemeStore = create<ThemeState>()(
     }),
     {
       name: THEME_STORE_KEY,
-      partialize: (state) => ({ settings: state.settings, showPageStats: state.showPageStats, showOutline: state.showOutline, uiMode: state.uiMode, notebookSortBy: state.notebookSortBy, pageSortBy: state.pageSortBy, panelWidths: state.panelWidths, autoHidePanels: state.autoHidePanels, zenModeSettings: state.zenModeSettings, showRecentPages: state.showRecentPages, showFavoritePages: state.showFavoritePages, pinnedToolButtons: state.pinnedToolButtons, pinnedSections: state.pinnedSections }),
+      partialize: (state) => ({ settings: state.settings, showPageStats: state.showPageStats, showOutline: state.showOutline, uiMode: state.uiMode, notebookSortBy: state.notebookSortBy, pageSortBy: state.pageSortBy, panelWidths: state.panelWidths, sidebarMode: state.sidebarMode, autoHidePanels: state.autoHidePanels, zenModeSettings: state.zenModeSettings, showRecentPages: state.showRecentPages, showFavoritePages: state.showFavoritePages, pinnedToolButtons: state.pinnedToolButtons, pinnedSections: state.pinnedSections }),
       onRehydrateStorage: () => (state) => {
         if (state) {
           // Resolve system theme on rehydration
@@ -642,6 +650,10 @@ export const useThemeStore = create<ThemeState>()(
             // Check if any of the old settings were true
             const oldAutoHide = (state as unknown as { autoHide?: { sidebar?: boolean; sections?: boolean; folderTree?: boolean } }).autoHide;
             state.autoHidePanels = oldAutoHide?.sidebar || oldAutoHide?.sections || oldAutoHide?.folderTree || false;
+          }
+          // Migration: ensure sidebarMode exists with default
+          if (!state.sidebarMode) {
+            state.sidebarMode = "full";
           }
           // Reset hover state on load
           state.panelsHovered = false;

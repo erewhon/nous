@@ -1,18 +1,28 @@
 import { useCallback, useRef, useEffect, useState } from "react";
 import { Sidebar } from "../Sidebar/Sidebar";
+import { SidebarRail, type RailSection } from "../Sidebar/SidebarRail";
+import { SidebarAccordionPanel } from "../Sidebar/SidebarAccordionPanel";
 import { EditorArea } from "../Editor/EditorArea";
 import { OverviewLayout } from "./OverviewLayout";
 import { ResizeHandle } from "./ResizeHandle";
 import { useThemeStore } from "../../stores/themeStore";
+import { useNotebookStore } from "../../stores/notebookStore";
 
 export function Layout() {
   const uiMode = useThemeStore((state) => state.uiMode);
+  const sidebarMode = useThemeStore((state) => state.sidebarMode);
   const panelWidths = useThemeStore((state) => state.panelWidths);
   const setPanelWidth = useThemeStore((state) => state.setPanelWidth);
   const autoHidePanels = useThemeStore((state) => state.autoHidePanels);
   const panelsHovered = useThemeStore((state) => state.panelsHovered);
   const setPanelsHovered = useThemeStore((state) => state.setPanelsHovered);
   const zenMode = useThemeStore((state) => state.zenMode);
+
+  const { notebooks, selectedNotebookId } = useNotebookStore();
+  const selectedNotebook = notebooks.find((n) => n.id === selectedNotebookId);
+
+  // Rail mode state
+  const [railActiveSection, setRailActiveSection] = useState<RailSection>(null);
 
   const [sidebarTransitioning, setSidebarTransitioning] = useState(false);
   const hideTimeoutRef = useRef<number | null>(null);
@@ -101,6 +111,59 @@ export function Layout() {
   // Calculate sidebar visibility (hidden in zen mode)
   const sidebarVisible = !zenMode && (!autoHidePanels || panelsHovered);
   const sidebarWidth = sidebarVisible ? panelWidths.sidebar : 0;
+
+  // Rail mode
+  if (sidebarMode === "rail") {
+    const railVisible = !zenMode && (!autoHidePanels || panelsHovered);
+
+    return (
+      <div className="flex h-screen w-screen overflow-hidden relative">
+        {/* Hover zone for auto-hide in rail mode */}
+        {autoHidePanels && !panelsHovered && !zenMode && (
+          <div
+            className="absolute left-0 top-0 h-full z-50"
+            style={{ width: "8px", cursor: "pointer" }}
+            onMouseEnter={handleHoverZoneEnter}
+          >
+            <div
+              className="h-full w-1 transition-opacity hover:opacity-100"
+              style={{ backgroundColor: "var(--color-accent)", opacity: 0.3 }}
+            />
+          </div>
+        )}
+
+        {/* Rail + Accordion container */}
+        <div
+          ref={sidebarRef}
+          className="flex flex-shrink-0 overflow-hidden h-full"
+          style={{
+            width: railVisible ? (railActiveSection ? `${48 + panelWidths.sidebar}px` : "48px") : "0px",
+            transition: autoHidePanels ? "width 0.2s ease-in-out" : "none",
+          }}
+          onMouseEnter={handleSidebarEnter}
+          onMouseLeave={handleSidebarLeave}
+          onTransitionEnd={handleTransitionEnd}
+        >
+          {(railVisible || sidebarTransitioning) && (
+            <div className="flex h-full" style={{ width: railActiveSection ? `${48 + panelWidths.sidebar}px` : "48px" }}>
+              <SidebarRail
+                activeSection={railActiveSection}
+                onSectionClick={setRailActiveSection}
+                sectionsEnabled={selectedNotebook?.sectionsEnabled ?? false}
+              />
+              {railActiveSection && (
+                <SidebarAccordionPanel activeSection={railActiveSection} />
+              )}
+            </div>
+          )}
+        </div>
+
+        <main className="flex-1 overflow-hidden">
+          <EditorArea />
+        </main>
+      </div>
+    );
+  }
 
   // Classic mode: sidebar + editor
   return (
