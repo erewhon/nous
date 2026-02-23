@@ -3801,6 +3801,17 @@ block-ref.broken {
   transition: opacity 0.2s ease;
 }
 
+/* Checklist item-level focus highlight */
+.cdx-checklist__item.focus-dimmed {
+  opacity: 0.25;
+  transition: opacity 0.2s ease;
+}
+
+.cdx-checklist__item.focus-active {
+  opacity: 1;
+  transition: opacity 0.2s ease;
+}
+
 .focus-sentence-highlight div {
   transition: opacity 0.15s ease;
 }

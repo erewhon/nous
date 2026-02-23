@@ -45,6 +45,33 @@ class ListWithoutChecklist extends ListBase {
     }
     return settings;
   }
+
+  // Override conversionConfig so that export joins items with newlines instead
+  // of the upstream's joinRecursive which concatenates with empty string.
+  // This lets ChecklistTool.import (which splits on "\n") correctly produce
+  // one checklist item per list item.
+  static get conversionConfig() {
+    return {
+      export: (data: { items: Array<{ content: string; items?: unknown[] }> }): string => {
+        const flatten = (items: Array<{ content: string; items?: unknown[] }>): string[] => {
+          const result: string[] = [];
+          for (const item of items) {
+            result.push(item.content);
+            if (item.items && Array.isArray(item.items) && (item.items as unknown[]).length > 0) {
+              result.push(...flatten(item.items as Array<{ content: string; items?: unknown[] }>));
+            }
+          }
+          return result;
+        };
+        return flatten(data.items).join("\n");
+      },
+      import: (content: string) => ({
+        meta: {},
+        items: [{ content, meta: {}, items: [] }],
+        style: "unordered",
+      }),
+    };
+  }
 }
 
 /** Assign data-block-id attributes to each .ce-block holder for scroll targeting.

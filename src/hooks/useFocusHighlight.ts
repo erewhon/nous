@@ -37,6 +37,10 @@ export function useFocusHighlight({
       allBlocks.forEach((block) => {
         block.classList.remove("focus-dimmed", "focus-active");
       });
+      // Remove checklist-item-level focus classes
+      document.querySelectorAll(".cdx-checklist__item").forEach((item) => {
+        item.classList.remove("focus-dimmed", "focus-active");
+      });
       activeBlockRef.current = null;
 
       // Remove sentence highlight
@@ -71,16 +75,44 @@ export function useFocusHighlight({
       const activeBlock = element.closest(".ce-block");
       if (!activeBlock) return;
 
-      // Skip if same block
-      if (activeBlock === activeBlockRef.current) return;
-      activeBlockRef.current = activeBlock;
+      // For checklist blocks, highlight individual items instead of the whole block
+      const checklistItem = element.closest(".cdx-checklist__item");
+      const isChecklist = activeBlock.querySelector(".cdx-checklist") !== null;
+
+      // Build a unique key to detect changes
+      const activeKey = isChecklist && checklistItem
+        ? checklistItem
+        : activeBlock;
+
+      // Skip if same element
+      if (activeKey === activeBlockRef.current) return;
+      activeBlockRef.current = activeKey;
+
+      // Clean up any previous checklist-item-level highlights
+      container!.querySelectorAll(".cdx-checklist__item").forEach((item) => {
+        item.classList.remove("focus-dimmed", "focus-active");
+      });
 
       // Get all blocks in the editor
       const allBlocks = container!.querySelectorAll(".ce-block");
       allBlocks.forEach((block) => {
         if (block === activeBlock) {
-          block.classList.add("focus-active");
-          block.classList.remove("focus-dimmed");
+          if (isChecklist && checklistItem) {
+            // For checklist: dim the block-level, then highlight individual items
+            block.classList.remove("focus-dimmed", "focus-active");
+            block.querySelectorAll(".cdx-checklist__item").forEach((item) => {
+              if (item === checklistItem) {
+                item.classList.add("focus-active");
+                item.classList.remove("focus-dimmed");
+              } else {
+                item.classList.add("focus-dimmed");
+                item.classList.remove("focus-active");
+              }
+            });
+          } else {
+            block.classList.add("focus-active");
+            block.classList.remove("focus-dimmed");
+          }
         } else {
           block.classList.add("focus-dimmed");
           block.classList.remove("focus-active");
