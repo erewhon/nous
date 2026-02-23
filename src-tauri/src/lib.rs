@@ -320,6 +320,37 @@ pub fn run() {
             //     window.open_devtools();
             // }
 
+            // Enable microphone/media permissions on Linux WebKitGTK
+            #[cfg(target_os = "linux")]
+            {
+                if let Some(main_window) = app.get_webview_window("main") {
+                    main_window.with_webview(|webview| {
+                        use webkit2gtk::glib::object::Cast;
+                        use webkit2gtk::{PermissionRequestExt, WebViewExt};
+
+                        let wv = webview.inner();
+
+                        // Enable media stream support
+                        if let Some(settings) = wv.settings() {
+                            use webkit2gtk::SettingsExt;
+                            settings.set_enable_media_stream(true);
+                            settings.set_media_playback_requires_user_gesture(false);
+                        }
+
+                        // Auto-allow media permission requests (microphone/camera)
+                        wv.connect_permission_request(|_, request| {
+                            if request.downcast_ref::<webkit2gtk::UserMediaPermissionRequest>().is_some() {
+                                request.allow();
+                                return true;
+                            }
+                            false // Let other permission types use default handling
+                        });
+                    }).unwrap_or_else(|e| {
+                        log::warn!("Failed to configure WebKitGTK media permissions: {:?}", e);
+                    });
+                }
+            }
+
             // Start the action scheduler
             let state: tauri::State<AppState> = app.handle().state();
             if let Ok(mut scheduler) = state.action_scheduler.lock() {
@@ -774,6 +805,10 @@ pub fn run() {
             commands::generate_page_audio,
             commands::get_tts_providers,
             commands::list_tts_voices,
+            // Audio recording & transcription commands
+            commands::transcribe_audio,
+            commands::save_audio_recording,
+            commands::synthesize_text,
             // Infographic generation commands
             commands::generate_infographic,
             commands::check_infographic_availability,

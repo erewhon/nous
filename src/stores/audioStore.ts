@@ -18,6 +18,10 @@ interface AudioSettings {
   // Podcast defaults
   podcastVoiceB: string;
   podcastLength: PodcastLength;
+  // Voice interaction
+  autoPlayResponse: boolean;
+  sttModelSize: string;
+  sttLanguage: string | null;
 }
 
 interface AudioState {
@@ -38,6 +42,9 @@ interface AudioState {
   setTtsSpeed: (speed: number) => void;
   setPodcastVoiceB: (voice: string) => void;
   setPodcastLength: (length: PodcastLength) => void;
+  setAutoPlayResponse: (enabled: boolean) => void;
+  setSttModelSize: (size: string) => void;
+  setSttLanguage: (lang: string | null) => void;
 
   // Data loading
   loadProviders: () => Promise<void>;
@@ -53,6 +60,9 @@ const defaultSettings: AudioSettings = {
   ttsSpeed: 1.0,
   podcastVoiceB: "nova",
   podcastLength: "medium",
+  autoPlayResponse: false,
+  sttModelSize: "base",
+  sttLanguage: null,
 };
 
 export const useAudioStore = create<AudioState>()(
@@ -102,6 +112,21 @@ export const useAudioStore = create<AudioState>()(
       setPodcastLength: (length) =>
         set((state) => ({
           settings: { ...state.settings, podcastLength: length },
+        })),
+
+      setAutoPlayResponse: (enabled) =>
+        set((state) => ({
+          settings: { ...state.settings, autoPlayResponse: enabled },
+        })),
+
+      setSttModelSize: (size) =>
+        set((state) => ({
+          settings: { ...state.settings, sttModelSize: size },
+        })),
+
+      setSttLanguage: (lang) =>
+        set((state) => ({
+          settings: { ...state.settings, sttLanguage: lang },
         })),
 
       loadProviders: async () => {

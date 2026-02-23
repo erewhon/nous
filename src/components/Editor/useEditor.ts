@@ -24,6 +24,7 @@ import { LiveQueryBlockTool } from "./LiveQueryBlockTool";
 import { BlockEmbedTool } from "./BlockEmbedTool";
 import { DrawingTool } from "./DrawingTool";
 import { EmbedTool } from "./EmbedTool";
+import { AudioTool } from "./AudioTool";
 import { ColumnsTool } from "./ColumnsTool";
 import { createImageUploader } from "./imageUploader";
 
@@ -215,6 +216,12 @@ export function useEditor({
             },
             video: {
               class: VideoTool as unknown as ToolConstructable,
+              config: {
+                notebookId,
+              },
+            },
+            audio: {
+              class: AudioTool as unknown as ToolConstructable,
               config: {
                 notebookId,
               },

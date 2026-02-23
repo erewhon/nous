@@ -64,3 +64,42 @@ export type TTSProviderInfo = z.infer<typeof TTSProviderInfoSchema>;
 // Podcast target length
 export const PodcastLengthSchema = z.enum(["short", "medium", "long"]);
 export type PodcastLength = z.infer<typeof PodcastLengthSchema>;
+
+// Transcription types (shared with video transcription)
+export interface TranscriptWord {
+  word: string;
+  start: number;
+  end: number;
+  probability: number;
+}
+
+export interface TranscriptSegment {
+  id: number;
+  start: number;
+  end: number;
+  text: string;
+  words: TranscriptWord[];
+}
+
+export interface TranscriptionResult {
+  videoPath: string; // Source file path (audio or video)
+  audioPath: string | null;
+  language: string;
+  languageProbability: number;
+  duration: number;
+  segments: TranscriptSegment[];
+  wordCount: number;
+  transcriptionTime: number;
+}
+
+// Audio block data for Editor.js AudioTool
+export interface AudioBlockData {
+  filename: string;
+  url: string;
+  duration?: number;
+  caption?: string;
+  transcription?: string;
+  transcriptionStatus?: "idle" | "transcribing" | "done" | "error";
+  showTranscript?: boolean;
+  recordedAt?: string;
+}

@@ -37,6 +37,16 @@ SUPPORTED_VIDEO_EXTENSIONS: dict[str, str] = {
     ".flv": "video/x-flv",
 }
 
+# Supported audio formats
+SUPPORTED_AUDIO_EXTENSIONS: dict[str, str] = {
+    ".wav": "audio/wav",
+    ".webm": "audio/webm",
+    ".ogg": "audio/ogg",
+    ".mp3": "audio/mpeg",
+    ".m4a": "audio/mp4",
+    ".flac": "audio/flac",
+}
+
 
 class TranscriptWord(BaseModel):
     """A single word with timing information."""
@@ -297,6 +307,208 @@ async def transcribe_video(
 
     except Exception as e:
         raise RuntimeError(f"Transcription failed: {e}") from e
+
+
+def is_supported_audio(file_path: str) -> bool:
+    """Check if file is a supported audio format."""
+    ext = Path(file_path).suffix.lower()
+    return ext in SUPPORTED_AUDIO_EXTENSIONS
+
+
+def get_audio_duration(audio_path: str) -> float:
+    """Get audio duration in seconds using ffprobe."""
+    path = Path(audio_path)
+    if not path.exists():
+        raise FileNotFoundError(f"Audio file not found: {audio_path}")
+
+    if not is_ffprobe_available():
+        raise RuntimeError("ffprobe is not installed. Please install ffmpeg.")
+
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                str(path),
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return float(result.stdout.strip())
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(f"ffprobe failed: {e.stderr}") from e
+    except ValueError as e:
+        raise RuntimeError(f"Could not parse duration: {e}") from e
+
+
+async def convert_audio_to_wav(audio_path: str, output_path: str | None = None) -> str:
+    """Convert audio file to WAV format suitable for Whisper (16kHz mono).
+
+    Args:
+        audio_path: Path to the audio file.
+        output_path: Optional path for the output file.
+
+    Returns:
+        Path to the converted WAV file.
+    """
+    path = Path(audio_path)
+    if not path.exists():
+        raise FileNotFoundError(f"Audio file not found: {audio_path}")
+
+    if not is_ffmpeg_available():
+        raise RuntimeError("ffmpeg is not installed. Please install ffmpeg.")
+
+    if output_path is None:
+        temp_dir = tempfile.gettempdir()
+        output_path = str(Path(temp_dir) / f"{path.stem}_converted.wav")
+
+    process = await asyncio.create_subprocess_exec(
+        "ffmpeg",
+        "-i",
+        str(path),
+        "-vn",
+        "-acodec",
+        "pcm_s16le",
+        "-ar",
+        "16000",
+        "-ac",
+        "1",
+        "-y",
+        output_path,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+
+    _, stderr = await process.communicate()
+
+    if process.returncode != 0:
+        raise RuntimeError(f"ffmpeg audio conversion failed: {stderr.decode()}")
+
+    return output_path
+
+
+async def transcribe_audio(
+    audio_path: str,
+    model_size: str = "base",
+    language: str | None = None,
+    compute_type: str = "int8",
+    device: str = "auto",
+) -> dict[str, Any]:
+    """Transcribe an audio file using faster-whisper.
+
+    Args:
+        audio_path: Path to the audio file.
+        model_size: Whisper model size (tiny, base, small, medium, large-v3).
+        language: Language code (e.g., "en"). Auto-detected if None.
+        compute_type: Compute type (int8, float16, float32).
+        device: Device to use (auto, cpu, cuda).
+
+    Returns:
+        TranscriptionResult as a dictionary.
+    """
+    if not FASTER_WHISPER_AVAILABLE:
+        raise ImportError(
+            "faster-whisper is not installed. Install with: uv pip install faster-whisper"
+        )
+
+    path = Path(audio_path)
+    if not path.exists():
+        raise FileNotFoundError(f"Audio file not found: {audio_path}")
+
+    if not is_supported_audio(audio_path):
+        raise ValueError(f"Unsupported audio format: {path.suffix}")
+
+    start_time = time.time()
+
+    # Get audio duration
+    duration = get_audio_duration(audio_path)
+
+    # Convert to WAV if not already in optimal format
+    if path.suffix.lower() != ".wav":
+        wav_path = await convert_audio_to_wav(audio_path)
+    else:
+        wav_path = audio_path
+
+    try:
+        model = WhisperModel(model_size, device=device, compute_type=compute_type)
+
+        segments_generator, info = model.transcribe(
+            wav_path,
+            language=language,
+            word_timestamps=True,
+            vad_filter=True,
+        )
+
+        segments: list[TranscriptSegment] = []
+        total_words = 0
+
+        for idx, segment in enumerate(segments_generator):
+            words: list[TranscriptWord] = []
+
+            if segment.words:
+                for word in segment.words:
+                    words.append(
+                        TranscriptWord(
+                            word=word.word.strip(),
+                            start=word.start,
+                            end=word.end,
+                            probability=word.probability,
+                        )
+                    )
+                    total_words += 1
+
+            segments.append(
+                TranscriptSegment(
+                    id=idx,
+                    start=segment.start,
+                    end=segment.end,
+                    text=segment.text.strip(),
+                    words=words,
+                )
+            )
+
+        transcription_time = time.time() - start_time
+
+        result = TranscriptionResult(
+            video_path=audio_path,  # Reuse field — holds the source path
+            audio_path=wav_path if wav_path != audio_path else None,
+            language=info.language,
+            language_probability=info.language_probability,
+            duration=duration,
+            segments=segments,
+            word_count=total_words,
+            transcription_time=transcription_time,
+        )
+
+        return result.model_dump()
+
+    except Exception as e:
+        raise RuntimeError(f"Transcription failed: {e}") from e
+
+
+def transcribe_audio_sync(
+    audio_path: str,
+    model_size: str = "base",
+    language: str | None = None,
+    compute_type: str = "int8",
+    device: str = "auto",
+) -> dict[str, Any]:
+    """Synchronous wrapper for transcribe_audio (for PyO3 bridge)."""
+    return asyncio.run(
+        transcribe_audio(
+            audio_path=audio_path,
+            model_size=model_size,
+            language=language,
+            compute_type=compute_type,
+            device=device,
+        )
+    )
 
 
 def transcribe_video_sync(

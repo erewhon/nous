@@ -1,11 +1,14 @@
-//! Audio generation Tauri commands — TTS narration and podcast discussion.
+//! Audio generation Tauri commands — TTS narration, podcast discussion, recording, and transcription.
 
-use serde::Deserialize;
+use base64::Engine;
+use serde::{Deserialize, Serialize};
 use std::fs;
 use tauri::State;
 use uuid::Uuid;
 
-use crate::python_bridge::{AIConfig, AudioGenerationResult, TTSProviderInfo, TTSVoiceInfo};
+use crate::python_bridge::{
+    AIConfig, AudioGenerationResult, TranscriptionResult, TTSProviderInfo, TTSVoiceInfo,
+};
 use crate::AppState;
 
 use super::notebook::CommandError;
@@ -240,4 +243,150 @@ pub fn list_tts_voices(
         .map_err(|e| CommandError {
             message: format!("Failed to list TTS voices: {}", e),
         })
+}
+
+// ===== Audio Recording & Transcription Commands =====
+
+/// Result from saving an audio recording
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveAudioResult {
+    pub path: String,
+    pub filename: String,
+}
+
+/// Transcribe an audio file using faster-whisper
+#[tauri::command]
+pub async fn transcribe_audio(
+    state: State<'_, AppState>,
+    audio_path: String,
+    model_size: Option<String>,
+    language: Option<String>,
+) -> Result<TranscriptionResult, CommandError> {
+    let python_ai = state.python_ai.clone();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let python_ai = python_ai.lock().map_err(|e| CommandError {
+            message: format!("Failed to acquire Python AI lock: {}", e),
+        })?;
+
+        python_ai
+            .transcribe_audio(
+                &audio_path,
+                model_size.as_deref(),
+                language.as_deref(),
+            )
+            .map_err(|e| CommandError {
+                message: format!("Audio transcription error: {}", e),
+            })
+    })
+    .await
+    .map_err(|e| CommandError {
+        message: format!("Task join error: {}", e),
+    })?
+}
+
+/// Save a base64-encoded audio recording to the notebook's assets directory
+#[tauri::command]
+pub async fn save_audio_recording(
+    state: State<'_, AppState>,
+    notebook_id: String,
+    audio_data_base64: String,
+    format: String,
+) -> Result<SaveAudioResult, CommandError> {
+    let nb_id = Uuid::parse_str(&notebook_id).map_err(|e| CommandError {
+        message: format!("Invalid notebook ID: {}", e),
+    })?;
+
+    let audio_dir = {
+        let storage = state.storage.lock().map_err(|e| CommandError {
+            message: format!("Failed to acquire storage lock: {}", e),
+        })?;
+        let assets_dir = storage.notebook_assets_dir(nb_id);
+        let audio_dir = assets_dir.join("audio");
+        fs::create_dir_all(&audio_dir).map_err(|e| CommandError {
+            message: format!("Failed to create audio directory: {}", e),
+        })?;
+        audio_dir
+    };
+
+    // Decode base64 audio data
+    let audio_bytes =
+        base64::engine::general_purpose::STANDARD
+            .decode(&audio_data_base64)
+            .map_err(|e| CommandError {
+                message: format!("Failed to decode base64 audio data: {}", e),
+            })?;
+
+    // Generate unique filename
+    let ext = if format.starts_with('.') {
+        format.clone()
+    } else {
+        format!(".{}", format)
+    };
+    let filename = format!("recording_{}{}", Uuid::new_v4(), ext);
+    let file_path = audio_dir.join(&filename);
+
+    fs::write(&file_path, &audio_bytes).map_err(|e| CommandError {
+        message: format!("Failed to write audio file: {}", e),
+    })?;
+
+    let path_str = file_path.to_str().map(|s| s.to_string()).ok_or_else(|| CommandError {
+        message: "Invalid path encoding".to_string(),
+    })?;
+
+    Ok(SaveAudioResult {
+        path: path_str,
+        filename,
+    })
+}
+
+/// Synthesize text to speech without requiring a page context
+#[tauri::command]
+pub async fn synthesize_text(
+    state: State<'_, AppState>,
+    text: String,
+    tts_config: TTSConfig,
+) -> Result<AudioGenerationResult, CommandError> {
+    if text.trim().is_empty() {
+        return Err(CommandError {
+            message: "No text to synthesize".to_string(),
+        });
+    }
+
+    let python_ai = state.python_ai.clone();
+
+    // Use system temp dir for output
+    let output_dir = std::env::temp_dir().join("nous_tts");
+    fs::create_dir_all(&output_dir).map_err(|e| CommandError {
+        message: format!("Failed to create temp directory: {}", e),
+    })?;
+    let output_dir_str = output_dir.to_str().map(|s| s.to_string()).ok_or_else(|| CommandError {
+        message: "Invalid path encoding".to_string(),
+    })?;
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let python_ai = python_ai.lock().map_err(|e| CommandError {
+            message: format!("Failed to acquire Python AI lock: {}", e),
+        })?;
+
+        python_ai
+            .synthesize_text(
+                &text,
+                &output_dir_str,
+                &tts_config.provider,
+                &tts_config.voice,
+                tts_config.api_key.as_deref(),
+                tts_config.base_url.as_deref(),
+                tts_config.model.as_deref(),
+                tts_config.speed,
+            )
+            .map_err(|e| CommandError {
+                message: format!("Text synthesis error: {}", e),
+            })
+    })
+    .await
+    .map_err(|e| CommandError {
+        message: format!("Task join error: {}", e),
+    })?
 }

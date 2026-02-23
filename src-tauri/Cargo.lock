@@ -3368,6 +3368,7 @@ dependencies = [
  "urlencoding",
  "uuid",
  "walkdir",
+ "webkit2gtk",
  "yrs",
  "zeroize",
  "zip",

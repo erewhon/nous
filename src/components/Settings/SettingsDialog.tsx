@@ -42,6 +42,7 @@ type TabId =
   | "rag"
   | "backup"
   | "audio"
+  | "voice"
   | "external-sources"
   | "daily-notes";
 
@@ -80,6 +81,7 @@ const TAB_CATEGORIES: TabCategory[] = [
     name: "Media",
     tabs: [
       { id: "audio", label: "Text-to-Speech", icon: <IconAudio /> },
+      { id: "voice", label: "Voice & STT", icon: <IconMic /> },
     ],
   },
   {
@@ -243,6 +245,7 @@ export function SettingsDialog({
             {activeTab === "rag" && <RAGSettings />}
             {activeTab === "system-prompt" && <SystemPromptSettingsContent />}
             {activeTab === "audio" && <AudioSettingsContent />}
+            {activeTab === "voice" && <VoiceSettingsContent />}
             {activeTab === "mcp" && <MCPServersSettings />}
             {activeTab === "web-research" && <WebResearchSettingsContent />}
             {activeTab === "external-sources" && <ExternalSourcesSettings />}
@@ -1422,6 +1425,184 @@ function AudioSettingsContent() {
   );
 }
 
+// Voice & STT Settings Content
+function VoiceSettingsContent() {
+  const {
+    settings,
+    setAutoPlayResponse,
+    setSttModelSize,
+    setSttLanguage,
+  } = useAudioStore();
+
+  const STT_MODEL_SIZES = [
+    { value: "tiny", label: "Tiny", description: "Fastest, lowest accuracy" },
+    { value: "base", label: "Base", description: "Good balance of speed and accuracy" },
+    { value: "small", label: "Small", description: "Better accuracy, slower" },
+    { value: "medium", label: "Medium", description: "High accuracy, much slower" },
+    { value: "large-v3", label: "Large v3", description: "Best accuracy, slowest" },
+  ];
+
+  const STT_LANGUAGES = [
+    { value: "", label: "Auto-detect" },
+    { value: "en", label: "English" },
+    { value: "es", label: "Spanish" },
+    { value: "fr", label: "French" },
+    { value: "de", label: "German" },
+    { value: "it", label: "Italian" },
+    { value: "pt", label: "Portuguese" },
+    { value: "ja", label: "Japanese" },
+    { value: "ko", label: "Korean" },
+    { value: "zh", label: "Chinese" },
+    { value: "ru", label: "Russian" },
+    { value: "ar", label: "Arabic" },
+    { value: "hi", label: "Hindi" },
+  ];
+
+  return (
+    <div className="space-y-6">
+      {/* Speech-to-Text */}
+      <div>
+        <h3
+          className="mb-1 text-sm font-medium"
+          style={{ color: "var(--color-text-primary)" }}
+        >
+          Speech-to-Text (Whisper)
+        </h3>
+        <p
+          className="mb-4 text-xs"
+          style={{ color: "var(--color-text-muted)" }}
+        >
+          Configure the Whisper model for voice recording transcription.
+          Requires faster-whisper to be installed.
+        </p>
+
+        {/* Model Size */}
+        <div className="mb-4">
+          <label
+            className="mb-2 block text-xs font-medium"
+            style={{ color: "var(--color-text-secondary)" }}
+          >
+            Model Size
+          </label>
+          <div className="grid grid-cols-1 gap-2">
+            {STT_MODEL_SIZES.map((m) => (
+              <label
+                key={m.value}
+                className="flex cursor-pointer items-center gap-3 rounded-lg border p-3 transition-colors"
+                style={{
+                  borderColor:
+                    settings.sttModelSize === m.value
+                      ? "var(--color-accent)"
+                      : "var(--color-border)",
+                  backgroundColor:
+                    settings.sttModelSize === m.value
+                      ? "rgba(139, 92, 246, 0.1)"
+                      : "transparent",
+                }}
+              >
+                <input
+                  type="radio"
+                  name="stt-model"
+                  value={m.value}
+                  checked={settings.sttModelSize === m.value}
+                  onChange={() => setSttModelSize(m.value)}
+                  className="accent-[--color-accent]"
+                />
+                <div>
+                  <div
+                    className="text-sm font-medium"
+                    style={{ color: "var(--color-text-primary)" }}
+                  >
+                    {m.label}
+                  </div>
+                  <div
+                    className="text-xs"
+                    style={{ color: "var(--color-text-muted)" }}
+                  >
+                    {m.description}
+                  </div>
+                </div>
+              </label>
+            ))}
+          </div>
+        </div>
+
+        {/* Language */}
+        <div className="mb-4">
+          <label
+            className="mb-2 block text-xs font-medium"
+            style={{ color: "var(--color-text-secondary)" }}
+          >
+            Language
+          </label>
+          <select
+            value={settings.sttLanguage || ""}
+            onChange={(e) =>
+              setSttLanguage(e.target.value || null)
+            }
+            className="w-full rounded-lg border px-3 py-2 text-sm"
+            style={{
+              backgroundColor: "var(--color-bg-secondary)",
+              borderColor: "var(--color-border)",
+              color: "var(--color-text-primary)",
+            }}
+          >
+            {STT_LANGUAGES.map((l) => (
+              <option key={l.value} value={l.value}>
+                {l.label}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {/* Voice Interaction */}
+      <div>
+        <h3
+          className="mb-1 text-sm font-medium"
+          style={{ color: "var(--color-text-primary)" }}
+        >
+          Voice Interaction
+        </h3>
+        <p
+          className="mb-4 text-xs"
+          style={{ color: "var(--color-text-muted)" }}
+        >
+          Configure how voice works with AI chat.
+        </p>
+
+        <label
+          className="flex cursor-pointer items-center justify-between rounded-lg border p-3"
+          style={{
+            borderColor: "var(--color-border)",
+          }}
+        >
+          <div>
+            <div
+              className="text-sm font-medium"
+              style={{ color: "var(--color-text-primary)" }}
+            >
+              Auto-play AI responses
+            </div>
+            <div
+              className="text-xs"
+              style={{ color: "var(--color-text-muted)" }}
+            >
+              Read AI responses aloud using your TTS settings
+            </div>
+          </div>
+          <input
+            type="checkbox"
+            checked={settings.autoPlayResponse}
+            onChange={(e) => setAutoPlayResponse(e.target.checked)}
+            className="h-4 w-4 accent-[--color-accent]"
+          />
+        </label>
+      </div>
+    </div>
+  );
+}
+
 // Web Research Settings Content
 function WebResearchSettingsContent() {
   const {
@@ -2161,6 +2342,27 @@ function IconBackup() {
       <polyline points="21 8 21 21 3 21 3 8" />
       <rect x="1" y="3" width="22" height="5" />
       <line x1="10" y1="12" x2="14" y2="12" />
+    </svg>
+  );
+}
+
+function IconMic() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+      <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+      <line x1="12" y1="19" x2="12" y2="23" />
+      <line x1="8" y1="23" x2="16" y2="23" />
     </svg>
   );
 }

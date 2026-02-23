@@ -2095,6 +2095,205 @@ impl PythonAI {
         })
     }
 
+    /// Transcribe an audio file using faster-whisper
+    pub fn transcribe_audio(
+        &self,
+        audio_path: &str,
+        model_size: Option<&str>,
+        language: Option<&str>,
+    ) -> Result<TranscriptionResult> {
+        Python::attach(|py| {
+            self.setup_python_path(py)?;
+
+            let video_module = py.import("nous_ai.video_transcribe")?;
+            let transcribe_fn = video_module.getattr("transcribe_audio_sync")?;
+
+            let kwargs = PyDict::new(py);
+            kwargs.set_item("audio_path", audio_path)?;
+            if let Some(size) = model_size {
+                kwargs.set_item("model_size", size)?;
+            }
+            if let Some(lang) = language {
+                kwargs.set_item("language", lang)?;
+            }
+
+            let result = transcribe_fn.call((), Some(&kwargs))?;
+            let result_dict: HashMap<String, Py<PyAny>> = result.extract()?;
+
+            // Extract segments (same as transcribe_video)
+            let segments_list = result_dict
+                .get("segments")
+                .map(|v| {
+                    v.extract::<Vec<HashMap<String, Py<PyAny>>>>(py)
+                        .unwrap_or_default()
+                })
+                .unwrap_or_default();
+
+            let segments: Vec<TranscriptSegment> = segments_list
+                .into_iter()
+                .map(|s| {
+                    let words_list = s
+                        .get("words")
+                        .map(|v| {
+                            v.extract::<Vec<HashMap<String, Py<PyAny>>>>(py)
+                                .unwrap_or_default()
+                        })
+                        .unwrap_or_default();
+
+                    let words: Vec<TranscriptWord> = words_list
+                        .into_iter()
+                        .map(|w| TranscriptWord {
+                            word: w.get("word").and_then(|v| v.extract::<String>(py).ok()).unwrap_or_default(),
+                            start: w.get("start").and_then(|v| v.extract::<f64>(py).ok()).unwrap_or(0.0),
+                            end: w.get("end").and_then(|v| v.extract::<f64>(py).ok()).unwrap_or(0.0),
+                            probability: w.get("probability").and_then(|v| v.extract::<f64>(py).ok()).unwrap_or(0.0),
+                        })
+                        .collect();
+
+                    TranscriptSegment {
+                        id: s.get("id").and_then(|v| v.extract::<i64>(py).ok()).unwrap_or(0),
+                        start: s.get("start").and_then(|v| v.extract::<f64>(py).ok()).unwrap_or(0.0),
+                        end: s.get("end").and_then(|v| v.extract::<f64>(py).ok()).unwrap_or(0.0),
+                        text: s.get("text").and_then(|v| v.extract::<String>(py).ok()).unwrap_or_default(),
+                        words,
+                    }
+                })
+                .collect();
+
+            Ok(TranscriptionResult {
+                video_path: result_dict
+                    .get("video_path")
+                    .and_then(|v| v.extract::<String>(py).ok())
+                    .unwrap_or_default(),
+                audio_path: result_dict
+                    .get("audio_path")
+                    .and_then(|v| v.extract::<String>(py).ok()),
+                language: result_dict
+                    .get("language")
+                    .and_then(|v| v.extract::<String>(py).ok())
+                    .unwrap_or_default(),
+                language_probability: result_dict
+                    .get("language_probability")
+                    .and_then(|v| v.extract::<f64>(py).ok())
+                    .unwrap_or(0.0),
+                duration: result_dict
+                    .get("duration")
+                    .and_then(|v| v.extract::<f64>(py).ok())
+                    .unwrap_or(0.0),
+                segments,
+                word_count: result_dict
+                    .get("word_count")
+                    .and_then(|v| v.extract::<i64>(py).ok())
+                    .unwrap_or(0),
+                transcription_time: result_dict
+                    .get("transcription_time")
+                    .and_then(|v| v.extract::<f64>(py).ok())
+                    .unwrap_or(0.0),
+            })
+        })
+    }
+
+    /// Synthesize text to speech, returning audio file info
+    pub fn synthesize_text(
+        &self,
+        text: &str,
+        output_dir: &str,
+        tts_provider: &str,
+        tts_voice: &str,
+        tts_api_key: Option<&str>,
+        tts_base_url: Option<&str>,
+        tts_model: Option<&str>,
+        tts_speed: Option<f64>,
+    ) -> Result<AudioGenerationResult> {
+        Python::attach(|py| {
+            self.setup_python_path(py)?;
+
+            let module = py.import("nous_ai.audio_generate")?;
+            let func = module.getattr("generate_page_audio_sync")?;
+
+            let kwargs = PyDict::new(py);
+            kwargs.set_item("content", text)?;
+            kwargs.set_item("title", "voice_synthesis")?;
+            kwargs.set_item("output_dir", output_dir)?;
+            kwargs.set_item("mode", "tts")?;
+
+            let tts_config = PyDict::new(py);
+            tts_config.set_item("provider", tts_provider)?;
+            tts_config.set_item("voice", tts_voice)?;
+            if let Some(key) = tts_api_key {
+                tts_config.set_item("api_key", key)?;
+            }
+            if let Some(url) = tts_base_url {
+                tts_config.set_item("base_url", url)?;
+            }
+            if let Some(model) = tts_model {
+                tts_config.set_item("model", model)?;
+            }
+            if let Some(speed) = tts_speed {
+                tts_config.set_item("speed", speed)?;
+            }
+            kwargs.set_item("tts_config", tts_config)?;
+
+            let result = func.call((), Some(&kwargs))?;
+            let result_dict: HashMap<String, Py<PyAny>> = result.extract()?;
+
+            let audio_path = result_dict
+                .get("audio_path")
+                .and_then(|v| v.extract::<String>(py).ok())
+                .unwrap_or_default();
+
+            if audio_path.is_empty() {
+                return Err(PythonError::TypeConversion(
+                    "Text synthesis failed: no audio_path returned.".to_string(),
+                ));
+            }
+
+            let transcript = result_dict
+                .get("transcript")
+                .and_then(|v| {
+                    v.extract::<Option<Vec<HashMap<String, Py<PyAny>>>>>(py)
+                        .ok()
+                        .flatten()
+                })
+                .map(|lines| {
+                    lines
+                        .into_iter()
+                        .map(|line| PodcastLine {
+                            speaker: line
+                                .get("speaker")
+                                .and_then(|v| v.extract::<String>(py).ok())
+                                .unwrap_or_default(),
+                            text: line
+                                .get("text")
+                                .and_then(|v| v.extract::<String>(py).ok())
+                                .unwrap_or_default(),
+                        })
+                        .collect()
+                });
+
+            Ok(AudioGenerationResult {
+                audio_path,
+                duration_seconds: result_dict
+                    .get("duration_seconds")
+                    .and_then(|v| v.extract::<f64>(py).ok())
+                    .unwrap_or(0.0),
+                format: result_dict
+                    .get("format")
+                    .and_then(|v| v.extract::<String>(py).ok())
+                    .unwrap_or_else(|| "mp3".to_string()),
+                file_size_bytes: result_dict
+                    .get("file_size_bytes")
+                    .and_then(|v| v.extract::<i64>(py).ok())
+                    .unwrap_or(0),
+                generation_time_seconds: result_dict
+                    .get("generation_time_seconds")
+                    .and_then(|v| v.extract::<f64>(py).ok())
+                    .unwrap_or(0.0),
+                transcript,
+            })
+        })
+    }
+
     /// Get video duration in seconds
     pub fn get_video_duration(&self, video_path: &str) -> Result<f64> {
         Python::attach(|py| {

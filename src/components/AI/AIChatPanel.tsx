@@ -18,6 +18,9 @@ import {
   updatePage as apiUpdatePage,
   runBrowserTask,
 } from "../../utils/api";
+import { transcribeAudio, synthesizeText, saveAudioRecording } from "../../utils/audioApi";
+import { useAudioStore } from "../../stores/audioStore";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import type { ChatMessage, PageContext, AIAction, CreateNotebookArgs, CreatePageArgs, StreamEvent } from "../../types/ai";
 import type { EditorData } from "../../types/page";
 
@@ -70,6 +73,9 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
   const [titleInput, setTitleInput] = useState("");
   const [showBranchSelector, setShowBranchSelector] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
+  const [isVoiceRecording, setIsVoiceRecording] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const [voiceRecordingDuration, setVoiceRecordingDuration] = useState(0);
   const currentSessionRef = useRef<ChatSession | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -77,6 +83,10 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
   const isStreamingRef = useRef(false); // Track if we're currently streaming
   const resizeStartRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
   const dragStartRef = useRef<{ x: number; y: number; panelX: number; panelY: number } | null>(null);
+  const voiceRecorderRef = useRef<MediaRecorder | null>(null);
+  const voiceStreamRef = useRef<MediaStream | null>(null);
+  const voiceTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const voiceChunksRef = useRef<Blob[]>([]);
 
   const {
     settings,
@@ -119,6 +129,7 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
     getContext: getRagContext
   } = useRAGStore();
   const toast = useToastStore();
+  const audioSettings = useAudioStore((s) => s.settings);
 
   // Use props if provided, otherwise use store state
   const isOpen = isOpenProp !== undefined ? isOpenProp : panel.isOpen;
@@ -1332,6 +1343,42 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
         }
         persistSession(currentSessionRef.current);
       }
+
+      // Auto-play TTS for AI response if enabled
+      if (audioSettings.autoPlayResponse && accumulatedContent) {
+        try {
+          const ttsConfig = {
+            provider: audioSettings.ttsProvider,
+            voice: audioSettings.ttsVoice,
+            apiKey: audioSettings.ttsApiKey || undefined,
+            baseUrl: audioSettings.ttsBaseUrl || undefined,
+            model: audioSettings.ttsModel || undefined,
+            speed: audioSettings.ttsSpeed,
+          };
+          // Strip markdown for cleaner TTS
+          const plainText = accumulatedContent
+            .replace(/```[\s\S]*?```/g, " code block ")
+            .replace(/[#*_~`>|[\]()]/g, "")
+            .replace(/\n{2,}/g, ". ")
+            .replace(/\n/g, " ")
+            .trim();
+          if (plainText.length > 10) {
+            const result = await synthesizeText(plainText, ttsConfig);
+            const assetUrl = convertFileSrc(result.audioPath);
+            const response = await fetch(assetUrl);
+            if (response.ok) {
+              const blob = await response.blob();
+              const blobUrl = URL.createObjectURL(blob);
+              const audio = new Audio(blobUrl);
+              audio.onended = () => URL.revokeObjectURL(blobUrl);
+              audio.onerror = () => URL.revokeObjectURL(blobUrl);
+              await audio.play();
+            }
+          }
+        } catch (e) {
+          console.warn("Auto-play TTS failed:", e);
+        }
+      }
     } catch (error) {
       console.error("AI chat error:", error);
       const elapsedMs = Date.now() - startTime;
@@ -1369,6 +1416,101 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
     }
     if (e.key === "Escape") {
       handleClose();
+    }
+  };
+
+  const handleVoiceStart = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      voiceStreamRef.current = stream;
+
+      const types = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/ogg"];
+      let mimeType = "";
+      for (const t of types) {
+        if (MediaRecorder.isTypeSupported(t)) { mimeType = t; break; }
+      }
+
+      const recorder = mimeType
+        ? new MediaRecorder(stream, { mimeType })
+        : new MediaRecorder(stream);
+      voiceRecorderRef.current = recorder;
+      voiceChunksRef.current = [];
+
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) voiceChunksRef.current.push(e.data);
+      };
+
+      recorder.onstop = async () => {
+        // Clean up stream
+        voiceStreamRef.current?.getTracks().forEach((t) => t.stop());
+        voiceStreamRef.current = null;
+        if (voiceTimerRef.current) { clearInterval(voiceTimerRef.current); voiceTimerRef.current = null; }
+
+        if (voiceChunksRef.current.length === 0) {
+          setIsVoiceRecording(false);
+          return;
+        }
+
+        const mime = recorder.mimeType || "audio/webm";
+        const blob = new Blob(voiceChunksRef.current, { type: mime });
+        voiceChunksRef.current = [];
+        setIsVoiceRecording(false);
+        setIsTranscribing(true);
+
+        try {
+          // Convert to base64 and save
+          const reader = new FileReader();
+          const base64 = await new Promise<string>((resolve) => {
+            reader.onloadend = () => {
+              const result = reader.result as string;
+              resolve(result.split(",")[1] || result);
+            };
+            reader.readAsDataURL(blob);
+          });
+
+          const format = mime.includes("ogg") ? "ogg" : "webm";
+          const nbId = selectedNotebookId || "scratch";
+          const saved = await saveAudioRecording(nbId, base64, format);
+
+          // Transcribe
+          const result = await transcribeAudio(
+            saved.path,
+            audioSettings.sttModelSize,
+            audioSettings.sttLanguage || undefined,
+          );
+          const text = result.segments.map((s) => s.text).join(" ").trim();
+
+          if (text) {
+            setInput((prev) => (prev ? prev + " " + text : text));
+            // Focus input
+            inputRef.current?.focus();
+          } else {
+            toast.warning("No speech detected");
+          }
+        } catch (err) {
+          console.error("Voice transcription failed:", err);
+          toast.error("Voice transcription failed");
+        } finally {
+          setIsTranscribing(false);
+        }
+      };
+
+      recorder.start(100);
+      setIsVoiceRecording(true);
+      setVoiceRecordingDuration(0);
+
+      const startTime = Date.now();
+      voiceTimerRef.current = setInterval(() => {
+        setVoiceRecordingDuration((Date.now() - startTime) / 1000);
+      }, 200);
+    } catch {
+      toast.error("Microphone access denied");
+    }
+  };
+
+  const handleVoiceStop = () => {
+    if (voiceRecorderRef.current && voiceRecorderRef.current.state !== "inactive") {
+      voiceRecorderRef.current.stop();
     }
   };
 
@@ -2420,6 +2562,46 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
               maxHeight: "120px",
             }}
           />
+          {/* Mic button for voice input */}
+          {isVoiceRecording ? (
+            <button
+              onClick={handleVoiceStop}
+              className="flex h-12 w-12 items-center justify-center rounded-xl text-white shadow-md transition-all"
+              style={{ background: "var(--color-error, #f44336)" }}
+              title={`Recording... ${Math.floor(voiceRecordingDuration)}s — click to stop`}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+            </button>
+          ) : isTranscribing ? (
+            <button
+              disabled
+              className="flex h-12 w-12 items-center justify-center rounded-xl shadow-md transition-all opacity-50"
+              style={{ background: "var(--color-bg-tertiary)" }}
+              title="Transcribing..."
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="animate-spin">
+                <circle cx="12" cy="12" r="10" strokeDasharray="32" strokeDashoffset="12"/>
+              </svg>
+            </button>
+          ) : (
+            <button
+              onClick={handleVoiceStart}
+              disabled={conversation.isLoading}
+              className="flex h-12 w-12 items-center justify-center rounded-xl shadow-md transition-all hover:opacity-80 disabled:opacity-50"
+              style={{
+                background: "var(--color-bg-tertiary)",
+                color: "var(--color-text-secondary)",
+              }}
+              title="Voice input"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                <line x1="12" y1="19" x2="12" y2="23"/>
+                <line x1="8" y1="23" x2="16" y2="23"/>
+              </svg>
+            </button>
+          )}
           <button
             onClick={handleSubmit}
             disabled={!input.trim() || conversation.isLoading}
