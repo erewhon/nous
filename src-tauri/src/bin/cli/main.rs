@@ -1,5 +1,7 @@
+mod api;
 mod app;
 mod commands;
+mod daemon;
 mod render;
 #[cfg(feature = "tui")]
 mod tui;
@@ -99,6 +101,10 @@ enum Command {
         notebook: Option<String>,
     },
 
+    /// Headless background daemon
+    #[command(subcommand)]
+    Daemon(DaemonCommand),
+
     /// Launch interactive TUI
     #[cfg(feature = "tui")]
     Tui,
@@ -124,6 +130,25 @@ enum InboxCommand {
         #[arg(long)]
         unprocessed: bool,
     },
+}
+
+#[derive(Subcommand)]
+enum DaemonCommand {
+    /// Start the daemon in the foreground
+    Start {
+        /// Port for the HTTP API (default: 7667)
+        #[arg(long)]
+        port: Option<u16>,
+    },
+
+    /// Check daemon status
+    Status,
+
+    /// Install as a system service (systemd on Linux, launchd on macOS)
+    Install,
+
+    /// Uninstall the system service
+    Uninstall,
 }
 
 /// Read content from stdin if piped, or resolve "-" as stdin
@@ -230,6 +255,24 @@ fn main() -> anyhow::Result<()> {
         Some(Command::Tags { notebook }) => {
             let app = app::App::new(cli.library.as_deref())?;
             commands::tags::run(&app, notebook.as_deref(), &cli.format, use_color)?;
+        }
+        Some(Command::Daemon(subcmd)) => {
+            match subcmd {
+                DaemonCommand::Start { port } => {
+                    // Build a tokio runtime and run the daemon
+                    let rt = tokio::runtime::Runtime::new()?;
+                    rt.block_on(daemon::run(cli.library.as_deref(), port))?;
+                }
+                DaemonCommand::Status => {
+                    daemon::status()?;
+                }
+                DaemonCommand::Install => {
+                    daemon::install()?;
+                }
+                DaemonCommand::Uninstall => {
+                    daemon::uninstall()?;
+                }
+            }
         }
         #[cfg(feature = "tui")]
         Some(Command::Tui) => {

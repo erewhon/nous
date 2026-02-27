@@ -8,8 +8,9 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use futures_util::StreamExt;
-use tauri::Emitter;
 use tokio::sync::Semaphore;
+
+use super::events::SyncEventEmitter;
 
 use crate::contacts::{Contact, ContactActivity, ContactsStorage};
 use crate::energy::{EnergyCheckIn, EnergyStorage};
@@ -218,8 +219,8 @@ pub struct SyncManager {
     syncing_notebooks: Arc<Mutex<HashSet<Uuid>>>,
     /// Monotonic counter for sentinel file
     sentinel_counter: std::sync::atomic::AtomicU64,
-    /// App handle for emitting events (set after app initialization)
-    app_handle: Arc<Mutex<Option<tauri::AppHandle>>>,
+    /// Event emitter for sync progress (set after app initialization)
+    emitter: Arc<Mutex<Option<Arc<dyn SyncEventEmitter>>>>,
     /// Debounce tracking for on-save sync triggers
     onsave_debounce: Arc<Mutex<HashMap<Uuid, std::time::Instant>>>,
     /// Live CRDT store (set after app initialization)
@@ -237,16 +238,17 @@ impl SyncManager {
             webdav_semaphore: Arc::new(Semaphore::new(DEFAULT_WEBDAV_CONCURRENCY)),
             syncing_notebooks: Arc::new(Mutex::new(HashSet::new())),
             sentinel_counter: std::sync::atomic::AtomicU64::new(0),
-            app_handle: Arc::new(Mutex::new(None)),
+            emitter: Arc::new(Mutex::new(None)),
             onsave_debounce: Arc::new(Mutex::new(HashMap::new())),
             crdt_store: Arc::new(Mutex::new(None)),
         }
     }
 
-    /// Set the app handle for event emission (called after app initialization)
-    pub fn set_app_handle(&self, handle: tauri::AppHandle) {
-        let mut guard = self.app_handle.lock().unwrap();
-        *guard = Some(handle);
+    /// Set the event emitter (called after app initialization).
+    /// In the GUI, pass a `TauriEmitter`; in the daemon, pass a `LogEmitter`.
+    pub fn set_emitter(&self, emitter: Arc<dyn SyncEventEmitter>) {
+        let mut guard = self.emitter.lock().unwrap();
+        *guard = Some(emitter);
     }
 
     /// Set the CRDT store for live page state (called after app initialization)
@@ -601,12 +603,11 @@ impl SyncManager {
 
         let manager = Arc::clone(self);
         let storage = Arc::clone(storage);
-        let app_handle = self.app_handle.lock().unwrap().clone();
 
-        tauri::async_runtime::spawn(async move {
+        tokio::spawn(async move {
             log::info!("OnSave sync triggered for notebook {}", notebook_id);
             match manager
-                .sync_notebook(notebook_id, &storage, app_handle.as_ref())
+                .sync_notebook(notebook_id, &storage)
                 .await
             {
                 Ok(result) => {
@@ -836,7 +837,6 @@ impl SyncManager {
         &self,
         notebook_id: Uuid,
         storage: &SharedStorage,
-        app_handle: Option<&tauri::AppHandle>,
     ) -> Result<SyncResult, SyncError> {
         // Prevent concurrent sync of the same notebook
         if !self.try_acquire_notebook_guard(notebook_id) {
@@ -845,7 +845,7 @@ impl SyncManager {
         }
 
         let result = self
-            .sync_notebook_inner(notebook_id, storage, app_handle)
+            .sync_notebook_inner(notebook_id, storage)
             .await;
 
         self.release_notebook_guard(notebook_id);
@@ -857,15 +857,12 @@ impl SyncManager {
         &self,
         notebook_id: Uuid,
         storage: &SharedStorage,
-        app_handle: Option<&tauri::AppHandle>,
     ) -> Result<SyncResult, SyncError> {
         let start = std::time::Instant::now();
         log::info!("Sync: starting notebook {}", notebook_id);
 
-        // Resolve app handle: use explicit parameter, or fall back to stored handle.
-        // This ensures scheduler-triggered syncs (which pass None) still emit events.
-        let stored_handle = self.app_handle.lock().unwrap().clone();
-        let app_handle = app_handle.or(stored_handle.as_ref());
+        // Get emitter for event emission
+        let emitter: Option<Arc<dyn SyncEventEmitter>> = self.emitter.lock().unwrap().clone();
 
         // 1. Get notebook config + local pages (short lock)
         let (config, local_pages, notebook_name) = {
@@ -1039,7 +1036,7 @@ impl SyncManager {
                 let storage = Arc::clone(storage);
                 let sem = Arc::clone(&self.webdav_semaphore);
                 let counter = Arc::clone(&progress_counter);
-                let app = app_handle.cloned();
+                let emit = emitter.clone();
                 let nb_id_str = notebook_id.to_string();
                 let nb_name = notebook_name.clone();
                 let page_title = page.title.clone();
@@ -1047,8 +1044,8 @@ impl SyncManager {
                 async move {
                     let _permit = sem.acquire().await.unwrap();
                     let idx = counter.fetch_add(1, Ordering::Relaxed);
-                    if let Some(ref app) = app {
-                        let _ = app.emit("sync-progress", SyncProgress {
+                    if let Some(ref e) = emit {
+                        e.emit_sync_progress(&SyncProgress {
                             notebook_id: nb_id_str,
                             notebook_name: nb_name,
                             current: idx + 1,
@@ -1323,8 +1320,8 @@ impl SyncManager {
         }
 
         // 9. Sync assets (with CAS when possible, fallback to legacy)
-        if let Some(app) = app_handle {
-            let _ = app.emit("sync-progress", SyncProgress {
+        if let Some(ref e) = emitter {
+            e.emit_sync_progress(&SyncProgress {
                 notebook_id: notebook_id.to_string(),
                 notebook_name: notebook_name.clone(),
                 current: 0,
@@ -1407,7 +1404,7 @@ impl SyncManager {
         // Notify frontend of pages that were updated from remote so it can
         // refresh stale in-memory data and prevent editor auto-save from
         // overwriting the sync'd content.
-        if let Some(app) = app_handle {
+        if let Some(ref e) = emitter {
             let updated_page_ids: Vec<String> = synced_page_ids
                 .iter()
                 .filter(|(_, result)| matches!(result, PageSyncResult::Pulled | PageSyncResult::Merged))
@@ -1418,7 +1415,7 @@ impl SyncManager {
                     "Sync: notifying frontend of {} updated page(s)",
                     updated_page_ids.len(),
                 );
-                let _ = app.emit("sync-pages-updated", SyncPagesUpdated {
+                e.emit_sync_pages_updated(&SyncPagesUpdated {
                     notebook_id: notebook_id.to_string(),
                     page_ids: updated_page_ids,
                 });
@@ -1428,12 +1425,10 @@ impl SyncManager {
             // sort order, sections, folders) when any structure changed
             if notebook_meta_changed {
                 log::info!("Sync: notifying frontend of notebook metadata changes");
-                let _ = app.emit("sync-notebook-updated", serde_json::json!({
-                    "notebookId": notebook_id.to_string(),
-                }));
+                e.emit_sync_notebook_updated(&notebook_id.to_string());
             }
 
-            let _ = app.emit("sync-progress", SyncProgress {
+            e.emit_sync_progress(&SyncProgress {
                 notebook_id: notebook_id.to_string(),
                 notebook_name: notebook_name.clone(),
                 current: total_pages,
@@ -3559,7 +3554,6 @@ impl SyncManager {
         inbox_storage: &SharedInboxStorage,
         contacts_storage: &SharedContactsStorage,
         energy_storage: &SharedEnergyStorage,
-        app_handle: Option<&tauri::AppHandle>,
     ) -> Result<SyncResult, SyncError> {
         let start = std::time::Instant::now();
 
@@ -3685,7 +3679,6 @@ impl SyncManager {
         let results: Vec<()> = futures_util::stream::iter(notebook_ids_to_sync)
             .map(|notebook_id| {
                 let storage = Arc::clone(storage);
-                let app = app_handle.cloned();
                 let tp = Arc::clone(&total_pulled);
                 let tps = Arc::clone(&total_pushed);
                 let tc = Arc::clone(&total_conflicts);
@@ -3702,7 +3695,7 @@ impl SyncManager {
 
                     log::info!("Library sync: syncing notebook '{}' ({})", nb_name, notebook_id);
 
-                    match self.sync_notebook(notebook_id, &storage, app.as_ref()).await {
+                    match self.sync_notebook(notebook_id, &storage).await {
                         Ok(result) => {
                             log::info!(
                                 "Library sync: notebook '{}' done: pulled={}, pushed={}, conflicts={}, assets_pushed={}, assets_pulled={}",
@@ -3793,18 +3786,9 @@ impl SyncManager {
                                     progress_changed,
                                 };
 
-                                // Try app_handle parameter first, then stored handle
-                                let emitted = if let Some(app) = app_handle {
-                                    app.emit("sync-goals-updated", event_payload.clone()).is_ok()
-                                } else {
-                                    false
-                                };
-
-                                if !emitted {
-                                    let handle_guard = self.app_handle.lock().unwrap();
-                                    if let Some(ref handle) = *handle_guard {
-                                        let _ = handle.emit("sync-goals-updated", event_payload);
-                                    }
+                                let emitter_guard = self.emitter.lock().unwrap();
+                                if let Some(ref e) = *emitter_guard {
+                                    e.emit_sync_goals_updated(&event_payload);
                                 }
                             }
                         }
@@ -3845,18 +3829,9 @@ impl SyncManager {
                             if inbox_changed {
                                 let event_payload = SyncInboxUpdated { inbox_changed };
 
-                                // Try app_handle parameter first, then stored handle
-                                let emitted = if let Some(app) = app_handle {
-                                    app.emit("sync-inbox-updated", event_payload.clone()).is_ok()
-                                } else {
-                                    false
-                                };
-
-                                if !emitted {
-                                    let handle_guard = self.app_handle.lock().unwrap();
-                                    if let Some(ref handle) = *handle_guard {
-                                        let _ = handle.emit("sync-inbox-updated", event_payload);
-                                    }
+                                let emitter_guard = self.emitter.lock().unwrap();
+                                if let Some(ref e) = *emitter_guard {
+                                    e.emit_sync_inbox_updated(&event_payload);
                                 }
                             }
                         }
@@ -3913,17 +3888,9 @@ impl SyncManager {
                                     activities_changed,
                                 };
 
-                                let emitted = if let Some(app) = app_handle {
-                                    app.emit("sync-contacts-updated", event_payload.clone()).is_ok()
-                                } else {
-                                    false
-                                };
-
-                                if !emitted {
-                                    let handle_guard = self.app_handle.lock().unwrap();
-                                    if let Some(ref handle) = *handle_guard {
-                                        let _ = handle.emit("sync-contacts-updated", event_payload);
-                                    }
+                                let emitter_guard = self.emitter.lock().unwrap();
+                                if let Some(ref e) = *emitter_guard {
+                                    e.emit_sync_contacts_updated(&event_payload);
                                 }
                             }
                         }
@@ -3963,17 +3930,9 @@ impl SyncManager {
                             if energy_changed {
                                 let event_payload = SyncEnergyUpdated { energy_changed };
 
-                                let emitted = if let Some(app) = app_handle {
-                                    app.emit("sync-energy-updated", event_payload.clone()).is_ok()
-                                } else {
-                                    false
-                                };
-
-                                if !emitted {
-                                    let handle_guard = self.app_handle.lock().unwrap();
-                                    if let Some(ref handle) = *handle_guard {
-                                        let _ = handle.emit("sync-energy-updated", event_payload);
-                                    }
+                                let emitter_guard = self.emitter.lock().unwrap();
+                                if let Some(ref e) = *emitter_guard {
+                                    e.emit_sync_energy_updated(&event_payload);
                                 }
                             }
                         }

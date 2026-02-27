@@ -3,20 +3,20 @@ use std::sync::{Arc, Mutex};
 
 use tauri::Manager;
 
-mod actions;
+pub mod actions;
 mod chat_sessions;
-mod commands;
-mod contacts;
-mod energy;
+pub mod commands;
+pub mod contacts;
+pub mod energy;
 mod freeze_watchdog;
 mod mcp_watcher;
 pub mod encryption;
 mod evernote;
 mod external_editor;
-mod external_sources;
+pub mod external_sources;
 mod flashcards;
 mod git;
-mod goals;
+pub mod goals;
 pub mod inbox;
 mod joplin;
 mod monitor;
@@ -27,7 +27,7 @@ mod obsidian;
 mod onenote;
 mod orgmode;
 mod publish;
-mod python_bridge;
+pub mod python_bridge;
 mod rag;
 mod scrivener;
 pub mod search;
@@ -369,9 +369,11 @@ pub fn run() {
                 log::info!("Action scheduler started");
             }
 
-            // Give the sync manager the app handle so scheduler-triggered syncs
+            // Give the sync manager the Tauri emitter so scheduler-triggered syncs
             // can emit events (e.g., sync-pages-updated) to the frontend.
-            state.sync_manager.set_app_handle(app.handle().clone());
+            state.sync_manager.set_emitter(Arc::new(
+                sync::TauriEmitter::new(app.handle().clone()),
+            ));
 
             // Give the sync manager the CRDT store so it can use live page state
             state.sync_manager.set_crdt_store(Arc::clone(&state.crdt_store));

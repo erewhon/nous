@@ -1,5 +1,6 @@
 pub mod config;
 pub mod crdt;
+pub mod events;
 pub mod metadata;
 pub mod notify;
 pub mod queue;
@@ -15,7 +16,11 @@ pub use config::{
     SyncStatus,
 };
 pub use crdt::{CRDTError, CrdtStore, PageDocument};
-pub use manager::SyncManager;
+pub use events::{LogEmitter, SyncEventEmitter, TauriEmitter};
+pub use manager::{
+    SyncContactsUpdated, SyncEnergyUpdated, SyncGoalsUpdated, SyncInboxUpdated, SyncManager,
+    SyncPagesUpdated, SyncProgress,
+};
 pub use metadata::{LocalAssetState, LocalPageState, LocalSyncState};
 pub use notify::NotifyPushListener;
 pub use queue::{QueueItem, SyncOperation, SyncQueue};

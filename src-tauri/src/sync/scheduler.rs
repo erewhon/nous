@@ -81,7 +81,7 @@ pub fn start_sync_scheduler(
 ) -> SyncScheduler {
     let (tx, rx) = mpsc::channel(32);
 
-    tauri::async_runtime::spawn(async move {
+    tokio::spawn(async move {
         sync_scheduler_loop(sync_manager, storage, library_storage, goals_storage, inbox_storage, contacts_storage, energy_storage, rx).await;
     });
 
@@ -364,7 +364,7 @@ async fn sync_scheduler_loop(
 
                         log::info!("Sync scheduler: running periodic sync for library {}", id);
                         match sync_manager
-                            .sync_library(id, &library_storage, &storage, &goals_storage, &inbox_storage, &contacts_storage, &energy_storage, None)
+                            .sync_library(id, &library_storage, &storage, &goals_storage, &inbox_storage, &contacts_storage, &energy_storage)
                             .await
                         {
                             Ok(result) => {
@@ -389,7 +389,7 @@ async fn sync_scheduler_loop(
                         }
                     } else {
                         log::info!("Sync scheduler: running periodic sync for notebook {}", id);
-                        match sync_manager.sync_notebook(id, &storage, None).await {
+                        match sync_manager.sync_notebook(id, &storage).await {
                             Ok(result) => {
                                 last_checked.insert(id, Utc::now());
                                 log::info!(
@@ -421,7 +421,7 @@ async fn sync_scheduler_loop(
                     Some(SyncSchedulerMessage::RemoteChanged { library_id }) => {
                         log::info!("Sync scheduler: remote change detected for library {}, triggering sync", library_id);
                         match sync_manager
-                            .sync_library(library_id, &library_storage, &storage, &goals_storage, &inbox_storage, &contacts_storage, &energy_storage, None)
+                            .sync_library(library_id, &library_storage, &storage, &goals_storage, &inbox_storage, &contacts_storage, &energy_storage)
                             .await
                         {
                             Ok(result) => {

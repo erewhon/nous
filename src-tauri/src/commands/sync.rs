@@ -1,4 +1,4 @@
-use tauri::{AppHandle, State};
+use tauri::State;
 use uuid::Uuid;
 
 use crate::sync::{LibrarySyncConfigInput, QueueItem, SyncConfigInput, SyncResult, SyncStatus};
@@ -62,14 +62,13 @@ pub async fn sync_status(
 /// Trigger manual sync
 #[tauri::command]
 pub async fn sync_now(
-    app: AppHandle,
     state: State<'_, AppState>,
     notebook_id: String,
 ) -> CommandResult<SyncResult> {
     let uuid = parse_uuid(&notebook_id)?;
 
     state.sync_manager
-        .sync_notebook(uuid, &state.storage, Some(&app))
+        .sync_notebook(uuid, &state.storage)
         .await
         .map_err(|e| e.to_string())
 }
@@ -128,14 +127,13 @@ pub async fn library_sync_disable(
 /// Sync all notebooks in a library
 #[tauri::command]
 pub async fn library_sync_now(
-    app: AppHandle,
     state: State<'_, AppState>,
     library_id: String,
 ) -> CommandResult<SyncResult> {
     let library_uuid = parse_uuid(&library_id)?;
 
     state.sync_manager
-        .sync_library(library_uuid, &state.library_storage, &state.storage, &state.goals_storage, &state.inbox_storage, &state.contacts_storage, &state.energy_storage, Some(&app))
+        .sync_library(library_uuid, &state.library_storage, &state.storage, &state.goals_storage, &state.inbox_storage, &state.contacts_storage, &state.energy_storage)
         .await
         .map_err(|e| e.to_string())
 }

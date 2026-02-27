@@ -33,7 +33,7 @@ pub fn start_notify_push_listener(
 ) -> NotifyPushListener {
     let (shutdown_tx, shutdown_rx) = mpsc::channel(1);
 
-    tauri::async_runtime::spawn(async move {
+    tokio::spawn(async move {
         notify_push_loop(
             library_id,
             nextcloud_url,

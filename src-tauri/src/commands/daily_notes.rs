@@ -3,12 +3,117 @@ use tauri::State;
 use uuid::Uuid;
 
 use crate::git;
-use crate::storage::Page;
+use crate::storage::{FileStorage, Page};
 use crate::AppState;
 
 use super::notebook::CommandError;
 
 type CommandResult<T> = Result<T, CommandError>;
+
+// ===== Standalone core functions (no Tauri dependency) =====
+
+/// Find a daily note for a date in a notebook (standalone).
+pub fn find_daily_note(
+    storage: &FileStorage,
+    notebook_id: Uuid,
+    date: &str,
+) -> Result<Option<Page>, CommandError> {
+    let pages = storage.list_pages(notebook_id)?;
+    let daily_note = pages
+        .into_iter()
+        .find(|p| {
+            p.is_daily_note
+                && p.daily_note_date.as_deref() == Some(date)
+                && p.deleted_at.is_none()
+        });
+    Ok(daily_note)
+}
+
+/// Create a daily note for a date (standalone, no sync/search/git side-effects).
+/// Returns the existing note if one already exists for that date.
+pub fn create_daily_note_core(
+    storage: &FileStorage,
+    notebook_id: Uuid,
+    date: &str,
+    template_id: Option<String>,
+) -> Result<Page, CommandError> {
+    // Check if a daily note already exists for this date
+    if let Some(existing) = find_daily_note(storage, notebook_id, date)? {
+        return Ok(existing);
+    }
+
+    // Get notebook config for daily notes folder
+    let notebook = storage.get_notebook(notebook_id)?;
+    let folder_id = notebook
+        .daily_notes_config
+        .as_ref()
+        .and_then(|c| c.folder_id);
+
+    // Format the title nicely (e.g., "January 15, 2024")
+    let title = format_daily_note_title(date);
+
+    // Create the page
+    let mut page = storage.create_page(notebook_id, title)?;
+
+    // Set daily note metadata
+    page.is_daily_note = true;
+    page.daily_note_date = Some(date.to_string());
+    page.template_id = template_id;
+
+    // Set folder if configured
+    if let Some(fld_id) = folder_id {
+        page.folder_id = Some(fld_id);
+    }
+
+    // Save the page
+    storage.update_page(&page)?;
+
+    Ok(page)
+}
+
+/// List daily notes (standalone).
+pub fn list_daily_notes_core(
+    storage: &FileStorage,
+    notebook_id: Uuid,
+    start_date: Option<&str>,
+    end_date: Option<&str>,
+) -> Result<Vec<Page>, CommandError> {
+    let pages = storage.list_pages(notebook_id)?;
+    let mut daily_notes: Vec<Page> = pages
+        .into_iter()
+        .filter(|p| {
+            if !p.is_daily_note || p.deleted_at.is_some() {
+                return false;
+            }
+            let date = match &p.daily_note_date {
+                Some(d) => d.as_str(),
+                None => return false,
+            };
+            if let Some(start) = start_date {
+                if date < start {
+                    return false;
+                }
+            }
+            if let Some(end) = end_date {
+                if date > end {
+                    return false;
+                }
+            }
+            true
+        })
+        .collect();
+
+    // Sort by date descending (most recent first)
+    daily_notes.sort_by(|a, b| {
+        b.daily_note_date
+            .as_ref()
+            .cmp(&a.daily_note_date.as_ref())
+    });
+
+    Ok(daily_notes)
+}
+
+// ===== Tauri command wrappers =====
 
 /// Get the daily note for a specific date in a notebook
 #[tauri::command(rename_all = "camelCase")]
@@ -22,17 +127,7 @@ pub fn get_daily_note(
         message: format!("Invalid notebook ID: {}", e),
     })?;
 
-    // List all pages and find the daily note for this date
-    let pages = storage.list_pages(nb_id)?;
-    let daily_note = pages
-        .into_iter()
-        .find(|p| {
-            p.is_daily_note
-                && p.daily_note_date.as_ref() == Some(&date)
-                && p.deleted_at.is_none()
-        });
-
-    Ok(daily_note)
+    find_daily_note(&storage, nb_id, &date)
 }
 
 /// Create a daily note for a specific date
@@ -48,41 +143,7 @@ pub fn create_daily_note(
         message: format!("Invalid notebook ID: {}", e),
     })?;
 
-    // Check if a daily note already exists for this date
-    let pages = storage.list_pages(nb_id)?;
-    if let Some(existing) = pages.iter().find(|p| {
-        p.is_daily_note
-            && p.daily_note_date.as_ref() == Some(&date)
-            && p.deleted_at.is_none()
-    }) {
-        return Ok(existing.clone());
-    }
-
-    // Get notebook config for daily notes folder
-    let notebook = storage.get_notebook(nb_id)?;
-    let folder_id = notebook
-        .daily_notes_config
-        .as_ref()
-        .and_then(|c| c.folder_id);
-
-    // Format the title nicely (e.g., "January 15, 2024")
-    let title = format_daily_note_title(&date);
-
-    // Create the page
-    let mut page = storage.create_page(nb_id, title)?;
-
-    // Set daily note metadata
-    page.is_daily_note = true;
-    page.daily_note_date = Some(date.clone());
-    page.template_id = template_id;
-
-    // Set folder if configured
-    if let Some(fld_id) = folder_id {
-        page.folder_id = Some(fld_id);
-    }
-
-    // Save the page
-    storage.update_page(&page)?;
+    let page = create_daily_note_core(&storage, nb_id, &date, template_id)?;
 
     // Notify sync manager
     state.sync_manager.queue_page_update(nb_id, page.id);
@@ -117,40 +178,12 @@ pub fn list_daily_notes(
         message: format!("Invalid notebook ID: {}", e),
     })?;
 
-    let pages = storage.list_pages(nb_id)?;
-    let mut daily_notes: Vec<Page> = pages
-        .into_iter()
-        .filter(|p| {
-            if !p.is_daily_note || p.deleted_at.is_some() {
-                return false;
-            }
-            let date = match &p.daily_note_date {
-                Some(d) => d,
-                None => return false,
-            };
-            // Filter by date range if specified
-            if let Some(ref start) = start_date {
-                if date < start {
-                    return false;
-                }
-            }
-            if let Some(ref end) = end_date {
-                if date > end {
-                    return false;
-                }
-            }
-            true
-        })
-        .collect();
-
-    // Sort by date descending (most recent first)
-    daily_notes.sort_by(|a, b| {
-        b.daily_note_date
-            .as_ref()
-            .cmp(&a.daily_note_date.as_ref())
-    });
-
-    Ok(daily_notes)
+    list_daily_notes_core(
+        &storage,
+        nb_id,
+        start_date.as_deref(),
+        end_date.as_deref(),
+    )
 }
 
 /// Get or create today's daily note
@@ -256,7 +289,7 @@ pub fn unmark_daily_note(
 }
 
 /// Format a date string into a nice title
-pub(crate) fn format_daily_note_title(date: &str) -> String {
+pub fn format_daily_note_title(date: &str) -> String {
     // Parse YYYY-MM-DD
     let parts: Vec<&str> = date.split('-').collect();
     if parts.len() != 3 {
