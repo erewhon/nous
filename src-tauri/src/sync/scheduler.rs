@@ -81,7 +81,7 @@ pub fn start_sync_scheduler(
 ) -> SyncScheduler {
     let (tx, rx) = mpsc::channel(32);
 
-    tokio::spawn(async move {
+    tauri::async_runtime::spawn(async move {
         sync_scheduler_loop(sync_manager, storage, library_storage, goals_storage, inbox_storage, contacts_storage, energy_storage, rx).await;
     });
 

@@ -604,7 +604,7 @@ impl SyncManager {
         let manager = Arc::clone(self);
         let storage = Arc::clone(storage);
 
-        tokio::spawn(async move {
+        tauri::async_runtime::spawn(async move {
             log::info!("OnSave sync triggered for notebook {}", notebook_id);
             match manager
                 .sync_notebook(notebook_id, &storage)

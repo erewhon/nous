@@ -52,8 +52,8 @@ impl ActionScheduler {
         let action_storage = Arc::clone(&self.action_storage);
         let executor = Arc::clone(&self.executor);
 
-        // Spawn scheduler task (tokio::spawn works in both Tauri and daemon contexts)
-        tokio::spawn(async move {
+        // Spawn scheduler task (tauri::async_runtime::spawn works in both Tauri and daemon contexts)
+        tauri::async_runtime::spawn(async move {
             scheduler_loop(action_storage, executor, rx).await;
         });
 
