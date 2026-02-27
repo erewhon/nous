@@ -35,7 +35,10 @@ struct ApiError {
 #[derive(Deserialize)]
 struct CreatePageRequest {
     title: String,
+    /// Plain text content (double newlines become separate paragraphs)
     content: Option<String>,
+    /// Structured Editor.js blocks (takes priority over `content`)
+    blocks: Option<Vec<EditorBlock>>,
     tags: Option<Vec<String>>,
     folder_id: Option<String>,
 }
@@ -43,13 +46,19 @@ struct CreatePageRequest {
 #[derive(Deserialize)]
 struct UpdatePageRequest {
     title: Option<String>,
+    /// Plain text content (double newlines become separate paragraphs)
     content: Option<String>,
+    /// Structured Editor.js blocks (takes priority over `content`)
+    blocks: Option<Vec<EditorBlock>>,
     tags: Option<Vec<String>>,
 }
 
 #[derive(Deserialize)]
 struct AppendPageRequest {
-    content: String,
+    /// Plain text to append (double newlines become separate paragraphs)
+    content: Option<String>,
+    /// Structured Editor.js blocks to append (takes priority over `content`)
+    blocks: Option<Vec<EditorBlock>>,
 }
 
 #[derive(Deserialize)]
@@ -185,8 +194,10 @@ async fn create_page(
         Err(e) => return Err(api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),
     };
 
-    // Set content if provided
-    if let Some(text) = req.content {
+    // Set content if provided (blocks take priority over plain text)
+    if let Some(blocks) = req.blocks {
+        page.content = make_block_content(blocks);
+    } else if let Some(text) = req.content {
         page.content = make_paragraph_content(&text);
     }
 
@@ -229,7 +240,9 @@ async fn update_page(
     if let Some(title) = req.title {
         page.title = title;
     }
-    if let Some(text) = req.content {
+    if let Some(blocks) = req.blocks {
+        page.content = make_block_content(blocks);
+    } else if let Some(text) = req.content {
         page.content = make_paragraph_content(&text);
     }
     if let Some(tags) = req.tags {
@@ -261,8 +274,14 @@ async fn append_to_page(
         Err(e) => return Err(api_err(StatusCode::NOT_FOUND, e.to_string())),
     };
 
-    // Append paragraphs
-    let new_blocks = text_to_blocks(&req.content);
+    // Append blocks (structured blocks take priority over plain text)
+    let new_blocks = if let Some(blocks) = req.blocks {
+        blocks
+    } else if let Some(text) = req.content {
+        text_to_blocks(&text)
+    } else {
+        return Err(api_err(StatusCode::BAD_REQUEST, "Either 'content' or 'blocks' is required"));
+    };
     page.content.blocks.extend(new_blocks);
     page.updated_at = chrono::Utc::now();
 
@@ -377,6 +396,14 @@ async fn trigger_sync(
 }
 
 // ===== Helpers =====
+
+fn make_block_content(blocks: Vec<EditorBlock>) -> EditorData {
+    EditorData {
+        time: Some(chrono::Utc::now().timestamp_millis()),
+        version: Some("2.28.0".to_string()),
+        blocks,
+    }
+}
 
 fn make_paragraph_content(text: &str) -> EditorData {
     EditorData {

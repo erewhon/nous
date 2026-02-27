@@ -47,12 +47,13 @@ Request body:
 {
   "title": "Page Title",
   "content": "Optional plain text. Double newlines become separate paragraphs.",
+  "blocks": [{"type": "paragraph", "data": {"text": "Structured block"}}],
   "tags": ["optional", "tags"],
   "folder_id": "optional-uuid"
 }
 ```
 
-Only `title` is required. Returns 201 on success.
+Only `title` is required. `blocks` takes priority over `content` if both are provided. Returns 201 on success.
 
 ### PUT /api/notebooks/:notebook_id/pages/:page_id
 
@@ -63,18 +64,28 @@ Request body:
 {
   "title": "New Title",
   "content": "Replaces all content with paragraph blocks.",
+  "blocks": [{"type": "header", "data": {"text": "Title", "level": 2}}],
   "tags": ["replaces", "all", "tags"]
 }
 ```
 
+`blocks` takes priority over `content` if both are provided.
+
 ### POST /api/notebooks/:notebook_id/pages/:page_id/append
 
-Append text to an existing page. Double newlines in the content become separate paragraph blocks.
+Append content to an existing page. Either `content` or `blocks` is required.
 
-Request body:
+Request body (plain text):
 ```json
 {"content": "Text to append.\n\nSecond paragraph."}
 ```
+
+Request body (structured blocks):
+```json
+{"blocks": [{"type": "paragraph", "data": {"text": "First block"}}, {"type": "checklist", "data": {"items": [{"text": "Todo item", "checked": false}]}}]}
+```
+
+`blocks` takes priority over `content` if both are provided.
 
 ### GET /api/notebooks/:notebook_id/daily-notes/:date
 
@@ -118,7 +129,17 @@ Trigger WebDAV sync for all notebooks that have sync enabled. Returns the count 
 
 ## Content format
 
-Text provided in `content` fields is converted to Editor.js paragraph blocks. Separate paragraphs with double newlines (`\n\n`). The API does not accept raw Editor.js block JSON — it always converts plain text to paragraphs.
+Content can be provided in two ways:
+
+1. **Plain text** (`content` field): Text is converted to Editor.js paragraph blocks. Separate paragraphs with double newlines (`\n\n`).
+
+2. **Structured blocks** (`blocks` field): An array of Editor.js block objects. Each block has `type` and `data` fields. An `id` is auto-generated if omitted. Common block types:
+   - `paragraph`: `{"text": "..."}`
+   - `header`: `{"text": "...", "level": 2}`
+   - `checklist`: `{"items": [{"text": "...", "checked": false}]}`
+   - `list`: `{"style": "unordered", "items": [{"content": "...", "items": []}]}`
+
+If both `content` and `blocks` are provided, `blocks` takes priority.
 
 ## Running the daemon
 
