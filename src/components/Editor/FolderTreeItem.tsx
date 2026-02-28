@@ -1179,6 +1179,37 @@ const DraggablePageItem = memo(function DraggablePageItem({
             </button>
           )}
 
+          {/* Share as Link */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowContextMenu(false);
+              window.dispatchEvent(
+                new CustomEvent("open-share-dialog", {
+                  detail: { pageId: page.id, notebookId: page.notebookId },
+                })
+              );
+            }}
+            className="flex w-full items-center gap-2 px-3 py-1.5 text-sm transition-colors hover:bg-[var(--color-bg-tertiary)]"
+            style={{ color: "var(--color-text-primary)" }}
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="#6366f1"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+            </svg>
+            Share as Link
+          </button>
+
           {/* Create Subpage option */}
           {onCreateSubpage && (
             <>
