@@ -620,18 +620,10 @@ async fn serve_share(
         }
     }
 
-    // Multi-page share: serve index.html from directory
+    // Multi-page share: redirect to trailing slash so relative links resolve correctly
     if share_storage.is_multi_page_share(&share_id) {
-        let content = share_storage
-            .get_share_file(&share_id, "index.html")
-            .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
-        match content {
-            Some(bytes) => {
-                let body = String::from_utf8_lossy(&bytes).into_owned();
-                Ok(Html(body).into_response())
-            }
-            None => Err(api_err(StatusCode::NOT_FOUND, "Share index.html not found")),
-        }
+        let redirect_url = format!("/share/{}/", share_id);
+        return Ok(axum::response::Redirect::permanent(&redirect_url).into_response());
     } else {
         // Single-page share
         let html = share_storage
@@ -671,13 +663,20 @@ async fn serve_share_file(
         }
     }
 
+    // Serve index.html for empty/root path
+    let effective_path = if file_path.is_empty() || file_path == "/" {
+        "index.html".to_string()
+    } else {
+        file_path.trim_start_matches('/').to_string()
+    };
+
     let content = share_storage
-        .get_share_file(&share_id, &file_path)
+        .get_share_file(&share_id, &effective_path)
         .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
 
     match content {
         Some(bytes) => {
-            let content_type = mime_for_path(&file_path);
+            let content_type = mime_for_path(&effective_path);
             Ok((
                 [(axum::http::header::CONTENT_TYPE, content_type)],
                 bytes,
