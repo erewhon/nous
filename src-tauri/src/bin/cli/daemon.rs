@@ -33,6 +33,7 @@ pub struct DaemonState {
     pub contacts_storage: Arc<Mutex<ContactsStorage>>,
     pub sync_manager: Arc<SyncManager>,
     pub action_scheduler: Mutex<ActionScheduler>,
+    pub library_path: PathBuf,
 }
 
 /// Default daemon port
@@ -164,6 +165,7 @@ pub async fn run(library_name: Option<&str>, port: Option<u16>) -> Result<()> {
         contacts_storage: contacts_storage_arc,
         sync_manager: sync_manager_arc,
         action_scheduler: Mutex::new(action_scheduler),
+        library_path: library_path.clone(),
     });
 
     // Start HTTP API

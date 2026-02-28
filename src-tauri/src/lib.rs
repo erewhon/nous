@@ -28,6 +28,7 @@ mod onenote;
 mod orgmode;
 mod publish;
 pub mod python_bridge;
+pub mod share;
 mod rag;
 mod scrivener;
 pub mod search;
@@ -53,6 +54,7 @@ use rag::VectorIndex;
 use search::SearchIndex;
 use storage::FileStorage;
 use sync::{CrdtStore, SyncManager, SyncScheduler};
+use share::storage::ShareStorage;
 use video_server::VideoServer;
 
 pub struct AppState {
@@ -80,6 +82,7 @@ pub struct AppState {
     pub encryption_manager: Arc<EncryptionManager>,
     pub monitor_storage: Arc<Mutex<MonitorStorage>>,
     pub monitor_scheduler: Mutex<Option<monitor::scheduler::MonitorScheduler>>,
+    pub share_storage: Arc<Mutex<ShareStorage>>,
     /// Keeps the MCP file watcher alive for the app's lifetime.
     pub _mcp_watcher: Mutex<Option<notify::PollWatcher>>,
 }
@@ -250,6 +253,11 @@ pub fn run() {
     let crdt_store = CrdtStore::new(library_path.clone());
     let crdt_store_arc = Arc::new(crdt_store);
 
+    // Initialize share storage (library-scoped)
+    let share_storage = ShareStorage::new(library_path.clone());
+    share_storage.init().expect("Failed to initialize share storage");
+    let share_storage_arc = Arc::new(Mutex::new(share_storage));
+
     // Initialize external editor manager
     let external_editor = ExternalEditorManager::new()
         .expect("Failed to initialize external editor manager");
@@ -332,6 +340,7 @@ pub fn run() {
         encryption_manager,
         monitor_storage: monitor_storage_arc,
         monitor_scheduler: Mutex::new(None),
+        share_storage: share_storage_arc,
         _mcp_watcher: Mutex::new(None),
     };
 
@@ -889,6 +898,10 @@ pub fn run() {
             // Smart organize commands
             commands::smart_organize_suggest,
             commands::smart_organize_apply,
+            // Share commands
+            commands::share_page,
+            commands::list_shares,
+            commands::delete_share,
             // Publish commands
             commands::publish_notebook,
             commands::publish_selected_pages,

@@ -11,6 +11,7 @@ import { TemplateDialog } from "./components/TemplateDialog";
 import { TagManager } from "./components/Tags";
 import { BackupDialog } from "./components/Backup";
 import { PublishDialog } from "./components/Publish";
+import { ShareDialog } from "./components/Share";
 import { ActionLibrary, ActionEditor } from "./components/Actions";
 import { QuickCapture, InboxPanel } from "./components/Inbox";
 import { FlashcardPanel } from "./components/Flashcards";
@@ -95,6 +96,9 @@ function App() {
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [showBackup, setShowBackup] = useState(false);
   const [showPublish, setShowPublish] = useState(false);
+  const [showShare, setShowShare] = useState(false);
+  const [sharePageId, setSharePageId] = useState<string | undefined>(undefined);
+  const [shareNotebookId, setShareNotebookId] = useState<string | undefined>(undefined);
 
   // Listen for custom event to open backup dialog
   useEffect(() => {
@@ -108,6 +112,18 @@ function App() {
     const handleOpenPublish = () => setShowPublish(true);
     window.addEventListener("open-publish-dialog", handleOpenPublish);
     return () => window.removeEventListener("open-publish-dialog", handleOpenPublish);
+  }, []);
+
+  // Listen for custom event to open share dialog
+  useEffect(() => {
+    const handleOpenShare = (e: Event) => {
+      const detail = (e as CustomEvent<{ pageId?: string; notebookId?: string }>).detail;
+      setSharePageId(detail?.pageId);
+      setShareNotebookId(detail?.notebookId);
+      setShowShare(true);
+    };
+    window.addEventListener("open-share-dialog", handleOpenShare);
+    return () => window.removeEventListener("open-share-dialog", handleOpenShare);
   }, []);
 
   // Listen for custom event to open web clipper (optionally with a URL)
@@ -460,6 +476,18 @@ function App() {
       <PublishDialog
         isOpen={showPublish}
         onClose={() => setShowPublish(false)}
+      />
+
+      {/* Share Dialog */}
+      <ShareDialog
+        isOpen={showShare}
+        onClose={() => {
+          setShowShare(false);
+          setSharePageId(undefined);
+          setShareNotebookId(undefined);
+        }}
+        pageId={sharePageId}
+        notebookId={shareNotebookId}
       />
 
       {/* Action Library */}

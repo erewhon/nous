@@ -7,8 +7,8 @@ use std::sync::Arc;
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
-    response::IntoResponse,
-    routing::{get, post, put},
+    response::{Html, IntoResponse},
+    routing::{delete, get, post, put},
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
@@ -16,6 +16,7 @@ use uuid::Uuid;
 
 use nous_lib::commands::{create_daily_note_core, find_daily_note};
 use nous_lib::inbox::{CaptureRequest, CaptureSource};
+use nous_lib::share::storage::ShareStorage;
 use nous_lib::storage::{EditorBlock, EditorData};
 
 use super::daemon::DaemonState;
@@ -150,6 +151,10 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/energy/checkins", get(get_energy_checkins))
         .route("/api/energy/patterns", get(get_energy_patterns))
         .route("/api/sync/trigger", post(trigger_sync))
+        // Share routes
+        .route("/share/{share_id}", get(serve_share))
+        .route("/api/shares", get(list_shares))
+        .route("/api/shares/{share_id}", delete(delete_share))
         .with_state(state)
 }
 
@@ -583,6 +588,68 @@ async fn get_energy_patterns(
         .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok(Json(ApiResponse { data: patterns }))
+}
+
+// ===== Share handlers =====
+
+async fn serve_share(
+    State(state): State<AppState>,
+    Path(share_id): Path<String>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    // Validate share_id is alphanumeric
+    if !share_id.chars().all(|c| c.is_alphanumeric()) {
+        return Err(api_err(StatusCode::BAD_REQUEST, "Invalid share ID"));
+    }
+
+    let share_storage = ShareStorage::new(state.library_path.clone());
+
+    let record = share_storage
+        .get_share(&share_id)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+
+    let record = match record {
+        Some(r) => r,
+        None => return Err(api_err(StatusCode::NOT_FOUND, "Share not found")),
+    };
+
+    // Check expiry
+    if let Some(expires_at) = record.expires_at {
+        if expires_at < chrono::Utc::now() {
+            return Err(api_err(StatusCode::GONE, "Share has expired"));
+        }
+    }
+
+    let html = share_storage
+        .get_share_html(&share_id)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+
+    match html {
+        Some(content) => Ok(Html(content)),
+        None => Err(api_err(StatusCode::NOT_FOUND, "Share HTML not found")),
+    }
+}
+
+async fn list_shares(
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let share_storage = ShareStorage::new(state.library_path.clone());
+    let shares = share_storage
+        .list_shares()
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    Ok(Json(ApiResponse { data: shares }))
+}
+
+async fn delete_share(
+    State(state): State<AppState>,
+    Path(share_id): Path<String>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let share_storage = ShareStorage::new(state.library_path.clone());
+    share_storage
+        .delete_share(&share_id)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    Ok(Json(ApiResponse {
+        data: serde_json::json!({ "deleted": true }),
+    }))
 }
 
 // ===== Helpers =====

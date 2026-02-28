@@ -295,7 +295,7 @@ fn generate_site(
 }
 
 /// Build lookup maps for page slug resolution and block text resolution.
-fn build_lookup_maps(pages: &[Page]) -> (HashMap<String, String>, HashMap<String, String>) {
+pub fn build_lookup_maps(pages: &[Page]) -> (HashMap<String, String>, HashMap<String, String>) {
     let mut page_slugs: HashMap<String, String> = HashMap::new();
     let mut block_texts: HashMap<String, String> = HashMap::new();
 

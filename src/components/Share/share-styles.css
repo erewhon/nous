@@ -1,0 +1,351 @@
+.share-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.share-dialog {
+  background: var(--color-bg-primary);
+  border-radius: 12px;
+  width: 520px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--color-border);
+}
+
+.share-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.share-header h2 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.share-close-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--color-text-muted);
+  padding: 4px;
+  border-radius: 4px;
+}
+
+.share-close-btn:hover {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
+.share-body {
+  padding: 1.25rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+/* Page Info */
+.share-page-info {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.6rem 0.75rem;
+  background: var(--color-bg-secondary);
+  border-radius: 8px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--color-text-primary);
+}
+
+.share-page-info svg {
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+/* Section Labels */
+.share-section-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.5rem;
+}
+
+/* Theme Picker */
+.share-themes {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.5rem;
+}
+
+.share-theme-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 0.6rem 0.4rem;
+  border: 2px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg-primary);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.share-theme-card:hover {
+  border-color: var(--color-text-muted);
+}
+
+.share-theme-card.selected {
+  border-color: var(--color-accent);
+  background: var(--color-bg-secondary);
+}
+
+.share-theme-preview {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  border-radius: 4px;
+  margin-bottom: 0.4rem;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.share-theme-name {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+
+/* Expiry Picker */
+.share-expiry-options {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.share-expiry-btn {
+  flex: 1;
+  padding: 0.45rem 0.5rem;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-bg-primary);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: 0.8rem;
+  transition: all 0.15s;
+}
+
+.share-expiry-btn:hover {
+  border-color: var(--color-text-muted);
+}
+
+.share-expiry-btn.selected {
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+  color: #fff;
+}
+
+/* Existing Shares */
+.share-existing-list {
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.share-existing-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.share-existing-item:last-child {
+  border-bottom: none;
+}
+
+.share-existing-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.share-existing-url {
+  font-size: 0.8rem;
+  font-family: monospace;
+  color: var(--color-text-primary);
+}
+
+.share-existing-meta {
+  font-size: 0.7rem;
+  color: var(--color-text-muted);
+}
+
+.share-delete-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--color-text-muted);
+  padding: 4px;
+  border-radius: 4px;
+}
+
+.share-delete-btn:hover {
+  background: var(--color-bg-tertiary);
+  color: #cc0000;
+}
+
+/* Loading State */
+.share-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  padding: 2rem 0;
+  color: var(--color-text-secondary);
+  font-size: 0.9rem;
+}
+
+.share-spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--color-border);
+  border-top-color: var(--color-accent);
+  border-radius: 50%;
+  animation: share-spin 0.8s linear infinite;
+}
+
+@keyframes share-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Success State */
+.share-success {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem 0;
+  text-align: center;
+}
+
+.share-success h3 {
+  font-size: 1.1rem;
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.share-url-row {
+  display: flex;
+  width: 100%;
+  gap: 0.5rem;
+}
+
+.share-url-input {
+  flex: 1;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-bg-secondary);
+  color: var(--color-text-primary);
+  font-size: 0.8rem;
+  font-family: monospace;
+  outline: none;
+}
+
+.share-url-input:focus {
+  border-color: var(--color-accent);
+}
+
+.share-copy-btn {
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--color-accent);
+  border-radius: 6px;
+  background: var(--color-accent);
+  color: #fff;
+  cursor: pointer;
+  font-size: 0.8rem;
+  white-space: nowrap;
+  transition: opacity 0.15s;
+}
+
+.share-copy-btn:hover {
+  opacity: 0.9;
+}
+
+.share-open-link {
+  font-size: 0.85rem;
+  color: var(--color-accent);
+  text-decoration: none;
+}
+
+.share-open-link:hover {
+  text-decoration: underline;
+}
+
+.share-expiry-info {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  margin: 0;
+}
+
+/* Error */
+.share-error {
+  background: #fff0f0;
+  color: #cc0000;
+  padding: 0.6rem 0.75rem;
+  border-radius: 6px;
+  font-size: 0.85rem;
+}
+
+/* Footer */
+.share-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 1rem 1.25rem;
+  border-top: 1px solid var(--color-border);
+}
+
+.share-btn {
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+}
+
+.share-btn:hover {
+  background: var(--color-bg-secondary);
+}
+
+.share-btn.primary {
+  background: var(--color-accent);
+  color: #fff;
+  border-color: var(--color-accent);
+}
+
+.share-btn.primary:hover {
+  opacity: 0.9;
+}
+
+.share-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
