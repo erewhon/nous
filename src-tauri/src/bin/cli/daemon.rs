@@ -119,11 +119,14 @@ pub async fn run(library_name: Option<&str>, port: Option<u16>) -> Result<()> {
     let python_ai_arc = Arc::new(Mutex::new(python_ai));
 
     // Initialize action executor
-    let action_executor = ActionExecutor::new(
+    let mut action_executor = ActionExecutor::new(
         Arc::clone(&storage_arc),
         Arc::clone(&action_storage_arc),
         Arc::clone(&python_ai_arc),
     );
+    action_executor.set_goals_storage(Arc::clone(&goals_storage_arc));
+    action_executor.set_energy_storage(Arc::clone(&energy_storage_arc));
+    action_executor.set_inbox_storage(Arc::clone(&inbox_storage_arc));
     let action_executor_arc = Arc::new(Mutex::new(action_executor));
 
     // Initialize action scheduler and start it

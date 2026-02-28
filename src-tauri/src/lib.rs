@@ -237,6 +237,9 @@ pub fn run() {
     );
     // Wire up external sources storage to executor
     action_executor.set_external_sources_storage(Arc::clone(&external_sources_storage_arc));
+    action_executor.set_goals_storage(Arc::clone(&goals_storage_arc));
+    action_executor.set_energy_storage(Arc::clone(&energy_storage_arc));
+    action_executor.set_inbox_storage(Arc::clone(&inbox_storage_arc));
     let action_executor_arc = Arc::new(Mutex::new(action_executor));
 
     // Initialize action scheduler

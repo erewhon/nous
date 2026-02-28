@@ -7,9 +7,12 @@ use uuid::Uuid;
 use crate::actions::models::*;
 use crate::actions::storage::ActionStorage;
 use crate::actions::variables::VariableResolver;
+use crate::energy::EnergyStorage;
 use crate::external_sources::{
     read_file_content, ExternalFileFormat, ExternalSourcesError, ExternalSourcesStorage,
 };
+use crate::goals::GoalsStorage;
+use crate::inbox::{CaptureRequest, CaptureSource, InboxStorage};
 use crate::python_bridge::{AIConfig, PageSummaryInput, PythonAI, StudyPageContent, StudyGuideOptions};
 use crate::storage::{EditorBlock, EditorData, FileStorage, NotebookType, StorageError};
 
@@ -115,6 +118,9 @@ pub struct ActionExecutor {
     action_storage: Arc<Mutex<ActionStorage>>,
     python_ai: Arc<Mutex<PythonAI>>,
     external_sources_storage: Option<Arc<Mutex<ExternalSourcesStorage>>>,
+    goals_storage: Option<Arc<Mutex<GoalsStorage>>>,
+    energy_storage: Option<Arc<Mutex<EnergyStorage>>>,
+    inbox_storage: Option<Arc<Mutex<InboxStorage>>>,
     variable_resolver: VariableResolver,
 }
 
@@ -129,6 +135,9 @@ impl ActionExecutor {
             action_storage,
             python_ai,
             external_sources_storage: None,
+            goals_storage: None,
+            energy_storage: None,
+            inbox_storage: None,
             variable_resolver: VariableResolver::new(),
         }
     }
@@ -139,6 +148,21 @@ impl ActionExecutor {
         storage: Arc<Mutex<ExternalSourcesStorage>>,
     ) {
         self.external_sources_storage = Some(storage);
+    }
+
+    /// Set the goals storage reference
+    pub fn set_goals_storage(&mut self, storage: Arc<Mutex<GoalsStorage>>) {
+        self.goals_storage = Some(storage);
+    }
+
+    /// Set the energy storage reference
+    pub fn set_energy_storage(&mut self, storage: Arc<Mutex<EnergyStorage>>) {
+        self.energy_storage = Some(storage);
+    }
+
+    /// Set the inbox storage reference
+    pub fn set_inbox_storage(&mut self, storage: Arc<Mutex<InboxStorage>>) {
+        self.inbox_storage = Some(storage);
     }
 
     /// Execute an action by ID
@@ -397,6 +421,32 @@ impl ActionExecutor {
                     notebook_target,
                     title_template,
                     *max_nodes,
+                    context,
+                )
+            }
+
+            ActionStep::GoalNudge {
+                streak_at_risk_threshold,
+                include_energy_context,
+            } => {
+                self.execute_goal_nudge(
+                    *streak_at_risk_threshold,
+                    *include_energy_context,
+                    context,
+                )
+            }
+
+            ActionStep::GoalBrainstorm {
+                notebook_target,
+                title_template,
+                lookback_days,
+                custom_prompt,
+            } => {
+                self.execute_goal_brainstorm(
+                    notebook_target,
+                    title_template,
+                    *lookback_days,
+                    custom_prompt.as_ref(),
                     context,
                 )
             }
@@ -1926,6 +1976,329 @@ impl ActionExecutor {
             "ExtractConceptMap: Created concept map page '{}' with {} concepts",
             title,
             concept_graph.nodes.len()
+        );
+        Ok(())
+    }
+
+    /// Execute goal nudge step — creates inbox items for incomplete goals
+    fn execute_goal_nudge(
+        &self,
+        streak_at_risk_threshold: Option<u32>,
+        include_energy_context: bool,
+        context: &mut ExecutionContext,
+    ) -> Result<(), ExecutionError> {
+        let goals_storage = self
+            .goals_storage
+            .as_ref()
+            .ok_or_else(|| ExecutionError::InvalidConfig("Goals storage not configured".into()))?;
+        let goals_storage = goals_storage.lock().map_err(|e| {
+            ExecutionError::StepFailed(format!("Failed to lock goals storage: {}", e))
+        })?;
+
+        let active_goals = goals_storage
+            .list_active_goals()
+            .map_err(|e| ExecutionError::StepFailed(format!("Failed to list goals: {}", e)))?;
+
+        if active_goals.is_empty() {
+            log::info!("GoalNudge: No active goals found");
+            return Ok(());
+        }
+
+        let today = Local::now().date_naive();
+
+        // Gather stats and filter to incomplete goals
+        let mut nudge_goals = Vec::new();
+        for goal in &active_goals {
+            let progress = goals_storage
+                .get_progress(goal.id)
+                .unwrap_or_default();
+            let completed_today = progress.iter().any(|p| p.date == today && p.completed);
+            if completed_today {
+                continue;
+            }
+
+            let stats = goals_storage
+                .calculate_stats(goal.id)
+                .unwrap_or_else(|_| crate::goals::GoalStats::empty(goal.id));
+
+            // If threshold set, only nudge goals with streak >= threshold
+            if let Some(threshold) = streak_at_risk_threshold {
+                if stats.current_streak < threshold {
+                    continue;
+                }
+            }
+
+            nudge_goals.push((goal.clone(), stats));
+        }
+
+        if nudge_goals.is_empty() {
+            log::info!("GoalNudge: All goals completed or none meet threshold");
+            return Ok(());
+        }
+
+        // Optionally gather energy context
+        let energy_context = if include_energy_context {
+            if let Some(energy_storage) = &self.energy_storage {
+                let energy = energy_storage.lock().map_err(|e| {
+                    ExecutionError::StepFailed(format!("Failed to lock energy storage: {}", e))
+                })?;
+                let start = today - chrono::Duration::days(30);
+                energy.calculate_patterns(start, today).ok()
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // Get inbox storage
+        let inbox_storage = self
+            .inbox_storage
+            .as_ref()
+            .ok_or_else(|| ExecutionError::InvalidConfig("Inbox storage not configured".into()))?;
+        let inbox_storage = inbox_storage.lock().map_err(|e| {
+            ExecutionError::StepFailed(format!("Failed to lock inbox storage: {}", e))
+        })?;
+
+        // Create one inbox item per incomplete goal
+        let mut nudge_count = 0;
+        for (goal, stats) in &nudge_goals {
+            let mut message = format!(
+                "Goal \"{}\" is not yet completed today. Current streak: {} days, completion rate: {:.0}%.",
+                goal.name,
+                stats.current_streak,
+                stats.completion_rate * 100.0,
+            );
+
+            if let Some(ref patterns) = energy_context {
+                let day_name = today.format("%A").to_string().to_lowercase();
+                if let Some(avg) = patterns.day_of_week_averages.get(&day_name) {
+                    message.push_str(&format!(" Today's avg energy: {:.1}/5.", avg));
+                }
+                if patterns.typical_low_days.contains(&day_name) {
+                    message.push_str(" (typically a low-energy day)");
+                } else if patterns.typical_high_days.contains(&day_name) {
+                    message.push_str(" (typically a high-energy day)");
+                }
+            }
+
+            let request = CaptureRequest {
+                title: format!("Goal nudge: {}", goal.name),
+                content: message,
+                tags: Some(vec!["goal-nudge".to_string()]),
+                source: Some(CaptureSource::Api {
+                    source: "goal-nudge".to_string(),
+                }),
+                auto_classify: Some(false),
+            };
+
+            match inbox_storage.capture(request) {
+                Ok(_) => nudge_count += 1,
+                Err(e) => log::warn!("GoalNudge: Failed to create inbox item for '{}': {}", goal.name, e),
+            }
+        }
+
+        log::info!(
+            "GoalNudge: Created {} inbox nudges for {} incomplete goals",
+            nudge_count,
+            nudge_goals.len()
+        );
+        Ok(())
+    }
+
+    /// Execute goal brainstorm step — gathers goals + stats + recent activity, generates a brainstorming page
+    fn execute_goal_brainstorm(
+        &self,
+        notebook_target: &NotebookTarget,
+        title_template: &str,
+        lookback_days: Option<u32>,
+        custom_prompt: Option<&String>,
+        context: &mut ExecutionContext,
+    ) -> Result<(), ExecutionError> {
+        let lookback = lookback_days.unwrap_or(7);
+
+        // 1. Gather active goals + stats
+        let goals_storage = self
+            .goals_storage
+            .as_ref()
+            .ok_or_else(|| ExecutionError::InvalidConfig("Goals storage not configured".into()))?;
+        let goals_storage = goals_storage.lock().map_err(|e| {
+            ExecutionError::StepFailed(format!("Failed to lock goals storage: {}", e))
+        })?;
+
+        let active_goals = goals_storage
+            .list_active_goals()
+            .map_err(|e| ExecutionError::StepFailed(format!("Failed to list goals: {}", e)))?;
+
+        let mut goals_text = String::from("## Current Goals\n\n");
+        for goal in &active_goals {
+            let stats = goals_storage
+                .calculate_stats(goal.id)
+                .unwrap_or_else(|_| crate::goals::GoalStats::empty(goal.id));
+            goals_text.push_str(&format!(
+                "- **{}**: streak {}, {:.0}% completion rate, {} total\n",
+                goal.name,
+                stats.current_streak,
+                stats.completion_rate * 100.0,
+                stats.total_completed,
+            ));
+            if let Some(ref desc) = goal.description {
+                goals_text.push_str(&format!("  _{}_\n", desc));
+            }
+        }
+        drop(goals_storage);
+
+        // 2. Gather recent daily notes
+        let daily_note_selector = PageSelector {
+            notebook: Some(notebook_target.clone()),
+            is_daily_note: Some(true),
+            created_within_days: Some(lookback),
+            ..Default::default()
+        };
+        let recent_pages = self.find_pages(&daily_note_selector, context).unwrap_or_default();
+
+        let mut notes_text = String::from("\n## Recent Daily Notes\n\n");
+        for page in &recent_pages {
+            let content_preview: String = page
+                .content
+                .blocks
+                .iter()
+                .filter_map(|block| {
+                    block.data.get("text").and_then(|t| t.as_str()).map(String::from)
+                })
+                .take(5)
+                .collect::<Vec<_>>()
+                .join(" | ");
+            notes_text.push_str(&format!("- **{}**: {}\n", page.title, content_preview));
+        }
+
+        // 3. Gather energy patterns
+        let today = Local::now().date_naive();
+        let mut energy_text = String::new();
+        if let Some(energy_storage) = &self.energy_storage {
+            if let Ok(energy) = energy_storage.lock() {
+                let start = today - chrono::Duration::days(30);
+                if let Ok(patterns) = energy.calculate_patterns(start, today) {
+                    energy_text.push_str("\n## Energy Patterns (last 30 days)\n\n");
+                    if !patterns.typical_high_days.is_empty() {
+                        energy_text.push_str(&format!(
+                            "- High-energy days: {}\n",
+                            patterns.typical_high_days.join(", ")
+                        ));
+                    }
+                    if !patterns.typical_low_days.is_empty() {
+                        energy_text.push_str(&format!(
+                            "- Low-energy days: {}\n",
+                            patterns.typical_low_days.join(", ")
+                        ));
+                    }
+                }
+            }
+        }
+
+        // 4. Build AI prompt context
+        let full_context = format!("{}\n{}\n{}", goals_text, notes_text, energy_text);
+
+        let brainstorm_prompt = format!(
+            "You are a thoughtful goal coach. Based on the user's current goals, recent activity, \
+             and energy patterns, provide a brainstorming review. Include:\n\
+             1. Progress highlights and wins\n\
+             2. Goals that may need attention or adjustment\n\
+             3. Suggestions for new goals or modifications\n\
+             4. Energy-aware scheduling tips\n\
+             5. Motivational observations\n\
+             {}",
+            custom_prompt.map(|s| s.as_str()).unwrap_or("")
+        );
+
+        // 5. Call AI
+        let page_inputs = vec![PageSummaryInput {
+            title: "Goal Brainstorm Context".to_string(),
+            content: full_context,
+            tags: vec!["goal-brainstorm".to_string()],
+        }];
+
+        let ai_config = context.ai_config.clone().unwrap_or_default();
+        let python_ai = self.python_ai.lock().map_err(|e| {
+            ExecutionError::StepFailed(format!("Failed to lock Python AI: {}", e))
+        })?;
+
+        let summary_result = python_ai
+            .summarize_pages(
+                page_inputs,
+                Some(brainstorm_prompt),
+                Some("detailed".to_string()),
+                ai_config,
+            )
+            .map_err(|e| ExecutionError::StepFailed(format!("AI brainstorm failed: {}", e)))?;
+        drop(python_ai);
+
+        // 6. Create output page
+        let notebook_id = self.resolve_notebook_target(notebook_target, context)?;
+        let storage = self.storage.lock().map_err(|e| {
+            ExecutionError::StepFailed(format!("Failed to lock storage: {}", e))
+        })?;
+
+        let title = self.variable_resolver.substitute(title_template, &context.variables);
+        let page = storage.create_page(notebook_id, title)?;
+        context.created_pages.push(page.id.to_string());
+
+        // Build EditorJS content
+        let mut blocks = vec![serde_json::json!({
+            "type": "paragraph",
+            "data": { "text": summary_result.summary }
+        })];
+
+        if !summary_result.key_points.is_empty() {
+            blocks.push(serde_json::json!({
+                "type": "header",
+                "data": { "text": "Key Insights", "level": 2 }
+            }));
+            blocks.push(serde_json::json!({
+                "type": "list",
+                "data": {
+                    "style": "unordered",
+                    "items": summary_result.key_points
+                }
+            }));
+        }
+
+        if !summary_result.action_items.is_empty() {
+            blocks.push(serde_json::json!({
+                "type": "header",
+                "data": { "text": "Suggested Actions", "level": 2 }
+            }));
+            let checklist_items: Vec<_> = summary_result
+                .action_items
+                .iter()
+                .map(|item| {
+                    serde_json::json!({ "text": item, "checked": false })
+                })
+                .collect();
+            blocks.push(serde_json::json!({
+                "type": "checklist",
+                "data": { "items": checklist_items }
+            }));
+        }
+
+        let editor_blocks: Vec<EditorBlock> = blocks
+            .into_iter()
+            .filter_map(|b| serde_json::from_value(b).ok())
+            .collect();
+
+        let mut updated_page = storage.get_page(notebook_id, page.id)?;
+        updated_page.content = EditorData {
+            time: Some(Utc::now().timestamp_millis()),
+            blocks: editor_blocks,
+            version: Some("2.28.0".to_string()),
+        };
+        updated_page.tags = vec!["goal-brainstorm".to_string()];
+        storage.update_page(&updated_page)?;
+
+        log::info!(
+            "GoalBrainstorm: Created brainstorm page '{}' with {} goals analyzed",
+            updated_page.title,
+            active_goals.len()
         );
         Ok(())
     }

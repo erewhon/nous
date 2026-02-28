@@ -23,6 +23,8 @@ pub fn get_builtin_actions() -> Vec<Action> {
         create_weekly_study_review_action(),
         create_exam_prep_workflow_action(),
         create_daily_learning_summary_action(),
+        create_daily_goal_nudge_action(),
+        create_goal_brainstorm_action(),
     ]
 }
 
@@ -691,6 +693,91 @@ fn create_daily_learning_summary_action() -> Action {
     }
 }
 
+/// Daily Goal Nudge action - checks goals and creates inbox reminders
+fn create_daily_goal_nudge_action() -> Action {
+    let id = Uuid::parse_str("00000000-0000-0000-0001-00000000000c").unwrap();
+
+    Action {
+        id,
+        name: "Daily Goal Nudge".to_string(),
+        description: "Check your goals and send inbox reminders for incomplete ones with streak and energy context".to_string(),
+        icon: Some("bell".to_string()),
+        category: ActionCategory::DailyRoutines,
+        triggers: vec![
+            ActionTrigger::Manual,
+            ActionTrigger::AiChat {
+                keywords: vec![
+                    "nudge goals".to_string(),
+                    "goal check".to_string(),
+                    "check my goals".to_string(),
+                    "am I on track".to_string(),
+                ],
+            },
+            ActionTrigger::Scheduled {
+                schedule: Schedule::Daily {
+                    time: "16:00".to_string(),
+                    skip_weekends: false,
+                },
+            },
+        ],
+        steps: vec![ActionStep::GoalNudge {
+            streak_at_risk_threshold: None,
+            include_energy_context: true,
+        }],
+        enabled: true,
+        is_built_in: true,
+        variables: Vec::new(),
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+        last_run: None,
+        next_run: None,
+    }
+}
+
+/// Goal Brainstorm action - AI-powered goal review and brainstorming
+fn create_goal_brainstorm_action() -> Action {
+    let id = Uuid::parse_str("00000000-0000-0000-0001-00000000000d").unwrap();
+
+    Action {
+        id,
+        name: "Goal Brainstorm".to_string(),
+        description: "AI-powered review of your goals with progress insights, suggestions, and energy-aware tips".to_string(),
+        icon: Some("lightbulb".to_string()),
+        category: ActionCategory::Custom,
+        triggers: vec![
+            ActionTrigger::Manual,
+            ActionTrigger::AiChat {
+                keywords: vec![
+                    "brainstorm goals".to_string(),
+                    "goal ideas".to_string(),
+                    "reflect on goals".to_string(),
+                    "goal review".to_string(),
+                ],
+            },
+        ],
+        steps: vec![ActionStep::GoalBrainstorm {
+            notebook_target: NotebookTarget::Current,
+            title_template: "{{date}} - Goal Brainstorm".to_string(),
+            lookback_days: Some(7),
+            custom_prompt: None,
+        }],
+        enabled: true,
+        is_built_in: true,
+        variables: vec![ActionVariable {
+            name: "date".to_string(),
+            description: "Today's date".to_string(),
+            default_value: None,
+            variable_type: VariableType::CurrentDateFormatted {
+                format: "%B %d, %Y".to_string(),
+            },
+        }],
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+        last_run: None,
+        next_run: None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -698,7 +785,7 @@ mod tests {
     #[test]
     fn test_builtin_actions_created() {
         let actions = get_builtin_actions();
-        assert_eq!(actions.len(), 11);
+        assert_eq!(actions.len(), 13);
     }
 
     #[test]

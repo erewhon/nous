@@ -309,6 +309,27 @@ pub enum ActionStep {
     },
     /// Set a variable for later use
     SetVariable { name: String, value: String },
+    /// Check goals and create inbox nudges for incomplete ones
+    #[serde(rename_all = "camelCase")]
+    GoalNudge {
+        /// Only nudge goals with streak >= threshold (None = all incomplete goals)
+        streak_at_risk_threshold: Option<u32>,
+        /// Include energy pattern context in nudge message
+        #[serde(default)]
+        include_energy_context: bool,
+    },
+    /// AI-powered goal brainstorming review
+    #[serde(rename_all = "camelCase")]
+    GoalBrainstorm {
+        /// Where to create the brainstorm page
+        notebook_target: NotebookTarget,
+        /// Title template (e.g. "{{date}} - Goal Brainstorm")
+        title_template: String,
+        /// Days of history to include (default 7)
+        lookback_days: Option<u32>,
+        /// Extra guidance for the AI prompt
+        custom_prompt: Option<String>,
+    },
     /// Process external files (JSON, Markdown, plain text) with AI summarization
     #[serde(rename_all = "camelCase")]
     ProcessExternalSource {

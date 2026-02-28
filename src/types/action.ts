@@ -251,6 +251,20 @@ export const SetVariableStepSchema = z.object({
   value: z.string(),
 });
 
+export const GoalNudgeStepSchema = z.object({
+  type: z.literal("goalNudge"),
+  streakAtRiskThreshold: z.number().optional(),
+  includeEnergyContext: z.boolean().default(false),
+});
+
+export const GoalBrainstormStepSchema = z.object({
+  type: z.literal("goalBrainstorm"),
+  notebookTarget: NotebookTargetSchema,
+  titleTemplate: z.string(),
+  lookbackDays: z.number().optional(),
+  customPrompt: z.string().optional(),
+});
+
 export const ProcessExternalSourceStepSchema = z.object({
   type: z.literal("processExternalSource"),
   sourceId: z.string().optional(),
@@ -312,6 +326,8 @@ export const ActionStepSchema: z.ZodType<ActionStep> = z.lazy(() =>
       thenSteps: z.array(ActionStepSchema),
       elseSteps: z.array(ActionStepSchema).default([]),
     }),
+    GoalNudgeStepSchema,
+    GoalBrainstormStepSchema,
     ProcessExternalSourceStepSchema,
   ])
 );
@@ -329,6 +345,8 @@ export type ActionStep =
   | z.infer<typeof DelayStepSchema>
   | z.infer<typeof SetVariableStepSchema>
   | ConditionalStep
+  | z.infer<typeof GoalNudgeStepSchema>
+  | z.infer<typeof GoalBrainstormStepSchema>
   | z.infer<typeof ProcessExternalSourceStepSchema>;
 
 // ===== Variable Types =====
@@ -572,6 +590,18 @@ export const STEP_TYPES: StepTypeInfo[] = [
     name: "Set Variable",
     description: "Set a variable for use in later steps",
     icon: "variable",
+  },
+  {
+    type: "goalNudge",
+    name: "Goal Nudge",
+    description: "Check goals and send inbox reminders for incomplete ones",
+    icon: "bell",
+  },
+  {
+    type: "goalBrainstorm",
+    name: "Goal Brainstorm",
+    description: "AI-powered goal review with insights and suggestions",
+    icon: "lightbulb",
   },
   {
     type: "processExternalSource",
