@@ -119,6 +119,69 @@ Request body:
 
 Only `title` is required.
 
+### GET /api/goals
+
+List all active goals with inline stats (streaks, completion rate).
+
+```json
+{"data": [{"goal": {"id": "uuid", "name": "Daily coding", "frequency": "Daily", ...}, "stats": {"goalId": "uuid", "currentStreak": 5, "longestStreak": 12, "totalCompleted": 45, "completionRate": 0.83}}]}
+```
+
+### GET /api/goals/summary
+
+Overview of all active goals.
+
+```json
+{"data": {"activeGoals": 3, "completedToday": 1, "totalStreaks": 12, "highestStreak": 7}}
+```
+
+### GET /api/goals/:goal_id
+
+Get a single goal with stats. Returns 404 if not found.
+
+```json
+{"data": {"goal": {...}, "stats": {...}}}
+```
+
+### GET /api/goals/:goal_id/progress
+
+Get progress entries for a goal. Optional query params: `?start=2025-01-01&end=2025-01-31` or `?days=30`.
+
+```json
+{"data": [{"goalId": "uuid", "date": "2025-01-15", "completed": true, "autoDetected": false, "value": null}]}
+```
+
+### POST /api/goals/:goal_id/progress
+
+Record progress for a goal. Returns 201 on success.
+
+Request body:
+```json
+{
+  "date": "2025-01-15",
+  "completed": true,
+  "value": 3
+}
+```
+
+Only `date` is required. `completed` defaults to true. `value` is optional (for auto-detected goals).
+
+### GET /api/energy/checkins
+
+List energy check-ins. Optional query params: `?start=2025-01-01&end=2025-01-31`.
+
+```json
+{"data": [{"id": "uuid", "date": "2025-01-15", "energyLevel": 4, "mood": 3, "sleepQuality": 3, "focusCapacity": ["DeepWork"], "notes": "Felt good"}]}
+```
+
+### GET /api/energy/patterns
+
+Get computed energy patterns. Optional query params: `?start=2025-01-01&end=2025-01-31`. Defaults to last 90 days.
+
+```json
+{"data": {"dayOfWeekAverages": {"monday": 3.5, "tuesday": 4.0}, "moodDayOfWeekAverages": {"monday": 3.0}, "currentStreak": 5, "typicalLowDays": ["monday"], "typicalHighDays": ["saturday"]}}
+```
+
 ### POST /api/sync/trigger
 
 Trigger WebDAV sync for all notebooks that have sync enabled. Returns the count of notebooks synced.

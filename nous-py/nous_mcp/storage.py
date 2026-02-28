@@ -10,7 +10,8 @@ import json
 import logging
 import re
 import sys
-from datetime import UTC, datetime
+from collections import defaultdict
+from datetime import date, timedelta
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -502,6 +503,185 @@ class NousStorage:
         tmp.write_text(json.dumps(entries, indent=2) + "\n")
         tmp.rename(path)
 
+    def calculate_goal_stats(self, goal_id: str) -> dict:
+        """Calculate statistics for a goal: streaks, completion rate, etc.
+
+        Mirrors Rust GoalsStorage::calculate_stats.
+        """
+        goals = self.list_goals(include_archived=True)
+        goal = next((g for g in goals if g["id"] == goal_id), None)
+        if goal is None:
+            raise ValueError(f"Goal not found: {goal_id}")
+
+        entries = self.get_goal_progress(goal_id)
+        if not entries:
+            return {
+                "goalId": goal_id,
+                "currentStreak": 0,
+                "longestStreak": 0,
+                "totalCompleted": 0,
+                "completionRate": 0.0,
+            }
+
+        completed_dates = sorted(
+            {e["date"] for e in entries if e.get("completed", False)}
+        )
+
+        today = date.today()
+        frequency = goal.get("frequency", "daily").capitalize()
+
+        # Current streak
+        current_streak = _calculate_current_streak(frequency, completed_dates, today)
+
+        # Longest streak
+        longest_streak = _calculate_longest_streak(frequency, completed_dates)
+
+        # Total completed
+        total_completed = len(completed_dates)
+
+        # Completion rate (last 30 days for daily, 4 for weekly, 1 for monthly)
+        thirty_days_ago = today - timedelta(days=30)
+        recent_completed = sum(
+            1 for d in completed_dates
+            if thirty_days_ago.isoformat() <= d <= today.isoformat()
+        )
+        freq_lower = frequency.lower()
+        days_tracked = {"daily": 30, "weekly": 4, "monthly": 1}.get(freq_lower, 30)
+        completion_rate = min(recent_completed / days_tracked, 1.0) if days_tracked > 0 else 0.0
+
+        return {
+            "goalId": goal_id,
+            "currentStreak": current_streak,
+            "longestStreak": longest_streak,
+            "totalCompleted": total_completed,
+            "completionRate": round(completion_rate, 3),
+        }
+
+    def get_goals_summary(self) -> dict:
+        """Get summary of all active goals with today's completions and streaks."""
+        goals = self.list_goals(include_archived=False)
+        today = date.today().isoformat()
+
+        active_goals = len(goals)
+        completed_today = 0
+        total_streaks = 0
+        highest_streak = 0
+
+        for goal in goals:
+            entries = self.get_goal_progress(goal["id"])
+            if any(e.get("date") == today and e.get("completed") for e in entries):
+                completed_today += 1
+
+            stats = self.calculate_goal_stats(goal["id"])
+            total_streaks += stats["currentStreak"]
+            highest_streak = max(highest_streak, stats["currentStreak"])
+
+        return {
+            "activeGoals": active_goals,
+            "completedToday": completed_today,
+            "totalStreaks": total_streaks,
+            "highestStreak": highest_streak,
+        }
+
+    # --- Energy ---
+
+    def _energy_dir(self) -> Path:
+        return _default_data_dir() / "energy"
+
+    def list_energy_checkins(self) -> list[dict]:
+        """Read all energy check-ins from energy/checkins.json."""
+        path = self._energy_dir() / "checkins.json"
+        if not path.exists():
+            return []
+        try:
+            return json.loads(path.read_text())
+        except (json.JSONDecodeError, OSError):
+            return []
+
+    def get_energy_checkins_range(
+        self, start: str, end: str
+    ) -> list[dict]:
+        """Filter energy check-ins by date range (YYYY-MM-DD strings)."""
+        checkins = self.list_energy_checkins()
+        return [
+            c for c in checkins
+            if start <= c.get("date", "") <= end
+        ]
+
+    def calculate_energy_patterns(self, checkins: list[dict]) -> dict:
+        """Calculate energy patterns from check-in data.
+
+        Mirrors Rust EnergyStorage::calculate_patterns.
+        """
+        energy_totals: dict[str, list[float]] = defaultdict(list)
+        mood_totals: dict[str, list[float]] = defaultdict(list)
+
+        for c in checkins:
+            d = c.get("date", "")
+            if not d:
+                continue
+            try:
+                parsed = date.fromisoformat(d)
+            except ValueError:
+                continue
+
+            day_name = parsed.strftime("%A").lower()
+
+            if c.get("energyLevel") is not None:
+                energy_totals[day_name].append(float(c["energyLevel"]))
+            # Also check snake_case variant for compatibility
+            elif c.get("energy_level") is not None:
+                energy_totals[day_name].append(float(c["energy_level"]))
+
+            if c.get("mood") is not None:
+                mood_totals[day_name].append(float(c["mood"]))
+
+        day_of_week_averages = {
+            day: round(sum(vals) / len(vals), 2)
+            for day, vals in energy_totals.items()
+        }
+        mood_day_of_week_averages = {
+            day: round(sum(vals) / len(vals), 2)
+            for day, vals in mood_totals.items()
+        }
+
+        typical_low_days = [d for d, avg in day_of_week_averages.items() if avg < 2.5]
+        typical_high_days = [d for d, avg in day_of_week_averages.items() if avg >= 4.0]
+
+        # Current streak: consecutive days with check-ins ending at today
+        current_streak = self._calculate_energy_streak()
+
+        return {
+            "dayOfWeekAverages": day_of_week_averages,
+            "moodDayOfWeekAverages": mood_day_of_week_averages,
+            "currentStreak": current_streak,
+            "typicalLowDays": typical_low_days,
+            "typicalHighDays": typical_high_days,
+        }
+
+    def _calculate_energy_streak(self) -> int:
+        """Calculate consecutive days with check-ins ending at today."""
+        checkins = self.list_energy_checkins()
+        if not checkins:
+            return 0
+
+        checkin_dates = {c.get("date", "") for c in checkins}
+        today = date.today()
+        streak = 0
+        check_date = today
+
+        if check_date.isoformat() not in checkin_dates:
+            # Try yesterday
+            check_date = today - timedelta(days=1)
+            if check_date.isoformat() not in checkin_dates:
+                return 0
+
+        while check_date.isoformat() in checkin_dates:
+            streak += 1
+            check_date -= timedelta(days=1)
+
+        return streak
+
     # --- Search ---
 
     def search_pages(
@@ -605,6 +785,159 @@ def _extract_block_text(block: dict) -> str:
         )
 
     return ""
+
+
+def _calculate_current_streak(
+    frequency: str, completed_dates: list[str], today: date
+) -> int:
+    """Calculate the current consecutive streak ending at today (or yesterday)."""
+    if not completed_dates:
+        return 0
+
+    if frequency == "Daily":
+        check = today
+        if today.isoformat() not in completed_dates:
+            check = today - timedelta(days=1)
+            if check.isoformat() not in completed_dates:
+                return 0
+
+        streak = 0
+        date_set = set(completed_dates)
+        while check.isoformat() in date_set:
+            streak += 1
+            check -= timedelta(days=1)
+        return streak
+
+    elif frequency == "Weekly":
+        # Group by ISO week
+        completed_weeks = set()
+        for d in completed_dates:
+            try:
+                parsed = date.fromisoformat(d)
+                completed_weeks.add(parsed.isocalendar()[:2])  # (year, week)
+            except ValueError:
+                continue
+
+        current_week = today.isocalendar()[:2]
+        prev_week = (today - timedelta(weeks=1)).isocalendar()[:2]
+
+        check_week_date = today
+        if current_week not in completed_weeks:
+            check_week_date = today - timedelta(weeks=1)
+            if prev_week not in completed_weeks:
+                return 0
+
+        streak = 0
+        while check_week_date.isocalendar()[:2] in completed_weeks:
+            streak += 1
+            check_week_date -= timedelta(weeks=1)
+        return streak
+
+    elif frequency == "Monthly":
+        completed_months = set()
+        for d in completed_dates:
+            try:
+                parsed = date.fromisoformat(d)
+                completed_months.add((parsed.year, parsed.month))
+            except ValueError:
+                continue
+
+        current_month = (today.year, today.month)
+        if current_month not in completed_months:
+            # Check previous month
+            first = date(today.year, today.month, 1)
+            prev = first - timedelta(days=1)
+            current_month = (prev.year, prev.month)
+            if current_month not in completed_months:
+                return 0
+
+        streak = 0
+        y, m = current_month
+        while (y, m) in completed_months:
+            streak += 1
+            m -= 1
+            if m == 0:
+                m = 12
+                y -= 1
+        return streak
+
+    return 0
+
+
+def _calculate_longest_streak(frequency: str, completed_dates: list[str]) -> int:
+    """Calculate the longest ever consecutive streak."""
+    if not completed_dates:
+        return 0
+
+    if frequency == "Daily":
+        dates_sorted = sorted(completed_dates)
+        longest = 1
+        current = 1
+        for i in range(1, len(dates_sorted)):
+            try:
+                prev = date.fromisoformat(dates_sorted[i - 1])
+                curr = date.fromisoformat(dates_sorted[i])
+                if (curr - prev).days == 1:
+                    current += 1
+                elif (curr - prev).days > 1:
+                    longest = max(longest, current)
+                    current = 1
+                # Skip duplicates
+            except ValueError:
+                longest = max(longest, current)
+                current = 1
+        return max(longest, current)
+
+    elif frequency == "Weekly":
+        weeks = sorted({
+            date.fromisoformat(d).isocalendar()[:2]
+            for d in completed_dates
+            if _is_valid_date(d)
+        })
+        if not weeks:
+            return 0
+        longest = 1
+        current = 1
+        for i in range(1, len(weeks)):
+            # Check if consecutive weeks
+            prev_date = date.fromisocalendar(weeks[i - 1][0], weeks[i - 1][1], 1)
+            curr_date = date.fromisocalendar(weeks[i][0], weeks[i][1], 1)
+            if (curr_date - prev_date).days == 7:
+                current += 1
+            else:
+                longest = max(longest, current)
+                current = 1
+        return max(longest, current)
+
+    elif frequency == "Monthly":
+        months = sorted({
+            (date.fromisoformat(d).year, date.fromisoformat(d).month)
+            for d in completed_dates
+            if _is_valid_date(d)
+        })
+        if not months:
+            return 0
+        longest = 1
+        current = 1
+        for i in range(1, len(months)):
+            y1, m1 = months[i - 1]
+            y2, m2 = months[i]
+            if (y2 * 12 + m2) - (y1 * 12 + m1) == 1:
+                current += 1
+            else:
+                longest = max(longest, current)
+                current = 1
+        return max(longest, current)
+
+    return 0
+
+
+def _is_valid_date(s: str) -> bool:
+    try:
+        date.fromisoformat(s)
+        return True
+    except ValueError:
+        return False
 
 
 def _resolve_name(name: str, items: list[dict], key: str) -> dict:

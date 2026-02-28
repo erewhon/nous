@@ -1244,6 +1244,94 @@ def record_goal_progress(
     return json.dumps(entry_data, indent=2)
 
 
+@mcp.tool()
+def get_goal_stats(goal_id: str) -> str:
+    """Get computed statistics for a goal including streaks and completion rate.
+
+    Args:
+        goal_id: The UUID of the goal.
+
+    Returns JSON with goalId, currentStreak, longestStreak, totalCompleted, completionRate.
+    """
+    storage = _get_storage()
+    stats = storage.calculate_goal_stats(goal_id)
+    return json.dumps(stats, indent=2)
+
+
+@mcp.tool()
+def get_goals_summary() -> str:
+    """Get a summary of all active goals with today's completions and streaks.
+
+    Returns JSON with activeGoals, completedToday, totalStreaks, highestStreak.
+    """
+    storage = _get_storage()
+    summary = storage.get_goals_summary()
+    return json.dumps(summary, indent=2)
+
+
+# ---------------------------------------------------------------------------
+# Energy tools
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+def get_energy_checkins(
+    start_date: str | None = None,
+    end_date: str | None = None,
+    limit: int = 30,
+) -> str:
+    """Get energy check-ins, optionally filtered by date range.
+
+    Args:
+        start_date: Optional start date (YYYY-MM-DD). Defaults to 30 days ago.
+        end_date: Optional end date (YYYY-MM-DD). Defaults to today.
+        limit: Maximum number of check-ins to return (default 30).
+
+    Returns JSON array of check-ins with date, energyLevel, mood,
+    sleepQuality, focusCapacity, notes.
+    """
+    storage = _get_storage()
+
+    if start_date and end_date:
+        checkins = storage.get_energy_checkins_range(start_date, end_date)
+    elif start_date:
+        from datetime import date
+
+        checkins = storage.get_energy_checkins_range(start_date, date.today().isoformat())
+    else:
+        checkins = storage.list_energy_checkins()
+
+    # Sort by date descending
+    checkins.sort(key=lambda c: c.get("date", ""), reverse=True)
+    return json.dumps(checkins[:limit], indent=2)
+
+
+@mcp.tool()
+def get_energy_patterns(
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> str:
+    """Get computed energy patterns including day-of-week averages and streaks.
+
+    Args:
+        start_date: Optional start date (YYYY-MM-DD). Defaults to 90 days ago.
+        end_date: Optional end date (YYYY-MM-DD). Defaults to today.
+
+    Returns JSON with dayOfWeekAverages, moodDayOfWeekAverages,
+    currentStreak, typicalLowDays, typicalHighDays.
+    """
+    storage = _get_storage()
+
+    from datetime import date, timedelta
+
+    end = end_date or date.today().isoformat()
+    start = start_date or (date.today() - timedelta(days=90)).isoformat()
+
+    checkins = storage.get_energy_checkins_range(start, end)
+    patterns = storage.calculate_energy_patterns(checkins)
+    return json.dumps(patterns, indent=2)
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

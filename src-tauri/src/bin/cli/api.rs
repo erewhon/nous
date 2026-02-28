@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
     routing::{get, post, put},
@@ -73,6 +73,20 @@ struct InboxCaptureRequest {
     tags: Option<Vec<String>>,
 }
 
+#[derive(Deserialize)]
+struct RecordProgressRequest {
+    date: String,
+    completed: Option<bool>,
+    value: Option<u32>,
+}
+
+#[derive(Deserialize)]
+struct DateRangeQuery {
+    start: Option<String>,
+    end: Option<String>,
+    days: Option<u32>,
+}
+
 #[derive(Serialize)]
 struct StatusResponse {
     status: String,
@@ -125,6 +139,16 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route("/api/inbox", get(list_inbox))
         .route("/api/inbox", post(capture_inbox))
+        .route("/api/goals", get(list_goals))
+        .route("/api/goals/summary", get(get_goals_summary))
+        .route("/api/goals/{goal_id}", get(get_goal))
+        .route("/api/goals/{goal_id}/progress", get(get_goal_progress))
+        .route(
+            "/api/goals/{goal_id}/progress",
+            post(record_goal_progress),
+        )
+        .route("/api/energy/checkins", get(get_energy_checkins))
+        .route("/api/energy/patterns", get(get_energy_patterns))
         .route("/api/sync/trigger", post(trigger_sync))
         .with_state(state)
 }
@@ -393,6 +417,172 @@ async fn trigger_sync(
             "synced_notebooks": synced,
         }),
     }))
+}
+
+// ===== Goals handlers =====
+
+async fn list_goals(
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let goals_storage = state.goals_storage.lock().unwrap();
+    let goals = goals_storage
+        .list_active_goals()
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    // Return goals with inline stats
+    let mut results = Vec::new();
+    for goal in goals {
+        let stats = goals_storage
+            .calculate_stats(goal.id)
+            .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        results.push(serde_json::json!({
+            "goal": goal,
+            "stats": stats,
+        }));
+    }
+
+    Ok(Json(ApiResponse { data: results }))
+}
+
+async fn get_goals_summary(
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let goals_storage = state.goals_storage.lock().unwrap();
+    let summary = goals_storage
+        .get_summary()
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    Ok(Json(ApiResponse { data: summary }))
+}
+
+async fn get_goal(
+    State(state): State<AppState>,
+    Path(goal_id): Path<String>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let id = parse_uuid(&goal_id)?;
+    let goals_storage = state.goals_storage.lock().unwrap();
+
+    let goal = goals_storage
+        .get_goal(id)
+        .map_err(|e| api_err(StatusCode::NOT_FOUND, e.to_string()))?;
+    let stats = goals_storage
+        .calculate_stats(id)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(Json(ApiResponse {
+        data: serde_json::json!({
+            "goal": goal,
+            "stats": stats,
+        }),
+    }))
+}
+
+async fn get_goal_progress(
+    State(state): State<AppState>,
+    Path(goal_id): Path<String>,
+    Query(query): Query<DateRangeQuery>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let id = parse_uuid(&goal_id)?;
+    let goals_storage = state.goals_storage.lock().unwrap();
+
+    let entries = if let (Some(start), Some(end)) = (&query.start, &query.end) {
+        let start_date = chrono::NaiveDate::parse_from_str(start, "%Y-%m-%d")
+            .map_err(|e| api_err(StatusCode::BAD_REQUEST, format!("Invalid start date: {}", e)))?;
+        let end_date = chrono::NaiveDate::parse_from_str(end, "%Y-%m-%d")
+            .map_err(|e| api_err(StatusCode::BAD_REQUEST, format!("Invalid end date: {}", e)))?;
+        goals_storage
+            .get_progress_range(id, start_date, end_date)
+            .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+    } else if let Some(days) = query.days {
+        let end_date = chrono::Local::now().date_naive();
+        let start_date = end_date - chrono::Duration::days(days as i64);
+        goals_storage
+            .get_progress_range(id, start_date, end_date)
+            .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+    } else {
+        goals_storage
+            .get_progress(id)
+            .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+    };
+
+    Ok(Json(ApiResponse { data: entries }))
+}
+
+async fn record_goal_progress(
+    State(state): State<AppState>,
+    Path(goal_id): Path<String>,
+    Json(req): Json<RecordProgressRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let id = parse_uuid(&goal_id)?;
+    let goals_storage = state.goals_storage.lock().unwrap();
+
+    let date = chrono::NaiveDate::parse_from_str(&req.date, "%Y-%m-%d")
+        .map_err(|e| api_err(StatusCode::BAD_REQUEST, format!("Invalid date: {}", e)))?;
+
+    let completed = req.completed.unwrap_or(true);
+
+    let progress = if let Some(value) = req.value {
+        nous_lib::goals::GoalProgress::new_auto(id, date, completed, value)
+    } else {
+        nous_lib::goals::GoalProgress::new_manual(id, date, completed)
+    };
+
+    let result = goals_storage
+        .record_progress(progress)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok((StatusCode::CREATED, Json(ApiResponse { data: result })))
+}
+
+// ===== Energy handlers =====
+
+async fn get_energy_checkins(
+    State(state): State<AppState>,
+    Query(query): Query<DateRangeQuery>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let energy_storage = state.energy_storage.lock().unwrap();
+
+    let checkins = if let (Some(start), Some(end)) = (&query.start, &query.end) {
+        let start_date = chrono::NaiveDate::parse_from_str(start, "%Y-%m-%d")
+            .map_err(|e| api_err(StatusCode::BAD_REQUEST, format!("Invalid start date: {}", e)))?;
+        let end_date = chrono::NaiveDate::parse_from_str(end, "%Y-%m-%d")
+            .map_err(|e| api_err(StatusCode::BAD_REQUEST, format!("Invalid end date: {}", e)))?;
+        energy_storage
+            .get_checkins_range(start_date, end_date)
+            .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+    } else {
+        energy_storage
+            .list_checkins()
+            .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+    };
+
+    Ok(Json(ApiResponse { data: checkins }))
+}
+
+async fn get_energy_patterns(
+    State(state): State<AppState>,
+    Query(query): Query<DateRangeQuery>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let energy_storage = state.energy_storage.lock().unwrap();
+
+    let end_date = if let Some(end) = &query.end {
+        chrono::NaiveDate::parse_from_str(end, "%Y-%m-%d")
+            .map_err(|e| api_err(StatusCode::BAD_REQUEST, format!("Invalid end date: {}", e)))?
+    } else {
+        chrono::Local::now().date_naive()
+    };
+
+    let start_date = if let Some(start) = &query.start {
+        chrono::NaiveDate::parse_from_str(start, "%Y-%m-%d")
+            .map_err(|e| api_err(StatusCode::BAD_REQUEST, format!("Invalid start date: {}", e)))?
+    } else {
+        end_date - chrono::Duration::days(90)
+    };
+
+    let patterns = energy_storage
+        .calculate_patterns(start_date, end_date)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(Json(ApiResponse { data: patterns }))
 }
 
 // ===== Helpers =====
