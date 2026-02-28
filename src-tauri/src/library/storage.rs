@@ -429,6 +429,29 @@ impl LibraryStorage {
         Ok(updated)
     }
 
+    /// Update a library's share upload configuration
+    pub fn update_library_share_upload_config(
+        &self,
+        id: Uuid,
+        share_upload_config: Option<crate::share::upload::ShareUploadConfig>,
+    ) -> Result<Library, LibraryError> {
+        let mut libraries = self.list_libraries()?;
+
+        let lib = libraries
+            .iter_mut()
+            .find(|lib| lib.id == id)
+            .ok_or(LibraryError::NotFound(id))?;
+
+        lib.share_upload_config = share_upload_config;
+        lib.updated_at = chrono::Utc::now();
+
+        let updated = lib.clone();
+        self.save_libraries(&libraries)?;
+
+        log::info!("Updated library share upload config for '{}'", updated.name);
+        Ok(updated)
+    }
+
     /// Save libraries to file
     fn save_libraries(&self, libraries: &[Library]) -> Result<(), LibraryError> {
         let content = serde_json::to_string_pretty(libraries)?;

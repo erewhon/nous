@@ -10,6 +10,7 @@ import { BackupScheduleSettings } from "./BackupScheduleSettings";
 import { ExternalSourcesSettings } from "./ExternalSourcesSettings";
 import { DailyNotesSettings } from "./DailyNotesSettings";
 import { MonitorSettings } from "./MonitorSettings";
+import { ShareUploadSettings } from "./ShareUploadSettings";
 import { LibrarySettingsPanel } from "../Library";
 import type { ProviderType, ProviderConfig } from "../../types/ai";
 import type { TTSProviderType } from "../../types/audio";
@@ -27,6 +28,7 @@ interface SettingsDialogProps {
     | "mcp"
     | "rag"
     | "backup"
+    | "sharing"
     | "audio"
     | "external-sources"
     | "daily-notes"
@@ -43,6 +45,7 @@ type TabId =
   | "mcp"
   | "rag"
   | "backup"
+  | "sharing"
   | "audio"
   | "voice"
   | "external-sources"
@@ -68,6 +71,7 @@ const TAB_CATEGORIES: TabCategory[] = [
     tabs: [
       { id: "libraries", label: "Libraries", icon: <IconLibrary /> },
       { id: "backup", label: "Backup", icon: <IconBackup /> },
+      { id: "sharing", label: "Sharing", icon: <IconShare /> },
       { id: "external-sources", label: "External Sources", icon: <IconFileImport /> },
     ],
   },
@@ -252,6 +256,7 @@ export function SettingsDialog({
             {activeTab === "voice" && <VoiceSettingsContent />}
             {activeTab === "mcp" && <MCPServersSettings />}
             {activeTab === "web-research" && <WebResearchSettingsContent />}
+            {activeTab === "sharing" && <ShareUploadSettings />}
             {activeTab === "external-sources" && <ExternalSourcesSettings />}
             {activeTab === "monitor" && <MonitorSettings />}
           </div>
@@ -2346,6 +2351,28 @@ function IconRefresh() {
       <path d="M3 12a9 9 0 0 1 15-6.7L21 8" />
       <path d="M3 22v-6h6" />
       <path d="M21 12a9 9 0 0 1-15 6.7L3 16" />
+    </svg>
+  );
+}
+
+function IconShare() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="18" cy="5" r="3" />
+      <circle cx="6" cy="12" r="3" />
+      <circle cx="18" cy="19" r="3" />
+      <line x1="8.59" y1="13.51" x2="15.42" y2="17.49" />
+      <line x1="15.41" y1="6.51" x2="8.59" y2="10.49" />
     </svg>
   );
 }

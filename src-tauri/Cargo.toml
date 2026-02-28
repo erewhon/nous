@@ -102,6 +102,8 @@ chacha20poly1305 = "0.10"
 argon2 = "0.5"
 hkdf = "0.12"
 sha2 = "0.10"
+hmac = "0.12"
+hex = "0.4"
 zeroize = { version = "1.7", features = ["derive"] }
 
 # CLI dependencies

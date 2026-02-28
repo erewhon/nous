@@ -153,6 +153,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/sync/trigger", post(trigger_sync))
         // Share routes
         .route("/share/{share_id}", get(serve_share))
+        .route("/share/{share_id}/{*path}", get(serve_share_file))
         .route("/api/shares", get(list_shares))
         .route("/api/shares/{share_id}", delete(delete_share))
         .with_state(state)
@@ -595,7 +596,7 @@ async fn get_energy_patterns(
 async fn serve_share(
     State(state): State<AppState>,
     Path(share_id): Path<String>,
-) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+) -> Result<axum::response::Response, (StatusCode, Json<ApiError>)> {
     // Validate share_id is alphanumeric
     if !share_id.chars().all(|c| c.is_alphanumeric()) {
         return Err(api_err(StatusCode::BAD_REQUEST, "Invalid share ID"));
@@ -619,13 +620,90 @@ async fn serve_share(
         }
     }
 
-    let html = share_storage
-        .get_share_html(&share_id)
+    // Multi-page share: serve index.html from directory
+    if share_storage.is_multi_page_share(&share_id) {
+        let content = share_storage
+            .get_share_file(&share_id, "index.html")
+            .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        match content {
+            Some(bytes) => {
+                let body = String::from_utf8_lossy(&bytes).into_owned();
+                Ok(Html(body).into_response())
+            }
+            None => Err(api_err(StatusCode::NOT_FOUND, "Share index.html not found")),
+        }
+    } else {
+        // Single-page share
+        let html = share_storage
+            .get_share_html(&share_id)
+            .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        match html {
+            Some(content) => Ok(Html(content).into_response()),
+            None => Err(api_err(StatusCode::NOT_FOUND, "Share HTML not found")),
+        }
+    }
+}
+
+async fn serve_share_file(
+    State(state): State<AppState>,
+    Path((share_id, file_path)): Path<(String, String)>,
+) -> Result<axum::response::Response, (StatusCode, Json<ApiError>)> {
+    // Validate share_id is alphanumeric
+    if !share_id.chars().all(|c| c.is_alphanumeric()) {
+        return Err(api_err(StatusCode::BAD_REQUEST, "Invalid share ID"));
+    }
+
+    let share_storage = ShareStorage::new(state.library_path.clone());
+
+    // Verify share exists and check expiry
+    let record = share_storage
+        .get_share(&share_id)
         .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
 
-    match html {
-        Some(content) => Ok(Html(content)),
-        None => Err(api_err(StatusCode::NOT_FOUND, "Share HTML not found")),
+    let record = match record {
+        Some(r) => r,
+        None => return Err(api_err(StatusCode::NOT_FOUND, "Share not found")),
+    };
+
+    if let Some(expires_at) = record.expires_at {
+        if expires_at < chrono::Utc::now() {
+            return Err(api_err(StatusCode::GONE, "Share has expired"));
+        }
+    }
+
+    let content = share_storage
+        .get_share_file(&share_id, &file_path)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+
+    match content {
+        Some(bytes) => {
+            let content_type = mime_for_path(&file_path);
+            Ok((
+                [(axum::http::header::CONTENT_TYPE, content_type)],
+                bytes,
+            )
+                .into_response())
+        }
+        None => Err(api_err(StatusCode::NOT_FOUND, "File not found")),
+    }
+}
+
+fn mime_for_path(path: &str) -> &'static str {
+    let ext = path.rsplit('.').next().unwrap_or("").to_lowercase();
+    match ext.as_str() {
+        "html" | "htm" => "text/html; charset=utf-8",
+        "css" => "text/css; charset=utf-8",
+        "js" => "application/javascript; charset=utf-8",
+        "json" => "application/json; charset=utf-8",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "svg" => "image/svg+xml",
+        "webp" => "image/webp",
+        "ico" => "image/x-icon",
+        "woff" => "font/woff",
+        "woff2" => "font/woff2",
+        _ => "application/octet-stream",
     }
 }
 

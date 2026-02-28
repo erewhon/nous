@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use uuid::Uuid;
 
 use crate::encryption::EncryptionConfig;
+use crate::share::upload::ShareUploadConfig;
 use crate::sync::config::LibrarySyncConfig;
 
 /// A library is a collection of notebooks stored at a specific path
@@ -44,6 +45,10 @@ pub struct Library {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sync_config: Option<LibrarySyncConfig>,
 
+    /// Share upload configuration (S3-compatible storage)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub share_upload_config: Option<ShareUploadConfig>,
+
     /// Creation timestamp
     pub created_at: DateTime<Utc>,
 
@@ -64,6 +69,7 @@ impl Library {
             color: None,
             encryption_config: None,
             sync_config: None,
+            share_upload_config: None,
             created_at: now,
             updated_at: now,
         }
@@ -81,6 +87,7 @@ impl Library {
             color: None,
             encryption_config: None,
             sync_config: None,
+            share_upload_config: None,
             created_at: now,
             updated_at: now,
         }

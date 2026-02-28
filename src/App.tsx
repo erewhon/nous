@@ -99,6 +99,10 @@ function App() {
   const [showShare, setShowShare] = useState(false);
   const [sharePageId, setSharePageId] = useState<string | undefined>(undefined);
   const [shareNotebookId, setShareNotebookId] = useState<string | undefined>(undefined);
+  const [shareFolderId, setShareFolderId] = useState<string | undefined>(undefined);
+  const [shareFolderName, setShareFolderName] = useState<string | undefined>(undefined);
+  const [shareSectionId, setShareSectionId] = useState<string | undefined>(undefined);
+  const [shareSectionName, setShareSectionName] = useState<string | undefined>(undefined);
 
   // Listen for custom event to open backup dialog
   useEffect(() => {
@@ -117,9 +121,22 @@ function App() {
   // Listen for custom event to open share dialog
   useEffect(() => {
     const handleOpenShare = (e: Event) => {
-      const detail = (e as CustomEvent<{ pageId?: string; notebookId?: string }>).detail;
+      const detail = (
+        e as CustomEvent<{
+          pageId?: string;
+          notebookId?: string;
+          folderId?: string;
+          folderName?: string;
+          sectionId?: string;
+          sectionName?: string;
+        }>
+      ).detail;
       setSharePageId(detail?.pageId);
       setShareNotebookId(detail?.notebookId);
+      setShareFolderId(detail?.folderId);
+      setShareFolderName(detail?.folderName);
+      setShareSectionId(detail?.sectionId);
+      setShareSectionName(detail?.sectionName);
       setShowShare(true);
     };
     window.addEventListener("open-share-dialog", handleOpenShare);
@@ -485,9 +502,17 @@ function App() {
           setShowShare(false);
           setSharePageId(undefined);
           setShareNotebookId(undefined);
+          setShareFolderId(undefined);
+          setShareFolderName(undefined);
+          setShareSectionId(undefined);
+          setShareSectionName(undefined);
         }}
         pageId={sharePageId}
         notebookId={shareNotebookId}
+        folderId={shareFolderId}
+        folderName={shareFolderName}
+        sectionId={shareSectionId}
+        sectionName={shareSectionName}
       />
 
       {/* Action Library */}

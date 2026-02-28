@@ -900,8 +900,14 @@ pub fn run() {
             commands::smart_organize_apply,
             // Share commands
             commands::share_page,
+            commands::share_folder,
+            commands::share_section,
             commands::list_shares,
             commands::delete_share,
+            commands::configure_share_upload,
+            commands::get_share_upload_config,
+            commands::test_share_upload,
+            commands::remove_share_upload_config,
             // Publish commands
             commands::publish_notebook,
             commands::publish_selected_pages,

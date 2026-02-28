@@ -1,9 +1,10 @@
 use std::fs;
+use std::path::PathBuf;
 
 use crate::publish::html::render_page_html;
-use crate::publish::site::build_lookup_maps;
+use crate::publish::site::{build_lookup_maps, generate_site, PublishOptions};
 use crate::publish::themes::get_theme;
-use crate::storage::{FileStorage, Page};
+use crate::storage::{FileStorage, Folder, Page};
 use uuid::Uuid;
 
 /// Render a self-contained HTML file for sharing a single page.
@@ -131,4 +132,84 @@ fn mime_for_extension(filename: &str) -> &'static str {
 fn base64_encode(data: &[u8]) -> String {
     use base64::Engine;
     base64::engine::general_purpose::STANDARD.encode(data)
+}
+
+/// Generate a multi-page share site in a temporary directory.
+///
+/// Uses the publish pipeline's `generate_site()` to create a full static site
+/// with navigation, then returns the path to the temp directory.
+pub fn generate_share_site(
+    storage: &FileStorage,
+    notebook_id: Uuid,
+    pages: &[Page],
+    folders: &[Folder],
+    site_title: &str,
+    theme_name: &str,
+) -> Result<PathBuf, String> {
+    let temp_dir = std::env::temp_dir().join(format!("nous-share-site-{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&temp_dir)
+        .map_err(|e| format!("Failed to create temp dir: {}", e))?;
+
+    let options = PublishOptions {
+        include_assets: true,
+        include_backlinks: false,
+        site_title: Some(site_title.to_string()),
+    };
+
+    generate_site(
+        storage,
+        notebook_id,
+        pages,
+        folders,
+        &temp_dir,
+        theme_name,
+        site_title,
+        &options,
+        None,
+    )?;
+
+    // Post-process: add generator meta tag and broken-link CSS to all HTML files
+    post_process_site(&temp_dir)?;
+
+    Ok(temp_dir)
+}
+
+/// Post-process generated site: add meta tag and broken-link styling.
+fn post_process_site(site_dir: &std::path::Path) -> Result<(), String> {
+    let broken_link_css = r#"
+<style>
+.broken-link {
+  color: var(--color-text-muted, #888);
+  text-decoration: none !important;
+  font-style: italic;
+}
+</style>
+</head>"#;
+
+    for entry in walkdir::WalkDir::new(site_dir)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            e.file_type().is_file()
+                && e.path().extension().and_then(|ext| ext.to_str()) == Some("html")
+        })
+    {
+        let path = entry.path();
+        let mut html = fs::read_to_string(path)
+            .map_err(|e| format!("Failed to read {}: {}", path.display(), e))?;
+
+        // Add generator meta tag
+        html = html.replace(
+            "<meta charset=\"utf-8\">",
+            "<meta charset=\"utf-8\">\n  <meta name=\"generator\" content=\"Nous\">",
+        );
+
+        // Add broken-link styling
+        html = html.replace("</head>", broken_link_css);
+
+        fs::write(path, &html)
+            .map_err(|e| format!("Failed to write {}: {}", path.display(), e))?;
+    }
+
+    Ok(())
 }

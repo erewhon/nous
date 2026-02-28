@@ -2,7 +2,7 @@ use chrono::{DateTime, Duration, Utc};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
 /// How long a share link stays valid.
@@ -39,22 +39,71 @@ impl ShareExpiry {
     }
 }
 
-/// Metadata for a single shared page.
+/// What kind of content is shared.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "type")]
+pub enum ShareType {
+    SinglePage { page_id: Uuid },
+    Folder { folder_id: Uuid },
+    Section { section_id: Uuid },
+}
+
+/// Metadata for a shared resource.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ShareRecord {
     pub id: String,
-    pub page_id: Uuid,
+    /// Discriminated share type (single page, folder, or section).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub share_type: Option<ShareType>,
     pub notebook_id: Uuid,
-    pub page_title: String,
+    /// Display title (page title, folder name, or section name).
+    pub title: String,
     pub theme: String,
     pub expiry: ShareExpiry,
     pub created_at: DateTime<Utc>,
     pub expires_at: Option<DateTime<Utc>>,
     pub external_url: Option<String>,
+    /// Number of pages (for multi-page shares).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page_count: Option<usize>,
+
+    // Backward compat: old records have page_id + page_title at top level.
+    // New records use share_type instead. On load we migrate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page_id: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page_title: Option<String>,
 }
 
-/// Manages share records and HTML files on disk.
+impl ShareRecord {
+    /// Ensure share_type is populated (migrates old records).
+    pub fn normalized(mut self) -> Self {
+        if self.share_type.is_none() {
+            if let Some(pid) = self.page_id {
+                self.share_type = Some(ShareType::SinglePage { page_id: pid });
+            }
+        }
+        // Migrate page_title -> title if title is empty
+        if self.title.is_empty() {
+            if let Some(pt) = &self.page_title {
+                self.title = pt.clone();
+            }
+        }
+        self
+    }
+
+    /// Get the page_id if this is a single-page share.
+    pub fn single_page_id(&self) -> Option<Uuid> {
+        match &self.share_type {
+            Some(ShareType::SinglePage { page_id }) => Some(*page_id),
+            None => self.page_id,
+            _ => None,
+        }
+    }
+}
+
+/// Manages share records and files on disk.
 pub struct ShareStorage {
     shares_dir: PathBuf,
 }
@@ -72,7 +121,7 @@ impl ShareStorage {
             .map_err(|e| format!("Failed to create shares dir: {}", e))
     }
 
-    /// Persist a new share record and its rendered HTML.
+    /// Persist a new share record and its rendered HTML (single page).
     pub fn create_share(&self, record: ShareRecord, html: &str) -> Result<ShareRecord, String> {
         // Write the HTML file
         let html_path = self.shares_dir.join(format!("{}.html", record.id));
@@ -87,13 +136,29 @@ impl ShareStorage {
         Ok(record)
     }
 
+    /// Persist a new multi-page share from a generated site directory.
+    pub fn create_multi_share(
+        &self,
+        record: ShareRecord,
+        source_dir: &Path,
+    ) -> Result<ShareRecord, String> {
+        let target_dir = self.shares_dir.join(&record.id);
+        copy_dir_recursive(source_dir, &target_dir)?;
+
+        let mut records = self.load_records()?;
+        records.push(record.clone());
+        self.save_records(&records)?;
+
+        Ok(record)
+    }
+
     /// Look up a share record by ID. Returns None if not found.
     pub fn get_share(&self, id: &str) -> Result<Option<ShareRecord>, String> {
         let records = self.load_records()?;
-        Ok(records.into_iter().find(|r| r.id == id))
+        Ok(records.into_iter().find(|r| r.id == id).map(|r| r.normalized()))
     }
 
-    /// Read the rendered HTML for a share.
+    /// Read the rendered HTML for a single-page share.
     pub fn get_share_html(&self, id: &str) -> Result<Option<String>, String> {
         let path = self.shares_dir.join(format!("{}.html", id));
         if !path.exists() {
@@ -104,20 +169,52 @@ impl ShareStorage {
             .map_err(|e| format!("Failed to read share HTML: {}", e))
     }
 
-    /// List all share records.
-    pub fn list_shares(&self) -> Result<Vec<ShareRecord>, String> {
-        self.load_records()
+    /// Read a file from a multi-page share site.
+    pub fn get_share_file(&self, id: &str, relative_path: &str) -> Result<Option<Vec<u8>>, String> {
+        let dir = self.shares_dir.join(id);
+        if !dir.is_dir() {
+            return Ok(None);
+        }
+        let file_path = dir.join(relative_path);
+        // Prevent path traversal
+        if !file_path.starts_with(&dir) {
+            return Err("Invalid path".to_string());
+        }
+        if !file_path.exists() {
+            return Ok(None);
+        }
+        fs::read(&file_path)
+            .map(Some)
+            .map_err(|e| format!("Failed to read share file: {}", e))
     }
 
-    /// Delete a share record and its HTML file.
+    /// Check if a share is stored as a multi-page directory.
+    pub fn is_multi_page_share(&self, id: &str) -> bool {
+        self.shares_dir.join(id).is_dir()
+    }
+
+    /// List all share records.
+    pub fn list_shares(&self) -> Result<Vec<ShareRecord>, String> {
+        let records = self.load_records()?;
+        Ok(records.into_iter().map(|r| r.normalized()).collect())
+    }
+
+    /// Delete a share record and its files (HTML file or directory).
     pub fn delete_share(&self, id: &str) -> Result<(), String> {
         let mut records = self.load_records()?;
         records.retain(|r| r.id != id);
         self.save_records(&records)?;
 
+        // Remove single-page HTML file
         let html_path = self.shares_dir.join(format!("{}.html", id));
         if html_path.exists() {
             let _ = fs::remove_file(&html_path);
+        }
+
+        // Remove multi-page directory
+        let dir_path = self.shares_dir.join(id);
+        if dir_path.is_dir() {
+            let _ = fs::remove_dir_all(&dir_path);
         }
 
         Ok(())
@@ -135,8 +232,14 @@ impl ShareStorage {
 
         let count = expired.len();
         for r in &expired {
+            // Remove single-page HTML
             let path = self.shares_dir.join(format!("{}.html", r.id));
             let _ = fs::remove_file(&path);
+            // Remove multi-page directory
+            let dir = self.shares_dir.join(&r.id);
+            if dir.is_dir() {
+                let _ = fs::remove_dir_all(&dir);
+            }
         }
 
         self.save_records(&active)?;
@@ -184,7 +287,7 @@ pub fn generate_share_id() -> String {
         .collect()
 }
 
-/// Build a ShareRecord from request parameters.
+/// Build a ShareRecord for a single page share.
 pub fn build_share_record(
     page_id: Uuid,
     notebook_id: Uuid,
@@ -197,13 +300,65 @@ pub fn build_share_record(
 
     ShareRecord {
         id: generate_share_id(),
-        page_id,
+        share_type: Some(ShareType::SinglePage { page_id }),
         notebook_id,
-        page_title: page_title.to_string(),
+        title: page_title.to_string(),
         theme: theme.to_string(),
         expiry,
         created_at: now,
         expires_at,
         external_url: None,
+        page_count: None,
+        // Backward compat fields
+        page_id: Some(page_id),
+        page_title: Some(page_title.to_string()),
     }
+}
+
+/// Build a ShareRecord for a folder or section share.
+pub fn build_multi_share_record(
+    share_type: ShareType,
+    notebook_id: Uuid,
+    title: &str,
+    theme: &str,
+    expiry: ShareExpiry,
+    page_count: usize,
+) -> ShareRecord {
+    let now = Utc::now();
+    let expires_at = expiry.to_duration().map(|d| now + d);
+
+    ShareRecord {
+        id: generate_share_id(),
+        share_type: Some(share_type),
+        notebook_id,
+        title: title.to_string(),
+        theme: theme.to_string(),
+        expiry,
+        created_at: now,
+        expires_at,
+        external_url: None,
+        page_count: Some(page_count),
+        page_id: None,
+        page_title: None,
+    }
+}
+
+/// Recursively copy a directory tree.
+fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
+    fs::create_dir_all(dst).map_err(|e| format!("Failed to create dir {}: {}", dst.display(), e))?;
+
+    for entry in fs::read_dir(src).map_err(|e| format!("Failed to read dir: {}", e))? {
+        let entry = entry.map_err(|e| format!("Dir entry error: {}", e))?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+
+        if src_path.is_dir() {
+            copy_dir_recursive(&src_path, &dst_path)?;
+        } else {
+            fs::copy(&src_path, &dst_path)
+                .map_err(|e| format!("Failed to copy file: {}", e))?;
+        }
+    }
+
+    Ok(())
 }

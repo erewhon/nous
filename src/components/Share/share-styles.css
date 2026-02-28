@@ -311,6 +311,44 @@
   font-size: 0.85rem;
 }
 
+.share-site-title-input {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-primary);
+  font-size: 0.85rem;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.share-site-title-input:focus {
+  border-color: var(--color-accent, #4f7fff);
+}
+
+.share-upload-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: var(--color-text-primary);
+}
+
+.share-upload-toggle input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--color-accent, #4f7fff);
+  cursor: pointer;
+}
+
+.share-upload-hint {
+  color: var(--color-text-muted);
+  font-size: 0.8rem;
+  margin-left: auto;
+}
+
 /* Footer */
 .share-footer {
   display: flex;

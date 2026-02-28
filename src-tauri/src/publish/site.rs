@@ -176,7 +176,7 @@ pub fn preview_page(
 // Internal
 // ---------------------------------------------------------------------------
 
-fn generate_site(
+pub fn generate_site(
     storage: &FileStorage,
     notebook_id: Uuid,
     pages: &[Page],

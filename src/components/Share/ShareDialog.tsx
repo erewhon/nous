@@ -2,7 +2,15 @@ import { useState, useEffect, useCallback } from "react";
 import { useNotebookStore } from "../../stores/notebookStore";
 import { usePageStore } from "../../stores/pageStore";
 import { useToastStore } from "../../stores/toastStore";
-import { sharePage, listShares, deleteShare, type ShareRecord } from "./api";
+import {
+  sharePage,
+  shareFolder,
+  shareSection,
+  listShares,
+  deleteShare,
+  getShareUploadConfig,
+  type ShareRecord,
+} from "./api";
 import "./share-styles.css";
 
 interface ShareDialogProps {
@@ -10,6 +18,10 @@ interface ShareDialogProps {
   onClose: () => void;
   pageId?: string;
   notebookId?: string;
+  folderId?: string;
+  folderName?: string;
+  sectionId?: string;
+  sectionName?: string;
 }
 
 type ThemeName = "minimal" | "documentation" | "blog" | "academic";
@@ -31,7 +43,16 @@ const EXPIRY_OPTIONS: { value: ExpiryOption; label: string }[] = [
   { value: "never", label: "Never" },
 ];
 
-export function ShareDialog({ isOpen, onClose, pageId, notebookId }: ShareDialogProps) {
+export function ShareDialog({
+  isOpen,
+  onClose,
+  pageId,
+  notebookId,
+  folderId,
+  folderName,
+  sectionId,
+  sectionName,
+}: ShareDialogProps) {
   const [theme, setTheme] = useState<ThemeName>("minimal");
   const [expiry, setExpiry] = useState<ExpiryOption>("1w");
   const [dialogState, setDialogState] = useState<DialogState>("configure");
@@ -40,6 +61,14 @@ export function ShareDialog({ isOpen, onClose, pageId, notebookId }: ShareDialog
   const [existingShares, setExistingShares] = useState<ShareRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [uploadExternal, setUploadExternal] = useState(false);
+  const [hasUploadConfig, setHasUploadConfig] = useState(false);
+  const [siteTitle, setSiteTitle] = useState("");
+
+  // Determine sharing mode
+  const isMultiPage = !!folderId || !!sectionId;
+  const shareLabel = folderId ? "Share Folder" : sectionId ? "Share Section" : "Share as Link";
+  const shareName = folderId ? folderName : sectionId ? sectionName : undefined;
 
   const selectedNotebookId = useNotebookStore((s) => s.selectedNotebookId);
   const pages = usePageStore((s) => s.pages);
@@ -58,35 +87,87 @@ export function ShareDialog({ isOpen, onClose, pageId, notebookId }: ShareDialog
       setShareUrl(null);
       setCurrentShare(null);
       setCopied(false);
+      setSiteTitle(shareName || "");
 
-      // Load existing shares for this page
+      // Load existing shares that match this context
       listShares()
         .then((shares) => {
-          const pageShares = shares.filter((s) => s.pageId === effectivePageId);
-          setExistingShares(pageShares);
+          let filtered: typeof shares;
+          if (folderId) {
+            filtered = shares.filter(
+              (s) => s.shareType?.type === "folder" && (s.shareType as { folderId?: string }).folderId === folderId
+            );
+          } else if (sectionId) {
+            filtered = shares.filter(
+              (s) => s.shareType?.type === "section" && (s.shareType as { sectionId?: string }).sectionId === sectionId
+            );
+          } else {
+            filtered = shares.filter((s) => s.pageId === effectivePageId);
+          }
+          setExistingShares(filtered);
         })
         .catch(() => setExistingShares([]));
+
+      // Check if upload config exists
+      getShareUploadConfig()
+        .then((config) => {
+          const configured = config !== null && config.hasCredentials;
+          setHasUploadConfig(configured);
+          setUploadExternal(configured);
+        })
+        .catch(() => setHasUploadConfig(false));
     }
   }, [isOpen, effectivePageId]);
 
   const handleShare = useCallback(async () => {
-    if (!effectiveNotebookId || !effectivePageId) return;
+    if (!effectiveNotebookId) return;
 
     setDialogState("sharing");
     setError(null);
 
     try {
-      const response = await sharePage(effectiveNotebookId, effectivePageId, theme, expiry);
-      setShareUrl(response.localUrl);
+      let response;
+      if (folderId) {
+        response = await shareFolder(
+          effectiveNotebookId,
+          folderId,
+          theme,
+          expiry,
+          uploadExternal,
+          siteTitle || undefined
+        );
+      } else if (sectionId) {
+        response = await shareSection(
+          effectiveNotebookId,
+          sectionId,
+          theme,
+          expiry,
+          uploadExternal,
+          siteTitle || undefined
+        );
+      } else {
+        if (!effectivePageId) return;
+        response = await sharePage(
+          effectiveNotebookId,
+          effectivePageId,
+          theme,
+          expiry,
+          uploadExternal
+        );
+      }
+      const url = response.share.externalUrl || response.localUrl;
+      setShareUrl(url);
       setCurrentShare(response.share);
       setDialogState("success");
       setExistingShares((prev) => [response.share, ...prev]);
-      toastStore.success("Share link created");
+      toastStore.success(
+        response.share.externalUrl ? "Share uploaded to web" : "Share link created"
+      );
     } catch (err) {
       setError(String(err));
       setDialogState("configure");
     }
-  }, [effectiveNotebookId, effectivePageId, theme, expiry, toastStore]);
+  }, [effectiveNotebookId, effectivePageId, folderId, sectionId, theme, expiry, uploadExternal, siteTitle, toastStore]);
 
   const handleCopy = useCallback(async () => {
     if (!shareUrl) return;
@@ -126,7 +207,7 @@ export function ShareDialog({ isOpen, onClose, pageId, notebookId }: ShareDialog
       <div className="share-dialog" onClick={(e) => e.stopPropagation()}>
         {/* Header */}
         <div className="share-header">
-          <h2>Share as Link</h2>
+          <h2>{shareLabel}</h2>
           <button className="share-close-btn" onClick={onClose}>
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
               <path
@@ -143,7 +224,7 @@ export function ShareDialog({ isOpen, onClose, pageId, notebookId }: ShareDialog
         <div className="share-body">
           {dialogState === "configure" && (
             <>
-              {/* Page Title */}
+              {/* Title info */}
               <div className="share-page-info">
                 <svg
                   width="16"
@@ -155,11 +236,33 @@ export function ShareDialog({ isOpen, onClose, pageId, notebookId }: ShareDialog
                   strokeLinecap="round"
                   strokeLinejoin="round"
                 >
-                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                  <polyline points="14 2 14 8 20 8" />
+                  {isMultiPage ? (
+                    <>
+                      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                    </>
+                  ) : (
+                    <>
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                      <polyline points="14 2 14 8 20 8" />
+                    </>
+                  )}
                 </svg>
-                <span>{currentPage?.title || "Untitled"}</span>
+                <span>{isMultiPage ? shareName : currentPage?.title || "Untitled"}</span>
               </div>
+
+              {/* Site Title (multi-page only) */}
+              {isMultiPage && (
+                <div>
+                  <div className="share-section-label">Site Title</div>
+                  <input
+                    type="text"
+                    className="share-site-title-input"
+                    value={siteTitle}
+                    onChange={(e) => setSiteTitle(e.target.value)}
+                    placeholder={shareName || "My Shared Site"}
+                  />
+                </div>
+              )}
 
               {/* Theme Picker */}
               <div>
@@ -207,6 +310,21 @@ export function ShareDialog({ isOpen, onClose, pageId, notebookId }: ShareDialog
                 </div>
               </div>
 
+              {/* Upload to web toggle */}
+              {hasUploadConfig && (
+                <label className="share-upload-toggle">
+                  <input
+                    type="checkbox"
+                    checked={uploadExternal}
+                    onChange={(e) => setUploadExternal(e.target.checked)}
+                  />
+                  <span>Upload to web</span>
+                  <span className="share-upload-hint">
+                    Publish to your configured S3 storage
+                  </span>
+                </label>
+              )}
+
               {/* Existing shares for this page */}
               {existingShares.length > 0 && (
                 <div>
@@ -218,7 +336,7 @@ export function ShareDialog({ isOpen, onClose, pageId, notebookId }: ShareDialog
                       <div key={share.id} className="share-existing-item">
                         <div className="share-existing-info">
                           <span className="share-existing-url">
-                            localhost:7667/share/{share.id}
+                            {share.externalUrl || `localhost:7667/share/${share.id}`}
                           </span>
                           <span className="share-existing-meta">
                             {share.expiresAt
@@ -310,7 +428,7 @@ export function ShareDialog({ isOpen, onClose, pageId, notebookId }: ShareDialog
             <button
               className="share-btn primary"
               onClick={handleShare}
-              disabled={!effectiveNotebookId || !effectivePageId}
+              disabled={!effectiveNotebookId || (!effectivePageId && !folderId && !sectionId)}
             >
               Share
             </button>
