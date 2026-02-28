@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use tauri::Manager;
@@ -82,6 +82,41 @@ pub struct AppState {
     pub monitor_scheduler: Mutex<Option<monitor::scheduler::MonitorScheduler>>,
     /// Keeps the MCP file watcher alive for the app's lifetime.
     pub _mcp_watcher: Mutex<Option<notify::PollWatcher>>,
+}
+
+/// Check whether the Nous daemon is running by reading its PID file and
+/// verifying the process is alive.  When the daemon is active it already
+/// runs the `ActionScheduler`, so the Tauri app should skip starting its
+/// own copy to avoid duplicate scheduled-action execution.
+fn is_daemon_running(pid_path: &Path) -> bool {
+    let pid_str = match std::fs::read_to_string(pid_path) {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    let pid: u32 = match pid_str.trim().parse() {
+        Ok(p) => p,
+        Err(_) => return false,
+    };
+
+    #[cfg(target_os = "linux")]
+    {
+        Path::new(&format!("/proc/{}", pid)).exists()
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        extern "C" {
+            #[link_name = "kill"]
+            fn libc_kill(pid: i32, sig: i32) -> i32;
+        }
+        unsafe { libc_kill(pid as i32, 0) == 0 }
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        let _ = pid;
+        false
+    }
 }
 
 /// Look for a bundled Python distribution next to the running binary.
@@ -365,9 +400,15 @@ pub fn run() {
                 }
             }
 
-            // Start the action scheduler
+            // Start the action scheduler (skip if the daemon is already running one)
             let state: tauri::State<AppState> = app.handle().state();
-            if let Ok(mut scheduler) = state.action_scheduler.lock() {
+            let daemon_pid_path = data_dir.join(".nous-daemon.pid");
+            if is_daemon_running(&daemon_pid_path) {
+                log::info!(
+                    "Daemon detected (PID file {:?}); skipping local action scheduler",
+                    daemon_pid_path
+                );
+            } else if let Ok(mut scheduler) = state.action_scheduler.lock() {
                 scheduler.start();
                 log::info!("Action scheduler started");
             }
