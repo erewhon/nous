@@ -153,6 +153,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/sync/trigger", post(trigger_sync))
         // Share routes
         .route("/share/{share_id}", get(serve_share))
+        .route("/share/{share_id}/", get(serve_share))
         .route("/share/{share_id}/{*path}", get(serve_share_file))
         .route("/api/shares", get(list_shares))
         .route("/api/shares/{share_id}", delete(delete_share))
@@ -620,10 +621,33 @@ async fn serve_share(
         }
     }
 
-    // Multi-page share: redirect to trailing slash so relative links resolve correctly
     if share_storage.is_multi_page_share(&share_id) {
-        let redirect_url = format!("/share/{}/", share_id);
-        return Ok(axum::response::Redirect::permanent(&redirect_url).into_response());
+        // Multi-page share: serve index.html directly with a <base> tag
+        // so relative links (e.g. "page-slug.html") resolve to /share/{id}/page-slug.html
+        let content = share_storage
+            .get_share_file(&share_id, "index.html")
+            .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        match content {
+            Some(bytes) => {
+                let html = String::from_utf8_lossy(&bytes);
+                let base_tag = format!("<base href=\"/share/{}/\">", share_id);
+                let html = if let Some(pos) = html.find("<head>") {
+                    format!("{}{}{}", &html[..pos + 6], base_tag, &html[pos + 6..])
+                } else if let Some(pos) = html.find("<html") {
+                    // Find end of <html...> tag
+                    if let Some(end) = html[pos..].find('>') {
+                        let after = pos + end + 1;
+                        format!("{}<head>{}</head>{}", &html[..after], base_tag, &html[after..])
+                    } else {
+                        format!("{}{}", base_tag, html)
+                    }
+                } else {
+                    format!("{}{}", base_tag, html)
+                };
+                Ok(Html(html).into_response())
+            }
+            None => Err(api_err(StatusCode::NOT_FOUND, "Share index not found")),
+        }
     } else {
         // Single-page share
         let html = share_storage

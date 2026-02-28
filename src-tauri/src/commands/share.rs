@@ -273,7 +273,7 @@ pub async fn share_folder(
         }
     }
 
-    let local_url = format!("http://localhost:7667/share/{}/", record.id);
+    let local_url = format!("http://localhost:7667/share/{}", record.id);
 
     // Persist locally (copy site_dir into shares)
     let share_storage_clone = share_storage.clone();
@@ -383,7 +383,7 @@ pub async fn share_section(
         }
     }
 
-    let local_url = format!("http://localhost:7667/share/{}/", record.id);
+    let local_url = format!("http://localhost:7667/share/{}", record.id);
 
     // Persist locally (copy site_dir into shares)
     let share_storage_clone = share_storage.clone();
