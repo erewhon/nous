@@ -58,6 +58,8 @@ pub struct ShareRecord {
     pub share_type: Option<ShareType>,
     pub notebook_id: Uuid,
     /// Display title (page title, folder name, or section name).
+    /// Defaults to empty for backward compat; normalized() fills from page_title.
+    #[serde(default)]
     pub title: String,
     pub theme: String,
     pub expiry: ShareExpiry,
