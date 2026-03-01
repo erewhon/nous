@@ -1,0 +1,702 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nous — Where thinking takes form</title>
+<meta name="description" content="A local-first knowledge system for networked thinking. Wiki-links, knowledge graphs, AI research, real-time collaboration. Your mind, your machine, your data.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;1,9..40,300;1,9..40,400&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --void: #0B0716;
+  --deep: #110D1F;
+  --surface: #1A0F3C;
+  --purple: #2D1B69;
+  --mid: #4A2D8A;
+  --accent: #7C4DFF;
+  --light: #B388FF;
+  --glow: #D1B3FF;
+  --teal: #80CBC4;
+  --text: #C8BFD6;
+  --text-dim: #7E738F;
+  --text-bright: #EDE7F6;
+  --serif: 'Cormorant Garamond', Georgia, serif;
+  --sans: 'DM Sans', -apple-system, sans-serif;
+}
+
+html {
+  scroll-behavior: smooth;
+  background: var(--void);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 16px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  overflow-x: hidden;
+}
+
+/* --- Canvas: constellation background --- */
+#constellation {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+
+/* --- Layout --- */
+.container {
+  position: relative;
+  z-index: 1;
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 0 2rem;
+}
+
+/* --- Navigation --- */
+nav {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  padding: 1.25rem 2rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: linear-gradient(to bottom, var(--void) 60%, transparent);
+  transition: background 0.4s;
+}
+
+nav .wordmark {
+  font-family: var(--serif);
+  font-size: 1.5rem;
+  font-weight: 300;
+  letter-spacing: 0.15em;
+  color: var(--text-bright);
+  text-decoration: none;
+}
+
+nav .nav-links {
+  display: flex;
+  gap: 2rem;
+  list-style: none;
+}
+
+nav .nav-links a {
+  color: var(--text-dim);
+  text-decoration: none;
+  font-size: 0.8rem;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  transition: color 0.3s;
+}
+
+nav .nav-links a:hover {
+  color: var(--light);
+}
+
+/* --- Hero --- */
+.hero {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 6rem 2rem 4rem;
+  position: relative;
+}
+
+.hero-greek {
+  font-family: var(--serif);
+  font-size: 1rem;
+  font-weight: 300;
+  letter-spacing: 0.4em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 2rem;
+  opacity: 0;
+  animation: fadeUp 1s 0.2s forwards;
+}
+
+.hero h1 {
+  font-family: var(--serif);
+  font-size: clamp(4rem, 10vw, 8rem);
+  font-weight: 300;
+  letter-spacing: 0.04em;
+  color: var(--text-bright);
+  line-height: 1;
+  margin-bottom: 1.5rem;
+  opacity: 0;
+  animation: fadeUp 1s 0.4s forwards;
+}
+
+.hero-tagline {
+  font-family: var(--serif);
+  font-size: clamp(1.1rem, 2.5vw, 1.4rem);
+  font-weight: 300;
+  font-style: italic;
+  color: var(--text);
+  max-width: 500px;
+  margin-bottom: 3rem;
+  opacity: 0;
+  animation: fadeUp 1s 0.6s forwards;
+}
+
+.hero-cta {
+  display: flex;
+  gap: 1rem;
+  opacity: 0;
+  animation: fadeUp 1s 0.8s forwards;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 2rem;
+  border-radius: 2px;
+  font-family: var(--sans);
+  font-size: 0.8rem;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  text-decoration: none;
+  transition: all 0.3s;
+  cursor: pointer;
+  border: none;
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
+}
+
+.btn-primary:hover {
+  background: var(--light);
+  color: var(--void);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--mid);
+}
+
+.btn-ghost:hover {
+  border-color: var(--light);
+  color: var(--text-bright);
+}
+
+.hero-scroll {
+  position: absolute;
+  bottom: 2rem;
+  left: 50%;
+  transform: translateX(-50%);
+  opacity: 0;
+  animation: fadeUp 1s 1.2s forwards;
+}
+
+.hero-scroll span {
+  display: block;
+  width: 1px;
+  height: 40px;
+  background: linear-gradient(to bottom, var(--mid), transparent);
+  margin: 0 auto;
+  animation: pulse 2s infinite;
+}
+
+/* --- Section rhythm --- */
+section {
+  padding: 8rem 0;
+}
+
+section + section {
+  border-top: 1px solid rgba(74, 45, 138, 0.2);
+}
+
+/* --- Essence section --- */
+.essence {
+  text-align: center;
+}
+
+.essence-statement {
+  font-family: var(--serif);
+  font-size: clamp(1.4rem, 3vw, 2rem);
+  font-weight: 300;
+  line-height: 1.6;
+  color: var(--text-bright);
+  max-width: 680px;
+  margin: 0 auto 4rem;
+}
+
+.essence-statement em {
+  font-style: italic;
+  color: var(--light);
+}
+
+/* --- Features --- */
+.features-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  background: rgba(74, 45, 138, 0.15);
+  border: 1px solid rgba(74, 45, 138, 0.15);
+}
+
+.feature {
+  background: var(--void);
+  padding: 2.5rem;
+  transition: background 0.4s;
+}
+
+.feature:hover {
+  background: var(--deep);
+}
+
+.feature-label {
+  font-size: 0.65rem;
+  font-weight: 500;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 1rem;
+}
+
+.feature h3 {
+  font-family: var(--serif);
+  font-size: 1.35rem;
+  font-weight: 400;
+  color: var(--text-bright);
+  margin-bottom: 0.75rem;
+  line-height: 1.3;
+}
+
+.feature p {
+  font-size: 0.9rem;
+  color: var(--text-dim);
+  line-height: 1.6;
+}
+
+/* --- Philosophy --- */
+.philosophy {
+  text-align: center;
+}
+
+.philosophy h2 {
+  font-family: var(--serif);
+  font-size: clamp(1.6rem, 3.5vw, 2.4rem);
+  font-weight: 300;
+  color: var(--text-bright);
+  margin-bottom: 1rem;
+}
+
+.philosophy .subtitle {
+  color: var(--text-dim);
+  font-size: 0.9rem;
+  margin-bottom: 4rem;
+}
+
+.tenets {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4rem;
+  text-align: left;
+}
+
+.tenet-number {
+  font-family: var(--serif);
+  font-size: 2.5rem;
+  font-weight: 300;
+  color: rgba(124, 77, 255, 0.25);
+  line-height: 1;
+  margin-bottom: 1rem;
+}
+
+.tenet h3 {
+  font-family: var(--serif);
+  font-size: 1.15rem;
+  font-weight: 400;
+  color: var(--text-bright);
+  margin-bottom: 0.75rem;
+}
+
+.tenet p {
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  line-height: 1.7;
+}
+
+/* --- Open source callout --- */
+.open-source {
+  text-align: center;
+  padding: 6rem 0;
+}
+
+.open-source-inner {
+  border: 1px solid rgba(74, 45, 138, 0.3);
+  padding: 4rem;
+  max-width: 600px;
+  margin: 0 auto;
+  position: relative;
+}
+
+.open-source-inner::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  background: linear-gradient(135deg, rgba(124, 77, 255, 0.1), transparent, rgba(128, 203, 196, 0.05));
+  z-index: -1;
+}
+
+.open-source h2 {
+  font-family: var(--serif);
+  font-size: 1.6rem;
+  font-weight: 300;
+  color: var(--text-bright);
+  margin-bottom: 1rem;
+}
+
+.open-source p {
+  color: var(--text-dim);
+  font-size: 0.9rem;
+  margin-bottom: 2rem;
+  line-height: 1.7;
+}
+
+.open-source .license {
+  font-size: 0.7rem;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--teal);
+}
+
+/* --- Footer --- */
+footer {
+  padding: 3rem 0;
+  border-top: 1px solid rgba(74, 45, 138, 0.15);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  color: var(--text-dim);
+}
+
+footer a {
+  color: var(--text-dim);
+  text-decoration: none;
+  transition: color 0.3s;
+}
+
+footer a:hover {
+  color: var(--light);
+}
+
+footer .footer-links {
+  display: flex;
+  gap: 2rem;
+  list-style: none;
+}
+
+.footer-wordmark {
+  font-family: var(--serif);
+  font-weight: 300;
+  letter-spacing: 0.1em;
+  color: var(--text);
+}
+
+/* --- Animations --- */
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 0.8; }
+}
+
+/* --- Scroll-triggered reveals --- */
+.reveal {
+  opacity: 0;
+  transform: translateY(30px);
+  transition: opacity 0.8s, transform 0.8s;
+}
+
+.reveal.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* --- Responsive --- */
+@media (max-width: 768px) {
+  nav .nav-links {
+    display: none;
+  }
+
+  .features-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .tenets {
+    grid-template-columns: 1fr;
+    gap: 2.5rem;
+  }
+
+  .container {
+    padding: 0 1.25rem;
+  }
+
+  section {
+    padding: 5rem 0;
+  }
+
+  .open-source-inner {
+    padding: 2.5rem;
+  }
+
+  footer {
+    flex-direction: column;
+    gap: 1.5rem;
+    text-align: center;
+  }
+}
+
+@media (max-width: 480px) {
+  .hero-cta {
+    flex-direction: column;
+    width: 100%;
+    max-width: 280px;
+  }
+
+  .btn {
+    justify-content: center;
+  }
+}
+</style>
+</head>
+<body>
+
+<canvas id="constellation"></canvas>
+
+<nav>
+  <a href="/" class="wordmark">Nous</a>
+  <ul class="nav-links">
+    <li><a href="#features">Features</a></li>
+    <li><a href="#philosophy">Philosophy</a></li>
+    <li><a href="https://github.com/erewhon/nous" target="_blank" rel="noopener">Source</a></li>
+  </ul>
+</nav>
+
+<main>
+  <!-- Hero -->
+  <section class="hero">
+    <div class="hero-greek">nous / Greek: mind, intellect, reason</div>
+    <h1>Nous</h1>
+    <p class="hero-tagline">Where thinking takes form</p>
+    <div class="hero-cta">
+      <a href="#features" class="btn btn-primary">Explore</a>
+      <a href="https://github.com/erewhon/nous" class="btn btn-ghost" target="_blank" rel="noopener">View Source</a>
+    </div>
+    <div class="hero-scroll"><span></span></div>
+  </section>
+
+  <!-- Essence -->
+  <section class="essence">
+    <div class="container reveal">
+      <p class="essence-statement">
+        A personal knowledge system where research, reflection, and <em>networked thinking</em> converge.
+        Your notes aren't files&mdash;they're an evolving structure of ideas,
+        each one linked to the last, each one leading to the next.
+      </p>
+    </div>
+  </section>
+
+  <!-- Features -->
+  <section id="features">
+    <div class="container reveal">
+      <div class="features-grid">
+        <div class="feature">
+          <div class="feature-label">Connections</div>
+          <h3>Networked Thinking</h3>
+          <p>Wiki-links, backlinks, and an interactive knowledge graph surface connections you didn't know existed. Ideas don't live in silos.</p>
+        </div>
+        <div class="feature">
+          <div class="feature-label">Research</div>
+          <h3>AI-Powered Inquiry</h3>
+          <p>Search the web, extract content, synthesize sources. A research assistant that works alongside your thinking, not instead of it.</p>
+        </div>
+        <div class="feature">
+          <div class="feature-label">Collaboration</div>
+          <h3>Think Together</h3>
+          <p>Start a live session on any page. Share a link. Edit simultaneously. No accounts required&mdash;just a URL and an idea.</p>
+        </div>
+        <div class="feature">
+          <div class="feature-label">Memory</div>
+          <h3>Spaced Repetition</h3>
+          <p>Turn any note into flashcards. A built-in review system that makes knowledge stick, with streak tracking and adaptive scheduling.</p>
+        </div>
+        <div class="feature">
+          <div class="feature-label">Reflection</div>
+          <h3>Daily Practice</h3>
+          <p>Daily notes with goal tracking, energy check-ins, and habit streaks. Build a rhythm of thinking that compounds over time.</p>
+        </div>
+        <div class="feature">
+          <div class="feature-label">Publishing</div>
+          <h3>Share Your Work</h3>
+          <p>Publish notebooks as themed websites. Minimal, academic, documentation, or blog styles. Your knowledge, your presentation.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Philosophy -->
+  <section id="philosophy" class="philosophy">
+    <div class="container reveal">
+      <h2>Built on conviction</h2>
+      <p class="subtitle">The principles that shape every decision in Nous</p>
+      <div class="tenets">
+        <div class="tenet">
+          <div class="tenet-number">I</div>
+          <h3>Local-first, always</h3>
+          <p>Your data lives on your machine. Plain files, no proprietary databases, no cloud dependency. You own every byte. Sync when you choose to, not because you have to.</p>
+        </div>
+        <div class="tenet">
+          <div class="tenet-number">II</div>
+          <h3>Native performance</h3>
+          <p>Built with Rust and Tauri. Not an Electron wrapper. Not a web app pretending to be native. Fast startup, low memory, real desktop integration across macOS, Linux, and Windows.</p>
+        </div>
+        <div class="tenet">
+          <div class="tenet-number">III</div>
+          <h3>Thinking over tooling</h3>
+          <p>Every feature serves the act of thinking. No feature bloat, no productivity theater. The interface recedes so your ideas can advance.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Open source -->
+  <section class="open-source">
+    <div class="container reveal">
+      <div class="open-source-inner">
+        <h2>Open source</h2>
+        <p>Nous is free software. Read every line, modify anything, contribute back. Built in the open because knowledge tools should be as transparent as the thinking they enable.</p>
+        <a href="https://github.com/erewhon/nous" class="btn btn-ghost" target="_blank" rel="noopener">Browse the source</a>
+        <p class="license" style="margin-top: 1.5rem; margin-bottom: 0;">Licensed under GNU GPL v3</p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="container" style="display:flex;align-items:center;justify-content:space-between;width:100%;max-width:1100px">
+    <span class="footer-wordmark">Nous</span>
+    <ul class="footer-links">
+      <li><a href="https://github.com/erewhon/nous" target="_blank" rel="noopener">GitHub</a></li>
+      <li><a href="https://collab.nous.page" target="_blank" rel="noopener">Collaborate</a></li>
+    </ul>
+  </div>
+</footer>
+
+<script>
+// Constellation background
+(function() {
+  const canvas = document.getElementById('constellation');
+  const ctx = canvas.getContext('2d');
+  let nodes = [];
+  let w, h;
+
+  function resize() {
+    w = canvas.width = window.innerWidth;
+    h = canvas.height = window.innerHeight * 3;
+  }
+
+  function init() {
+    resize();
+    nodes = [];
+    const count = Math.floor((w * h) / 25000);
+    for (let i = 0; i < count; i++) {
+      nodes.push({
+        x: Math.random() * w,
+        y: Math.random() * h,
+        r: Math.random() * 1.5 + 0.3,
+        vx: (Math.random() - 0.5) * 0.08,
+        vy: (Math.random() - 0.5) * 0.08,
+        alpha: Math.random() * 0.4 + 0.1,
+      });
+    }
+  }
+
+  function draw() {
+    ctx.clearRect(0, 0, w, h);
+
+    // Draw connections
+    for (let i = 0; i < nodes.length; i++) {
+      for (let j = i + 1; j < nodes.length; j++) {
+        const dx = nodes[i].x - nodes[j].x;
+        const dy = nodes[i].y - nodes[j].y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < 120) {
+          const alpha = (1 - dist / 120) * 0.06;
+          ctx.strokeStyle = `rgba(124, 77, 255, ${alpha})`;
+          ctx.lineWidth = 0.5;
+          ctx.beginPath();
+          ctx.moveTo(nodes[i].x, nodes[i].y);
+          ctx.lineTo(nodes[j].x, nodes[j].y);
+          ctx.stroke();
+        }
+      }
+    }
+
+    // Draw nodes
+    for (const node of nodes) {
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, node.r, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(179, 136, 255, ${node.alpha})`;
+      ctx.fill();
+
+      node.x += node.vx;
+      node.y += node.vy;
+      if (node.x < 0 || node.x > w) node.vx *= -1;
+      if (node.y < 0 || node.y > h) node.vy *= -1;
+    }
+
+    requestAnimationFrame(draw);
+  }
+
+  init();
+  draw();
+  window.addEventListener('resize', init);
+})();
+
+// Scroll reveal
+(function() {
+  const els = document.querySelectorAll('.reveal');
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(e => {
+      if (e.isIntersecting) {
+        e.target.classList.add('visible');
+        observer.unobserve(e.target);
+      }
+    });
+  }, { threshold: 0.15 });
+  els.forEach(el => observer.observe(el));
+})();
+</script>
+
+</body>
+</html>
