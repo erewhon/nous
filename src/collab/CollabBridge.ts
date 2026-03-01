@@ -65,12 +65,13 @@ export class CollabBridge {
     this.seedDocument(options.initialData);
 
     // Connect to PartyKit
-    const wsProtocol = options.host.startsWith("localhost") ? "ws" : "wss";
+    // YPartyKitProvider adds the protocol (ws/wss) automatically based on host
     this.provider = new YPartyKitProvider(
-      `${wsProtocol}://${options.host}`,
+      options.host,
       options.roomId,
       this.doc,
       {
+        party: "collab-server",
         params: { token: options.token },
         connect: true,
       }

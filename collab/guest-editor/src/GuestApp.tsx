@@ -33,6 +33,7 @@ export function GuestApp() {
   const editorRef = useRef<EditorJS | null>(null);
   const docRef = useRef<Y.Doc | null>(null);
   const providerRef = useRef<YPartyKitProvider | null>(null);
+  const blocksArrayRef = useRef<Y.Array<Y.Map<unknown>> | null>(null);
   const suppressRemoteRef = useRef(false);
   const lastSnapshotRef = useRef<EditorBlock[]>([]);
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
@@ -65,24 +66,19 @@ export function GuestApp() {
       return;
     }
 
-    // Create Yjs doc
+    // Create Yjs doc — do NOT create shared types yet.
+    // Wait for sync so the server's state populates the doc first.
     const doc = new Y.Doc();
     docRef.current = doc;
 
-    const pageMap = doc.getMap("page");
-    let blocksArray = pageMap.get("blocks") as Y.Array<Y.Map<unknown>> | undefined;
-    if (!blocksArray) {
-      blocksArray = new Y.Array<Y.Map<unknown>>();
-      pageMap.set("blocks", blocksArray);
-    }
-
     // Connect to PartyKit
-    const wsProtocol = PARTYKIT_HOST.startsWith("localhost") ? "ws" : "wss";
+    // YPartyKitProvider adds the protocol (ws/wss) automatically based on host
     const provider = new YPartyKitProvider(
-      `${wsProtocol}://${PARTYKIT_HOST}`,
+      PARTYKIT_HOST,
       roomId,
       doc,
       {
+        party: "collab-server",
         params: { token },
         connect: true,
       }
@@ -104,10 +100,22 @@ export function GuestApp() {
       },
     });
 
-    // Wait for initial sync, then initialize editor
+    // Wait for initial sync, then read the doc and initialize editor
     provider.on("synced", () => {
-      const initialBlocks = yjsToBlocks(blocksArray!);
+      // Now the doc has the server's state. Read the shared types.
+      const pageMap = doc.getMap("page");
+      let blocksArray = pageMap.get("blocks") as Y.Array<Y.Map<unknown>> | undefined;
+      if (!blocksArray) {
+        // Server had no blocks yet — create the array now
+        blocksArray = new Y.Array<Y.Map<unknown>>();
+        pageMap.set("blocks", blocksArray);
+      }
+      blocksArrayRef.current = blocksArray;
+
+      const initialBlocks = yjsToBlocks(blocksArray);
       lastSnapshotRef.current = initialBlocks;
+
+      console.log("[GuestApp] synced, got", initialBlocks.length, "blocks from server");
 
       const editor = new EditorJS({
         holder: "editor",
@@ -140,7 +148,7 @@ export function GuestApp() {
             // Apply diff to Yjs
             suppressRemoteRef.current = true;
             doc.transact(() => {
-              applyDiffToYjs(lastSnapshotRef.current, newBlocks, blocksArray!);
+              applyDiffToYjs(lastSnapshotRef.current, newBlocks, blocksArrayRef.current!);
             }, doc.clientID);
             suppressRemoteRef.current = false;
 
@@ -156,10 +164,10 @@ export function GuestApp() {
       editorRef.current = editor;
 
       // Observe remote changes
-      blocksArray!.observe((event, transaction) => {
+      blocksArray.observe((event, transaction) => {
         if (suppressRemoteRef.current || transaction.origin === doc.clientID) return;
 
-        const remoteBlocks = yjsToBlocks(blocksArray!);
+        const remoteBlocks = yjsToBlocks(blocksArrayRef.current!);
         lastSnapshotRef.current = remoteBlocks;
 
         suppressRemoteRef.current = true;

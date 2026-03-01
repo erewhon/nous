@@ -1,6 +1,7 @@
 import { routePartykitRequest } from "partyserver";
 import type { Connection, ConnectionContext } from "partyserver";
 import { YServer } from "y-partyserver";
+import { Doc, encodeStateAsUpdate, applyUpdate } from "yjs";
 
 /**
  * HMAC-SHA256 token verification for collab sessions.
@@ -16,6 +17,14 @@ interface TokenPayload {
   exp: number;
 }
 
+function hexDecode(hex: string): Uint8Array {
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < hex.length; i += 2) {
+    bytes[i / 2] = parseInt(hex.substring(i, i + 2), 16);
+  }
+  return bytes;
+}
+
 async function verifyToken(
   token: string,
   secret: string
@@ -27,8 +36,8 @@ async function verifyToken(
 
   const [payloadB64, sigB64] = parts;
 
-  const encoder = new TextEncoder();
-  const keyData = encoder.encode(secret);
+  // Secret is stored as hex — decode to raw bytes to match Rust's HMAC key
+  const keyData = hexDecode(secret);
   const cryptoKey = await crypto.subtle.importKey(
     "raw",
     keyData,
@@ -38,7 +47,7 @@ async function verifyToken(
   );
 
   const sigBytes = base64UrlDecode(sigB64);
-  const payloadBytes = encoder.encode(payloadB64);
+  const payloadBytes = new TextEncoder().encode(payloadB64);
   const valid = await crypto.subtle.verify("HMAC", cryptoKey, sigBytes, payloadBytes);
 
   if (!valid) {
@@ -71,20 +80,53 @@ interface Env {
   CollabServer: DurableObjectNamespace;
 }
 
+const STORAGE_KEY = "yjs-state";
+
 export class CollabServer extends YServer {
   static options = {
     hibernate: true,
   };
 
   /**
+   * Restore Yjs document from Durable Object storage on wake.
+   * Called by YServer's onStart() when the DO initializes (or re-initializes
+   * after hibernation eviction).
+   */
+  async onLoad(): Promise<Doc | void> {
+    const ctx = (this as unknown as { ctx: DurableObjectState }).ctx;
+    const stored = await ctx.storage.get<ArrayBuffer>(STORAGE_KEY);
+    if (stored) {
+      console.log(`[CollabServer] onLoad: restoring ${stored.byteLength} bytes from storage`);
+      const doc = new Doc();
+      applyUpdate(doc, new Uint8Array(stored));
+      return doc;
+    }
+    console.log("[CollabServer] onLoad: no stored state");
+  }
+
+  /**
+   * Persist Yjs document to Durable Object storage.
+   * Called by YServer on a debounced schedule after document updates.
+   */
+  async onSave(): Promise<void> {
+    const ctx = (this as unknown as { ctx: DurableObjectState }).ctx;
+    const state = encodeStateAsUpdate(this.document);
+    await ctx.storage.put(STORAGE_KEY, state.buffer);
+    console.log(`[CollabServer] onSave: persisted ${state.byteLength} bytes`);
+  }
+
+  /**
    * Validate HMAC token on connect.
    * If invalid, close the connection immediately.
    */
   async onConnect(connection: Connection, ctx: ConnectionContext) {
+    console.log("[CollabServer] onConnect called, connection id:", connection.id);
+
     const url = new URL(ctx.request.url);
     const token = url.searchParams.get("token");
 
     if (!token) {
+      console.log("[CollabServer] No token in URL");
       connection.close(4001, "Missing token");
       return;
     }
@@ -93,22 +135,22 @@ export class CollabServer extends YServer {
     const secret = env?.COLLAB_HMAC_SECRET;
 
     if (!secret) {
-      console.error("COLLAB_HMAC_SECRET not configured");
+      console.error("[CollabServer] COLLAB_HMAC_SECRET not configured");
       connection.close(4500, "Server misconfigured");
       return;
     }
 
     try {
       const payload = await verifyToken(token, secret);
-      console.log(`Authenticated connection for room ${payload.room_id}`);
+      console.log(`[CollabServer] Authenticated connection for room ${payload.room_id}`);
     } catch (err) {
-      console.warn("Token verification failed:", (err as Error).message);
+      console.warn("[CollabServer] Token verification failed:", (err as Error).message);
       connection.close(4003, "Invalid token");
       return;
     }
 
     // Token valid — proceed with Yjs sync
-    super.onConnect(connection, ctx);
+    await super.onConnect(connection, ctx);
   }
 }
 
