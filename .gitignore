@@ -5,6 +5,9 @@ node_modules/
 dist/
 target/
 
+# Secrets
+.envrc
+
 # IDE
 .idea/
 .vscode/

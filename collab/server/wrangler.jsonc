@@ -1,0 +1,25 @@
+{
+  "name": "nous-collab",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-12-17",
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "CollabServer",
+        "class_name": "CollabServer"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["CollabServer"]
+    }
+  ],
+  "routes": [
+    {
+      "pattern": "party.nous.page",
+      "custom_domain": true
+    }
+  ]
+}

@@ -27,7 +27,7 @@ interface EditorBlock {
   data: Record<string, unknown>;
 }
 
-const PARTYKIT_HOST = "collab.nous.page";
+const PARTYKIT_HOST = "party.nous.page";
 
 export function GuestApp() {
   const editorRef = useRef<EditorJS | null>(null);

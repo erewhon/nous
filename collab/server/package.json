@@ -7,12 +7,13 @@
     "deploy": "npx partykit deploy src/index.ts"
   },
   "dependencies": {
-    "partyserver": "^0.0.56",
-    "y-partyserver": "^0.0.4",
+    "partyserver": "^0.3.2",
+    "y-partyserver": "^2.1.2",
     "yjs": "^13.6.20"
   },
   "devDependencies": {
-    "partykit": "^0.0.111",
-    "typescript": "^5.9.3"
+    "partykit": "^0.0.115",
+    "typescript": "^5.9.3",
+    "wrangler": "^4.69.0"
   }
 }

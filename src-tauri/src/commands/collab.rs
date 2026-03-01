@@ -7,7 +7,7 @@ use crate::collab::storage::{generate_room_id, CollabExpiry, CollabSession};
 use crate::collab::token;
 use crate::AppState;
 
-const DEFAULT_PARTYKIT_HOST: &str = "collab.nous.page";
+const DEFAULT_PARTYKIT_HOST: &str = "party.nous.page";
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -46,25 +46,24 @@ pub async fn start_collab_session(
     let collab_storage = state.collab_storage.clone();
     let library_storage = state.library_storage.clone();
 
-    // Get library path and page title
-    let (library_path, library_id, page_title) = {
+    // Get data dir and page title
+    let (data_dir, page_title) = {
         let lib_storage = library_storage.lock().map_err(|e| e.to_string())?;
         let library = lib_storage
             .get_current_library()
             .map_err(|e| format!("Failed to get library: {}", e))?;
-        let lib_path = library.path.clone();
-        let lib_id = library.id;
+        let dir = library.path.clone();
 
         let store = storage.lock().map_err(|e| e.to_string())?;
         let page = store
             .get_page(nb_id, pg_id)
             .map_err(|e| format!("Failed to get page: {}", e))?;
 
-        (lib_path, lib_id, page.title.clone())
+        (dir, page.title.clone())
     };
 
-    // Get or create HMAC secret
-    let secret = credentials::get_or_create_collab_secret(&library_path, library_id)?;
+    // Get or create global HMAC secret
+    let secret = credentials::get_or_create_collab_secret(&data_dir)?;
 
     // Check for existing active session on this page
     {

@@ -21,7 +21,7 @@ import { diffEditorData, type BlockChange } from "./diffEditorData";
 import type { EditorData } from "../types/page";
 
 export interface CollabBridgeOptions {
-  /** PartyKit host (e.g., "collab.nous.page") */
+  /** PartyKit host (e.g., "party.nous.page") */
   host: string;
   /** Room ID for this collaboration session */
   roomId: string;
