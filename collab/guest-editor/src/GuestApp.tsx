@@ -16,6 +16,7 @@ import Code from "@editorjs/code";
 import Quote from "@editorjs/quote";
 import Delimiter from "@editorjs/delimiter";
 import Table from "@editorjs/table";
+import { ChecklistTool } from "./ChecklistTool";
 import * as Y from "yjs";
 import YPartyKitProvider from "y-partykit/provider";
 
@@ -124,6 +125,7 @@ export function GuestApp() {
           list: { class: List as unknown as EditorJS.BlockToolConstructable, inlineToolbar: true },
           code: Code as unknown as EditorJS.BlockToolConstructable,
           quote: { class: Quote as unknown as EditorJS.BlockToolConstructable, inlineToolbar: true },
+          checklist: { class: ChecklistTool as unknown as EditorJS.BlockToolConstructable, inlineToolbar: true },
           delimiter: Delimiter as unknown as EditorJS.BlockToolConstructable,
           table: { class: Table as unknown as EditorJS.BlockToolConstructable, inlineToolbar: true },
         },
@@ -162,6 +164,34 @@ export function GuestApp() {
       });
 
       editorRef.current = editor;
+
+      // Listen for checklist toggle events and propagate to Yjs.
+      // The ChecklistTool dispatches this instead of triggering editor.save()
+      // to avoid WebKitGTK freezes in the Nous app. In the guest editor
+      // we can safely call save() to sync the checked state.
+      const editorHolder = document.getElementById("editor");
+      const handleChecklistChange = async () => {
+        if (suppressRemoteRef.current) return;
+        try {
+          const saved = await editor.save();
+          const newBlocks = saved.blocks.map((b) => ({
+            id: b.id ?? crypto.randomUUID(),
+            type: b.type,
+            data: b.data as Record<string, unknown>,
+          }));
+          suppressRemoteRef.current = true;
+          doc.transact(() => {
+            applyDiffToYjs(lastSnapshotRef.current, newBlocks, blocksArrayRef.current!);
+          }, doc.clientID);
+          suppressRemoteRef.current = false;
+          lastSnapshotRef.current = newBlocks;
+        } catch (err) {
+          console.warn("Failed to sync checklist change:", err);
+          suppressRemoteRef.current = false;
+        }
+      };
+      editorHolder?.addEventListener("checklist-data-changed", handleChecklistChange);
+      editorHolder?.addEventListener("checklist-structural-change", handleChecklistChange);
 
       // Observe remote changes
       blocksArray.observe((event, transaction) => {

@@ -13,6 +13,147 @@
         min-height: 100vh;
       }
       #root { min-height: 100vh; display: flex; flex-direction: column; }
+
+      /* Checklist styles */
+      .ce-block .cdx-checklist {
+        padding: 0.25rem 0;
+        display: flex;
+        flex-direction: column;
+        gap: 0 !important;
+      }
+      .ce-block .cdx-checklist__items {
+        display: flex;
+        flex-direction: column;
+        gap: 0.125rem;
+      }
+      .ce-block .cdx-checklist__item {
+        display: flex;
+        align-items: flex-start;
+        gap: 0.5rem;
+        padding: 0.375rem 0.25rem;
+        padding-left: 1.25rem;
+        border-radius: 4px;
+        transition: background-color 0.15s ease;
+        position: relative;
+        box-sizing: border-box;
+      }
+      .ce-block .cdx-checklist__item:hover {
+        background-color: rgba(255,255,255,0.05);
+      }
+      .ce-block .cdx-checklist__item:hover .cdx-checklist__item-drag-handle {
+        display: flex;
+      }
+      .ce-block .cdx-checklist__item-drag-handle {
+        display: none;
+        position: absolute;
+        left: 0;
+        top: 50%;
+        transform: translateY(-50%);
+        width: 1rem;
+        height: 1.5rem;
+        align-items: center;
+        justify-content: center;
+        cursor: grab;
+        color: #666;
+        transition: color 0.15s ease;
+      }
+      .ce-block .cdx-checklist__item-drag-handle:hover {
+        color: #999;
+      }
+      .ce-block .cdx-checklist__item-drag-handle:active {
+        cursor: grabbing;
+      }
+      .ce-block .cdx-checklist__item-drag-handle svg {
+        display: block;
+      }
+      .ce-block .cdx-checklist__item-checkbox {
+        width: 1.25rem;
+        height: 1.25rem;
+        min-width: 1.25rem;
+        min-height: 1.25rem;
+        border: 2px solid #555;
+        border-radius: 4px;
+        cursor: pointer;
+        flex-shrink: 0;
+        margin-top: 0.125rem;
+        margin-right: 0;
+        transition: background-color 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        position: relative;
+        box-sizing: border-box;
+        background: transparent;
+      }
+      .ce-block .cdx-checklist__item-checkbox:hover {
+        border-color: #7C4DFF;
+      }
+      .ce-block .cdx-checklist__item-checkbox:active {
+        transform: scale(0.9);
+      }
+      .ce-block .cdx-checklist__item[data-checked="true"] .cdx-checklist__item-checkbox {
+        background-color: #7C4DFF !important;
+        border-color: #7C4DFF !important;
+      }
+      .ce-block .cdx-checklist__item[data-checked="true"] .cdx-checklist__item-checkbox::after {
+        content: '';
+        display: block;
+        width: 100%;
+        height: 100%;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'%3E%3C/polyline%3E%3C/svg%3E");
+        background-size: 70%;
+        background-position: center;
+        background-repeat: no-repeat;
+        position: absolute;
+        top: 0;
+        left: 0;
+      }
+      .ce-block .cdx-checklist__item-text {
+        flex: 1;
+        min-height: 1.5rem;
+        line-height: 1.5;
+        outline: none;
+      }
+      .ce-block .cdx-checklist__item-text:empty::before {
+        content: attr(data-placeholder);
+        color: #666;
+        pointer-events: none;
+      }
+      .ce-block .cdx-checklist__item[data-checked="true"] .cdx-checklist__item-text {
+        text-decoration: line-through;
+        color: #666;
+      }
+      .ce-block .cdx-checklist__item[data-checked="true"] {
+        order: 1;
+      }
+      .ce-block .cdx-checklist__item[data-checked="false"] {
+        order: 0;
+      }
+      .ce-block .cdx-checklist__item--dragging {
+        opacity: 0.5;
+        background-color: rgba(255,255,255,0.08);
+      }
+      .ce-block .cdx-checklist__item--drag-over {
+        background-color: rgba(124, 77, 255, 0.1);
+        border-radius: 4px;
+      }
+      .ce-block .cdx-checklist__item--drag-over::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        right: 0;
+        top: -2px;
+        height: 3px;
+        background-color: #7C4DFF;
+        border-radius: 2px;
+      }
+      .ce-block .cdx-checklist__item-placeholder {
+        height: 2.25rem;
+        background-color: rgba(124, 77, 255, 0.1);
+        border: 2px dashed #7C4DFF;
+        border-radius: 4px;
+        margin: 0.125rem 0;
+      }
     </style>
   </head>
   <body>

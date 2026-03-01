@@ -96,12 +96,10 @@ export class CollabServer extends YServer {
     const ctx = (this as unknown as { ctx: DurableObjectState }).ctx;
     const stored = await ctx.storage.get<ArrayBuffer>(STORAGE_KEY);
     if (stored) {
-      console.log(`[CollabServer] onLoad: restoring ${stored.byteLength} bytes from storage`);
       const doc = new Doc();
       applyUpdate(doc, new Uint8Array(stored));
       return doc;
     }
-    console.log("[CollabServer] onLoad: no stored state");
   }
 
   /**
@@ -112,7 +110,6 @@ export class CollabServer extends YServer {
     const ctx = (this as unknown as { ctx: DurableObjectState }).ctx;
     const state = encodeStateAsUpdate(this.document);
     await ctx.storage.put(STORAGE_KEY, state.buffer);
-    console.log(`[CollabServer] onSave: persisted ${state.byteLength} bytes`);
   }
 
   /**
@@ -120,13 +117,10 @@ export class CollabServer extends YServer {
    * If invalid, close the connection immediately.
    */
   async onConnect(connection: Connection, ctx: ConnectionContext) {
-    console.log("[CollabServer] onConnect called, connection id:", connection.id);
-
     const url = new URL(ctx.request.url);
     const token = url.searchParams.get("token");
 
     if (!token) {
-      console.log("[CollabServer] No token in URL");
       connection.close(4001, "Missing token");
       return;
     }
@@ -135,16 +129,15 @@ export class CollabServer extends YServer {
     const secret = env?.COLLAB_HMAC_SECRET;
 
     if (!secret) {
-      console.error("[CollabServer] COLLAB_HMAC_SECRET not configured");
+      console.error("COLLAB_HMAC_SECRET not configured");
       connection.close(4500, "Server misconfigured");
       return;
     }
 
     try {
-      const payload = await verifyToken(token, secret);
-      console.log(`[CollabServer] Authenticated connection for room ${payload.room_id}`);
+      await verifyToken(token, secret);
     } catch (err) {
-      console.warn("[CollabServer] Token verification failed:", (err as Error).message);
+      console.warn("Token verification failed:", (err as Error).message);
       connection.close(4003, "Invalid token");
       return;
     }
