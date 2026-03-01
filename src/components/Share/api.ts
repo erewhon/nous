@@ -3,7 +3,8 @@ import { invoke } from "@tauri-apps/api/core";
 export type ShareType =
   | { type: "single_page"; pageId: string }
   | { type: "folder"; folderId: string }
-  | { type: "section"; sectionId: string };
+  | { type: "section"; sectionId: string }
+  | { type: "notebook"; notebookId: string };
 
 export interface ShareRecord {
   id: string;
@@ -71,6 +72,18 @@ export async function shareSection(
 ): Promise<SharePageResponse> {
   return invoke("share_section", {
     request: { notebookId, sectionId, theme, expiry, uploadExternal, siteTitle },
+  });
+}
+
+export async function shareNotebook(
+  notebookId: string,
+  theme: string,
+  expiry: string,
+  uploadExternal: boolean = false,
+  siteTitle?: string
+): Promise<SharePageResponse> {
+  return invoke("share_notebook", {
+    request: { notebookId, theme, expiry, uploadExternal, siteTitle },
   });
 }
 

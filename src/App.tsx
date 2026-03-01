@@ -103,6 +103,8 @@ function App() {
   const [shareFolderName, setShareFolderName] = useState<string | undefined>(undefined);
   const [shareSectionId, setShareSectionId] = useState<string | undefined>(undefined);
   const [shareSectionName, setShareSectionName] = useState<string | undefined>(undefined);
+  const [shareNotebookShareId, setShareNotebookShareId] = useState<string | undefined>(undefined);
+  const [shareNotebookShareName, setShareNotebookShareName] = useState<string | undefined>(undefined);
 
   // Listen for custom event to open backup dialog
   useEffect(() => {
@@ -129,6 +131,8 @@ function App() {
           folderName?: string;
           sectionId?: string;
           sectionName?: string;
+          notebookShareId?: string;
+          notebookShareName?: string;
         }>
       ).detail;
       setSharePageId(detail?.pageId);
@@ -137,6 +141,8 @@ function App() {
       setShareFolderName(detail?.folderName);
       setShareSectionId(detail?.sectionId);
       setShareSectionName(detail?.sectionName);
+      setShareNotebookShareId(detail?.notebookShareId);
+      setShareNotebookShareName(detail?.notebookShareName);
       setShowShare(true);
     };
     window.addEventListener("open-share-dialog", handleOpenShare);
@@ -506,6 +512,8 @@ function App() {
           setShareFolderName(undefined);
           setShareSectionId(undefined);
           setShareSectionName(undefined);
+          setShareNotebookShareId(undefined);
+          setShareNotebookShareName(undefined);
         }}
         pageId={sharePageId}
         notebookId={shareNotebookId}
@@ -513,6 +521,8 @@ function App() {
         folderName={shareFolderName}
         sectionId={shareSectionId}
         sectionName={shareSectionName}
+        notebookShareId={shareNotebookShareId}
+        notebookShareName={shareNotebookShareName}
       />
 
       {/* Action Library */}

@@ -405,6 +405,117 @@ pub async fn share_section(
     })
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShareNotebookRequest {
+    pub notebook_id: String,
+    pub theme: String,
+    pub expiry: String,
+    pub site_title: Option<String>,
+    #[serde(default)]
+    pub upload_external: bool,
+}
+
+#[tauri::command]
+pub async fn share_notebook(
+    state: State<'_, AppState>,
+    request: ShareNotebookRequest,
+) -> Result<SharePageResponse, String> {
+    let nb_id =
+        Uuid::parse_str(&request.notebook_id).map_err(|e| format!("Invalid notebook ID: {}", e))?;
+    let expiry = ShareExpiry::from_str(&request.expiry)?;
+    let upload_external = request.upload_external;
+
+    let storage = state.storage.clone();
+    let share_storage = state.share_storage.clone();
+    let library_storage = state.library_storage.clone();
+    let theme = request.theme.clone();
+    let site_title_opt = request.site_title.clone();
+
+    // Extract upload config synchronously
+    let upload_info = if upload_external {
+        let lib_storage = library_storage.lock().map_err(|e| e.to_string())?;
+        let library = lib_storage.get_current_library().map_err(|e| format!("{}", e))?;
+        library.share_upload_config.clone().map(|config| {
+            let creds = credentials::get_s3_credentials(&library.path, library.id).ok();
+            (config, creds)
+        })
+    } else {
+        None
+    };
+
+    // Generate site in a blocking task
+    let (site_dir, record) = tokio::task::spawn_blocking(move || {
+        let storage = storage.lock().map_err(|e| e.to_string())?;
+
+        let notebook = storage
+            .get_notebook(nb_id)
+            .map_err(|e| format!("Failed to get notebook: {}", e))?;
+        let notebook_name = notebook.name.clone();
+        let site_title = site_title_opt.unwrap_or(notebook_name.clone());
+
+        let all_pages = storage.list_pages(nb_id).map_err(|e| format!("{}", e))?;
+        let all_folders = storage.list_folders(nb_id).map_err(|e| format!("{}", e))?;
+
+        // Include all non-deleted pages
+        let pages: Vec<_> = all_pages
+            .into_iter()
+            .filter(|p| p.deleted_at.is_none())
+            .collect();
+
+        let page_count = pages.len();
+        let site_dir =
+            generate_share_site(&storage, nb_id, &pages, &all_folders, &site_title, &theme)?;
+
+        let record = build_multi_share_record(
+            ShareType::Notebook { notebook_id: nb_id },
+            nb_id,
+            &notebook_name,
+            &theme,
+            expiry,
+            page_count,
+        );
+
+        Ok::<_, String>((site_dir, record))
+    })
+    .await
+    .map_err(|e| format!("Task failed: {}", e))??;
+
+    // Attempt external upload
+    let mut record = record;
+    if let Some((config, Some(creds))) = &upload_info {
+        match upload::upload_share_site(config, creds, &record.id, &site_dir).await {
+            Ok(url) => {
+                record.external_url = Some(url);
+            }
+            Err(e) => {
+                log::warn!("External upload failed (continuing with local): {}", e);
+            }
+        }
+    }
+
+    let local_url = format!("http://localhost:7667/share/{}", record.id);
+
+    // Persist locally (copy site_dir into shares)
+    let share_storage_clone = share_storage.clone();
+    let record_clone = record.clone();
+    let site_dir_clone = site_dir.clone();
+    tokio::task::spawn_blocking(move || {
+        let share_store = share_storage_clone.lock().map_err(|e| e.to_string())?;
+        share_store.create_multi_share(record_clone, &site_dir_clone)
+    })
+    .await
+    .map_err(|e| format!("Task failed: {}", e))??;
+
+    // Clean up temp dir
+    let _ = std::fs::remove_dir_all(&site_dir);
+
+    Ok(SharePageResponse {
+        share: record,
+        local_url,
+    })
+}
+
 /// Collect a folder and all its descendant folder IDs.
 fn collect_folder_subtree(
     root_id: Uuid,

@@ -1654,6 +1654,24 @@ export function NotebookSettingsDialog({
               {notebook?.archived ? "Unarchive" : "Archive"}
             </button>
             <button
+              onClick={() => {
+                if (!notebook) return;
+                onClose();
+                window.dispatchEvent(
+                  new CustomEvent("open-share-dialog", {
+                    detail: {
+                      notebookShareId: notebook.id,
+                      notebookShareName: notebook.name,
+                    },
+                  })
+                );
+              }}
+              className="rounded-lg px-3 py-2 text-sm font-medium transition-colors hover:bg-[--color-bg-tertiary]"
+              style={{ color: "var(--color-text-secondary)" }}
+            >
+              Share
+            </button>
+            <button
               onClick={() => setShowDeleteConfirm(true)}
               className="rounded-lg px-3 py-2 text-sm font-medium transition-colors hover:bg-red-500/10"
               style={{ color: "var(--color-error)" }}

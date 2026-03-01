@@ -902,6 +902,7 @@ pub fn run() {
             commands::share_page,
             commands::share_folder,
             commands::share_section,
+            commands::share_notebook,
             commands::list_shares,
             commands::delete_share,
             commands::configure_share_upload,

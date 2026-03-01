@@ -46,6 +46,7 @@ pub enum ShareType {
     SinglePage { page_id: Uuid },
     Folder { folder_id: Uuid },
     Section { section_id: Uuid },
+    Notebook { notebook_id: Uuid },
 }
 
 /// Metadata for a shared resource.

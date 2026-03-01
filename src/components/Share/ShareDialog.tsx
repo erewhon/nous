@@ -6,6 +6,7 @@ import {
   sharePage,
   shareFolder,
   shareSection,
+  shareNotebook,
   listShares,
   deleteShare,
   getShareUploadConfig,
@@ -22,6 +23,8 @@ interface ShareDialogProps {
   folderName?: string;
   sectionId?: string;
   sectionName?: string;
+  notebookShareId?: string;
+  notebookShareName?: string;
 }
 
 type ThemeName = "minimal" | "documentation" | "blog" | "academic";
@@ -52,6 +55,8 @@ export function ShareDialog({
   folderName,
   sectionId,
   sectionName,
+  notebookShareId,
+  notebookShareName,
 }: ShareDialogProps) {
   const [theme, setTheme] = useState<ThemeName>("minimal");
   const [expiry, setExpiry] = useState<ExpiryOption>("1w");
@@ -66,9 +71,21 @@ export function ShareDialog({
   const [siteTitle, setSiteTitle] = useState("");
 
   // Determine sharing mode
-  const isMultiPage = !!folderId || !!sectionId;
-  const shareLabel = folderId ? "Share Folder" : sectionId ? "Share Section" : "Share as Link";
-  const shareName = folderId ? folderName : sectionId ? sectionName : undefined;
+  const isMultiPage = !!folderId || !!sectionId || !!notebookShareId;
+  const shareLabel = notebookShareId
+    ? "Share Notebook"
+    : folderId
+      ? "Share Folder"
+      : sectionId
+        ? "Share Section"
+        : "Share as Link";
+  const shareName = notebookShareId
+    ? notebookShareName
+    : folderId
+      ? folderName
+      : sectionId
+        ? sectionName
+        : undefined;
 
   const selectedNotebookId = useNotebookStore((s) => s.selectedNotebookId);
   const pages = usePageStore((s) => s.pages);
@@ -93,7 +110,11 @@ export function ShareDialog({
       listShares()
         .then((shares) => {
           let filtered: typeof shares;
-          if (folderId) {
+          if (notebookShareId) {
+            filtered = shares.filter(
+              (s) => s.shareType?.type === "notebook" && (s.shareType as { notebookId?: string }).notebookId === notebookShareId
+            );
+          } else if (folderId) {
             filtered = shares.filter(
               (s) => s.shareType?.type === "folder" && (s.shareType as { folderId?: string }).folderId === folderId
             );
@@ -120,14 +141,22 @@ export function ShareDialog({
   }, [isOpen, effectivePageId]);
 
   const handleShare = useCallback(async () => {
-    if (!effectiveNotebookId) return;
+    if (!effectiveNotebookId && !notebookShareId) return;
 
     setDialogState("sharing");
     setError(null);
 
     try {
       let response;
-      if (folderId) {
+      if (notebookShareId) {
+        response = await shareNotebook(
+          notebookShareId,
+          theme,
+          expiry,
+          uploadExternal,
+          siteTitle || undefined
+        );
+      } else if (folderId) {
         response = await shareFolder(
           effectiveNotebookId,
           folderId,
@@ -167,7 +196,7 @@ export function ShareDialog({
       setError(String(err));
       setDialogState("configure");
     }
-  }, [effectiveNotebookId, effectivePageId, folderId, sectionId, theme, expiry, uploadExternal, siteTitle, toastStore]);
+  }, [effectiveNotebookId, effectivePageId, folderId, sectionId, notebookShareId, theme, expiry, uploadExternal, siteTitle, toastStore]);
 
   const handleCopy = useCallback(async () => {
     if (!shareUrl) return;
@@ -428,7 +457,7 @@ export function ShareDialog({
             <button
               className="share-btn primary"
               onClick={handleShare}
-              disabled={!effectiveNotebookId || (!effectivePageId && !folderId && !sectionId)}
+              disabled={(!effectiveNotebookId && !notebookShareId) || (!effectivePageId && !folderId && !sectionId && !notebookShareId)}
             >
               Share
             </button>
