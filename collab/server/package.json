@@ -1,0 +1,18 @@
+{
+  "name": "@nous/collab-server",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "npx partykit dev src/index.ts",
+    "deploy": "npx partykit deploy src/index.ts"
+  },
+  "dependencies": {
+    "partyserver": "^0.0.56",
+    "y-partyserver": "^0.0.4",
+    "yjs": "^13.6.20"
+  },
+  "devDependencies": {
+    "partykit": "^0.0.111",
+    "typescript": "^5.9.3"
+  }
+}

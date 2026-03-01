@@ -32,6 +32,8 @@ import type { EditorData, Page } from "../../types/page";
 import { calculatePageStats, type PageStats } from "../../utils/pageStats";
 import { useWritingGoalsStore } from "../../stores/writingGoalsStore";
 import { useKeybindingsStore } from "../../stores/keybindingsStore";
+import { useCollabSession } from "../../collab/useCollabSession";
+import { CollabStatusBar } from "../Collab/CollabStatusBar";
 
 interface EditorPaneContentProps {
   pane: EditorPane;
@@ -84,6 +86,9 @@ export function EditorPaneContent({
   const selectedPage = pages.find((p) => p.id === pane.pageId);
   const isStandardPage =
     selectedPage?.pageType === "standard" || !selectedPage?.pageType;
+
+  // Real-time collaboration session
+  const collab = useCollabSession();
   const history = useUndoHistoryStore((state) =>
     state.getHistory(pane.pageId || "")
   );
@@ -530,6 +535,89 @@ export function EditorPaneContent({
     ]
   );
 
+  // Listen for collab session start/stop events from the CollabDialog
+  useEffect(() => {
+    const handleStart = (e: Event) => {
+      const detail = (e as CustomEvent<{
+        pageId: string;
+        notebookId: string;
+        roomId: string;
+        token: string;
+        partykitHost: string;
+        sessionId: string;
+      }>).detail;
+
+      // Only handle events for our page
+      if (detail.pageId !== pane.pageId) return;
+
+      if (editorData && editorRef.current) {
+        const collabInitData: EditorData = {
+          time: editorData.time,
+          version: editorData.version,
+          blocks: editorData.blocks.map((b) => ({
+            id: b.id ?? crypto.randomUUID(),
+            type: b.type,
+            data: b.data as Record<string, unknown>,
+          })),
+        };
+        collab.startSession(
+          detail.notebookId,
+          detail.pageId,
+          collabInitData,
+          (remoteData) => {
+            // Remote change arrived — re-render editor
+            editorRef.current?.render(remoteData);
+          },
+          "8h"
+        );
+      }
+    };
+
+    const handleStop = (e: Event) => {
+      const detail = (e as CustomEvent<{ pageId: string }>).detail;
+      if (detail.pageId !== pane.pageId) return;
+      collab.stopSession();
+    };
+
+    window.addEventListener("collab-session-started", handleStart);
+    window.addEventListener("collab-session-stopped", handleStop);
+    return () => {
+      window.removeEventListener("collab-session-started", handleStart);
+      window.removeEventListener("collab-session-stopped", handleStop);
+    };
+  }, [pane.pageId, editorData, collab]);
+
+  // Clean up collab session when page changes
+  useEffect(() => {
+    return () => {
+      if (collab.isActive) {
+        collab.stopSession();
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pane.pageId]);
+
+  // After auto-save, forward changes to collab bridge
+  const handleSaveWithCollab = useCallback(
+    async (data: OutputData) => {
+      await handleSave(data);
+      // Forward to collab bridge if active
+      if (collab.bridge) {
+        const editorDataForCollab: EditorData = {
+          time: data.time,
+          version: data.version,
+          blocks: data.blocks.map((block) => ({
+            id: block.id ?? crypto.randomUUID(),
+            type: block.type,
+            data: block.data as Record<string, unknown>,
+          })),
+        };
+        collab.bridge.applyLocalChange(editorDataForCollab);
+      }
+    },
+    [handleSave, collab.bridge]
+  );
+
   // Handle block reference clicks — navigate to the target page and scroll to block
   const handleBlockRefClick = useCallback(
     (blockId: string, pageId: string) => {
@@ -855,21 +943,37 @@ export function EditorPaneContent({
                     )}
                     {(selectedPage.pageType === "standard" ||
                       !selectedPage.pageType) && (
-                      <BlockEditor
-                        ref={editorRef}
-                        key={selectedPage.id}
-                        initialData={editorData}
-                        onChange={handleChange}
-                        onSave={handleSave}
-                        onExplicitSave={handleExplicitSave}
-                        onLinkClick={handleLinkClick}
-                        onBlockRefClick={handleBlockRefClick}
-                        notebookId={notebookId}
-                        pageId={selectedPage.id}
-                        paneId={pane.id}
-                        pages={blockEditorPages}
-                        className="min-h-[calc(100vh-300px)]"
-                      />
+                      <>
+                        {collab.isActive && (
+                          <CollabStatusBar
+                            status={collab.status}
+                            participants={collab.participants}
+                            onStop={() => {
+                              collab.stopSession();
+                              window.dispatchEvent(
+                                new CustomEvent("collab-session-stopped", {
+                                  detail: { pageId: pane.pageId },
+                                })
+                              );
+                            }}
+                          />
+                        )}
+                        <BlockEditor
+                          ref={editorRef}
+                          key={selectedPage.id}
+                          initialData={editorData}
+                          onChange={handleChange}
+                          onSave={collab.isActive ? handleSaveWithCollab : handleSave}
+                          onExplicitSave={handleExplicitSave}
+                          onLinkClick={handleLinkClick}
+                          onBlockRefClick={handleBlockRefClick}
+                          notebookId={notebookId}
+                          pageId={selectedPage.id}
+                          paneId={pane.id}
+                          pages={blockEditorPages}
+                          className="min-h-[calc(100vh-300px)]"
+                        />
+                      </>
                     )}
 
                     {/* Backlinks panel - only for standard pages */}

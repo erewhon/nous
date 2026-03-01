@@ -5,6 +5,7 @@ use tauri::Manager;
 
 pub mod actions;
 mod chat_sessions;
+pub mod collab;
 pub mod commands;
 pub mod contacts;
 pub mod energy;
@@ -54,6 +55,7 @@ use rag::VectorIndex;
 use search::SearchIndex;
 use storage::FileStorage;
 use sync::{CrdtStore, SyncManager, SyncScheduler};
+use collab::storage::CollabStorage;
 use share::storage::ShareStorage;
 use video_server::VideoServer;
 
@@ -83,6 +85,7 @@ pub struct AppState {
     pub monitor_storage: Arc<Mutex<MonitorStorage>>,
     pub monitor_scheduler: Mutex<Option<monitor::scheduler::MonitorScheduler>>,
     pub share_storage: Arc<Mutex<ShareStorage>>,
+    pub collab_storage: Arc<Mutex<CollabStorage>>,
     /// Keeps the MCP file watcher alive for the app's lifetime.
     pub _mcp_watcher: Mutex<Option<notify::PollWatcher>>,
 }
@@ -258,6 +261,11 @@ pub fn run() {
     share_storage.init().expect("Failed to initialize share storage");
     let share_storage_arc = Arc::new(Mutex::new(share_storage));
 
+    // Initialize collab storage (library-scoped)
+    let collab_storage = CollabStorage::new(library_path.clone());
+    collab_storage.init().expect("Failed to initialize collab storage");
+    let collab_storage_arc = Arc::new(Mutex::new(collab_storage));
+
     // Initialize external editor manager
     let external_editor = ExternalEditorManager::new()
         .expect("Failed to initialize external editor manager");
@@ -341,6 +349,7 @@ pub fn run() {
         monitor_storage: monitor_storage_arc,
         monitor_scheduler: Mutex::new(None),
         share_storage: share_storage_arc,
+        collab_storage: collab_storage_arc,
         _mcp_watcher: Mutex::new(None),
     };
 
@@ -430,6 +439,9 @@ pub fn run() {
 
             // Give the sync manager the CRDT store so it can use live page state
             state.sync_manager.set_crdt_store(Arc::clone(&state.crdt_store));
+
+            // Give the sync manager the collab storage so it can skip pages with active sessions
+            state.sync_manager.set_collab_storage(Arc::clone(&state.collab_storage));
 
             // Start the freeze watchdog (Rust-side ping/pong to detect frontend freezes)
             freeze_watchdog::start_watchdog(
@@ -898,6 +910,11 @@ pub fn run() {
             // Smart organize commands
             commands::smart_organize_suggest,
             commands::smart_organize_apply,
+            // Collab commands
+            commands::start_collab_session,
+            commands::stop_collab_session,
+            commands::list_collab_sessions,
+            commands::get_collab_config,
             // Share commands
             commands::share_page,
             commands::share_folder,

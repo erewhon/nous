@@ -225,6 +225,8 @@ pub struct SyncManager {
     onsave_debounce: Arc<Mutex<HashMap<Uuid, std::time::Instant>>>,
     /// Live CRDT store (set after app initialization)
     crdt_store: Arc<Mutex<Option<Arc<CrdtStore>>>>,
+    /// Collab storage for checking active real-time sessions (set after app initialization)
+    collab_storage: Arc<Mutex<Option<Arc<Mutex<crate::collab::storage::CollabStorage>>>>>,
 }
 
 impl SyncManager {
@@ -241,6 +243,7 @@ impl SyncManager {
             emitter: Arc::new(Mutex::new(None)),
             onsave_debounce: Arc::new(Mutex::new(HashMap::new())),
             crdt_store: Arc::new(Mutex::new(None)),
+            collab_storage: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -255,6 +258,27 @@ impl SyncManager {
     pub fn set_crdt_store(&self, store: Arc<CrdtStore>) {
         let mut guard = self.crdt_store.lock().unwrap();
         *guard = Some(store);
+    }
+
+    /// Set the collab storage for checking active sessions (called after app initialization)
+    pub fn set_collab_storage(&self, storage: Arc<Mutex<crate::collab::storage::CollabStorage>>) {
+        let mut guard = self.collab_storage.lock().unwrap();
+        *guard = Some(storage);
+    }
+
+    /// Check if a page has an active collab session (should be skipped during sync)
+    fn has_active_collab_session(&self, page_id: Uuid) -> bool {
+        let guard = self.collab_storage.lock().unwrap();
+        if let Some(storage) = guard.as_ref() {
+            if let Ok(store) = storage.lock() {
+                return store
+                    .get_active_session_for_page(page_id)
+                    .ok()
+                    .flatten()
+                    .is_some();
+            }
+        }
+        false
     }
 
     /// Get the sync directory for a notebook
@@ -973,6 +997,16 @@ impl SyncManager {
         let page_tasks: Vec<(Page, PageSyncInfo)> = local_pages
             .iter()
             .filter(|page| {
+                // Skip pages with active collab sessions — the live Yjs doc
+                // is the authority during collaboration. The final state will
+                // be persisted locally when the session ends.
+                if self.has_active_collab_session(page.id) {
+                    log::info!(
+                        "Sync: skipping page '{}' ({}) — active collab session",
+                        page.title, page.id,
+                    );
+                    return false;
+                }
                 let local_needs_sync = local_state.page_needs_sync(page.id);
                 let never_synced = !local_state.pages.contains_key(&page.id);
                 let updated_since_sync = local_state.pages.get(&page.id)

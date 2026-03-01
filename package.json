@@ -74,6 +74,8 @@
     "rehype-raw": "^7.0.0",
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
+    "y-partykit": "^0.0.33",
+    "yjs": "^13.6.29",
     "zod": "^4.3.5",
     "zustand": "^5.0.9"
   }

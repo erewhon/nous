@@ -12,6 +12,7 @@ import { TagManager } from "./components/Tags";
 import { BackupDialog } from "./components/Backup";
 import { PublishDialog } from "./components/Publish";
 import { ShareDialog } from "./components/Share";
+import { CollabDialog } from "./components/Collab";
 import { ActionLibrary, ActionEditor } from "./components/Actions";
 import { QuickCapture, InboxPanel } from "./components/Inbox";
 import { FlashcardPanel } from "./components/Flashcards";
@@ -106,6 +107,11 @@ function App() {
   const [shareNotebookShareId, setShareNotebookShareId] = useState<string | undefined>(undefined);
   const [shareNotebookShareName, setShareNotebookShareName] = useState<string | undefined>(undefined);
 
+  // Collab dialog state
+  const [showCollab, setShowCollab] = useState(false);
+  const [collabPageId, setCollabPageId] = useState<string | undefined>(undefined);
+  const [collabNotebookId, setCollabNotebookId] = useState<string | undefined>(undefined);
+
   // Listen for custom event to open backup dialog
   useEffect(() => {
     const handleOpenBackup = () => setShowBackup(true);
@@ -147,6 +153,18 @@ function App() {
     };
     window.addEventListener("open-share-dialog", handleOpenShare);
     return () => window.removeEventListener("open-share-dialog", handleOpenShare);
+  }, []);
+
+  // Listen for custom event to open collab dialog
+  useEffect(() => {
+    const handleOpenCollab = (e: Event) => {
+      const detail = (e as CustomEvent<{ pageId?: string; notebookId?: string }>).detail;
+      setCollabPageId(detail?.pageId);
+      setCollabNotebookId(detail?.notebookId);
+      setShowCollab(true);
+    };
+    window.addEventListener("open-collab-dialog", handleOpenCollab);
+    return () => window.removeEventListener("open-collab-dialog", handleOpenCollab);
   }, []);
 
   // Listen for custom event to open web clipper (optionally with a URL)
@@ -523,6 +541,18 @@ function App() {
         sectionName={shareSectionName}
         notebookShareId={shareNotebookShareId}
         notebookShareName={shareNotebookShareName}
+      />
+
+      {/* Collab Dialog */}
+      <CollabDialog
+        isOpen={showCollab}
+        onClose={() => {
+          setShowCollab(false);
+          setCollabPageId(undefined);
+          setCollabNotebookId(undefined);
+        }}
+        pageId={collabPageId}
+        notebookId={collabNotebookId}
       />
 
       {/* Action Library */}
