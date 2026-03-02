@@ -23,6 +23,7 @@ from nous_ai.database_helpers import (
     resolve_cell_value,
     resolve_option_label,
 )
+from nous_mcp.daemon_client import DaemonError, NousDaemonClient
 from nous_mcp.markdown import export_page_to_markdown, markdown_to_blocks
 from nous_mcp.storage import NousStorage
 
@@ -44,14 +45,21 @@ mcp = FastMCP(
     ),
 )
 
-# Global storage instance, initialized in main()
+# Global instances, initialized in main()
 _storage: NousStorage | None = None
+_daemon: NousDaemonClient | None = None
 
 
 def _get_storage() -> NousStorage:
     if _storage is None:
         raise RuntimeError("Storage not initialized")
     return _storage
+
+
+def _get_daemon() -> NousDaemonClient:
+    if _daemon is None:
+        raise RuntimeError("Daemon client not initialized")
+    return _daemon
 
 
 # ---------------------------------------------------------------------------
@@ -172,8 +180,9 @@ def get_page(
     Returns the page content in the requested format.
     """
     storage = _get_storage()
+    daemon = _get_daemon()
     nb = storage.resolve_notebook(notebook)
-    pg = storage.resolve_page(nb["id"], page)
+    pg = daemon.resolve_page(nb["id"], page)
 
     if format == "json":
         return json.dumps(pg, indent=2)
@@ -198,13 +207,14 @@ def search_pages(
     Title matches are ranked first.
     """
     storage = _get_storage()
+    daemon = _get_daemon()
 
     notebook_id = None
     if notebook:
         nb = storage.resolve_notebook(notebook)
         notebook_id = nb["id"]
 
-    results = storage.search_pages(query, notebook_id=notebook_id, limit=limit)
+    results = daemon.search_pages(query, notebook_id=notebook_id, limit=limit)
     return json.dumps(results, indent=2)
 
 
@@ -230,6 +240,7 @@ def create_page(
     Returns JSON with id, title, notebookId of the created page.
     """
     storage = _get_storage()
+    daemon = _get_daemon()
     nb = storage.resolve_notebook(notebook)
 
     folder_id = None
@@ -242,17 +253,13 @@ def create_page(
         sec = storage.resolve_section(nb["id"], section)
         section_id = sec["id"]
 
-    tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
+    tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else None
 
-    blocks = _markdown_to_blocks(content) if content else []
+    blocks = _markdown_to_blocks(content) if content else None
 
-    # Use NousPageStorage for atomic writes + oplog
-    from nous_ai.page_storage import NousPageStorage
-
-    page_storage = NousPageStorage(data_dir=storage.library_path, client_id="nous-mcp")
-    page = page_storage.create_page(
-        notebook_id=nb["id"],
-        title=title,
+    page = daemon.create_page(
+        nb["id"],
+        title,
         blocks=blocks,
         tags=tag_list,
         folder_id=folder_id,
@@ -285,30 +292,15 @@ def append_to_page(
     Returns JSON with id, title, blocksAdded count.
     """
     storage = _get_storage()
+    daemon = _get_daemon()
     nb = storage.resolve_notebook(notebook)
-    pg = storage.resolve_page(nb["id"], page)
+    pg = daemon.resolve_page(nb["id"], page)
 
     new_blocks = _markdown_to_blocks(content)
     if not new_blocks:
         return json.dumps({"id": pg["id"], "title": pg["title"], "blocksAdded": 0})
 
-    existing_content = pg.get("content", {"time": None, "version": "2.28.0", "blocks": []})
-    existing_blocks = existing_content.get("blocks", [])
-
-    updated_content = {
-        "time": int(datetime.now(UTC).timestamp() * 1000),
-        "version": existing_content.get("version", "2.28.0"),
-        "blocks": existing_blocks + new_blocks,
-    }
-
-    from nous_ai.page_storage import NousPageStorage
-
-    page_storage = NousPageStorage(data_dir=storage.library_path, client_id="nous-mcp")
-    page_storage.update_page(
-        notebook_id=nb["id"],
-        page_id=pg["id"],
-        content=updated_content,
-    )
+    daemon.append_to_page(nb["id"], pg["id"], blocks=new_blocks)
 
     return json.dumps(
         {
@@ -340,32 +332,21 @@ def update_page(
     Returns JSON with id, title of the updated page.
     """
     storage = _get_storage()
+    daemon = _get_daemon()
     nb = storage.resolve_notebook(notebook)
-    pg = storage.resolve_page(nb["id"], page)
+    pg = daemon.resolve_page(nb["id"], page)
 
-    from nous_ai.page_storage import NousPageStorage
-
-    page_storage = NousPageStorage(data_dir=storage.library_path, client_id="nous-mcp")
-
-    updated_content = None
-    if content is not None:
-        blocks = _markdown_to_blocks(content)
-        existing = pg.get("content", {"version": "2.28.0"})
-        updated_content = {
-            "time": int(datetime.now(UTC).timestamp() * 1000),
-            "version": existing.get("version", "2.28.0"),
-            "blocks": blocks,
-        }
+    blocks = _markdown_to_blocks(content) if content is not None else None
 
     tag_list = None
     if tags is not None:
         tag_list = [t.strip() for t in tags.split(",") if t.strip()]
 
-    updated = page_storage.update_page(
-        notebook_id=nb["id"],
-        page_id=pg["id"],
-        content=updated_content,
+    updated = daemon.update_page(
+        nb["id"],
+        pg["id"],
         title=title,
+        blocks=blocks,
         tags=tag_list,
     )
 
@@ -437,10 +418,12 @@ def move_page(
     Returns JSON with id, title, folderId, sectionId of the moved page.
     """
     storage = _get_storage()
+    daemon = _get_daemon()
     nb = storage.resolve_notebook(notebook)
-    pg = storage.resolve_page(nb["id"], page)
+    pg = daemon.resolve_page(nb["id"], page)
 
-    folder_id = None
+    # Use empty string to clear folder (move to root)
+    folder_id: str | None = ""
     if folder:
         f = storage.resolve_folder(nb["id"], folder)
         folder_id = f["id"]
@@ -450,18 +433,11 @@ def move_page(
         sec = storage.resolve_section(nb["id"], section)
         section_id = sec["id"]
 
-    from nous_ai.page_storage import NousPageStorage
-
-    page_storage = NousPageStorage(data_dir=storage.library_path, client_id="nous-mcp")
-
-    extra: dict[str, str | None] = {"folderId": folder_id}
-    if section_id is not None:
-        extra["sectionId"] = section_id
-
-    updated = page_storage.update_page(
-        notebook_id=nb["id"],
-        page_id=pg["id"],
-        extra_fields=extra,
+    updated = daemon.update_page(
+        nb["id"],
+        pg["id"],
+        folder_id=folder_id,
+        section_id=section_id,
     )
 
     return json.dumps(
@@ -493,8 +469,9 @@ def manage_tags(
     Returns JSON with id, title, tags of the updated page.
     """
     storage = _get_storage()
+    daemon = _get_daemon()
     nb = storage.resolve_notebook(notebook)
-    pg = storage.resolve_page(nb["id"], page)
+    pg = daemon.resolve_page(nb["id"], page)
 
     existing_tags: list[str] = pg.get("tags", [])
     tag_set = list(dict.fromkeys(existing_tags))  # preserve order, dedup
@@ -509,12 +486,9 @@ def manage_tags(
         remove_set = {t.strip().lower() for t in remove.split(",") if t.strip()}
         tag_set = [t for t in tag_set if t.lower() not in remove_set]
 
-    from nous_ai.page_storage import NousPageStorage
-
-    page_storage = NousPageStorage(data_dir=storage.library_path, client_id="nous-mcp")
-    updated = page_storage.update_page(
-        notebook_id=nb["id"],
-        page_id=pg["id"],
+    updated = daemon.update_page(
+        nb["id"],
+        pg["id"],
         tags=tag_set,
     )
 
@@ -546,8 +520,9 @@ def toggle_checklist_item(
     Returns JSON with id, title, item text, and new checked state.
     """
     storage = _get_storage()
+    daemon = _get_daemon()
     nb = storage.resolve_notebook(notebook)
-    pg = storage.resolve_page(nb["id"], page)
+    pg = daemon.resolve_page(nb["id"], page)
 
     content = pg.get("content", {})
     blocks = content.get("blocks", [])
@@ -593,19 +568,10 @@ def toggle_checklist_item(
 
     blocks[block_idx]["data"]["items"][item_idx]["checked"] = new_checked
 
-    updated_content = {
-        "time": int(datetime.now(UTC).timestamp() * 1000),
-        "version": content.get("version", "2.28.0"),
-        "blocks": blocks,
-    }
-
-    from nous_ai.page_storage import NousPageStorage
-
-    page_storage = NousPageStorage(data_dir=storage.library_path, client_id="nous-mcp")
-    page_storage.update_page(
-        notebook_id=nb["id"],
-        page_id=pg["id"],
-        content=updated_content,
+    daemon.update_page(
+        nb["id"],
+        pg["id"],
+        blocks=blocks,
     )
 
     return json.dumps(
@@ -679,8 +645,9 @@ def get_database(
     Returns the database content in the requested format.
     """
     storage = _get_storage()
+    daemon = _get_daemon()
     nb = storage.resolve_notebook(notebook)
-    pg = storage.resolve_page(nb["id"], database)
+    pg = daemon.resolve_page(nb["id"], database)
 
     if pg.get("pageType") != "database":
         page_type = pg.get("pageType")
@@ -737,6 +704,8 @@ def create_database(
 
     tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
 
+    daemon = _get_daemon()
+
     prop_specs = json.loads(properties)
     built_properties = []
     color_idx = 0
@@ -744,28 +713,20 @@ def create_database(
         prop, color_idx = _build_property(spec, color_idx)
         built_properties.append(prop)
 
-    # Pre-generate page ID so we can reference it in sourceFile
-    page_id = str(uuid4())
-
-    # Create the page metadata
-    from nous_ai.page_storage import NousPageStorage
-
-    page_storage = NousPageStorage(data_dir=storage.library_path, client_id="nous-mcp")
-    page = page_storage.create_page(
-        notebook_id=nb["id"],
-        title=title,
-        blocks=[],
-        tags=tag_list,
+    # Create the page via daemon — Rust auto-sets sourceFile from fileExtension + page ID
+    page = daemon.create_page(
+        nb["id"],
+        title,
+        tags=tag_list if tag_list else None,
         folder_id=folder_id,
         section_id=section_id,
-        page_id=page_id,
+        page_type="database",
         extra_fields={
-            "pageType": "database",
-            "sourceFile": f"files/{page_id}.database",
             "storageMode": "embedded",
             "fileExtension": "database",
         },
     )
+    page_id = page["id"]
 
     # Create the .database file
     db_content = {
@@ -815,8 +776,9 @@ def add_database_rows(
     Returns JSON with databaseId, rowsAdded, totalRows.
     """
     storage = _get_storage()
+    daemon = _get_daemon()
     nb = storage.resolve_notebook(notebook)
-    pg = storage.resolve_page(nb["id"], database)
+    pg = daemon.resolve_page(nb["id"], database)
 
     if pg.get("pageType") != "database":
         raise ValueError(f"Page '{pg.get('title')}' is not a database")
@@ -852,11 +814,8 @@ def add_database_rows(
     db_content["rows"].extend(new_rows)
     storage.write_database_content(nb["id"], pg["id"], db_content)
 
-    # Touch page updatedAt
-    from nous_ai.page_storage import NousPageStorage
-
-    page_storage = NousPageStorage(data_dir=storage.library_path, client_id="nous-mcp")
-    page_storage.update_page(notebook_id=nb["id"], page_id=pg["id"])
+    # Touch page updatedAt via daemon
+    daemon.update_page(nb["id"], pg["id"])
 
     return json.dumps(
         {
@@ -888,8 +847,9 @@ def update_database_rows(
     Returns JSON with databaseId, rowsUpdated.
     """
     storage = _get_storage()
+    daemon = _get_daemon()
     nb = storage.resolve_notebook(notebook)
-    pg = storage.resolve_page(nb["id"], database)
+    pg = daemon.resolve_page(nb["id"], database)
 
     if pg.get("pageType") != "database":
         raise ValueError(f"Page '{pg.get('title')}' is not a database")
@@ -932,11 +892,8 @@ def update_database_rows(
     db_content["rows"] = existing_rows
     storage.write_database_content(nb["id"], pg["id"], db_content)
 
-    # Touch page updatedAt
-    from nous_ai.page_storage import NousPageStorage
-
-    page_storage = NousPageStorage(data_dir=storage.library_path, client_id="nous-mcp")
-    page_storage.update_page(notebook_id=nb["id"], page_id=pg["id"])
+    # Touch page updatedAt via daemon
+    daemon.update_page(nb["id"], pg["id"])
 
     return json.dumps(
         {
@@ -1066,8 +1023,9 @@ def get_daily_note(
     Returns the daily note content in markdown format, or an error if not found.
     """
     storage = _get_storage()
+    daemon = _get_daemon()
     nb = storage.resolve_notebook(notebook)
-    page = storage.get_daily_note(nb["id"], date)
+    page = daemon.get_daily_note(nb["id"], date)
     if page is None:
         raise ValueError(f"No daily note found for {date} in notebook '{nb.get('name')}'")
 
@@ -1090,41 +1048,24 @@ def create_daily_note(
     Returns JSON with id, title, dailyNoteDate of the created page.
     """
     storage = _get_storage()
+    daemon = _get_daemon()
     nb = storage.resolve_notebook(notebook)
 
-    # Check if daily note already exists for this date
-    existing = storage.get_daily_note(nb["id"], date)
-    if existing:
-        raise ValueError(
-            f"Daily note already exists for {date}: '{existing.get('title')}' (id: {existing['id']})"
-        )
+    # The daemon's create_or_get endpoint handles duplicate checking
+    # and title formatting via create_daily_note_core
+    page = daemon.create_daily_note(nb["id"], date)
 
-    # Format title like the Tauri backend: "Daily Note - Monday, January 6, 2025"
-    from datetime import date as date_type
-
-    parsed_date = date_type.fromisoformat(date)
-    title = f"Daily Note - {parsed_date.strftime('%A, %B %-d, %Y')}"
-
-    blocks = _markdown_to_blocks(content) if content else []
-
-    from nous_ai.page_storage import NousPageStorage
-
-    page_storage = NousPageStorage(data_dir=storage.library_path, client_id="nous-mcp")
-    page = page_storage.create_page(
-        notebook_id=nb["id"],
-        title=title,
-        blocks=blocks,
-        extra_fields={
-            "isDailyNote": True,
-            "dailyNoteDate": date,
-        },
-    )
+    # If content was provided, append it
+    if content:
+        blocks = _markdown_to_blocks(content)
+        if blocks:
+            daemon.append_to_page(nb["id"], page["id"], blocks=blocks)
 
     return json.dumps(
         {
             "id": page["id"],
             "title": page["title"],
-            "dailyNoteDate": date,
+            "dailyNoteDate": page.get("dailyNoteDate", date),
             "notebookId": nb["id"],
         },
         indent=2,
@@ -1363,9 +1304,19 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    global _storage
+    global _storage, _daemon
     _storage = NousStorage.from_library_name(args.library)
     logger.info("Using library at: %s", _storage.library_path)
+
+    # Initialize daemon client and verify connectivity
+    _daemon = NousDaemonClient()
+    try:
+        status = _daemon.status()
+        logger.info("Connected to Nous daemon (pid %s)", status.get("pid"))
+    except DaemonError as e:
+        logger.error("Nous daemon is not running: %s", e)
+        logger.error("Start the daemon with: nous daemon start")
+        sys.exit(1)
 
     mcp.run(transport="stdio")
 

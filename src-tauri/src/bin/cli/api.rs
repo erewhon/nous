@@ -14,10 +14,13 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use html_escape::decode_html_entities;
+use regex::Regex;
+
 use nous_lib::commands::{create_daily_note_core, find_daily_note};
 use nous_lib::inbox::{CaptureRequest, CaptureSource};
 use nous_lib::share::storage::ShareStorage;
-use nous_lib::storage::{EditorBlock, EditorData};
+use nous_lib::storage::{EditorBlock, EditorData, Page};
 
 use super::daemon::DaemonState;
 
@@ -42,6 +45,12 @@ struct CreatePageRequest {
     blocks: Option<Vec<EditorBlock>>,
     tags: Option<Vec<String>>,
     folder_id: Option<String>,
+    section_id: Option<String>,
+    page_type: Option<String>,
+    is_daily_note: Option<bool>,
+    daily_note_date: Option<String>,
+    /// Arbitrary extra fields to merge into the page JSON (sourceFile, storageMode, etc.)
+    extra_fields: Option<serde_json::Value>,
 }
 
 #[derive(Deserialize)]
@@ -52,6 +61,8 @@ struct UpdatePageRequest {
     /// Structured Editor.js blocks (takes priority over `content`)
     blocks: Option<Vec<EditorBlock>>,
     tags: Option<Vec<String>>,
+    folder_id: Option<String>,
+    section_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -95,6 +106,18 @@ struct StatusResponse {
     uptime_secs: u64,
 }
 
+#[derive(Deserialize)]
+struct SearchQuery {
+    q: String,
+    notebook_id: Option<String>,
+    limit: Option<usize>,
+}
+
+#[derive(Deserialize)]
+struct ResolvePageQuery {
+    title: String,
+}
+
 // Track daemon start time
 static START_TIME: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
 
@@ -115,9 +138,14 @@ pub fn build_router(state: AppState) -> Router {
 
     Router::new()
         .route("/api/status", get(get_status))
+        .route("/api/search", get(search_pages))
         .route("/api/notebooks", get(list_notebooks))
         .route("/api/notebooks/{notebook_id}/pages", get(list_pages))
         .route("/api/notebooks/{notebook_id}/pages", post(create_page))
+        .route(
+            "/api/notebooks/{notebook_id}/pages/resolve",
+            get(resolve_page),
+        )
         .route(
             "/api/notebooks/{notebook_id}/pages/{page_id}",
             get(get_page),
@@ -212,6 +240,157 @@ async fn get_page(
     }
 }
 
+async fn resolve_page(
+    State(state): State<AppState>,
+    Path(notebook_id): Path<String>,
+    Query(query): Query<ResolvePageQuery>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let nb_id = parse_uuid(&notebook_id)?;
+    let storage = state.storage.lock().unwrap();
+    let title_lower = query.title.to_lowercase();
+
+    // Try as UUID first
+    if let Ok(uuid) = Uuid::parse_str(&query.title) {
+        return match storage.get_page(nb_id, uuid) {
+            Ok(page) => Ok(Json(ApiResponse { data: page })),
+            Err(e) => Err(api_err(StatusCode::NOT_FOUND, e.to_string())),
+        };
+    }
+
+    // Match by title prefix
+    let pages = storage
+        .list_pages(nb_id)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    // Try exact match first
+    let exact: Vec<&Page> = pages
+        .iter()
+        .filter(|p| p.title.to_lowercase() == title_lower)
+        .collect();
+    if exact.len() == 1 {
+        return Ok(Json(ApiResponse {
+            data: exact[0].clone(),
+        }));
+    }
+
+    // Try prefix match
+    let prefix: Vec<&Page> = pages
+        .iter()
+        .filter(|p| p.title.to_lowercase().starts_with(&title_lower))
+        .collect();
+    match prefix.len() {
+        0 => Err(api_err(
+            StatusCode::NOT_FOUND,
+            format!("No page matching '{}'", query.title),
+        )),
+        1 => Ok(Json(ApiResponse {
+            data: prefix[0].clone(),
+        })),
+        _ => Err(api_err(
+            StatusCode::CONFLICT,
+            format!(
+                "Ambiguous title '{}'. Matches: {}",
+                query.title,
+                prefix
+                    .iter()
+                    .map(|p| format!("'{}'", p.title))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        )),
+    }
+}
+
+async fn search_pages(
+    State(state): State<AppState>,
+    Query(query): Query<SearchQuery>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let limit = query.limit.unwrap_or(20);
+    let query_lower = query.q.to_lowercase();
+    let storage = state.storage.lock().unwrap();
+    let html_tag_re = Regex::new(r"<[^>]+>").unwrap();
+
+    // Determine which notebooks to search
+    let notebook_ids: Vec<Uuid> = if let Some(ref nb_id_str) = query.notebook_id {
+        vec![parse_uuid(nb_id_str)?]
+    } else {
+        storage
+            .list_notebooks()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|nb| nb.id)
+            .collect()
+    };
+
+    let mut title_matches = Vec::new();
+    let mut content_matches = Vec::new();
+
+    for nb_id in &notebook_ids {
+        let pages = match storage.list_pages(*nb_id) {
+            Ok(p) => p,
+            Err(_) => continue,
+        };
+
+        // Get notebook name for results
+        let nb_name = storage
+            .list_notebooks()
+            .unwrap_or_default()
+            .into_iter()
+            .find(|n| n.id == *nb_id)
+            .map(|n| n.name.clone())
+            .unwrap_or_default();
+
+        for page in &pages {
+            if page.is_archived || page.deleted_at.is_some() {
+                continue;
+            }
+
+            let title_hit = page.title.to_lowercase().contains(&query_lower);
+
+            // Search block content
+            let mut snippet = String::new();
+            for block in &page.content.blocks {
+                let text = extract_block_text(block, &html_tag_re);
+                if text.is_empty() {
+                    continue;
+                }
+                if let Some(pos) = text.to_lowercase().find(&query_lower) {
+                    let start = pos.saturating_sub(50);
+                    let end = (pos + query.q.len() + 50).min(text.len());
+                    let prefix = if start > 0 { "..." } else { "" };
+                    let suffix = if end < text.len() { "..." } else { "" };
+                    snippet = format!("{}{}{}", prefix, &text[start..end], suffix);
+                    break;
+                }
+            }
+
+            if title_hit || !snippet.is_empty() {
+                let entry = serde_json::json!({
+                    "pageId": page.id.to_string(),
+                    "notebookId": nb_id.to_string(),
+                    "notebookName": nb_name,
+                    "title": page.title,
+                    "snippet": snippet,
+                    "tags": page.tags,
+                });
+                if title_hit {
+                    title_matches.push(entry);
+                } else {
+                    content_matches.push(entry);
+                }
+            }
+        }
+    }
+
+    // Title matches first, then content matches
+    title_matches.extend(content_matches);
+    title_matches.truncate(limit);
+
+    Ok(Json(ApiResponse {
+        data: title_matches,
+    }))
+}
+
 async fn create_page(
     State(state): State<AppState>,
     Path(notebook_id): Path<String>,
@@ -241,6 +420,52 @@ async fn create_page(
     if let Some(fid) = req.folder_id {
         if let Ok(uuid) = Uuid::parse_str(&fid) {
             page.folder_id = Some(uuid);
+        }
+    }
+
+    // Set section
+    if let Some(sid) = req.section_id {
+        if let Ok(uuid) = Uuid::parse_str(&sid) {
+            page.section_id = Some(uuid);
+        }
+    }
+
+    // Set page type
+    if let Some(pt) = req.page_type {
+        if let Ok(parsed) = serde_json::from_value(serde_json::Value::String(pt)) {
+            page.page_type = parsed;
+        }
+    }
+
+    // Set daily note fields
+    if req.is_daily_note.unwrap_or(false) {
+        page.is_daily_note = true;
+    }
+    if let Some(date) = req.daily_note_date {
+        page.daily_note_date = Some(date);
+    }
+
+    // Merge extra fields
+    if let Some(extras) = req.extra_fields {
+        if let Some(obj) = extras.as_object() {
+            if let Some(v) = obj.get("sourceFile").and_then(|v| v.as_str()) {
+                page.source_file = Some(v.to_string());
+            }
+            if let Some(v) = obj.get("storageMode") {
+                if let Ok(parsed) = serde_json::from_value(v.clone()) {
+                    page.storage_mode = Some(parsed);
+                }
+            }
+            if let Some(v) = obj.get("fileExtension").and_then(|v| v.as_str()) {
+                page.file_extension = Some(v.to_string());
+            }
+        }
+    }
+
+    // Auto-set sourceFile for database pages using the assigned page ID
+    if page.source_file.is_none() {
+        if let Some(ext) = &page.file_extension {
+            page.source_file = Some(format!("files/{}.{}", page.id, ext));
         }
     }
 
@@ -278,6 +503,20 @@ async fn update_page(
     }
     if let Some(tags) = req.tags {
         page.tags = tags;
+    }
+    if let Some(fid) = req.folder_id {
+        if fid.is_empty() {
+            page.folder_id = None;
+        } else if let Ok(uuid) = Uuid::parse_str(&fid) {
+            page.folder_id = Some(uuid);
+        }
+    }
+    if let Some(sid) = req.section_id {
+        if sid.is_empty() {
+            page.section_id = None;
+        } else if let Ok(uuid) = Uuid::parse_str(&sid) {
+            page.section_id = Some(uuid);
+        }
     }
 
     page.updated_at = chrono::Utc::now();
@@ -780,4 +1019,89 @@ fn text_to_blocks(text: &str) -> Vec<EditorBlock> {
             data: serde_json::json!({ "text": paragraph.trim() }),
         })
         .collect()
+}
+
+/// Extract plain text from a block for search.
+fn extract_block_text(block: &EditorBlock, html_tag_re: &Regex) -> String {
+    let data = &block.data;
+    let block_type = block.block_type.as_str();
+
+    let raw = match block_type {
+        "paragraph" | "header" | "quote" => data
+            .get("text")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+        "code" => data
+            .get("code")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+        "list" => {
+            let items = data.get("items").and_then(|v| v.as_array());
+            match items {
+                Some(arr) => arr
+                    .iter()
+                    .filter_map(|item| {
+                        if let Some(s) = item.as_str() {
+                            Some(s.to_string())
+                        } else {
+                            item.get("content")
+                                .or(item.get("text"))
+                                .and_then(|v| v.as_str())
+                                .map(|s| s.to_string())
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" "),
+                None => String::new(),
+            }
+        }
+        "checklist" => {
+            let items = data.get("items").and_then(|v| v.as_array());
+            match items {
+                Some(arr) => arr
+                    .iter()
+                    .filter_map(|item| item.get("text").and_then(|v| v.as_str()))
+                    .collect::<Vec<_>>()
+                    .join(" "),
+                None => String::new(),
+            }
+        }
+        "callout" => {
+            let title = data
+                .get("title")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let content = data
+                .get("content")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            format!("{} {}", title, content)
+        }
+        "table" => {
+            let rows = data.get("content").and_then(|v| v.as_array());
+            match rows {
+                Some(arr) => arr
+                    .iter()
+                    .filter_map(|row| row.as_array())
+                    .flat_map(|row| {
+                        row.iter()
+                            .filter_map(|cell| cell.as_str().map(|s| s.to_string()))
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" "),
+                None => String::new(),
+            }
+        }
+        _ => String::new(),
+    };
+
+    if raw.is_empty() {
+        return raw;
+    }
+
+    // Strip HTML tags and decode entities
+    let stripped = html_tag_re.replace_all(&raw, "");
+    decode_html_entities(&stripped).to_string()
 }
