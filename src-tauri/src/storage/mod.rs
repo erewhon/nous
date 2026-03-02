@@ -1,4 +1,5 @@
 pub mod backup;
+pub mod content_format;
 mod file_storage;
 pub mod html_utils;
 pub mod migration;

@@ -328,13 +328,77 @@ pub struct EditorBlock {
     pub data: serde_json::Value,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct EditorData {
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub time: Option<i64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
     pub blocks: Vec<EditorBlock>,
+}
+
+impl serde::Serialize for EditorData {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+
+        if crate::storage::content_format::is_blocknote_version(&self.version) {
+            // Serialize as BlockNote format
+            let bn_blocks =
+                crate::storage::content_format::editor_blocks_to_blocknote(&self.blocks);
+            let mut map = serializer.serialize_map(None)?;
+            if let Some(ref t) = self.time {
+                map.serialize_entry("time", t)?;
+            }
+            if let Some(ref v) = self.version {
+                map.serialize_entry("version", v)?;
+            }
+            map.serialize_entry("blocks", &bn_blocks)?;
+            map.end()
+        } else {
+            // Serialize as EditorJS format (original behavior)
+            let mut map = serializer.serialize_map(None)?;
+            if let Some(ref t) = self.time {
+                map.serialize_entry("time", t)?;
+            }
+            if let Some(ref v) = self.version {
+                map.serialize_entry("version", v)?;
+            }
+            map.serialize_entry("blocks", &self.blocks)?;
+            map.end()
+        }
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for EditorData {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        // Deserialize to raw Value first so we can inspect the version
+        let raw = serde_json::Value::deserialize(deserializer)?;
+
+        let time = raw.get("time").and_then(|v| v.as_i64());
+        let version = raw
+            .get("version")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        let blocks = if crate::storage::content_format::is_blocknote_version(&version) {
+            // BlockNote format: convert blocks from BN to EditorBlock
+            let bn_blocks = raw
+                .get("blocks")
+                .and_then(|v| v.as_array())
+                .cloned()
+                .unwrap_or_default();
+            crate::storage::content_format::blocknote_to_editor_blocks(&bn_blocks)
+        } else {
+            // EditorJS format: deserialize blocks normally
+            raw.get("blocks")
+                .and_then(|v| serde_json::from_value::<Vec<EditorBlock>>(v.clone()).ok())
+                .unwrap_or_default()
+        };
+
+        Ok(EditorData {
+            time,
+            version,
+            blocks,
+        })
+    }
 }
 
 impl Default for EditorData {
