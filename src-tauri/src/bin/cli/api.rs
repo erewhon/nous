@@ -354,9 +354,13 @@ async fn search_pages(
                 if text.is_empty() {
                     continue;
                 }
-                if let Some(pos) = text.to_lowercase().find(&query_lower) {
-                    let start = pos.saturating_sub(50);
-                    let end = (pos + query.q.len() + 50).min(text.len());
+                let text_lower = text.to_lowercase();
+                if let Some(pos) = text_lower.find(&query_lower) {
+                    // Snap byte offsets to char boundaries
+                    let raw_start = pos.saturating_sub(50);
+                    let raw_end = (pos + query.q.len() + 50).min(text.len());
+                    let start = snap_char_boundary_down(&text, raw_start);
+                    let end = snap_char_boundary_up(&text, raw_end);
                     let prefix = if start > 0 { "..." } else { "" };
                     let suffix = if end < text.len() { "..." } else { "" };
                     snippet = format!("{}{}{}", prefix, &text[start..end], suffix);
@@ -1019,6 +1023,24 @@ fn text_to_blocks(text: &str) -> Vec<EditorBlock> {
             data: serde_json::json!({ "text": paragraph.trim() }),
         })
         .collect()
+}
+
+/// Snap a byte offset down to a char boundary.
+fn snap_char_boundary_down(s: &str, idx: usize) -> usize {
+    let mut i = idx.min(s.len());
+    while i > 0 && !s.is_char_boundary(i) {
+        i -= 1;
+    }
+    i
+}
+
+/// Snap a byte offset up to a char boundary.
+fn snap_char_boundary_up(s: &str, idx: usize) -> usize {
+    let mut i = idx.min(s.len());
+    while i < s.len() && !s.is_char_boundary(i) {
+        i += 1;
+    }
+    i
 }
 
 /// Extract plain text from a block for search.
