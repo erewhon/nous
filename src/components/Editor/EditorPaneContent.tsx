@@ -1,4 +1,4 @@
-import { useMemo, useCallback, useState, useEffect, useRef } from "react";
+import { useMemo, useCallback, useState, useEffect, useRef, type Ref } from "react";
 import type { OutputData } from "@editorjs/editorjs";
 import { usePageStore, type EditorPane } from "../../stores/pageStore";
 import { useLinkStore } from "../../stores/linkStore";
@@ -8,6 +8,10 @@ import { useTypewriterScroll } from "../../hooks/useTypewriterScroll";
 import { useFocusHighlight } from "../../hooks/useFocusHighlight";
 import { useUndoHistory } from "../../hooks/useUndoHistory";
 import { BlockEditor, type BlockEditorRef } from "./BlockEditor";
+import {
+  BlockNoteEditor,
+  type BlockNoteEditorRef,
+} from "./BlockNoteEditor";
 import { PageSearchBar } from "./PageSearchBar";
 import { usePageSearch } from "./usePageSearch";
 import * as api from "../../utils/api";
@@ -34,6 +38,11 @@ import { useWritingGoalsStore } from "../../stores/writingGoalsStore";
 import { useKeybindingsStore } from "../../stores/keybindingsStore";
 import { useCollabSession } from "../../collab/useCollabSession";
 import { CollabStatusBar } from "../Collab/CollabStatusBar";
+
+// Feature flag: set localStorage "use-blocknote" = "true" to switch editors
+const USE_BLOCKNOTE =
+  typeof localStorage !== "undefined" &&
+  localStorage.getItem("use-blocknote") === "true";
 
 interface EditorPaneContentProps {
   pane: EditorPane;
@@ -81,7 +90,7 @@ export function EditorPaneContent({
   const [showSearch, setShowSearch] = useState(false);
   const [dbUndoState, setDbUndoState] = useState<DatabaseUndoRedoState | null>(null);
   const editorScrollRef = useRef<HTMLDivElement>(null);
-  const editorRef = useRef<BlockEditorRef>(null);
+  const editorRef = useRef<BlockEditorRef | BlockNoteEditorRef>(null);
 
   const selectedPage = pages.find((p) => p.id === pane.pageId);
   const isStandardPage =
@@ -96,7 +105,8 @@ export function EditorPaneContent({
   // Callback when undo/redo changes state - render new data in editor
   const handleUndoRedoStateChange = useCallback((data: OutputData) => {
     if (editorRef.current) {
-      editorRef.current.render(data);
+      // Cast: undo entries always have block IDs (EditorData is stricter than OutputData)
+      editorRef.current.render(data as EditorData & OutputData);
     }
   }, []);
 
@@ -958,21 +968,39 @@ export function EditorPaneContent({
                             }}
                           />
                         )}
-                        <BlockEditor
-                          ref={editorRef}
-                          key={selectedPage.id}
-                          initialData={editorData}
-                          onChange={handleChange}
-                          onSave={collab.isActive ? handleSaveWithCollab : handleSave}
-                          onExplicitSave={handleExplicitSave}
-                          onLinkClick={handleLinkClick}
-                          onBlockRefClick={handleBlockRefClick}
-                          notebookId={notebookId}
-                          pageId={selectedPage.id}
-                          paneId={pane.id}
-                          pages={blockEditorPages}
-                          className="min-h-[calc(100vh-300px)]"
-                        />
+                        {USE_BLOCKNOTE ? (
+                          <BlockNoteEditor
+                            ref={editorRef as Ref<BlockNoteEditorRef>}
+                            key={selectedPage.id}
+                            initialData={editorData as EditorData}
+                            onChange={handleChange as (data?: EditorData) => void}
+                            onSave={(collab.isActive ? handleSaveWithCollab : handleSave) as (data: EditorData) => void}
+                            onExplicitSave={handleExplicitSave as (data: EditorData) => void}
+                            onLinkClick={handleLinkClick}
+                            onBlockRefClick={handleBlockRefClick}
+                            notebookId={notebookId}
+                            pageId={selectedPage.id}
+                            paneId={pane.id}
+                            pages={blockEditorPages}
+                            className="min-h-[calc(100vh-300px)]"
+                          />
+                        ) : (
+                          <BlockEditor
+                            ref={editorRef as Ref<BlockEditorRef>}
+                            key={selectedPage.id}
+                            initialData={editorData}
+                            onChange={handleChange}
+                            onSave={collab.isActive ? handleSaveWithCollab : handleSave}
+                            onExplicitSave={handleExplicitSave}
+                            onLinkClick={handleLinkClick}
+                            onBlockRefClick={handleBlockRefClick}
+                            notebookId={notebookId}
+                            pageId={selectedPage.id}
+                            paneId={pane.id}
+                            pages={blockEditorPages}
+                            className="min-h-[calc(100vh-300px)]"
+                          />
+                        )}
                       </>
                     )}
 
