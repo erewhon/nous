@@ -59,7 +59,7 @@ pub fn take_snapshot(pages_dir: &Path, page: &Page) -> std::io::Result<()> {
     let filename = ts.format("%Y%m%d_%H%M%S").to_string();
 
     // Write page JSON snapshot
-    let page_json = serde_json::to_string_pretty(page).map_err(|e| {
+    let page_json = super::content_format::page_to_disk_json(page).map_err(|e| {
         std::io::Error::new(std::io::ErrorKind::InvalidData, e)
     })?;
     fs::write(snap_dir.join(format!("{}.json", filename)), &page_json)?;

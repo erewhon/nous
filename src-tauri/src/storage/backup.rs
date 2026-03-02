@@ -264,7 +264,7 @@ pub fn import_notebook_from_zip(
                 let content = fs::read_to_string(&path)?;
                 let mut page: Page = serde_json::from_str(&content)?;
                 page.notebook_id = new_id;
-                let updated_content = serde_json::to_string_pretty(&page)?;
+                let updated_content = super::content_format::page_to_disk_json(&page)?;
                 fs::write(&path, updated_content)?;
             }
         }

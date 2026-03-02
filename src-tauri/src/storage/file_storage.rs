@@ -364,7 +364,7 @@ impl FileStorage {
         let page = Page::new(notebook_id, title);
 
         let page_path = self.page_path(notebook_id, page.id);
-        let content = serde_json::to_string_pretty(&page)?;
+        let content = super::content_format::page_to_disk_json(&page)?;
         fs::write(&page_path, content)?;
 
         self.oplog_record_create(&page);
@@ -379,7 +379,7 @@ impl FileStorage {
         }
 
         let page_path = self.page_path(page.notebook_id, page.id);
-        let content = serde_json::to_string_pretty(&page)?;
+        let content = super::content_format::page_to_disk_json(&page)?;
         fs::write(&page_path, content)?;
 
         self.oplog_record_create(&page);
@@ -394,7 +394,7 @@ impl FileStorage {
         }
 
         let page_path = self.page_path(notebook_id, page.id);
-        let content = serde_json::to_string_pretty(page)?;
+        let content = super::content_format::page_to_disk_json(page)?;
         fs::write(&page_path, content)?;
 
         self.oplog_record_create(page);
@@ -440,7 +440,7 @@ impl FileStorage {
             .and_then(|s| serde_json::from_str::<Page>(&s).ok())
             .map(|p| p.content);
 
-        let content = serde_json::to_string_pretty(page)?;
+        let content = super::content_format::page_to_disk_json(page)?;
         Self::atomic_write(&page_path, &content)?;
 
         // Append oplog entry (best-effort — never fail the save for oplog issues)
@@ -630,7 +630,7 @@ impl FileStorage {
 
         // Save page in target notebook
         let target_page_path = self.page_path(target_notebook_id, page.id);
-        let content = serde_json::to_string_pretty(&page)?;
+        let content = super::content_format::page_to_disk_json(&page)?;
         fs::write(&target_page_path, content)?;
 
         // Delete original page file
@@ -1607,7 +1607,7 @@ impl FileStorage {
 
                     // Write metadata file in target
                     let target_meta = self.metadata_path(target_notebook_id, page.id);
-                    match serde_json::to_string_pretty(&moved) {
+                    match super::content_format::page_to_disk_json(&moved) {
                         Ok(content) => {
                             if let Err(e) = fs::write(&target_meta, content) {
                                 log::warn!("Failed to write metadata for page {}: {}", page.id, e);
@@ -2001,7 +2001,7 @@ impl FileStorage {
 
                     // Write metadata in target
                     let target_meta = self.metadata_path(target_notebook_id, page.id);
-                    match serde_json::to_string_pretty(&moved) {
+                    match super::content_format::page_to_disk_json(&moved) {
                         Ok(content) => {
                             if let Err(e) = fs::write(&target_meta, content) {
                                 log::warn!(
@@ -2481,7 +2481,7 @@ impl FileStorage {
 
         // Save page metadata
         let metadata_path = self.metadata_path(notebook_id, page_id);
-        let content = serde_json::to_string_pretty(&page)?;
+        let content = super::content_format::page_to_disk_json(&page)?;
         fs::write(&metadata_path, content)?;
 
         Ok(page)
@@ -2595,7 +2595,7 @@ impl FileStorage {
         }
 
         let metadata_path = self.metadata_path(page.notebook_id, page.id);
-        let content = serde_json::to_string_pretty(page)?;
+        let content = super::content_format::page_to_disk_json(page)?;
         Self::atomic_write(&metadata_path, &content)?;
         Ok(())
     }
@@ -2750,7 +2750,7 @@ impl FileStorage {
             let container = encrypt_json(page, key)?;
             serde_json::to_string_pretty(&container)?
         } else {
-            serde_json::to_string_pretty(page)?
+            super::content_format::page_to_disk_json(page)?
         };
 
         fs::write(&page_path, content)?;
@@ -2776,7 +2776,7 @@ impl FileStorage {
             let container = encrypt_json(&page, key)?;
             serde_json::to_string_pretty(&container)?
         } else {
-            serde_json::to_string_pretty(&page)?
+            super::content_format::page_to_disk_json(&page)?
         };
 
         fs::write(&page_path, content)?;
@@ -2907,7 +2907,7 @@ impl FileStorage {
                 // Parse and decrypt
                 let container: EncryptedContainer = serde_json::from_str(&content)?;
                 let page: Page = decrypt_json(&container, key)?;
-                let decrypted = serde_json::to_string_pretty(&page)?;
+                let decrypted = super::content_format::page_to_disk_json(&page)?;
                 fs::write(&path, decrypted)?;
                 decrypted_count += 1;
             }

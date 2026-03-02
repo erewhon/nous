@@ -337,33 +337,19 @@ pub struct EditorData {
 
 impl serde::Serialize for EditorData {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        // Always serialize as EditorJS format (id, type, data).
+        // BlockNote conversion for disk writes is handled by
+        // content_format::page_to_disk_json().
         use serde::ser::SerializeMap;
-
-        if crate::storage::content_format::is_blocknote_version(&self.version) {
-            // Serialize as BlockNote format
-            let bn_blocks =
-                crate::storage::content_format::editor_blocks_to_blocknote(&self.blocks);
-            let mut map = serializer.serialize_map(None)?;
-            if let Some(ref t) = self.time {
-                map.serialize_entry("time", t)?;
-            }
-            if let Some(ref v) = self.version {
-                map.serialize_entry("version", v)?;
-            }
-            map.serialize_entry("blocks", &bn_blocks)?;
-            map.end()
-        } else {
-            // Serialize as EditorJS format (original behavior)
-            let mut map = serializer.serialize_map(None)?;
-            if let Some(ref t) = self.time {
-                map.serialize_entry("time", t)?;
-            }
-            if let Some(ref v) = self.version {
-                map.serialize_entry("version", v)?;
-            }
-            map.serialize_entry("blocks", &self.blocks)?;
-            map.end()
+        let mut map = serializer.serialize_map(None)?;
+        if let Some(ref t) = self.time {
+            map.serialize_entry("time", t)?;
         }
+        if let Some(ref v) = self.version {
+            map.serialize_entry("version", v)?;
+        }
+        map.serialize_entry("blocks", &self.blocks)?;
+        map.end()
     }
 }
 

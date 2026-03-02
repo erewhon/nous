@@ -6,7 +6,7 @@
 
 use serde_json::{json, Map, Value};
 
-use super::EditorBlock;
+use super::{EditorBlock, Page};
 
 // ─── Format detection ────────────────────────────────────────────────────────
 
@@ -16,6 +16,32 @@ pub fn is_blocknote_version(version: &Option<String>) -> bool {
         .as_ref()
         .map(|v| v.starts_with("blocknote-"))
         .unwrap_or(false)
+}
+
+// ─── Disk serialization ─────────────────────────────────────────────────────
+
+/// Serialize a Page to pretty JSON for disk storage.
+///
+/// If the page content has a BlockNote version, the blocks are converted from
+/// internal EditorBlock format back to BlockNote format. For EditorJS pages,
+/// this is equivalent to `serde_json::to_string_pretty(page)`.
+///
+/// This is the ONLY path that should write Page JSON to disk — normal serde
+/// serialization always produces EditorJS format (safe for Tauri IPC).
+pub fn page_to_disk_json(page: &Page) -> serde_json::Result<String> {
+    if is_blocknote_version(&page.content.version) {
+        let mut val = serde_json::to_value(page)?;
+        // Serde produced EditorJS blocks; replace with BlockNote blocks
+        if let Some(content) = val.get_mut("content") {
+            if let Some(obj) = content.as_object_mut() {
+                let bn_blocks = editor_blocks_to_blocknote(&page.content.blocks);
+                obj.insert("blocks".to_string(), Value::Array(bn_blocks));
+            }
+        }
+        serde_json::to_string_pretty(&val)
+    } else {
+        serde_json::to_string_pretty(page)
+    }
 }
 
 // ─── BlockNote → EditorJS (deserialization path) ────────────────────────────
