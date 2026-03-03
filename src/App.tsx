@@ -111,6 +111,9 @@ function App() {
   const [showCollab, setShowCollab] = useState(false);
   const [collabPageId, setCollabPageId] = useState<string | undefined>(undefined);
   const [collabNotebookId, setCollabNotebookId] = useState<string | undefined>(undefined);
+  const [collabScopeType, setCollabScopeType] = useState<"page" | "section" | "notebook" | undefined>(undefined);
+  const [collabSectionId, setCollabSectionId] = useState<string | undefined>(undefined);
+  const [collabSectionName, setCollabSectionName] = useState<string | undefined>(undefined);
 
   // Live sessions dialog
   const [showLiveSessions, setShowLiveSessions] = useState(false);
@@ -161,9 +164,18 @@ function App() {
   // Listen for custom event to open collab dialog
   useEffect(() => {
     const handleOpenCollab = (e: Event) => {
-      const detail = (e as CustomEvent<{ pageId?: string; notebookId?: string }>).detail;
+      const detail = (e as CustomEvent<{
+        pageId?: string;
+        notebookId?: string;
+        scopeType?: "page" | "section" | "notebook";
+        sectionId?: string;
+        sectionName?: string;
+      }>).detail;
       setCollabPageId(detail?.pageId);
       setCollabNotebookId(detail?.notebookId);
+      setCollabScopeType(detail?.scopeType);
+      setCollabSectionId(detail?.sectionId);
+      setCollabSectionName(detail?.sectionName);
       setShowCollab(true);
     };
     window.addEventListener("open-collab-dialog", handleOpenCollab);
@@ -560,9 +572,15 @@ function App() {
           setShowCollab(false);
           setCollabPageId(undefined);
           setCollabNotebookId(undefined);
+          setCollabScopeType(undefined);
+          setCollabSectionId(undefined);
+          setCollabSectionName(undefined);
         }}
         pageId={collabPageId}
         notebookId={collabNotebookId}
+        initialScopeType={collabScopeType}
+        sectionId={collabSectionId}
+        sectionName={collabSectionName}
       />
 
       {/* Live Sessions Dialog */}

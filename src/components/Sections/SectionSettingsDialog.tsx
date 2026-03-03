@@ -362,27 +362,51 @@ export function SectionSettingsDialog({
                 </button>
               )}
               {!isCreating && section && (
-                <button
-                  onClick={() => {
-                    onClose();
-                    window.dispatchEvent(
-                      new CustomEvent("open-share-dialog", {
-                        detail: {
-                          notebookId: section.notebookId,
-                          sectionId: section.id,
-                          sectionName: section.name,
-                        },
-                      })
-                    );
-                  }}
-                  className="rounded-lg border px-4 py-2 text-sm font-medium transition-colors hover:bg-[--color-bg-tertiary]"
-                  style={{
-                    borderColor: "var(--color-border)",
-                    color: "var(--color-text-secondary)",
-                  }}
-                >
-                  Share
-                </button>
+                <>
+                  <button
+                    onClick={() => {
+                      onClose();
+                      window.dispatchEvent(
+                        new CustomEvent("open-share-dialog", {
+                          detail: {
+                            notebookId: section.notebookId,
+                            sectionId: section.id,
+                            sectionName: section.name,
+                          },
+                        })
+                      );
+                    }}
+                    className="rounded-lg border px-4 py-2 text-sm font-medium transition-colors hover:bg-[--color-bg-tertiary]"
+                    style={{
+                      borderColor: "var(--color-border)",
+                      color: "var(--color-text-secondary)",
+                    }}
+                  >
+                    Share
+                  </button>
+                  <button
+                    onClick={() => {
+                      onClose();
+                      window.dispatchEvent(
+                        new CustomEvent("open-collab-dialog", {
+                          detail: {
+                            notebookId: section.notebookId,
+                            scopeType: "section",
+                            sectionId: section.id,
+                            sectionName: section.name,
+                          },
+                        })
+                      );
+                    }}
+                    className="rounded-lg border px-4 py-2 text-sm font-medium transition-colors hover:bg-[--color-bg-tertiary]"
+                    style={{
+                      borderColor: "var(--color-border)",
+                      color: "var(--color-text-secondary)",
+                    }}
+                  >
+                    Collaborate
+                  </button>
+                </>
               )}
               <div className="flex-1" />
               <button

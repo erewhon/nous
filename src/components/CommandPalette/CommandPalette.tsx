@@ -11,6 +11,7 @@ import { usePageStore } from "../../stores/pageStore";
 import { useSearchStore, type SearchMode } from "../../stores/searchStore";
 import { useActionStore } from "../../stores/actionStore";
 import { useRAGStore } from "../../stores/ragStore";
+import { useSectionStore } from "../../stores/sectionStore";
 import { searchPages, exportPageToFile, importMarkdownFile, convertDocument, importMarkdown } from "../../utils/api";
 import { save, open } from "@tauri-apps/plugin-dialog";
 import { highlightText } from "../../utils/highlightText";
@@ -268,14 +269,82 @@ export function CommandPalette({
       category: "action",
       action: () => {
         const pageId = usePageStore.getState().selectedPageId;
+        const selectedPage = pageId ? pages.find((p) => p.id === pageId) : null;
+        const { sections, selectedSectionId } = useSectionStore.getState();
+        const section = selectedSectionId ? sections.find((s) => s.id === selectedSectionId) : null;
         window.dispatchEvent(
           new CustomEvent("open-collab-dialog", {
-            detail: { pageId: pageId || undefined, notebookId: selectedNotebookId || undefined },
+            detail: {
+              pageId: pageId || undefined,
+              notebookId: selectedNotebookId || undefined,
+              sectionId: selectedPage?.sectionId || section?.id || undefined,
+              sectionName: section?.name || undefined,
+            },
           })
         );
         onClose();
       },
       keywords: ["collaborate", "realtime", "live", "session", "collab", "multiplayer"],
+    });
+
+    cmds.push({
+      id: "action-collab-section",
+      title: "Collaborate on Section",
+      subtitle: "Share all pages in this section for real-time editing",
+      icon: (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+          <circle cx="9" cy="7" r="4" />
+          <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+          <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+        </svg>
+      ),
+      category: "action",
+      action: () => {
+        const { sections, selectedSectionId } = useSectionStore.getState();
+        const section = selectedSectionId ? sections.find((s) => s.id === selectedSectionId) : null;
+        if (!section) return;
+        window.dispatchEvent(
+          new CustomEvent("open-collab-dialog", {
+            detail: {
+              notebookId: selectedNotebookId || undefined,
+              scopeType: "section" as const,
+              sectionId: section.id,
+              sectionName: section.name,
+            },
+          })
+        );
+        onClose();
+      },
+      keywords: ["collaborate", "section", "realtime", "live", "multi-page"],
+    });
+
+    cmds.push({
+      id: "action-collab-notebook",
+      title: "Collaborate on Notebook",
+      subtitle: "Share all pages in this notebook for real-time editing",
+      icon: (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+          <circle cx="9" cy="7" r="4" />
+          <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+          <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+        </svg>
+      ),
+      category: "action",
+      action: () => {
+        if (!selectedNotebookId) return;
+        window.dispatchEvent(
+          new CustomEvent("open-collab-dialog", {
+            detail: {
+              notebookId: selectedNotebookId,
+              scopeType: "notebook" as const,
+            },
+          })
+        );
+        onClose();
+      },
+      keywords: ["collaborate", "notebook", "realtime", "live", "multi-page", "all"],
     });
 
     cmds.push({

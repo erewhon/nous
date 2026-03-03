@@ -16,6 +16,12 @@
       "new_sqlite_classes": ["CollabServer"]
     }
   ],
+  "kv_namespaces": [
+    {
+      "binding": "COLLAB_MANIFESTS",
+      "id": "PLACEHOLDER_CREATE_WITH_wrangler_kv_namespace_create"
+    }
+  ],
   "routes": [
     {
       "pattern": "party.nous.page",
