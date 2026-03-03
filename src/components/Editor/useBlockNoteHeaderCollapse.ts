@@ -125,14 +125,15 @@ export function useBlockNoteHeaderCollapse({
             `}`
         );
 
-        // Hide subsequent blocks until next heading of equal/higher level
+        // Hide subsequent blocks until next heading of equal/higher level.
+        // Target blockOuter (the outermost wrapper) to fully remove from layout.
         for (let i = blockIdx + 1; i < blocks.length; i++) {
           const siblingLevel = getHeaderLevel(blocks[i]);
           if (siblingLevel > 0 && siblingLevel <= headerLevel) break;
           const siblingId = getBlockId(blocks[i]);
           if (siblingId) {
             lines.push(
-              `${scopeSelector} [data-node-type="blockContainer"][data-id="${siblingId}"] { display: none; }`
+              `${scopeSelector} [data-node-type="blockOuter"][data-id="${siblingId}"] { display: none; }`
             );
           }
         }

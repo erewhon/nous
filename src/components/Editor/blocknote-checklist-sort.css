@@ -1,15 +1,18 @@
 /* Auto-sort: checked checklist items sink to bottom via CSS order.
  * Same approach as Editor.js ChecklistTool (editor-styles.css:315-322).
- * :has() is supported in WebKitGTK (Safari 15.4+ / WebKit 605+). */
+ * :has() is supported in WebKitGTK (Safari 15.4+ / WebKit 605+).
+ *
+ * BlockNote DOM: blockGroup → blockOuter → blockContainer → checkListItem
+ * The flex parent is blockGroup, flex children are blockOuter wrappers. */
 
 /* Parent flex column so order property works on checklist siblings */
-[data-node-type="blockGroup"]:has(> [data-node-type="blockContainer"] [data-content-type="checkListItem"]) {
+[data-node-type="blockGroup"]:has([data-content-type="checkListItem"]) {
   display: flex;
   flex-direction: column;
 }
 
-/* Checked items sink to bottom */
-[data-node-type="blockContainer"]:has(> [data-content-type="checkListItem"] input:checked) {
+/* Checked items sink to bottom — order on blockOuter (the flex child) */
+[data-node-type="blockOuter"]:has([data-content-type="checkListItem"] input:checked) {
   order: 1;
 }
 

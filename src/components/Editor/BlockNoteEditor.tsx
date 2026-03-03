@@ -15,6 +15,7 @@ import "@blocknote/mantine/style.css";
 import "./blocknote-checklist-sort.css";
 
 import { combineByGroup } from "@blocknote/core";
+import { en as defaultDictionary } from "@blocknote/core/locales";
 import type { CollaborationOptions } from "../../collab/CollabProvider";
 import { BlockNoteView } from "@blocknote/mantine";
 import {
@@ -25,6 +26,7 @@ import {
 } from "@blocknote/react";
 import {
   getMultiColumnSlashMenuItems,
+  locales as multiColumnLocales,
   multiColumnDropCursor,
 } from "@blocknote/xl-multi-column";
 import {
@@ -147,6 +149,12 @@ export const BlockNoteEditor = memo(
       // Theme
       const resolvedMode = useThemeStore((s) => s.resolvedMode);
 
+      // Merge default dictionary with multi-column translations
+      const dictionary = useMemo(
+        () => ({ ...defaultDictionary, multi_column: multiColumnLocales.en }),
+        [],
+      );
+
       // Create BlockNote editor
       // When collaboration is active, don't pass initialContent — Yjs doc is the source of truth
       const editor = useCreateBlockNote({
@@ -154,6 +162,7 @@ export const BlockNoteEditor = memo(
         initialContent: collaboration ? undefined : initialContent,
         collaboration,
         dropCursor: multiColumnDropCursor,
+        dictionary,
       });
 
       // ─── Seed Yjs fragment with page content after initial sync ─────
