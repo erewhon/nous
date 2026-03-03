@@ -19,7 +19,7 @@ interface PublishDialogProps {
 }
 
 type PublishMode = "notebook" | "selected";
-type ThemeName = "minimal" | "documentation" | "blog" | "academic";
+type ThemeName = "minimal" | "documentation" | "blog" | "academic" | "docs";
 type DialogState = "configure" | "publishing" | "success" | "preview";
 
 interface ProgressData {
@@ -29,15 +29,16 @@ interface ProgressData {
 }
 
 const THEMES: { name: ThemeName; label: string; colors: [string, string, string] }[] = [
+  { name: "docs", label: "Modern Docs", colors: ["#f8f9fb", "#ffffff", "#3b82f6"] },
   { name: "minimal", label: "Minimal", colors: ["#f8f8f8", "#ffffff", "#333333"] },
-  { name: "documentation", label: "Docs", colors: ["#f0f4f8", "#ffffff", "#1a1a2e"] },
+  { name: "documentation", label: "Docs Classic", colors: ["#f0f4f8", "#ffffff", "#1a1a2e"] },
   { name: "blog", label: "Blog", colors: ["#fafafa", "#ffffff", "#111111"] },
   { name: "academic", label: "Academic", colors: ["#fffff8", "#f5f5ef", "#1a1a1a"] },
 ];
 
 export function PublishDialog({ isOpen, onClose }: PublishDialogProps) {
   const [mode, setMode] = useState<PublishMode>("notebook");
-  const [theme, setTheme] = useState<ThemeName>("minimal");
+  const [theme, setTheme] = useState<ThemeName>("docs");
   const [selectedPageIds, setSelectedPageIds] = useState<Set<string>>(new Set());
   const [pageSearch, setPageSearch] = useState("");
   const [outputDir, setOutputDir] = useState<string | null>(null);

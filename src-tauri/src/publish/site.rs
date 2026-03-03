@@ -1,13 +1,21 @@
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use uuid::Uuid;
 
-use crate::storage::{FileStorage, Folder, Page};
+use crate::storage::{FileStorage, Folder, Page, Section};
 
 use super::html::{block_plain_text, render_page_html, rewrite_asset_url, slugify};
 use super::themes::get_theme;
+
+#[derive(Serialize)]
+struct SearchEntry {
+    t: String,
+    s: String,
+    b: String,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -63,6 +71,9 @@ pub fn publish_notebook(
     let folders = storage
         .list_folders(notebook_id)
         .map_err(|e| format!("Failed to list folders: {}", e))?;
+    let sections = storage
+        .list_sections(notebook_id)
+        .unwrap_or_default();
 
     // Filter out deleted pages and non-standard types
     let pages: Vec<Page> = pages
@@ -81,6 +92,8 @@ pub fn publish_notebook(
         notebook_id,
         &pages,
         &folders,
+        &sections,
+        notebook.sections_enabled,
         output_dir,
         theme_name,
         &site_title,
@@ -108,6 +121,9 @@ pub fn publish_selected_pages(
     let folders = storage
         .list_folders(notebook_id)
         .map_err(|e| format!("Failed to list folders: {}", e))?;
+    let sections = storage
+        .list_sections(notebook_id)
+        .unwrap_or_default();
 
     let id_set: std::collections::HashSet<Uuid> = page_ids.iter().copied().collect();
     let pages: Vec<Page> = all_pages
@@ -126,6 +142,8 @@ pub fn publish_selected_pages(
         notebook_id,
         &pages,
         &folders,
+        &sections,
+        notebook.sections_enabled,
         output_dir,
         theme_name,
         &site_title,
@@ -154,6 +172,13 @@ pub fn preview_page(
     let content_html = render_page_html(&page, &page_slugs, &block_texts);
     let date = page.updated_at.format("%B %d, %Y").to_string();
 
+    // Docs-specific placeholders for preview
+    let toc_html = if theme.name == "docs" {
+        extract_toc(&content_html)
+    } else {
+        String::new()
+    };
+
     let html = theme
         .page_template
         .replace("{{page_title}}", &page.title)
@@ -161,13 +186,25 @@ pub fn preview_page(
         .replace("{{content}}", &content_html)
         .replace("{{date}}", &date)
         .replace("{{backlinks}}", "")
-        .replace("{{nav}}", "");
+        .replace("{{nav}}", "")
+        .replace("{{toc}}", &toc_html)
+        .replace("{{prev_link}}", "")
+        .replace("{{next_link}}", "")
+        .replace("{{breadcrumbs}}", "");
 
     // Inline the CSS for preview
-    let full_html = html.replace(
+    let mut full_html = html.replace(
         "<link rel=\"stylesheet\" href=\"style.css\">",
         &format!("<style>{}</style>", theme.css),
     );
+
+    // Inline JS for preview
+    if let Some(js) = theme.js {
+        full_html = full_html.replace(
+            "<script src=\"docs.js\"></script>",
+            &format!("<script>{}</script>", js),
+        );
+    }
 
     Ok(full_html)
 }
@@ -181,6 +218,8 @@ pub fn generate_site(
     notebook_id: Uuid,
     pages: &[Page],
     folders: &[Folder],
+    sections: &[Section],
+    sections_enabled: bool,
     output_dir: &Path,
     theme_name: &str,
     site_title: &str,
@@ -188,6 +227,7 @@ pub fn generate_site(
     progress: Option<&ProgressFn>,
 ) -> Result<PublishResult, String> {
     let theme = get_theme(theme_name);
+    let is_docs = theme.name == "docs";
 
     // Create output directories
     fs::create_dir_all(output_dir).map_err(|e| format!("Failed to create output dir: {}", e))?;
@@ -214,10 +254,24 @@ pub fn generate_site(
         HashMap::new()
     };
 
-    // Build folder name map
+    // Build folder name map and parent map
     let folder_names: HashMap<Uuid, String> = folders
         .iter()
         .map(|f| (f.id, f.name.clone()))
+        .collect();
+    let folder_section_map: HashMap<Uuid, Option<Uuid>> = folders
+        .iter()
+        .map(|f| (f.id, f.section_id))
+        .collect();
+    let folder_parent_map: HashMap<Uuid, Option<Uuid>> = folders
+        .iter()
+        .map(|f| (f.id, f.parent_id))
+        .collect();
+
+    // Section name map
+    let section_names: HashMap<Uuid, String> = sections
+        .iter()
+        .map(|s| (s.id, s.name.clone()))
         .collect();
 
     let total = pages.len() + 2; // +2 for index.html + style.css
@@ -231,8 +285,22 @@ pub fn generate_site(
         .map_err(|e| format!("Failed to write style.css: {}", e))?;
     current += 1;
 
-    // Generate navigation items
-    let nav_html = build_nav_html(pages, folders, &folder_names, theme_name);
+    // Write JS file if theme has one
+    if let Some(js) = theme.js {
+        fs::write(output_dir.join("docs.js"), js)
+            .map_err(|e| format!("Failed to write docs.js: {}", e))?;
+    }
+
+    // Build navigation and page order
+    let (nav_html, page_order) = if is_docs {
+        let (nav, order) = build_docs_nav_html(pages, folders, sections, sections_enabled);
+        (nav, order)
+    } else {
+        let nav = build_nav_html(pages, folders, &folder_names, theme_name);
+        // Simple page order for non-docs themes (not used but keep consistent)
+        let order: Vec<Uuid> = pages.iter().map(|p| p.id).collect();
+        (nav, order)
+    };
 
     // Write index.html
     if let Some(ref cb) = progress {
@@ -248,6 +316,16 @@ pub fn generate_site(
 
     // Track copied assets
     let mut asset_count = 0;
+
+    // Build page_id -> index in page_order for prev/next
+    let page_order_index: HashMap<Uuid, usize> = page_order
+        .iter()
+        .enumerate()
+        .map(|(i, id)| (*id, i))
+        .collect();
+
+    // Collect search index entries for docs theme
+    let mut search_entries: Vec<SearchEntry> = Vec::new();
 
     // Generate individual page files
     for page in pages {
@@ -266,6 +344,32 @@ pub fn generate_site(
             String::new()
         };
 
+        // Docs-specific placeholders
+        let toc_html = if is_docs {
+            extract_toc(&content_html)
+        } else {
+            String::new()
+        };
+
+        let (prev_html, next_html) = if is_docs {
+            build_prev_next(page.id, &page_order, &page_order_index, pages)
+        } else {
+            (String::new(), String::new())
+        };
+
+        let breadcrumbs_html = if is_docs {
+            build_breadcrumbs(
+                page,
+                &folder_names,
+                &folder_parent_map,
+                &folder_section_map,
+                &section_names,
+                sections_enabled,
+            )
+        } else {
+            String::new()
+        };
+
         let page_html = theme
             .page_template
             .replace("{{page_title}}", &page.title)
@@ -273,11 +377,38 @@ pub fn generate_site(
             .replace("{{content}}", &content_html)
             .replace("{{date}}", &date)
             .replace("{{backlinks}}", &backlinks_html)
-            .replace("{{nav}}", &nav_html);
+            .replace("{{nav}}", &nav_html)
+            .replace("{{toc}}", &toc_html)
+            .replace("{{prev_link}}", &prev_html)
+            .replace("{{next_link}}", &next_html)
+            .replace("{{breadcrumbs}}", &breadcrumbs_html);
 
         let filename = format!("{}.html", slug);
         fs::write(output_dir.join(&filename), page_html)
             .map_err(|e| format!("Failed to write {}: {}", filename, e))?;
+
+        // Collect search index entry
+        if is_docs {
+            let mut body = String::new();
+            for block in &page.content.blocks {
+                let text = block_plain_text(block);
+                if !text.is_empty() {
+                    if !body.is_empty() {
+                        body.push(' ');
+                    }
+                    body.push_str(&text);
+                    if body.len() >= 200 {
+                        break;
+                    }
+                }
+            }
+            body.truncate(200);
+            search_entries.push(SearchEntry {
+                t: page.title.clone(),
+                s: slug.clone(),
+                b: body,
+            });
+        }
 
         // Copy assets referenced by this page
         if options.include_assets {
@@ -285,6 +416,14 @@ pub fn generate_site(
         }
 
         current += 1;
+    }
+
+    // Write search index for docs theme
+    if is_docs {
+        let json = serde_json::to_string(&search_entries)
+            .map_err(|e| format!("Failed to serialize search index: {}", e))?;
+        fs::write(output_dir.join("search-index.json"), json)
+            .map_err(|e| format!("Failed to write search-index.json: {}", e))?;
     }
 
     Ok(PublishResult {
@@ -513,4 +652,333 @@ fn copy_page_assets(
     }
 
     Ok(count)
+}
+
+// ---------------------------------------------------------------------------
+// Docs theme helpers
+// ---------------------------------------------------------------------------
+
+/// Build a docs-style collapsible sidebar nav using <details>/<summary>.
+/// Returns (nav_html, page_order) where page_order is the flat ordered list of page IDs
+/// matching sidebar display order (used for prev/next links).
+fn build_docs_nav_html(
+    pages: &[Page],
+    folders: &[Folder],
+    sections: &[Section],
+    sections_enabled: bool,
+) -> (String, Vec<Uuid>) {
+    let mut html = String::new();
+    let mut page_order: Vec<Uuid> = Vec::new();
+
+    // Build folder lookup
+    let folder_map: HashMap<Uuid, &Folder> = folders.iter().map(|f| (f.id, f)).collect();
+
+    // Group pages by folder_id (None = root)
+    let mut root_pages: Vec<&Page> = Vec::new();
+    let mut folder_pages: HashMap<Uuid, Vec<&Page>> = HashMap::new();
+    for page in pages {
+        if let Some(fid) = page.folder_id {
+            folder_pages.entry(fid).or_default().push(page);
+        } else {
+            root_pages.push(page);
+        }
+    }
+
+    // Sort pages within each group by position
+    root_pages.sort_by_key(|p| p.position);
+    for fps in folder_pages.values_mut() {
+        fps.sort_by_key(|p| p.position);
+    }
+
+    // Filter folders to only those that have pages (skip empty ones)
+    let page_folder_ids: std::collections::HashSet<Uuid> = folder_pages.keys().copied().collect();
+
+    // Build tree of folders (only top-level and children that have pages)
+    // Group folders by parent_id
+    let mut child_folders: HashMap<Option<Uuid>, Vec<&Folder>> = HashMap::new();
+    for folder in folders {
+        if page_folder_ids.contains(&folder.id) || has_descendant_pages(folder.id, folders, &page_folder_ids) {
+            child_folders
+                .entry(folder.parent_id)
+                .or_default()
+                .push(folder);
+        }
+    }
+    // Sort child folders by position
+    for children in child_folders.values_mut() {
+        children.sort_by_key(|f| f.position);
+    }
+
+    if sections_enabled && !sections.is_empty() {
+        // Group by section
+        let mut sorted_sections: Vec<&Section> = sections.iter().collect();
+        sorted_sections.sort_by_key(|s| s.position);
+
+        for section in sorted_sections {
+            html.push_str(&format!(
+                "      <div class=\"nav-section\">\n        <div class=\"nav-section-title\">{}</div>\n",
+                section.name
+            ));
+
+            // Root pages in this section
+            let section_root: Vec<&&Page> = root_pages
+                .iter()
+                .filter(|p| p.section_id == Some(section.id))
+                .collect();
+            for page in &section_root {
+                let slug = title_to_slug(&page.title);
+                html.push_str(&format!(
+                    "        <a href=\"{slug}.html\" class=\"nav-link\" data-slug=\"{slug}\">{title}</a>\n",
+                    slug = slug, title = page.title
+                ));
+                page_order.push(page.id);
+            }
+
+            // Folders in this section (top-level, i.e. parent_id is None)
+            if let Some(top_folders) = child_folders.get(&None) {
+                for folder in top_folders {
+                    if folder.section_id == Some(section.id) {
+                        render_docs_folder(
+                            folder, &folder_pages, &child_folders, &mut html, &mut page_order, 8,
+                        );
+                    }
+                }
+            }
+
+            html.push_str("      </div>\n");
+        }
+
+        // Pages/folders with no section
+        let orphan_root: Vec<&&Page> = root_pages
+            .iter()
+            .filter(|p| p.section_id.is_none())
+            .collect();
+        let has_orphan_folders = child_folders.get(&None).map_or(false, |fs| {
+            fs.iter().any(|f| f.section_id.is_none())
+        });
+        if !orphan_root.is_empty() || has_orphan_folders {
+            for page in &orphan_root {
+                let slug = title_to_slug(&page.title);
+                html.push_str(&format!(
+                    "      <a href=\"{slug}.html\" class=\"nav-link\" data-slug=\"{slug}\">{title}</a>\n",
+                    slug = slug, title = page.title
+                ));
+                page_order.push(page.id);
+            }
+            if let Some(top_folders) = child_folders.get(&None) {
+                for folder in top_folders {
+                    if folder.section_id.is_none() {
+                        render_docs_folder(
+                            folder, &folder_pages, &child_folders, &mut html, &mut page_order, 6,
+                        );
+                    }
+                }
+            }
+        }
+    } else {
+        // No sections — just root pages then folders
+        for page in &root_pages {
+            let slug = title_to_slug(&page.title);
+            html.push_str(&format!(
+                "      <a href=\"{slug}.html\" class=\"nav-link\" data-slug=\"{slug}\">{title}</a>\n",
+                slug = slug, title = page.title
+            ));
+            page_order.push(page.id);
+        }
+
+        if let Some(top_folders) = child_folders.get(&None) {
+            for folder in top_folders {
+                render_docs_folder(
+                    folder, &folder_pages, &child_folders, &mut html, &mut page_order, 6,
+                );
+            }
+        }
+    }
+
+    (html, page_order)
+}
+
+/// Check if a folder has any descendant folders that contain pages.
+fn has_descendant_pages(
+    folder_id: Uuid,
+    folders: &[Folder],
+    page_folder_ids: &std::collections::HashSet<Uuid>,
+) -> bool {
+    for folder in folders {
+        if folder.parent_id == Some(folder_id) {
+            if page_folder_ids.contains(&folder.id) {
+                return true;
+            }
+            if has_descendant_pages(folder.id, folders, page_folder_ids) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Recursively render a folder as a <details> element.
+fn render_docs_folder(
+    folder: &Folder,
+    folder_pages: &HashMap<Uuid, Vec<&Page>>,
+    child_folders: &HashMap<Option<Uuid>, Vec<&Folder>>,
+    html: &mut String,
+    page_order: &mut Vec<Uuid>,
+    indent: usize,
+) {
+    let pad = " ".repeat(indent);
+    html.push_str(&format!(
+        "{pad}<details class=\"nav-folder\" open>\n{pad}  <summary>{name}</summary>\n{pad}  <div class=\"nav-folder-items\">\n",
+        pad = pad, name = folder.name
+    ));
+
+    // Pages in this folder
+    if let Some(fps) = folder_pages.get(&folder.id) {
+        for page in fps {
+            let slug = title_to_slug(&page.title);
+            html.push_str(&format!(
+                "{pad}    <a href=\"{slug}.html\" class=\"nav-link\" data-slug=\"{slug}\">{title}</a>\n",
+                pad = pad, slug = slug, title = page.title
+            ));
+            page_order.push(page.id);
+        }
+    }
+
+    // Child folders
+    if let Some(children) = child_folders.get(&Some(folder.id)) {
+        for child in children {
+            render_docs_folder(child, folder_pages, child_folders, html, page_order, indent + 4);
+        }
+    }
+
+    html.push_str(&format!("{pad}  </div>\n{pad}</details>\n", pad = pad));
+}
+
+/// Extract h2/h3 headings from rendered HTML for Table of Contents.
+fn extract_toc(content_html: &str) -> String {
+    let heading_re = Regex::new(r#"<h([23])\s+id="([^"]*)"[^>]*>(.*?)</h\1>"#).unwrap();
+    let mut items: Vec<String> = Vec::new();
+
+    for cap in heading_re.captures_iter(content_html) {
+        let level = &cap[1];
+        let id = &cap[2];
+        // Strip HTML tags from heading text
+        let raw_text = &cap[3];
+        let text = Regex::new(r"<[^>]+>").unwrap().replace_all(raw_text, "");
+        let class = if level == "3" { " class=\"toc-h3\"" } else { "" };
+        items.push(format!(
+            "  <li{class}><a href=\"#{id}\">{text}</a></li>",
+            class = class, id = id, text = text
+        ));
+    }
+
+    if items.is_empty() {
+        return String::new();
+    }
+
+    format!("<ul class=\"toc-list\">\n{}\n</ul>", items.join("\n"))
+}
+
+/// Build prev/next navigation links.
+fn build_prev_next(
+    page_id: Uuid,
+    page_order: &[Uuid],
+    page_order_index: &HashMap<Uuid, usize>,
+    pages: &[Page],
+) -> (String, String) {
+    let page_map: HashMap<Uuid, &Page> = pages.iter().map(|p| (p.id, p)).collect();
+
+    let idx = match page_order_index.get(&page_id) {
+        Some(&i) => i,
+        None => return (String::new(), String::new()),
+    };
+
+    let prev = if idx > 0 {
+        if let Some(prev_page) = page_map.get(&page_order[idx - 1]) {
+            let slug = title_to_slug(&prev_page.title);
+            format!(
+                "<a class=\"prev-link\" href=\"{slug}.html\"><span class=\"page-nav-label\">Previous</span><span class=\"page-nav-title\">{title}</span></a>",
+                slug = slug, title = prev_page.title
+            )
+        } else {
+            String::new()
+        }
+    } else {
+        String::new()
+    };
+
+    let next = if idx + 1 < page_order.len() {
+        if let Some(next_page) = page_map.get(&page_order[idx + 1]) {
+            let slug = title_to_slug(&next_page.title);
+            format!(
+                "<a class=\"next-link\" href=\"{slug}.html\"><span class=\"page-nav-label\">Next</span><span class=\"page-nav-title\">{title}</span></a>",
+                slug = slug, title = next_page.title
+            )
+        } else {
+            String::new()
+        }
+    } else {
+        String::new()
+    };
+
+    (prev, next)
+}
+
+/// Build breadcrumb trail: Home > Section > Folder > ... > Page title
+fn build_breadcrumbs(
+    page: &Page,
+    folder_names: &HashMap<Uuid, String>,
+    folder_parent_map: &HashMap<Uuid, Option<Uuid>>,
+    folder_section_map: &HashMap<Uuid, Option<Uuid>>,
+    section_names: &HashMap<Uuid, String>,
+    sections_enabled: bool,
+) -> String {
+    let mut crumbs: Vec<(String, Option<String>)> = Vec::new(); // (label, optional href)
+
+    // Walk up folder hierarchy
+    let mut current_folder = page.folder_id;
+    while let Some(fid) = current_folder {
+        if let Some(name) = folder_names.get(&fid) {
+            crumbs.push((name.clone(), None));
+        }
+        current_folder = folder_parent_map
+            .get(&fid)
+            .copied()
+            .flatten();
+    }
+
+    // Add section if applicable
+    if sections_enabled {
+        let section_id = page.section_id.or_else(|| {
+            page.folder_id
+                .and_then(|fid| folder_section_map.get(&fid).copied().flatten())
+        });
+        if let Some(sid) = section_id {
+            if let Some(name) = section_names.get(&sid) {
+                crumbs.push((name.clone(), None));
+            }
+        }
+    }
+
+    // Add home link
+    crumbs.push(("Home".to_string(), Some("index.html".to_string())));
+    crumbs.reverse();
+
+    if crumbs.len() <= 1 {
+        // Only "Home" — don't show breadcrumbs
+        return String::new();
+    }
+
+    let parts: Vec<String> = crumbs
+        .iter()
+        .map(|(label, href)| {
+            if let Some(h) = href {
+                format!("<a href=\"{}\">{}</a>", h, label)
+            } else {
+                format!("<span>{}</span>", label)
+            }
+        })
+        .collect();
+
+    parts.join("<span class=\"sep\">/</span>")
 }
