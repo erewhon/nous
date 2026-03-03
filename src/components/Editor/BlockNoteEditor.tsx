@@ -48,6 +48,7 @@ import {
 } from "../../utils/blockFormatConverter";
 import { useThemeStore } from "../../stores/themeStore";
 import { useBlockNoteHeaderCollapse } from "./useBlockNoteHeaderCollapse";
+import { useChecklistSort } from "./useChecklistSort";
 import type { EditorData } from "../../types/page";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -297,6 +298,9 @@ export const BlockNoteEditor = memo(
         containerRef: wrapperRef,
         enabled: !readOnly,
       });
+
+      // ─── Checklist sort (checked items to bottom of run) ───────────
+      useChecklistSort(editor);
 
       // ─── Slash menu with multi-column items ─────────────────────────
       const getSlashMenuItems = useMemo(() => {
