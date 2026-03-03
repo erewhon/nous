@@ -13,6 +13,7 @@ export interface CollabSession {
   createdAt: string;
   expiresAt: string | null;
   shareUrl: string;
+  readOnlyShareUrl: string | null;
   isActive: boolean;
 }
 
@@ -30,10 +31,11 @@ export interface CollabConfig {
 export async function startCollabSession(
   notebookId: string,
   pageId: string,
-  expiry: string = "8h"
+  expiry: string = "8h",
+  permissions: string = "rw"
 ): Promise<StartCollabResponse> {
   return invoke<StartCollabResponse>("start_collab_session", {
-    request: { notebookId, pageId, expiry },
+    request: { notebookId, pageId, expiry, permissions },
   });
 }
 

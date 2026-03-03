@@ -37,12 +37,13 @@ import { calculatePageStats, type PageStats } from "../../utils/pageStats";
 import { useWritingGoalsStore } from "../../stores/writingGoalsStore";
 import { useKeybindingsStore } from "../../stores/keybindingsStore";
 import { useCollabSession } from "../../collab/useCollabSession";
+import { useCollabStore } from "../../collab/collabStore";
 import { CollabStatusBar } from "../Collab/CollabStatusBar";
 
-// Feature flag: set localStorage "use-blocknote" = "true" to switch editors
-const USE_BLOCKNOTE =
+// BlockNote is the default editor. Set localStorage "use-editorjs" = "true" to opt out.
+const USE_EDITORJS =
   typeof localStorage !== "undefined" &&
-  localStorage.getItem("use-blocknote") === "true";
+  localStorage.getItem("use-editorjs") === "true";
 
 interface EditorPaneContentProps {
   pane: EditorPane;
@@ -546,47 +547,26 @@ export function EditorPaneContent({
   );
 
   // Listen for collab session start/stop events from the CollabDialog
+  // Use store.getState() for stable references (no effect re-runs on state change)
   useEffect(() => {
     const handleStart = (e: Event) => {
       const detail = (e as CustomEvent<{
         pageId: string;
         notebookId: string;
-        roomId: string;
-        token: string;
-        partykitHost: string;
         sessionId: string;
       }>).detail;
 
       // Only handle events for our page
       if (detail.pageId !== pane.pageId) return;
 
-      if (editorData && editorRef.current) {
-        const collabInitData: EditorData = {
-          time: editorData.time,
-          version: editorData.version,
-          blocks: editorData.blocks.map((b) => ({
-            id: b.id ?? crypto.randomUUID(),
-            type: b.type,
-            data: b.data as Record<string, unknown>,
-          })),
-        };
-        collab.startSession(
-          detail.notebookId,
-          detail.pageId,
-          collabInitData,
-          (remoteData) => {
-            // Remote change arrived — re-render editor
-            editorRef.current?.render(remoteData);
-          },
-          "8h"
-        );
-      }
+      // Start the collab session — CollabProvider + BlockNote native collaboration
+      useCollabStore.getState().startSession(detail.notebookId, detail.pageId, "8h");
     };
 
     const handleStop = (e: Event) => {
       const detail = (e as CustomEvent<{ pageId: string }>).detail;
       if (detail.pageId !== pane.pageId) return;
-      collab.stopSession();
+      useCollabStore.getState().stopSession();
     };
 
     window.addEventListener("collab-session-started", handleStart);
@@ -595,38 +575,20 @@ export function EditorPaneContent({
       window.removeEventListener("collab-session-started", handleStart);
       window.removeEventListener("collab-session-stopped", handleStop);
     };
-  }, [pane.pageId, editorData, collab]);
-
-  // Clean up collab session when page changes
-  useEffect(() => {
-    return () => {
-      if (collab.isActive) {
-        collab.stopSession();
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pane.pageId]);
 
-  // After auto-save, forward changes to collab bridge
-  const handleSaveWithCollab = useCallback(
-    async (data: OutputData) => {
-      await handleSave(data);
-      // Forward to collab bridge if active
-      if (collab.bridge) {
-        const editorDataForCollab: EditorData = {
-          time: data.time,
-          version: data.version,
-          blocks: data.blocks.map((block) => ({
-            id: block.id ?? crypto.randomUUID(),
-            type: block.type,
-            data: block.data as Record<string, unknown>,
-          })),
-        };
-        collab.bridge.applyLocalChange(editorDataForCollab);
-      }
-    },
-    [handleSave, collab.bridge]
-  );
+  // Stop collab session when navigating to a different page.
+  // Does NOT stop on component remount (sidebar toggle) — the Zustand store
+  // and CollabProvider survive remounts by design.
+  useEffect(() => {
+    const { isActive, pageId: collabPageId, stopSession } = useCollabStore.getState();
+    if (isActive && collabPageId && collabPageId !== pane.pageId) {
+      stopSession();
+    }
+  }, [pane.pageId]);
+
+  // During collab, auto-save still works normally — editor.document reads from
+  // the Yjs-backed state. No manual bridging needed; y-prosemirror handles sync.
 
   // Handle block reference clicks — navigate to the target page and scroll to block
   const handleBlockRefClick = useCallback(
@@ -958,6 +920,8 @@ export function EditorPaneContent({
                           <CollabStatusBar
                             status={collab.status}
                             participants={collab.participants}
+                            shareUrl={collab.shareUrl}
+                            connectionState={collab.connectionState}
                             onStop={() => {
                               collab.stopSession();
                               window.dispatchEvent(
@@ -966,15 +930,16 @@ export function EditorPaneContent({
                                 })
                               );
                             }}
+                            onReconnect={collab.reconnect}
                           />
                         )}
-                        {USE_BLOCKNOTE ? (
+                        {!USE_EDITORJS || collab.isActive ? (
                           <BlockNoteEditor
                             ref={editorRef as Ref<BlockNoteEditorRef>}
-                            key={selectedPage.id}
+                            key={collab.isActive ? `${selectedPage.id}-collab` : selectedPage.id}
                             initialData={editorData as EditorData}
                             onChange={handleChange as (data?: EditorData) => void}
-                            onSave={(collab.isActive ? handleSaveWithCollab : handleSave) as (data: EditorData) => void}
+                            onSave={handleSave as (data: EditorData) => void}
                             onExplicitSave={handleExplicitSave as (data: EditorData) => void}
                             onLinkClick={handleLinkClick}
                             onBlockRefClick={handleBlockRefClick}
@@ -983,6 +948,8 @@ export function EditorPaneContent({
                             paneId={pane.id}
                             pages={blockEditorPages}
                             className="min-h-[calc(100vh-300px)]"
+                            collaboration={collab.collabOptions ?? undefined}
+                            collabSynced={collab.isSynced}
                           />
                         ) : (
                           <BlockEditor
@@ -990,7 +957,7 @@ export function EditorPaneContent({
                             key={selectedPage.id}
                             initialData={editorData}
                             onChange={handleChange}
-                            onSave={collab.isActive ? handleSaveWithCollab : handleSave}
+                            onSave={handleSave}
                             onExplicitSave={handleExplicitSave}
                             onLinkClick={handleLinkClick}
                             onBlockRefClick={handleBlockRefClick}

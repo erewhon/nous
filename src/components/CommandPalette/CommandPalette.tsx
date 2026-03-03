@@ -279,6 +279,27 @@ export function CommandPalette({
     });
 
     cmds.push({
+      id: "action-live-sessions",
+      title: "View Live Sessions",
+      subtitle: "See all active collaboration sessions",
+      icon: (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="2" />
+          <path d="M16.24 7.76a6 6 0 0 1 0 8.49" />
+          <path d="M7.76 16.24a6 6 0 0 1 0-8.49" />
+          <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+          <path d="M4.93 19.07a10 10 0 0 1 0-14.14" />
+        </svg>
+      ),
+      category: "action",
+      action: () => {
+        window.dispatchEvent(new CustomEvent("open-live-sessions"));
+        onClose();
+      },
+      keywords: ["live", "sessions", "active", "collab", "collaboration"],
+    });
+
+    cmds.push({
       id: "action-share-notebook",
       title: "Share Notebook as Website",
       subtitle: "Share all pages in this notebook as a navigable website",

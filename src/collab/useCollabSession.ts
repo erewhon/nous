@@ -1,121 +1,73 @@
 /**
  * React hook wrapping the collab session lifecycle.
  *
- * - startSession() → creates session via Tauri, instantiates CollabBridge
- * - stopSession() → destroys bridge, stops session via Tauri
- * - Exposes: isActive, status, shareUrl, participants, bridge
+ * Thin wrapper over collabStore (Zustand) so the CollabProvider and session
+ * state survive component remounts (e.g., sidebar toggle causing Layout
+ * to switch render paths).
+ *
+ * Returns the same CollabSessionState interface for backwards compatibility.
  */
 
-import { useState, useRef, useCallback } from "react";
-import { CollabBridge } from "./CollabBridge";
-import * as api from "./api";
+import { useCollabStore, type CollabStatus } from "./collabStore";
+import type { CollaborationOptions, ConnectionState } from "./CollabProvider";
+import type { BlockNoteEditor } from "@blocknote/core";
 import type { EditorData } from "../types/page";
 
-export type CollabStatus = "idle" | "starting" | "connected" | "connecting" | "disconnected" | "error";
+export type { CollabStatus };
 
 export interface CollabSessionState {
   isActive: boolean;
   status: CollabStatus;
+  /** True after initial Yjs sync with server completes */
+  isSynced: boolean;
   shareUrl: string | null;
   sessionId: string | null;
   participants: number;
   error: string | null;
-  bridge: CollabBridge | null;
+  collabOptions: CollaborationOptions | null;
+  connectionState: ConnectionState | null;
+  /** Page ID the active session belongs to */
+  pageId: string | null;
   startSession: (
     notebookId: string,
     pageId: string,
-    initialData: EditorData,
-    onRemoteChange: (data: EditorData) => void,
-    expiry?: string
+    expiry?: string,
   ) => Promise<void>;
   stopSession: () => Promise<void>;
+  reconnect: () => void;
+  seedContent: (editor: BlockNoteEditor<any, any, any>, initialData: EditorData) => void;
 }
 
 export function useCollabSession(): CollabSessionState {
-  const [isActive, setIsActive] = useState(false);
-  const [status, setStatus] = useState<CollabStatus>("idle");
-  const [shareUrl, setShareUrl] = useState<string | null>(null);
-  const [sessionId, setSessionId] = useState<string | null>(null);
-  const [participants, setParticipants] = useState(0);
-  const [error, setError] = useState<string | null>(null);
-  const bridgeRef = useRef<CollabBridge | null>(null);
-
-  const startSession = useCallback(
-    async (
-      notebookId: string,
-      pageId: string,
-      initialData: EditorData,
-      onRemoteChange: (data: EditorData) => void,
-      expiry: string = "8h"
-    ) => {
-      try {
-        setStatus("starting");
-        setError(null);
-
-        // Create session via Tauri backend
-        const response = await api.startCollabSession(notebookId, pageId, expiry);
-
-        // Create the CollabBridge
-        const bridge = new CollabBridge({
-          host: response.partykitHost,
-          roomId: response.roomId,
-          token: response.token,
-          initialData,
-          onRemoteChange,
-          onStatusChange: (s) => {
-            setStatus(s);
-          },
-          onParticipantsChange: (count) => {
-            setParticipants(count);
-          },
-        });
-
-        bridgeRef.current = bridge;
-        setSessionId(response.session.id);
-        setShareUrl(response.session.shareUrl);
-        setIsActive(true);
-        setStatus("connecting");
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
-        setStatus("error");
-      }
-    },
-    []
-  );
-
-  const stopSession = useCallback(async () => {
-    // Destroy bridge
-    if (bridgeRef.current) {
-      bridgeRef.current.destroy();
-      bridgeRef.current = null;
-    }
-
-    // Stop session on backend
-    if (sessionId) {
-      try {
-        await api.stopCollabSession(sessionId);
-      } catch (err) {
-        console.warn("Failed to stop collab session:", err);
-      }
-    }
-
-    setIsActive(false);
-    setStatus("idle");
-    setShareUrl(null);
-    setSessionId(null);
-    setParticipants(0);
-    setError(null);
-  }, [sessionId]);
+  const isActive = useCollabStore((s) => s.isActive);
+  const isSynced = useCollabStore((s) => s.isSynced);
+  const status = useCollabStore((s) => s.status);
+  const shareUrl = useCollabStore((s) => s.shareUrl);
+  const sessionId = useCollabStore((s) => s.sessionId);
+  const participants = useCollabStore((s) => s.participants);
+  const error = useCollabStore((s) => s.error);
+  const collabOptions = useCollabStore((s) => s.collabOptions);
+  const connectionState = useCollabStore((s) => s.connectionState);
+  const pageId = useCollabStore((s) => s.pageId);
+  const startSession = useCollabStore((s) => s.startSession);
+  const stopSession = useCollabStore((s) => s.stopSession);
+  const reconnect = useCollabStore((s) => s.reconnect);
+  const seedContent = useCollabStore((s) => s.seedContent);
 
   return {
     isActive,
+    isSynced,
     status,
     shareUrl,
     sessionId,
     participants,
     error,
-    bridge: bridgeRef.current,
+    collabOptions,
+    connectionState,
+    pageId,
     startSession,
     stopSession,
+    reconnect,
+    seedContent,
   };
 }

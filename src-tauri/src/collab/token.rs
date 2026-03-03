@@ -21,17 +21,19 @@ pub struct TokenPayload {
 }
 
 /// Generate an HMAC-SHA256 signed token for a collab session.
+/// `permissions` should be "rw" for read-write or "r" for read-only.
 pub fn generate_token(
     room_id: &str,
     page_id: &str,
     secret: &[u8],
     expires_in: Duration,
+    permissions: &str,
 ) -> String {
     let exp = (Utc::now() + expires_in).timestamp();
     let payload = TokenPayload {
         room_id: room_id.to_string(),
         page_id: page_id.to_string(),
-        permissions: "rw".to_string(),
+        permissions: permissions.to_string(),
         exp,
     };
 

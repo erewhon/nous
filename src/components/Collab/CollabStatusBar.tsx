@@ -1,14 +1,19 @@
 /**
  * Status bar shown above the editor when a collaboration session is active.
- * Shows connection status, participant count, and a stop button.
+ * Shows connection status, participant count, copy link, reconnection UI, and stop button.
  */
 
+import { useState, useCallback } from "react";
 import type { CollabStatus } from "../../collab/useCollabSession";
+import type { ConnectionState } from "../../collab/CollabProvider";
 
 interface CollabStatusBarProps {
   status: CollabStatus;
   participants: number;
+  shareUrl: string | null;
+  connectionState: ConnectionState | null;
   onStop: () => void;
+  onReconnect: () => void;
 }
 
 const STATUS_COLORS: Record<CollabStatus, string> = {
@@ -17,6 +22,7 @@ const STATUS_COLORS: Record<CollabStatus, string> = {
   connecting: "#f59e0b",
   connected: "#22c55e",
   disconnected: "#ef4444",
+  expired: "#ef4444",
   error: "#ef4444",
 };
 
@@ -26,14 +32,31 @@ const STATUS_LABELS: Record<CollabStatus, string> = {
   connecting: "Connecting...",
   connected: "Connected",
   disconnected: "Disconnected",
+  expired: "Session Expired",
   error: "Error",
 };
 
 export function CollabStatusBar({
   status,
   participants,
+  shareUrl,
+  connectionState,
   onStop,
+  onReconnect,
 }: CollabStatusBarProps) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = useCallback(async () => {
+    if (!shareUrl) return;
+    await navigator.clipboard.writeText(shareUrl);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }, [shareUrl]);
+
+  const isReconnecting = connectionState?.isReconnecting && status === "disconnected";
+  const reconnectAttempts = connectionState?.reconnectAttempts ?? 0;
+  const showReconnectButton = isReconnecting && reconnectAttempts >= 5;
+
   return (
     <div
       className="flex items-center justify-between px-4 py-1.5 text-xs border-b"
@@ -47,14 +70,32 @@ export function CollabStatusBar({
         {/* Connection indicator */}
         <div className="flex items-center gap-1.5">
           <div
-            className="w-2 h-2 rounded-full"
+            className={`w-2 h-2 rounded-full ${isReconnecting ? "animate-pulse" : ""}`}
             style={{ backgroundColor: STATUS_COLORS[status] }}
           />
-          <span>{STATUS_LABELS[status]}</span>
+          <span>
+            {isReconnecting
+              ? `Reconnecting (attempt ${reconnectAttempts})...`
+              : STATUS_LABELS[status]}
+          </span>
         </div>
 
+        {/* Reconnect button after many attempts */}
+        {showReconnectButton && (
+          <button
+            onClick={onReconnect}
+            className="px-2 py-0.5 rounded text-xs transition-colors"
+            style={{
+              backgroundColor: "var(--color-bg-tertiary)",
+              color: "var(--color-text-primary)",
+            }}
+          >
+            Reconnect
+          </button>
+        )}
+
         {/* Participant count */}
-        {participants > 0 && (
+        {participants > 0 && status === "connected" && (
           <div className="flex items-center gap-1">
             <svg
               width="12"
@@ -76,15 +117,51 @@ export function CollabStatusBar({
             </span>
           </div>
         )}
+
+        {/* Disconnected reassurance */}
+        {isReconnecting && reconnectAttempts >= 3 && (
+          <span style={{ color: "var(--color-text-muted)" }}>
+            Changes saved locally
+          </span>
+        )}
       </div>
 
-      <button
-        onClick={onStop}
-        className="px-2 py-0.5 rounded text-xs hover:bg-[--color-bg-elevated] transition-colors"
-        style={{ color: "var(--color-text-muted)" }}
-      >
-        Stop
-      </button>
+      <div className="flex items-center gap-2">
+        {/* Copy link button */}
+        {shareUrl && status === "connected" && (
+          <button
+            onClick={handleCopy}
+            className="flex items-center gap-1 px-2 py-0.5 rounded text-xs hover:bg-[--color-bg-elevated] transition-colors"
+            style={{ color: copied ? "#22c55e" : "var(--color-text-muted)" }}
+            title="Copy share link"
+          >
+            {copied ? (
+              <>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+                Copied
+              </>
+            ) : (
+              <>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                </svg>
+                Copy Link
+              </>
+            )}
+          </button>
+        )}
+
+        <button
+          onClick={onStop}
+          className="px-2 py-0.5 rounded text-xs hover:bg-[--color-bg-elevated] transition-colors"
+          style={{ color: "var(--color-text-muted)" }}
+        >
+          Stop
+        </button>
+      </div>
     </div>
   );
 }

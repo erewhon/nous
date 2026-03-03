@@ -82,6 +82,9 @@ interface Env {
 
 const STORAGE_KEY = "yjs-state";
 
+/** Map of connection ID → permissions for enforcing read-only */
+const connectionPermissions = new Map<string, string>();
+
 export class CollabServer extends YServer {
   static options = {
     hibernate: true,
@@ -113,7 +116,7 @@ export class CollabServer extends YServer {
   }
 
   /**
-   * Validate HMAC token on connect.
+   * Validate HMAC token on connect and store permissions.
    * If invalid, close the connection immediately.
    */
   async onConnect(connection: Connection, ctx: ConnectionContext) {
@@ -134,16 +137,57 @@ export class CollabServer extends YServer {
       return;
     }
 
+    let payload: TokenPayload;
     try {
-      await verifyToken(token, secret);
+      payload = await verifyToken(token, secret);
     } catch (err) {
       console.warn("Token verification failed:", (err as Error).message);
       connection.close(4003, "Invalid token");
       return;
     }
 
+    // Store permissions for this connection
+    connectionPermissions.set(connection.id, payload.permissions);
+
     // Token valid — proceed with Yjs sync
     await super.onConnect(connection, ctx);
+  }
+
+  /**
+   * Intercept messages to enforce read-only permissions.
+   * Read-only connections can receive sync/awareness but cannot send document updates.
+   */
+  async onMessage(connection: Connection, message: string | ArrayBuffer | ArrayBufferView) {
+    const permissions = connectionPermissions.get(connection.id);
+
+    // For read-only connections, filter out document update messages
+    // Yjs protocol: message type 0 = sync, 1 = awareness
+    // Sync sub-messages: 0 = step1 (request), 1 = step2 (response), 2 = update
+    // Read-only should be allowed to receive sync responses and awareness,
+    // but NOT allowed to send document updates (sync type 2)
+    if (permissions === "r" && message instanceof ArrayBuffer) {
+      const data = new Uint8Array(message);
+      // Check if this is a sync message (type 0) with an update sub-type (2)
+      if (data.length >= 2 && data[0] === 0 && data[1] === 2) {
+        // Drop document update messages from read-only connections
+        return;
+      }
+    } else if (permissions === "r" && ArrayBuffer.isView(message)) {
+      const data = new Uint8Array(message.buffer, message.byteOffset, message.byteLength);
+      if (data.length >= 2 && data[0] === 0 && data[1] === 2) {
+        return;
+      }
+    }
+
+    await super.onMessage(connection, message);
+  }
+
+  /**
+   * Clean up permissions on disconnect.
+   */
+  async onClose(connection: Connection, code: number, reason: string) {
+    connectionPermissions.delete(connection.id);
+    await super.onClose(connection, code, reason);
   }
 }
 

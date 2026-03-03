@@ -1,6 +1,6 @@
 {
   "name": "@nous/guest-editor",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,17 +9,13 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@editorjs/editorjs": "^2.31.1",
-    "@editorjs/header": "^2.8.8",
-    "@editorjs/list": "^2.0.2",
-    "@editorjs/code": "^2.9.3",
-    "@editorjs/quote": "^2.7.4",
-    "@editorjs/delimiter": "^1.4.2",
-    "@editorjs/table": "^2.4.2",
+    "@blocknote/core": "^0.47.0",
+    "@blocknote/mantine": "^0.47.0",
+    "@blocknote/react": "^0.47.0",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
-    "yjs": "^13.6.20",
-    "y-partykit": "^0.0.9"
+    "yjs": "^13.6.29",
+    "y-partykit": "^0.0.33"
   },
   "devDependencies": {
     "@types/react": "^19.2.3",

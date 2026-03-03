@@ -52,6 +52,9 @@ pub struct CollabSession {
     pub created_at: DateTime<Utc>,
     pub expires_at: Option<DateTime<Utc>>,
     pub share_url: String,
+    /// Read-only share URL (view-only permission token).
+    #[serde(default)]
+    pub read_only_share_url: Option<String>,
     pub is_active: bool,
 }
 

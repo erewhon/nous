@@ -12,8 +12,10 @@
  */
 import "@blocknote/core/fonts/inter.css";
 import "@blocknote/mantine/style.css";
+import "./blocknote-checklist-sort.css";
 
 import { combineByGroup } from "@blocknote/core";
+import type { CollaborationOptions } from "../../collab/CollabProvider";
 import { BlockNoteView } from "@blocknote/mantine";
 import {
   SuggestionMenuController,
@@ -35,6 +37,7 @@ import {
   useRef,
 } from "react";
 
+import { blocksToYXmlFragment } from "@blocknote/core/yjs";
 import { schema } from "./schema";
 import {
   editorJsToBlockNote,
@@ -42,6 +45,7 @@ import {
   type BNDocument,
 } from "../../utils/blockFormatConverter";
 import { useThemeStore } from "../../stores/themeStore";
+import { useBlockNoteHeaderCollapse } from "./useBlockNoteHeaderCollapse";
 import type { EditorData } from "../../types/page";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -59,6 +63,10 @@ interface BlockNoteEditorProps {
   pageId?: string;
   paneId?: string;
   pages?: Array<{ id: string; title: string }>;
+  /** BlockNote native collaboration options. When set, initialContent is ignored. */
+  collaboration?: CollaborationOptions;
+  /** True after initial Yjs sync with server completes. Used to trigger content seeding. */
+  collabSynced?: boolean;
 }
 
 export interface BlockNoteEditorRef {
@@ -97,6 +105,8 @@ export const BlockNoteEditor = memo(
         readOnly = false,
         className = "",
         pageId,
+        collaboration,
+        collabSynced,
       },
       ref,
     ) {
@@ -138,11 +148,33 @@ export const BlockNoteEditor = memo(
       const resolvedMode = useThemeStore((s) => s.resolvedMode);
 
       // Create BlockNote editor
+      // When collaboration is active, don't pass initialContent — Yjs doc is the source of truth
       const editor = useCreateBlockNote({
         schema,
-        initialContent,
+        initialContent: collaboration ? undefined : initialContent,
+        collaboration,
         dropCursor: multiColumnDropCursor,
       });
+
+      // ─── Seed Yjs fragment with page content after initial sync ─────
+      // When starting a new collab session, the Y.XmlFragment is empty.
+      // After the provider syncs with the server (which also has an empty doc
+      // for new sessions), we populate the fragment with the page's content.
+      // This goes through y-prosemirror and syncs to all connected clients.
+      const initialDataRef = useRef(initialData);
+      useEffect(() => {
+        if (!collaboration || !collabSynced) return;
+        // Only seed if the fragment is empty (new session, no prior server state)
+        if (collaboration.fragment.length > 0) return;
+        if (!initialDataRef.current?.blocks?.length) return;
+
+        try {
+          const bnBlocks = editorJsToBlockNote(initialDataRef.current);
+          blocksToYXmlFragment(editor, bnBlocks as any, collaboration.fragment);
+        } catch (e) {
+          console.error("Failed to seed collab content:", e);
+        }
+      }, [collaboration, collabSynced, editor]);
 
       // ─── Auto-save timer ────────────────────────────────────────────
       const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -250,6 +282,13 @@ export const BlockNoteEditor = memo(
         [editor],
       );
 
+      // ─── Header collapse ────────────────────────────────────────────
+      const wrapperRef = useRef<HTMLDivElement>(null);
+      useBlockNoteHeaderCollapse({
+        containerRef: wrapperRef,
+        enabled: !readOnly,
+      });
+
       // ─── Slash menu with multi-column items ─────────────────────────
       const getSlashMenuItems = useMemo(() => {
         return async (query: string) =>
@@ -264,6 +303,7 @@ export const BlockNoteEditor = memo(
 
       return (
         <div
+          ref={wrapperRef}
           className={`bn-editor-wrapper ${className}`}
           data-page-id={pageId}
         >

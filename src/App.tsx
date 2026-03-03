@@ -12,7 +12,7 @@ import { TagManager } from "./components/Tags";
 import { BackupDialog } from "./components/Backup";
 import { PublishDialog } from "./components/Publish";
 import { ShareDialog } from "./components/Share";
-import { CollabDialog } from "./components/Collab";
+import { CollabDialog, LiveSessionsDialog } from "./components/Collab";
 import { ActionLibrary, ActionEditor } from "./components/Actions";
 import { QuickCapture, InboxPanel } from "./components/Inbox";
 import { FlashcardPanel } from "./components/Flashcards";
@@ -112,6 +112,9 @@ function App() {
   const [collabPageId, setCollabPageId] = useState<string | undefined>(undefined);
   const [collabNotebookId, setCollabNotebookId] = useState<string | undefined>(undefined);
 
+  // Live sessions dialog
+  const [showLiveSessions, setShowLiveSessions] = useState(false);
+
   // Listen for custom event to open backup dialog
   useEffect(() => {
     const handleOpenBackup = () => setShowBackup(true);
@@ -165,6 +168,13 @@ function App() {
     };
     window.addEventListener("open-collab-dialog", handleOpenCollab);
     return () => window.removeEventListener("open-collab-dialog", handleOpenCollab);
+  }, []);
+
+  // Listen for custom event to open live sessions dialog
+  useEffect(() => {
+    const handleOpenLiveSessions = () => setShowLiveSessions(true);
+    window.addEventListener("open-live-sessions", handleOpenLiveSessions);
+    return () => window.removeEventListener("open-live-sessions", handleOpenLiveSessions);
   }, []);
 
   // Listen for custom event to open web clipper (optionally with a URL)
@@ -553,6 +563,12 @@ function App() {
         }}
         pageId={collabPageId}
         notebookId={collabNotebookId}
+      />
+
+      {/* Live Sessions Dialog */}
+      <LiveSessionsDialog
+        isOpen={showLiveSessions}
+        onClose={() => setShowLiveSessions(false)}
       />
 
       {/* Action Library */}

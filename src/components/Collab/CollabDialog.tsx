@@ -3,7 +3,7 @@
  * Follows the ShareDialog pattern with three states:
  * - configure: select expiry, start session
  * - starting: spinner
- * - active: share URL with copy button, participant list, stop button
+ * - active: share URLs (edit + view-only) with copy buttons, stop button
  */
 
 import { useState, useEffect, useCallback } from "react";
@@ -19,6 +19,7 @@ interface CollabDialogProps {
 
 type ExpiryOption = "1h" | "8h" | "1d" | "never";
 type DialogState = "configure" | "starting" | "active";
+type ShareMode = "edit" | "view";
 
 const EXPIRY_OPTIONS: { value: ExpiryOption; label: string }[] = [
   { value: "1h", label: "1 hour" },
@@ -36,12 +37,16 @@ export function CollabDialog({
   const [expiry, setExpiry] = useState<ExpiryOption>("8h");
   const [dialogState, setDialogState] = useState<DialogState>("configure");
   const [shareUrl, setShareUrl] = useState<string | null>(null);
+  const [readOnlyShareUrl, setReadOnlyShareUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [shareMode, setShareMode] = useState<ShareMode>("edit");
 
   const pages = usePageStore((s) => s.pages);
   const selectedPage = pageId ? pages.find((p) => p.id === pageId) : null;
+
+  const activeUrl = shareMode === "edit" ? shareUrl : readOnlyShareUrl;
 
   // Reset state when dialog opens
   useEffect(() => {
@@ -54,15 +59,18 @@ export function CollabDialog({
         if (existing) {
           setDialogState("active");
           setShareUrl(existing.shareUrl);
+          setReadOnlyShareUrl(existing.readOnlyShareUrl ?? null);
           setSessionId(existing.id);
         } else {
           setDialogState("configure");
           setShareUrl(null);
+          setReadOnlyShareUrl(null);
           setSessionId(null);
         }
       });
       setError(null);
       setCopied(false);
+      setShareMode("edit");
     }
   }, [isOpen, pageId]);
 
@@ -75,6 +83,7 @@ export function CollabDialog({
     try {
       const response = await api.startCollabSession(notebookId, pageId, expiry);
       setShareUrl(response.session.shareUrl);
+      setReadOnlyShareUrl(response.session.readOnlyShareUrl ?? null);
       setSessionId(response.session.id);
       setDialogState("active");
 
@@ -106,7 +115,7 @@ export function CollabDialog({
       }
     }
 
-    // Dispatch event to clean up the bridge
+    // Dispatch event to clean up the provider
     window.dispatchEvent(
       new CustomEvent("collab-session-stopped", {
         detail: { pageId },
@@ -115,16 +124,17 @@ export function CollabDialog({
 
     setDialogState("configure");
     setShareUrl(null);
+    setReadOnlyShareUrl(null);
     setSessionId(null);
   }, [sessionId, pageId]);
 
   const handleCopy = useCallback(async () => {
-    if (shareUrl) {
-      await navigator.clipboard.writeText(shareUrl);
+    if (activeUrl) {
+      await navigator.clipboard.writeText(activeUrl);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     }
-  }, [shareUrl]);
+  }, [activeUrl]);
 
   if (!isOpen) return null;
 
@@ -256,8 +266,9 @@ export function CollabDialog({
           )}
 
           {/* Active state */}
-          {dialogState === "active" && shareUrl && (
+          {dialogState === "active" && activeUrl && (
             <>
+              {/* Permission toggle */}
               <div>
                 <label
                   className="block text-xs font-medium mb-2"
@@ -265,10 +276,42 @@ export function CollabDialog({
                 >
                   Share Link
                 </label>
+                {readOnlyShareUrl && (
+                  <div className="flex gap-1 mb-2">
+                    <button
+                      onClick={() => { setShareMode("edit"); setCopied(false); }}
+                      className="px-3 py-1 rounded text-xs transition-colors"
+                      style={{
+                        backgroundColor: shareMode === "edit"
+                          ? "var(--color-accent)"
+                          : "var(--color-bg-tertiary)",
+                        color: shareMode === "edit"
+                          ? "white"
+                          : "var(--color-text-secondary)",
+                      }}
+                    >
+                      Can Edit
+                    </button>
+                    <button
+                      onClick={() => { setShareMode("view"); setCopied(false); }}
+                      className="px-3 py-1 rounded text-xs transition-colors"
+                      style={{
+                        backgroundColor: shareMode === "view"
+                          ? "var(--color-accent)"
+                          : "var(--color-bg-tertiary)",
+                        color: shareMode === "view"
+                          ? "white"
+                          : "var(--color-text-secondary)",
+                      }}
+                    >
+                      View Only
+                    </button>
+                  </div>
+                )}
                 <div className="flex gap-2">
                   <input
                     type="text"
-                    value={shareUrl}
+                    value={activeUrl}
                     readOnly
                     className="flex-1 px-3 py-2 rounded text-sm"
                     style={{
@@ -297,8 +340,9 @@ export function CollabDialog({
                 className="text-xs"
                 style={{ color: "var(--color-text-muted)" }}
               >
-                Session is active. Share this link with collaborators. WebDAV
-                sync is paused for this page during the session.
+                {shareMode === "edit"
+                  ? "Anyone with this link can view and edit in real-time."
+                  : "Anyone with this link can view but not edit."}
               </p>
             </>
           )}

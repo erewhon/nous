@@ -65,6 +65,8 @@ pub async fn start_collab_session(
     // Get or create global HMAC secret
     let secret = credentials::get_or_create_collab_secret(&data_dir)?;
 
+    let token_duration = expiry.to_duration().unwrap_or(chrono::Duration::hours(24));
+
     // Check for existing active session on this page
     {
         let store = collab_storage.lock().map_err(|e| e.to_string())?;
@@ -74,7 +76,8 @@ pub async fn start_collab_session(
                 &existing.id,
                 &request.page_id,
                 &secret,
-                expiry.to_duration().unwrap_or(chrono::Duration::hours(24)),
+                token_duration,
+                "rw",
             );
             return Ok(StartCollabResponse {
                 room_id: existing.id.clone(),
@@ -90,9 +93,29 @@ pub async fn start_collab_session(
     let now = chrono::Utc::now();
     let expires_at = expiry.to_duration().map(|d| now + d);
 
+    // Generate RW and RO tokens
+    let rw_token = token::generate_token(
+        &room_id,
+        &request.page_id,
+        &secret,
+        token_duration,
+        "rw",
+    );
+    let ro_token = token::generate_token(
+        &room_id,
+        &request.page_id,
+        &secret,
+        token_duration,
+        "r",
+    );
+
     let share_url = format!(
-        "https://collab.nous.page/{}?token=placeholder",
-        room_id
+        "https://collab.nous.page/{}?token={}",
+        room_id, rw_token
+    );
+    let read_only_share_url = format!(
+        "https://collab.nous.page/{}?token={}",
+        room_id, ro_token
     );
 
     let session = CollabSession {
@@ -103,26 +126,10 @@ pub async fn start_collab_session(
         expiry: expiry.clone(),
         created_at: now,
         expires_at,
-        share_url: share_url.clone(),
+        share_url,
+        read_only_share_url: Some(read_only_share_url),
         is_active: true,
     };
-
-    // Generate token
-    let token = token::generate_token(
-        &room_id,
-        &request.page_id,
-        &secret,
-        expiry.to_duration().unwrap_or(chrono::Duration::hours(24)),
-    );
-
-    // Update share URL with real token
-    let final_share_url = format!(
-        "https://collab.nous.page/{}?token={}",
-        room_id, token
-    );
-
-    let mut session = session;
-    session.share_url = final_share_url;
 
     // Persist session
     let session = {
@@ -133,7 +140,7 @@ pub async fn start_collab_session(
     Ok(StartCollabResponse {
         room_id,
         partykit_host: DEFAULT_PARTYKIT_HOST.to_string(),
-        token,
+        token: rw_token,
         session,
     })
 }
