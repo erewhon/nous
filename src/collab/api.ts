@@ -89,3 +89,17 @@ export async function listCollabSessions(): Promise<CollabSession[]> {
 export async function getCollabConfig(): Promise<CollabConfig> {
   return invoke<CollabConfig>("get_collab_config");
 }
+
+export interface PageContent {
+  id: string;
+  title: string;
+  blocks: Array<Record<string, unknown>>;
+  pageType: string | null;
+}
+
+export async function getPageContent(
+  notebookId: string,
+  pageId: string,
+): Promise<PageContent> {
+  return invoke<PageContent>("get_page_content", { notebookId, pageId });
+}

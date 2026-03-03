@@ -11,13 +11,14 @@
  */
 
 import { create } from "zustand";
-import type { BlockNoteEditor as BNEditor } from "@blocknote/core";
+import { BlockNoteEditor, type BlockNoteEditor as BNEditor } from "@blocknote/core";
 import { blocksToYXmlFragment } from "@blocknote/core/yjs";
 import { CollabProvider, type CollaborationOptions, type ConnectionState } from "./CollabProvider";
 import { makeRoomId } from "./roomId";
 import * as api from "./api";
 import type { EditorData } from "../types/page";
 import { editorJsToBlockNote } from "../utils/blockFormatConverter";
+import { schema } from "../components/Editor/schema";
 
 export type CollabStatus = "idle" | "starting" | "connected" | "connecting" | "disconnected" | "error" | "expired";
 
@@ -145,6 +146,124 @@ function destroyAllProviders(): void {
   _providers.clear();
 }
 
+// ── Background page seeding ─────────────────────────────────────────────────
+// When a scoped session starts, seed all pages in the scope into their Yjs DO
+// rooms so guests see content immediately, even for pages the host hasn't opened.
+
+/** Max concurrent page seeding WebSocket connections */
+const SEED_CONCURRENCY = 5;
+
+/**
+ * Background-seed all pages in a scoped session into their Yjs DO rooms.
+ * Fire-and-forget: errors are logged but don't affect the session.
+ */
+async function seedScopePages(
+  scope: CollabScope,
+  pages: api.PageSummary[],
+): Promise<void> {
+  if (pages.length === 0) return;
+
+  // Create a headless BlockNote editor for block → Yjs conversion.
+  // Uses the full custom schema so all block types serialize correctly.
+  const headlessEditor = BlockNoteEditor.create({ schema });
+
+  // Process pages with concurrency limit
+  const queue = [...pages];
+  const active: Promise<void>[] = [];
+
+  while (queue.length > 0 || active.length > 0) {
+    // Bail if session was stopped
+    if (!_scope || _scope.sessionId !== scope.sessionId) break;
+
+    while (queue.length > 0 && active.length < SEED_CONCURRENCY) {
+      const page = queue.shift()!;
+      const promise = seedSinglePage(headlessEditor, scope, page)
+        .then(() => {
+          const idx = active.indexOf(promise);
+          if (idx >= 0) active.splice(idx, 1);
+        });
+      active.push(promise);
+    }
+
+    if (active.length > 0) {
+      await Promise.race(active);
+    }
+  }
+
+  console.log(`[collab] Seeded ${pages.length} pages for scope ${scope.scopeId}`);
+}
+
+/**
+ * Seed a single page's Yjs DO room with its content.
+ */
+async function seedSinglePage(
+  editor: BNEditor<any, any, any>,
+  scope: CollabScope,
+  page: api.PageSummary,
+): Promise<void> {
+  // Skip if this page already has an active provider (host is viewing it —
+  // BlockNoteEditor.tsx will seed it via its own useEffect)
+  if (_providers.has(page.id)) return;
+  // Skip if scope was stopped
+  if (!_scope || _scope.sessionId !== scope.sessionId) return;
+
+  try {
+    // Fetch page content from Tauri backend
+    const content = await api.getPageContent(scope.notebookId, page.id);
+    if (!content.blocks?.length) return;
+
+    // Bail again if scope changed during the async call
+    if (!_scope || _scope.sessionId !== scope.sessionId) return;
+    if (_providers.has(page.id)) return;
+
+    const roomId = makeRoomId(scope.notebookId, page.id);
+
+    // Create temp provider
+    const tempProvider = new CollabProvider({
+      host: scope.host,
+      roomId,
+      token: scope.token,
+      user: { name: "Seeder", color: "#888888" },
+    });
+
+    try {
+      // Wait for initial sync (with timeout)
+      const synced = await new Promise<boolean>((resolve) => {
+        if (tempProvider.isSynced) { resolve(true); return; }
+        const timeout = setTimeout(() => resolve(false), 15_000);
+        // Poll for sync — the provider's internal sync handler sets isSynced
+        const interval = setInterval(() => {
+          if (tempProvider.isSynced) {
+            clearInterval(interval);
+            clearTimeout(timeout);
+            resolve(true);
+          }
+        }, 50);
+        setTimeout(() => clearInterval(interval), 15_100);
+      });
+
+      if (!synced) {
+        console.warn(`[collab] Sync timeout for page ${page.id}, skipping seed`);
+        return;
+      }
+
+      // Only seed if the server's fragment is empty (no prior state)
+      if (tempProvider.fragment.length === 0) {
+        const editorData: EditorData = { blocks: content.blocks as any };
+        const bnBlocks = editorJsToBlockNote(editorData);
+        blocksToYXmlFragment(editor, bnBlocks as any, tempProvider.fragment);
+
+        // Brief wait for the Yjs update to propagate to the DO via WebSocket
+        await new Promise((r) => setTimeout(r, 500));
+      }
+    } finally {
+      tempProvider.destroy();
+    }
+  } catch (e) {
+    console.warn(`[collab] Failed to seed page ${page.id}:`, e);
+  }
+}
+
 export const useCollabStore = create<CollabStore>((set, get) => ({
   // ── State ──────────────────────────────────────────────────────────
   isActive: false,
@@ -206,9 +325,10 @@ export const useCollabStore = create<CollabStore>((set, get) => ({
 
       const response = await api.startCollabSessionScoped(notebookId, scopeType, scopeId, expiry);
 
-      // Push manifest to Worker
+      // Push manifest to Worker and get page list for seeding
+      let pages: api.PageSummary[] = [];
       try {
-        const pages = await api.listPagesForScope(notebookId, scopeType, scopeId);
+        pages = await api.listPagesForScope(notebookId, scopeType, scopeId);
         await pushManifest(response.session.id, response.token, pages);
       } catch (e) {
         console.warn("Failed to push manifest:", e);
@@ -237,6 +357,14 @@ export const useCollabStore = create<CollabStore>((set, get) => ({
         pageId: null,
         scope,
       });
+
+      // Background-seed all pages in the scope so guests see content immediately.
+      // Fire-and-forget: doesn't block the UI or affect session status.
+      if (pages.length > 0) {
+        seedScopePages(scope, pages).catch((e) => {
+          console.warn("[collab] Background page seeding failed:", e);
+        });
+      }
     } catch (err) {
       set({
         error: err instanceof Error ? err.message : String(err),
