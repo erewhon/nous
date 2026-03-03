@@ -7,14 +7,28 @@ import { Doc, encodeStateAsUpdate, applyUpdate } from "yjs";
  * HMAC-SHA256 token verification for collab sessions.
  *
  * Token format: base64url(JSON payload).base64url(HMAC-SHA256 signature)
- * Payload: { room_id, page_id, permissions, exp }
+ * Payload supports both legacy (room_id/page_id) and scoped (scope_type/scope_id/notebook_id) tokens.
  */
 
 interface TokenPayload {
-  room_id: string;
-  page_id: string;
+  // Scope-based fields (new)
+  scope_type?: "page" | "section" | "notebook";
+  scope_id?: string;
+  notebook_id?: string;
+  // Legacy fields
+  room_id?: string;
+  page_id?: string;
+  // Common
   permissions: string;
   exp: number;
+}
+
+/** Manifest entry for a page in a scoped session */
+interface ManifestPage {
+  id: string;
+  title: string;
+  folderId?: string | null;
+  sectionId?: string | null;
 }
 
 function hexDecode(hex: string): Uint8Array {
@@ -75,9 +89,38 @@ function base64UrlDecode(str: string): Uint8Array {
   return bytes;
 }
 
+/**
+ * Validate that a token's scope authorizes access to a specific room.
+ * Room ID format: {notebook_id}:{page_id}
+ */
+function validateRoomAccess(payload: TokenPayload, roomId: string): boolean {
+  const scopeType = payload.scope_type;
+
+  if (!scopeType) {
+    // Legacy token: must have room_id matching exactly
+    return payload.room_id === roomId;
+  }
+
+  switch (scopeType) {
+    case "page": {
+      // Room must equal {notebook_id}:{scope_id}
+      const expected = `${payload.notebook_id}:${payload.scope_id}`;
+      return roomId === expected;
+    }
+    case "section":
+    case "notebook":
+      // Room must belong to the same notebook
+      return roomId.startsWith(`${payload.notebook_id}:`);
+    default:
+      return false;
+  }
+}
+
 interface Env {
   COLLAB_HMAC_SECRET: string;
   CollabServer: DurableObjectNamespace;
+  /** KV namespace for manifest storage */
+  COLLAB_MANIFESTS?: KVNamespace;
 }
 
 const STORAGE_KEY = "yjs-state";
@@ -116,7 +159,7 @@ export class CollabServer extends YServer {
   }
 
   /**
-   * Validate HMAC token on connect and store permissions.
+   * Validate HMAC token on connect, check scope authorization, and store permissions.
    * If invalid, close the connection immediately.
    */
   async onConnect(connection: Connection, ctx: ConnectionContext) {
@@ -143,6 +186,14 @@ export class CollabServer extends YServer {
     } catch (err) {
       console.warn("Token verification failed:", (err as Error).message);
       connection.close(4003, "Invalid token");
+      return;
+    }
+
+    // Validate that the token's scope authorizes access to this room
+    const roomId = this.name; // DO name = room ID
+    if (!validateRoomAccess(payload, roomId)) {
+      console.warn("Room access denied:", { roomId, scope_type: payload.scope_type, scope_id: payload.scope_id });
+      connection.close(4003, "Token does not authorize access to this room");
       return;
     }
 
@@ -185,14 +236,112 @@ export class CollabServer extends YServer {
   /**
    * Clean up permissions on disconnect.
    */
-  async onClose(connection: Connection, code: number, reason: string) {
+  async onClose(connection: Connection, code: number, reason: string, wasClean: boolean) {
     connectionPermissions.delete(connection.id);
-    await super.onClose(connection, code, reason);
+    await super.onClose(connection, code, reason, wasClean);
   }
 }
 
+/** In-memory manifest cache (TTL-based, falls back to KV if available) */
+const manifestCache = new Map<string, { data: ManifestPage[]; expiresAt: number }>();
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
+    const url = new URL(request.url);
+
+    // Manifest API: store/retrieve page lists for scoped sessions
+    if (url.pathname.startsWith("/api/manifest/")) {
+      const sessionId = url.pathname.split("/api/manifest/")[1];
+      if (!sessionId) {
+        return new Response("Missing session ID", { status: 400 });
+      }
+
+      // Verify token for manifest access
+      const authHeader = request.headers.get("Authorization");
+      const token = authHeader?.replace("Bearer ", "") || url.searchParams.get("token");
+      if (!token) {
+        return new Response("Missing token", { status: 401 });
+      }
+
+      try {
+        await verifyToken(token, env.COLLAB_HMAC_SECRET);
+      } catch {
+        return new Response("Invalid token", { status: 403 });
+      }
+
+      if (request.method === "POST") {
+        // Store manifest
+        const body = await request.json() as ManifestPage[];
+        const ttl = 24 * 60 * 60; // 24h
+
+        // In-memory cache
+        manifestCache.set(sessionId, {
+          data: body,
+          expiresAt: Date.now() + ttl * 1000,
+        });
+
+        // Persist to KV if available
+        if (env.COLLAB_MANIFESTS) {
+          await env.COLLAB_MANIFESTS.put(
+            `manifest:${sessionId}`,
+            JSON.stringify(body),
+            { expirationTtl: ttl }
+          );
+        }
+
+        return new Response(JSON.stringify({ ok: true }), {
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      if (request.method === "GET") {
+        // Check in-memory cache first
+        const cached = manifestCache.get(sessionId);
+        if (cached && cached.expiresAt > Date.now()) {
+          return new Response(JSON.stringify(cached.data), {
+            headers: {
+              "Content-Type": "application/json",
+              "Access-Control-Allow-Origin": "*",
+            },
+          });
+        }
+
+        // Fall back to KV
+        if (env.COLLAB_MANIFESTS) {
+          const stored = await env.COLLAB_MANIFESTS.get(`manifest:${sessionId}`);
+          if (stored) {
+            // Repopulate in-memory cache
+            const data = JSON.parse(stored);
+            manifestCache.set(sessionId, {
+              data,
+              expiresAt: Date.now() + 24 * 60 * 60 * 1000,
+            });
+            return new Response(stored, {
+              headers: {
+                "Content-Type": "application/json",
+                "Access-Control-Allow-Origin": "*",
+              },
+            });
+          }
+        }
+
+        return new Response("Not found", { status: 404 });
+      }
+
+      return new Response("Method not allowed", { status: 405 });
+    }
+
+    // CORS preflight for manifest API
+    if (request.method === "OPTIONS" && url.pathname.startsWith("/api/")) {
+      return new Response(null, {
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+          "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        },
+      });
+    }
+
     return (
       (await routePartykitRequest(request, env)) ||
       new Response("Not Found", { status: 404 })

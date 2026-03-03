@@ -1,22 +1,36 @@
 /**
  * Zustand store for collaboration session state.
  *
- * The CollabProvider (Y.Doc, YPartyKitProvider, WebSocket) lives outside of
- * React's lifecycle so it survives component remounts (e.g., sidebar toggle
- * causing Layout to switch render paths).
+ * Supports two modes:
+ * 1. Single-page scope: one CollabProvider for one page (existing behavior)
+ * 2. Multi-page scope (section/notebook): lazy per-page providers sharing a
+ *    single token and scope configuration
  *
- * Components read state via selectors; actions mutate the store directly.
+ * The CollabProvider (Y.Doc, YPartyKitProvider, WebSocket) lives outside of
+ * React's lifecycle so it survives component remounts.
  */
 
 import { create } from "zustand";
 import type { BlockNoteEditor as BNEditor } from "@blocknote/core";
 import { blocksToYXmlFragment } from "@blocknote/core/yjs";
 import { CollabProvider, type CollaborationOptions, type ConnectionState } from "./CollabProvider";
+import { makeRoomId } from "./roomId";
 import * as api from "./api";
 import type { EditorData } from "../types/page";
 import { editorJsToBlockNote } from "../utils/blockFormatConverter";
 
 export type CollabStatus = "idle" | "starting" | "connected" | "connecting" | "disconnected" | "error" | "expired";
+
+export interface CollabScope {
+  sessionId: string;
+  scopeType: "page" | "section" | "notebook";
+  scopeId: string;
+  notebookId: string;
+  token: string;
+  host: string;
+  shareUrl: string | null;
+  readOnlyShareUrl: string | null;
+}
 
 interface CollabState {
   isActive: boolean;
@@ -28,21 +42,108 @@ interface CollabState {
   error: string | null;
   collabOptions: CollaborationOptions | null;
   connectionState: ConnectionState | null;
-  /** Page ID the active session belongs to */
+  /** Page ID the active provider belongs to (for the currently viewed page) */
   pageId: string | null;
+  /** Active scope (null when idle) */
+  scope: CollabScope | null;
 }
 
 interface CollabActions {
+  /** Start a single-page collab session (backward compatible) */
   startSession: (notebookId: string, pageId: string, expiry?: string) => Promise<void>;
+  /** Start a scoped (section/notebook) collab session */
+  startScopedSession: (notebookId: string, scopeType: string, scopeId: string, expiry?: string) => Promise<void>;
   stopSession: () => Promise<void>;
+  /** Activate a page's provider within a multi-page scope */
+  activatePage: (pageId: string) => void;
+  /** Deactivate a page's provider (with grace period for quick navigation) */
+  deactivatePage: (pageId: string) => void;
+  /** Check if a page is within the current scope */
+  isPageInScope: (pageId: string) => boolean;
   reconnect: () => void;
   seedContent: (editor: BNEditor<any, any, any>, initialData: EditorData) => void;
 }
 
 type CollabStore = CollabState & CollabActions;
 
-// Module-level CollabProvider — survives React remounts
-let _provider: CollabProvider | null = null;
+// Module-level provider management — survives React remounts
+let _scope: CollabScope | null = null;
+const _providers = new Map<string, CollabProvider>();
+const _destroyTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+/** Grace period before destroying a deactivated provider (handles quick page switches) */
+const DEACTIVATE_GRACE_MS = 30_000;
+
+function getOrCreateProvider(pageId: string, scope: CollabScope, set: (partial: Partial<CollabState>) => void): CollabProvider {
+  // Cancel any pending destroy timer
+  const timer = _destroyTimers.get(pageId);
+  if (timer) {
+    clearTimeout(timer);
+    _destroyTimers.delete(pageId);
+  }
+
+  const existing = _providers.get(pageId);
+  if (existing) return existing;
+
+  const roomId = makeRoomId(scope.notebookId, pageId);
+
+  const provider = new CollabProvider({
+    host: scope.host,
+    roomId,
+    token: scope.token,
+    user: { name: "Owner", color: "#3b82f6" },
+    onStatusChange: (state) => {
+      // Only update store if this is still the active page
+      if (_scope?.sessionId === scope.sessionId) {
+        set({ connectionState: state });
+        if (state.isExpired) {
+          set({ status: "expired" });
+        } else {
+          set({ status: state.status });
+        }
+      }
+    },
+    onParticipantsChange: (count) => {
+      if (_scope?.sessionId === scope.sessionId) {
+        set({ participants: count });
+      }
+    },
+    onSynced: () => {
+      if (_scope?.sessionId === scope.sessionId) {
+        set({ isSynced: true });
+      }
+    },
+  });
+
+  _providers.set(pageId, provider);
+  return provider;
+}
+
+function destroyProvider(pageId: string): void {
+  const timer = _destroyTimers.get(pageId);
+  if (timer) {
+    clearTimeout(timer);
+    _destroyTimers.delete(pageId);
+  }
+
+  const provider = _providers.get(pageId);
+  if (provider) {
+    provider.destroy();
+    _providers.delete(pageId);
+  }
+}
+
+function destroyAllProviders(): void {
+  for (const timer of _destroyTimers.values()) {
+    clearTimeout(timer);
+  }
+  _destroyTimers.clear();
+
+  for (const provider of _providers.values()) {
+    provider.destroy();
+  }
+  _providers.clear();
+}
 
 export const useCollabStore = create<CollabStore>((set, get) => ({
   // ── State ──────────────────────────────────────────────────────────
@@ -56,6 +157,7 @@ export const useCollabStore = create<CollabStore>((set, get) => ({
   collabOptions: null,
   connectionState: null,
   pageId: null,
+  scope: null,
 
   // ── Actions ────────────────────────────────────────────────────────
 
@@ -65,28 +167,20 @@ export const useCollabStore = create<CollabStore>((set, get) => ({
 
       const response = await api.startCollabSession(notebookId, pageId, expiry);
 
-      const provider = new CollabProvider({
-        host: response.partykitHost,
-        roomId: response.roomId,
+      const scope: CollabScope = {
+        sessionId: response.session.id,
+        scopeType: "page",
+        scopeId: pageId,
+        notebookId,
         token: response.token,
-        user: { name: "Owner", color: "#3b82f6" },
-        onStatusChange: (state) => {
-          set({ connectionState: state });
-          if (state.isExpired) {
-            set({ status: "expired" });
-          } else {
-            set({ status: state.status });
-          }
-        },
-        onParticipantsChange: (count) => {
-          set({ participants: count });
-        },
-        onSynced: () => {
-          set({ isSynced: true });
-        },
-      });
+        host: response.partykitHost,
+        shareUrl: response.session.shareUrl,
+        readOnlyShareUrl: response.session.readOnlyShareUrl,
+      };
 
-      _provider = provider;
+      _scope = scope;
+
+      const provider = getOrCreateProvider(pageId, scope, set);
 
       set({
         isActive: true,
@@ -96,6 +190,52 @@ export const useCollabStore = create<CollabStore>((set, get) => ({
         shareUrl: response.session.shareUrl,
         collabOptions: provider.getCollaborationOptions(),
         pageId,
+        scope,
+      });
+    } catch (err) {
+      set({
+        error: err instanceof Error ? err.message : String(err),
+        status: "error",
+      });
+    }
+  },
+
+  startScopedSession: async (notebookId, scopeType, scopeId, expiry = "8h") => {
+    try {
+      set({ status: "starting", error: null });
+
+      const response = await api.startCollabSessionScoped(notebookId, scopeType, scopeId, expiry);
+
+      // Push manifest to Worker
+      try {
+        const pages = await api.listPagesForScope(notebookId, scopeType, scopeId);
+        await pushManifest(response.session.id, response.token, pages);
+      } catch (e) {
+        console.warn("Failed to push manifest:", e);
+      }
+
+      const scope: CollabScope = {
+        sessionId: response.session.id,
+        scopeType: scopeType as "section" | "notebook",
+        scopeId,
+        notebookId,
+        token: response.token,
+        host: response.partykitHost,
+        shareUrl: response.session.shareUrl,
+        readOnlyShareUrl: response.session.readOnlyShareUrl,
+      };
+
+      _scope = scope;
+
+      set({
+        isActive: true,
+        isSynced: false,
+        status: "connecting",
+        sessionId: response.session.id,
+        shareUrl: response.session.shareUrl,
+        collabOptions: null,
+        pageId: null,
+        scope,
       });
     } catch (err) {
       set({
@@ -108,11 +248,9 @@ export const useCollabStore = create<CollabStore>((set, get) => ({
   stopSession: async () => {
     const { sessionId } = get();
 
-    // Destroy provider
-    if (_provider) {
-      _provider.destroy();
-      _provider = null;
-    }
+    // Destroy all providers
+    destroyAllProviders();
+    _scope = null;
 
     // Stop session on backend
     if (sessionId) {
@@ -134,22 +272,89 @@ export const useCollabStore = create<CollabStore>((set, get) => ({
       collabOptions: null,
       connectionState: null,
       pageId: null,
+      scope: null,
     });
   },
 
+  activatePage: (pageId: string) => {
+    if (!_scope) return;
+
+    const provider = getOrCreateProvider(pageId, _scope, set);
+
+    set({
+      pageId,
+      isSynced: provider.isSynced,
+      collabOptions: provider.getCollaborationOptions(),
+      status: provider.status === "connected" ? "connected" : "connecting",
+      connectionState: provider.connectionInfo,
+      participants: provider.participantCount,
+    });
+  },
+
+  deactivatePage: (pageId: string) => {
+    if (!_scope) return;
+    // For single-page scope, don't destroy on deactivate — stopSession handles that
+    if (_scope.scopeType === "page") return;
+
+    // Grace period: schedule destruction
+    const timer = setTimeout(() => {
+      _destroyTimers.delete(pageId);
+      destroyProvider(pageId);
+    }, DEACTIVATE_GRACE_MS);
+
+    _destroyTimers.set(pageId, timer);
+  },
+
+  isPageInScope: (pageId: string) => {
+    if (!_scope) return false;
+    if (_scope.scopeType === "page") {
+      return _scope.scopeId === pageId;
+    }
+    // For section/notebook scopes, any page in the notebook could be in scope.
+    // The actual membership check is done by the server via token validation.
+    return true;
+  },
+
   reconnect: () => {
-    _provider?.reconnect();
+    const { pageId } = get();
+    if (pageId) {
+      const provider = _providers.get(pageId);
+      provider?.reconnect();
+    }
   },
 
   seedContent: (editor, initialData) => {
-    if (!_provider) return;
-    if (_provider.fragment.length > 0) return;
+    const { pageId } = get();
+    if (!pageId) return;
+    const provider = _providers.get(pageId);
+    if (!provider) return;
+    if (provider.fragment.length > 0) return;
 
     try {
       const bnBlocks = editorJsToBlockNote(initialData);
-      blocksToYXmlFragment(editor, bnBlocks as any, _provider.fragment);
+      blocksToYXmlFragment(editor, bnBlocks as any, provider.fragment);
     } catch (e) {
       console.error("Failed to seed collab content:", e);
     }
   },
 }));
+
+/** Push page manifest to the Worker API */
+async function pushManifest(
+  sessionId: string,
+  token: string,
+  pages: api.PageSummary[],
+): Promise<void> {
+  const url = `https://party.nous.page/api/manifest/${sessionId}`;
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(pages),
+  });
+  if (!response.ok) {
+    throw new Error(`Manifest push failed: ${response.status}`);
+  }
+}

@@ -43,11 +43,18 @@ impl CollabExpiry {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CollabSession {
-    /// Room ID (used as the PartyKit room identifier).
+    /// Session ID (random 12-char alphanumeric).
     pub id: String,
-    pub page_id: Uuid,
+    /// Scope type: "page", "section", or "notebook".
+    #[serde(default = "default_scope_type")]
+    pub scope_type: String,
+    /// Scope ID: page_id, section_id, or notebook_id depending on scope_type.
+    #[serde(default)]
+    pub scope_id: Option<Uuid>,
     pub notebook_id: Uuid,
-    pub page_title: String,
+    /// Display title for the session (page title, section name, or notebook name).
+    #[serde(default)]
+    pub title: Option<String>,
     pub expiry: CollabExpiry,
     pub created_at: DateTime<Utc>,
     pub expires_at: Option<DateTime<Utc>>,
@@ -56,6 +63,15 @@ pub struct CollabSession {
     #[serde(default)]
     pub read_only_share_url: Option<String>,
     pub is_active: bool,
+    // Backward compat fields — populated for single-page sessions and legacy data
+    #[serde(default)]
+    pub page_id: Option<Uuid>,
+    #[serde(default)]
+    pub page_title: Option<String>,
+}
+
+fn default_scope_type() -> String {
+    "page".to_string()
 }
 
 /// Manages collab session records on disk.
@@ -98,7 +114,25 @@ impl CollabStorage {
         let now = Utc::now();
         let records = self.load_records()?;
         Ok(records.into_iter().find(|r| {
-            r.page_id == page_id
+            let matches_page = r.page_id == Some(page_id)
+                || (r.scope_type == "page" && r.scope_id == Some(page_id));
+            matches_page
+                && r.is_active
+                && r.expires_at.map_or(true, |exp| exp > now)
+        }))
+    }
+
+    /// Get the active session for a specific scope (section/notebook).
+    pub fn get_active_session_for_scope(
+        &self,
+        scope_type: &str,
+        scope_id: Uuid,
+    ) -> Result<Option<CollabSession>, String> {
+        let now = Utc::now();
+        let records = self.load_records()?;
+        Ok(records.into_iter().find(|r| {
+            r.scope_type == scope_type
+                && r.scope_id == Some(scope_id)
                 && r.is_active
                 && r.expires_at.map_or(true, |exp| exp > now)
         }))
@@ -175,8 +209,15 @@ impl CollabStorage {
     }
 }
 
-/// Generate a 12-character alphanumeric room ID.
-pub fn generate_room_id() -> String {
+/// Build a deterministic room ID from notebook + page IDs.
+/// Format: `{notebook_id}:{page_id}` — allows clients to construct room IDs
+/// without calling the backend, and lets the server validate scope-based tokens.
+pub fn make_room_id(notebook_id: &Uuid, page_id: &Uuid) -> String {
+    format!("{}:{}", notebook_id, page_id)
+}
+
+/// Generate a 12-character alphanumeric session ID.
+pub fn generate_session_id() -> String {
     use rand::Rng;
     const CHARSET: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
     let mut rng = rand::thread_rng();

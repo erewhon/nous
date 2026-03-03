@@ -1,7 +1,7 @@
 //! HMAC-SHA256 token generation for collab sessions.
 //!
 //! Token format: `base64url(JSON payload).base64url(HMAC-SHA256 signature)`
-//! Payload: `{ room_id, page_id, permissions, exp }`
+//! Payload includes scope fields for multi-page collaboration support.
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 use chrono::{Duration, Utc};
@@ -13,14 +13,26 @@ type HmacSha256 = Hmac<Sha256>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TokenPayload {
-    pub room_id: String,
-    pub page_id: String,
+    /// Scope type: "page", "section", or "notebook"
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope_type: Option<String>,
+    /// Scope ID: page_id, section_id, or notebook_id depending on scope_type
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope_id: Option<String>,
+    /// Notebook ID — always present (needed to construct deterministic room IDs)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notebook_id: Option<String>,
     pub permissions: String,
     /// Unix timestamp (seconds) when token expires.
     pub exp: i64,
+    // Backward compat: populated for single-page sessions and legacy tokens
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub room_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page_id: Option<String>,
 }
 
-/// Generate an HMAC-SHA256 signed token for a collab session.
+/// Generate an HMAC-SHA256 signed token for a single-page collab session.
 /// `permissions` should be "rw" for read-write or "r" for read-only.
 pub fn generate_token(
     room_id: &str,
@@ -30,14 +42,48 @@ pub fn generate_token(
     permissions: &str,
 ) -> String {
     let exp = (Utc::now() + expires_in).timestamp();
+    // Extract notebook_id from deterministic room ID (format: notebook_id:page_id)
+    let notebook_id = room_id.split(':').next().map(|s| s.to_string());
     let payload = TokenPayload {
-        room_id: room_id.to_string(),
-        page_id: page_id.to_string(),
+        scope_type: Some("page".to_string()),
+        scope_id: Some(page_id.to_string()),
+        notebook_id,
         permissions: permissions.to_string(),
         exp,
+        // Backward compat
+        room_id: Some(room_id.to_string()),
+        page_id: Some(page_id.to_string()),
     };
 
-    let payload_json = serde_json::to_string(&payload).expect("Failed to serialize token payload");
+    sign_payload(&payload, secret)
+}
+
+/// Generate an HMAC-SHA256 signed token for a scoped collab session.
+/// `scope_type` is "section" or "notebook".
+pub fn generate_scoped_token(
+    scope_type: &str,
+    scope_id: &str,
+    notebook_id: &str,
+    secret: &[u8],
+    expires_in: Duration,
+    permissions: &str,
+) -> String {
+    let exp = (Utc::now() + expires_in).timestamp();
+    let payload = TokenPayload {
+        scope_type: Some(scope_type.to_string()),
+        scope_id: Some(scope_id.to_string()),
+        notebook_id: Some(notebook_id.to_string()),
+        permissions: permissions.to_string(),
+        exp,
+        room_id: None,
+        page_id: None,
+    };
+
+    sign_payload(&payload, secret)
+}
+
+fn sign_payload(payload: &TokenPayload, secret: &[u8]) -> String {
+    let payload_json = serde_json::to_string(payload).expect("Failed to serialize token payload");
     let payload_b64 = URL_SAFE_NO_PAD.encode(payload_json.as_bytes());
 
     let mut mac = HmacSha256::new_from_slice(secret).expect("HMAC can take key of any size");

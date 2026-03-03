@@ -551,22 +551,39 @@ export function EditorPaneContent({
   useEffect(() => {
     const handleStart = (e: Event) => {
       const detail = (e as CustomEvent<{
-        pageId: string;
+        pageId?: string;
         notebookId: string;
         sessionId: string;
+        scopeType?: string;
+        scopeId?: string;
       }>).detail;
 
-      // Only handle events for our page
-      if (detail.pageId !== pane.pageId) return;
+      const state = useCollabStore.getState();
 
-      // Start the collab session — CollabProvider + BlockNote native collaboration
-      useCollabStore.getState().startSession(detail.notebookId, detail.pageId, "8h");
+      if (detail.scopeType && detail.scopeType !== "page") {
+        // Scoped session (section/notebook) — activate our page within the scope
+        if (pane.pageId) {
+          state.activatePage(pane.pageId);
+        }
+      } else {
+        // Single-page session — only handle events for our page
+        if (detail.pageId !== pane.pageId) return;
+        state.startSession(detail.notebookId, detail.pageId!, "8h");
+      }
     };
 
     const handleStop = (e: Event) => {
-      const detail = (e as CustomEvent<{ pageId: string }>).detail;
-      if (detail.pageId !== pane.pageId) return;
-      useCollabStore.getState().stopSession();
+      const detail = (e as CustomEvent<{ pageId?: string }>).detail;
+      const state = useCollabStore.getState();
+
+      if (state.scope && state.scope.scopeType !== "page") {
+        // Scoped session — full stop
+        state.stopSession();
+      } else {
+        // Single-page: only handle if it's our page
+        if (detail.pageId !== pane.pageId) return;
+        state.stopSession();
+      }
     };
 
     window.addEventListener("collab-session-started", handleStart);
@@ -577,14 +594,31 @@ export function EditorPaneContent({
     };
   }, [pane.pageId]);
 
-  // Stop collab session when navigating to a different page.
-  // Does NOT stop on component remount (sidebar toggle) — the Zustand store
-  // and CollabProvider survive remounts by design.
+  // Scope-aware page navigation for collab.
+  // - Single-page scope: stop session when navigating away from the collab page
+  // - Multi-page scope: activate new page, deactivate old page
   useEffect(() => {
-    const { isActive, pageId: collabPageId, stopSession } = useCollabStore.getState();
-    if (isActive && collabPageId && collabPageId !== pane.pageId) {
-      stopSession();
+    const state = useCollabStore.getState();
+    if (!state.isActive || !state.scope) return;
+
+    if (state.scope.scopeType === "page") {
+      // Single-page scope: stop if navigating away
+      if (state.scope.scopeId !== pane.pageId) {
+        state.stopSession();
+      }
+    } else {
+      // Multi-page scope: activate the new page within scope
+      if (pane.pageId) {
+        state.activatePage(pane.pageId);
+      }
     }
+
+    return () => {
+      // Deactivate page when unmounting or switching to a different page
+      if (pane.pageId) {
+        useCollabStore.getState().deactivatePage(pane.pageId);
+      }
+    };
   }, [pane.pageId]);
 
   // During collab, auto-save still works normally — editor.document reads from

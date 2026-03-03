@@ -912,6 +912,8 @@ pub fn run() {
             commands::smart_organize_apply,
             // Collab commands
             commands::start_collab_session,
+            commands::start_collab_session_scoped,
+            commands::list_pages_for_scope,
             commands::stop_collab_session,
             commands::list_collab_sessions,
             commands::get_collab_config,

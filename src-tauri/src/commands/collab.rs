@@ -3,7 +3,7 @@ use tauri::State;
 use uuid::Uuid;
 
 use crate::collab::credentials;
-use crate::collab::storage::{generate_room_id, CollabExpiry, CollabSession};
+use crate::collab::storage::{generate_session_id, make_room_id, CollabExpiry, CollabSession};
 use crate::collab::token;
 use crate::AppState;
 
@@ -67,20 +67,23 @@ pub async fn start_collab_session(
 
     let token_duration = expiry.to_duration().unwrap_or(chrono::Duration::hours(24));
 
+    // Deterministic room ID from notebook + page
+    let room_id = make_room_id(&nb_id, &pg_id);
+
     // Check for existing active session on this page
     {
         let store = collab_storage.lock().map_err(|e| e.to_string())?;
         if let Some(existing) = store.get_active_session_for_page(pg_id)? {
             // Return existing session with a fresh token
             let token = token::generate_token(
-                &existing.id,
+                &room_id,
                 &request.page_id,
                 &secret,
                 token_duration,
                 "rw",
             );
             return Ok(StartCollabResponse {
-                room_id: existing.id.clone(),
+                room_id: room_id.clone(),
                 partykit_host: DEFAULT_PARTYKIT_HOST.to_string(),
                 token,
                 session: existing,
@@ -89,7 +92,7 @@ pub async fn start_collab_session(
     }
 
     // Generate new session
-    let room_id = generate_room_id();
+    let session_id = generate_session_id();
     let now = chrono::Utc::now();
     let expires_at = expiry.to_duration().map(|d| now + d);
 
@@ -119,16 +122,19 @@ pub async fn start_collab_session(
     );
 
     let session = CollabSession {
-        id: room_id.clone(),
-        page_id: pg_id,
+        id: session_id,
+        scope_type: "page".to_string(),
+        scope_id: Some(pg_id),
         notebook_id: nb_id,
-        page_title,
+        title: Some(page_title.clone()),
         expiry: expiry.clone(),
         created_at: now,
         expires_at,
         share_url,
         read_only_share_url: Some(read_only_share_url),
         is_active: true,
+        page_id: Some(pg_id),
+        page_title: Some(page_title),
     };
 
     // Persist session
@@ -138,12 +144,224 @@ pub async fn start_collab_session(
     };
 
     Ok(StartCollabResponse {
-        room_id,
+        room_id: room_id.clone(),
         partykit_host: DEFAULT_PARTYKIT_HOST.to_string(),
         token: rw_token,
         session,
     })
 }
+
+// ── Scoped session (section / notebook) ────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartScopedCollabRequest {
+    pub notebook_id: String,
+    pub scope_type: String,
+    pub scope_id: String,
+    #[serde(default = "default_expiry")]
+    pub expiry: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartScopedCollabResponse {
+    pub session: CollabSession,
+    pub token: String,
+    pub partykit_host: String,
+}
+
+#[tauri::command]
+pub async fn start_collab_session_scoped(
+    state: State<'_, AppState>,
+    request: StartScopedCollabRequest,
+) -> Result<StartScopedCollabResponse, String> {
+    let nb_id =
+        Uuid::parse_str(&request.notebook_id).map_err(|e| format!("Invalid notebook ID: {}", e))?;
+    let scope_id =
+        Uuid::parse_str(&request.scope_id).map_err(|e| format!("Invalid scope ID: {}", e))?;
+    let expiry = CollabExpiry::from_str(&request.expiry)?;
+
+    if request.scope_type != "section" && request.scope_type != "notebook" {
+        return Err(format!("Invalid scope_type: {}. Must be 'section' or 'notebook'", request.scope_type));
+    }
+
+    let storage = state.storage.clone();
+    let collab_storage = state.collab_storage.clone();
+    let library_storage = state.library_storage.clone();
+
+    // Resolve scope title and get data dir
+    let (data_dir, scope_title) = {
+        let lib_storage = library_storage.lock().map_err(|e| e.to_string())?;
+        let library = lib_storage
+            .get_current_library()
+            .map_err(|e| format!("Failed to get library: {}", e))?;
+        let dir = library.path.clone();
+
+        let store = storage.lock().map_err(|e| e.to_string())?;
+        let title = match request.scope_type.as_str() {
+            "section" => {
+                let section = store
+                    .get_section(nb_id, scope_id)
+                    .map_err(|e| format!("Failed to get section: {}", e))?;
+                section.name
+            }
+            "notebook" => {
+                let notebook = store
+                    .get_notebook(nb_id)
+                    .map_err(|e| format!("Failed to get notebook: {}", e))?;
+                notebook.name
+            }
+            _ => unreachable!(),
+        };
+
+        (dir, title)
+    };
+
+    // Get or create global HMAC secret
+    let secret = credentials::get_or_create_collab_secret(&data_dir)?;
+
+    let token_duration = expiry.to_duration().unwrap_or(chrono::Duration::hours(24));
+
+    // Check for existing active scoped session
+    {
+        let store = collab_storage.lock().map_err(|e| e.to_string())?;
+        if let Some(existing) = store.get_active_session_for_scope(&request.scope_type, scope_id)? {
+            let token = token::generate_scoped_token(
+                &request.scope_type,
+                &request.scope_id,
+                &request.notebook_id,
+                &secret,
+                token_duration,
+                "rw",
+            );
+            return Ok(StartScopedCollabResponse {
+                partykit_host: DEFAULT_PARTYKIT_HOST.to_string(),
+                token,
+                session: existing,
+            });
+        }
+    }
+
+    // Generate new scoped session
+    let session_id = generate_session_id();
+    let now = chrono::Utc::now();
+    let expires_at = expiry.to_duration().map(|d| now + d);
+
+    // Generate RW and RO scoped tokens
+    let rw_token = token::generate_scoped_token(
+        &request.scope_type,
+        &request.scope_id,
+        &request.notebook_id,
+        &secret,
+        token_duration,
+        "rw",
+    );
+    let ro_token = token::generate_scoped_token(
+        &request.scope_type,
+        &request.scope_id,
+        &request.notebook_id,
+        &secret,
+        token_duration,
+        "r",
+    );
+
+    let share_url = format!(
+        "https://collab.nous.page/s/{}?token={}",
+        session_id, rw_token
+    );
+    let read_only_share_url = format!(
+        "https://collab.nous.page/s/{}?token={}",
+        session_id, ro_token
+    );
+
+    let session = CollabSession {
+        id: session_id,
+        scope_type: request.scope_type.clone(),
+        scope_id: Some(scope_id),
+        notebook_id: nb_id,
+        title: Some(scope_title),
+        expiry: expiry.clone(),
+        created_at: now,
+        expires_at,
+        share_url,
+        read_only_share_url: Some(read_only_share_url),
+        is_active: true,
+        page_id: None,
+        page_title: None,
+    };
+
+    // Persist session
+    let session = {
+        let store = collab_storage.lock().map_err(|e| e.to_string())?;
+        store.create_session(session)?
+    };
+
+    Ok(StartScopedCollabResponse {
+        partykit_host: DEFAULT_PARTYKIT_HOST.to_string(),
+        token: rw_token,
+        session,
+    })
+}
+
+// ── List pages for scope ───────────────────────────────────────────────
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PageSummary {
+    pub id: String,
+    pub title: String,
+    pub folder_id: Option<String>,
+    pub section_id: Option<String>,
+}
+
+#[tauri::command]
+pub async fn list_pages_for_scope(
+    state: State<'_, AppState>,
+    notebook_id: String,
+    scope_type: String,
+    scope_id: String,
+) -> Result<Vec<PageSummary>, String> {
+    let nb_id =
+        Uuid::parse_str(&notebook_id).map_err(|e| format!("Invalid notebook ID: {}", e))?;
+    let s_id =
+        Uuid::parse_str(&scope_id).map_err(|e| format!("Invalid scope ID: {}", e))?;
+
+    let storage = state.storage.clone();
+    let store = storage.lock().map_err(|e| e.to_string())?;
+
+    let all_pages = store
+        .list_pages(nb_id)
+        .map_err(|e| format!("Failed to list pages: {}", e))?;
+
+    let filtered: Vec<PageSummary> = match scope_type.as_str() {
+        "section" => all_pages
+            .into_iter()
+            .filter(|p| p.section_id == Some(s_id) && !p.is_archived)
+            .map(|p| PageSummary {
+                id: p.id.to_string(),
+                title: p.title,
+                folder_id: p.folder_id.map(|f| f.to_string()),
+                section_id: p.section_id.map(|s| s.to_string()),
+            })
+            .collect(),
+        "notebook" => all_pages
+            .into_iter()
+            .filter(|p| !p.is_archived)
+            .map(|p| PageSummary {
+                id: p.id.to_string(),
+                title: p.title,
+                folder_id: p.folder_id.map(|f| f.to_string()),
+                section_id: p.section_id.map(|s| s.to_string()),
+            })
+            .collect(),
+        _ => return Err(format!("Invalid scope_type: {}", scope_type)),
+    };
+
+    Ok(filtered)
+}
+
+// ── Existing commands ──────────────────────────────────────────────────
 
 #[tauri::command]
 pub async fn stop_collab_session(

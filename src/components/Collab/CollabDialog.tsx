@@ -1,9 +1,9 @@
 /**
  * Dialog for starting/stopping real-time collaboration sessions.
- * Follows the ShareDialog pattern with three states:
- * - configure: select expiry, start session
- * - starting: spinner
- * - active: share URLs (edit + view-only) with copy buttons, stop button
+ * Supports three scope levels:
+ * - page: share a single page (default, existing behavior)
+ * - section: share all pages in a section
+ * - notebook: share all pages in the notebook
  */
 
 import { useState, useEffect, useCallback } from "react";
@@ -15,11 +15,18 @@ interface CollabDialogProps {
   onClose: () => void;
   pageId?: string;
   notebookId?: string;
+  /** Pre-select a scope type when opening from section/notebook context */
+  initialScopeType?: "page" | "section" | "notebook";
+  /** Section ID for the current page (enables section scope option) */
+  sectionId?: string;
+  /** Section name for display */
+  sectionName?: string;
 }
 
 type ExpiryOption = "1h" | "8h" | "1d" | "never";
 type DialogState = "configure" | "starting" | "active";
 type ShareMode = "edit" | "view";
+type ScopeType = "page" | "section" | "notebook";
 
 const EXPIRY_OPTIONS: { value: ExpiryOption; label: string }[] = [
   { value: "1h", label: "1 hour" },
@@ -33,6 +40,9 @@ export function CollabDialog({
   onClose,
   pageId,
   notebookId,
+  initialScopeType,
+  sectionId,
+  sectionName,
 }: CollabDialogProps) {
   const [expiry, setExpiry] = useState<ExpiryOption>("8h");
   const [dialogState, setDialogState] = useState<DialogState>("configure");
@@ -42,25 +52,50 @@ export function CollabDialog({
   const [copied, setCopied] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [shareMode, setShareMode] = useState<ShareMode>("edit");
+  const [scopeType, setScopeType] = useState<ScopeType>(initialScopeType || "page");
 
   const pages = usePageStore((s) => s.pages);
   const selectedPage = pageId ? pages.find((p) => p.id === pageId) : null;
 
   const activeUrl = shareMode === "edit" ? shareUrl : readOnlyShareUrl;
 
+  // Scope description text
+  const scopeDescription = (() => {
+    switch (scopeType) {
+      case "page":
+        return "Anyone with the link can view and edit this page in real-time. No account required.";
+      case "section":
+        return `Anyone with the link can view and edit all pages in "${sectionName || "this section"}" in real-time.`;
+      case "notebook":
+        return "Anyone with the link can view and edit all pages in this notebook in real-time.";
+    }
+  })();
+
   // Reset state when dialog opens
   useEffect(() => {
     if (isOpen) {
+      setScopeType(initialScopeType || "page");
       // Check for existing active session
       api.listCollabSessions().then((sessions) => {
-        const existing = sessions.find(
-          (s) => s.pageId === pageId && s.isActive
-        );
+        const existing = sessions.find((s) => {
+          if (s.scopeType === "page") {
+            return (s.pageId === pageId || s.scopeId === pageId) && s.isActive;
+          }
+          // Check for existing scoped sessions
+          if (s.scopeType === "section" && sectionId) {
+            return s.scopeId === sectionId && s.isActive;
+          }
+          if (s.scopeType === "notebook" && notebookId) {
+            return s.scopeId === notebookId && s.isActive;
+          }
+          return false;
+        });
         if (existing) {
           setDialogState("active");
           setShareUrl(existing.shareUrl);
           setReadOnlyShareUrl(existing.readOnlyShareUrl ?? null);
           setSessionId(existing.id);
+          setScopeType(existing.scopeType as ScopeType);
         } else {
           setDialogState("configure");
           setShareUrl(null);
@@ -72,39 +107,65 @@ export function CollabDialog({
       setCopied(false);
       setShareMode("edit");
     }
-  }, [isOpen, pageId]);
+  }, [isOpen, pageId, sectionId, notebookId, initialScopeType]);
 
   const handleStart = useCallback(async () => {
-    if (!notebookId || !pageId) return;
+    if (!notebookId) return;
 
     setDialogState("starting");
     setError(null);
 
     try {
-      const response = await api.startCollabSession(notebookId, pageId, expiry);
-      setShareUrl(response.session.shareUrl);
-      setReadOnlyShareUrl(response.session.readOnlyShareUrl ?? null);
-      setSessionId(response.session.id);
-      setDialogState("active");
+      if (scopeType === "page") {
+        if (!pageId) return;
+        const response = await api.startCollabSession(notebookId, pageId, expiry);
+        setShareUrl(response.session.shareUrl);
+        setReadOnlyShareUrl(response.session.readOnlyShareUrl ?? null);
+        setSessionId(response.session.id);
+        setDialogState("active");
 
-      // Dispatch event so EditorPaneContent can pick up the session
-      window.dispatchEvent(
-        new CustomEvent("collab-session-started", {
-          detail: {
-            pageId,
-            notebookId,
-            roomId: response.roomId,
-            token: response.token,
-            partykitHost: response.partykitHost,
-            sessionId: response.session.id,
-          },
-        })
-      );
+        // Dispatch event so EditorPaneContent can pick up the session
+        window.dispatchEvent(
+          new CustomEvent("collab-session-started", {
+            detail: {
+              pageId,
+              notebookId,
+              roomId: response.roomId,
+              token: response.token,
+              partykitHost: response.partykitHost,
+              sessionId: response.session.id,
+              scopeType: "page",
+            },
+          })
+        );
+      } else {
+        // Section or notebook scope
+        const scopeId = scopeType === "section" ? sectionId! : notebookId;
+        const response = await api.startCollabSessionScoped(notebookId, scopeType, scopeId, expiry);
+        setShareUrl(response.session.shareUrl);
+        setReadOnlyShareUrl(response.session.readOnlyShareUrl ?? null);
+        setSessionId(response.session.id);
+        setDialogState("active");
+
+        // Dispatch event for scoped session
+        window.dispatchEvent(
+          new CustomEvent("collab-session-started", {
+            detail: {
+              notebookId,
+              token: response.token,
+              partykitHost: response.partykitHost,
+              sessionId: response.session.id,
+              scopeType,
+              scopeId,
+            },
+          })
+        );
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       setDialogState("configure");
     }
-  }, [notebookId, pageId, expiry]);
+  }, [notebookId, pageId, expiry, scopeType, sectionId]);
 
   const handleStop = useCallback(async () => {
     if (sessionId) {
@@ -137,6 +198,9 @@ export function CollabDialog({
   }, [activeUrl]);
 
   if (!isOpen) return null;
+
+  // Whether we can show scope options (need at least one non-page scope available)
+  const showScopeSelector = sectionId || initialScopeType === "notebook";
 
   return (
     <div
@@ -184,8 +248,8 @@ export function CollabDialog({
 
         {/* Body */}
         <div className="px-5 py-4 space-y-4">
-          {/* Page title */}
-          {selectedPage && (
+          {/* Page/scope title */}
+          {dialogState !== "active" && selectedPage && scopeType === "page" && (
             <div
               className="text-sm"
               style={{ color: "var(--color-text-secondary)" }}
@@ -207,6 +271,70 @@ export function CollabDialog({
           {/* Configure state */}
           {dialogState === "configure" && (
             <>
+              {/* Scope selector */}
+              {showScopeSelector && (
+                <div>
+                  <label
+                    className="block text-xs font-medium mb-2"
+                    style={{ color: "var(--color-text-muted)" }}
+                  >
+                    Share Scope
+                  </label>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setScopeType("page")}
+                      className="flex-1 px-3 py-1.5 rounded text-sm transition-colors"
+                      style={{
+                        backgroundColor:
+                          scopeType === "page"
+                            ? "var(--color-accent)"
+                            : "var(--color-bg-tertiary)",
+                        color:
+                          scopeType === "page"
+                            ? "white"
+                            : "var(--color-text-secondary)",
+                      }}
+                    >
+                      This Page
+                    </button>
+                    {sectionId && (
+                      <button
+                        onClick={() => setScopeType("section")}
+                        className="flex-1 px-3 py-1.5 rounded text-sm transition-colors"
+                        style={{
+                          backgroundColor:
+                            scopeType === "section"
+                              ? "var(--color-accent)"
+                              : "var(--color-bg-tertiary)",
+                          color:
+                            scopeType === "section"
+                              ? "white"
+                              : "var(--color-text-secondary)",
+                        }}
+                      >
+                        Section
+                      </button>
+                    )}
+                    <button
+                      onClick={() => setScopeType("notebook")}
+                      className="flex-1 px-3 py-1.5 rounded text-sm transition-colors"
+                      style={{
+                        backgroundColor:
+                          scopeType === "notebook"
+                            ? "var(--color-accent)"
+                            : "var(--color-bg-tertiary)",
+                        color:
+                          scopeType === "notebook"
+                            ? "white"
+                            : "var(--color-text-secondary)",
+                      }}
+                    >
+                      Notebook
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <div>
                 <label
                   className="block text-xs font-medium mb-2"
@@ -241,8 +369,7 @@ export function CollabDialog({
                 className="text-xs"
                 style={{ color: "var(--color-text-muted)" }}
               >
-                Anyone with the link can view and edit this page in real-time.
-                No account required.
+                {scopeDescription}
               </p>
             </>
           )}
@@ -341,8 +468,12 @@ export function CollabDialog({
                 style={{ color: "var(--color-text-muted)" }}
               >
                 {shareMode === "edit"
-                  ? "Anyone with this link can view and edit in real-time."
-                  : "Anyone with this link can view but not edit."}
+                  ? scopeType === "page"
+                    ? "Anyone with this link can view and edit in real-time."
+                    : `Anyone with this link can view and edit all pages in this ${scopeType} in real-time.`
+                  : scopeType === "page"
+                    ? "Anyone with this link can view but not edit."
+                    : `Anyone with this link can view but not edit pages in this ${scopeType}.`}
               </p>
             </>
           )}
@@ -367,7 +498,11 @@ export function CollabDialog({
               </button>
               <button
                 onClick={handleStart}
-                disabled={!pageId || !notebookId}
+                disabled={
+                  (scopeType === "page" && (!pageId || !notebookId)) ||
+                  (scopeType === "section" && (!sectionId || !notebookId)) ||
+                  (scopeType === "notebook" && !notebookId)
+                }
                 className="px-4 py-2 rounded text-sm transition-colors disabled:opacity-50"
                 style={{
                   backgroundColor: "var(--color-accent)",
