@@ -467,6 +467,11 @@ export const useCollabStore = create<CollabStore>((set, get) => ({
   },
 }));
 
+/** Get the active CollabProvider for a given page (if any) */
+export function getCollabProvider(pageId: string): CollabProvider | null {
+  return _providers.get(pageId) ?? null;
+}
+
 /** Push page manifest to the Worker API */
 async function pushManifest(
   sessionId: string,

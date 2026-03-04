@@ -28,6 +28,7 @@ interface ManifestPage {
   id: string;
   title: string;
   folderId?: string | null;
+  folderName?: string | null;
   sectionId?: string | null;
 }
 

@@ -552,8 +552,6 @@ export function EditorPaneContent({
     const handleStart = (e: Event) => {
       const detail = (e as CustomEvent<{
         pageId?: string;
-        notebookId: string;
-        sessionId: string;
         scopeType?: string;
         scopeId?: string;
       }>).detail;
@@ -561,14 +559,17 @@ export function EditorPaneContent({
       const state = useCollabStore.getState();
 
       if (detail.scopeType && detail.scopeType !== "page") {
-        // Scoped session (section/notebook) — activate our page within the scope
+        // Scoped session (section/notebook) — activate our page within the scope.
+        // The store's startScopedSession already set _scope, so activatePage works.
         if (pane.pageId) {
           state.activatePage(pane.pageId);
         }
       } else {
-        // Single-page session — only handle events for our page
+        // Single-page session — only re-render if it's our page.
+        // The store's startSession already created the provider.
         if (detail.pageId !== pane.pageId) return;
-        state.startSession(detail.notebookId, detail.pageId!, "8h");
+        // Trigger a re-read of collabOptions by activating our page
+        state.activatePage(pane.pageId!);
       }
     };
 

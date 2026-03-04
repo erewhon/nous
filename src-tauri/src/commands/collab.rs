@@ -312,6 +312,7 @@ pub struct PageSummary {
     pub id: String,
     pub title: String,
     pub folder_id: Option<String>,
+    pub folder_name: Option<String>,
     pub section_id: Option<String>,
 }
 
@@ -334,26 +335,36 @@ pub async fn list_pages_for_scope(
         .list_pages(nb_id)
         .map_err(|e| format!("Failed to list pages: {}", e))?;
 
+    // Build folder name lookup
+    let folders = store
+        .list_folders(nb_id)
+        .unwrap_or_default();
+    let folder_names: std::collections::HashMap<uuid::Uuid, String> = folders
+        .iter()
+        .map(|f| (f.id, f.name.clone()))
+        .collect();
+
+    let to_summary = |p: crate::storage::Page| -> PageSummary {
+        let folder_name = p.folder_id.and_then(|fid| folder_names.get(&fid).cloned());
+        PageSummary {
+            id: p.id.to_string(),
+            title: p.title,
+            folder_id: p.folder_id.map(|f| f.to_string()),
+            folder_name,
+            section_id: p.section_id.map(|s| s.to_string()),
+        }
+    };
+
     let filtered: Vec<PageSummary> = match scope_type.as_str() {
         "section" => all_pages
             .into_iter()
             .filter(|p| p.section_id == Some(s_id) && !p.is_archived)
-            .map(|p| PageSummary {
-                id: p.id.to_string(),
-                title: p.title,
-                folder_id: p.folder_id.map(|f| f.to_string()),
-                section_id: p.section_id.map(|s| s.to_string()),
-            })
+            .map(to_summary)
             .collect(),
         "notebook" => all_pages
             .into_iter()
             .filter(|p| !p.is_archived)
-            .map(|p| PageSummary {
-                id: p.id.to_string(),
-                title: p.title,
-                folder_id: p.folder_id.map(|f| f.to_string()),
-                section_id: p.section_id.map(|s| s.to_string()),
-            })
+            .map(to_summary)
             .collect(),
         _ => return Err(format!("Invalid scope_type: {}", scope_type)),
     };

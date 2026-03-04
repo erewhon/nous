@@ -7,6 +7,7 @@ interface ManifestPage {
   id: string;
   title: string;
   folderId?: string | null;
+  folderName?: string | null;
   sectionId?: string | null;
 }
 
@@ -71,7 +72,10 @@ export function GuestSidebar({ pages, currentPageId, onSelectPage }: GuestSideba
         ))}
 
         {/* Grouped pages */}
-        {[...grouped.entries()].map(([folderId, folderPages]) => (
+        {[...grouped.entries()].map(([folderId, folderPages]) => {
+          // Get folder name from any page in the group
+          const folderName = folderPages[0]?.folderName || "Folder";
+          return (
           <div key={folderId}>
             <div style={{
               padding: "0.5rem 1rem 0.25rem",
@@ -81,7 +85,7 @@ export function GuestSidebar({ pages, currentPageId, onSelectPage }: GuestSideba
               textTransform: "uppercase",
               letterSpacing: "0.05em",
             }}>
-              Folder
+              {folderName}
             </div>
             {folderPages.map((page) => (
               <PageItem
@@ -93,7 +97,8 @@ export function GuestSidebar({ pages, currentPageId, onSelectPage }: GuestSideba
               />
             ))}
           </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

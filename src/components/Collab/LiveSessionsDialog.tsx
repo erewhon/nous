@@ -5,6 +5,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { usePageStore } from "../../stores/pageStore";
+import { useCollabStore } from "../../collab/collabStore";
 import * as api from "../../collab/api";
 import type { CollabSession } from "../../collab/api";
 
@@ -62,6 +63,11 @@ export function LiveSessionsDialog({ isOpen, onClose }: LiveSessionsDialogProps)
   }, []);
 
   const handleGoToPage = useCallback((session: CollabSession) => {
+    if (!session.pageId) {
+      // Scoped session — just close the dialog (user is already in the notebook)
+      onClose();
+      return;
+    }
     const activePaneId = panes[0]?.id;
     if (activePaneId) {
       openPageInPane(activePaneId, session.pageId);
@@ -71,8 +77,15 @@ export function LiveSessionsDialog({ isOpen, onClose }: LiveSessionsDialogProps)
 
   const handleStopSession = useCallback(async (session: CollabSession) => {
     try {
-      await api.stopCollabSession(session.id);
-      // Dispatch event so EditorPaneContent cleans up if this is the current page
+      const store = useCollabStore.getState();
+      if (store.sessionId === session.id) {
+        // This is the active session — use the store to clean up providers
+        await store.stopSession();
+      } else {
+        // Different session — just stop it on the backend
+        await api.stopCollabSession(session.id);
+      }
+      // Dispatch event so EditorPaneContent re-renders without collab
       window.dispatchEvent(
         new CustomEvent("collab-session-stopped", {
           detail: { pageId: session.pageId },
@@ -158,10 +171,24 @@ export function LiveSessionsDialog({ isOpen, onClose }: LiveSessionsDialogProps)
                 >
                   <div className="flex-1 min-w-0 mr-3">
                     <div
-                      className="text-sm font-medium truncate"
+                      className="text-sm font-medium truncate flex items-center gap-1.5"
                       style={{ color: "var(--color-text-primary)" }}
                     >
-                      {session.pageTitle}
+                      {session.scopeType !== "page" && (
+                        <span
+                          className="text-[10px] px-1.5 py-0.5 rounded font-medium uppercase"
+                          style={{
+                            backgroundColor: "var(--color-accent)",
+                            color: "white",
+                            flexShrink: 0,
+                          }}
+                        >
+                          {session.scopeType}
+                        </span>
+                      )}
+                      <span className="truncate">
+                        {session.pageTitle || session.title || "Untitled"}
+                      </span>
                     </div>
                     <div
                       className="text-xs mt-0.5"
@@ -190,15 +217,17 @@ export function LiveSessionsDialog({ isOpen, onClose }: LiveSessionsDialogProps)
                       </svg>
                     </button>
 
-                    {/* Go to page */}
-                    <button
-                      onClick={() => handleGoToPage(session)}
-                      className="px-2 py-1 rounded text-xs hover:bg-[--color-bg-elevated] transition-colors"
-                      style={{ color: "var(--color-accent)" }}
-                      title="Go to page"
-                    >
-                      Open
-                    </button>
+                    {/* Go to page (only for single-page sessions) */}
+                    {session.pageId && (
+                      <button
+                        onClick={() => handleGoToPage(session)}
+                        className="px-2 py-1 rounded text-xs hover:bg-[--color-bg-elevated] transition-colors"
+                        style={{ color: "var(--color-accent)" }}
+                        title="Go to page"
+                      >
+                        Open
+                      </button>
+                    )}
 
                     {/* Stop */}
                     <button

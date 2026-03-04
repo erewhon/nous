@@ -49,6 +49,8 @@ import {
 import { useThemeStore } from "../../stores/themeStore";
 import { useBlockNoteHeaderCollapse } from "./useBlockNoteHeaderCollapse";
 import { useChecklistSort } from "./useChecklistSort";
+import { useBlockAttribution } from "../../hooks/useBlockAttribution";
+import { getCollabProvider } from "../../collab/collabStore";
 import type { EditorData } from "../../types/page";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -301,6 +303,34 @@ export const BlockNoteEditor = memo(
 
       // ─── Checklist sort (checked items to bottom of run) ───────────
       useChecklistSort(editor);
+
+      // ─── Block attribution (collab hover tooltips) ─────────────────
+      const provider = pageId ? getCollabProvider(pageId) : null;
+      useBlockAttribution({
+        containerRef: wrapperRef,
+        provider,
+        enabled: !!collaboration && !!provider,
+      });
+
+      // Track attribution when blocks are edited during collab
+      const providerRef = useRef(provider);
+      providerRef.current = provider;
+      useEffect(() => {
+        if (!collaboration || !providerRef.current) return;
+        const p = providerRef.current;
+        // Listen to local Yjs doc changes to track attribution
+        const handleYjsUpdate = (_update: Uint8Array, origin: unknown) => {
+          // Only track local changes (origin is the provider for remote changes)
+          if (origin === p.provider) return;
+          // Get cursor block from editor
+          const cursor = editor.getTextCursorPosition();
+          if (cursor?.block?.id) {
+            p.setBlockAttribution(cursor.block.id, { name: "Owner", color: "#3b82f6" });
+          }
+        };
+        p.doc.on("update", handleYjsUpdate);
+        return () => { p.doc.off("update", handleYjsUpdate); };
+      }, [collaboration, editor]);
 
       // ─── Slash menu with multi-column items ─────────────────────────
       const getSlashMenuItems = useMemo(() => {

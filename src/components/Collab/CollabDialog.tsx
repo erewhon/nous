@@ -8,6 +8,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { usePageStore } from "../../stores/pageStore";
+import { useCollabStore } from "../../collab/collabStore";
 import * as api from "../../collab/api";
 
 interface CollabDialogProps {
@@ -50,7 +51,7 @@ export function CollabDialog({
   const [readOnlyShareUrl, setReadOnlyShareUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [_sessionId, setSessionId] = useState<string | null>(null);
   const [shareMode, setShareMode] = useState<ShareMode>("edit");
   const [scopeType, setScopeType] = useState<ScopeType>(initialScopeType || "page");
 
@@ -116,48 +117,51 @@ export function CollabDialog({
     setError(null);
 
     try {
+      const store = useCollabStore.getState();
+
       if (scopeType === "page") {
         if (!pageId) return;
-        const response = await api.startCollabSession(notebookId, pageId, expiry);
-        setShareUrl(response.session.shareUrl);
-        setReadOnlyShareUrl(response.session.readOnlyShareUrl ?? null);
-        setSessionId(response.session.id);
+        // Use the store — sets _scope, creates provider, etc.
+        await store.startSession(notebookId, pageId, expiry);
+
+        // Read back from store
+        const state = useCollabStore.getState();
+        if (state.error) {
+          setError(state.error);
+          setDialogState("configure");
+          return;
+        }
+        setShareUrl(state.scope?.shareUrl ?? null);
+        setReadOnlyShareUrl(state.scope?.readOnlyShareUrl ?? null);
+        setSessionId(state.sessionId);
         setDialogState("active");
 
-        // Dispatch event so EditorPaneContent can pick up the session
+        // Notify EditorPaneContent to pick up collabOptions (re-render with collab)
         window.dispatchEvent(
           new CustomEvent("collab-session-started", {
-            detail: {
-              pageId,
-              notebookId,
-              roomId: response.roomId,
-              token: response.token,
-              partykitHost: response.partykitHost,
-              sessionId: response.session.id,
-              scopeType: "page",
-            },
+            detail: { pageId, scopeType: "page" },
           })
         );
       } else {
-        // Section or notebook scope
+        // Section or notebook scope — use the store
         const scopeId = scopeType === "section" ? sectionId! : notebookId;
-        const response = await api.startCollabSessionScoped(notebookId, scopeType, scopeId, expiry);
-        setShareUrl(response.session.shareUrl);
-        setReadOnlyShareUrl(response.session.readOnlyShareUrl ?? null);
-        setSessionId(response.session.id);
+        await store.startScopedSession(notebookId, scopeType, scopeId, expiry);
+
+        const state = useCollabStore.getState();
+        if (state.error) {
+          setError(state.error);
+          setDialogState("configure");
+          return;
+        }
+        setShareUrl(state.scope?.shareUrl ?? null);
+        setReadOnlyShareUrl(state.scope?.readOnlyShareUrl ?? null);
+        setSessionId(state.sessionId);
         setDialogState("active");
 
-        // Dispatch event for scoped session
+        // Notify all EditorPaneContent instances to activate their page
         window.dispatchEvent(
           new CustomEvent("collab-session-started", {
-            detail: {
-              notebookId,
-              token: response.token,
-              partykitHost: response.partykitHost,
-              sessionId: response.session.id,
-              scopeType,
-              scopeId,
-            },
+            detail: { scopeType, scopeId },
           })
         );
       }
@@ -168,15 +172,10 @@ export function CollabDialog({
   }, [notebookId, pageId, expiry, scopeType, sectionId]);
 
   const handleStop = useCallback(async () => {
-    if (sessionId) {
-      try {
-        await api.stopCollabSession(sessionId);
-      } catch (err) {
-        console.warn("Failed to stop session:", err);
-      }
-    }
+    // Use the store to stop — handles provider cleanup + backend call
+    await useCollabStore.getState().stopSession();
 
-    // Dispatch event to clean up the provider
+    // Dispatch event so EditorPaneContent re-renders without collab
     window.dispatchEvent(
       new CustomEvent("collab-session-stopped", {
         detail: { pageId },
@@ -187,7 +186,7 @@ export function CollabDialog({
     setShareUrl(null);
     setReadOnlyShareUrl(null);
     setSessionId(null);
-  }, [sessionId, pageId]);
+  }, [pageId]);
 
   const handleCopy = useCallback(async () => {
     if (activeUrl) {
