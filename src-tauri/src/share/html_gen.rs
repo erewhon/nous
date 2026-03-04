@@ -161,6 +161,8 @@ pub fn generate_share_site(
         notebook_id,
         pages,
         folders,
+        &[],
+        false,
         &temp_dir,
         theme_name,
         site_title,

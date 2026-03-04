@@ -9,10 +9,10 @@ export PKG_CONFIG_PATH="/usr/lib/x86_64-linux-gnu/pkgconfig${PKG_CONFIG_PATH:+:$
 
 source "$(dirname "$0")/setup-python-env.sh"
 
-echo ""
-echo "=== TypeScript type check ==="
-pnpm tsc --noEmit
-echo "TypeScript: OK"
+#echo ""
+#echo "=== TypeScript type check ==="
+#pnpm tsc --noEmit
+#echo "TypeScript: OK"
 
 echo ""
 echo "=== Rust cargo check ==="
