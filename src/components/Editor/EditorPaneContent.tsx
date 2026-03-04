@@ -187,6 +187,31 @@ export function EditorPaneContent({
     return () => document.removeEventListener("keydown", handler, true);
   }, [isActive, editorKeymap, search]);
 
+  // Vim search events (/, n, N)
+  useEffect(() => {
+    const container = editorScrollRef.current;
+    if (!container || !isActive) return;
+
+    const onOpenSearch = () => {
+      setShowSearch(true);
+    };
+    const onSearchNext = () => {
+      if (showSearch) search.goToNext();
+    };
+    const onSearchPrev = () => {
+      if (showSearch) search.goToPrevious();
+    };
+
+    container.addEventListener("vim:open-search", onOpenSearch);
+    container.addEventListener("vim:search-next", onSearchNext);
+    container.addEventListener("vim:search-prev", onSearchPrev);
+    return () => {
+      container.removeEventListener("vim:open-search", onOpenSearch);
+      container.removeEventListener("vim:search-next", onSearchNext);
+      container.removeEventListener("vim:search-prev", onSearchPrev);
+    };
+  }, [isActive, showSearch, search]);
+
   // Close search on page switch
   useEffect(() => {
     if (showSearch) {

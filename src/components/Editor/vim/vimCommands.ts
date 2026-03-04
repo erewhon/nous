@@ -657,3 +657,382 @@ export function clampCursorToContent(
     );
   }
 }
+
+// ─── Motion result system for operator+motion combos ─────────────────────────
+
+export interface MotionResult {
+  from: number;
+  to: number;
+  linewise: boolean;
+}
+
+/** Set of motions that are characterwise (not linewise). */
+const CHARWISE_MOTIONS = new Set([
+  "w",
+  "b",
+  "e",
+  "h",
+  "l",
+  "0",
+  "^",
+  "$",
+  "f",
+  "F",
+  "t",
+  "T",
+]);
+
+/**
+ * Execute a motion and return the range it covers.
+ * The cursor is moved as a side effect, then we compute from/to.
+ */
+export function executeMotion(
+  view: EditorView,
+  bnEditor: BlockNoteEditor<any, any, any>,
+  state: VimState,
+  motionKey: string,
+  motionArg?: string,
+): MotionResult | null {
+  const before = view.state.selection.from;
+
+  // Execute the motion
+  switch (motionKey) {
+    case "w":
+      moveWordForward(view, bnEditor, state);
+      break;
+    case "b":
+      moveWordBackward(view, bnEditor, state);
+      break;
+    case "e":
+      moveWordEnd(view, bnEditor, state);
+      break;
+    case "h":
+      moveLeft(view, bnEditor, state);
+      break;
+    case "l":
+      moveRight(view, bnEditor, state);
+      break;
+    case "0":
+      moveLineStart(view);
+      break;
+    case "^":
+      moveFirstNonWhitespace(view);
+      break;
+    case "$":
+      moveLineEnd(view);
+      break;
+    case "j":
+      moveDown(view, bnEditor, state);
+      break;
+    case "k":
+      moveUp(view, bnEditor, state);
+      break;
+    case "G":
+      if (state.count > 0) {
+        const doc = bnEditor.document;
+        const idx = Math.min(state.count - 1, doc.length - 1);
+        if (idx >= 0 && doc[idx]) {
+          bnEditor.setTextCursorPosition(doc[idx].id, "start");
+        }
+      } else {
+        moveDocEnd(bnEditor);
+      }
+      break;
+    case "gg":
+      moveDocStart(bnEditor);
+      break;
+    case "f":
+      if (motionArg) findCharForward(view, motionArg, state, false);
+      break;
+    case "F":
+      if (motionArg) findCharBackward(view, motionArg, state, false);
+      break;
+    case "t":
+      if (motionArg) findCharForward(view, motionArg, state, true);
+      break;
+    case "T":
+      if (motionArg) findCharBackward(view, motionArg, state, true);
+      break;
+    default:
+      return null;
+  }
+
+  const after = view.state.selection.from;
+  if (after === before && motionKey !== "0" && motionKey !== "^") return null;
+
+  const linewise = !CHARWISE_MOTIONS.has(motionKey);
+
+  // For 'e' motion (inclusive): extend to include the character at cursor
+  let to = after;
+  if (motionKey === "e" && after > before) {
+    to = after + 1;
+    // Clamp to block end
+    const $pos = view.state.doc.resolve(after);
+    to = Math.min(to, $pos.end());
+  }
+
+  return { from: before, to, linewise };
+}
+
+// ─── Operator application ────────────────────────────────────────────────────
+
+/**
+ * Apply an operator to a charwise range within the current block's text node.
+ * Returns the yanked text.
+ */
+export function applyOperatorCharwise(
+  view: EditorView,
+  operator: "d" | "c" | "y",
+  from: number,
+  to: number,
+): string {
+  const lo = Math.min(from, to);
+  const hi = Math.max(from, to);
+
+  // Clamp to the same text node (block)
+  const $lo = view.state.doc.resolve(lo);
+  const blockStart = $lo.start();
+  const blockEnd = $lo.end();
+  const clampedLo = Math.max(lo, blockStart);
+  const clampedHi = Math.min(hi, blockEnd);
+
+  if (clampedLo >= clampedHi) return "";
+
+  const yanked = view.state.doc.textBetween(clampedLo, clampedHi);
+
+  if (operator === "d" || operator === "c") {
+    view.dispatch(view.state.tr.delete(clampedLo, clampedHi));
+  } else {
+    // yank — restore cursor to original position
+    view.dispatch(
+      view.state.tr.setSelection(
+        TextSelection.create(view.state.doc, from),
+      ),
+    );
+  }
+
+  return yanked;
+}
+
+/**
+ * Apply a linewise operator using BlockNote API.
+ * Operates on blocks between the cursor's original block and the motion target.
+ * Returns the yanked text.
+ */
+export function applyOperatorLinewise(
+  view: EditorView,
+  bnEditor: BlockNoteEditor<any, any, any>,
+  operator: "d" | "c" | "y",
+  fromPos: number,
+  toPos: number,
+): string {
+  // Find the blocks that span from fromPos to toPos
+  const doc = bnEditor.document;
+
+  // Find block containing fromPos and block containing toPos
+  const fromBlock = bnEditor.getTextCursorPosition()?.block;
+  if (!fromBlock) return "";
+
+  // For linewise, we need to figure out which blocks are in range
+  // Move cursor back to fromPos to find the original block
+  try {
+    view.dispatch(
+      view.state.tr.setSelection(
+        TextSelection.create(view.state.doc, fromPos),
+      ),
+    );
+  } catch {
+    // Position may be invalid after motion
+  }
+
+  const startCursor = bnEditor.getTextCursorPosition();
+  if (!startCursor) return "";
+  const startBlock = startCursor.block;
+
+  // Move to toPos to find end block
+  try {
+    view.dispatch(
+      view.state.tr.setSelection(
+        TextSelection.create(view.state.doc, toPos),
+      ),
+    );
+  } catch {
+    // Position may be invalid
+  }
+
+  const endCursor = bnEditor.getTextCursorPosition();
+  if (!endCursor) return "";
+  const endBlock = endCursor.block;
+
+  // Collect blocks from start to end
+  const startIdx = doc.findIndex((b) => b.id === startBlock.id);
+  const endIdx = doc.findIndex((b) => b.id === endBlock.id);
+  if (startIdx < 0 || endIdx < 0) return "";
+
+  const lo = Math.min(startIdx, endIdx);
+  const hi = Math.max(startIdx, endIdx);
+  const blocks = doc.slice(lo, hi + 1);
+
+  const yanked = blocks
+    .map((b) => {
+      const content = b.content;
+      if (Array.isArray(content)) {
+        return content.map((c: any) => c.text ?? "").join("");
+      }
+      return "";
+    })
+    .join("\n");
+
+  if (operator === "d") {
+    const nextBlock = hi + 1 < doc.length ? doc[hi + 1] : null;
+    const prevBlock = lo > 0 ? doc[lo - 1] : null;
+    bnEditor.removeBlocks(blocks.map((b) => b.id));
+    if (nextBlock) {
+      bnEditor.setTextCursorPosition(nextBlock.id, "start");
+    } else if (prevBlock) {
+      bnEditor.setTextCursorPosition(prevBlock.id, "start");
+    }
+  } else if (operator === "c") {
+    // Clear first block, remove rest
+    if (blocks.length > 1) {
+      bnEditor.removeBlocks(blocks.slice(1).map((b) => b.id));
+    }
+    bnEditor.updateBlock(blocks[0].id, { content: "" });
+    bnEditor.setTextCursorPosition(blocks[0].id, "start");
+  } else {
+    // yank — restore cursor
+    bnEditor.setTextCursorPosition(startBlock.id, "start");
+  }
+
+  return yanked;
+}
+
+// ─── Inline paste (charwise) ─────────────────────────────────────────────────
+
+export function pasteInline(
+  view: EditorView,
+  register: string,
+  after: boolean,
+): boolean {
+  if (!register) return true;
+
+  const { from } = view.state.selection;
+  const $pos = view.state.doc.resolve(from);
+  const insertPos = after ? Math.min(from + 1, $pos.end()) : from;
+
+  view.dispatch(view.state.tr.insertText(register, insertPos));
+  // Place cursor at end of pasted text minus 1 (vim convention)
+  const endPos = insertPos + register.length - 1;
+  view.dispatch(
+    view.state.tr.setSelection(
+      TextSelection.create(view.state.doc, Math.max(insertPos, endPos)),
+    ),
+  );
+
+  return true;
+}
+
+// ─── Bracket matching (%) ────────────────────────────────────────────────────
+
+const BRACKET_PAIRS: Record<string, string> = {
+  "(": ")",
+  "[": "]",
+  "{": "}",
+  ")": "(",
+  "]": "[",
+  "}": "{",
+};
+const OPEN_BRACKETS = new Set(["(", "[", "{"]);
+
+export function matchBracket(view: EditorView): boolean {
+  const { from } = view.state.selection;
+  const $pos = view.state.doc.resolve(from);
+  const blockStart = $pos.start();
+  const blockEnd = $pos.end();
+  const text = view.state.doc.textBetween(blockStart, blockEnd);
+  const cursorOffset = from - blockStart;
+
+  if (cursorOffset >= text.length) return true;
+
+  const ch = text[cursorOffset];
+  const match = BRACKET_PAIRS[ch];
+  if (!match) return true;
+
+  if (OPEN_BRACKETS.has(ch)) {
+    // Scan forward
+    let depth = 1;
+    for (let i = cursorOffset + 1; i < text.length; i++) {
+      if (text[i] === ch) depth++;
+      if (text[i] === match) depth--;
+      if (depth === 0) {
+        view.dispatch(
+          view.state.tr.setSelection(
+            TextSelection.create(view.state.doc, blockStart + i),
+          ),
+        );
+        return true;
+      }
+    }
+  } else {
+    // Scan backward
+    let depth = 1;
+    for (let i = cursorOffset - 1; i >= 0; i--) {
+      if (text[i] === ch) depth++;
+      if (text[i] === match) depth--;
+      if (depth === 0) {
+        view.dispatch(
+          view.state.tr.setSelection(
+            TextSelection.create(view.state.doc, blockStart + i),
+          ),
+        );
+        return true;
+      }
+    }
+  }
+
+  return true;
+}
+
+// ─── Half-page scroll (Ctrl+D / Ctrl+U) ─────────────────────────────────────
+
+export function scrollHalfPageDown(
+  _view: EditorView,
+  bnEditor: BlockNoteEditor<any, any, any>,
+  count: number = 15,
+): boolean {
+  const cursor = bnEditor.getTextCursorPosition();
+  if (!cursor) return false;
+
+  let block = cursor.block;
+  for (let i = 0; i < count; i++) {
+    const next = bnEditor.getNextBlock(block);
+    if (!next) break;
+    block = next;
+  }
+
+  if (block.id !== cursor.block.id) {
+    bnEditor.setTextCursorPosition(block.id, "start");
+  }
+  return true;
+}
+
+export function scrollHalfPageUp(
+  _view: EditorView,
+  bnEditor: BlockNoteEditor<any, any, any>,
+  count: number = 15,
+): boolean {
+  const cursor = bnEditor.getTextCursorPosition();
+  if (!cursor) return false;
+
+  let block = cursor.block;
+  for (let i = 0; i < count; i++) {
+    const prev = bnEditor.getPrevBlock(block);
+    if (!prev) break;
+    block = prev;
+  }
+
+  if (block.id !== cursor.block.id) {
+    bnEditor.setTextCursorPosition(block.id, "start");
+  }
+  return true;
+}
