@@ -1,4 +1,4 @@
-import type { VimMode } from "./useVimMode";
+import type { VimMode } from "./vim/vimTypes";
 
 interface VimModeIndicatorProps {
   mode: VimMode;

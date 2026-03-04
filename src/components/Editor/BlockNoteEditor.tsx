@@ -47,6 +47,9 @@ import {
   type BNDocument,
 } from "../../utils/blockFormatConverter";
 import { useThemeStore } from "../../stores/themeStore";
+import { useVimStore } from "../../stores/vimStore";
+import { VimExtension } from "./vim";
+import { VimModeIndicator } from "./VimModeIndicator";
 import { useBlockNoteHeaderCollapse } from "./useBlockNoteHeaderCollapse";
 import { useChecklistSort } from "./useChecklistSort";
 import { useBlockAttribution } from "../../hooks/useBlockAttribution";
@@ -158,6 +161,28 @@ export const BlockNoteEditor = memo(
         [],
       );
 
+      // ─── Vim extension ────────────────────────────────────────────
+      // Always registered; checks enabled() on every keydown so toggling
+      // the keymap setting doesn't require editor recreation.
+      const editorKeymap = useThemeStore((s) => s.settings.editorKeymap);
+      const editorKeymapRef = useRef(editorKeymap);
+      editorKeymapRef.current = editorKeymap;
+
+      const vimSetMode = useVimStore((s) => s.setMode);
+      const vimSetPendingKeys = useVimStore((s) => s.setPendingKeys);
+
+      const vimExtension = useMemo(
+        () =>
+          VimExtension({
+            enabled: () =>
+              editorKeymapRef.current === "vim" && !readOnly,
+            onModeChange: vimSetMode,
+            onPendingKeysChange: vimSetPendingKeys,
+          }),
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- stable refs, create once
+        [],
+      );
+
       // Create BlockNote editor
       // When collaboration is active, don't pass initialContent — Yjs doc is the source of truth
       const editor = useCreateBlockNote({
@@ -166,6 +191,7 @@ export const BlockNoteEditor = memo(
         collaboration,
         dropCursor: multiColumnDropCursor,
         dictionary,
+        extensions: [vimExtension],
       });
 
       // ─── Seed Yjs fragment with page content after initial sync ─────
@@ -344,6 +370,11 @@ export const BlockNoteEditor = memo(
           );
       }, [editor]);
 
+      // ─── Vim mode indicator state ──────────────────────────────────
+      const vimMode = useVimStore((s) => s.mode);
+      const vimPendingKeys = useVimStore((s) => s.pendingKeys);
+      const isVimEnabled = editorKeymap === "vim" && !readOnly;
+
       return (
         <div
           ref={wrapperRef}
@@ -362,6 +393,14 @@ export const BlockNoteEditor = memo(
               getItems={getSlashMenuItems}
             />
           </BlockNoteView>
+          {isVimEnabled && (
+            <div className="pointer-events-none fixed bottom-16 left-4 z-50">
+              <VimModeIndicator
+                mode={vimMode}
+                pendingKeys={vimPendingKeys}
+              />
+            </div>
+          )}
         </div>
       );
     },
