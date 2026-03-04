@@ -74,6 +74,20 @@ struct AppendPageRequest {
 }
 
 #[derive(Deserialize)]
+struct DeleteBlockRequest {
+    block_id: String,
+}
+
+#[derive(Deserialize)]
+struct ReplaceBlockRequest {
+    block_id: String,
+    /// Plain text content (double newlines become separate paragraphs)
+    content: Option<String>,
+    /// Structured Editor.js blocks (takes priority over `content`)
+    blocks: Option<Vec<EditorBlock>>,
+}
+
+#[derive(Deserialize)]
 struct CreateDailyNoteRequest {
     template_id: Option<String>,
 }
@@ -157,6 +171,14 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/api/notebooks/{notebook_id}/pages/{page_id}/append",
             post(append_to_page),
+        )
+        .route(
+            "/api/notebooks/{notebook_id}/pages/{page_id}/delete-block",
+            post(delete_block),
+        )
+        .route(
+            "/api/notebooks/{notebook_id}/pages/{page_id}/replace-block",
+            post(replace_block),
         )
         .route(
             "/api/notebooks/{notebook_id}/daily-notes/{date}",
@@ -557,6 +579,93 @@ async fn append_to_page(
         return Err(api_err(StatusCode::BAD_REQUEST, "Either 'content' or 'blocks' is required"));
     };
     page.content.blocks.extend(new_blocks);
+    page.updated_at = chrono::Utc::now();
+
+    if let Err(e) = storage.update_page(&page) {
+        return Err(api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()));
+    }
+
+    state.sync_manager.queue_page_update(nb_id, pg_id);
+
+    Ok(Json(ApiResponse { data: page }))
+}
+
+async fn delete_block(
+    State(state): State<AppState>,
+    Path((notebook_id, page_id)): Path<(String, String)>,
+    Json(req): Json<DeleteBlockRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let nb_id = parse_uuid(&notebook_id)?;
+    let pg_id = parse_uuid(&page_id)?;
+    let storage = state.storage.lock().unwrap();
+
+    let mut page = match storage.get_page(nb_id, pg_id) {
+        Ok(p) => p,
+        Err(e) => return Err(api_err(StatusCode::NOT_FOUND, e.to_string())),
+    };
+
+    let before_len = page.content.blocks.len();
+    page.content.blocks.retain(|b| b.id != req.block_id);
+
+    if page.content.blocks.len() == before_len {
+        return Err(api_err(
+            StatusCode::NOT_FOUND,
+            format!("Block not found: {}", req.block_id),
+        ));
+    }
+
+    page.updated_at = chrono::Utc::now();
+
+    if let Err(e) = storage.update_page(&page) {
+        return Err(api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()));
+    }
+
+    state.sync_manager.queue_page_update(nb_id, pg_id);
+
+    Ok(Json(ApiResponse { data: page }))
+}
+
+async fn replace_block(
+    State(state): State<AppState>,
+    Path((notebook_id, page_id)): Path<(String, String)>,
+    Json(req): Json<ReplaceBlockRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let nb_id = parse_uuid(&notebook_id)?;
+    let pg_id = parse_uuid(&page_id)?;
+    let storage = state.storage.lock().unwrap();
+
+    let mut page = match storage.get_page(nb_id, pg_id) {
+        Ok(p) => p,
+        Err(e) => return Err(api_err(StatusCode::NOT_FOUND, e.to_string())),
+    };
+
+    let new_blocks = if let Some(blocks) = req.blocks {
+        blocks
+    } else if let Some(text) = req.content {
+        text_to_blocks(&text)
+    } else {
+        return Err(api_err(
+            StatusCode::BAD_REQUEST,
+            "Either 'content' or 'blocks' is required",
+        ));
+    };
+
+    let pos = page.content.blocks.iter().position(|b| b.id == req.block_id);
+    match pos {
+        Some(idx) => {
+            page.content.blocks.remove(idx);
+            for (i, block) in new_blocks.into_iter().enumerate() {
+                page.content.blocks.insert(idx + i, block);
+            }
+        }
+        None => {
+            return Err(api_err(
+                StatusCode::NOT_FOUND,
+                format!("Block not found: {}", req.block_id),
+            ));
+        }
+    }
+
     page.updated_at = chrono::Utc::now();
 
     if let Err(e) = storage.update_page(&page) {

@@ -585,6 +585,76 @@ def toggle_checklist_item(
     )
 
 
+@mcp.tool()
+def delete_block(
+    notebook: str,
+    page: str,
+    block_id: str,
+) -> str:
+    """Delete a block from a page by its block ID.
+
+    Args:
+        notebook: Notebook name or UUID.
+        page: Page title (prefix match) or UUID.
+        block_id: The ID of the block to delete (from get_page format="json").
+
+    Returns JSON with id, title, blockCount.
+    """
+    storage = _get_storage()
+    daemon = _get_daemon()
+    nb = storage.resolve_notebook(notebook)
+    pg = daemon.resolve_page(nb["id"], page)
+
+    updated = daemon.delete_block(nb["id"], pg["id"], block_id=block_id)
+
+    return json.dumps(
+        {
+            "id": updated["id"],
+            "title": updated["title"],
+            "blockCount": len(updated.get("content", {}).get("blocks", [])),
+        },
+        indent=2,
+    )
+
+
+@mcp.tool()
+def replace_block(
+    notebook: str,
+    page: str,
+    block_id: str,
+    content: str,
+) -> str:
+    """Replace a block in a page with new markdown content.
+
+    Args:
+        notebook: Notebook name or UUID.
+        page: Page title (prefix match) or UUID.
+        block_id: The ID of the block to replace (from get_page format="json").
+        content: Markdown text to replace the block with. Can produce multiple blocks.
+
+    Returns JSON with id, title, blocksInserted.
+    """
+    storage = _get_storage()
+    daemon = _get_daemon()
+    nb = storage.resolve_notebook(notebook)
+    pg = daemon.resolve_page(nb["id"], page)
+
+    new_blocks = _markdown_to_blocks(content)
+    if not new_blocks:
+        raise ValueError("Content produced no blocks")
+
+    daemon.replace_block(nb["id"], pg["id"], block_id=block_id, blocks=new_blocks)
+
+    return json.dumps(
+        {
+            "id": pg["id"],
+            "title": pg.get("title"),
+            "blocksInserted": len(new_blocks),
+        },
+        indent=2,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Database tools
 # ---------------------------------------------------------------------------

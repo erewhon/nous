@@ -79,6 +79,7 @@ export class CollabProvider {
         party: "collab-server",
         params: { token: options.token },
         connect: true,
+        maxBackoffTime: 30000,
       }
     );
 

@@ -173,6 +173,40 @@ class NousDaemonClient:
         )
         return self._unwrap(resp)
 
+    def delete_block(
+        self,
+        notebook_id: str,
+        page_id: str,
+        *,
+        block_id: str,
+    ) -> dict:
+        body = {"block_id": block_id}
+        resp = self.client.post(
+            self._url(f"/api/notebooks/{notebook_id}/pages/{page_id}/delete-block"),
+            json=body,
+        )
+        return self._unwrap(resp)
+
+    def replace_block(
+        self,
+        notebook_id: str,
+        page_id: str,
+        *,
+        block_id: str,
+        blocks: list[dict] | None = None,
+        content: str | None = None,
+    ) -> dict:
+        body: dict[str, Any] = {"block_id": block_id}
+        if blocks is not None:
+            body["blocks"] = blocks
+        elif content is not None:
+            body["content"] = content
+        resp = self.client.post(
+            self._url(f"/api/notebooks/{notebook_id}/pages/{page_id}/replace-block"),
+            json=body,
+        )
+        return self._unwrap(resp)
+
     # --- Search ---
 
     def search_pages(

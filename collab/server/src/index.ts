@@ -246,28 +246,50 @@ export class CollabServer extends YServer {
 /** In-memory manifest cache (TTL-based, falls back to KV if available) */
 const manifestCache = new Map<string, { data: ManifestPage[]; expiresAt: number }>();
 
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+};
+
+function corsJson(body: string | object, status = 200): Response {
+  return new Response(typeof body === "string" ? body : JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+  });
+}
+
+function corsError(message: string, status: number): Response {
+  return new Response(message, { status, headers: CORS_HEADERS });
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
+
+    // CORS preflight for all API routes
+    if (request.method === "OPTIONS" && url.pathname.startsWith("/api/")) {
+      return new Response(null, { headers: CORS_HEADERS });
+    }
 
     // Manifest API: store/retrieve page lists for scoped sessions
     if (url.pathname.startsWith("/api/manifest/")) {
       const sessionId = url.pathname.split("/api/manifest/")[1];
       if (!sessionId) {
-        return new Response("Missing session ID", { status: 400 });
+        return corsError("Missing session ID", 400);
       }
 
       // Verify token for manifest access
       const authHeader = request.headers.get("Authorization");
       const token = authHeader?.replace("Bearer ", "") || url.searchParams.get("token");
       if (!token) {
-        return new Response("Missing token", { status: 401 });
+        return corsError("Missing token", 401);
       }
 
       try {
         await verifyToken(token, env.COLLAB_HMAC_SECRET);
       } catch {
-        return new Response("Invalid token", { status: 403 });
+        return corsError("Invalid token", 403);
       }
 
       if (request.method === "POST") {
@@ -290,21 +312,14 @@ export default {
           );
         }
 
-        return new Response(JSON.stringify({ ok: true }), {
-          headers: { "Content-Type": "application/json" },
-        });
+        return corsJson({ ok: true });
       }
 
       if (request.method === "GET") {
         // Check in-memory cache first
         const cached = manifestCache.get(sessionId);
         if (cached && cached.expiresAt > Date.now()) {
-          return new Response(JSON.stringify(cached.data), {
-            headers: {
-              "Content-Type": "application/json",
-              "Access-Control-Allow-Origin": "*",
-            },
-          });
+          return corsJson(cached.data);
         }
 
         // Fall back to KV
@@ -317,30 +332,14 @@ export default {
               data,
               expiresAt: Date.now() + 24 * 60 * 60 * 1000,
             });
-            return new Response(stored, {
-              headers: {
-                "Content-Type": "application/json",
-                "Access-Control-Allow-Origin": "*",
-              },
-            });
+            return corsJson(stored);
           }
         }
 
-        return new Response("Not found", { status: 404 });
+        return corsError("Not found", 404);
       }
 
-      return new Response("Method not allowed", { status: 405 });
-    }
-
-    // CORS preflight for manifest API
-    if (request.method === "OPTIONS" && url.pathname.startsWith("/api/")) {
-      return new Response(null, {
-        headers: {
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-          "Access-Control-Allow-Headers": "Content-Type, Authorization",
-        },
-      });
+      return corsError("Method not allowed", 405);
     }
 
     return (

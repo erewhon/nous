@@ -93,6 +93,7 @@ export function GuestApp() {
         party: "collab-server",
         params: { token },
         connect: true,
+        maxBackoffTime: 30000,
       }
     );
 

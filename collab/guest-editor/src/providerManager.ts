@@ -46,6 +46,7 @@ export function getOrCreateProvider(
       party: "collab-server",
       params: { token },
       connect: true,
+      maxBackoffTime: 30000,
     }
   );
 
