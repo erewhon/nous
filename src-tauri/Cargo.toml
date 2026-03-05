@@ -117,6 +117,7 @@ crossterm = { version = "0.28", optional = true }
 mlua = { version = "0.10", features = ["lua54", "vendored", "serialize"], optional = true }
 bitflags = { version = "2", optional = true }
 toml = { version = "0.8", optional = true }
+extism = { version = "1.9", optional = true }
 
 # WebKitGTK access (Linux-only) for media permission handling
 [target.'cfg(target_os = "linux")'.dependencies]
@@ -125,7 +126,7 @@ webkit2gtk = "2.0"
 [features]
 default = ["tui", "plugins"]
 tui = ["dep:ratatui", "dep:crossterm"]
-plugins = ["dep:mlua", "dep:bitflags", "dep:toml"]
+plugins = ["dep:mlua", "dep:bitflags", "dep:toml", "dep:extism"]
 
 [dev-dependencies]
 tempfile = "3"

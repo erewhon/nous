@@ -309,6 +309,7 @@ pub fn run() {
             Arc::clone(&inbox_storage_arc),
         );
         api.set_search_index(Arc::clone(&search_index_arc));
+        api.set_energy_storage(Arc::clone(&energy_storage_arc));
         let api = Arc::new(api);
         let mut host = plugins::PluginHost::new(api, library_path.join("plugins"));
         if let Err(e) = host.load_all() {

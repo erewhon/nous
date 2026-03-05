@@ -333,6 +333,296 @@ impl LuaPlugin {
             })?;
         }
 
+        // -- Page WRITE APIs --
+        {
+            let api_ref = Arc::clone(api);
+            let pid = plugin_id.clone();
+            let c = caps;
+            let page_create = self.lua.create_function(move |_, (notebook_id, title): (String, String)| {
+                let result = api_ref.page_create(c, &pid, &notebook_id, &title)
+                    .map_err(|e| LuaError::external(e))?;
+                let s = serde_json::to_string(&result)
+                    .map_err(|e| LuaError::external(e))?;
+                Ok(s)
+            }).map_err(|e| PluginError::InitFailed(format!("page_create: {e}")))?;
+            nous.set("page_create", page_create).map_err(|e| {
+                PluginError::InitFailed(format!("set page_create: {e}"))
+            })?;
+        }
+
+        {
+            let api_ref = Arc::clone(api);
+            let pid = plugin_id.clone();
+            let c = caps;
+            let page_update = self.lua.create_function(
+                move |_, (notebook_id, page_id, title, content, tags_json): (String, String, Option<String>, Option<String>, Option<String>)| {
+                    let result = api_ref
+                        .page_update(c, &pid, &notebook_id, &page_id, title.as_deref(), content.as_deref(), tags_json.as_deref())
+                        .map_err(|e| LuaError::external(e))?;
+                    let s = serde_json::to_string(&result).map_err(|e| LuaError::external(e))?;
+                    Ok(s)
+                },
+            ).map_err(|e| PluginError::InitFailed(format!("page_update: {e}")))?;
+            nous.set("page_update", page_update).map_err(|e| {
+                PluginError::InitFailed(format!("set page_update: {e}"))
+            })?;
+        }
+
+        {
+            let api_ref = Arc::clone(api);
+            let pid = plugin_id.clone();
+            let c = caps;
+            let page_append = self.lua.create_function(move |_, (notebook_id, page_id, content): (String, String, String)| {
+                let result = api_ref.page_append(c, &pid, &notebook_id, &page_id, &content)
+                    .map_err(|e| LuaError::external(e))?;
+                let s = serde_json::to_string(&result)
+                    .map_err(|e| LuaError::external(e))?;
+                Ok(s)
+            }).map_err(|e| PluginError::InitFailed(format!("page_append: {e}")))?;
+            nous.set("page_append", page_append).map_err(|e| {
+                PluginError::InitFailed(format!("set page_append: {e}"))
+            })?;
+        }
+
+        {
+            let api_ref = Arc::clone(api);
+            let pid = plugin_id.clone();
+            let c = caps;
+            let page_delete = self.lua.create_function(move |_, (notebook_id, page_id): (String, String)| {
+                let result = api_ref.page_delete(c, &pid, &notebook_id, &page_id)
+                    .map_err(|e| LuaError::external(e))?;
+                let s = serde_json::to_string(&result)
+                    .map_err(|e| LuaError::external(e))?;
+                Ok(s)
+            }).map_err(|e| PluginError::InitFailed(format!("page_delete: {e}")))?;
+            nous.set("page_delete", page_delete).map_err(|e| {
+                PluginError::InitFailed(format!("set page_delete: {e}"))
+            })?;
+        }
+
+        {
+            let api_ref = Arc::clone(api);
+            let pid = plugin_id.clone();
+            let c = caps;
+            let page_move = self.lua.create_function(
+                move |_, (notebook_id, page_id, folder_id, section_id): (String, String, Option<String>, Option<String>)| {
+                    let result = api_ref
+                        .page_move(c, &pid, &notebook_id, &page_id, folder_id.as_deref(), section_id.as_deref())
+                        .map_err(|e| LuaError::external(e))?;
+                    let s = serde_json::to_string(&result).map_err(|e| LuaError::external(e))?;
+                    Ok(s)
+                },
+            ).map_err(|e| PluginError::InitFailed(format!("page_move: {e}")))?;
+            nous.set("page_move", page_move).map_err(|e| {
+                PluginError::InitFailed(format!("set page_move: {e}"))
+            })?;
+        }
+
+        {
+            let api_ref = Arc::clone(api);
+            let pid = plugin_id.clone();
+            let c = caps;
+            let page_manage_tags = self.lua.create_function(
+                move |_, (notebook_id, page_id, add_json, remove_json): (String, String, Option<String>, Option<String>)| {
+                    let result = api_ref
+                        .page_manage_tags(c, &pid, &notebook_id, &page_id, add_json.as_deref(), remove_json.as_deref())
+                        .map_err(|e| LuaError::external(e))?;
+                    let s = serde_json::to_string(&result).map_err(|e| LuaError::external(e))?;
+                    Ok(s)
+                },
+            ).map_err(|e| PluginError::InitFailed(format!("page_manage_tags: {e}")))?;
+            nous.set("page_manage_tags", page_manage_tags).map_err(|e| {
+                PluginError::InitFailed(format!("set page_manage_tags: {e}"))
+            })?;
+        }
+
+        // -- Notebook/Folder APIs --
+        {
+            let api_ref = Arc::clone(api);
+            let pid = plugin_id.clone();
+            let c = caps;
+            let list_notebooks = self.lua.create_function(move |_, ()| {
+                let result = api_ref.list_notebooks(c, &pid)
+                    .map_err(|e| LuaError::external(e))?;
+                let s = serde_json::to_string(&result)
+                    .map_err(|e| LuaError::external(e))?;
+                Ok(s)
+            }).map_err(|e| PluginError::InitFailed(format!("list_notebooks: {e}")))?;
+            nous.set("list_notebooks", list_notebooks).map_err(|e| {
+                PluginError::InitFailed(format!("set list_notebooks: {e}"))
+            })?;
+        }
+
+        {
+            let api_ref = Arc::clone(api);
+            let pid = plugin_id.clone();
+            let c = caps;
+            let list_sections = self.lua.create_function(move |_, notebook_id: String| {
+                let result = api_ref.list_sections(c, &pid, &notebook_id)
+                    .map_err(|e| LuaError::external(e))?;
+                let s = serde_json::to_string(&result)
+                    .map_err(|e| LuaError::external(e))?;
+                Ok(s)
+            }).map_err(|e| PluginError::InitFailed(format!("list_sections: {e}")))?;
+            nous.set("list_sections", list_sections).map_err(|e| {
+                PluginError::InitFailed(format!("set list_sections: {e}"))
+            })?;
+        }
+
+        {
+            let api_ref = Arc::clone(api);
+            let pid = plugin_id.clone();
+            let c = caps;
+            let list_folders = self.lua.create_function(move |_, notebook_id: String| {
+                let result = api_ref.list_folders(c, &pid, &notebook_id)
+                    .map_err(|e| LuaError::external(e))?;
+                let s = serde_json::to_string(&result)
+                    .map_err(|e| LuaError::external(e))?;
+                Ok(s)
+            }).map_err(|e| PluginError::InitFailed(format!("list_folders: {e}")))?;
+            nous.set("list_folders", list_folders).map_err(|e| {
+                PluginError::InitFailed(format!("set list_folders: {e}"))
+            })?;
+        }
+
+        {
+            let api_ref = Arc::clone(api);
+            let pid = plugin_id.clone();
+            let c = caps;
+            let create_folder = self.lua.create_function(
+                move |_, (notebook_id, name, parent_id): (String, String, Option<String>)| {
+                    let result = api_ref.create_folder(c, &pid, &notebook_id, &name, parent_id.as_deref())
+                        .map_err(|e| LuaError::external(e))?;
+                    let s = serde_json::to_string(&result).map_err(|e| LuaError::external(e))?;
+                    Ok(s)
+                },
+            ).map_err(|e| PluginError::InitFailed(format!("create_folder: {e}")))?;
+            nous.set("create_folder", create_folder).map_err(|e| {
+                PluginError::InitFailed(format!("set create_folder: {e}"))
+            })?;
+        }
+
+        // -- Daily Notes APIs --
+        {
+            let api_ref = Arc::clone(api);
+            let pid = plugin_id.clone();
+            let c = caps;
+            let daily_note_list = self.lua.create_function(move |_, (notebook_id, limit): (String, Option<usize>)| {
+                let result = api_ref.daily_note_list(c, &pid, &notebook_id, limit)
+                    .map_err(|e| LuaError::external(e))?;
+                let s = serde_json::to_string(&result)
+                    .map_err(|e| LuaError::external(e))?;
+                Ok(s)
+            }).map_err(|e| PluginError::InitFailed(format!("daily_note_list: {e}")))?;
+            nous.set("daily_note_list", daily_note_list).map_err(|e| {
+                PluginError::InitFailed(format!("set daily_note_list: {e}"))
+            })?;
+        }
+
+        {
+            let api_ref = Arc::clone(api);
+            let pid = plugin_id.clone();
+            let c = caps;
+            let daily_note_get = self.lua.create_function(move |_, (notebook_id, date): (String, String)| {
+                let result = api_ref.daily_note_get(c, &pid, &notebook_id, &date)
+                    .map_err(|e| LuaError::external(e))?;
+                let s = serde_json::to_string(&result)
+                    .map_err(|e| LuaError::external(e))?;
+                Ok(s)
+            }).map_err(|e| PluginError::InitFailed(format!("daily_note_get: {e}")))?;
+            nous.set("daily_note_get", daily_note_get).map_err(|e| {
+                PluginError::InitFailed(format!("set daily_note_get: {e}"))
+            })?;
+        }
+
+        {
+            let api_ref = Arc::clone(api);
+            let pid = plugin_id.clone();
+            let c = caps;
+            let daily_note_create = self.lua.create_function(
+                move |_, (notebook_id, date, content): (String, String, Option<String>)| {
+                    let result = api_ref.daily_note_create(c, &pid, &notebook_id, &date, content.as_deref())
+                        .map_err(|e| LuaError::external(e))?;
+                    let s = serde_json::to_string(&result).map_err(|e| LuaError::external(e))?;
+                    Ok(s)
+                },
+            ).map_err(|e| PluginError::InitFailed(format!("daily_note_create: {e}")))?;
+            nous.set("daily_note_create", daily_note_create).map_err(|e| {
+                PluginError::InitFailed(format!("set daily_note_create: {e}"))
+            })?;
+        }
+
+        // -- Additional Inbox API --
+        {
+            let api_ref = Arc::clone(api);
+            let pid = plugin_id.clone();
+            let c = caps;
+            let inbox_delete = self.lua.create_function(move |_, item_id: String| {
+                let result = api_ref.inbox_delete(c, &pid, &item_id)
+                    .map_err(|e| LuaError::external(e))?;
+                let s = serde_json::to_string(&result)
+                    .map_err(|e| LuaError::external(e))?;
+                Ok(s)
+            }).map_err(|e| PluginError::InitFailed(format!("inbox_delete: {e}")))?;
+            nous.set("inbox_delete", inbox_delete).map_err(|e| {
+                PluginError::InitFailed(format!("set inbox_delete: {e}"))
+            })?;
+        }
+
+        // -- Additional Goals API --
+        {
+            let api_ref = Arc::clone(api);
+            let pid = plugin_id.clone();
+            let c = caps;
+            let goal_get_progress = self.lua.create_function(move |_, (goal_id, limit): (String, Option<usize>)| {
+                let result = api_ref.goal_get_progress(c, &pid, &goal_id, limit)
+                    .map_err(|e| LuaError::external(e))?;
+                let s = serde_json::to_string(&result)
+                    .map_err(|e| LuaError::external(e))?;
+                Ok(s)
+            }).map_err(|e| PluginError::InitFailed(format!("goal_get_progress: {e}")))?;
+            nous.set("goal_get_progress", goal_get_progress).map_err(|e| {
+                PluginError::InitFailed(format!("set goal_get_progress: {e}"))
+            })?;
+        }
+
+        // -- Energy APIs --
+        {
+            let api_ref = Arc::clone(api);
+            let pid = plugin_id.clone();
+            let c = caps;
+            let energy_get_checkins = self.lua.create_function(
+                move |_, (start, end, limit): (Option<String>, Option<String>, Option<usize>)| {
+                    let result = api_ref
+                        .energy_get_checkins(c, &pid, start.as_deref(), end.as_deref(), limit)
+                        .map_err(|e| LuaError::external(e))?;
+                    let s = serde_json::to_string(&result).map_err(|e| LuaError::external(e))?;
+                    Ok(s)
+                },
+            ).map_err(|e| PluginError::InitFailed(format!("energy_get_checkins: {e}")))?;
+            nous.set("energy_get_checkins", energy_get_checkins).map_err(|e| {
+                PluginError::InitFailed(format!("set energy_get_checkins: {e}"))
+            })?;
+        }
+
+        {
+            let api_ref = Arc::clone(api);
+            let pid = plugin_id.clone();
+            let c = caps;
+            let energy_get_patterns = self.lua.create_function(
+                move |_, (start, end): (Option<String>, Option<String>)| {
+                    let result = api_ref
+                        .energy_get_patterns(c, &pid, start.as_deref(), end.as_deref())
+                        .map_err(|e| LuaError::external(e))?;
+                    let s = serde_json::to_string(&result).map_err(|e| LuaError::external(e))?;
+                    Ok(s)
+                },
+            ).map_err(|e| PluginError::InitFailed(format!("energy_get_patterns: {e}")))?;
+            nous.set("energy_get_patterns", energy_get_patterns).map_err(|e| {
+                PluginError::InitFailed(format!("set energy_get_patterns: {e}"))
+            })?;
+        }
+
         // -- Search API --
         {
             let api_ref = Arc::clone(api);

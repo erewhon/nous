@@ -105,10 +105,17 @@ impl PluginHost {
                     "Cannot reload built-in plugins".to_string(),
                 ));
             }
-            super::manifest::PluginSource::WasmFile { .. } => {
-                return Err(PluginError::Runtime(
-                    "WASM reload not yet implemented".to_string(),
-                ));
+            super::manifest::PluginSource::WasmFile { ref wasm_path, ref toml_path } => {
+                let wasm_path = wasm_path.clone();
+                let toml_path = toml_path.clone();
+                let toml_content = std::fs::read_to_string(&toml_path)?;
+                let raw: super::manifest::RawManifest = toml::from_str(&toml_content)
+                    .map_err(|e| PluginError::ManifestParse(format!("TOML parse error: {e}")))?;
+                let manifest = raw.into_manifest(source)?;
+                let wasm_bytes = std::fs::read(&wasm_path)?;
+                let mut plugin = super::runtime::wasm::WasmPlugin::new(manifest, wasm_bytes);
+                plugin.init(&self.api)?;
+                self.registry.register(Box::new(plugin));
             }
         }
 

@@ -10,6 +10,7 @@ use uuid::Uuid;
 
 use super::error::PluginError;
 use super::manifest::CapabilitySet;
+use crate::energy::EnergyStorage;
 use crate::goals::GoalsStorage;
 use crate::inbox::InboxStorage;
 use crate::search::SearchIndex;
@@ -27,6 +28,7 @@ pub struct HostApi {
     pub(crate) goals_storage: Arc<Mutex<GoalsStorage>>,
     pub(crate) inbox_storage: Arc<Mutex<InboxStorage>>,
     pub(crate) search_index: Option<Arc<Mutex<SearchIndex>>>,
+    pub(crate) energy_storage: Option<Arc<Mutex<EnergyStorage>>>,
     pub(crate) http_client: reqwest::blocking::Client,
 }
 
@@ -48,6 +50,7 @@ impl HostApi {
             goals_storage,
             inbox_storage,
             search_index: None,
+            energy_storage: None,
             http_client,
         }
     }
@@ -55,6 +58,11 @@ impl HostApi {
     /// Set the search index reference (called after construction when Arc is available).
     pub fn set_search_index(&mut self, search_index: Arc<Mutex<SearchIndex>>) {
         self.search_index = Some(search_index);
+    }
+
+    /// Set the energy storage reference (called after construction when Arc is available).
+    pub fn set_energy_storage(&mut self, energy_storage: Arc<Mutex<EnergyStorage>>) {
+        self.energy_storage = Some(energy_storage);
     }
 
     // -- Capability gate helper --
@@ -620,6 +628,515 @@ impl HostApi {
             }
         }
         map
+    }
+
+    // -- Page WRITE APIs --
+
+    /// Create a new page in a notebook.
+    pub fn page_create(
+        &self,
+        caps: CapabilitySet,
+        plugin_id: &str,
+        notebook_id: &str,
+        title: &str,
+    ) -> Result<serde_json::Value, PluginError> {
+        Self::require(caps, CapabilitySet::PAGE_WRITE, plugin_id)?;
+        let nid = Uuid::parse_str(notebook_id)
+            .map_err(|e| PluginError::CallFailed(format!("invalid notebook_id: {e}")))?;
+        let storage = self.storage.lock().map_err(|e| {
+            PluginError::CallFailed(format!("storage lock: {e}"))
+        })?;
+        let page = storage
+            .create_page(nid, title.to_string())
+            .map_err(|e| PluginError::CallFailed(e.to_string()))?;
+        Ok(serde_json::json!({
+            "id": page.id.to_string(),
+            "title": page.title,
+            "notebookId": nid.to_string(),
+        }))
+    }
+
+    /// Update an existing page (title, content, and/or tags).
+    pub fn page_update(
+        &self,
+        caps: CapabilitySet,
+        plugin_id: &str,
+        notebook_id: &str,
+        page_id: &str,
+        title: Option<&str>,
+        content: Option<&str>,
+        tags_json: Option<&str>,
+    ) -> Result<serde_json::Value, PluginError> {
+        Self::require(caps, CapabilitySet::PAGE_WRITE, plugin_id)?;
+        let nid = Uuid::parse_str(notebook_id)
+            .map_err(|e| PluginError::CallFailed(format!("invalid notebook_id: {e}")))?;
+        let pid = Uuid::parse_str(page_id)
+            .map_err(|e| PluginError::CallFailed(format!("invalid page_id: {e}")))?;
+        let storage = self.storage.lock().map_err(|e| {
+            PluginError::CallFailed(format!("storage lock: {e}"))
+        })?;
+        let mut page = storage
+            .get_page(nid, pid)
+            .map_err(|e| PluginError::CallFailed(e.to_string()))?;
+
+        if let Some(t) = title {
+            page.title = t.to_string();
+        }
+        if let Some(md) = content {
+            let blocks = crate::markdown::parse_markdown_to_blocks(md);
+            page.content.blocks = blocks;
+        }
+        if let Some(tj) = tags_json {
+            let tags: Vec<String> = serde_json::from_str(tj)
+                .map_err(|e| PluginError::CallFailed(format!("invalid tags JSON: {e}")))?;
+            page.tags = tags;
+        }
+
+        storage
+            .update_page(&page)
+            .map_err(|e| PluginError::CallFailed(e.to_string()))?;
+
+        Ok(serde_json::json!({
+            "id": page.id.to_string(),
+            "title": page.title,
+        }))
+    }
+
+    /// Append markdown content to an existing page.
+    pub fn page_append(
+        &self,
+        caps: CapabilitySet,
+        plugin_id: &str,
+        notebook_id: &str,
+        page_id: &str,
+        content: &str,
+    ) -> Result<serde_json::Value, PluginError> {
+        Self::require(caps, CapabilitySet::PAGE_WRITE, plugin_id)?;
+        let nid = Uuid::parse_str(notebook_id)
+            .map_err(|e| PluginError::CallFailed(format!("invalid notebook_id: {e}")))?;
+        let pid = Uuid::parse_str(page_id)
+            .map_err(|e| PluginError::CallFailed(format!("invalid page_id: {e}")))?;
+        let storage = self.storage.lock().map_err(|e| {
+            PluginError::CallFailed(format!("storage lock: {e}"))
+        })?;
+        let mut page = storage
+            .get_page(nid, pid)
+            .map_err(|e| PluginError::CallFailed(e.to_string()))?;
+
+        let new_blocks = crate::markdown::parse_markdown_to_blocks(content);
+        let blocks_added = new_blocks.len();
+        page.content.blocks.extend(new_blocks);
+
+        storage
+            .update_page(&page)
+            .map_err(|e| PluginError::CallFailed(e.to_string()))?;
+
+        Ok(serde_json::json!({
+            "id": page.id.to_string(),
+            "title": page.title,
+            "blocksAdded": blocks_added,
+        }))
+    }
+
+    /// Soft-delete a page.
+    pub fn page_delete(
+        &self,
+        caps: CapabilitySet,
+        plugin_id: &str,
+        notebook_id: &str,
+        page_id: &str,
+    ) -> Result<serde_json::Value, PluginError> {
+        Self::require(caps, CapabilitySet::PAGE_WRITE, plugin_id)?;
+        let nid = Uuid::parse_str(notebook_id)
+            .map_err(|e| PluginError::CallFailed(format!("invalid notebook_id: {e}")))?;
+        let pid = Uuid::parse_str(page_id)
+            .map_err(|e| PluginError::CallFailed(format!("invalid page_id: {e}")))?;
+        let storage = self.storage.lock().map_err(|e| {
+            PluginError::CallFailed(format!("storage lock: {e}"))
+        })?;
+        storage
+            .delete_page(nid, pid)
+            .map_err(|e| PluginError::CallFailed(e.to_string()))?;
+        Ok(serde_json::json!({ "deleted": true }))
+    }
+
+    /// Move a page to a different folder and/or section.
+    pub fn page_move(
+        &self,
+        caps: CapabilitySet,
+        plugin_id: &str,
+        notebook_id: &str,
+        page_id: &str,
+        folder_id: Option<&str>,
+        section_id: Option<&str>,
+    ) -> Result<serde_json::Value, PluginError> {
+        Self::require(caps, CapabilitySet::PAGE_WRITE, plugin_id)?;
+        let nid = Uuid::parse_str(notebook_id)
+            .map_err(|e| PluginError::CallFailed(format!("invalid notebook_id: {e}")))?;
+        let pid = Uuid::parse_str(page_id)
+            .map_err(|e| PluginError::CallFailed(format!("invalid page_id: {e}")))?;
+        let fid = folder_id
+            .map(|f| Uuid::parse_str(f))
+            .transpose()
+            .map_err(|e| PluginError::CallFailed(format!("invalid folder_id: {e}")))?;
+
+        let storage = self.storage.lock().map_err(|e| {
+            PluginError::CallFailed(format!("storage lock: {e}"))
+        })?;
+        let mut page = storage
+            .move_page_to_folder(nid, pid, fid, None)
+            .map_err(|e| PluginError::CallFailed(e.to_string()))?;
+
+        // Optionally set section_id
+        if let Some(sid_str) = section_id {
+            let sid = Uuid::parse_str(sid_str)
+                .map_err(|e| PluginError::CallFailed(format!("invalid section_id: {e}")))?;
+            page.section_id = Some(sid);
+            storage
+                .update_page(&page)
+                .map_err(|e| PluginError::CallFailed(e.to_string()))?;
+        }
+
+        Ok(serde_json::json!({
+            "id": page.id.to_string(),
+            "title": page.title,
+            "folderId": page.folder_id,
+            "sectionId": page.section_id,
+        }))
+    }
+
+    /// Add/remove tags without replacing all existing tags.
+    pub fn page_manage_tags(
+        &self,
+        caps: CapabilitySet,
+        plugin_id: &str,
+        notebook_id: &str,
+        page_id: &str,
+        add_json: Option<&str>,
+        remove_json: Option<&str>,
+    ) -> Result<serde_json::Value, PluginError> {
+        Self::require(caps, CapabilitySet::PAGE_WRITE, plugin_id)?;
+        let nid = Uuid::parse_str(notebook_id)
+            .map_err(|e| PluginError::CallFailed(format!("invalid notebook_id: {e}")))?;
+        let pid = Uuid::parse_str(page_id)
+            .map_err(|e| PluginError::CallFailed(format!("invalid page_id: {e}")))?;
+        let storage = self.storage.lock().map_err(|e| {
+            PluginError::CallFailed(format!("storage lock: {e}"))
+        })?;
+        let mut page = storage
+            .get_page(nid, pid)
+            .map_err(|e| PluginError::CallFailed(e.to_string()))?;
+
+        if let Some(aj) = add_json {
+            let add_tags: Vec<String> = serde_json::from_str(aj)
+                .map_err(|e| PluginError::CallFailed(format!("invalid add tags JSON: {e}")))?;
+            for tag in add_tags {
+                if !page.tags.iter().any(|t| t.eq_ignore_ascii_case(&tag)) {
+                    page.tags.push(tag);
+                }
+            }
+        }
+        if let Some(rj) = remove_json {
+            let remove_tags: Vec<String> = serde_json::from_str(rj)
+                .map_err(|e| PluginError::CallFailed(format!("invalid remove tags JSON: {e}")))?;
+            page.tags.retain(|t| !remove_tags.iter().any(|r| r.eq_ignore_ascii_case(t)));
+        }
+
+        storage
+            .update_page(&page)
+            .map_err(|e| PluginError::CallFailed(e.to_string()))?;
+
+        Ok(serde_json::json!({
+            "id": page.id.to_string(),
+            "title": page.title,
+            "tags": page.tags,
+        }))
+    }
+
+    // -- Notebook/Folder APIs --
+
+    /// List all notebooks.
+    pub fn list_notebooks(
+        &self,
+        caps: CapabilitySet,
+        plugin_id: &str,
+    ) -> Result<serde_json::Value, PluginError> {
+        Self::require(caps, CapabilitySet::PAGE_READ, plugin_id)?;
+        let storage = self.storage.lock().map_err(|e| {
+            PluginError::CallFailed(format!("storage lock: {e}"))
+        })?;
+        let notebooks = storage
+            .list_notebooks()
+            .map_err(|e| PluginError::CallFailed(e.to_string()))?;
+        serde_json::to_value(&notebooks).map_err(PluginError::Json)
+    }
+
+    /// List sections in a notebook.
+    pub fn list_sections(
+        &self,
+        caps: CapabilitySet,
+        plugin_id: &str,
+        notebook_id: &str,
+    ) -> Result<serde_json::Value, PluginError> {
+        Self::require(caps, CapabilitySet::PAGE_READ, plugin_id)?;
+        let nid = Uuid::parse_str(notebook_id)
+            .map_err(|e| PluginError::CallFailed(format!("invalid notebook_id: {e}")))?;
+        let storage = self.storage.lock().map_err(|e| {
+            PluginError::CallFailed(format!("storage lock: {e}"))
+        })?;
+        let sections = storage
+            .list_sections(nid)
+            .map_err(|e| PluginError::CallFailed(e.to_string()))?;
+        serde_json::to_value(&sections).map_err(PluginError::Json)
+    }
+
+    /// List folders in a notebook.
+    pub fn list_folders(
+        &self,
+        caps: CapabilitySet,
+        plugin_id: &str,
+        notebook_id: &str,
+    ) -> Result<serde_json::Value, PluginError> {
+        Self::require(caps, CapabilitySet::PAGE_READ, plugin_id)?;
+        let nid = Uuid::parse_str(notebook_id)
+            .map_err(|e| PluginError::CallFailed(format!("invalid notebook_id: {e}")))?;
+        let storage = self.storage.lock().map_err(|e| {
+            PluginError::CallFailed(format!("storage lock: {e}"))
+        })?;
+        let folders = storage
+            .list_folders(nid)
+            .map_err(|e| PluginError::CallFailed(e.to_string()))?;
+        serde_json::to_value(&folders).map_err(PluginError::Json)
+    }
+
+    /// Create a folder in a notebook.
+    pub fn create_folder(
+        &self,
+        caps: CapabilitySet,
+        plugin_id: &str,
+        notebook_id: &str,
+        name: &str,
+        parent_id: Option<&str>,
+    ) -> Result<serde_json::Value, PluginError> {
+        Self::require(caps, CapabilitySet::PAGE_WRITE, plugin_id)?;
+        let nid = Uuid::parse_str(notebook_id)
+            .map_err(|e| PluginError::CallFailed(format!("invalid notebook_id: {e}")))?;
+        let pid = parent_id
+            .map(|p| Uuid::parse_str(p))
+            .transpose()
+            .map_err(|e| PluginError::CallFailed(format!("invalid parent_id: {e}")))?;
+        let storage = self.storage.lock().map_err(|e| {
+            PluginError::CallFailed(format!("storage lock: {e}"))
+        })?;
+        let folder = storage
+            .create_folder(nid, name.to_string(), pid)
+            .map_err(|e| PluginError::CallFailed(e.to_string()))?;
+        Ok(serde_json::json!({
+            "id": folder.id.to_string(),
+            "name": folder.name,
+        }))
+    }
+
+    // -- Daily Notes APIs --
+
+    /// List daily notes in a notebook.
+    pub fn daily_note_list(
+        &self,
+        caps: CapabilitySet,
+        plugin_id: &str,
+        notebook_id: &str,
+        limit: Option<usize>,
+    ) -> Result<serde_json::Value, PluginError> {
+        Self::require(caps, CapabilitySet::PAGE_READ, plugin_id)?;
+        let nid = Uuid::parse_str(notebook_id)
+            .map_err(|e| PluginError::CallFailed(format!("invalid notebook_id: {e}")))?;
+        let storage = self.storage.lock().map_err(|e| {
+            PluginError::CallFailed(format!("storage lock: {e}"))
+        })?;
+        let mut pages = crate::commands::list_daily_notes_core(&storage, nid, None, None)
+            .map_err(|e| PluginError::CallFailed(e.message))?;
+        if let Some(lim) = limit {
+            pages.truncate(lim);
+        }
+        serde_json::to_value(&pages).map_err(PluginError::Json)
+    }
+
+    /// Get a daily note for a specific date.
+    pub fn daily_note_get(
+        &self,
+        caps: CapabilitySet,
+        plugin_id: &str,
+        notebook_id: &str,
+        date: &str,
+    ) -> Result<serde_json::Value, PluginError> {
+        Self::require(caps, CapabilitySet::PAGE_READ, plugin_id)?;
+        let nid = Uuid::parse_str(notebook_id)
+            .map_err(|e| PluginError::CallFailed(format!("invalid notebook_id: {e}")))?;
+        let storage = self.storage.lock().map_err(|e| {
+            PluginError::CallFailed(format!("storage lock: {e}"))
+        })?;
+        let page = crate::commands::find_daily_note(&storage, nid, date)
+            .map_err(|e| PluginError::CallFailed(e.message))?;
+        match page {
+            Some(p) => serde_json::to_value(&p).map_err(PluginError::Json),
+            None => Ok(serde_json::Value::Null),
+        }
+    }
+
+    /// Create a daily note for a specific date.
+    pub fn daily_note_create(
+        &self,
+        caps: CapabilitySet,
+        plugin_id: &str,
+        notebook_id: &str,
+        date: &str,
+        content: Option<&str>,
+    ) -> Result<serde_json::Value, PluginError> {
+        Self::require(caps, CapabilitySet::PAGE_WRITE, plugin_id)?;
+        let nid = Uuid::parse_str(notebook_id)
+            .map_err(|e| PluginError::CallFailed(format!("invalid notebook_id: {e}")))?;
+        let storage = self.storage.lock().map_err(|e| {
+            PluginError::CallFailed(format!("storage lock: {e}"))
+        })?;
+        let mut page = crate::commands::create_daily_note_core(&storage, nid, date, None)
+            .map_err(|e| PluginError::CallFailed(e.message))?;
+
+        // If content was provided, parse and set it
+        if let Some(md) = content {
+            let blocks = crate::markdown::parse_markdown_to_blocks(md);
+            if !blocks.is_empty() {
+                page.content.blocks = blocks;
+                storage
+                    .update_page(&page)
+                    .map_err(|e| PluginError::CallFailed(e.to_string()))?;
+            }
+        }
+
+        serde_json::to_value(&page).map_err(PluginError::Json)
+    }
+
+    // -- Additional Inbox API --
+
+    /// Delete an inbox item by ID.
+    pub fn inbox_delete(
+        &self,
+        caps: CapabilitySet,
+        plugin_id: &str,
+        item_id: &str,
+    ) -> Result<serde_json::Value, PluginError> {
+        Self::require(caps, CapabilitySet::INBOX_CAPTURE, plugin_id)?;
+        let id = Uuid::parse_str(item_id)
+            .map_err(|e| PluginError::CallFailed(format!("invalid item_id: {e}")))?;
+        let inbox = self.inbox_storage.lock().map_err(|e| {
+            PluginError::CallFailed(format!("inbox lock: {e}"))
+        })?;
+        inbox
+            .delete_item(id)
+            .map_err(|e| PluginError::CallFailed(e.to_string()))?;
+        Ok(serde_json::json!({ "id": item_id, "deleted": true }))
+    }
+
+    // -- Additional Goals API --
+
+    /// Get progress entries for a goal.
+    pub fn goal_get_progress(
+        &self,
+        caps: CapabilitySet,
+        plugin_id: &str,
+        goal_id: &str,
+        limit: Option<usize>,
+    ) -> Result<serde_json::Value, PluginError> {
+        Self::require(caps, CapabilitySet::GOALS_READ, plugin_id)?;
+        let gid = Uuid::parse_str(goal_id)
+            .map_err(|e| PluginError::CallFailed(format!("invalid goal_id: {e}")))?;
+        let goals = self.goals_storage.lock().map_err(|e| {
+            PluginError::CallFailed(format!("goals lock: {e}"))
+        })?;
+        let mut progress = goals
+            .get_progress(gid)
+            .map_err(|e| PluginError::CallFailed(e.to_string()))?;
+        // Sort descending by date and truncate
+        progress.sort_by(|a, b| b.date.cmp(&a.date));
+        if let Some(lim) = limit {
+            progress.truncate(lim);
+        }
+        serde_json::to_value(&progress).map_err(PluginError::Json)
+    }
+
+    // -- Energy APIs --
+
+    /// Get energy check-ins for a date range.
+    pub fn energy_get_checkins(
+        &self,
+        caps: CapabilitySet,
+        plugin_id: &str,
+        start: Option<&str>,
+        end: Option<&str>,
+        limit: Option<usize>,
+    ) -> Result<serde_json::Value, PluginError> {
+        Self::require(caps, CapabilitySet::ENERGY_READ, plugin_id)?;
+        let energy = self
+            .energy_storage
+            .as_ref()
+            .ok_or_else(|| PluginError::CallFailed("energy storage not available".to_string()))?;
+        let energy = energy.lock().map_err(|e| {
+            PluginError::CallFailed(format!("energy lock: {e}"))
+        })?;
+
+        let today = chrono::Local::now().date_naive();
+        let start_date = start
+            .map(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d"))
+            .transpose()
+            .map_err(|e| PluginError::CallFailed(format!("invalid start date: {e}")))?
+            .unwrap_or(today - chrono::Duration::days(30));
+        let end_date = end
+            .map(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d"))
+            .transpose()
+            .map_err(|e| PluginError::CallFailed(format!("invalid end date: {e}")))?
+            .unwrap_or(today);
+
+        let mut checkins = energy
+            .get_checkins_range(start_date, end_date)
+            .map_err(|e| PluginError::CallFailed(e.to_string()))?;
+        if let Some(lim) = limit {
+            checkins.truncate(lim);
+        }
+        serde_json::to_value(&checkins).map_err(PluginError::Json)
+    }
+
+    /// Get computed energy patterns for a date range.
+    pub fn energy_get_patterns(
+        &self,
+        caps: CapabilitySet,
+        plugin_id: &str,
+        start: Option<&str>,
+        end: Option<&str>,
+    ) -> Result<serde_json::Value, PluginError> {
+        Self::require(caps, CapabilitySet::ENERGY_READ, plugin_id)?;
+        let energy = self
+            .energy_storage
+            .as_ref()
+            .ok_or_else(|| PluginError::CallFailed("energy storage not available".to_string()))?;
+        let energy = energy.lock().map_err(|e| {
+            PluginError::CallFailed(format!("energy lock: {e}"))
+        })?;
+
+        let today = chrono::Local::now().date_naive();
+        let start_date = start
+            .map(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d"))
+            .transpose()
+            .map_err(|e| PluginError::CallFailed(format!("invalid start date: {e}")))?
+            .unwrap_or(today - chrono::Duration::days(90));
+        let end_date = end
+            .map(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d"))
+            .transpose()
+            .map_err(|e| PluginError::CallFailed(format!("invalid end date: {e}")))?
+            .unwrap_or(today);
+
+        let patterns = energy
+            .calculate_patterns(start_date, end_date)
+            .map_err(|e| PluginError::CallFailed(e.to_string()))?;
+        serde_json::to_value(&patterns).map_err(PluginError::Json)
     }
 
     // -- Search API --

@@ -22,6 +22,8 @@ bitflags::bitflags! {
         const SEARCH          = 0b0000_1000_0000;
         const COMMAND_PALETTE = 0b0001_0000_0000;
         const NETWORK         = 0b0010_0000_0000;
+        const ENERGY_READ     = 0b0100_0000_0000;
+        const ENERGY_WRITE    = 0b1000_0000_0000;
     }
 }
 
@@ -41,6 +43,8 @@ impl CapabilitySet {
                 "search" => CapabilitySet::SEARCH,
                 "command_palette" => CapabilitySet::COMMAND_PALETTE,
                 "network" => CapabilitySet::NETWORK,
+                "energy_read" => CapabilitySet::ENERGY_READ,
+                "energy_write" => CapabilitySet::ENERGY_WRITE,
                 other => {
                     return Err(PluginError::ManifestParse(format!(
                         "unknown capability: {other}"
@@ -66,6 +70,8 @@ impl fmt::Display for CapabilitySet {
             (CapabilitySet::SEARCH, "search"),
             (CapabilitySet::COMMAND_PALETTE, "command_palette"),
             (CapabilitySet::NETWORK, "network"),
+            (CapabilitySet::ENERGY_READ, "energy_read"),
+            (CapabilitySet::ENERGY_WRITE, "energy_write"),
         ]
         .iter()
         .filter(|(cap, _)| self.contains(*cap))

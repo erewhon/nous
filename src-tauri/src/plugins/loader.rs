@@ -7,6 +7,7 @@ use super::api::HostApi;
 use super::error::PluginError;
 use super::manifest::{parse_lua_manifest_header, PluginSource, RawManifest};
 use super::runtime::lua::LuaPlugin;
+use super::runtime::wasm::WasmPlugin;
 use super::runtime::{BoxedPlugin, Plugin};
 
 /// Embedded built-in Lua plugin sources
@@ -56,7 +57,7 @@ pub fn scan_plugins_dir(
         else if path.extension().map_or(false, |ext| ext == "toml") {
             let wasm_path = path.with_extension("wasm");
             if wasm_path.exists() {
-                results.push(load_wasm_file(&path, &wasm_path));
+                results.push(load_wasm_file(&path, &wasm_path, api));
             }
         }
     }
@@ -81,23 +82,25 @@ fn load_lua_file(path: &Path, api: &Arc<HostApi>) -> Result<BoxedPlugin, PluginE
     Ok(Box::new(plugin))
 }
 
-/// Load a WASM plugin from a .toml manifest + .wasm binary (stub — Phase 1 logs only)
-fn load_wasm_file(toml_path: &Path, wasm_path: &Path) -> Result<BoxedPlugin, PluginError> {
-    // WASM support is Phase 1 stub — we parse the manifest but don't instantiate the runtime.
+/// Load a WASM plugin from a .toml manifest + .wasm binary.
+fn load_wasm_file(toml_path: &Path, wasm_path: &Path, api: &Arc<HostApi>) -> Result<BoxedPlugin, PluginError> {
     let toml_content = std::fs::read_to_string(toml_path)?;
     let raw: RawManifest = toml::from_str(&toml_content)
         .map_err(|e| PluginError::ManifestParse(format!("TOML parse error: {e}")))?;
 
-    log::info!(
-        "Found WASM plugin manifest: {} ({}), but WASM runtime is not yet implemented",
-        raw.name,
-        wasm_path.display()
-    );
+    let source = PluginSource::WasmFile {
+        wasm_path: wasm_path.to_path_buf(),
+        toml_path: toml_path.to_path_buf(),
+    };
+    let manifest = raw.into_manifest(source)?;
+    let id = manifest.id.clone();
 
-    Err(PluginError::LoadFailed(format!(
-        "WASM runtime not yet implemented for plugin '{}'",
-        raw.id
-    )))
+    let wasm_bytes = std::fs::read(wasm_path)?;
+    let mut plugin = WasmPlugin::new(manifest, wasm_bytes);
+    plugin.init(api)?;
+
+    log::info!("Loaded WASM plugin: {} from {}", id, wasm_path.display());
+    Ok(Box::new(plugin))
 }
 
 /// Load built-in plugins embedded in the binary via `include_str!`.

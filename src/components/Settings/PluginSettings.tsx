@@ -14,6 +14,19 @@ const CAPABILITY_NAMES: Record<number, string> = {
   0x080: "Search",
   0x100: "Command Palette",
   0x200: "Network",
+  0x400: "Energy Read",
+  0x800: "Energy Write",
+};
+
+const HOOK_TYPE_LABELS: Record<string, string> = {
+  goal_detector: "Goal Detector",
+  action_step: "Action Step",
+  command_palette: "Command Palette",
+  on_page_created: "On Page Created",
+  on_page_updated: "On Page Updated",
+  on_page_deleted: "On Page Deleted",
+  on_inbox_captured: "On Inbox Captured",
+  on_goal_progress: "On Goal Progress",
 };
 
 function getCapabilityLabels(caps: number): string[] {
@@ -254,7 +267,10 @@ function PluginCard({
           {hooks.length > 0 && (
             <div className="text-xs" style={{ color: "var(--color-text-muted)" }}>
               <span className="font-medium">Hooks:</span>{" "}
-              {hooks.map((h) => h.type + (h.step_type ? `:${h.step_type}` : "")).join(", ")}
+              {hooks.map((h) => {
+                const label = HOOK_TYPE_LABELS[h.type] || h.type;
+                return h.step_type ? `${label}: ${h.step_type}` : label;
+              }).join(", ")}
             </div>
           )}
         </div>
