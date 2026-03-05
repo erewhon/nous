@@ -24,7 +24,7 @@ import { PDFPageViewer } from "../PDF";
 import { JupyterViewer } from "../Jupyter";
 import { EpubReader } from "../Epub";
 import { CalendarViewer } from "../Calendar";
-import { ChatEditor } from "../Chat";
+import { ChatPageRouter } from "./ChatPageRouter";
 import { CanvasEditor } from "../Canvas";
 import { DatabaseEditor, type DatabaseUndoRedoState } from "../Database";
 import { HtmlViewer } from "../Html";
@@ -966,7 +966,7 @@ export function EditorPaneContent({
                       />
                     )}
                     {selectedPage.pageType === "chat" && (
-                      <ChatEditor
+                      <ChatPageRouter
                         key={selectedPage.id}
                         page={selectedPage}
                         notebookId={notebookId}

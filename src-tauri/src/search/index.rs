@@ -340,6 +340,7 @@ impl SearchIndex {
             PageType::Pdf | PageType::Epub => Self::extract_text_from_markdown(file_content),
             PageType::Database => Self::extract_text_from_database(file_content),
             PageType::Html => crate::storage::html_utils::html_to_searchable_text(file_content),
+            PageType::Chat => Self::extract_text_from_chat(file_content),
             _ => String::new(),
         };
 
@@ -472,6 +473,50 @@ impl SearchIndex {
             }
 
             text_parts.join(" ")
+        } else {
+            String::new()
+        }
+    }
+
+    /// Extract searchable text from a chat session JSON (.chat files)
+    /// Handles both ChatSession format (messages[]) and ChatPageContent format (cells[])
+    fn extract_text_from_chat(json_content: &str) -> String {
+        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(json_content) {
+            let mut text_parts: Vec<String> = Vec::new();
+
+            // Extract title
+            if let Some(title) = parsed.get("title").and_then(|t| t.as_str()) {
+                text_parts.push(title.to_string());
+            }
+
+            // ChatSession format: messages array
+            if let Some(messages) = parsed.get("messages").and_then(|m| m.as_array()) {
+                for msg in messages {
+                    if let Some(content) = msg.get("content").and_then(|c| c.as_str()) {
+                        if !content.is_empty() {
+                            text_parts.push(content.to_string());
+                        }
+                    }
+                    if let Some(thinking) = msg.get("thinking").and_then(|t| t.as_str()) {
+                        if !thinking.is_empty() {
+                            text_parts.push(thinking.to_string());
+                        }
+                    }
+                }
+            }
+
+            // ChatPageContent format: cells array
+            if let Some(cells) = parsed.get("cells").and_then(|c| c.as_array()) {
+                for cell in cells {
+                    if let Some(content) = cell.get("content").and_then(|c| c.as_str()) {
+                        if !content.is_empty() {
+                            text_parts.push(content.to_string());
+                        }
+                    }
+                }
+            }
+
+            text_parts.join("\n")
         } else {
             String::new()
         }

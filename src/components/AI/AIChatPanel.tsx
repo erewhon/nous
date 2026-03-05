@@ -11,6 +11,7 @@ import { useChatSessionStore } from "../../stores/chatSessionStore";
 import type { SemanticSearchResult } from "../../types/rag";
 import type { ChatSession, ChatSessionBranch, SessionMessage, ToolCallRecord } from "../../types/chatSession";
 import { useToastStore } from "../../stores/toastStore";
+import * as api from "../../utils/api";
 import {
   aiChatStream,
   createNotebook as apiCreateNotebook,
@@ -112,7 +113,6 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
   } = useAIStore();
   const {
     sessions,
-    loadSessions,
     createSession: createChatSession,
     loadSession: loadChatSession,
     saveSession: saveChatSession,
@@ -332,12 +332,39 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
     }
   }, [isOpen]);
 
-  // Load session list when panel opens
+  // Initialize session folder and load session list when panel opens
   useEffect(() => {
-    if (isOpen) {
-      loadSessions();
-    }
-  }, [isOpen, loadSessions]);
+    if (!isOpen || !selectedNotebookId) return;
+
+    const init = async () => {
+      const { initSessionFolder, loadSessions: load } = useChatSessionStore.getState();
+      await initSessionFolder(selectedNotebookId);
+
+      // One-time migration from old ai_sessions/ storage
+      const migrationKey = `ai_sessions_migrated_${selectedNotebookId}`;
+      if (!localStorage.getItem(migrationKey)) {
+        try {
+          const { sessionFolderId } = useChatSessionStore.getState();
+          if (sessionFolderId) {
+            const migrated = await api.migrateChatSessionsToPages(
+              selectedNotebookId,
+              sessionFolderId
+            );
+            if (migrated.length > 0) {
+              console.log(`Migrated ${migrated.length} chat sessions to pages`);
+            }
+          }
+        } catch (err) {
+          console.warn("Chat session migration failed (may already be done):", err);
+        }
+        localStorage.setItem(migrationKey, "true");
+      }
+
+      await load();
+    };
+
+    init();
+  }, [isOpen, selectedNotebookId]);
 
   // Auto-resume active session on panel open
   useEffect(() => {

@@ -22,6 +22,7 @@ import { DatabaseBoard } from "./DatabaseBoard";
 import { DatabaseGallery } from "./DatabaseGallery";
 import { DatabaseCalendar } from "./DatabaseCalendar";
 import { DatabaseChart } from "./DatabaseChart";
+import { DatabaseTimeline } from "./DatabaseTimeline";
 import { useRelationContext } from "./useRelationContext";
 import * as api from "../../utils/api";
 import "./database-styles.css";
@@ -584,6 +585,16 @@ export function DatabaseEditor({
             content={content}
             view={activeView}
             onUpdateView={handleUpdateView}
+          />
+        );
+      case "timeline":
+        return (
+          <DatabaseTimeline
+            content={content}
+            view={activeView}
+            onUpdateContent={handleUpdateContent}
+            onUpdateView={handleUpdateView}
+            relationContext={relationContext}
           />
         );
       default:

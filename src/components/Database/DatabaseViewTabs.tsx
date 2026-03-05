@@ -23,6 +23,7 @@ const VIEW_TYPE_LABELS: Record<DatabaseViewType, string> = {
   list: "List",
   calendar: "Calendar",
   chart: "Chart",
+  timeline: "Timeline",
 };
 
 function ViewTypeIcon({ type }: { type: DatabaseViewType }) {
@@ -141,6 +142,24 @@ function ViewTypeIcon({ type }: { type: DatabaseViewType }) {
           <rect x="17" y="8" width="4" height="13" rx="1" />
         </svg>
       );
+    case "timeline":
+      return (
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <rect x="3" y="4" width="14" height="3" rx="1.5" />
+          <rect x="6" y="10" width="11" height="3" rx="1.5" />
+          <rect x="4" y="16" width="16" height="3" rx="1.5" />
+        </svg>
+      );
   }
 }
 
@@ -221,6 +240,19 @@ export function DatabaseViewTabs({
         xAxisPropertyId: catProp?.id ?? properties[0]?.id ?? "",
         yAxisPropertyId: numProp?.id,
         aggregation: numProp ? ("sum" as const) : ("count" as const),
+      };
+    } else if (type === "timeline") {
+      const dateProp = properties.find((p) => p.type === "date");
+      if (!dateProp) return;
+      const dateProps = properties.filter((p) => p.type === "date");
+      const textProp = properties.find((p) => p.type === "text");
+      const selectProp = properties.find((p) => p.type === "select");
+      config = {
+        startDatePropertyId: dateProp.id,
+        endDatePropertyId: dateProps.length > 1 ? dateProps[1].id : undefined,
+        labelPropertyId: textProp?.id,
+        colorPropertyId: selectProp?.id,
+        showToday: true,
       };
     }
 
@@ -382,11 +414,13 @@ export function DatabaseViewTabs({
                 "gallery",
                 "calendar",
                 "chart",
+                "timeline",
               ] as DatabaseViewType[]
             ).map((type) => {
               const disabled =
                 (type === "board" && !hasSelectProperty) ||
-                (type === "calendar" && !hasDateProperty);
+                (type === "calendar" && !hasDateProperty) ||
+                (type === "timeline" && !hasDateProperty);
               return (
                 <button
                   key={type}
@@ -400,7 +434,9 @@ export function DatabaseViewTabs({
                     <span className="db-view-tabs-add-hint">
                       {type === "board"
                         ? "Needs select property"
-                        : "Needs date property"}
+                        : type === "calendar" || type === "timeline"
+                          ? "Needs date property"
+                          : "Needs date property"}
                     </span>
                   )}
                 </button>

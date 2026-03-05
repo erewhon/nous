@@ -1396,6 +1396,22 @@ export async function chatSessionUpdateTitle(
   return invoke("chat_session_update_title", { id, title });
 }
 
+export interface MigratedSession {
+  oldId: string;
+  newPageId: string;
+  title: string;
+}
+
+export async function migrateChatSessionsToPages(
+  notebookId: string,
+  folderId: string
+): Promise<MigratedSession[]> {
+  return invoke<MigratedSession[]>("migrate_chat_sessions_to_pages", {
+    notebookId,
+    folderId,
+  });
+}
+
 // ========== Git Operations ==========
 
 export interface GitStatus {

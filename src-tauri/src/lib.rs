@@ -948,6 +948,7 @@ pub fn run() {
             commands::chat_session_list,
             commands::chat_session_delete,
             commands::chat_session_update_title,
+            commands::migrate_chat_sessions_to_pages,
             // Freeze watchdog
             freeze_watchdog::freeze_pong,
         ])

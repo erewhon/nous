@@ -160,6 +160,7 @@ export const DatabaseViewTypeSchema = z.enum([
   "list",
   "calendar",
   "chart",
+  "timeline",
 ]);
 export type DatabaseViewType = z.infer<typeof DatabaseViewTypeSchema>;
 
@@ -208,6 +209,15 @@ export const ChartViewConfigSchema = z.object({
 });
 export type ChartViewConfig = z.infer<typeof ChartViewConfigSchema>;
 
+export const TimelineViewConfigSchema = z.object({
+  startDatePropertyId: z.string(),
+  endDatePropertyId: z.string().optional(),
+  labelPropertyId: z.string().optional(),
+  colorPropertyId: z.string().optional(),
+  showToday: z.boolean().default(true),
+});
+export type TimelineViewConfig = z.infer<typeof TimelineViewConfigSchema>;
+
 export const ViewConfigSchema = z.union([
   TableViewConfigSchema,
   BoardViewConfigSchema,
@@ -215,6 +225,7 @@ export const ViewConfigSchema = z.union([
   ListViewConfigSchema,
   CalendarViewConfigSchema,
   ChartViewConfigSchema,
+  TimelineViewConfigSchema,
 ]);
 
 export const SummaryAggregationSchema = z.enum([
@@ -687,7 +698,8 @@ export function createDatabaseFromObjectType(objectType: ObjectType): DatabaseCo
     viewType === "gallery" ? "Gallery" :
     viewType === "list" ? "List" :
     viewType === "calendar" ? "Calendar" :
-    viewType === "chart" ? "Chart" : "Table";
+    viewType === "chart" ? "Chart" :
+    viewType === "timeline" ? "Timeline" : "Table";
 
   return {
     version: 2,
