@@ -145,6 +145,18 @@ pub fn create_page(
         }
     }
 
+    // Dispatch plugin event
+    #[cfg(feature = "plugins")]
+    crate::plugins::dispatch_plugin_event_bg(
+        &state.plugin_host,
+        crate::plugins::HookPoint::OnPageCreated,
+        serde_json::json!({
+            "notebook_id": nb_id.to_string(),
+            "page_id": page.id.to_string(),
+            "title": page.title,
+        }),
+    );
+
     Ok(page)
 }
 
@@ -318,6 +330,19 @@ pub fn update_page(
         }
     }
 
+    // Dispatch plugin event
+    #[cfg(feature = "plugins")]
+    crate::plugins::dispatch_plugin_event_bg(
+        &state.plugin_host,
+        crate::plugins::HookPoint::OnPageUpdated,
+        serde_json::json!({
+            "notebook_id": nb_id.to_string(),
+            "page_id": pg_id.to_string(),
+            "title": page.title,
+            "tags": page.tags,
+        }),
+    );
+
     Ok(page)
 }
 
@@ -360,6 +385,18 @@ pub fn delete_page(
             log::warn!("Failed to auto-commit page deletion: {}", e);
         }
     }
+
+    // Dispatch plugin event
+    #[cfg(feature = "plugins")]
+    crate::plugins::dispatch_plugin_event_bg(
+        &state.plugin_host,
+        crate::plugins::HookPoint::OnPageDeleted,
+        serde_json::json!({
+            "notebook_id": nb_id.to_string(),
+            "page_id": pg_id.to_string(),
+            "title": page_title,
+        }),
+    );
 
     Ok(())
 }

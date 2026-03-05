@@ -4,7 +4,7 @@
 //! loading plugins, calling hooks, and managing the lifecycle.
 
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -308,8 +308,62 @@ impl PluginHost {
         plugin.call("execute_command", &input)
     }
 
+    /// Dispatch an event to all plugins that registered for the given hook.
+    /// Calls the corresponding Lua function with the provided data JSON.
+    /// Errors are logged but never propagated — events are best-effort.
+    pub fn dispatch_event(&self, hook: &HookPoint, data: &serde_json::Value) {
+        let func_name = match hook {
+            HookPoint::OnPageCreated => "on_page_created",
+            HookPoint::OnPageUpdated => "on_page_updated",
+            HookPoint::OnPageDeleted => "on_page_deleted",
+            HookPoint::OnInboxCaptured => "on_inbox_captured",
+            HookPoint::OnGoalProgress => "on_goal_progress",
+            _ => return, // Not an event hook
+        };
+
+        let plugin_ids = self.registry.plugins_for_hook(hook);
+        for plugin_id in plugin_ids {
+            let plugin_mutex = match self.registry.get(&plugin_id) {
+                Some(m) => m,
+                None => continue,
+            };
+            let mut plugin = match plugin_mutex.lock() {
+                Ok(p) => p,
+                Err(e) => {
+                    log::warn!("Failed to lock plugin '{}' for event dispatch: {e}", plugin_id);
+                    continue;
+                }
+            };
+            if let Err(e) = plugin.call(func_name, data) {
+                log::warn!(
+                    "Plugin '{}' event handler '{}' failed: {e}",
+                    plugin_id,
+                    func_name
+                );
+            }
+        }
+    }
+
     /// Get plugins directory path
     pub fn plugins_dir(&self) -> &PathBuf {
         &self.plugins_dir
+    }
+}
+
+/// Dispatch a plugin event in a background thread.
+/// Takes the same `Option<Arc<Mutex<PluginHost>>>` type as `AppState.plugin_host`.
+/// Fire-and-forget: errors are logged, never propagated.
+pub fn dispatch_plugin_event_bg(
+    plugin_host: &Option<Arc<Mutex<PluginHost>>>,
+    hook: HookPoint,
+    data: serde_json::Value,
+) {
+    if let Some(ref ph) = plugin_host {
+        let ph = Arc::clone(ph);
+        std::thread::spawn(move || {
+            if let Ok(host) = ph.lock() {
+                host.dispatch_event(&hook, &data);
+            }
+        });
     }
 }

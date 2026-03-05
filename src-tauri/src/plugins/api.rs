@@ -2,7 +2,9 @@
 //!
 //! Every method checks the calling plugin's capabilities before touching storage.
 
+use std::net::IpAddr;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use uuid::Uuid;
 
@@ -13,6 +15,11 @@ use crate::inbox::InboxStorage;
 use crate::search::SearchIndex;
 use crate::storage::{FileStorage, FileStorageMode, PageType};
 
+/// Maximum timeout for HTTP requests (60 seconds).
+const MAX_TIMEOUT_SECS: u64 = 60;
+/// Maximum response body size (10 MB).
+const MAX_RESPONSE_BYTES: usize = 10 * 1024 * 1024;
+
 /// Host API available to all plugin runtimes.
 /// Holds Arc references to the app's storage layers.
 pub struct HostApi {
@@ -20,6 +27,7 @@ pub struct HostApi {
     pub(crate) goals_storage: Arc<Mutex<GoalsStorage>>,
     pub(crate) inbox_storage: Arc<Mutex<InboxStorage>>,
     pub(crate) search_index: Option<Arc<Mutex<SearchIndex>>>,
+    pub(crate) http_client: reqwest::blocking::Client,
 }
 
 impl HostApi {
@@ -28,11 +36,19 @@ impl HostApi {
         goals_storage: Arc<Mutex<GoalsStorage>>,
         inbox_storage: Arc<Mutex<InboxStorage>>,
     ) -> Self {
+        let http_client = reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(30))
+            .redirect(reqwest::redirect::Policy::limited(5))
+            .user_agent("nous-plugin/1.0")
+            .build()
+            .unwrap_or_else(|_| reqwest::blocking::Client::new());
+
         Self {
             storage,
             goals_storage,
             inbox_storage,
             search_index: None,
+            http_client,
         }
     }
 
@@ -628,6 +644,132 @@ impl HostApi {
             .search(query, limit)
             .map_err(|e| PluginError::CallFailed(e.to_string()))?;
         serde_json::to_value(&results).map_err(PluginError::Json)
+    }
+
+    // -- Network API --
+
+    /// Make an HTTP request. Gated on NETWORK capability.
+    pub fn http_request(
+        &self,
+        caps: CapabilitySet,
+        plugin_id: &str,
+        method: &str,
+        url: &str,
+        body: Option<&str>,
+        headers: Option<&std::collections::HashMap<String, String>>,
+        timeout_secs: Option<u64>,
+    ) -> Result<serde_json::Value, PluginError> {
+        Self::require(caps, CapabilitySet::NETWORK, plugin_id)?;
+
+        // Validate URL scheme
+        let parsed_url: reqwest::Url = url
+            .parse()
+            .map_err(|e| PluginError::CallFailed(format!("invalid URL: {e}")))?;
+        match parsed_url.scheme() {
+            "http" | "https" => {}
+            other => {
+                return Err(PluginError::CallFailed(format!(
+                    "blocked URL scheme: {other} (only http/https allowed)"
+                )));
+            }
+        }
+
+        // SSRF prevention: block private/loopback addresses
+        if let Some(host) = parsed_url.host_str() {
+            let is_blocked = match host {
+                "localhost" | "0.0.0.0" => true,
+                h => {
+                    if let Ok(ip) = h.parse::<IpAddr>() {
+                        match ip {
+                            IpAddr::V4(v4) => {
+                                v4.is_loopback()
+                                    || v4.is_private()
+                                    || v4.is_link_local()
+                                    || v4.is_unspecified()
+                            }
+                            IpAddr::V6(v6) => v6.is_loopback() || v6.is_unspecified(),
+                        }
+                    } else {
+                        false
+                    }
+                }
+            };
+            if is_blocked {
+                return Err(PluginError::CallFailed(format!(
+                    "blocked request to private/loopback address: {host}"
+                )));
+            }
+        }
+
+        // Parse method
+        let http_method = match method.to_uppercase().as_str() {
+            "GET" => reqwest::Method::GET,
+            "POST" => reqwest::Method::POST,
+            "PUT" => reqwest::Method::PUT,
+            "PATCH" => reqwest::Method::PATCH,
+            "DELETE" => reqwest::Method::DELETE,
+            "HEAD" => reqwest::Method::HEAD,
+            other => {
+                return Err(PluginError::CallFailed(format!(
+                    "unsupported HTTP method: {other}"
+                )));
+            }
+        };
+
+        // Cap timeout
+        let timeout = Duration::from_secs(timeout_secs.unwrap_or(30).min(MAX_TIMEOUT_SECS));
+
+        // Build request
+        let mut req = self.http_client.request(http_method, url).timeout(timeout);
+
+        // Add headers (filter dangerous ones)
+        if let Some(hdrs) = headers {
+            for (k, v) in hdrs {
+                let lower = k.to_lowercase();
+                if lower == "host" || lower == "transfer-encoding" {
+                    continue;
+                }
+                req = req.header(k.as_str(), v.as_str());
+            }
+        }
+
+        // Add body
+        if let Some(b) = body {
+            req = req.body(b.to_string());
+        }
+
+        // Execute
+        let response = req
+            .send()
+            .map_err(|e| PluginError::CallFailed(format!("HTTP request failed: {e}")))?;
+
+        let status = response.status().as_u16();
+
+        // Collect response headers
+        let resp_headers: std::collections::HashMap<String, String> = response
+            .headers()
+            .iter()
+            .filter_map(|(k, v)| v.to_str().ok().map(|vs| (k.to_string(), vs.to_string())))
+            .collect();
+
+        // Read body with size limit
+        let body_bytes = response
+            .bytes()
+            .map_err(|e| PluginError::CallFailed(format!("failed to read response body: {e}")))?;
+        if body_bytes.len() > MAX_RESPONSE_BYTES {
+            return Err(PluginError::CallFailed(format!(
+                "response body too large: {} bytes (max {})",
+                body_bytes.len(),
+                MAX_RESPONSE_BYTES
+            )));
+        }
+        let body_str = String::from_utf8_lossy(&body_bytes).to_string();
+
+        Ok(serde_json::json!({
+            "status": status,
+            "headers": resp_headers,
+            "body": body_str,
+        }))
     }
 
     // -- Logging APIs (no capability required) --

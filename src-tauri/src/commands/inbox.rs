@@ -16,7 +16,21 @@ type CommandResult<T> = Result<T, String>;
 #[tauri::command]
 pub fn inbox_capture(state: State<AppState>, request: CaptureRequest) -> CommandResult<InboxItem> {
     let inbox = state.inbox_storage.lock().map_err(|e| e.to_string())?;
-    inbox.capture(request).map_err(|e| e.to_string())
+    let item = inbox.capture(request).map_err(|e| e.to_string())?;
+
+    // Dispatch plugin event
+    #[cfg(feature = "plugins")]
+    crate::plugins::dispatch_plugin_event_bg(
+        &state.plugin_host,
+        crate::plugins::HookPoint::OnInboxCaptured,
+        serde_json::json!({
+            "item_id": item.id.to_string(),
+            "title": item.title,
+            "tags": item.tags,
+        }),
+    );
+
+    Ok(item)
 }
 
 /// List all inbox items

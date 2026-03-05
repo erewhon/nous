@@ -350,6 +350,67 @@ impl LuaPlugin {
             })?;
         }
 
+        // -- Network API --
+        {
+            let api_ref = Arc::clone(api);
+            let pid = plugin_id.clone();
+            let c = caps;
+            let http_request = self.lua.create_function(
+                move |_, (method, url, body, headers_json, timeout): (String, String, Option<String>, Option<String>, Option<u64>)| {
+                    let headers: Option<std::collections::HashMap<String, String>> =
+                        headers_json.as_deref().and_then(|h| serde_json::from_str(h).ok());
+                    let result = api_ref
+                        .http_request(c, &pid, &method, &url, body.as_deref(), headers.as_ref(), timeout)
+                        .map_err(|e| LuaError::external(e))?;
+                    let s = serde_json::to_string(&result).map_err(|e| LuaError::external(e))?;
+                    Ok(s)
+                },
+            ).map_err(|e| PluginError::InitFailed(format!("http_request: {e}")))?;
+            nous.set("http_request", http_request).map_err(|e| {
+                PluginError::InitFailed(format!("set http_request: {e}"))
+            })?;
+        }
+
+        {
+            let api_ref = Arc::clone(api);
+            let pid = plugin_id.clone();
+            let c = caps;
+            let http_get = self.lua.create_function(
+                move |_, (url, headers_json): (String, Option<String>)| {
+                    let headers: Option<std::collections::HashMap<String, String>> =
+                        headers_json.as_deref().and_then(|h| serde_json::from_str(h).ok());
+                    let result = api_ref
+                        .http_request(c, &pid, "GET", &url, None, headers.as_ref(), None)
+                        .map_err(|e| LuaError::external(e))?;
+                    let s = serde_json::to_string(&result).map_err(|e| LuaError::external(e))?;
+                    Ok(s)
+                },
+            ).map_err(|e| PluginError::InitFailed(format!("http_get: {e}")))?;
+            nous.set("http_get", http_get).map_err(|e| {
+                PluginError::InitFailed(format!("set http_get: {e}"))
+            })?;
+        }
+
+        {
+            let api_ref = Arc::clone(api);
+            let pid = plugin_id.clone();
+            let c = caps;
+            let http_post = self.lua.create_function(
+                move |_, (url, body, headers_json): (String, String, Option<String>)| {
+                    let headers: Option<std::collections::HashMap<String, String>> =
+                        headers_json.as_deref().and_then(|h| serde_json::from_str(h).ok());
+                    let result = api_ref
+                        .http_request(c, &pid, "POST", &url, Some(&body), headers.as_ref(), None)
+                        .map_err(|e| LuaError::external(e))?;
+                    let s = serde_json::to_string(&result).map_err(|e| LuaError::external(e))?;
+                    Ok(s)
+                },
+            ).map_err(|e| PluginError::InitFailed(format!("http_post: {e}")))?;
+            nous.set("http_post", http_post).map_err(|e| {
+                PluginError::InitFailed(format!("set http_post: {e}"))
+            })?;
+        }
+
         // Set nous as a global
         self.lua.globals().set("nous", nous).map_err(|e| {
             PluginError::InitFailed(format!("set global nous: {e}"))

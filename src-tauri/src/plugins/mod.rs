@@ -12,7 +12,7 @@ pub mod registry;
 pub mod runtime;
 
 pub use error::PluginError;
-pub use host::PluginHost;
+pub use host::{dispatch_plugin_event_bg, PluginHost};
 pub use api::HostApi;
 pub use manifest::{CapabilitySet, HookPoint, PluginManifest, PluginSource};
 pub use runtime::Plugin;

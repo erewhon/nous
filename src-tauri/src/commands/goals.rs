@@ -85,13 +85,27 @@ pub fn record_goal_progress(
     date: String,
     completed: bool,
 ) -> CommandResult<GoalProgress> {
-    let goal_id = Uuid::parse_str(&goal_id).map_err(|e| format!("Invalid goal ID: {}", e))?;
-    let date =
+    let gid = Uuid::parse_str(&goal_id).map_err(|e| format!("Invalid goal ID: {}", e))?;
+    let parsed_date =
         NaiveDate::parse_from_str(&date, "%Y-%m-%d").map_err(|e| format!("Invalid date: {}", e))?;
 
-    let progress = GoalProgress::new_manual(goal_id, date, completed);
+    let progress = GoalProgress::new_manual(gid, parsed_date, completed);
     let goals = state.goals_storage.lock().map_err(|e| e.to_string())?;
-    goals.record_progress(progress).map_err(|e| e.to_string())
+    let result = goals.record_progress(progress).map_err(|e| e.to_string())?;
+
+    // Dispatch plugin event
+    #[cfg(feature = "plugins")]
+    crate::plugins::dispatch_plugin_event_bg(
+        &state.plugin_host,
+        crate::plugins::HookPoint::OnGoalProgress,
+        serde_json::json!({
+            "goal_id": gid.to_string(),
+            "date": date,
+            "completed": completed,
+        }),
+    );
+
+    Ok(result)
 }
 
 /// Get progress for a goal within a date range
@@ -205,16 +219,31 @@ pub fn get_goals_summary(state: State<AppState>) -> CommandResult<GoalsSummary> 
 /// Toggle goal completion for today
 #[tauri::command]
 pub fn toggle_goal_today(state: State<AppState>, goal_id: String) -> CommandResult<GoalProgress> {
-    let goal_id = Uuid::parse_str(&goal_id).map_err(|e| format!("Invalid goal ID: {}", e))?;
+    let gid = Uuid::parse_str(&goal_id).map_err(|e| format!("Invalid goal ID: {}", e))?;
     let today = chrono::Utc::now().date_naive();
 
     let goals = state.goals_storage.lock().map_err(|e| e.to_string())?;
 
     // Check current progress for today
-    let current_progress = goals.get_progress_range(goal_id, today, today).map_err(|e| e.to_string())?;
+    let current_progress = goals.get_progress_range(gid, today, today).map_err(|e| e.to_string())?;
     let currently_completed = current_progress.first().map(|p| p.completed).unwrap_or(false);
 
     // Toggle the completion status
-    let progress = GoalProgress::new_manual(goal_id, today, !currently_completed);
-    goals.record_progress(progress).map_err(|e| e.to_string())
+    let new_completed = !currently_completed;
+    let progress = GoalProgress::new_manual(gid, today, new_completed);
+    let result = goals.record_progress(progress).map_err(|e| e.to_string())?;
+
+    // Dispatch plugin event
+    #[cfg(feature = "plugins")]
+    crate::plugins::dispatch_plugin_event_bg(
+        &state.plugin_host,
+        crate::plugins::HookPoint::OnGoalProgress,
+        serde_json::json!({
+            "goal_id": gid.to_string(),
+            "date": today.format("%Y-%m-%d").to_string(),
+            "completed": new_completed,
+        }),
+    );
+
+    Ok(result)
 }

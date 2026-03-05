@@ -89,6 +89,16 @@ pub enum HookPoint {
     },
     /// Command palette command registration
     CommandPalette,
+    /// Fired when a page is created
+    OnPageCreated,
+    /// Fired when a page is updated
+    OnPageUpdated,
+    /// Fired when a page is deleted (moved to trash)
+    OnPageDeleted,
+    /// Fired when an inbox item is captured
+    OnInboxCaptured,
+    /// Fired when goal progress is recorded
+    OnGoalProgress,
 }
 
 impl HookPoint {
@@ -97,6 +107,11 @@ impl HookPoint {
         match s {
             "goal_detector" => Ok(HookPoint::GoalDetector),
             "command_palette" => Ok(HookPoint::CommandPalette),
+            "on_page_created" => Ok(HookPoint::OnPageCreated),
+            "on_page_updated" => Ok(HookPoint::OnPageUpdated),
+            "on_page_deleted" => Ok(HookPoint::OnPageDeleted),
+            "on_inbox_captured" => Ok(HookPoint::OnInboxCaptured),
+            "on_goal_progress" => Ok(HookPoint::OnGoalProgress),
             other if other.starts_with("action_step:") => {
                 let step_type = other.strip_prefix("action_step:").unwrap().to_string();
                 Ok(HookPoint::ActionStep { step_type })
