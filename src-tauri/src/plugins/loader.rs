@@ -25,6 +25,7 @@ static BUILTIN_PLUGINS: &[(&str, &str)] = &[
     ("daily_learning_summary", include_str!("builtins/daily_learning_summary.lua")),
     ("daily_goal_nudge", include_str!("builtins/daily_goal_nudge.lua")),
     ("goal_brainstorm", include_str!("builtins/goal_brainstorm.lua")),
+    ("database_heatmap", include_str!("builtins/database_heatmap.lua")),
 ];
 
 /// Scan a directory for plugin files and return loaded (but not yet initialized) plugins.

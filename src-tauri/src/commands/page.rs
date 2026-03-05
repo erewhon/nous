@@ -244,6 +244,7 @@ pub fn update_page(
             "calendar" => crate::storage::PageType::Calendar,
             "chat" => crate::storage::PageType::Chat,
             "canvas" => crate::storage::PageType::Canvas,
+            "database" => crate::storage::PageType::Database,
             _ => crate::storage::PageType::Standard,
         };
     }
@@ -264,6 +265,7 @@ pub fn update_page(
                     | crate::storage::PageType::Chat
                     | crate::storage::PageType::Jupyter
                     | crate::storage::PageType::Canvas
+                    | crate::storage::PageType::Database
             );
             if is_file_based {
                 // Set source_file to files/{page_id}.{ext}

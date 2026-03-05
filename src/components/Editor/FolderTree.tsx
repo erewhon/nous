@@ -493,17 +493,21 @@ END:VCALENDAR`;
         console.error("Failed to create database page");
         return;
       }
-      const { updatePage: storeUpdatePage } = usePageStore.getState();
-      await storeUpdatePage(notebookId, pageData.id, {
+      // Use api.updatePage directly so errors propagate (store method swallows them)
+      const updatedPage = await api.updatePage(notebookId, pageData.id, {
         fileExtension: "database",
         pageType: "database",
       });
+      // Update the store with the result
+      usePageStore.setState((state) => ({
+        pages: state.pages.map((p) => (p.id === pageData.id ? updatedPage : p)),
+      }));
       // Initialize database content — from template or empty
       const { createDefaultDatabaseContent, createDatabaseFromObjectType } = await import("../../types/database");
-      const content = objectType
+      const dbContent = objectType
         ? createDatabaseFromObjectType(objectType)
         : createDefaultDatabaseContent();
-      await api.updateFileContent(notebookId, pageData.id, JSON.stringify(content, null, 2));
+      await api.updateFileContent(notebookId, pageData.id, JSON.stringify(dbContent, null, 2));
     } catch (err) {
       console.error("Failed to create database page:", err);
     }

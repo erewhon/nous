@@ -16,6 +16,7 @@ const CAPABILITY_NAMES: Record<number, string> = {
   0x200: "Network",
   0x400: "Energy Read",
   0x800: "Energy Write",
+  0x1000: "Database View",
 };
 
 const HOOK_TYPE_LABELS: Record<string, string> = {
@@ -27,6 +28,7 @@ const HOOK_TYPE_LABELS: Record<string, string> = {
   on_page_deleted: "On Page Deleted",
   on_inbox_captured: "On Inbox Captured",
   on_goal_progress: "On Goal Progress",
+  database_view: "Database View",
 };
 
 function getCapabilityLabels(caps: number): string[] {
@@ -47,7 +49,8 @@ function getSourceLabel(source: PluginManifest["source"]): string {
 }
 
 export function PluginSettings() {
-  const { plugins, loading, fetchPlugins, reloadPlugin } = usePluginStore();
+  const { plugins, loading, fetchPlugins, reloadPlugin, setPluginEnabled } =
+    usePluginStore();
   const [reloading, setReloading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -64,6 +67,15 @@ export function PluginSettings() {
       setError(`Failed to reload ${pluginId}: ${e}`);
     } finally {
       setReloading(null);
+    }
+  };
+
+  const handleToggleEnabled = async (pluginId: string, enabled: boolean) => {
+    setError(null);
+    try {
+      await setPluginEnabled(pluginId, enabled);
+    } catch (e) {
+      setError(`Failed to ${enabled ? "enable" : "disable"} ${pluginId}: ${e}`);
     }
   };
 
@@ -128,6 +140,9 @@ export function PluginSettings() {
                 plugin={plugin}
                 onReload={() => handleReload(plugin.id)}
                 isReloading={reloading === plugin.id}
+                onToggleEnabled={(enabled) =>
+                  handleToggleEnabled(plugin.id, enabled)
+                }
               />
             ))}
           </div>
@@ -152,7 +167,13 @@ export function PluginSettings() {
         ) : (
           <div className="space-y-2">
             {builtinPlugins.map((plugin) => (
-              <PluginCard key={plugin.id} plugin={plugin} />
+              <PluginCard
+                key={plugin.id}
+                plugin={plugin}
+                onToggleEnabled={(enabled) =>
+                  handleToggleEnabled(plugin.id, enabled)
+                }
+              />
             ))}
           </div>
         )}
@@ -165,14 +186,17 @@ function PluginCard({
   plugin,
   onReload,
   isReloading,
+  onToggleEnabled,
 }: {
   plugin: PluginManifest;
   onReload?: () => void;
   isReloading?: boolean;
+  onToggleEnabled?: (enabled: boolean) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const caps = getCapabilityLabels(plugin.capabilities);
   const hooks = plugin.hooks;
+  const isEnabled = plugin.enabled;
 
   return (
     <div
@@ -180,6 +204,7 @@ function PluginCard({
       style={{
         backgroundColor: "var(--color-bg-secondary)",
         borderColor: "var(--color-border)",
+        opacity: isEnabled ? 1 : 0.6,
       }}
     >
       <div className="flex items-center justify-between">
@@ -220,28 +245,62 @@ function PluginCard({
             <span
               className="text-xs px-1.5 py-0.5 rounded shrink-0"
               style={{
-                backgroundColor: "var(--color-accent-bg, rgba(59, 130, 246, 0.1))",
+                backgroundColor:
+                  "var(--color-accent-bg, rgba(59, 130, 246, 0.1))",
                 color: "var(--color-accent)",
               }}
             >
               built-in
             </span>
           )}
+          {!isEnabled && (
+            <span
+              className="text-xs px-1.5 py-0.5 rounded shrink-0"
+              style={{
+                backgroundColor: "var(--color-danger-bg, #fef2f2)",
+                color: "var(--color-danger-text, #dc2626)",
+              }}
+            >
+              disabled
+            </span>
+          )}
         </div>
-        {onReload && (
-          <button
-            onClick={onReload}
-            disabled={isReloading}
-            className="text-xs px-2 py-1 rounded transition-colors shrink-0"
-            style={{
-              backgroundColor: "var(--color-bg-tertiary)",
-              color: "var(--color-text-secondary)",
-              opacity: isReloading ? 0.5 : 1,
-            }}
-          >
-            {isReloading ? "Reloading..." : "Reload"}
-          </button>
-        )}
+        <div className="flex items-center gap-2 shrink-0">
+          {onToggleEnabled && (
+            <button
+              onClick={() => onToggleEnabled(!isEnabled)}
+              className="relative w-8 h-[18px] rounded-full transition-colors"
+              style={{
+                backgroundColor: isEnabled
+                  ? "var(--color-accent, #3b82f6)"
+                  : "var(--color-bg-tertiary, #555)",
+              }}
+              title={isEnabled ? "Disable plugin" : "Enable plugin"}
+            >
+              <span
+                className="absolute top-[2px] w-[14px] h-[14px] rounded-full transition-transform"
+                style={{
+                  backgroundColor: "#fff",
+                  left: isEnabled ? "16px" : "2px",
+                }}
+              />
+            </button>
+          )}
+          {onReload && (
+            <button
+              onClick={onReload}
+              disabled={isReloading}
+              className="text-xs px-2 py-1 rounded transition-colors"
+              style={{
+                backgroundColor: "var(--color-bg-tertiary)",
+                color: "var(--color-text-secondary)",
+                opacity: isReloading ? 0.5 : 1,
+              }}
+            >
+              {isReloading ? "Reloading..." : "Reload"}
+            </button>
+          )}
+        </div>
       </div>
 
       {expanded && (

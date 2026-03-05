@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import type { ObjectType, PropertyType, DatabaseViewType, CellValue } from "../../types/database";
+import { BUILT_IN_OBJECT_TYPES } from "../../types/database";
 import { useObjectTypeStore } from "../../stores/objectTypeStore";
 import { PropertyTypeIcon } from "./PropertyEditor";
 import "./database-styles.css";
@@ -21,7 +22,8 @@ interface ObjectTypeManagerProps {
 export function ObjectTypeManager({ onClose }: ObjectTypeManagerProps) {
   const { addType, updateType, deleteType, addPropertyToType, removePropertyFromType, updatePropertyInType } =
     useObjectTypeStore();
-  const allTypes = useObjectTypeStore((s) => s.getAllTypes());
+  const customTypes = useObjectTypeStore((s) => s.customTypes);
+  const allTypes = useMemo(() => [...BUILT_IN_OBJECT_TYPES, ...customTypes], [customTypes]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [newName, setNewName] = useState("");
@@ -402,7 +404,8 @@ const TEMPLATE_CATEGORIES: { label: string; typeIds: string[] }[] = [
 ];
 
 export function ObjectTypePicker({ onSelect, onManageTypes }: ObjectTypePickerProps) {
-  const allTypes = useObjectTypeStore((s) => s.getAllTypes());
+  const storeCustomTypes = useObjectTypeStore((s) => s.customTypes);
+  const allTypes = useMemo(() => [...BUILT_IN_OBJECT_TYPES, ...storeCustomTypes], [storeCustomTypes]);
 
   // Group built-in types by category, collect custom types separately
   const typeById = new Map(allTypes.map((t) => [t.id, t]));

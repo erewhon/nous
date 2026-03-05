@@ -3,6 +3,7 @@
 //! Owns the HostApi and PluginRegistry. Provides high-level methods for
 //! loading plugins, calling hooks, and managing the lifecycle.
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -27,20 +28,78 @@ pub struct PluginCommand {
     pub keywords: Option<Vec<String>>,
 }
 
+/// A database view type registered by a plugin.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginViewType {
+    pub plugin_id: String,
+    pub view_type: String,
+    pub label: String,
+    pub icon_svg: Option<String>,
+}
+
+/// Plugin manifest with runtime enabled/disabled status.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginInfo {
+    #[serde(flatten)]
+    pub manifest: PluginManifest,
+    pub enabled: bool,
+}
+
 /// The central plugin host that coordinates loading, registration, and hook dispatch.
 pub struct PluginHost {
     api: Arc<HostApi>,
     registry: PluginRegistry,
     plugins_dir: PathBuf,
+    disabled: HashSet<String>,
 }
 
 impl PluginHost {
     pub fn new(api: Arc<HostApi>, plugins_dir: PathBuf) -> Self {
+        let disabled = Self::load_disabled(&plugins_dir);
         Self {
             api,
             registry: PluginRegistry::new(),
             plugins_dir,
+            disabled,
         }
+    }
+
+    fn load_disabled(plugins_dir: &PathBuf) -> HashSet<String> {
+        let path = plugins_dir.join("disabled.json");
+        match std::fs::read_to_string(&path) {
+            Ok(content) => {
+                serde_json::from_str::<Vec<String>>(&content)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .collect()
+            }
+            Err(_) => HashSet::new(),
+        }
+    }
+
+    fn save_disabled(&self) {
+        let path = self.plugins_dir.join("disabled.json");
+        let list: Vec<&String> = self.disabled.iter().collect();
+        if let Ok(json) = serde_json::to_string_pretty(&list) {
+            if let Err(e) = std::fs::write(&path, json) {
+                log::warn!("Failed to save disabled.json: {e}");
+            }
+        }
+    }
+
+    pub fn set_plugin_enabled(&mut self, plugin_id: &str, enabled: bool) {
+        if enabled {
+            self.disabled.remove(plugin_id);
+        } else {
+            self.disabled.insert(plugin_id.to_string());
+        }
+        self.save_disabled();
+    }
+
+    pub fn is_plugin_enabled(&self, plugin_id: &str) -> bool {
+        !self.disabled.contains(plugin_id)
     }
 
     /// Load all plugins from the plugins directory and built-ins.
@@ -123,9 +182,16 @@ impl PluginHost {
         Ok(())
     }
 
-    /// List manifests for all loaded plugins.
-    pub fn list_plugins(&self) -> Vec<PluginManifest> {
-        self.registry.list_manifests()
+    /// List all loaded plugins with their enabled/disabled status.
+    pub fn list_plugins(&self) -> Vec<PluginInfo> {
+        self.registry
+            .list_manifests()
+            .into_iter()
+            .map(|manifest| {
+                let enabled = self.is_plugin_enabled(&manifest.id);
+                PluginInfo { manifest, enabled }
+            })
+            .collect()
     }
 
     /// Run all goal detector plugins for a given goal/check/date.
@@ -137,6 +203,11 @@ impl PluginHost {
         check: &serde_json::Value,
         date: &str,
     ) -> Result<(bool, u32), PluginError> {
+        if !self.is_plugin_enabled(plugin_id) {
+            return Err(PluginError::Runtime(format!(
+                "plugin '{plugin_id}' is disabled"
+            )));
+        }
         let plugin_mutex = self.registry.get(plugin_id).ok_or_else(|| {
             PluginError::NotFound(plugin_id.to_string())
         })?;
@@ -173,6 +244,11 @@ impl PluginHost {
         function: &str,
         input: &serde_json::Value,
     ) -> Result<serde_json::Value, PluginError> {
+        if !self.is_plugin_enabled(plugin_id) {
+            return Err(PluginError::Runtime(format!(
+                "plugin '{plugin_id}' is disabled"
+            )));
+        }
         let plugin_mutex = self.registry.get(plugin_id).ok_or_else(|| {
             PluginError::NotFound(plugin_id.to_string())
         })?;
@@ -192,7 +268,7 @@ impl PluginHost {
         let mut actions = Vec::new();
 
         for manifest in self.registry.list_manifests() {
-            if !manifest.is_builtin {
+            if !manifest.is_builtin || !self.is_plugin_enabled(&manifest.id) {
                 continue;
             }
 
@@ -247,6 +323,10 @@ impl PluginHost {
 
         let plugin_ids = self.registry.plugins_for_hook(&HookPoint::CommandPalette);
         for plugin_id in plugin_ids {
+            if !self.is_plugin_enabled(&plugin_id) {
+                continue;
+            }
+
             let plugin_mutex = match self.registry.get(&plugin_id) {
                 Some(m) => m,
                 None => continue,
@@ -330,6 +410,9 @@ impl PluginHost {
 
         let plugin_ids = self.registry.plugins_for_hook(hook);
         for plugin_id in plugin_ids {
+            if !self.is_plugin_enabled(&plugin_id) {
+                continue;
+            }
             let plugin_mutex = match self.registry.get(&plugin_id) {
                 Some(m) => m,
                 None => continue,
@@ -351,9 +434,118 @@ impl PluginHost {
         }
     }
 
+    /// Get database view types registered by plugins.
+    pub fn get_plugin_view_types(&self) -> Vec<PluginViewType> {
+        let mut view_types = Vec::new();
+
+        for manifest in self.registry.list_manifests() {
+            if !self.is_plugin_enabled(&manifest.id) {
+                continue;
+            }
+            for hook in &manifest.hooks {
+                if let HookPoint::DatabaseView { view_type } = hook {
+                    let plugin_mutex = match self.registry.get(&manifest.id) {
+                        Some(m) => m,
+                        None => continue,
+                    };
+
+                    let mut plugin = match plugin_mutex.lock() {
+                        Ok(p) => p,
+                        Err(e) => {
+                            log::warn!("Failed to lock plugin '{}' for describe_view: {e}", manifest.id);
+                            continue;
+                        }
+                    };
+
+                    match plugin.call("describe_view", &serde_json::Value::Null) {
+                        Ok(val) => {
+                            let label = val.get("label").and_then(|v| v.as_str()).unwrap_or(view_type.as_str()).to_string();
+                            let icon_svg = val.get("icon_svg").and_then(|v| v.as_str()).map(|s| s.to_string());
+                            view_types.push(PluginViewType {
+                                plugin_id: manifest.id.clone(),
+                                view_type: view_type.clone(),
+                                label,
+                                icon_svg,
+                            });
+                        }
+                        Err(e) => {
+                            log::warn!("Plugin '{}' describe_view failed: {e}", manifest.id);
+                            view_types.push(PluginViewType {
+                                plugin_id: manifest.id.clone(),
+                                view_type: view_type.clone(),
+                                label: view_type.clone(),
+                                icon_svg: None,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        view_types
+    }
+
+    /// Render a plugin database view. Returns JSON with html, styles, height.
+    pub fn render_plugin_view(
+        &self,
+        plugin_id: &str,
+        view_type: &str,
+        content: &serde_json::Value,
+        view: &serde_json::Value,
+    ) -> Result<serde_json::Value, PluginError> {
+        if !self.is_plugin_enabled(plugin_id) {
+            return Err(PluginError::Runtime(format!(
+                "plugin '{plugin_id}' is disabled"
+            )));
+        }
+        let plugin_mutex = self.registry.get(plugin_id).ok_or_else(|| {
+            PluginError::NotFound(plugin_id.to_string())
+        })?;
+
+        let input = json!({
+            "view_type": view_type,
+            "content": content,
+            "view": view,
+        });
+
+        let mut plugin = plugin_mutex.lock().map_err(|e| {
+            PluginError::Runtime(format!("lock: {e}"))
+        })?;
+
+        plugin.call("render_view", &input)
+    }
+
+    /// Handle an interactive action from a plugin database view.
+    pub fn handle_plugin_view_action(
+        &self,
+        plugin_id: &str,
+        action: &serde_json::Value,
+    ) -> Result<serde_json::Value, PluginError> {
+        if !self.is_plugin_enabled(plugin_id) {
+            return Err(PluginError::Runtime(format!(
+                "plugin '{plugin_id}' is disabled"
+            )));
+        }
+        let plugin_mutex = self.registry.get(plugin_id).ok_or_else(|| {
+            PluginError::NotFound(plugin_id.to_string())
+        })?;
+
+        let mut plugin = plugin_mutex.lock().map_err(|e| {
+            PluginError::Runtime(format!("lock: {e}"))
+        })?;
+
+        plugin.call("handle_action", action)
+    }
+
     /// Get plugins directory path
     pub fn plugins_dir(&self) -> &PathBuf {
         &self.plugins_dir
+    }
+
+    /// Get mutable access to the registry (for testing).
+    #[cfg(test)]
+    pub(crate) fn registry_mut(&mut self) -> &mut PluginRegistry {
+        &mut self.registry
     }
 }
 

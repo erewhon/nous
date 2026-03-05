@@ -161,6 +161,7 @@ export const DatabaseViewTypeSchema = z.enum([
   "calendar",
   "chart",
   "timeline",
+  "plugin",
 ]);
 export type DatabaseViewType = z.infer<typeof DatabaseViewTypeSchema>;
 
@@ -218,6 +219,13 @@ export const TimelineViewConfigSchema = z.object({
 });
 export type TimelineViewConfig = z.infer<typeof TimelineViewConfigSchema>;
 
+export const PluginViewConfigSchema = z.object({
+  pluginId: z.string(),
+  viewType: z.string(),
+  pluginConfig: z.record(z.string(), z.unknown()).optional(),
+});
+export type PluginViewConfig = z.infer<typeof PluginViewConfigSchema>;
+
 export const ViewConfigSchema = z.union([
   TableViewConfigSchema,
   BoardViewConfigSchema,
@@ -226,6 +234,7 @@ export const ViewConfigSchema = z.union([
   CalendarViewConfigSchema,
   ChartViewConfigSchema,
   TimelineViewConfigSchema,
+  PluginViewConfigSchema,
 ]);
 
 export const SummaryAggregationSchema = z.enum([

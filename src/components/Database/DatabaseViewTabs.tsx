@@ -4,7 +4,10 @@ import type {
   DatabaseView,
   DatabaseViewType,
   PropertyDef,
+  PluginViewConfig,
 } from "../../types/database";
+import { usePluginStore } from "../../stores/pluginStore";
+import type { PluginViewType } from "../../stores/pluginStore";
 
 interface DatabaseViewTabsProps {
   views: DatabaseView[];
@@ -24,7 +27,42 @@ const VIEW_TYPE_LABELS: Record<DatabaseViewType, string> = {
   calendar: "Calendar",
   chart: "Chart",
   timeline: "Timeline",
+  plugin: "Plugin",
 };
+
+function PluginViewIcon({ iconSvg }: { iconSvg?: string }) {
+  if (iconSvg) {
+    return (
+      <span
+        style={{ display: "inline-flex", width: 14, height: 14 }}
+        dangerouslySetInnerHTML={{ __html: iconSvg }}
+      />
+    );
+  }
+  // Default plugin icon (puzzle piece)
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M12 2v4" />
+      <path d="M12 18v4" />
+      <path d="M4.93 4.93l2.83 2.83" />
+      <path d="M16.24 16.24l2.83 2.83" />
+      <path d="M2 12h4" />
+      <path d="M18 12h4" />
+      <path d="M4.93 19.07l2.83-2.83" />
+      <path d="M16.24 7.76l2.83-2.83" />
+    </svg>
+  );
+}
 
 function ViewTypeIcon({ type }: { type: DatabaseViewType }) {
   switch (type) {
@@ -160,6 +198,8 @@ function ViewTypeIcon({ type }: { type: DatabaseViewType }) {
           <rect x="4" y="16" width="16" height="3" rx="1.5" />
         </svg>
       );
+    case "plugin":
+      return <PluginViewIcon />;
   }
 }
 
@@ -171,6 +211,12 @@ export function DatabaseViewTabs({
   onUpdateContent,
 }: DatabaseViewTabsProps) {
   const [showAddMenu, setShowAddMenu] = useState(false);
+  const pluginViewTypes = usePluginStore((s) => s.viewTypes);
+
+  useEffect(() => {
+    usePluginStore.getState().fetchViewTypes();
+  }, []);
+
   const [contextMenuViewId, setContextMenuViewId] = useState<string | null>(
     null
   );
@@ -273,6 +319,28 @@ export function DatabaseViewTabs({
     setShowAddMenu(false);
   };
 
+  const addPluginView = (pvt: PluginViewType) => {
+    const id = crypto.randomUUID();
+    const config: PluginViewConfig = {
+      pluginId: pvt.pluginId,
+      viewType: pvt.viewType,
+    };
+    const newView: DatabaseView = {
+      id,
+      name: pvt.label,
+      type: "plugin",
+      sorts: [],
+      filters: [],
+      config,
+    };
+    onUpdateContent((prev) => ({
+      ...prev,
+      views: [...prev.views, newView],
+    }));
+    onSelectView(id);
+    setShowAddMenu(false);
+  };
+
   const deleteView = (viewId: string) => {
     if (views.length <= 1) return;
     onUpdateContent((prev) => ({
@@ -326,6 +394,7 @@ export function DatabaseViewTabs({
   };
 
   return (
+    <div className="db-view-tabs-wrapper">
     <div className="db-view-tabs">
       {views.map((view) => (
         <div
@@ -337,7 +406,17 @@ export function DatabaseViewTabs({
             setContextMenuViewId(view.id);
           }}
         >
-          <ViewTypeIcon type={view.type} />
+          {view.type === "plugin" ? (
+            <PluginViewIcon
+              iconSvg={pluginViewTypes.find(
+                (pvt) =>
+                  pvt.pluginId === (view.config as PluginViewConfig)?.pluginId &&
+                  pvt.viewType === (view.config as PluginViewConfig)?.viewType
+              )?.iconSvg}
+            />
+          ) : (
+            <ViewTypeIcon type={view.type} />
+          )}
           {renamingViewId === view.id ? (
             <input
               ref={renameInputRef}
@@ -385,6 +464,7 @@ export function DatabaseViewTabs({
           )}
         </div>
       ))}
+    </div>
 
       <div className="db-view-tabs-add" ref={addMenuRef}>
         <button
@@ -442,6 +522,21 @@ export function DatabaseViewTabs({
                 </button>
               );
             })}
+            {pluginViewTypes.length > 0 && (
+              <>
+                <div className="db-view-tabs-add-separator" />
+                {pluginViewTypes.map((pvt) => (
+                  <button
+                    key={`${pvt.pluginId}:${pvt.viewType}`}
+                    className="db-view-tabs-add-option"
+                    onClick={() => addPluginView(pvt)}
+                  >
+                    <PluginViewIcon iconSvg={pvt.iconSvg} />
+                    <span>{pvt.label}</span>
+                  </button>
+                ))}
+              </>
+            )}
           </div>
         )}
       </div>

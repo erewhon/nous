@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use chrono::Datelike;
 use mlua::prelude::*;
 
 use crate::plugins::api::HostApi;
@@ -74,6 +75,43 @@ impl LuaPlugin {
             }).map_err(|e| PluginError::InitFailed(format!("json_encode: {e}")))?;
             nous.set("json_encode", json_encode).map_err(|e| {
                 PluginError::InitFailed(format!("set json_encode: {e}"))
+            })?;
+        }
+
+        // -- Date helpers (sandbox has no os library) --
+        {
+            let current_date = self.lua.create_function(|lua, ()| {
+                let now = chrono::Local::now().date_naive();
+                let tbl = lua.create_table()?;
+                tbl.set("year", now.year())?;
+                tbl.set("month", now.month())?;
+                tbl.set("day", now.day())?;
+                tbl.set("wday", now.weekday().num_days_from_sunday() + 1)?; // 1=Sun like Lua
+                // ISO date string for convenience
+                tbl.set("iso", now.format("%Y-%m-%d").to_string())?;
+                Ok(tbl)
+            }).map_err(|e| PluginError::InitFailed(format!("current_date: {e}")))?;
+            nous.set("current_date", current_date).map_err(|e| {
+                PluginError::InitFailed(format!("set current_date: {e}"))
+            })?;
+        }
+
+        {
+            // date_offset(iso_date_string, days) -> {year, month, day, wday, iso}
+            let date_offset = self.lua.create_function(|lua, (date_str, days): (String, i64)| {
+                let base = chrono::NaiveDate::parse_from_str(&date_str, "%Y-%m-%d")
+                    .map_err(|e| LuaError::external(format!("invalid date '{}': {}", date_str, e)))?;
+                let result = base + chrono::Duration::days(days);
+                let tbl = lua.create_table()?;
+                tbl.set("year", result.year())?;
+                tbl.set("month", result.month())?;
+                tbl.set("day", result.day())?;
+                tbl.set("wday", result.weekday().num_days_from_sunday() + 1)?;
+                tbl.set("iso", result.format("%Y-%m-%d").to_string())?;
+                Ok(tbl)
+            }).map_err(|e| PluginError::InitFailed(format!("date_offset: {e}")))?;
+            nous.set("date_offset", date_offset).map_err(|e| {
+                PluginError::InitFailed(format!("set date_offset: {e}"))
             })?;
         }
 

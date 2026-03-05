@@ -6,10 +6,10 @@ use crate::AppState;
 
 type CommandResult<T> = Result<T, String>;
 
-/// List all loaded plugins with their manifests
+/// List all loaded plugins with their manifests and enabled status
 #[cfg(feature = "plugins")]
 #[tauri::command]
-pub fn list_plugins(state: State<AppState>) -> CommandResult<Vec<crate::plugins::PluginManifest>> {
+pub fn list_plugins(state: State<AppState>) -> CommandResult<Vec<crate::plugins::PluginInfo>> {
     let Some(ref ph) = state.plugin_host else {
         return Ok(vec![]);
     };
@@ -86,5 +86,110 @@ pub fn execute_plugin_command(
     _plugin_id: String,
     _command_id: String,
 ) -> CommandResult<serde_json::Value> {
+    Err("Plugins feature not enabled".to_string())
+}
+
+/// Get database view types registered by plugins
+#[cfg(feature = "plugins")]
+#[tauri::command]
+pub fn get_plugin_view_types(
+    state: State<AppState>,
+) -> CommandResult<Vec<crate::plugins::host::PluginViewType>> {
+    let Some(ref ph) = state.plugin_host else {
+        return Ok(vec![]);
+    };
+    let host = ph.lock().map_err(|e| e.to_string())?;
+    Ok(host.get_plugin_view_types())
+}
+
+/// Get plugin view types (stub when plugins feature disabled)
+#[cfg(not(feature = "plugins"))]
+#[tauri::command]
+pub fn get_plugin_view_types(_state: State<AppState>) -> CommandResult<Vec<serde_json::Value>> {
+    Ok(vec![])
+}
+
+/// Render a plugin database view
+#[cfg(feature = "plugins")]
+#[tauri::command]
+pub fn render_plugin_view(
+    state: State<AppState>,
+    plugin_id: String,
+    view_type: String,
+    content: serde_json::Value,
+    view: serde_json::Value,
+) -> CommandResult<serde_json::Value> {
+    let Some(ref ph) = state.plugin_host else {
+        return Err("Plugin host not available".to_string());
+    };
+    let host = ph.lock().map_err(|e| e.to_string())?;
+    host.render_plugin_view(&plugin_id, &view_type, &content, &view)
+        .map_err(|e| e.to_string())
+}
+
+/// Render plugin view (stub when plugins feature disabled)
+#[cfg(not(feature = "plugins"))]
+#[tauri::command]
+pub fn render_plugin_view(
+    _state: State<AppState>,
+    _plugin_id: String,
+    _view_type: String,
+    _content: serde_json::Value,
+    _view: serde_json::Value,
+) -> CommandResult<serde_json::Value> {
+    Err("Plugins feature not enabled".to_string())
+}
+
+/// Handle an interactive action from a plugin database view
+#[cfg(feature = "plugins")]
+#[tauri::command]
+pub fn handle_plugin_view_action(
+    state: State<AppState>,
+    plugin_id: String,
+    action: serde_json::Value,
+) -> CommandResult<serde_json::Value> {
+    let Some(ref ph) = state.plugin_host else {
+        return Err("Plugin host not available".to_string());
+    };
+    let host = ph.lock().map_err(|e| e.to_string())?;
+    host.handle_plugin_view_action(&plugin_id, &action)
+        .map_err(|e| e.to_string())
+}
+
+/// Handle plugin view action (stub when plugins feature disabled)
+#[cfg(not(feature = "plugins"))]
+#[tauri::command]
+pub fn handle_plugin_view_action(
+    _state: State<AppState>,
+    _plugin_id: String,
+    _action: serde_json::Value,
+) -> CommandResult<serde_json::Value> {
+    Err("Plugins feature not enabled".to_string())
+}
+
+/// Enable or disable a plugin by ID
+#[cfg(feature = "plugins")]
+#[tauri::command]
+pub fn set_plugin_enabled(
+    state: State<AppState>,
+    plugin_id: String,
+    enabled: bool,
+) -> CommandResult<()> {
+    let Some(ref ph) = state.plugin_host else {
+        return Err("Plugin host not available".to_string());
+    };
+    let mut host = ph.lock().map_err(|e| e.to_string())?;
+    host.set_plugin_enabled(&plugin_id, enabled);
+    Ok(())
+}
+
+/// Enable/disable a plugin (stub when plugins feature disabled)
+#[cfg(not(feature = "plugins"))]
+#[tauri::command]
+pub fn set_plugin_enabled(
+    _state: State<AppState>,
+    _plugin_id: String,
+    _enabled: bool,
+) -> CommandResult<()> {
     Err("Plugins feature not enabled".to_string())
 }

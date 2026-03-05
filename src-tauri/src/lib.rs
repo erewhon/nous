@@ -1001,6 +1001,10 @@ pub fn run() {
             commands::reload_plugin,
             commands::get_plugin_commands,
             commands::execute_plugin_command,
+            commands::set_plugin_enabled,
+            commands::get_plugin_view_types,
+            commands::render_plugin_view,
+            commands::handle_plugin_view_action,
             // Freeze watchdog
             freeze_watchdog::freeze_pong,
         ])

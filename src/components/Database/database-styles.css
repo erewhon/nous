@@ -734,13 +734,23 @@
 /* ============================================
    View Tabs
    ============================================ */
-.db-view-tabs {
+.db-view-tabs-wrapper {
   display: flex;
   align-items: center;
   gap: 2px;
   padding: 4px 0;
   border-bottom: 1px solid var(--color-border);
+  position: relative;
+  z-index: 10;
+}
+
+.db-view-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
   overflow-x: auto;
+  flex: 1;
+  min-width: 0;
 }
 
 .db-view-tab {
@@ -850,7 +860,7 @@
 .db-view-tabs-add-menu {
   position: absolute;
   top: 100%;
-  left: 0;
+  right: 0;
   z-index: 30;
   min-width: 180px;
   background-color: var(--color-bg-secondary);
@@ -892,6 +902,52 @@
   font-size: 10px;
   color: var(--color-text-muted);
   margin-left: auto;
+}
+
+.db-view-tabs-add-separator {
+  height: 1px;
+  background: var(--color-border);
+  margin: 4px 0;
+}
+
+/* Plugin Database View */
+.db-plugin-view {
+  padding: 8px 0;
+}
+
+.db-plugin-view-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 40px 16px;
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
+.db-plugin-view-error {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  color: var(--color-danger-text, #dc2626);
+  font-size: 13px;
+  background: var(--color-danger-bg, #fef2f2);
+  border-radius: 6px;
+  margin: 8px 0;
+}
+
+.db-plugin-view-retry {
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border);
+  cursor: pointer;
+}
+
+.db-plugin-view-retry:hover {
+  background: var(--color-bg-hover);
 }
 
 /* ============================================

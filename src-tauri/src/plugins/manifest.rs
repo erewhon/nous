@@ -24,6 +24,7 @@ bitflags::bitflags! {
         const NETWORK         = 0b0010_0000_0000;
         const ENERGY_READ     = 0b0100_0000_0000;
         const ENERGY_WRITE    = 0b1000_0000_0000;
+        const DATABASE_VIEW   = 0b0001_0000_0000_0000;
     }
 }
 
@@ -45,6 +46,7 @@ impl CapabilitySet {
                 "network" => CapabilitySet::NETWORK,
                 "energy_read" => CapabilitySet::ENERGY_READ,
                 "energy_write" => CapabilitySet::ENERGY_WRITE,
+                "database_view" => CapabilitySet::DATABASE_VIEW,
                 other => {
                     return Err(PluginError::ManifestParse(format!(
                         "unknown capability: {other}"
@@ -72,6 +74,7 @@ impl fmt::Display for CapabilitySet {
             (CapabilitySet::NETWORK, "network"),
             (CapabilitySet::ENERGY_READ, "energy_read"),
             (CapabilitySet::ENERGY_WRITE, "energy_write"),
+            (CapabilitySet::DATABASE_VIEW, "database_view"),
         ]
         .iter()
         .filter(|(cap, _)| self.contains(*cap))
@@ -105,6 +108,10 @@ pub enum HookPoint {
     OnInboxCaptured,
     /// Fired when goal progress is recorded
     OnGoalProgress,
+    /// Custom database view rendering
+    DatabaseView {
+        view_type: String,
+    },
 }
 
 impl HookPoint {
@@ -121,6 +128,10 @@ impl HookPoint {
             other if other.starts_with("action_step:") => {
                 let step_type = other.strip_prefix("action_step:").unwrap().to_string();
                 Ok(HookPoint::ActionStep { step_type })
+            }
+            other if other.starts_with("database_view:") => {
+                let view_type = other.strip_prefix("database_view:").unwrap().to_string();
+                Ok(HookPoint::DatabaseView { view_type })
             }
             other => Err(PluginError::ManifestParse(format!(
                 "unknown hook point: {other}"
