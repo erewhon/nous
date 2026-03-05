@@ -1,0 +1,229 @@
+//! PluginHost — central coordinator for the plugin system.
+//!
+//! Owns the HostApi and PluginRegistry. Provides high-level methods for
+//! loading plugins, calling hooks, and managing the lifecycle.
+
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use serde_json::json;
+
+use super::api::HostApi;
+use super::error::PluginError;
+use super::loader;
+use super::manifest::{HookPoint, PluginManifest};
+use super::registry::PluginRegistry;
+use super::runtime::Plugin;
+
+/// The central plugin host that coordinates loading, registration, and hook dispatch.
+pub struct PluginHost {
+    api: Arc<HostApi>,
+    registry: PluginRegistry,
+    plugins_dir: PathBuf,
+}
+
+impl PluginHost {
+    pub fn new(api: Arc<HostApi>, plugins_dir: PathBuf) -> Self {
+        Self {
+            api,
+            registry: PluginRegistry::new(),
+            plugins_dir,
+        }
+    }
+
+    /// Load all plugins from the plugins directory and built-ins.
+    pub fn load_all(&mut self) -> Result<(), PluginError> {
+        // Ensure the plugins directory exists
+        if !self.plugins_dir.exists() {
+            std::fs::create_dir_all(&self.plugins_dir)?;
+            log::info!("Created plugins directory: {}", self.plugins_dir.display());
+        }
+
+        // Load built-in plugins (Phase 4)
+        for result in loader::load_builtins(&self.api) {
+            match result {
+                Ok(plugin) => self.registry.register(plugin),
+                Err(e) => log::warn!("Failed to load built-in plugin: {e}"),
+            }
+        }
+
+        // Scan plugins directory for user plugins
+        for result in loader::scan_plugins_dir(&self.plugins_dir, &self.api) {
+            match result {
+                Ok(plugin) => self.registry.register(plugin),
+                Err(e) => log::warn!("Failed to load plugin: {e}"),
+            }
+        }
+
+        log::info!(
+            "Plugin system loaded: {} plugins",
+            self.registry.len()
+        );
+        Ok(())
+    }
+
+    /// Reload a specific plugin by ID (re-reads from disk).
+    pub fn reload(&mut self, plugin_id: &str) -> Result<(), PluginError> {
+        // Get the current source path
+        let source = {
+            let plugin_mutex = self.registry.get(plugin_id).ok_or_else(|| {
+                PluginError::NotFound(plugin_id.to_string())
+            })?;
+            let plugin = plugin_mutex.lock().map_err(|e| {
+                PluginError::Runtime(format!("lock: {e}"))
+            })?;
+            plugin.manifest().source.clone()
+        };
+
+        // Unregister old plugin
+        self.registry.unregister(plugin_id);
+
+        // Re-load from source
+        match source {
+            super::manifest::PluginSource::LuaFile { ref path } => {
+                let source_code = std::fs::read_to_string(path)?;
+                let raw = super::manifest::parse_lua_manifest_header(&source_code)?;
+                let manifest = raw.into_manifest(source)?;
+                let mut plugin = super::runtime::lua::LuaPlugin::new(manifest, source_code)?;
+                plugin.init(&self.api)?;
+                self.registry.register(Box::new(plugin));
+            }
+            super::manifest::PluginSource::Builtin => {
+                return Err(PluginError::Runtime(
+                    "Cannot reload built-in plugins".to_string(),
+                ));
+            }
+            super::manifest::PluginSource::WasmFile { .. } => {
+                return Err(PluginError::Runtime(
+                    "WASM reload not yet implemented".to_string(),
+                ));
+            }
+        }
+
+        log::info!("Reloaded plugin: {plugin_id}");
+        Ok(())
+    }
+
+    /// List manifests for all loaded plugins.
+    pub fn list_plugins(&self) -> Vec<PluginManifest> {
+        self.registry.list_manifests()
+    }
+
+    /// Run all goal detector plugins for a given goal/check/date.
+    /// Returns (completed, value) from the first matching plugin.
+    pub fn run_goal_detector(
+        &self,
+        plugin_id: &str,
+        goal: &serde_json::Value,
+        check: &serde_json::Value,
+        date: &str,
+    ) -> Result<(bool, u32), PluginError> {
+        let plugin_mutex = self.registry.get(plugin_id).ok_or_else(|| {
+            PluginError::NotFound(plugin_id.to_string())
+        })?;
+
+        let input = json!({
+            "goal": goal,
+            "check": check,
+            "date": date,
+        });
+
+        let mut plugin = plugin_mutex.lock().map_err(|e| {
+            PluginError::Runtime(format!("lock: {e}"))
+        })?;
+
+        let result = plugin.call("detect_goal", &input)?;
+
+        let completed = result
+            .get("completed")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let value = result
+            .get("value")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as u32;
+
+        Ok((completed, value))
+    }
+
+    /// Run a plugin function for an action step.
+    /// Returns the result JSON.
+    pub fn run_action_step(
+        &self,
+        plugin_id: &str,
+        function: &str,
+        input: &serde_json::Value,
+    ) -> Result<serde_json::Value, PluginError> {
+        let plugin_mutex = self.registry.get(plugin_id).ok_or_else(|| {
+            PluginError::NotFound(plugin_id.to_string())
+        })?;
+
+        let mut plugin = plugin_mutex.lock().map_err(|e| {
+            PluginError::Runtime(format!("lock: {e}"))
+        })?;
+
+        plugin.call(function, input)
+    }
+
+    /// Get built-in action definitions from Lua plugins.
+    ///
+    /// Iterates all plugins where `is_builtin == true` and calls `describe_action()`.
+    /// Returns successfully parsed actions; logs and skips failures.
+    pub fn get_builtin_actions(&self) -> Vec<crate::actions::models::Action> {
+        let mut actions = Vec::new();
+
+        for manifest in self.registry.list_manifests() {
+            if !manifest.is_builtin {
+                continue;
+            }
+
+            let plugin_mutex = match self.registry.get(&manifest.id) {
+                Some(m) => m,
+                None => continue,
+            };
+
+            let mut plugin = match plugin_mutex.lock() {
+                Ok(p) => p,
+                Err(e) => {
+                    log::warn!("Failed to lock builtin plugin '{}': {e}", manifest.id);
+                    continue;
+                }
+            };
+
+            // Try calling describe_action — not all builtins may have it
+            let input = serde_json::Value::Null;
+            match plugin.call("describe_action", &input) {
+                Ok(val) => {
+                    match serde_json::from_value::<crate::actions::models::Action>(val) {
+                        Ok(mut action) => {
+                            // Ensure timestamps are current
+                            action.created_at = chrono::Utc::now();
+                            action.updated_at = chrono::Utc::now();
+                            actions.push(action);
+                        }
+                        Err(e) => {
+                            log::warn!(
+                                "Failed to parse action from builtin plugin '{}': {e}",
+                                manifest.id
+                            );
+                        }
+                    }
+                }
+                Err(e) => {
+                    // Not all builtins are action-description plugins, that's OK
+                    log::debug!(
+                        "Builtin plugin '{}' has no describe_action: {e}",
+                        manifest.id
+                    );
+                }
+            }
+        }
+
+        actions
+    }
+
+    /// Get plugins directory path
+    pub fn plugins_dir(&self) -> &PathBuf {
+        &self.plugins_dir
+    }
+}

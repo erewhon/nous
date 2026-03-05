@@ -6,6 +6,7 @@ import type {
 } from "../../types/action";
 import { STEP_TYPES } from "../../types/action";
 import { useExternalSourceStore } from "../../stores/externalSourceStore";
+import { usePluginStore } from "../../stores/pluginStore";
 
 interface StepBuilderProps {
   steps: ActionStep[];
@@ -348,6 +349,13 @@ function StepEditor({ step, onUpdate, viewOnly = false }: StepEditorProps) {
           onUpdate={(updates) => onUpdate({ ...step, ...updates })}
         />
       );
+    case "plugin":
+      return (
+        <PluginStepEditor
+          step={step}
+          onUpdate={(updates) => onUpdate({ ...step, ...updates })}
+        />
+      );
     default:
       return (
         <div className="text-sm" style={{ color: "var(--color-text-muted)" }}>
@@ -510,6 +518,23 @@ function StepConfigSummary({ step }: { step: ActionStep }) {
           {step.tags.length > 0 && (
             <div>
               <span className="font-medium">Tags:</span> {step.tags.join(", ")}
+            </div>
+          )}
+        </div>
+      );
+    case "plugin":
+      return (
+        <div className="space-y-1">
+          <div>
+            <span className="font-medium">Plugin:</span> {step.pluginId || "Not set"}
+          </div>
+          <div>
+            <span className="font-medium">Function:</span> {step.function || "Not set"}
+          </div>
+          {step.config && Object.keys(step.config).length > 0 && (
+            <div>
+              <span className="font-medium">Config:</span>{" "}
+              {JSON.stringify(step.config)}
             </div>
           )}
         </div>
@@ -1076,6 +1101,115 @@ function AiSummarizeEditor({
   );
 }
 
+function PluginStepEditor({
+  step,
+  onUpdate,
+}: {
+  step: Extract<ActionStep, { type: "plugin" }>;
+  onUpdate: (updates: Partial<typeof step>) => void;
+}) {
+  const { plugins, fetchPlugins } = usePluginStore();
+  const [configText, setConfigText] = useState(
+    JSON.stringify(step.config || {}, null, 2)
+  );
+
+  useEffect(() => {
+    fetchPlugins();
+  }, [fetchPlugins]);
+
+  // Filter to plugins that have action_step hooks (or show all for flexibility)
+  const availablePlugins = plugins.filter((p) => !p.isBuiltin);
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <label
+          className="block text-xs font-medium mb-1"
+          style={{ color: "var(--color-text-muted)" }}
+        >
+          Plugin
+        </label>
+        {availablePlugins.length === 0 ? (
+          <p
+            className="text-xs italic"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            No user plugins installed. Place <code>.lua</code> files in your
+            library&apos;s <code>plugins/</code> directory.
+          </p>
+        ) : (
+          <select
+            value={step.pluginId}
+            onChange={(e) => onUpdate({ pluginId: e.target.value })}
+            className="w-full rounded-lg border px-3 py-2 text-sm focus:outline-none"
+            style={{
+              backgroundColor: "var(--color-bg-tertiary)",
+              borderColor: "var(--color-border)",
+              color: "var(--color-text-primary)",
+            }}
+          >
+            <option value="">Select a plugin...</option>
+            {availablePlugins.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name} (v{p.version})
+              </option>
+            ))}
+          </select>
+        )}
+      </div>
+
+      <div>
+        <label
+          className="block text-xs font-medium mb-1"
+          style={{ color: "var(--color-text-muted)" }}
+        >
+          Function name
+        </label>
+        <input
+          type="text"
+          value={step.function}
+          onChange={(e) => onUpdate({ function: e.target.value })}
+          placeholder="run_step"
+          className="w-full rounded-lg border px-3 py-2 text-sm focus:outline-none"
+          style={{
+            backgroundColor: "var(--color-bg-tertiary)",
+            borderColor: "var(--color-border)",
+            color: "var(--color-text-primary)",
+          }}
+        />
+      </div>
+
+      <div>
+        <label
+          className="block text-xs font-medium mb-1"
+          style={{ color: "var(--color-text-muted)" }}
+        >
+          Config (JSON)
+        </label>
+        <textarea
+          value={configText}
+          onChange={(e) => {
+            setConfigText(e.target.value);
+            try {
+              const parsed = JSON.parse(e.target.value);
+              onUpdate({ config: parsed });
+            } catch {
+              // Invalid JSON — don't update until it's valid
+            }
+          }}
+          rows={4}
+          className="w-full rounded-lg border px-3 py-2 text-sm font-mono focus:outline-none"
+          style={{
+            backgroundColor: "var(--color-bg-tertiary)",
+            borderColor: "var(--color-border)",
+            color: "var(--color-text-primary)",
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
 function ProcessExternalSourceEditor({
   step,
   onUpdate,
@@ -1590,6 +1724,13 @@ function createDefaultStep(type: ActionStep["type"]): ActionStep | null {
         incremental: false,
         tags: [],
       };
+    case "plugin":
+      return {
+        type: "plugin",
+        pluginId: "",
+        function: "",
+        config: {},
+      };
     default:
       return null;
   }
@@ -1627,6 +1768,8 @@ function getStepSummary(step: ActionStep): string {
       return `If condition then ${step.thenSteps.length} steps`;
     case "processExternalSource":
       return `Process ${step.sourceId ? "source" : step.inlinePath || "files"} → "${step.titleTemplate}"`;
+    case "plugin":
+      return `Plugin ${step.pluginId || "?"} → ${step.function || "?"}()`;
     default:
       return step.type;
   }
@@ -1785,6 +1928,19 @@ function StepIcon({ type }: { type: ActionStep["type"] }) {
           <polyline points="14,2 14,8 20,8" />
           <path d="M12 18v-6" />
           <path d="M9 15l3-3 3 3" />
+        </svg>
+      );
+    case "plugin":
+      return (
+        <svg
+          width={size}
+          height={size}
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke={color}
+          strokeWidth="2"
+        >
+          <path d="M19.439 7.85c-.049.322.059.648.289.878l1.568 1.568c.47.47.706 1.087.706 1.704s-.235 1.233-.706 1.704l-1.611 1.611a.98.98 0 0 1-.837.276c-.47-.07-.802-.48-.968-.925a2.501 2.501 0 1 0-3.214 3.214c.446.166.855.497.925.968a.979.979 0 0 1-.276.837l-1.61 1.61a2.404 2.404 0 0 1-1.705.707 2.402 2.402 0 0 1-1.704-.706l-1.568-1.568a1.026 1.026 0 0 0-.877-.29c-.493.074-.84.504-1.02.968a2.5 2.5 0 1 1-3.237-3.237c.464-.18.894-.527.967-1.02a1.026 1.026 0 0 0-.289-.877l-1.568-1.568A2.402 2.402 0 0 1 1.998 12c0-.617.236-1.234.706-1.704L4.23 8.77c.24-.24.581-.353.917-.303.515.077.877.528 1.073 1.01a2.5 2.5 0 1 0 3.259-3.259c-.482-.196-.933-.558-1.01-1.073-.05-.336.062-.676.303-.917l1.525-1.525A2.402 2.402 0 0 1 12 1.998c.617 0 1.234.236 1.704.706l1.568 1.568c.23.23.556.338.877.29.493-.074.84-.504 1.02-.968a2.5 2.5 0 1 1 3.237 3.237c-.464.18-.894.527-.967 1.02Z" />
         </svg>
       );
     default:

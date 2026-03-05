@@ -26,14 +26,15 @@ impl ActionStorage {
             base_path: actions_path,
         };
 
-        // Initialize built-in actions if they don't exist
-        storage.ensure_builtin_actions()?;
+        // Initialize built-in actions using Rust definitions (may be refreshed from plugins later)
+        storage.ensure_builtin_actions_from(get_builtin_actions())?;
 
         Ok(storage)
     }
 
-    /// Ensure all built-in actions exist in storage (regenerates when version bumps)
-    fn ensure_builtin_actions(&self) -> Result<(), StorageError> {
+    /// Ensure all built-in actions exist in storage (regenerates when version bumps).
+    /// If `actions` is provided, uses those; otherwise falls back to Rust definitions.
+    fn ensure_builtin_actions_from(&self, actions: Vec<Action>) -> Result<(), StorageError> {
         let version_path = self.base_path.join("builtin_version.txt");
         let current = fs::read_to_string(&version_path)
             .ok()
@@ -41,7 +42,7 @@ impl ActionStorage {
             .unwrap_or(0);
         let needs_regen = current < BUILTIN_ACTIONS_VERSION;
 
-        for mut action in get_builtin_actions() {
+        for mut action in actions {
             let path = self.action_path(action.id);
             if needs_regen || !path.exists() {
                 // Preserve the user's enabled setting from the existing file.
@@ -68,6 +69,15 @@ impl ActionStorage {
         }
 
         Ok(())
+    }
+
+    /// Refresh built-in actions from an external source (e.g. plugin host).
+    /// Falls back to Rust definitions if the provided list is empty.
+    pub fn refresh_builtins(&self, actions: Vec<Action>) -> Result<(), StorageError> {
+        if actions.is_empty() {
+            return Ok(());
+        }
+        self.ensure_builtin_actions_from(actions)
     }
 
     /// Get path for an action file

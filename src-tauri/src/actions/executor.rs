@@ -121,6 +121,8 @@ pub struct ActionExecutor {
     goals_storage: Option<Arc<Mutex<GoalsStorage>>>,
     energy_storage: Option<Arc<Mutex<EnergyStorage>>>,
     inbox_storage: Option<Arc<Mutex<InboxStorage>>>,
+    #[cfg(feature = "plugins")]
+    plugin_host: Option<Arc<Mutex<crate::plugins::PluginHost>>>,
     variable_resolver: VariableResolver,
 }
 
@@ -138,6 +140,8 @@ impl ActionExecutor {
             goals_storage: None,
             energy_storage: None,
             inbox_storage: None,
+            #[cfg(feature = "plugins")]
+            plugin_host: None,
             variable_resolver: VariableResolver::new(),
         }
     }
@@ -163,6 +167,12 @@ impl ActionExecutor {
     /// Set the inbox storage reference
     pub fn set_inbox_storage(&mut self, storage: Arc<Mutex<InboxStorage>>) {
         self.inbox_storage = Some(storage);
+    }
+
+    /// Set the plugin host reference for plugin-based action steps
+    #[cfg(feature = "plugins")]
+    pub fn set_plugin_host(&mut self, host: Option<Arc<Mutex<crate::plugins::PluginHost>>>) {
+        self.plugin_host = host;
     }
 
     /// Execute an action by ID
@@ -474,6 +484,53 @@ impl ActionExecutor {
                     tags,
                     context,
                 )
+            }
+
+            ActionStep::Plugin {
+                plugin_id,
+                function,
+                config,
+            } => {
+                #[cfg(feature = "plugins")]
+                {
+                    let Some(ref ph) = self.plugin_host else {
+                        return Err(ExecutionError::StepFailed(
+                            "Plugin host not available".to_string(),
+                        ));
+                    };
+                    let ph = ph.lock().map_err(|e| {
+                        ExecutionError::StepFailed(format!("plugin host lock: {e}"))
+                    })?;
+                    let input = serde_json::json!({
+                        "config": config,
+                        "variables": context.variables,
+                        "created_pages": context.created_pages,
+                    });
+                    match ph.run_action_step(plugin_id, function, &input) {
+                        Ok(result) => {
+                            // If the plugin returns created_pages, merge them
+                            if let Some(pages) = result.get("created_pages").and_then(|v| v.as_array()) {
+                                for page in pages {
+                                    if let Some(id) = page.as_str() {
+                                        context.created_pages.push(id.to_string());
+                                    }
+                                }
+                            }
+                            Ok(())
+                        }
+                        Err(e) => Err(ExecutionError::StepFailed(format!(
+                            "Plugin '{}' function '{}' failed: {e}",
+                            plugin_id, function
+                        ))),
+                    }
+                }
+                #[cfg(not(feature = "plugins"))]
+                {
+                    let _ = (plugin_id, function, config);
+                    Err(ExecutionError::StepFailed(
+                        "Plugin steps require the 'plugins' feature".to_string(),
+                    ))
+                }
             }
         }
     }

@@ -278,6 +278,13 @@ export const ProcessExternalSourceStepSchema = z.object({
   tags: z.array(z.string()).default([]),
 });
 
+export const PluginStepSchema = z.object({
+  type: z.literal("plugin"),
+  pluginId: z.string(),
+  function: z.string(),
+  config: z.any().default({}),
+});
+
 export const ConditionalStepSchema: z.ZodType<ConditionalStep> = z.lazy(() =>
   z.object({
     type: z.literal("conditional"),
@@ -329,6 +336,7 @@ export const ActionStepSchema: z.ZodType<ActionStep> = z.lazy(() =>
     GoalNudgeStepSchema,
     GoalBrainstormStepSchema,
     ProcessExternalSourceStepSchema,
+    PluginStepSchema,
   ])
 );
 
@@ -347,7 +355,8 @@ export type ActionStep =
   | ConditionalStep
   | z.infer<typeof GoalNudgeStepSchema>
   | z.infer<typeof GoalBrainstormStepSchema>
-  | z.infer<typeof ProcessExternalSourceStepSchema>;
+  | z.infer<typeof ProcessExternalSourceStepSchema>
+  | z.infer<typeof PluginStepSchema>;
 
 // ===== Variable Types =====
 
@@ -608,5 +617,11 @@ export const STEP_TYPES: StepTypeInfo[] = [
     name: "Process External Files",
     description: "Import and summarize external files with AI",
     icon: "file-import",
+  },
+  {
+    type: "plugin",
+    name: "Plugin",
+    description: "Execute a function in a plugin",
+    icon: "puzzle",
   },
 ];

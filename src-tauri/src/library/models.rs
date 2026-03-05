@@ -142,6 +142,11 @@ impl Library {
     pub fn vector_db_path(&self) -> PathBuf {
         self.path.join(".nous").join("vectors.db")
     }
+
+    /// Get the plugins directory for this library
+    pub fn plugins_path(&self) -> PathBuf {
+        self.path.join("plugins")
+    }
 }
 
 /// Statistics about a library

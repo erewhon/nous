@@ -30,6 +30,8 @@ pub enum AutoDetectType {
     PageEdit,
     PageCreate,
     YoutubePublish,
+    /// Plugin-based detection (requires plugins feature)
+    Plugin,
 }
 
 /// How multiple checks should be combined
@@ -80,6 +82,9 @@ pub struct AutoDetectCheck {
     /// YouTube channel ID (for youtube_publish type)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub youtube_channel_id: Option<String>,
+    /// Plugin ID (for plugin type)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plugin_id: Option<String>,
     /// Minimum count to mark as completed (default: 1)
     pub threshold: Option<u32>,
 }
@@ -141,6 +146,7 @@ impl AutoDetectConfig {
                     repo_path: self.repo_path.take(),
                     repo_paths: std::mem::take(&mut self.repo_paths),
                     youtube_channel_id: self.youtube_channel_id.take(),
+                    plugin_id: None,
                     threshold: self.threshold.take(),
                 };
                 self.checks.push(check);
@@ -163,6 +169,7 @@ impl AutoDetectConfig {
             repo_path: None,
             repo_paths,
             youtube_channel_id,
+            plugin_id: None,
             threshold,
         };
         Self {

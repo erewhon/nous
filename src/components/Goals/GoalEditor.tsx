@@ -3,6 +3,7 @@ import { useGoalsStore } from "../../stores/goalsStore";
 import { useNotebookStore } from "../../stores/notebookStore";
 import * as api from "../../utils/api";
 import type { Section } from "../../types/page";
+import { usePluginStore } from "../../stores/pluginStore";
 import type {
   Frequency,
   TrackingType,
@@ -22,6 +23,7 @@ interface CheckState {
   sectionId: string;
   repoPaths: string[];
   youtubeChannelId: string;
+  pluginId: string;
   threshold: number;
 }
 
@@ -34,6 +36,7 @@ function createEmptyCheck(): CheckState {
     sectionId: "",
     repoPaths: [],
     youtubeChannelId: "",
+    pluginId: "",
     threshold: 1,
   };
 }
@@ -46,6 +49,7 @@ function getCheckTypeName(type: AutoDetectType): string {
     case "git_commit": return "Git commits";
     case "jj_commit": return "Jujutsu commits";
     case "youtube_publish": return "YouTube publish";
+    case "plugin": return "Plugin";
     default: return type;
   }
 }
@@ -135,6 +139,7 @@ function CheckEditor({
           <option value="git_commit">Git commits</option>
           <option value="jj_commit">Jujutsu (jj) commits</option>
           <option value="youtube_publish">YouTube video/livestream</option>
+          <option value="plugin">Plugin</option>
         </select>
       </div>
 
@@ -160,6 +165,14 @@ function CheckEditor({
             }}
           />
         </div>
+      )}
+
+      {/* Plugin ID selector */}
+      {check.type === "plugin" && (
+        <PluginSelector
+          pluginId={check.pluginId}
+          onChange={(pluginId) => onUpdate({ pluginId })}
+        />
       )}
 
       {/* Repository paths */}
@@ -376,6 +389,60 @@ function CheckEditor({
   );
 }
 
+function PluginSelector({
+  pluginId,
+  onChange,
+}: {
+  pluginId: string;
+  onChange: (id: string) => void;
+}) {
+  const { plugins, fetchPlugins } = usePluginStore();
+
+  useEffect(() => {
+    fetchPlugins();
+  }, [fetchPlugins]);
+
+  // Show plugins that have a goal_detector hook
+  const detectorPlugins = plugins.filter(
+    (p) => p.hooks.some((h) => h.type === "goal_detector")
+  );
+
+  return (
+    <div>
+      <label
+        className="block text-xs font-medium mb-1"
+        style={{ color: "var(--color-text-muted)" }}
+      >
+        Plugin
+      </label>
+      {detectorPlugins.length === 0 ? (
+        <p className="text-xs italic" style={{ color: "var(--color-text-muted)" }}>
+          No plugins with goal detector hooks installed.
+          {plugins.length === 0 && " Install plugins to enable this option."}
+        </p>
+      ) : (
+        <select
+          value={pluginId}
+          onChange={(e) => onChange(e.target.value)}
+          className="w-full rounded-lg border px-3 py-2 text-sm focus:outline-none"
+          style={{
+            backgroundColor: "var(--color-bg-tertiary)",
+            borderColor: "var(--color-border)",
+            color: "var(--color-text-primary)",
+          }}
+        >
+          <option value="">Select a plugin...</option>
+          {detectorPlugins.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name} (v{p.version})
+            </option>
+          ))}
+        </select>
+      )}
+    </div>
+  );
+}
+
 export function GoalEditor() {
   const { isEditorOpen, editingGoal, closeEditor, createGoal, updateGoal } =
     useGoalsStore();
@@ -440,6 +507,7 @@ export function GoalEditor() {
             sectionId: check.scope.type === "section" ? check.scope.sectionId : "",
             repoPaths: check.repoPaths || (check.repoPath ? [check.repoPath] : []),
             youtubeChannelId: check.youtubeChannelId || "",
+            pluginId: check.pluginId || "",
             threshold: check.threshold || 1,
           })));
         }
@@ -460,6 +528,7 @@ export function GoalEditor() {
             sectionId: scope.type === "section" ? scope.sectionId : "",
             repoPaths: paths,
             youtubeChannelId: editingGoal.autoDetect.youtubeChannelId || "",
+            pluginId: editingGoal.autoDetect.pluginId || "",
             threshold: editingGoal.autoDetect.threshold || 1,
           }]);
         } else {
@@ -544,6 +613,7 @@ export function GoalEditor() {
         scope: checkStateToScope(check),
         repoPaths: (check.type === "git_commit" || check.type === "jj_commit") ? check.repoPaths : [],
         youtubeChannelId: check.type === "youtube_publish" ? check.youtubeChannelId : undefined,
+        pluginId: check.type === "plugin" ? check.pluginId : undefined,
         threshold: check.threshold > 1 ? check.threshold : undefined,
       }));
 

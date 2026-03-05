@@ -18,12 +18,25 @@ type Result<T> = std::result::Result<T, StorageError>;
 /// Detector for automatic goal progress tracking
 pub struct GoalDetector {
     storage: Arc<Mutex<FileStorage>>,
+    #[cfg(feature = "plugins")]
+    plugin_host: Option<Arc<Mutex<crate::plugins::PluginHost>>>,
 }
 
 impl GoalDetector {
     /// Create a new goal detector
     pub fn new(storage: Arc<Mutex<FileStorage>>) -> Self {
-        Self { storage }
+        Self {
+            storage,
+            #[cfg(feature = "plugins")]
+            plugin_host: None,
+        }
+    }
+
+    /// Builder method to add plugin host for plugin-based detection
+    #[cfg(feature = "plugins")]
+    pub fn with_plugins(mut self, plugin_host: Option<Arc<Mutex<crate::plugins::PluginHost>>>) -> Self {
+        self.plugin_host = plugin_host;
+        self
     }
 
     /// Check if a goal is completed for the given date
@@ -73,6 +86,36 @@ impl GoalDetector {
                         continue;
                     };
                     self.detect_youtube_publishes(channel_id, date, goal.frequency.clone())?
+                }
+                AutoDetectType::Plugin => {
+                    #[cfg(feature = "plugins")]
+                    {
+                        let Some(ref plugin_id) = check.plugin_id else {
+                            continue;
+                        };
+                        if let Some(ref ph) = self.plugin_host {
+                            let ph = ph.lock().map_err(|e| {
+                                StorageError::InvalidOperation(format!("plugin host lock: {e}"))
+                            })?;
+                            let goal_json = serde_json::to_value(goal).unwrap_or_default();
+                            let check_json = serde_json::to_value(check).unwrap_or_default();
+                            let date_str = date.format("%Y-%m-%d").to_string();
+                            match ph.run_goal_detector(plugin_id, &goal_json, &check_json, &date_str) {
+                                Ok((_completed, count)) => count,
+                                Err(e) => {
+                                    log::warn!("Plugin goal detector '{}' failed: {e}", plugin_id);
+                                    continue;
+                                }
+                            }
+                        } else {
+                            continue;
+                        }
+                    }
+                    #[cfg(not(feature = "plugins"))]
+                    {
+                        log::warn!("Plugin goal detector requested but plugins feature is disabled");
+                        continue;
+                    }
                 }
             };
             check_results.push((value, value >= threshold));
@@ -142,6 +185,10 @@ impl GoalDetector {
                     return Ok(None);
                 };
                 self.detect_youtube_publishes(channel_id, date, goal.frequency.clone())?
+            }
+            AutoDetectType::Plugin => {
+                // Plugin type not supported in legacy format
+                return Ok(None);
             }
         };
 

@@ -330,6 +330,17 @@ pub enum ActionStep {
         /// Extra guidance for the AI prompt
         custom_prompt: Option<String>,
     },
+    /// Execute a function in a plugin
+    #[serde(rename_all = "camelCase")]
+    Plugin {
+        /// Plugin ID to call
+        plugin_id: String,
+        /// Function name to invoke
+        function: String,
+        /// Static configuration passed to the plugin function
+        #[serde(default)]
+        config: serde_json::Value,
+    },
     /// Process external files (JSON, Markdown, plain text) with AI summarization
     #[serde(rename_all = "camelCase")]
     ProcessExternalSource {

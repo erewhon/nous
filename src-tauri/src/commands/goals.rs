@@ -128,7 +128,12 @@ pub fn get_goal_progress(
         let existing_dates: std::collections::HashSet<NaiveDate> =
             existing_progress.iter().map(|p| p.date).collect();
 
-        let detector = GoalDetector::new(state.storage.clone());
+        let detector = {
+            let d = GoalDetector::new(state.storage.clone());
+            #[cfg(feature = "plugins")]
+            let d = d.with_plugins(state.plugin_host.clone());
+            d
+        };
         let goals_storage = state.goals_storage.lock().map_err(|e| e.to_string())?;
 
         // Check each date in the range
@@ -167,7 +172,12 @@ pub fn check_auto_goals(state: State<AppState>) -> CommandResult<Vec<GoalProgres
     };
 
     // Create detector and check goals
-    let detector = GoalDetector::new(state.storage.clone());
+    let detector = {
+        let d = GoalDetector::new(state.storage.clone());
+        #[cfg(feature = "plugins")]
+        let d = d.with_plugins(state.plugin_host.clone());
+        d
+    };
     let detected = detector
         .check_all_auto_goals(&active_goals)
         .map_err(|e| e.to_string())?;

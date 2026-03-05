@@ -36,6 +36,8 @@ pub mod search;
 pub mod storage;
 pub mod sync;
 mod video_server;
+#[cfg(feature = "plugins")]
+pub mod plugins;
 
 use actions::{ActionExecutor, ActionScheduler, ActionStorage};
 use chat_sessions::ChatSessionStorage;
@@ -88,6 +90,9 @@ pub struct AppState {
     pub collab_storage: Arc<Mutex<CollabStorage>>,
     /// Keeps the MCP file watcher alive for the app's lifetime.
     pub _mcp_watcher: Mutex<Option<notify::PollWatcher>>,
+    /// Plugin host for Lua/WASM plugins (None when plugins feature is disabled)
+    #[cfg(feature = "plugins")]
+    pub plugin_host: Option<Arc<Mutex<plugins::PluginHost>>>,
 }
 
 /// Check whether the Nous daemon is running by reading its PID file and
@@ -291,6 +296,40 @@ pub fn run() {
     action_executor.set_goals_storage(Arc::clone(&goals_storage_arc));
     action_executor.set_energy_storage(Arc::clone(&energy_storage_arc));
     action_executor.set_inbox_storage(Arc::clone(&inbox_storage_arc));
+
+    // Initialize plugin host (optional, behind "plugins" feature)
+    #[cfg(feature = "plugins")]
+    let plugin_host = {
+        let api = Arc::new(plugins::HostApi::new(
+            Arc::clone(&storage_arc),
+            Arc::clone(&goals_storage_arc),
+            Arc::clone(&inbox_storage_arc),
+        ));
+        let mut host = plugins::PluginHost::new(api, library_path.join("plugins"));
+        if let Err(e) = host.load_all() {
+            log::warn!("Plugin load error: {e}");
+        }
+        Some(Arc::new(Mutex::new(host)))
+    };
+
+    #[cfg(feature = "plugins")]
+    action_executor.set_plugin_host(plugin_host.clone());
+
+    // Refresh built-in actions from Lua plugin definitions (if plugins loaded successfully)
+    #[cfg(feature = "plugins")]
+    if let Some(ref ph) = plugin_host {
+        if let Ok(host) = ph.lock() {
+            let builtins = host.get_builtin_actions();
+            if !builtins.is_empty() {
+                if let Ok(storage) = action_storage_arc.lock() {
+                    if let Err(e) = storage.refresh_builtins(builtins) {
+                        log::warn!("Failed to refresh builtins from plugins: {e}");
+                    }
+                }
+            }
+        }
+    }
+
     let action_executor_arc = Arc::new(Mutex::new(action_executor));
 
     // Initialize action scheduler
@@ -351,6 +390,8 @@ pub fn run() {
         share_storage: share_storage_arc,
         collab_storage: collab_storage_arc,
         _mcp_watcher: Mutex::new(None),
+        #[cfg(feature = "plugins")]
+        plugin_host,
     };
 
     let watchdog_state = Arc::new(freeze_watchdog::WatchdogState::new());
@@ -949,6 +990,9 @@ pub fn run() {
             commands::chat_session_delete,
             commands::chat_session_update_title,
             commands::migrate_chat_sessions_to_pages,
+            // Plugin commands
+            commands::list_plugins,
+            commands::reload_plugin,
             // Freeze watchdog
             freeze_watchdog::freeze_pong,
         ])
