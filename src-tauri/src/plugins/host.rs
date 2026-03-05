@@ -6,6 +6,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use super::api::HostApi;
@@ -14,6 +15,17 @@ use super::loader;
 use super::manifest::{HookPoint, PluginManifest};
 use super::registry::PluginRegistry;
 use super::runtime::Plugin;
+
+/// A command registered by a plugin for the Command Palette.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginCommand {
+    pub plugin_id: String,
+    pub id: String,
+    pub title: String,
+    pub subtitle: Option<String>,
+    pub keywords: Option<Vec<String>>,
+}
 
 /// The central plugin host that coordinates loading, registration, and hook dispatch.
 pub struct PluginHost {
@@ -220,6 +232,80 @@ impl PluginHost {
         }
 
         actions
+    }
+
+    /// Get commands from all plugins that have the CommandPalette hook.
+    pub fn get_plugin_commands(&self) -> Vec<PluginCommand> {
+        let mut commands = Vec::new();
+
+        let plugin_ids = self.registry.plugins_for_hook(&HookPoint::CommandPalette);
+        for plugin_id in plugin_ids {
+            let plugin_mutex = match self.registry.get(&plugin_id) {
+                Some(m) => m,
+                None => continue,
+            };
+
+            let mut plugin = match plugin_mutex.lock() {
+                Ok(p) => p,
+                Err(e) => {
+                    log::warn!("Failed to lock plugin '{}' for get_commands: {e}", plugin_id);
+                    continue;
+                }
+            };
+
+            let input = serde_json::Value::Null;
+            match plugin.call("get_commands", &input) {
+                Ok(val) => {
+                    // Expect an array of command objects
+                    if let Some(arr) = val.as_array() {
+                        for cmd_val in arr {
+                            let id = cmd_val.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                            let title = cmd_val.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                            let subtitle = cmd_val.get("subtitle").and_then(|v| v.as_str()).map(|s| s.to_string());
+                            let keywords = cmd_val.get("keywords").and_then(|v| v.as_array()).map(|arr| {
+                                arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect()
+                            });
+
+                            if !id.is_empty() && !title.is_empty() {
+                                commands.push(PluginCommand {
+                                    plugin_id: plugin_id.clone(),
+                                    id,
+                                    title,
+                                    subtitle,
+                                    keywords,
+                                });
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    log::warn!("Plugin '{}' get_commands failed: {e}", plugin_id);
+                }
+            }
+        }
+
+        commands
+    }
+
+    /// Execute a specific command from a plugin.
+    pub fn execute_plugin_command(
+        &self,
+        plugin_id: &str,
+        command_id: &str,
+    ) -> Result<serde_json::Value, PluginError> {
+        let plugin_mutex = self.registry.get(plugin_id).ok_or_else(|| {
+            PluginError::NotFound(plugin_id.to_string())
+        })?;
+
+        let input = json!({
+            "command_id": command_id,
+        });
+
+        let mut plugin = plugin_mutex.lock().map_err(|e| {
+            PluginError::Runtime(format!("lock: {e}"))
+        })?;
+
+        plugin.call("execute_command", &input)
     }
 
     /// Get plugins directory path

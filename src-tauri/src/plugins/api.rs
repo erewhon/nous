@@ -10,7 +10,8 @@ use super::error::PluginError;
 use super::manifest::CapabilitySet;
 use crate::goals::GoalsStorage;
 use crate::inbox::InboxStorage;
-use crate::storage::FileStorage;
+use crate::search::SearchIndex;
+use crate::storage::{FileStorage, FileStorageMode, PageType};
 
 /// Host API available to all plugin runtimes.
 /// Holds Arc references to the app's storage layers.
@@ -18,6 +19,7 @@ pub struct HostApi {
     pub(crate) storage: Arc<Mutex<FileStorage>>,
     pub(crate) goals_storage: Arc<Mutex<GoalsStorage>>,
     pub(crate) inbox_storage: Arc<Mutex<InboxStorage>>,
+    pub(crate) search_index: Option<Arc<Mutex<SearchIndex>>>,
 }
 
 impl HostApi {
@@ -30,7 +32,13 @@ impl HostApi {
             storage,
             goals_storage,
             inbox_storage,
+            search_index: None,
         }
+    }
+
+    /// Set the search index reference (called after construction when Arc is available).
+    pub fn set_search_index(&mut self, search_index: Arc<Mutex<SearchIndex>>) {
+        self.search_index = Some(search_index);
     }
 
     // -- Capability gate helper --
@@ -218,6 +226,408 @@ impl HostApi {
             .get_summary()
             .map_err(|e| PluginError::CallFailed(e.to_string()))?;
         serde_json::to_value(&summary).map_err(PluginError::Json)
+    }
+
+    // -- Database APIs --
+
+    /// List database pages in a notebook.
+    pub fn database_list(
+        &self,
+        caps: CapabilitySet,
+        plugin_id: &str,
+        notebook_id: &str,
+    ) -> Result<serde_json::Value, PluginError> {
+        Self::require(caps, CapabilitySet::DATABASE_READ, plugin_id)?;
+        let nid = Uuid::parse_str(notebook_id)
+            .map_err(|e| PluginError::CallFailed(format!("invalid notebook_id: {e}")))?;
+        let storage = self.storage.lock().map_err(|e| {
+            PluginError::CallFailed(format!("storage lock: {e}"))
+        })?;
+        let pages = storage
+            .list_pages(nid)
+            .map_err(|e| PluginError::CallFailed(e.to_string()))?;
+
+        let databases: Vec<serde_json::Value> = pages
+            .into_iter()
+            .filter(|p| p.page_type == PageType::Database)
+            .map(|p| {
+                // Try to read database content to get property/row counts
+                let (prop_count, row_count) = storage
+                    .read_native_file_content(&p)
+                    .ok()
+                    .and_then(|content| serde_json::from_str::<serde_json::Value>(&content).ok())
+                    .map(|v| {
+                        let props = v.get("properties").and_then(|a| a.as_array()).map_or(0, |a| a.len());
+                        let rows = v.get("rows").and_then(|a| a.as_array()).map_or(0, |a| a.len());
+                        (props, rows)
+                    })
+                    .unwrap_or((0, 0));
+
+                serde_json::json!({
+                    "id": p.id.to_string(),
+                    "title": p.title,
+                    "tags": p.tags,
+                    "folderId": p.folder_id,
+                    "sectionId": p.section_id,
+                    "propertyCount": prop_count,
+                    "rowCount": row_count,
+                })
+            })
+            .collect();
+
+        Ok(serde_json::Value::Array(databases))
+    }
+
+    /// Get full database content (properties, rows, views).
+    pub fn database_get(
+        &self,
+        caps: CapabilitySet,
+        plugin_id: &str,
+        notebook_id: &str,
+        page_id: &str,
+    ) -> Result<serde_json::Value, PluginError> {
+        Self::require(caps, CapabilitySet::DATABASE_READ, plugin_id)?;
+        let nid = Uuid::parse_str(notebook_id)
+            .map_err(|e| PluginError::CallFailed(format!("invalid notebook_id: {e}")))?;
+        let pid = Uuid::parse_str(page_id)
+            .map_err(|e| PluginError::CallFailed(format!("invalid page_id: {e}")))?;
+        let storage = self.storage.lock().map_err(|e| {
+            PluginError::CallFailed(format!("storage lock: {e}"))
+        })?;
+        let page = storage
+            .get_page(nid, pid)
+            .map_err(|e| PluginError::CallFailed(e.to_string()))?;
+
+        if page.page_type != PageType::Database {
+            return Err(PluginError::CallFailed(format!(
+                "page {} is not a database",
+                pid
+            )));
+        }
+
+        let content = storage
+            .read_native_file_content(&page)
+            .map_err(|e| PluginError::CallFailed(e.to_string()))?;
+        let db: serde_json::Value = serde_json::from_str(&content)
+            .map_err(|e| PluginError::CallFailed(format!("invalid database JSON: {e}")))?;
+        Ok(db)
+    }
+
+    /// Create a new database page.
+    pub fn database_create(
+        &self,
+        caps: CapabilitySet,
+        plugin_id: &str,
+        notebook_id: &str,
+        title: &str,
+        properties_json: &str,
+    ) -> Result<serde_json::Value, PluginError> {
+        Self::require(caps, CapabilitySet::DATABASE_WRITE, plugin_id)?;
+        let nid = Uuid::parse_str(notebook_id)
+            .map_err(|e| PluginError::CallFailed(format!("invalid notebook_id: {e}")))?;
+
+        // Parse properties from plugin input: [{"name":"Name","type":"text"}, ...]
+        let input_props: Vec<serde_json::Value> = serde_json::from_str(properties_json)
+            .map_err(|e| PluginError::CallFailed(format!("invalid properties JSON: {e}")))?;
+
+        // Build versioned property definitions with generated IDs
+        let properties: Vec<serde_json::Value> = input_props
+            .into_iter()
+            .map(|mut prop| {
+                if prop.get("id").is_none() {
+                    prop.as_object_mut().map(|m| {
+                        m.insert("id".to_string(), serde_json::json!(Uuid::new_v4().to_string()));
+                    });
+                }
+                prop
+            })
+            .collect();
+
+        // Build default table view
+        let default_view = serde_json::json!({
+            "id": Uuid::new_v4().to_string(),
+            "name": "Table",
+            "type": "table",
+            "sorts": [],
+            "filters": [],
+            "config": { "type": "table" },
+        });
+
+        let db_content = serde_json::json!({
+            "version": 2,
+            "properties": properties,
+            "rows": [],
+            "views": [default_view],
+        });
+
+        let storage = self.storage.lock().map_err(|e| {
+            PluginError::CallFailed(format!("storage lock: {e}"))
+        })?;
+
+        // Create the page
+        let mut page = storage
+            .create_page(nid, title.to_string())
+            .map_err(|e| PluginError::CallFailed(e.to_string()))?;
+
+        // Set database page type and file info
+        page.page_type = PageType::Database;
+        page.file_extension = Some("database".to_string());
+        page.storage_mode = Some(FileStorageMode::Embedded);
+        page.source_file = Some(format!("files/{}.database", page.id));
+
+        // Write the database content file
+        let notebook_dir = storage.get_notebook_path(nid);
+        let files_dir = notebook_dir.join("files");
+        std::fs::create_dir_all(&files_dir).map_err(|e| {
+            PluginError::CallFailed(format!("create files dir: {e}"))
+        })?;
+        let db_json = serde_json::to_string_pretty(&db_content)
+            .map_err(|e| PluginError::CallFailed(format!("serialize database: {e}")))?;
+        std::fs::write(files_dir.join(format!("{}.database", page.id)), &db_json)
+            .map_err(|e| PluginError::CallFailed(format!("write database file: {e}")))?;
+
+        // Update the page metadata
+        storage
+            .update_page(&page)
+            .map_err(|e| PluginError::CallFailed(e.to_string()))?;
+
+        Ok(serde_json::json!({
+            "id": page.id.to_string(),
+            "title": page.title,
+            "notebookId": nid.to_string(),
+            "propertyCount": properties.len(),
+        }))
+    }
+
+    /// Append rows to an existing database.
+    pub fn database_add_rows(
+        &self,
+        caps: CapabilitySet,
+        plugin_id: &str,
+        notebook_id: &str,
+        page_id: &str,
+        rows_json: &str,
+    ) -> Result<serde_json::Value, PluginError> {
+        Self::require(caps, CapabilitySet::DATABASE_WRITE, plugin_id)?;
+        let nid = Uuid::parse_str(notebook_id)
+            .map_err(|e| PluginError::CallFailed(format!("invalid notebook_id: {e}")))?;
+        let pid = Uuid::parse_str(page_id)
+            .map_err(|e| PluginError::CallFailed(format!("invalid page_id: {e}")))?;
+
+        let storage = self.storage.lock().map_err(|e| {
+            PluginError::CallFailed(format!("storage lock: {e}"))
+        })?;
+        let page = storage
+            .get_page(nid, pid)
+            .map_err(|e| PluginError::CallFailed(e.to_string()))?;
+
+        if page.page_type != PageType::Database {
+            return Err(PluginError::CallFailed(format!(
+                "page {} is not a database",
+                pid
+            )));
+        }
+
+        // Read existing database content
+        let content = storage
+            .read_native_file_content(&page)
+            .map_err(|e| PluginError::CallFailed(e.to_string()))?;
+        let mut db: serde_json::Value = serde_json::from_str(&content)
+            .map_err(|e| PluginError::CallFailed(format!("invalid database JSON: {e}")))?;
+
+        // Parse input rows: [{"PropName": "value", ...}, ...]
+        // Plugins use property names; we need to resolve them to property IDs.
+        let input_rows: Vec<serde_json::Map<String, serde_json::Value>> =
+            serde_json::from_str(rows_json)
+                .map_err(|e| PluginError::CallFailed(format!("invalid rows JSON: {e}")))?;
+
+        // Build name→id map from properties
+        let name_to_id = Self::build_property_name_map(&db);
+
+        let now = chrono::Utc::now().to_rfc3339();
+        let rows_arr = db
+            .get_mut("rows")
+            .and_then(|v| v.as_array_mut())
+            .ok_or_else(|| PluginError::CallFailed("database has no rows array".to_string()))?;
+
+        let added = input_rows.len();
+        for input_row in input_rows {
+            let mut cells = serde_json::Map::new();
+            for (key, value) in input_row {
+                // Resolve property name to ID, fall back to using key as-is (might be an ID)
+                let prop_id = name_to_id.get(&key).cloned().unwrap_or(key);
+                cells.insert(prop_id, value);
+            }
+            rows_arr.push(serde_json::json!({
+                "id": Uuid::new_v4().to_string(),
+                "cells": cells,
+                "createdAt": now,
+                "updatedAt": now,
+            }));
+        }
+
+        let total = rows_arr.len();
+
+        // Write back
+        let db_json = serde_json::to_string_pretty(&db)
+            .map_err(|e| PluginError::CallFailed(format!("serialize database: {e}")))?;
+        storage
+            .write_native_file_content(&page, &db_json)
+            .map_err(|e| PluginError::CallFailed(e.to_string()))?;
+
+        Ok(serde_json::json!({
+            "databaseId": pid.to_string(),
+            "rowsAdded": added,
+            "totalRows": total,
+        }))
+    }
+
+    /// Update specific cells in existing database rows.
+    pub fn database_update_rows(
+        &self,
+        caps: CapabilitySet,
+        plugin_id: &str,
+        notebook_id: &str,
+        page_id: &str,
+        updates_json: &str,
+    ) -> Result<serde_json::Value, PluginError> {
+        Self::require(caps, CapabilitySet::DATABASE_WRITE, plugin_id)?;
+        let nid = Uuid::parse_str(notebook_id)
+            .map_err(|e| PluginError::CallFailed(format!("invalid notebook_id: {e}")))?;
+        let pid = Uuid::parse_str(page_id)
+            .map_err(|e| PluginError::CallFailed(format!("invalid page_id: {e}")))?;
+
+        let storage = self.storage.lock().map_err(|e| {
+            PluginError::CallFailed(format!("storage lock: {e}"))
+        })?;
+        let page = storage
+            .get_page(nid, pid)
+            .map_err(|e| PluginError::CallFailed(e.to_string()))?;
+
+        if page.page_type != PageType::Database {
+            return Err(PluginError::CallFailed(format!(
+                "page {} is not a database",
+                pid
+            )));
+        }
+
+        // Read existing database content
+        let content = storage
+            .read_native_file_content(&page)
+            .map_err(|e| PluginError::CallFailed(e.to_string()))?;
+        let mut db: serde_json::Value = serde_json::from_str(&content)
+            .map_err(|e| PluginError::CallFailed(format!("invalid database JSON: {e}")))?;
+
+        // Parse updates: [{"row": 0_or_"uuid", "cells": {"PropName": "value"}}, ...]
+        let updates: Vec<serde_json::Value> = serde_json::from_str(updates_json)
+            .map_err(|e| PluginError::CallFailed(format!("invalid updates JSON: {e}")))?;
+
+        let name_to_id = Self::build_property_name_map(&db);
+        let now = chrono::Utc::now().to_rfc3339();
+
+        let rows_arr = db
+            .get_mut("rows")
+            .and_then(|v| v.as_array_mut())
+            .ok_or_else(|| PluginError::CallFailed("database has no rows array".to_string()))?;
+
+        let mut updated_count = 0usize;
+        for update in &updates {
+            let row_ref = update.get("row").ok_or_else(|| {
+                PluginError::CallFailed("update missing 'row' field".to_string())
+            })?;
+            let cell_updates = update
+                .get("cells")
+                .and_then(|v| v.as_object())
+                .ok_or_else(|| {
+                    PluginError::CallFailed("update missing 'cells' object".to_string())
+                })?;
+
+            // Find the row by index or UUID
+            let row = if let Some(idx) = row_ref.as_u64() {
+                rows_arr.get_mut(idx as usize)
+            } else if let Some(uuid_str) = row_ref.as_str() {
+                rows_arr.iter_mut().find(|r| {
+                    r.get("id").and_then(|v| v.as_str()) == Some(uuid_str)
+                })
+            } else {
+                None
+            };
+
+            let Some(row) = row else {
+                continue;
+            };
+
+            let cells = row
+                .get_mut("cells")
+                .and_then(|v| v.as_object_mut())
+                .ok_or_else(|| {
+                    PluginError::CallFailed("row has no cells object".to_string())
+                })?;
+
+            for (key, value) in cell_updates {
+                let prop_id = name_to_id.get(key).cloned().unwrap_or_else(|| key.clone());
+                cells.insert(prop_id, value.clone());
+            }
+
+            // Update timestamp
+            if let Some(obj) = row.as_object_mut() {
+                obj.insert("updatedAt".to_string(), serde_json::json!(now));
+            }
+
+            updated_count += 1;
+        }
+
+        // Write back
+        let db_json = serde_json::to_string_pretty(&db)
+            .map_err(|e| PluginError::CallFailed(format!("serialize database: {e}")))?;
+        storage
+            .write_native_file_content(&page, &db_json)
+            .map_err(|e| PluginError::CallFailed(e.to_string()))?;
+
+        Ok(serde_json::json!({
+            "databaseId": pid.to_string(),
+            "rowsUpdated": updated_count,
+        }))
+    }
+
+    /// Build a map from property name → property id from a database JSON value.
+    fn build_property_name_map(db: &serde_json::Value) -> std::collections::HashMap<String, String> {
+        let mut map = std::collections::HashMap::new();
+        if let Some(props) = db.get("properties").and_then(|v| v.as_array()) {
+            for prop in props {
+                if let (Some(name), Some(id)) = (
+                    prop.get("name").and_then(|v| v.as_str()),
+                    prop.get("id").and_then(|v| v.as_str()),
+                ) {
+                    map.insert(name.to_string(), id.to_string());
+                }
+            }
+        }
+        map
+    }
+
+    // -- Search API --
+
+    /// Search pages across all notebooks.
+    pub fn search(
+        &self,
+        caps: CapabilitySet,
+        plugin_id: &str,
+        query: &str,
+        limit: usize,
+    ) -> Result<serde_json::Value, PluginError> {
+        Self::require(caps, CapabilitySet::SEARCH, plugin_id)?;
+        let search_index = self
+            .search_index
+            .as_ref()
+            .ok_or_else(|| PluginError::CallFailed("search index not available".to_string()))?;
+        let index = search_index.lock().map_err(|e| {
+            PluginError::CallFailed(format!("search lock: {e}"))
+        })?;
+        let results = index
+            .search(query, limit)
+            .map_err(|e| PluginError::CallFailed(e.to_string()))?;
+        serde_json::to_value(&results).map_err(PluginError::Json)
     }
 
     // -- Logging APIs (no capability required) --

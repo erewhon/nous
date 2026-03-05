@@ -41,3 +41,50 @@ pub fn reload_plugin(state: State<AppState>, plugin_id: String) -> CommandResult
 pub fn reload_plugin(_state: State<AppState>, _plugin_id: String) -> CommandResult<()> {
     Err("Plugins feature not enabled".to_string())
 }
+
+/// Get commands registered by plugins for the Command Palette
+#[cfg(feature = "plugins")]
+#[tauri::command]
+pub fn get_plugin_commands(
+    state: State<AppState>,
+) -> CommandResult<Vec<crate::plugins::host::PluginCommand>> {
+    let Some(ref ph) = state.plugin_host else {
+        return Ok(vec![]);
+    };
+    let host = ph.lock().map_err(|e| e.to_string())?;
+    Ok(host.get_plugin_commands())
+}
+
+/// Get plugin commands (stub when plugins feature disabled)
+#[cfg(not(feature = "plugins"))]
+#[tauri::command]
+pub fn get_plugin_commands(_state: State<AppState>) -> CommandResult<Vec<serde_json::Value>> {
+    Ok(vec![])
+}
+
+/// Execute a command registered by a plugin
+#[cfg(feature = "plugins")]
+#[tauri::command]
+pub fn execute_plugin_command(
+    state: State<AppState>,
+    plugin_id: String,
+    command_id: String,
+) -> CommandResult<serde_json::Value> {
+    let Some(ref ph) = state.plugin_host else {
+        return Err("Plugin host not available".to_string());
+    };
+    let host = ph.lock().map_err(|e| e.to_string())?;
+    host.execute_plugin_command(&plugin_id, &command_id)
+        .map_err(|e| e.to_string())
+}
+
+/// Execute a plugin command (stub when plugins feature disabled)
+#[cfg(not(feature = "plugins"))]
+#[tauri::command]
+pub fn execute_plugin_command(
+    _state: State<AppState>,
+    _plugin_id: String,
+    _command_id: String,
+) -> CommandResult<serde_json::Value> {
+    Err("Plugins feature not enabled".to_string())
+}

@@ -64,7 +64,7 @@ use video_server::VideoServer;
 pub struct AppState {
     pub library_storage: Arc<Mutex<LibraryStorage>>,
     pub storage: Arc<Mutex<FileStorage>>,
-    pub search_index: Mutex<SearchIndex>,
+    pub search_index: Arc<Mutex<SearchIndex>>,
     pub vector_index: Mutex<VectorIndex>,
     pub python_ai: Arc<Mutex<PythonAI>>,
     pub action_storage: Arc<Mutex<ActionStorage>>,
@@ -297,14 +297,19 @@ pub fn run() {
     action_executor.set_energy_storage(Arc::clone(&energy_storage_arc));
     action_executor.set_inbox_storage(Arc::clone(&inbox_storage_arc));
 
+    // Wrap search index in Arc for sharing with plugin system
+    let search_index_arc = Arc::new(Mutex::new(search_index));
+
     // Initialize plugin host (optional, behind "plugins" feature)
     #[cfg(feature = "plugins")]
     let plugin_host = {
-        let api = Arc::new(plugins::HostApi::new(
+        let mut api = plugins::HostApi::new(
             Arc::clone(&storage_arc),
             Arc::clone(&goals_storage_arc),
             Arc::clone(&inbox_storage_arc),
-        ));
+        );
+        api.set_search_index(Arc::clone(&search_index_arc));
+        let api = Arc::new(api);
         let mut host = plugins::PluginHost::new(api, library_path.join("plugins"));
         if let Err(e) = host.load_all() {
             log::warn!("Plugin load error: {e}");
@@ -365,7 +370,7 @@ pub fn run() {
     let state = AppState {
         library_storage: library_storage_arc,
         storage: storage_arc,
-        search_index: Mutex::new(search_index),
+        search_index: search_index_arc,
         vector_index: Mutex::new(vector_index),
         python_ai: python_ai_arc,
         action_storage: action_storage_arc,
@@ -993,6 +998,8 @@ pub fn run() {
             // Plugin commands
             commands::list_plugins,
             commands::reload_plugin,
+            commands::get_plugin_commands,
+            commands::execute_plugin_command,
             // Freeze watchdog
             freeze_watchdog::freeze_pong,
         ])

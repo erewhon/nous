@@ -10,6 +10,7 @@ import { useNotebookStore } from "../../stores/notebookStore";
 import { usePageStore } from "../../stores/pageStore";
 import { useSearchStore, type SearchMode } from "../../stores/searchStore";
 import { useActionStore } from "../../stores/actionStore";
+import { usePluginStore } from "../../stores/pluginStore";
 import { useRAGStore } from "../../stores/ragStore";
 import { useSectionStore } from "../../stores/sectionStore";
 import { searchPages, exportPageToFile, importMarkdownFile, convertDocument, importMarkdown } from "../../utils/api";
@@ -58,7 +59,15 @@ export function CommandPalette({
   const { recentSearches, searchScope, searchMode, addRecentSearch, setSearchScope, setSearchMode, clearRecentSearches } =
     useSearchStore();
   const { actions, runAction: executeAction, openActionLibrary } = useActionStore();
+  const { commands: pluginCommands, fetchCommands: fetchPluginCommands, executeCommand: executePluginCommand } = usePluginStore();
   const { isConfigured: ragConfigured, settings: ragSettings, hybridSearch, semanticSearch } = useRAGStore();
+
+  // Fetch plugin commands when palette opens
+  useEffect(() => {
+    if (isOpen) {
+      fetchPluginCommands();
+    }
+  }, [isOpen, fetchPluginCommands]);
 
   // Debounced search
   useEffect(() => {
@@ -558,6 +567,26 @@ export function CommandPalette({
       });
     }
 
+    // Add plugin commands
+    for (const cmd of pluginCommands) {
+      cmds.push({
+        id: `plugin-${cmd.pluginId}-${cmd.id}`,
+        title: cmd.title,
+        subtitle: cmd.subtitle,
+        icon: <IconZap />,
+        category: "automation",
+        action: async () => {
+          onClose();
+          try {
+            await executePluginCommand(cmd.pluginId, cmd.id);
+          } catch (error) {
+            console.error("Failed to execute plugin command:", error);
+          }
+        },
+        keywords: cmd.keywords,
+      });
+    }
+
     // Only show local pages/notebooks if no search query (to avoid duplication)
     if (!query.trim()) {
       // Pages in current notebook
@@ -613,6 +642,8 @@ export function CommandPalette({
     actions,
     executeAction,
     openActionLibrary,
+    pluginCommands,
+    executePluginCommand,
   ]);
 
   // Convert search results to commands

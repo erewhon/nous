@@ -252,6 +252,104 @@ impl LuaPlugin {
             })?;
         }
 
+        // -- Database APIs --
+        {
+            let api_ref = Arc::clone(api);
+            let pid = plugin_id.clone();
+            let c = caps;
+            let database_list = self.lua.create_function(move |_, notebook_id: String| {
+                let result = api_ref.database_list(c, &pid, &notebook_id)
+                    .map_err(|e| LuaError::external(e))?;
+                let s = serde_json::to_string(&result)
+                    .map_err(|e| LuaError::external(e))?;
+                Ok(s)
+            }).map_err(|e| PluginError::InitFailed(format!("database_list: {e}")))?;
+            nous.set("database_list", database_list).map_err(|e| {
+                PluginError::InitFailed(format!("set database_list: {e}"))
+            })?;
+        }
+
+        {
+            let api_ref = Arc::clone(api);
+            let pid = plugin_id.clone();
+            let c = caps;
+            let database_get = self.lua.create_function(move |_, (notebook_id, page_id): (String, String)| {
+                let result = api_ref.database_get(c, &pid, &notebook_id, &page_id)
+                    .map_err(|e| LuaError::external(e))?;
+                let s = serde_json::to_string(&result)
+                    .map_err(|e| LuaError::external(e))?;
+                Ok(s)
+            }).map_err(|e| PluginError::InitFailed(format!("database_get: {e}")))?;
+            nous.set("database_get", database_get).map_err(|e| {
+                PluginError::InitFailed(format!("set database_get: {e}"))
+            })?;
+        }
+
+        {
+            let api_ref = Arc::clone(api);
+            let pid = plugin_id.clone();
+            let c = caps;
+            let database_create = self.lua.create_function(move |_, (notebook_id, title, properties_json): (String, String, String)| {
+                let result = api_ref.database_create(c, &pid, &notebook_id, &title, &properties_json)
+                    .map_err(|e| LuaError::external(e))?;
+                let s = serde_json::to_string(&result)
+                    .map_err(|e| LuaError::external(e))?;
+                Ok(s)
+            }).map_err(|e| PluginError::InitFailed(format!("database_create: {e}")))?;
+            nous.set("database_create", database_create).map_err(|e| {
+                PluginError::InitFailed(format!("set database_create: {e}"))
+            })?;
+        }
+
+        {
+            let api_ref = Arc::clone(api);
+            let pid = plugin_id.clone();
+            let c = caps;
+            let database_add_rows = self.lua.create_function(move |_, (notebook_id, page_id, rows_json): (String, String, String)| {
+                let result = api_ref.database_add_rows(c, &pid, &notebook_id, &page_id, &rows_json)
+                    .map_err(|e| LuaError::external(e))?;
+                let s = serde_json::to_string(&result)
+                    .map_err(|e| LuaError::external(e))?;
+                Ok(s)
+            }).map_err(|e| PluginError::InitFailed(format!("database_add_rows: {e}")))?;
+            nous.set("database_add_rows", database_add_rows).map_err(|e| {
+                PluginError::InitFailed(format!("set database_add_rows: {e}"))
+            })?;
+        }
+
+        {
+            let api_ref = Arc::clone(api);
+            let pid = plugin_id.clone();
+            let c = caps;
+            let database_update_rows = self.lua.create_function(move |_, (notebook_id, page_id, updates_json): (String, String, String)| {
+                let result = api_ref.database_update_rows(c, &pid, &notebook_id, &page_id, &updates_json)
+                    .map_err(|e| LuaError::external(e))?;
+                let s = serde_json::to_string(&result)
+                    .map_err(|e| LuaError::external(e))?;
+                Ok(s)
+            }).map_err(|e| PluginError::InitFailed(format!("database_update_rows: {e}")))?;
+            nous.set("database_update_rows", database_update_rows).map_err(|e| {
+                PluginError::InitFailed(format!("set database_update_rows: {e}"))
+            })?;
+        }
+
+        // -- Search API --
+        {
+            let api_ref = Arc::clone(api);
+            let pid = plugin_id.clone();
+            let c = caps;
+            let search = self.lua.create_function(move |_, (query, limit): (String, Option<usize>)| {
+                let result = api_ref.search(c, &pid, &query, limit.unwrap_or(20))
+                    .map_err(|e| LuaError::external(e))?;
+                let s = serde_json::to_string(&result)
+                    .map_err(|e| LuaError::external(e))?;
+                Ok(s)
+            }).map_err(|e| PluginError::InitFailed(format!("search: {e}")))?;
+            nous.set("search", search).map_err(|e| {
+                PluginError::InitFailed(format!("set search: {e}"))
+            })?;
+        }
+
         // Set nous as a global
         self.lua.globals().set("nous", nous).map_err(|e| {
             PluginError::InitFailed(format!("set global nous: {e}"))
