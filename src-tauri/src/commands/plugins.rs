@@ -167,6 +167,82 @@ pub fn handle_plugin_view_action(
     Err("Plugins feature not enabled".to_string())
 }
 
+/// Get editor block types registered by plugins
+#[cfg(feature = "plugins")]
+#[tauri::command]
+pub fn get_plugin_block_types(
+    state: State<AppState>,
+) -> CommandResult<Vec<crate::plugins::host::PluginBlockType>> {
+    let Some(ref ph) = state.plugin_host else {
+        return Ok(vec![]);
+    };
+    let host = ph.lock().map_err(|e| e.to_string())?;
+    Ok(host.get_plugin_block_types())
+}
+
+/// Get plugin block types (stub when plugins feature disabled)
+#[cfg(not(feature = "plugins"))]
+#[tauri::command]
+pub fn get_plugin_block_types(_state: State<AppState>) -> CommandResult<Vec<serde_json::Value>> {
+    Ok(vec![])
+}
+
+/// Render a plugin editor block
+#[cfg(feature = "plugins")]
+#[tauri::command]
+pub fn render_plugin_block(
+    state: State<AppState>,
+    plugin_id: String,
+    block_type: String,
+    data: serde_json::Value,
+) -> CommandResult<serde_json::Value> {
+    let Some(ref ph) = state.plugin_host else {
+        return Err("Plugin host not available".to_string());
+    };
+    let host = ph.lock().map_err(|e| e.to_string())?;
+    host.render_plugin_block(&plugin_id, &block_type, &data)
+        .map_err(|e| e.to_string())
+}
+
+/// Render plugin block (stub when plugins feature disabled)
+#[cfg(not(feature = "plugins"))]
+#[tauri::command]
+pub fn render_plugin_block(
+    _state: State<AppState>,
+    _plugin_id: String,
+    _block_type: String,
+    _data: serde_json::Value,
+) -> CommandResult<serde_json::Value> {
+    Err("Plugins feature not enabled".to_string())
+}
+
+/// Handle an interactive action from a plugin editor block
+#[cfg(feature = "plugins")]
+#[tauri::command]
+pub fn handle_plugin_block_action(
+    state: State<AppState>,
+    plugin_id: String,
+    action: serde_json::Value,
+) -> CommandResult<serde_json::Value> {
+    let Some(ref ph) = state.plugin_host else {
+        return Err("Plugin host not available".to_string());
+    };
+    let host = ph.lock().map_err(|e| e.to_string())?;
+    host.handle_plugin_block_action(&plugin_id, &action)
+        .map_err(|e| e.to_string())
+}
+
+/// Handle plugin block action (stub when plugins feature disabled)
+#[cfg(not(feature = "plugins"))]
+#[tauri::command]
+pub fn handle_plugin_block_action(
+    _state: State<AppState>,
+    _plugin_id: String,
+    _action: serde_json::Value,
+) -> CommandResult<serde_json::Value> {
+    Err("Plugins feature not enabled".to_string())
+}
+
 /// Enable or disable a plugin by ID
 #[cfg(feature = "plugins")]
 #[tauri::command]

@@ -31,10 +31,18 @@ export interface PluginViewType {
   iconSvg?: string;
 }
 
+export interface PluginBlockType {
+  pluginId: string;
+  blockType: string;
+  label: string;
+  iconSvg?: string;
+}
+
 interface PluginStore {
   plugins: PluginManifest[];
   commands: PluginCommand[];
   viewTypes: PluginViewType[];
+  blockTypes: PluginBlockType[];
   loading: boolean;
 
   fetchPlugins: () => Promise<void>;
@@ -45,12 +53,16 @@ interface PluginStore {
   fetchViewTypes: () => Promise<void>;
   renderView: (pluginId: string, viewType: string, content: unknown, view: unknown) => Promise<unknown>;
   handleViewAction: (pluginId: string, action: unknown) => Promise<unknown>;
+  fetchBlockTypes: () => Promise<void>;
+  renderBlock: (pluginId: string, blockType: string, data: unknown) => Promise<unknown>;
+  handleBlockAction: (pluginId: string, action: unknown) => Promise<unknown>;
 }
 
 export const usePluginStore = create<PluginStore>((set) => ({
   plugins: [],
   commands: [],
   viewTypes: [],
+  blockTypes: [],
   loading: false,
 
   fetchPlugins: async () => {
@@ -120,5 +132,22 @@ export const usePluginStore = create<PluginStore>((set) => ({
 
   handleViewAction: async (pluginId: string, action: unknown) => {
     return invoke("handle_plugin_view_action", { pluginId, action });
+  },
+
+  fetchBlockTypes: async () => {
+    try {
+      const blockTypes = await invoke<PluginBlockType[]>("get_plugin_block_types");
+      set({ blockTypes });
+    } catch (e) {
+      console.error("Failed to fetch plugin block types:", e);
+    }
+  },
+
+  renderBlock: async (pluginId: string, blockType: string, data: unknown) => {
+    return invoke("render_plugin_block", { pluginId, blockType, data });
+  },
+
+  handleBlockAction: async (pluginId: string, action: unknown) => {
+    return invoke("handle_plugin_block_action", { pluginId, action });
   },
 }));

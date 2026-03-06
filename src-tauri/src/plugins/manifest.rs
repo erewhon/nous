@@ -25,6 +25,7 @@ bitflags::bitflags! {
         const ENERGY_READ     = 0b0100_0000_0000;
         const ENERGY_WRITE    = 0b1000_0000_0000;
         const DATABASE_VIEW   = 0b0001_0000_0000_0000;
+        const BLOCK_RENDER    = 0b0010_0000_0000_0000;
     }
 }
 
@@ -47,6 +48,7 @@ impl CapabilitySet {
                 "energy_read" => CapabilitySet::ENERGY_READ,
                 "energy_write" => CapabilitySet::ENERGY_WRITE,
                 "database_view" => CapabilitySet::DATABASE_VIEW,
+                "block_render" => CapabilitySet::BLOCK_RENDER,
                 other => {
                     return Err(PluginError::ManifestParse(format!(
                         "unknown capability: {other}"
@@ -75,6 +77,7 @@ impl fmt::Display for CapabilitySet {
             (CapabilitySet::ENERGY_READ, "energy_read"),
             (CapabilitySet::ENERGY_WRITE, "energy_write"),
             (CapabilitySet::DATABASE_VIEW, "database_view"),
+            (CapabilitySet::BLOCK_RENDER, "block_render"),
         ]
         .iter()
         .filter(|(cap, _)| self.contains(*cap))
@@ -112,6 +115,10 @@ pub enum HookPoint {
     DatabaseView {
         view_type: String,
     },
+    /// Custom editor block rendering
+    BlockRender {
+        block_type: String,
+    },
 }
 
 impl HookPoint {
@@ -132,6 +139,10 @@ impl HookPoint {
             other if other.starts_with("database_view:") => {
                 let view_type = other.strip_prefix("database_view:").unwrap().to_string();
                 Ok(HookPoint::DatabaseView { view_type })
+            }
+            other if other.starts_with("block_render:") => {
+                let block_type = other.strip_prefix("block_render:").unwrap().to_string();
+                Ok(HookPoint::BlockRender { block_type })
             }
             other => Err(PluginError::ManifestParse(format!(
                 "unknown hook point: {other}"

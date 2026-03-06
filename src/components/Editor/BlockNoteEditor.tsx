@@ -55,6 +55,7 @@ import { useChecklistSort } from "./useChecklistSort";
 import { useBlockAttribution } from "../../hooks/useBlockAttribution";
 import { getCollabProvider } from "../../collab/collabStore";
 import type { EditorData } from "../../types/page";
+import { usePluginStore } from "../../stores/pluginStore";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -358,17 +359,50 @@ export const BlockNoteEditor = memo(
         return () => { p.doc.off("update", handleYjsUpdate); };
       }, [collaboration, editor]);
 
-      // ─── Slash menu with multi-column items ─────────────────────────
+      // ─── Plugin block types for slash menu ─────────────────────────
+      const pluginBlockTypes = usePluginStore((s) => s.blockTypes);
+      const fetchBlockTypes = usePluginStore((s) => s.fetchBlockTypes);
+
+      useEffect(() => {
+        fetchBlockTypes();
+      }, [fetchBlockTypes]);
+
+      // ─── Slash menu with multi-column items + plugin blocks ───────
       const getSlashMenuItems = useMemo(() => {
+        const pluginItems: DefaultReactSuggestionItem[] = pluginBlockTypes.map(
+          (bt) => ({
+            title: bt.label,
+            onItemClick: () => {
+              editor.insertBlocks(
+                [
+                  {
+                    type: "plugin" as const,
+                    props: {
+                      pluginId: bt.pluginId,
+                      blockType: bt.blockType,
+                      dataJson: "{}",
+                    },
+                  },
+                ],
+                editor.getTextCursorPosition().block,
+                "after",
+              );
+            },
+            aliases: [bt.blockType],
+            group: "Plugins",
+          }),
+        );
+
         return async (query: string) =>
           filterItems(
             combineByGroup(
               getDefaultReactSlashMenuItems(editor),
               getMultiColumnSlashMenuItems(editor),
+              pluginItems,
             ),
             query,
           );
-      }, [editor]);
+      }, [editor, pluginBlockTypes]);
 
       // ─── Vim mode indicator state ──────────────────────────────────
       const vimMode = useVimStore((s) => s.mode);

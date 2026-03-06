@@ -26,6 +26,7 @@ import { PDFBlock } from "./blocks/PDFBlock";
 import { VideoBlock } from "./blocks/VideoBlock";
 import { AudioBlock } from "./blocks/AudioBlock";
 import { DrawingBlock } from "./blocks/DrawingBlock";
+import { PluginBlock } from "./blocks/PluginBlock";
 
 // Custom inline content
 import { WikiLinkInline } from "./inline/WikiLinkInline";
@@ -51,6 +52,7 @@ const baseSchema = BlockNoteSchema.create({
     video: VideoBlock(),
     audio: AudioBlock(),
     drawing: DrawingBlock(),
+    plugin: PluginBlock(),
   },
   inlineContentSpecs: {
     ...defaultInlineContentSpecs,

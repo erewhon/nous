@@ -309,6 +309,8 @@ class NousStorage:
 
             if page.get("isArchived", False):
                 continue
+            if page.get("deletedAt") is not None:
+                continue
             if folder_id and page.get("folderId") != folder_id:
                 continue
             if section_id and page.get("sectionId") != section_id:
@@ -433,6 +435,8 @@ class NousStorage:
             if not page.get("isDailyNote", False):
                 continue
             if page.get("isArchived", False):
+                continue
+            if page.get("deletedAt") is not None:
                 continue
 
             results.append({
@@ -713,6 +717,8 @@ class NousStorage:
                     continue
 
                 if page.get("isArchived", False):
+                    continue
+                if page.get("deletedAt") is not None:
                     continue
 
                 title = page.get("title", "")

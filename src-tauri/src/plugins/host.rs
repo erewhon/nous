@@ -38,6 +38,16 @@ pub struct PluginViewType {
     pub icon_svg: Option<String>,
 }
 
+/// A block type registered by a plugin for the editor.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginBlockType {
+    pub plugin_id: String,
+    pub block_type: String,
+    pub label: String,
+    pub icon_svg: Option<String>,
+}
+
 /// Plugin manifest with runtime enabled/disabled status.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -535,6 +545,107 @@ impl PluginHost {
         })?;
 
         plugin.call("handle_action", action)
+    }
+
+    /// Get editor block types registered by plugins.
+    pub fn get_plugin_block_types(&self) -> Vec<PluginBlockType> {
+        let mut block_types = Vec::new();
+
+        for manifest in self.registry.list_manifests() {
+            if !self.is_plugin_enabled(&manifest.id) {
+                continue;
+            }
+            for hook in &manifest.hooks {
+                if let HookPoint::BlockRender { block_type } = hook {
+                    let plugin_mutex = match self.registry.get(&manifest.id) {
+                        Some(m) => m,
+                        None => continue,
+                    };
+
+                    let mut plugin = match plugin_mutex.lock() {
+                        Ok(p) => p,
+                        Err(e) => {
+                            log::warn!("Failed to lock plugin '{}' for describe_block: {e}", manifest.id);
+                            continue;
+                        }
+                    };
+
+                    match plugin.call("describe_block", &serde_json::Value::Null) {
+                        Ok(val) => {
+                            let label = val.get("label").and_then(|v| v.as_str()).unwrap_or(block_type.as_str()).to_string();
+                            let icon_svg = val.get("icon_svg").and_then(|v| v.as_str()).map(|s| s.to_string());
+                            block_types.push(PluginBlockType {
+                                plugin_id: manifest.id.clone(),
+                                block_type: block_type.clone(),
+                                label,
+                                icon_svg,
+                            });
+                        }
+                        Err(e) => {
+                            log::warn!("Plugin '{}' describe_block failed: {e}", manifest.id);
+                            block_types.push(PluginBlockType {
+                                plugin_id: manifest.id.clone(),
+                                block_type: block_type.clone(),
+                                label: block_type.clone(),
+                                icon_svg: None,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        block_types
+    }
+
+    /// Render a plugin editor block. Returns JSON with html, styles, height.
+    pub fn render_plugin_block(
+        &self,
+        plugin_id: &str,
+        block_type: &str,
+        data: &serde_json::Value,
+    ) -> Result<serde_json::Value, PluginError> {
+        if !self.is_plugin_enabled(plugin_id) {
+            return Err(PluginError::Runtime(format!(
+                "plugin '{plugin_id}' is disabled"
+            )));
+        }
+        let plugin_mutex = self.registry.get(plugin_id).ok_or_else(|| {
+            PluginError::NotFound(plugin_id.to_string())
+        })?;
+
+        let input = json!({
+            "block_type": block_type,
+            "data": data,
+        });
+
+        let mut plugin = plugin_mutex.lock().map_err(|e| {
+            PluginError::Runtime(format!("lock: {e}"))
+        })?;
+
+        plugin.call("render_block", &input)
+    }
+
+    /// Handle an interactive action from a plugin editor block.
+    pub fn handle_plugin_block_action(
+        &self,
+        plugin_id: &str,
+        action: &serde_json::Value,
+    ) -> Result<serde_json::Value, PluginError> {
+        if !self.is_plugin_enabled(plugin_id) {
+            return Err(PluginError::Runtime(format!(
+                "plugin '{plugin_id}' is disabled"
+            )));
+        }
+        let plugin_mutex = self.registry.get(plugin_id).ok_or_else(|| {
+            PluginError::NotFound(plugin_id.to_string())
+        })?;
+
+        let mut plugin = plugin_mutex.lock().map_err(|e| {
+            PluginError::Runtime(format!("lock: {e}"))
+        })?;
+
+        plugin.call("handle_block_action", action)
     }
 
     /// Get plugins directory path
