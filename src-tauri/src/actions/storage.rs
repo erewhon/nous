@@ -156,9 +156,13 @@ impl ActionStorage {
                 && updates.steps.is_none()
                 && updates.variables.is_none();
 
-            if !only_allowed || (updates.enabled.is_none() && updates.triggers.is_none()) {
+            if !only_allowed
+                || (updates.enabled.is_none()
+                    && updates.triggers.is_none()
+                    && updates.default_notebook_id.is_none())
+            {
                 return Err(StorageError::InvalidOperation(
-                    "Only enabled and triggers can be changed on built-in actions".to_string(),
+                    "Only enabled, triggers, and default_notebook_id can be changed on built-in actions".to_string(),
                 ));
             }
 
@@ -167,6 +171,13 @@ impl ActionStorage {
             }
             if let Some(triggers) = updates.triggers {
                 action.triggers = triggers;
+            }
+            if let Some(ref nb_id) = updates.default_notebook_id {
+                action.default_notebook_id = if nb_id.is_empty() {
+                    None
+                } else {
+                    Some(nb_id.clone())
+                };
             }
             action.updated_at = chrono::Utc::now();
 
@@ -201,6 +212,13 @@ impl ActionStorage {
         }
         if let Some(variables) = updates.variables {
             action.variables = variables;
+        }
+        if let Some(ref nb_id) = updates.default_notebook_id {
+            action.default_notebook_id = if nb_id.is_empty() {
+                None
+            } else {
+                Some(nb_id.clone())
+            };
         }
 
         action.updated_at = chrono::Utc::now();

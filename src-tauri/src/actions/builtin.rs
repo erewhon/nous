@@ -85,6 +85,7 @@ fn create_daily_outcomes_action() -> Action {
         updated_at: chrono::Utc::now(),
         last_run: None,
         next_run: None,
+        default_notebook_id: None,
     }
 }
 
@@ -134,6 +135,7 @@ fn create_weekly_outcomes_action() -> Action {
         updated_at: chrono::Utc::now(),
         last_run: None,
         next_run: None,
+        default_notebook_id: None,
     }
 }
 
@@ -191,6 +193,7 @@ fn create_monthly_review_action() -> Action {
         updated_at: chrono::Utc::now(),
         last_run: None,
         next_run: None,
+        default_notebook_id: None,
     }
 }
 
@@ -242,6 +245,7 @@ fn create_daily_reflection_action() -> Action {
         updated_at: chrono::Utc::now(),
         last_run: None,
         next_run: None,
+        default_notebook_id: None,
     }
 }
 
@@ -291,6 +295,7 @@ fn create_weekly_review_action() -> Action {
         updated_at: chrono::Utc::now(),
         last_run: None,
         next_run: None,
+        default_notebook_id: None,
     }
 }
 
@@ -355,6 +360,7 @@ fn create_carry_forward_action() -> Action {
         updated_at: chrono::Utc::now(),
         last_run: None,
         next_run: None,
+        default_notebook_id: None,
     }
 }
 
@@ -410,6 +416,7 @@ fn create_weekly_outcomes_carry_forward_action() -> Action {
         updated_at: chrono::Utc::now(),
         last_run: None,
         next_run: None,
+        default_notebook_id: None,
     }
 }
 
@@ -482,6 +489,7 @@ fn create_carry_forward_daily_notes_action() -> Action {
         updated_at: chrono::Utc::now(),
         last_run: None,
         next_run: None,
+        default_notebook_id: None,
     }
 }
 
@@ -550,6 +558,7 @@ fn create_weekly_study_review_action() -> Action {
         updated_at: chrono::Utc::now(),
         last_run: None,
         next_run: None,
+        default_notebook_id: None,
     }
 }
 
@@ -624,6 +633,7 @@ fn create_exam_prep_workflow_action() -> Action {
         updated_at: chrono::Utc::now(),
         last_run: None,
         next_run: None,
+        default_notebook_id: None,
     }
 }
 
@@ -690,6 +700,7 @@ fn create_daily_learning_summary_action() -> Action {
         updated_at: chrono::Utc::now(),
         last_run: None,
         next_run: None,
+        default_notebook_id: None,
     }
 }
 
@@ -731,6 +742,7 @@ fn create_daily_goal_nudge_action() -> Action {
         updated_at: chrono::Utc::now(),
         last_run: None,
         next_run: None,
+        default_notebook_id: None,
     }
 }
 
@@ -775,6 +787,7 @@ fn create_goal_brainstorm_action() -> Action {
         updated_at: chrono::Utc::now(),
         last_run: None,
         next_run: None,
+        default_notebook_id: None,
     }
 }
 

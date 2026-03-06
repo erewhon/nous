@@ -449,6 +449,9 @@ pub struct Action {
     /// Next scheduled run (if applicable)
     #[serde(default)]
     pub next_run: Option<DateTime<Utc>>,
+    /// Default notebook for scheduled/background execution (fallback when no UI context)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_notebook_id: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -473,6 +476,7 @@ impl Action {
             updated_at: now,
             last_run: None,
             next_run: None,
+            default_notebook_id: None,
         }
     }
 
@@ -582,4 +586,5 @@ pub struct ActionUpdate {
     pub steps: Option<Vec<ActionStep>>,
     pub enabled: Option<bool>,
     pub variables: Option<Vec<ActionVariable>>,
+    pub default_notebook_id: Option<String>,
 }

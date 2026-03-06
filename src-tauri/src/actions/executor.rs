@@ -202,6 +202,10 @@ impl ActionExecutor {
         let mut context = ExecutionContext::new();
         if let Some(notebook_id) = current_notebook_id {
             context = context.with_notebook(notebook_id);
+        } else if let Some(ref default_nb) = action.default_notebook_id {
+            if let Ok(uuid) = Uuid::parse_str(default_nb) {
+                context = context.with_notebook(uuid);
+            }
         }
 
         // Build variable context
@@ -969,7 +973,7 @@ impl ActionExecutor {
                     page.template_id = Some(tpl_id.clone());
                 }
 
-                // Place in the daily notes folder if configured
+                // Place in the daily notes folder/section if configured
                 let notebook = storage.get_notebook(notebook_id)?;
                 if let Some(folder_id) = notebook
                     .daily_notes_config
@@ -977,6 +981,13 @@ impl ActionExecutor {
                     .and_then(|c| c.folder_id)
                 {
                     page.folder_id = Some(folder_id);
+                }
+                if let Some(section_id) = notebook
+                    .daily_notes_config
+                    .as_ref()
+                    .and_then(|c| c.section_id)
+                {
+                    page.section_id = Some(section_id);
                 }
 
                 // Set content with carried forward blocks (may be empty)

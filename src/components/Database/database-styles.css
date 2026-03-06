@@ -796,10 +796,8 @@
 }
 
 .db-view-tab-menu {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  z-index: 30;
+  position: fixed;
+  z-index: 50;
   min-width: 120px;
   background-color: var(--color-bg-secondary);
   border: 1px solid var(--color-border);

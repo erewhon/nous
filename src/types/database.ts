@@ -226,16 +226,11 @@ export const PluginViewConfigSchema = z.object({
 });
 export type PluginViewConfig = z.infer<typeof PluginViewConfigSchema>;
 
-export const ViewConfigSchema = z.union([
-  TableViewConfigSchema,
-  BoardViewConfigSchema,
-  GalleryViewConfigSchema,
-  ListViewConfigSchema,
-  CalendarViewConfigSchema,
-  ChartViewConfigSchema,
-  TimelineViewConfigSchema,
-  PluginViewConfigSchema,
-]);
+// Use passthrough record instead of union to avoid stripping unknown fields.
+// A z.union tries schemas in order; TableViewConfigSchema (all-optional) matches
+// anything, so plugin configs like { pluginId, viewType } would be stripped.
+// The actual config type is discriminated by the parent view's `type` field.
+export const ViewConfigSchema = z.record(z.string(), z.unknown());
 
 export const SummaryAggregationSchema = z.enum([
   "none",

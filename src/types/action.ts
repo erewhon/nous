@@ -411,6 +411,7 @@ export const ActionSchema = z.object({
   updatedAt: z.string(),
   lastRun: z.string().optional(),
   nextRun: z.string().optional(),
+  defaultNotebookId: z.string().optional(),
 });
 
 export type Action = z.infer<typeof ActionSchema>;
@@ -456,6 +457,7 @@ export const ActionUpdateSchema = z.object({
   steps: z.array(ActionStepSchema).optional(),
   enabled: z.boolean().optional(),
   variables: z.array(ActionVariableSchema).optional(),
+  defaultNotebookId: z.string().optional(),
 });
 
 export type ActionUpdate = z.infer<typeof ActionUpdateSchema>;

@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useActionStore } from "../../stores/actionStore";
+import { useNotebookStore } from "../../stores/notebookStore";
 import type {
   ActionCategory,
   ActionTrigger,
@@ -23,6 +24,7 @@ export function ActionEditor({
   editingActionId,
 }: ActionEditorProps) {
   const { actions, createAction, updateAction, viewOnlyMode } = useActionStore();
+  const notebooks = useNotebookStore((s) => s.notebooks);
 
   const [currentStep, setCurrentStep] = useState<EditorStep>("basics");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -33,6 +35,7 @@ export function ActionEditor({
   const [category, setCategory] = useState<ActionCategory>("custom");
   const [triggers, setTriggers] = useState<ActionTrigger[]>([{ type: "manual" }]);
   const [steps, setSteps] = useState<ActionStep[]>([]);
+  const [defaultNotebookId, setDefaultNotebookId] = useState<string | undefined>();
 
   // Load existing action when editing
   useEffect(() => {
@@ -44,6 +47,7 @@ export function ActionEditor({
         setCategory(existingAction.category);
         setTriggers(existingAction.triggers);
         setSteps(existingAction.steps);
+        setDefaultNotebookId(existingAction.defaultNotebookId);
       }
     } else if (isOpen && !editingActionId) {
       // Reset form for new action
@@ -52,6 +56,7 @@ export function ActionEditor({
       setCategory("custom");
       setTriggers([{ type: "manual" }]);
       setSteps([]);
+      setDefaultNotebookId(undefined);
       setCurrentStep("basics");
     }
   }, [isOpen, editingActionId, actions]);
@@ -86,6 +91,7 @@ export function ActionEditor({
           category,
           triggers,
           steps,
+          defaultNotebookId: defaultNotebookId || undefined,
         });
       } else {
         await createAction(name.trim(), description.trim(), {
@@ -295,6 +301,45 @@ export function ActionEditor({
                     </button>
                   ))}
                 </div>
+              </div>
+
+              {/* Default Notebook */}
+              <div>
+                <label
+                  className="mb-1.5 block text-sm font-medium"
+                  style={{ color: "var(--color-text-secondary)" }}
+                >
+                  Default Notebook (for scheduled runs)
+                </label>
+                <select
+                  value={defaultNotebookId || ""}
+                  onChange={(e) => {
+                    const val = e.target.value || undefined;
+                    setDefaultNotebookId(val);
+                    if (viewOnlyMode && editingActionId) {
+                      updateAction(editingActionId, { defaultNotebookId: val || "" });
+                    }
+                  }}
+                  className="w-full rounded-lg border px-3 py-2 text-sm outline-none transition-colors focus:border-[--color-accent]"
+                  style={{
+                    backgroundColor: "var(--color-bg-secondary)",
+                    borderColor: "var(--color-border)",
+                    color: "var(--color-text-primary)",
+                  }}
+                >
+                  <option value="">Active notebook</option>
+                  {notebooks.map((nb) => (
+                    <option key={nb.id} value={nb.id}>
+                      {nb.name}
+                    </option>
+                  ))}
+                </select>
+                <p
+                  className="mt-1 text-xs"
+                  style={{ color: "var(--color-text-muted)" }}
+                >
+                  Used when the action runs on a schedule without an active notebook
+                </p>
               </div>
             </div>
           )}

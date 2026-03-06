@@ -220,6 +220,7 @@ export function DatabaseViewTabs({
   const [contextMenuViewId, setContextMenuViewId] = useState<string | null>(
     null
   );
+  const [contextMenuPos, setContextMenuPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [renamingViewId, setRenamingViewId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const addMenuRef = useRef<HTMLDivElement>(null);
@@ -403,6 +404,7 @@ export function DatabaseViewTabs({
           onClick={() => onSelectView(view.id)}
           onContextMenu={(e) => {
             e.preventDefault();
+            setContextMenuPos({ x: e.clientX, y: e.clientY });
             setContextMenuViewId(view.id);
           }}
         >
@@ -434,37 +436,44 @@ export function DatabaseViewTabs({
             <span className="db-view-tab-name">{view.name}</span>
           )}
 
-          {contextMenuViewId === view.id && (
-            <div
-              ref={contextMenuRef}
-              className="db-view-tab-menu"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <button
-                className="db-view-tab-menu-item"
-                onClick={() => startRename(view.id)}
-              >
-                Rename
-              </button>
-              <button
-                className="db-view-tab-menu-item"
-                onClick={() => duplicateView(view.id)}
-              >
-                Duplicate
-              </button>
-              {views.length > 1 && (
-                <button
-                  className="db-view-tab-menu-item db-view-tab-menu-item-danger"
-                  onClick={() => deleteView(view.id)}
-                >
-                  Delete
-                </button>
-              )}
-            </div>
-          )}
         </div>
       ))}
     </div>
+
+      {/* Context menu rendered outside .db-view-tabs to avoid overflow clipping */}
+      {contextMenuViewId && (
+        <div
+          ref={contextMenuRef}
+          className="db-view-tab-menu"
+          style={{
+            position: "fixed",
+            top: contextMenuPos.y,
+            left: contextMenuPos.x,
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            className="db-view-tab-menu-item"
+            onClick={() => startRename(contextMenuViewId)}
+          >
+            Rename
+          </button>
+          <button
+            className="db-view-tab-menu-item"
+            onClick={() => duplicateView(contextMenuViewId)}
+          >
+            Duplicate
+          </button>
+          {views.length > 1 && (
+            <button
+              className="db-view-tab-menu-item db-view-tab-menu-item-danger"
+              onClick={() => deleteView(contextMenuViewId)}
+            >
+              Delete
+            </button>
+          )}
+        </div>
+      )}
 
       <div className="db-view-tabs-add" ref={addMenuRef}>
         <button

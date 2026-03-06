@@ -65,6 +65,12 @@ pub fn create_daily_note_core(
         page.folder_id = Some(fld_id);
     }
 
+    // Set section if configured
+    let section_id = notebook.daily_notes_config.as_ref().and_then(|c| c.section_id);
+    if let Some(sec_id) = section_id {
+        page.section_id = Some(sec_id);
+    }
+
     // Save the page
     storage.update_page(&page)?;
 

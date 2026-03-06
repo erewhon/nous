@@ -15,6 +15,8 @@ pub struct DailyNotesConfig {
     pub template_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub folder_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub section_id: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
