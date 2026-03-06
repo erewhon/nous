@@ -224,6 +224,17 @@ function convertBlock(block: EditorBlock): BNBlock | BNBlock[] {
     case "columns":
       return convertColumns(block);
 
+    case "plugin":
+      return {
+        id: block.id,
+        type: "plugin",
+        props: {
+          pluginId: (data.pluginId as string) ?? "",
+          blockType: (data.blockType as string) ?? "",
+          dataJson: (data.dataJson as string) ?? "{}",
+        },
+      };
+
     default:
       // Unknown block type — preserve as paragraph with raw text
       console.warn(`Unknown Editor.js block type: ${block.type}`, data);

@@ -5,6 +5,7 @@
 import { createReactBlockSpec } from "@blocknote/react";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { usePluginStore } from "../../../stores/pluginStore";
+import { useNotebookStore } from "../../../stores/notebookStore";
 
 function PluginBlockRenderer(props: {
   pluginId: string;
@@ -16,6 +17,7 @@ function PluginBlockRenderer(props: {
   const { pluginId, blockType, dataJson, editor, block } = props;
   const renderBlock = usePluginStore((s) => s.renderBlock);
   const handleBlockAction = usePluginStore((s) => s.handleBlockAction);
+  const notebookId = useNotebookStore((s) => s.selectedNotebookId);
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
   const [html, setHtml] = useState("");
@@ -35,6 +37,10 @@ function PluginBlockRenderer(props: {
     setError(null);
     try {
       const data = dataJson ? JSON.parse(dataJson) : {};
+      // Inject notebook context so plugins can access databases
+      if (notebookId) {
+        data.notebook_id = notebookId;
+      }
       const result = (await renderBlock(pluginId, blockType, data)) as {
         html?: string;
         styles?: string;
@@ -48,7 +54,7 @@ function PluginBlockRenderer(props: {
     } finally {
       setLoading(false);
     }
-  }, [pluginId, blockType, dataJson, renderBlock]);
+  }, [pluginId, blockType, dataJson, renderBlock, notebookId]);
 
   useEffect(() => {
     doRender();

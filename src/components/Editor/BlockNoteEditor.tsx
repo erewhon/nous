@@ -39,6 +39,7 @@ import {
   useRef,
 } from "react";
 
+import { autoPlacement, offset, shift, size } from "@floating-ui/react";
 import { blocksToYXmlFragment } from "@blocknote/core/yjs";
 import { schema } from "./schema";
 import {
@@ -404,6 +405,50 @@ export const BlockNoteEditor = memo(
           );
       }, [editor, pluginBlockTypes]);
 
+      // ─── Slash menu positioning ─────────────────────────────────────
+      // Use strategy:"fixed" to escape overflow:hidden ancestors, and
+      // boundary:"clippingAncestors" is the default — but contextElement
+      // causes floating-ui to use the scroll container as boundary. Override
+      // with explicit viewport boundary via altBoundary so the menu uses
+      // the full viewport height, not just the scroll container.
+      const slashMenuFloatingOptions = useMemo(
+        () => ({
+          useFloatingOptions: {
+            strategy: "fixed" as const,
+            middleware: [
+              offset(10),
+              autoPlacement({
+                allowedPlacements: [
+                  "bottom-start" as const,
+                  "top-start" as const,
+                ],
+                padding: 10,
+                boundary: "clippingAncestors" as const,
+                rootBoundary: "viewport" as const,
+              }),
+              shift({ padding: 10 }),
+              size({
+                apply({
+                  elements,
+                  availableHeight,
+                }: {
+                  elements: { floating: HTMLElement };
+                  availableHeight: number;
+                }) {
+                  elements.floating.style.maxHeight = `${Math.max(
+                    0,
+                    availableHeight,
+                  )}px`;
+                },
+                padding: 10,
+                rootBoundary: "viewport" as const,
+              }),
+            ],
+          },
+        }),
+        [],
+      );
+
       // ─── Vim mode indicator state ──────────────────────────────────
       const vimMode = useVimStore((s) => s.mode);
       const vimPendingKeys = useVimStore((s) => s.pendingKeys);
@@ -425,6 +470,7 @@ export const BlockNoteEditor = memo(
             <SuggestionMenuController
               triggerCharacter="/"
               getItems={getSlashMenuItems}
+              floatingUIOptions={slashMenuFloatingOptions}
             />
           </BlockNoteView>
           {isVimEnabled && (

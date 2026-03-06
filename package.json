@@ -60,6 +60,7 @@
     "@editorjs/marker": "^1.4.0",
     "@editorjs/quote": "^2.7.6",
     "@editorjs/table": "^2.4.5",
+    "@floating-ui/react": "^0.27.19",
     "@mantine/core": "^8.3.15",
     "@mantine/hooks": "^8.3.15",
     "@tauri-apps/api": "^2.9.1",

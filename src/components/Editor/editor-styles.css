@@ -1,5 +1,16 @@
 /* Editor.js Styling for Nous */
 
+/* Fix slash menu scrolling: the floating-ui size middleware sets maxHeight on
+   the container div (display:flex). The inner .bn-suggestion-menu needs
+   min-height:0 to shrink below content size in flex, and height:auto instead
+   of fit-content so it respects the inherited max-height constraint. */
+.bn-suggestion-menu {
+  min-height: 0 !important;
+  height: auto !important;
+}
+
+
+
 /* Tab bar styles */
 .tab-bar {
   min-height: 36px;
