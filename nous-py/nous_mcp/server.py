@@ -655,6 +655,267 @@ def replace_block(
     )
 
 
+@mcp.tool()
+def insert_after_block(
+    notebook: str,
+    page: str,
+    block_id: str,
+    content: str,
+) -> str:
+    """Insert content after a specific block in a page.
+
+    Args:
+        notebook: Notebook name or UUID.
+        page: Page title (prefix match) or UUID.
+        block_id: The ID of the block to insert after (from get_page format="json" or find_block).
+        content: Markdown text to insert. Can produce multiple blocks.
+
+    Returns JSON with id, title, blocksInserted.
+    """
+    storage = _get_storage()
+    daemon = _get_daemon()
+    nb = storage.resolve_notebook(notebook)
+    pg = daemon.resolve_page(nb["id"], page)
+
+    new_blocks = _markdown_to_blocks(content)
+    if not new_blocks:
+        raise ValueError("Content produced no blocks")
+
+    daemon.insert_after_block(nb["id"], pg["id"], block_id=block_id, blocks=new_blocks)
+
+    return json.dumps(
+        {
+            "id": pg["id"],
+            "title": pg.get("title"),
+            "blocksInserted": len(new_blocks),
+        },
+        indent=2,
+    )
+
+
+@mcp.tool()
+def add_checklist_item(
+    notebook: str,
+    page: str,
+    item: str,
+    section: str | None = None,
+    checked: bool = False,
+) -> str:
+    """Add a checklist item to a page, optionally under a specific section heading.
+
+    If section is provided, the item is inserted after the last checklist block
+    under that heading. If no section is specified, the item is appended to the
+    end of the page.
+
+    Args:
+        notebook: Notebook name or UUID.
+        page: Page title (prefix match) or UUID.
+        item: Text of the checklist item to add.
+        section: Optional heading text to insert under (case-insensitive substring match).
+        checked: Whether the item starts checked (default false).
+
+    Returns JSON with id, title, blockId of the new checklist block.
+    """
+    storage = _get_storage()
+    daemon = _get_daemon()
+    nb = storage.resolve_notebook(notebook)
+    pg = daemon.resolve_page(nb["id"], page)
+
+    new_block = {
+        "id": str(uuid4())[:8],
+        "type": "checklist",
+        "data": {"items": [{"text": item, "checked": checked}]},
+    }
+
+    if section:
+        # Find the heading, then find the last checklist block in that section
+        blocks = pg.get("content", {}).get("blocks", [])
+        query = section.lower().strip()
+        heading_idx = None
+        for i, block in enumerate(blocks):
+            if block.get("type") == "header":
+                text = block.get("data", {}).get("text", "")
+                clean = re.sub(r"<[^>]+>", "", text)
+                clean = html_unescape(clean).replace("\xa0", " ").strip()
+                if query in clean.lower():
+                    heading_idx = i
+                    break
+
+        if heading_idx is None:
+            raise ValueError(
+                f"No heading matching '{section}' found on page '{pg.get('title')}'"
+            )
+
+        # Walk forward from heading to find the last checklist before the next
+        # heading of the same or higher level
+        heading_level = blocks[heading_idx].get("data", {}).get("level", 3)
+        last_checklist_idx = heading_idx  # fallback: insert right after heading
+        for i in range(heading_idx + 1, len(blocks)):
+            b = blocks[i]
+            if b.get("type") == "header":
+                blevel = b.get("data", {}).get("level", 3)
+                if blevel <= heading_level:
+                    break  # reached next section at same or higher level
+            if b.get("type") == "checklist":
+                last_checklist_idx = i
+
+        insert_after_id = blocks[last_checklist_idx]["id"]
+        daemon.insert_after_block(
+            nb["id"], pg["id"], block_id=insert_after_id, blocks=[new_block]
+        )
+    else:
+        # Append to end
+        daemon.append_to_page(nb["id"], pg["id"], blocks=[new_block])
+
+    return json.dumps(
+        {
+            "id": pg["id"],
+            "title": pg.get("title"),
+            "blockId": new_block["id"],
+        },
+        indent=2,
+    )
+
+
+@mcp.tool()
+def find_block(
+    notebook: str,
+    page: str,
+    query: str,
+    block_type: str | None = None,
+) -> str:
+    """Search for blocks within a page by text content.
+
+    Args:
+        notebook: Notebook name or UUID.
+        page: Page title (prefix match) or UUID.
+        query: Case-insensitive substring to search for in block text.
+        block_type: Optional block type filter (e.g. "header", "paragraph", "checklist").
+
+    Returns JSON array of matching blocks with id, type, text, and index.
+    """
+    storage = _get_storage()
+    daemon = _get_daemon()
+    nb = storage.resolve_notebook(notebook)
+    pg = daemon.resolve_page(nb["id"], page)
+
+    blocks = pg.get("content", {}).get("blocks", [])
+    q = query.lower().strip()
+    results = []
+
+    for i, block in enumerate(blocks):
+        if block_type and block.get("type") != block_type:
+            continue
+
+        # Extract text from block
+        data = block.get("data", {})
+        texts = []
+
+        if data.get("text"):
+            texts.append(data["text"])
+        if data.get("items"):
+            for item in data["items"]:
+                if isinstance(item, dict):
+                    texts.append(item.get("text", item.get("content", "")))
+                elif isinstance(item, str):
+                    texts.append(item)
+        if data.get("code"):
+            texts.append(data["code"])
+        if data.get("caption"):
+            texts.append(data["caption"])
+
+        raw_text = " ".join(texts)
+        clean = re.sub(r"<[^>]+>", "", raw_text)
+        clean = html_unescape(clean).replace("\xa0", " ").strip()
+
+        if q in clean.lower():
+            result: dict = {
+                "id": block.get("id", ""),
+                "type": block.get("type", ""),
+                "text": clean[:200],  # truncate for readability
+                "index": i,
+            }
+            if block.get("type") == "checklist" and data.get("items"):
+                result["checked"] = data["items"][0].get("checked", False)
+            results.append(result)
+
+    return json.dumps(results, indent=2)
+
+
+@mcp.tool()
+def get_page_outline(
+    notebook: str,
+    page: str,
+    include_checklists: bool = True,
+    include_paragraphs: bool = False,
+) -> str:
+    """Get a condensed outline of a page — headings and optionally checklist items.
+
+    Useful for navigating large pages without loading full content. Returns block IDs
+    that can be used with insert_after_block, replace_block, or delete_block.
+
+    Args:
+        notebook: Notebook name or UUID.
+        page: Page title (prefix match) or UUID.
+        include_checklists: Include checklist items (default true).
+        include_paragraphs: Include paragraph text previews (default false).
+
+    Returns JSON with title, blockCount, and outline array of {id, type, level, text, checked?}.
+    """
+    storage = _get_storage()
+    daemon = _get_daemon()
+    nb = storage.resolve_notebook(notebook)
+    pg = daemon.resolve_page(nb["id"], page)
+
+    blocks = pg.get("content", {}).get("blocks", [])
+    outline = []
+
+    for block in blocks:
+        btype = block.get("type", "")
+        data = block.get("data", {})
+        bid = block.get("id", "")
+
+        if btype == "header":
+            text = re.sub(r"<[^>]+>", "", data.get("text", ""))
+            text = html_unescape(text).replace("\xa0", " ").strip()
+            outline.append({
+                "id": bid,
+                "type": "header",
+                "level": data.get("level", 3),
+                "text": text,
+            })
+        elif btype == "checklist" and include_checklists:
+            items = data.get("items", [])
+            for item in items:
+                if isinstance(item, dict):
+                    text = re.sub(r"<[^>]+>", "", item.get("text", ""))
+                    text = html_unescape(text).replace("\xa0", " ").strip()
+                    outline.append({
+                        "id": bid,
+                        "type": "checklist",
+                        "text": text[:120],
+                        "checked": item.get("checked", False),
+                    })
+        elif btype == "paragraph" and include_paragraphs:
+            text = re.sub(r"<[^>]+>", "", data.get("text", ""))
+            text = html_unescape(text).replace("\xa0", " ").strip()
+            if text:
+                outline.append({
+                    "id": bid,
+                    "type": "paragraph",
+                    "text": text[:120],
+                })
+
+    return json.dumps(
+        {
+            "title": pg.get("title", ""),
+            "blockCount": len(blocks),
+            "outline": outline,
+        },
+        indent=2,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Database tools
 # ---------------------------------------------------------------------------

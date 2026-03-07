@@ -88,6 +88,15 @@ struct ReplaceBlockRequest {
 }
 
 #[derive(Deserialize)]
+struct InsertAfterBlockRequest {
+    block_id: String,
+    /// Plain text content (double newlines become separate paragraphs)
+    content: Option<String>,
+    /// Structured Editor.js blocks (takes priority over `content`)
+    blocks: Option<Vec<EditorBlock>>,
+}
+
+#[derive(Deserialize)]
 struct CreateDailyNoteRequest {
     template_id: Option<String>,
 }
@@ -179,6 +188,10 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/api/notebooks/{notebook_id}/pages/{page_id}/replace-block",
             post(replace_block),
+        )
+        .route(
+            "/api/notebooks/{notebook_id}/pages/{page_id}/insert-after-block",
+            post(insert_after_block),
         )
         .route(
             "/api/notebooks/{notebook_id}/daily-notes/{date}",
@@ -656,6 +669,59 @@ async fn replace_block(
             page.content.blocks.remove(idx);
             for (i, block) in new_blocks.into_iter().enumerate() {
                 page.content.blocks.insert(idx + i, block);
+            }
+        }
+        None => {
+            return Err(api_err(
+                StatusCode::NOT_FOUND,
+                format!("Block not found: {}", req.block_id),
+            ));
+        }
+    }
+
+    page.updated_at = chrono::Utc::now();
+
+    if let Err(e) = storage.update_page(&page) {
+        return Err(api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()));
+    }
+
+    state.sync_manager.queue_page_update(nb_id, pg_id);
+
+    Ok(Json(ApiResponse { data: page }))
+}
+
+async fn insert_after_block(
+    State(state): State<AppState>,
+    Path((notebook_id, page_id)): Path<(String, String)>,
+    Json(req): Json<InsertAfterBlockRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let nb_id = parse_uuid(&notebook_id)?;
+    let pg_id = parse_uuid(&page_id)?;
+    let storage = state.storage.lock().unwrap();
+
+    let mut page = match storage.get_page(nb_id, pg_id) {
+        Ok(p) => p,
+        Err(e) => return Err(api_err(StatusCode::NOT_FOUND, e.to_string())),
+    };
+
+    let new_blocks = if let Some(blocks) = req.blocks {
+        blocks
+    } else if let Some(text) = req.content {
+        text_to_blocks(&text)
+    } else {
+        return Err(api_err(
+            StatusCode::BAD_REQUEST,
+            "Either 'content' or 'blocks' is required",
+        ));
+    };
+
+    let pos = page.content.blocks.iter().position(|b| b.id == req.block_id);
+    match pos {
+        Some(idx) => {
+            // Insert after the found block
+            let insert_at = idx + 1;
+            for (i, block) in new_blocks.into_iter().enumerate() {
+                page.content.blocks.insert(insert_at + i, block);
             }
         }
         None => {
