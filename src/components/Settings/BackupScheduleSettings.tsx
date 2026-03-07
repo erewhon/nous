@@ -120,7 +120,7 @@ function ScheduleContent({
   backupProgress: { current: number; total: number; message: string } | null;
 }) {
   const [localSettings, setLocalSettings] = useState<BackupSettings>({
-    enabled: false,
+    enabled: true,
     frequency: "daily",
     time: "02:00",
     maxBackupsPerNotebook: 5,

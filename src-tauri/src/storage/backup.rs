@@ -54,7 +54,7 @@ pub struct BackupSettings {
 impl Default for BackupSettings {
     fn default() -> Self {
         Self {
-            enabled: false,
+            enabled: true,
             frequency: BackupFrequency::Daily,
             time: "02:00".to_string(), // 2 AM default
             day_of_week: Some(0), // Sunday for weekly
