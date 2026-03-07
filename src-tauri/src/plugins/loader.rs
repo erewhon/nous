@@ -34,6 +34,7 @@ static BUILTIN_PLUGINS: &[(&str, &str)] = &[
     ("treemap_view", include_str!("builtins/treemap_view.lua")),
     ("sprint_planning", include_str!("builtins/sprint_planning.lua")),
     ("database_automation", include_str!("builtins/database_automation.lua")),
+    ("database_templates", include_str!("builtins/database_templates.lua")),
 ];
 
 /// Scan a directory for plugin files and return loaded (but not yet initialized) plugins.
