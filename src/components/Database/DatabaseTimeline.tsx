@@ -17,6 +17,7 @@ interface DatabaseTimelineProps {
   ) => void;
   onUpdateView: (updater: (prev: DatabaseView) => DatabaseView) => void;
   relationContext?: RelationContext;
+  pageId?: string;
 }
 
 interface TimelineRow {
@@ -41,6 +42,7 @@ export function DatabaseTimeline({
   content,
   view,
   onUpdateView,
+  pageId,
 }: DatabaseTimelineProps) {
   const config = view.config as TimelineViewConfig;
   const svgRef = useRef<SVGSVGElement>(null);
@@ -90,6 +92,21 @@ export function DatabaseTimeline({
     }
     return map;
   }, [colorProp]);
+
+  // Self-referencing relation properties (for dependency arrows)
+  const selfRelations = useMemo(() => {
+    if (!pageId) return [];
+    return content.properties.filter(
+      (p) =>
+        p.type === "relation" &&
+        p.relationConfig?.databasePageId === pageId &&
+        p.relationConfig?.direction !== "back"
+    );
+  }, [content.properties, pageId]);
+
+  // Auto-select dependency property if exactly one self-relation exists and none configured
+  const depPropertyId = config.dependencyPropertyId ??
+    (selfRelations.length === 1 ? selfRelations[0].id : undefined);
 
   // Filter and sort rows, then build timeline data
   const timelineData = useMemo((): TimelineRow[] => {
@@ -178,6 +195,24 @@ export function DatabaseTimeline({
     colorProp,
     colorMap,
   ]);
+
+  // Build dependency edges: successor → predecessor(s)
+  const dependencyEdges = useMemo(() => {
+    if (!depPropertyId) return [];
+    const edges: Array<{ from: string; to: string }> = [];
+    const rowIds = new Set(timelineData.map((d) => d.id));
+    for (const row of timelineData) {
+      const deps = row.row.cells[depPropertyId];
+      if (!deps) continue;
+      const depIds = Array.isArray(deps) ? deps : [deps];
+      for (const predId of depIds) {
+        if (typeof predId === "string" && rowIds.has(predId)) {
+          edges.push({ from: predId, to: row.id }); // from predecessor → to successor
+        }
+      }
+    }
+    return edges;
+  }, [timelineData, depPropertyId]);
 
   // Tooltip helpers
   const showTooltip = useCallback(
@@ -433,7 +468,66 @@ export function DatabaseTimeline({
           .text("Today");
       }
     }
-  }, [timelineData, dimensions, config, showTooltip, hideTooltip]);
+    // Dependency arrows
+    if (dependencyEdges.length > 0) {
+      // Arrowhead marker definition
+      root.append("defs")
+        .append("marker")
+        .attr("id", "dep-arrow")
+        .attr("viewBox", "0 0 10 6")
+        .attr("refX", 10)
+        .attr("refY", 3)
+        .attr("markerWidth", 8)
+        .attr("markerHeight", 6)
+        .attr("orient", "auto")
+        .append("path")
+        .attr("d", "M0,0 L10,3 L0,6 Z")
+        .attr("fill", "#f59e0b");
+
+      const arrowGroup = g.append("g").attr("class", "dependency-arrows");
+
+      for (const edge of dependencyEdges) {
+        const predBandY = y(edge.from);
+        const succBandY = y(edge.to);
+        if (predBandY == null || succBandY == null) continue;
+
+        const predRow = timelineData.find((d) => d.id === edge.from);
+        const succRow = timelineData.find((d) => d.id === edge.to);
+        if (!predRow || !succRow) continue;
+
+        // End of predecessor bar (or point position)
+        const predEndX = predRow.endDate
+          ? Math.max(x(predRow.startDate) + MIN_BAR_WIDTH, x(predRow.endDate))
+          : x(predRow.startDate);
+        const predCenterY = predBandY + y.bandwidth() / 2;
+
+        // Start of successor bar
+        const succStartX = x(succRow.startDate);
+        const succCenterY = succBandY + y.bandwidth() / 2;
+
+        // Bezier control points for smooth curve
+        const dx = succStartX - predEndX;
+        const cpOffset = Math.max(20, Math.abs(dx) * 0.4);
+
+        const path = `M ${predEndX} ${predCenterY} C ${predEndX + cpOffset} ${predCenterY}, ${succStartX - cpOffset} ${succCenterY}, ${succStartX} ${succCenterY}`;
+
+        arrowGroup.append("path")
+          .attr("d", path)
+          .attr("fill", "none")
+          .attr("stroke", "#f59e0b")
+          .attr("stroke-width", 1.5)
+          .attr("stroke-opacity", 0.5)
+          .attr("marker-end", "url(#dep-arrow)")
+          .style("pointer-events", "stroke")
+          .on("mouseover", function () {
+            d3.select(this).attr("stroke-opacity", 1).attr("stroke-width", 2.5);
+          })
+          .on("mouseout", function () {
+            d3.select(this).attr("stroke-opacity", 0.5).attr("stroke-width", 1.5);
+          });
+      }
+    }
+  }, [timelineData, dimensions, config, showTooltip, hideTooltip, dependencyEdges]);
 
   // Config update helper
   const updateConfig = useCallback(
@@ -553,6 +647,28 @@ export function DatabaseTimeline({
             Today marker
           </label>
         </div>
+
+        {selfRelations.length > 0 && (
+          <div className="db-chart-config-group">
+            <label className="db-chart-config-label">Dependencies</label>
+            <select
+              className="db-chart-config-select"
+              value={config.dependencyPropertyId ?? ""}
+              onChange={(e) =>
+                updateConfig({
+                  dependencyPropertyId: e.target.value || undefined,
+                })
+              }
+            >
+              <option value="">None</option>
+              {selfRelations.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
 
       {/* Timeline area */}

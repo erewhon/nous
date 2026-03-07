@@ -216,6 +216,7 @@ export const TimelineViewConfigSchema = z.object({
   labelPropertyId: z.string().optional(),
   colorPropertyId: z.string().optional(),
   showToday: z.boolean().default(true),
+  dependencyPropertyId: z.string().optional(),
 });
 export type TimelineViewConfig = z.infer<typeof TimelineViewConfigSchema>;
 

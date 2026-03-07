@@ -596,6 +596,7 @@ export function DatabaseEditor({
             onUpdateContent={handleUpdateContent}
             onUpdateView={handleUpdateView}
             relationContext={relationContext}
+            pageId={page?.id}
           />
         );
       case "plugin":
