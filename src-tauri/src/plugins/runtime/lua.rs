@@ -371,6 +371,22 @@ impl LuaPlugin {
             })?;
         }
 
+        {
+            let api_ref = Arc::clone(api);
+            let pid = plugin_id.clone();
+            let c = caps;
+            let database_update_properties = self.lua.create_function(move |_, (notebook_id, page_id, properties_json): (String, String, String)| {
+                let result = api_ref.database_update_properties(c, &pid, &notebook_id, &page_id, &properties_json)
+                    .map_err(|e| LuaError::external(e))?;
+                let s = serde_json::to_string(&result)
+                    .map_err(|e| LuaError::external(e))?;
+                Ok(s)
+            }).map_err(|e| PluginError::InitFailed(format!("database_update_properties: {e}")))?;
+            nous.set("database_update_properties", database_update_properties).map_err(|e| {
+                PluginError::InitFailed(format!("set database_update_properties: {e}"))
+            })?;
+        }
+
         // -- Page WRITE APIs --
         {
             let api_ref = Arc::clone(api);

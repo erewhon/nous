@@ -111,6 +111,10 @@ pub enum HookPoint {
     OnInboxCaptured,
     /// Fired when goal progress is recorded
     OnGoalProgress,
+    /// Fired when database rows are added (via plugin API)
+    OnDatabaseRowAdded,
+    /// Fired when database rows are updated (via plugin API)
+    OnDatabaseRowUpdated,
     /// Custom database view rendering
     DatabaseView {
         view_type: String,
@@ -132,6 +136,8 @@ impl HookPoint {
             "on_page_deleted" => Ok(HookPoint::OnPageDeleted),
             "on_inbox_captured" => Ok(HookPoint::OnInboxCaptured),
             "on_goal_progress" => Ok(HookPoint::OnGoalProgress),
+            "on_database_row_added" => Ok(HookPoint::OnDatabaseRowAdded),
+            "on_database_row_updated" => Ok(HookPoint::OnDatabaseRowUpdated),
             other if other.starts_with("action_step:") => {
                 let step_type = other.strip_prefix("action_step:").unwrap().to_string();
                 Ok(HookPoint::ActionStep { step_type })

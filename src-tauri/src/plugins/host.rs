@@ -415,6 +415,8 @@ impl PluginHost {
             HookPoint::OnPageDeleted => "on_page_deleted",
             HookPoint::OnInboxCaptured => "on_inbox_captured",
             HookPoint::OnGoalProgress => "on_goal_progress",
+            HookPoint::OnDatabaseRowAdded => "on_database_row_added",
+            HookPoint::OnDatabaseRowUpdated => "on_database_row_updated",
             _ => return, // Not an event hook
         };
 

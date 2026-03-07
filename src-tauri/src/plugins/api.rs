@@ -614,6 +614,117 @@ impl HostApi {
         }))
     }
 
+    /// Add or update properties on an existing database.
+    /// Accepts a JSON array of property definitions. Properties with an existing
+    /// `id` or matching `name` are updated; new properties are appended.
+    /// Supports all property types including `relation` with `relationConfig`.
+    pub fn database_update_properties(
+        &self,
+        caps: CapabilitySet,
+        plugin_id: &str,
+        notebook_id: &str,
+        page_id: &str,
+        properties_json: &str,
+    ) -> Result<serde_json::Value, PluginError> {
+        Self::require(caps, CapabilitySet::DATABASE_WRITE, plugin_id)?;
+        let nid = Uuid::parse_str(notebook_id)
+            .map_err(|e| PluginError::CallFailed(format!("invalid notebook_id: {e}")))?;
+        let pid = Uuid::parse_str(page_id)
+            .map_err(|e| PluginError::CallFailed(format!("invalid page_id: {e}")))?;
+
+        let storage = self.storage.lock().map_err(|e| {
+            PluginError::CallFailed(format!("storage lock: {e}"))
+        })?;
+        let page = storage
+            .get_page(nid, pid)
+            .map_err(|e| PluginError::CallFailed(e.to_string()))?;
+
+        if page.page_type != PageType::Database {
+            return Err(PluginError::CallFailed(format!(
+                "page {} is not a database",
+                pid
+            )));
+        }
+
+        let content = storage
+            .read_native_file_content(&page)
+            .map_err(|e| PluginError::CallFailed(e.to_string()))?;
+        let mut db: serde_json::Value = serde_json::from_str(&content)
+            .map_err(|e| PluginError::CallFailed(format!("invalid database JSON: {e}")))?;
+
+        let input_props: Vec<serde_json::Value> = serde_json::from_str(properties_json)
+            .map_err(|e| PluginError::CallFailed(format!("invalid properties JSON: {e}")))?;
+
+        let props_arr = db
+            .get_mut("properties")
+            .and_then(|v| v.as_array_mut())
+            .ok_or_else(|| PluginError::CallFailed("database has no properties array".to_string()))?;
+
+        // Build lookup maps for existing properties
+        let mut id_index: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        let mut name_index: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        for (i, prop) in props_arr.iter().enumerate() {
+            if let Some(id) = prop.get("id").and_then(|v| v.as_str()) {
+                id_index.insert(id.to_string(), i);
+            }
+            if let Some(name) = prop.get("name").and_then(|v| v.as_str()) {
+                name_index.insert(name.to_string(), i);
+            }
+        }
+
+        let mut added = 0usize;
+        let mut updated = 0usize;
+
+        for mut prop in input_props {
+            // Ensure property has an id
+            let prop_id = prop.get("id").and_then(|v| v.as_str()).map(|s| s.to_string());
+            let prop_name = prop.get("name").and_then(|v| v.as_str()).map(|s| s.to_string());
+
+            // Try to find existing property by id first, then by name
+            let existing_idx = prop_id
+                .as_ref()
+                .and_then(|id| id_index.get(id).copied())
+                .or_else(|| prop_name.as_ref().and_then(|name| name_index.get(name).copied()));
+
+            if let Some(idx) = existing_idx {
+                // Update existing property (merge fields)
+                if let (Some(existing), Some(incoming)) =
+                    (props_arr[idx].as_object_mut(), prop.as_object())
+                {
+                    for (key, value) in incoming {
+                        existing.insert(key.clone(), value.clone());
+                    }
+                }
+                updated += 1;
+            } else {
+                // New property — generate id if missing
+                if prop.get("id").is_none() {
+                    prop.as_object_mut().map(|m| {
+                        m.insert("id".to_string(), serde_json::json!(Uuid::new_v4().to_string()));
+                    });
+                }
+                props_arr.push(prop);
+                added += 1;
+            }
+        }
+
+        let total_props = props_arr.len();
+
+        // Write back
+        let db_json = serde_json::to_string_pretty(&db)
+            .map_err(|e| PluginError::CallFailed(format!("serialize database: {e}")))?;
+        storage
+            .write_native_file_content(&page, &db_json)
+            .map_err(|e| PluginError::CallFailed(e.to_string()))?;
+
+        Ok(serde_json::json!({
+            "databaseId": pid.to_string(),
+            "propertiesAdded": added,
+            "propertiesUpdated": updated,
+            "totalProperties": total_props,
+        }))
+    }
+
     /// Build a map from property name → property id from a database JSON value.
     fn build_property_name_map(db: &serde_json::Value) -> std::collections::HashMap<String, String> {
         let mut map = std::collections::HashMap::new();

@@ -237,6 +237,14 @@ pub fn update_file_content(
         }
     }
 
+    // For database pages, detect row changes for plugin event dispatch
+    #[cfg(feature = "plugins")]
+    let db_row_event = if page.page_type == PageType::Database {
+        detect_database_row_changes(&storage, &page, &content)
+    } else {
+        None
+    };
+
     storage
         .write_native_file_content(&page, &content)
         .map_err(|e| CommandError {
@@ -258,6 +266,16 @@ pub fn update_file_content(
         if let Err(e) = search_index.index_page_with_content(&page, &content) {
             log::warn!("Failed to re-index page: {}", e);
         }
+    }
+
+    // Dispatch database row events to plugins
+    #[cfg(feature = "plugins")]
+    if let Some((hook, data)) = db_row_event {
+        crate::plugins::dispatch_plugin_event_bg(
+            &state.plugin_host,
+            hook,
+            data,
+        );
     }
 
     Ok(page)
@@ -521,4 +539,84 @@ pub fn check_python_execution_available(
         .map_err(|e| CommandError {
             message: format!("Failed to check Python environment: {}", e),
         })
+}
+
+/// Compare old and new database JSON to detect row additions/updates.
+/// Returns a single event (row_added takes priority over row_updated).
+#[cfg(feature = "plugins")]
+fn detect_database_row_changes(
+    storage: &crate::storage::FileStorage,
+    page: &Page,
+    new_content: &str,
+) -> Option<(crate::plugins::HookPoint, serde_json::Value)> {
+    use std::collections::HashSet;
+
+    // Read existing content
+    let old_content = storage.read_native_file_content(page).ok()?;
+    let old_db: serde_json::Value = serde_json::from_str(&old_content).ok()?;
+    let new_db: serde_json::Value = serde_json::from_str(new_content).ok()?;
+
+    let old_rows = old_db.get("rows")?.as_array()?;
+    let new_rows = new_db.get("rows")?.as_array()?;
+
+    let old_ids: HashSet<&str> = old_rows
+        .iter()
+        .filter_map(|r| r.get("id")?.as_str())
+        .collect();
+
+    let new_row_ids: Vec<&str> = new_rows
+        .iter()
+        .filter_map(|r| r.get("id")?.as_str())
+        .collect();
+
+    let added: Vec<&str> = new_row_ids.iter().filter(|id| !old_ids.contains(*id)).copied().collect();
+
+    let notebook_id = page.notebook_id.to_string();
+    let database_id = page.id.to_string();
+    let title = page.title.clone();
+
+    if !added.is_empty() {
+        return Some((
+            crate::plugins::HookPoint::OnDatabaseRowAdded,
+            serde_json::json!({
+                "notebook_id": notebook_id,
+                "database_id": database_id,
+                "database_title": title,
+                "row_ids": added,
+                "rows_added": added.len(),
+                "total_rows": new_rows.len(),
+            }),
+        ));
+    }
+
+    // Check for cell-level updates (compare updatedAt timestamps)
+    let mut updated_ids: Vec<&str> = Vec::new();
+    let old_row_map: std::collections::HashMap<&str, &serde_json::Value> = old_rows
+        .iter()
+        .filter_map(|r| Some((r.get("id")?.as_str()?, r)))
+        .collect();
+
+    for new_row in new_rows {
+        let Some(id) = new_row.get("id").and_then(|v| v.as_str()) else { continue };
+        let Some(old_row) = old_row_map.get(id) else { continue };
+        // Compare cells object
+        if new_row.get("cells") != old_row.get("cells") {
+            updated_ids.push(id);
+        }
+    }
+
+    if !updated_ids.is_empty() {
+        return Some((
+            crate::plugins::HookPoint::OnDatabaseRowUpdated,
+            serde_json::json!({
+                "notebook_id": notebook_id,
+                "database_id": database_id,
+                "database_title": title,
+                "row_ids": updated_ids,
+                "rows_updated": updated_ids.len(),
+            }),
+        ));
+    }
+
+    None
 }
