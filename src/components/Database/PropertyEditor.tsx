@@ -4,6 +4,7 @@ import { pickNextColor } from "./CellEditors";
 import { evaluateFormula } from "./formulaEvaluator";
 import { useFormulaAutocomplete, FormulaDropdown } from "./FormulaAutocomplete";
 import { getOperatorsForType, getDefaultOperator } from "./DatabaseToolbar";
+import { useThemeStore } from "../../stores/themeStore";
 
 interface PropertyEditorProps {
   property: PropertyDef;
@@ -27,9 +28,12 @@ const PROPERTY_TYPE_LABELS: Record<PropertyType, string> = {
   formula: "Formula",
 };
 
+const EXPERT_PROPERTY_TYPES: Set<PropertyType> = new Set(["relation", "rollup", "formula"]);
+
 export function PropertyEditor({ property, onUpdate, onDelete, onClose, allProperties }: PropertyEditorProps) {
   const [name, setName] = useState(property.name);
   const [newOptionLabel, setNewOptionLabel] = useState("");
+  const expertMode = useThemeStore((s) => s.expertMode);
 
   const handleRename = () => {
     if (name.trim() && name !== property.name) {
@@ -115,7 +119,9 @@ export function PropertyEditor({ property, onUpdate, onDelete, onClose, allPrope
             value={property.type}
             onChange={(e) => handleTypeChange(e.target.value as PropertyType)}
           >
-            {Object.entries(PROPERTY_TYPE_LABELS).map(([val, label]) => (
+            {Object.entries(PROPERTY_TYPE_LABELS)
+              .filter(([val]) => expertMode || !EXPERT_PROPERTY_TYPES.has(val as PropertyType))
+              .map(([val, label]) => (
               <option key={val} value={val}>{label}</option>
             ))}
           </select>

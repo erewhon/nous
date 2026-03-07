@@ -22,6 +22,7 @@ import { TasksPanel } from "./components/Tasks";
 import { PeoplePanel } from "./components/People";
 import { MonitorPanel } from "./components/Monitor";
 import { ToastContainer } from "./components/Toast";
+import { TourOverlay } from "./components/Tour";
 import { WebClipperDialog } from "./components/WebClipper/WebClipperDialog";
 import { SmartCollectionsPanel } from "./components/SmartCollections/SmartCollectionsPanel";
 import { DropZoneOverlay } from "./components/Import/DropZoneOverlay";
@@ -662,6 +663,9 @@ function App() {
 
       {/* Toast Notifications */}
       <ToastContainer />
+
+      {/* Onboarding Tour */}
+      <TourOverlay />
     </>
   );
 }

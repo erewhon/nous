@@ -13,6 +13,7 @@ import { useActionStore } from "../../stores/actionStore";
 import { usePluginStore } from "../../stores/pluginStore";
 import { useRAGStore } from "../../stores/ragStore";
 import { useSectionStore } from "../../stores/sectionStore";
+import { useThemeStore } from "../../stores/themeStore";
 import { searchPages, exportPageToFile, importMarkdownFile, convertDocument, importMarkdown } from "../../utils/api";
 import { save, open } from "@tauri-apps/plugin-dialog";
 import { highlightText } from "../../utils/highlightText";
@@ -28,6 +29,7 @@ interface Command {
   action: () => void;
   keywords?: string[];
   score?: number;
+  expert?: boolean; // Hidden in beginner mode
 }
 
 interface CommandPaletteProps {
@@ -61,6 +63,7 @@ export function CommandPalette({
   const { actions, runAction: executeAction, openActionLibrary } = useActionStore();
   const { commands: pluginCommands, fetchCommands: fetchPluginCommands, executeCommand: executePluginCommand } = usePluginStore();
   const { isConfigured: ragConfigured, settings: ragSettings, hybridSearch, semanticSearch } = useRAGStore();
+  const expertMode = useThemeStore((s) => s.expertMode);
 
   // Fetch plugin commands when palette opens
   useEffect(() => {
@@ -178,6 +181,7 @@ export function CommandPalette({
         onClose();
       },
       keywords: ["graph", "network", "links", "connections", "visualize"],
+      expert: true,
     });
 
     cmds.push({
@@ -238,6 +242,7 @@ export function CommandPalette({
         onClose();
       },
       keywords: ["publish", "web", "html", "site", "export", "static"],
+      expert: true,
     });
 
     cmds.push({
@@ -261,6 +266,7 @@ export function CommandPalette({
         onClose();
       },
       keywords: ["share", "link", "url", "send"],
+      expert: true,
     });
 
     cmds.push({
@@ -294,6 +300,7 @@ export function CommandPalette({
         onClose();
       },
       keywords: ["collaborate", "realtime", "live", "session", "collab", "multiplayer"],
+      expert: true,
     });
 
     cmds.push({
@@ -326,6 +333,7 @@ export function CommandPalette({
         onClose();
       },
       keywords: ["collaborate", "section", "realtime", "live", "multi-page"],
+      expert: true,
     });
 
     cmds.push({
@@ -354,6 +362,7 @@ export function CommandPalette({
         onClose();
       },
       keywords: ["collaborate", "notebook", "realtime", "live", "multi-page", "all"],
+      expert: true,
     });
 
     cmds.push({
@@ -375,6 +384,7 @@ export function CommandPalette({
         onClose();
       },
       keywords: ["live", "sessions", "active", "collab", "collaboration"],
+      expert: true,
     });
 
     cmds.push({
@@ -403,6 +413,7 @@ export function CommandPalette({
         onClose();
       },
       keywords: ["share", "notebook", "website", "publish"],
+      expert: true,
     });
 
     cmds.push({
@@ -490,6 +501,25 @@ export function CommandPalette({
       keywords: ["backup", "restore", "export", "import", "zip", "archive"],
     });
 
+    cmds.push({
+      id: "action-tour",
+      title: "Take the Tour",
+      subtitle: "Walk through the basics of Nous",
+      icon: (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="10" />
+          <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+          <line x1="12" y1="17" x2="12.01" y2="17" />
+        </svg>
+      ),
+      category: "action",
+      action: () => {
+        onClose();
+        window.dispatchEvent(new CustomEvent("start-tour"));
+      },
+      keywords: ["tour", "help", "guide", "onboarding", "tutorial", "walkthrough"],
+    });
+
     // Browse all actions
     cmds.push({
       id: "action-browse-actions",
@@ -502,6 +532,7 @@ export function CommandPalette({
         openActionLibrary();
       },
       keywords: ["actions", "automations", "workflows", "browse", "library"],
+      expert: true,
     });
 
     // Smart Organize
@@ -517,6 +548,7 @@ export function CommandPalette({
           window.dispatchEvent(new CustomEvent("smart-organize-open"));
         },
         keywords: ["organize", "sort", "move", "ai", "classify", "smart"],
+        expert: true,
       });
     }
 
@@ -533,6 +565,7 @@ export function CommandPalette({
           window.dispatchEvent(new CustomEvent("open-smart-collections"));
         },
         keywords: ["collections", "groups", "topics", "ai", "cluster", "smart"],
+        expert: true,
       });
     }
 
@@ -564,6 +597,7 @@ export function CommandPalette({
             .filter((t): t is { type: "aiChat"; keywords: string[] } => t.type === "aiChat")
             .flatMap((t) => t.keywords),
         ],
+        expert: true,
       });
     }
 
@@ -584,6 +618,7 @@ export function CommandPalette({
           }
         },
         keywords: cmd.keywords,
+        expert: true,
       });
     }
 
@@ -644,6 +679,7 @@ export function CommandPalette({
     openActionLibrary,
     pluginCommands,
     executePluginCommand,
+    expertMode,
   ]);
 
   // Convert search results to commands
@@ -709,14 +745,16 @@ export function CommandPalette({
     });
   }, [query, getRecentPages, notebooks, selectedNotebookId, selectNotebook, selectPage, onClose]);
 
-  // Filter commands based on query
+  // Filter commands based on query and expert mode
   const filteredCommands = useMemo(() => {
+    const visible = expertMode ? commands : commands.filter((c) => !c.expert);
+
     if (!query.trim()) {
-      return commands;
+      return visible;
     }
 
     const lowerQuery = query.toLowerCase();
-    return commands.filter((cmd) => {
+    return visible.filter((cmd) => {
       const titleMatch = cmd.title.toLowerCase().includes(lowerQuery);
       const subtitleMatch = cmd.subtitle?.toLowerCase().includes(lowerQuery);
       const keywordMatch = cmd.keywords?.some((k) =>
@@ -724,7 +762,7 @@ export function CommandPalette({
       );
       return titleMatch || subtitleMatch || keywordMatch;
     });
-  }, [commands, query]);
+  }, [commands, query, expertMode]);
 
   // Combine filtered commands with search results and recent searches
   const allCommands = useMemo(() => {

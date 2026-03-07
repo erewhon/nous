@@ -517,6 +517,7 @@ export function EditorArea() {
       {/* Editor panel - multi-pane support (only active pane shown in zen mode) */}
       <div
         className="flex flex-1 overflow-hidden"
+        data-tour="editor"
         style={{ backgroundColor: "var(--color-bg-primary)" }}
       >
         {(zenMode ? panes.filter(pane => pane.id === activePaneId) : panes).map((pane) => (

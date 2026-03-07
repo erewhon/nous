@@ -8,6 +8,7 @@ import type {
 } from "../../types/database";
 import { usePluginStore } from "../../stores/pluginStore";
 import type { PluginViewType } from "../../stores/pluginStore";
+import { useThemeStore } from "../../stores/themeStore";
 
 interface DatabaseViewTabsProps {
   views: DatabaseView[];
@@ -212,6 +213,7 @@ export function DatabaseViewTabs({
 }: DatabaseViewTabsProps) {
   const [showAddMenu, setShowAddMenu] = useState(false);
   const pluginViewTypes = usePluginStore((s) => s.viewTypes);
+  const expertMode = useThemeStore((s) => s.expertMode);
 
   useEffect(() => {
     usePluginStore.getState().fetchViewTypes();
@@ -496,15 +498,22 @@ export function DatabaseViewTabs({
         {showAddMenu && (
           <div className="db-view-tabs-add-menu">
             {(
-              [
-                "table",
-                "list",
-                "board",
-                "gallery",
-                "calendar",
-                "chart",
-                "timeline",
-              ] as DatabaseViewType[]
+              expertMode
+                ? ([
+                    "table",
+                    "list",
+                    "board",
+                    "gallery",
+                    "calendar",
+                    "chart",
+                    "timeline",
+                  ] as DatabaseViewType[])
+                : ([
+                    "table",
+                    "list",
+                    "board",
+                    "gallery",
+                  ] as DatabaseViewType[])
             ).map((type) => {
               const disabled =
                 (type === "board" && !hasSelectProperty) ||
@@ -531,7 +540,7 @@ export function DatabaseViewTabs({
                 </button>
               );
             })}
-            {pluginViewTypes.length > 0 && (
+            {expertMode && pluginViewTypes.length > 0 && (
               <>
                 <div className="db-view-tabs-add-separator" />
                 {pluginViewTypes.map((pvt) => (

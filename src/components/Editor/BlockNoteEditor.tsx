@@ -369,6 +369,8 @@ export const BlockNoteEditor = memo(
       }, [fetchBlockTypes]);
 
       // ─── Slash menu with multi-column items + plugin blocks ───────
+      const expertMode = useThemeStore((s) => s.expertMode);
+
       const getSlashMenuItems = useMemo(() => {
         const pluginItems: DefaultReactSuggestionItem[] = pluginBlockTypes.map(
           (bt) => ({
@@ -394,16 +396,22 @@ export const BlockNoteEditor = memo(
           }),
         );
 
-        return async (query: string) =>
-          filterItems(
+        return async (query: string) => {
+          const defaultItems = getDefaultReactSlashMenuItems(editor);
+          if (!expertMode) {
+            // Beginner mode: only basic block types, no columns or plugins
+            return filterItems(defaultItems, query);
+          }
+          return filterItems(
             combineByGroup(
-              getDefaultReactSlashMenuItems(editor),
+              defaultItems,
               getMultiColumnSlashMenuItems(editor),
               pluginItems,
             ),
             query,
           );
-      }, [editor, pluginBlockTypes]);
+        };
+      }, [editor, pluginBlockTypes, expertMode]);
 
       // ─── Slash menu positioning ─────────────────────────────────────
       // Use strategy:"fixed" to escape overflow:hidden ancestors, and

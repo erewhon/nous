@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useAIStore, DEFAULT_SYSTEM_PROMPT } from "../../stores/aiStore";
 import { useWebResearchStore } from "../../stores/webResearchStore";
 import { useAudioStore } from "../../stores/audioStore";
+import { useThemeStore } from "../../stores/themeStore";
 import { ThemeSettings } from "./ThemeSettings";
 import { KeybindingsSettings } from "./KeybindingsSettings";
 import { MCPServersSettings } from "./MCPServersSettings";
@@ -143,14 +144,30 @@ const PROVIDER_INFO: Record<
   },
 };
 
+// Tabs visible in beginner mode
+const BEGINNER_TABS: Set<TabId> = new Set([
+  "theme", "keybindings", "daily-notes", "libraries", "backup",
+]);
+
 export function SettingsDialog({
   isOpen,
   onClose,
   initialTab = "theme",
 }: SettingsDialogProps) {
   const [activeTab, setActiveTab] = useState<TabId>(initialTab);
+  const expertMode = useThemeStore((s) => s.expertMode);
 
   if (!isOpen) return null;
+
+  // Filter tabs based on expert mode
+  const visibleCategories = expertMode
+    ? TAB_CATEGORIES
+    : TAB_CATEGORIES
+        .map((cat) => ({
+          ...cat,
+          tabs: cat.tabs.filter((t) => BEGINNER_TABS.has(t.id)),
+        }))
+        .filter((cat) => cat.tabs.length > 0);
 
   return (
     <div
@@ -187,7 +204,7 @@ export function SettingsDialog({
           </div>
 
           <nav className="flex-1 space-y-4 overflow-y-auto px-4 pb-4">
-            {TAB_CATEGORIES.map((category) => (
+            {visibleCategories.map((category) => (
               <div key={category.name}>
                 <div
                   className="mb-2 px-3 text-xs font-semibold uppercase tracking-wider"
@@ -235,7 +252,7 @@ export function SettingsDialog({
               className="text-base font-semibold"
               style={{ color: "var(--color-text-primary)" }}
             >
-              {TAB_CATEGORIES.flatMap((c) => c.tabs).find((t) => t.id === activeTab)?.label}
+              {visibleCategories.flatMap((c) => c.tabs).find((t) => t.id === activeTab)?.label}
             </h3>
             <button
               onClick={onClose}

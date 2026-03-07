@@ -71,6 +71,7 @@ export function Sidebar({ width = 256 }: SidebarProps) {
   return (
     <aside
       className="flex h-full flex-shrink-0 flex-col border-r"
+      data-tour="sidebar"
       style={{
         width: `${width}px`,
         backgroundColor: "var(--color-bg-sidebar)",
@@ -170,7 +171,7 @@ export function Sidebar({ width = 256 }: SidebarProps) {
       </div>
 
       {/* Search */}
-      <div className="px-4 pb-4">
+      <div className="px-4 pb-4" data-tour="search">
         <button
           className="flex w-full items-center gap-2 rounded-md border text-left text-sm px-3 py-2"
           style={{
@@ -427,7 +428,7 @@ export function Sidebar({ width = 256 }: SidebarProps) {
       </div>
 
       {/* Notebook List */}
-      <div className="flex-1 overflow-y-auto px-3">
+      <div className="flex-1 overflow-y-auto px-3" data-tour="notebook-list">
         <NotebookList
           notebooks={visibleNotebooks}
           selectedNotebookId={selectedNotebookId}
@@ -891,9 +892,20 @@ function SidebarToolDock({
     openMonitorPanel, monitorUnread,
   ]);
 
+  // In beginner mode, hide expert-only tool buttons
+  const expertMode = useThemeStore((s) => s.expertMode);
+  const EXPERT_ONLY_BUTTONS: Set<ToolButtonId> = useMemo(
+    () => new Set(["actions", "graph-view", "monitor"] as ToolButtonId[]),
+    []
+  );
+  const visibleButtons = useMemo(
+    () => expertMode ? allButtons : allButtons.filter((b) => !EXPERT_ONLY_BUTTONS.has(b.id)),
+    [allButtons, expertMode, EXPERT_ONLY_BUTTONS]
+  );
+
   const buttonMap = useMemo(
-    () => new Map(allButtons.map((b) => [b.id, b])),
-    [allButtons]
+    () => new Map(visibleButtons.map((b) => [b.id, b])),
+    [visibleButtons]
   );
 
   // Resolve pinned buttons
@@ -929,6 +941,7 @@ function SidebarToolDock({
   return (
     <div
       className="relative border-t px-3 py-2.5"
+      data-tour="tool-buttons"
       style={{ borderColor: "var(--color-border)" }}
       ref={menuRef}
     >

@@ -115,6 +115,10 @@ interface ThemeState {
   setZenMode: (enabled: boolean) => void;
   toggleZenMode: () => void;
   setZenModeSettings: (settings: Partial<ZenModeSettings>) => void;
+  expertMode: boolean;
+  tourCompleted: boolean;
+  setExpertMode: (enabled: boolean) => void;
+  setTourCompleted: (completed: boolean) => void;
   applyTheme: () => void;
 }
 
@@ -425,6 +429,8 @@ export const useThemeStore = create<ThemeState>()(
       zenModeSettings: DEFAULT_ZEN_MODE_SETTINGS,
       pinnedToolButtons: DEFAULT_PINNED_TOOL_BUTTONS,
       pinnedSections: [],
+      expertMode: false,
+      tourCompleted: false,
 
       setPinnedToolButtons: (buttons) => {
         set({ pinnedToolButtons: buttons });
@@ -582,6 +588,14 @@ export const useThemeStore = create<ThemeState>()(
         }));
       },
 
+      setExpertMode: (enabled) => {
+        set({ expertMode: enabled });
+      },
+
+      setTourCompleted: (completed) => {
+        set({ tourCompleted: completed });
+      },
+
       applyTheme: () => {
         const { settings, resolvedMode } = get();
         const root = document.documentElement;
@@ -629,7 +643,7 @@ export const useThemeStore = create<ThemeState>()(
     }),
     {
       name: THEME_STORE_KEY,
-      partialize: (state) => ({ settings: state.settings, showPageStats: state.showPageStats, showOutline: state.showOutline, uiMode: state.uiMode, notebookSortBy: state.notebookSortBy, pageSortBy: state.pageSortBy, panelWidths: state.panelWidths, sidebarMode: state.sidebarMode, autoHidePanels: state.autoHidePanels, zenModeSettings: state.zenModeSettings, showRecentPages: state.showRecentPages, showFavoritePages: state.showFavoritePages, pinnedToolButtons: state.pinnedToolButtons, pinnedSections: state.pinnedSections }),
+      partialize: (state) => ({ settings: state.settings, showPageStats: state.showPageStats, showOutline: state.showOutline, uiMode: state.uiMode, notebookSortBy: state.notebookSortBy, pageSortBy: state.pageSortBy, panelWidths: state.panelWidths, sidebarMode: state.sidebarMode, autoHidePanels: state.autoHidePanels, zenModeSettings: state.zenModeSettings, showRecentPages: state.showRecentPages, showFavoritePages: state.showFavoritePages, pinnedToolButtons: state.pinnedToolButtons, pinnedSections: state.pinnedSections, expertMode: state.expertMode, tourCompleted: state.tourCompleted }),
       onRehydrateStorage: () => (state) => {
         if (state) {
           // Resolve system theme on rehydration
@@ -680,6 +694,12 @@ export const useThemeStore = create<ThemeState>()(
           // Migration: ensure pinnedSections exists
           if (!state.pinnedSections || !Array.isArray(state.pinnedSections)) {
             state.pinnedSections = [];
+          }
+          // Migration: ensure expertMode and tourCompleted exist
+          if (state.expertMode === undefined) {
+            // Existing users get expert mode (they're already familiar)
+            state.expertMode = true;
+            state.tourCompleted = true;
           }
           // Apply theme after rehydration
           setTimeout(() => state.applyTheme(), 0);

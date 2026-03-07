@@ -87,6 +87,7 @@ export function ThemeSettings() {
     showRecentPages,
     showFavoritePages,
     zenModeSettings,
+    expertMode,
     setMode,
     setColorScheme,
     setFontFamily,
@@ -100,10 +101,52 @@ export function ThemeSettings() {
     setShowRecentPages,
     setShowFavoritePages,
     setZenModeSettings,
+    setExpertMode,
   } = useThemeStore();
 
   return (
     <div className="space-y-8">
+      {/* Expert Mode Toggle */}
+      <div
+        className="flex items-center justify-between rounded-lg border p-4"
+        data-tour="expert-toggle"
+        style={{
+          borderColor: expertMode ? "var(--color-accent)" : "var(--color-border)",
+          backgroundColor: expertMode ? "rgba(139, 92, 246, 0.08)" : "var(--color-bg-secondary)",
+        }}
+      >
+        <div>
+          <div
+            className="font-medium"
+            style={{ color: "var(--color-text-primary)" }}
+          >
+            Expert Mode
+          </div>
+          <div
+            className="text-xs mt-0.5"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            {expertMode
+              ? "All features visible — databases, plugins, actions, collaboration, and more"
+              : "Simplified interface — enable to unlock databases, plugins, actions, and advanced features"}
+          </div>
+        </div>
+        <button
+          onClick={() => setExpertMode(!expertMode)}
+          className="relative h-6 w-11 rounded-full transition-colors flex-shrink-0"
+          style={{
+            backgroundColor: expertMode ? "var(--color-accent)" : "var(--color-bg-tertiary)",
+          }}
+        >
+          <span
+            className="absolute top-[2px] left-0 h-5 w-5 rounded-full bg-white transition-transform"
+            style={{
+              transform: expertMode ? "translateX(20px)" : "translateX(2px)",
+            }}
+          />
+        </button>
+      </div>
+
       {/* UI Layout Mode */}
       <div>
         <label
