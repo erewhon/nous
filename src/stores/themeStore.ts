@@ -117,8 +117,13 @@ interface ThemeState {
   setZenModeSettings: (settings: Partial<ZenModeSettings>) => void;
   expertMode: boolean;
   tourCompleted: boolean;
+  expertModeBannerDismissed: boolean;
+  lastActiveDay: string; // ISO date string (YYYY-MM-DD)
+  usageDaysCount: number;
   setExpertMode: (enabled: boolean) => void;
   setTourCompleted: (completed: boolean) => void;
+  setExpertModeBannerDismissed: (dismissed: boolean) => void;
+  trackDailyUsage: () => void;
   applyTheme: () => void;
 }
 
@@ -431,6 +436,9 @@ export const useThemeStore = create<ThemeState>()(
       pinnedSections: [],
       expertMode: false,
       tourCompleted: false,
+      expertModeBannerDismissed: false,
+      lastActiveDay: "",
+      usageDaysCount: 0,
 
       setPinnedToolButtons: (buttons) => {
         set({ pinnedToolButtons: buttons });
@@ -596,6 +604,18 @@ export const useThemeStore = create<ThemeState>()(
         set({ tourCompleted: completed });
       },
 
+      setExpertModeBannerDismissed: (dismissed) => {
+        set({ expertModeBannerDismissed: dismissed });
+      },
+
+      trackDailyUsage: () => {
+        const today = new Date().toISOString().slice(0, 10);
+        const { lastActiveDay, usageDaysCount } = get();
+        if (lastActiveDay !== today) {
+          set({ lastActiveDay: today, usageDaysCount: usageDaysCount + 1 });
+        }
+      },
+
       applyTheme: () => {
         const { settings, resolvedMode } = get();
         const root = document.documentElement;
@@ -643,7 +663,7 @@ export const useThemeStore = create<ThemeState>()(
     }),
     {
       name: THEME_STORE_KEY,
-      partialize: (state) => ({ settings: state.settings, showPageStats: state.showPageStats, showOutline: state.showOutline, uiMode: state.uiMode, notebookSortBy: state.notebookSortBy, pageSortBy: state.pageSortBy, panelWidths: state.panelWidths, sidebarMode: state.sidebarMode, autoHidePanels: state.autoHidePanels, zenModeSettings: state.zenModeSettings, showRecentPages: state.showRecentPages, showFavoritePages: state.showFavoritePages, pinnedToolButtons: state.pinnedToolButtons, pinnedSections: state.pinnedSections, expertMode: state.expertMode, tourCompleted: state.tourCompleted }),
+      partialize: (state) => ({ settings: state.settings, showPageStats: state.showPageStats, showOutline: state.showOutline, uiMode: state.uiMode, notebookSortBy: state.notebookSortBy, pageSortBy: state.pageSortBy, panelWidths: state.panelWidths, sidebarMode: state.sidebarMode, autoHidePanels: state.autoHidePanels, zenModeSettings: state.zenModeSettings, showRecentPages: state.showRecentPages, showFavoritePages: state.showFavoritePages, pinnedToolButtons: state.pinnedToolButtons, pinnedSections: state.pinnedSections, expertMode: state.expertMode, tourCompleted: state.tourCompleted, expertModeBannerDismissed: state.expertModeBannerDismissed, lastActiveDay: state.lastActiveDay, usageDaysCount: state.usageDaysCount }),
       onRehydrateStorage: () => (state) => {
         if (state) {
           // Resolve system theme on rehydration

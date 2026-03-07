@@ -895,7 +895,10 @@ function SidebarToolDock({
   // In beginner mode, hide expert-only tool buttons
   const expertMode = useThemeStore((s) => s.expertMode);
   const EXPERT_ONLY_BUTTONS: Set<ToolButtonId> = useMemo(
-    () => new Set(["actions", "graph-view", "monitor"] as ToolButtonId[]),
+    () => new Set([
+      "actions", "graph-view", "monitor",
+      "web-clipper", "flashcards", "goals", "people", "random-note",
+    ] as ToolButtonId[]),
     []
   );
   const visibleButtons = useMemo(
@@ -955,7 +958,7 @@ function SidebarToolDock({
           }}
         >
           <div className="p-1">
-            {allButtons.map((btn) => (
+            {visibleButtons.map((btn) => (
               <div key={btn.id}>
                 {btn.separator && (
                   <div className="mx-2 my-1 border-t" style={{ borderColor: "var(--color-border)" }} />

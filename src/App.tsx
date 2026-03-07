@@ -22,7 +22,7 @@ import { TasksPanel } from "./components/Tasks";
 import { PeoplePanel } from "./components/People";
 import { MonitorPanel } from "./components/Monitor";
 import { ToastContainer } from "./components/Toast";
-import { TourOverlay } from "./components/Tour";
+import { TourOverlay, ExpertModeBanner } from "./components/Tour";
 import { WebClipperDialog } from "./components/WebClipper/WebClipperDialog";
 import { SmartCollectionsPanel } from "./components/SmartCollections/SmartCollectionsPanel";
 import { DropZoneOverlay } from "./components/Import/DropZoneOverlay";
@@ -71,12 +71,14 @@ function App() {
   // Get window library context
   const { library, isSecondaryWindow } = useWindowLibrary();
 
-  // Apply theme on mount
+  // Apply theme on mount and track daily usage
   const applyTheme = useThemeStore((state) => state.applyTheme);
   const toggleZenMode = useThemeStore((state) => state.toggleZenMode);
+  const trackDailyUsage = useThemeStore((state) => state.trackDailyUsage);
   useEffect(() => {
     applyTheme();
-  }, [applyTheme]);
+    trackDailyUsage();
+  }, [applyTheme, trackDailyUsage]);
 
   // Task reminders check
   useEffect(() => {
@@ -666,6 +668,9 @@ function App() {
 
       {/* Onboarding Tour */}
       <TourOverlay />
+
+      {/* Expert Mode Suggestion */}
+      <ExpertModeBanner />
     </>
   );
 }
