@@ -31,6 +31,7 @@ static BUILTIN_PLUGINS: &[(&str, &str)] = &[
     ("external_data_embed", include_str!("builtins/external_data_embed.lua")),
     ("pomodoro_timer", include_str!("builtins/pomodoro_timer.lua")),
     ("food_tracker", include_str!("builtins/food_tracker.lua")),
+    ("treemap_view", include_str!("builtins/treemap_view.lua")),
 ];
 
 /// Scan a directory for plugin files and return loaded (but not yet initialized) plugins.
