@@ -26,6 +26,8 @@ bitflags::bitflags! {
         const ENERGY_WRITE    = 0b1000_0000_0000;
         const DATABASE_VIEW   = 0b0001_0000_0000_0000;
         const BLOCK_RENDER    = 0b0010_0000_0000_0000;
+        const EXPORT          = 0b0100_0000_0000_0000;
+        const IMPORT          = 0b1000_0000_0000_0000;
     }
 }
 
@@ -49,6 +51,8 @@ impl CapabilitySet {
                 "energy_write" => CapabilitySet::ENERGY_WRITE,
                 "database_view" => CapabilitySet::DATABASE_VIEW,
                 "block_render" => CapabilitySet::BLOCK_RENDER,
+                "export" => CapabilitySet::EXPORT,
+                "import" => CapabilitySet::IMPORT,
                 other => {
                     return Err(PluginError::ManifestParse(format!(
                         "unknown capability: {other}"
@@ -78,6 +82,8 @@ impl fmt::Display for CapabilitySet {
             (CapabilitySet::ENERGY_WRITE, "energy_write"),
             (CapabilitySet::DATABASE_VIEW, "database_view"),
             (CapabilitySet::BLOCK_RENDER, "block_render"),
+            (CapabilitySet::EXPORT, "export"),
+            (CapabilitySet::IMPORT, "import"),
         ]
         .iter()
         .filter(|(cap, _)| self.contains(*cap))
@@ -123,6 +129,14 @@ pub enum HookPoint {
     BlockRender {
         block_type: String,
     },
+    /// Custom export format
+    ExportFormat {
+        format_id: String,
+    },
+    /// Custom import format
+    ImportFormat {
+        format_id: String,
+    },
 }
 
 impl HookPoint {
@@ -149,6 +163,14 @@ impl HookPoint {
             other if other.starts_with("block_render:") => {
                 let block_type = other.strip_prefix("block_render:").unwrap().to_string();
                 Ok(HookPoint::BlockRender { block_type })
+            }
+            other if other.starts_with("export_format:") => {
+                let format_id = other.strip_prefix("export_format:").unwrap().to_string();
+                Ok(HookPoint::ExportFormat { format_id })
+            }
+            other if other.starts_with("import_format:") => {
+                let format_id = other.strip_prefix("import_format:").unwrap().to_string();
+                Ok(HookPoint::ImportFormat { format_id })
             }
             other => Err(PluginError::ManifestParse(format!(
                 "unknown hook point: {other}"

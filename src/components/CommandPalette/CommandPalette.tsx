@@ -61,16 +61,18 @@ export function CommandPalette({
   const { recentSearches, searchScope, searchMode, addRecentSearch, setSearchScope, setSearchMode, clearRecentSearches } =
     useSearchStore();
   const { actions, runAction: executeAction, openActionLibrary } = useActionStore();
-  const { commands: pluginCommands, fetchCommands: fetchPluginCommands, executeCommand: executePluginCommand } = usePluginStore();
+  const { commands: pluginCommands, fetchCommands: fetchPluginCommands, executeCommand: executePluginCommand, exportFormats: pluginExportFormats, fetchExportFormats: fetchPluginExportFormats, executeExport: executePluginExport, importFormats: pluginImportFormats, fetchImportFormats: fetchPluginImportFormats, executeImport: executePluginImport } = usePluginStore();
   const { isConfigured: ragConfigured, settings: ragSettings, hybridSearch, semanticSearch } = useRAGStore();
   const expertMode = useThemeStore((s) => s.expertMode);
 
-  // Fetch plugin commands when palette opens
+  // Fetch plugin commands and formats when palette opens
   useEffect(() => {
     if (isOpen) {
       fetchPluginCommands();
+      fetchPluginExportFormats();
+      fetchPluginImportFormats();
     }
-  }, [isOpen, fetchPluginCommands]);
+  }, [isOpen, fetchPluginCommands, fetchPluginExportFormats, fetchPluginImportFormats]);
 
   // Debounced search
   useEffect(() => {
@@ -618,6 +620,96 @@ export function CommandPalette({
           }
         },
         keywords: cmd.keywords,
+        expert: true,
+      });
+    }
+
+    // Add plugin export format commands
+    for (const format of pluginExportFormats) {
+      cmds.push({
+        id: `export-${format.pluginId}-${format.formatId}`,
+        title: `Export as ${format.label}`,
+        subtitle: `Save current page as ${format.fileExtension} file`,
+        icon: <IconExport />,
+        category: "action",
+        action: async () => {
+          const selectedPageId = usePageStore.getState().selectedPageId;
+          if (selectedNotebookId && selectedPageId) {
+            onClose();
+            try {
+              const { getPage } = await import("../../utils/api");
+              const fullPage = await getPage(selectedNotebookId, selectedPageId);
+              const result = await executePluginExport(format.pluginId, format.formatId, fullPage, selectedNotebookId) as {
+                content: string;
+                encoding: string;
+                filename: string;
+              };
+              if (result?.content && result?.filename) {
+                const ext = format.fileExtension.replace(/^\./, "");
+                const path = await save({
+                  defaultPath: result.filename,
+                  filters: [{ name: format.label, extensions: [ext] }],
+                });
+                if (path) {
+                  const { writeTextFile, writeFile } = await import("@tauri-apps/plugin-fs");
+                  if (result.encoding === "base64") {
+                    const bytes = Uint8Array.from(atob(result.content), c => c.charCodeAt(0));
+                    await writeFile(path, bytes);
+                  } else {
+                    await writeTextFile(path, result.content);
+                  }
+                }
+              }
+            } catch (error) {
+              console.error("Plugin export failed:", error);
+            }
+          } else {
+            onClose();
+          }
+        },
+        keywords: ["export", format.label.toLowerCase(), format.formatId, format.fileExtension],
+        expert: true,
+      });
+    }
+
+    // Add plugin import format commands
+    for (const format of pluginImportFormats) {
+      cmds.push({
+        id: `import-${format.pluginId}-${format.formatId}`,
+        title: `Import ${format.label}`,
+        subtitle: format.description || `Import a ${format.fileExtensions.join("/")} file`,
+        icon: <IconImport />,
+        category: "action",
+        action: async () => {
+          if (!selectedNotebookId) {
+            onClose();
+            return;
+          }
+          onClose();
+          try {
+            const exts = format.fileExtensions.map(e => e.replace(/^\./, ""));
+            const selected = await open({
+              multiple: false,
+              filters: [{ name: format.label, extensions: exts }],
+            });
+            if (selected) {
+              const { readFile } = await import("@tauri-apps/plugin-fs");
+              const bytes = await readFile(selected);
+              const base64 = btoa(String.fromCharCode(...bytes));
+              const fileName = selected.split("/").pop() || selected.split("\\").pop() || "import";
+              const result = await executePluginImport(format.pluginId, format.formatId, base64, fileName, selectedNotebookId) as {
+                pages?: Array<{ title: string; content: string; content_format: string; tags?: string[]; folder?: string }>;
+                message?: string;
+              };
+              if (result?.message) {
+                console.log("Import result:", result.message);
+              }
+            }
+          } catch (error) {
+            console.error("Plugin import failed:", error);
+          }
+        },
+        keywords: ["import", format.label.toLowerCase(), format.formatId, ...format.fileExtensions],
         expert: true,
       });
     }

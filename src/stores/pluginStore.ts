@@ -38,11 +38,32 @@ export interface PluginBlockType {
   iconSvg?: string;
 }
 
+export interface PluginExportFormat {
+  pluginId: string;
+  formatId: string;
+  label: string;
+  fileExtension: string;
+  mimeType: string;
+  iconSvg?: string;
+  acceptsOptions: boolean;
+}
+
+export interface PluginImportFormat {
+  pluginId: string;
+  formatId: string;
+  label: string;
+  fileExtensions: string[];
+  description?: string;
+  iconSvg?: string;
+}
+
 interface PluginStore {
   plugins: PluginManifest[];
   commands: PluginCommand[];
   viewTypes: PluginViewType[];
   blockTypes: PluginBlockType[];
+  exportFormats: PluginExportFormat[];
+  importFormats: PluginImportFormat[];
   loading: boolean;
 
   fetchPlugins: () => Promise<void>;
@@ -56,6 +77,11 @@ interface PluginStore {
   fetchBlockTypes: () => Promise<void>;
   renderBlock: (pluginId: string, blockType: string, data: unknown) => Promise<unknown>;
   handleBlockAction: (pluginId: string, action: unknown) => Promise<unknown>;
+  fetchExportFormats: () => Promise<void>;
+  executeExport: (pluginId: string, formatId: string, page: unknown, notebookId: string, options?: unknown) => Promise<unknown>;
+  renderExportOptions: (pluginId: string, formatId: string) => Promise<unknown>;
+  fetchImportFormats: () => Promise<void>;
+  executeImport: (pluginId: string, formatId: string, fileContent: string, fileName: string, notebookId: string) => Promise<unknown>;
 }
 
 export const usePluginStore = create<PluginStore>((set) => ({
@@ -63,6 +89,8 @@ export const usePluginStore = create<PluginStore>((set) => ({
   commands: [],
   viewTypes: [],
   blockTypes: [],
+  exportFormats: [],
+  importFormats: [],
   loading: false,
 
   fetchPlugins: async () => {
@@ -149,5 +177,35 @@ export const usePluginStore = create<PluginStore>((set) => ({
 
   handleBlockAction: async (pluginId: string, action: unknown) => {
     return invoke("handle_plugin_block_action", { pluginId, action });
+  },
+
+  fetchExportFormats: async () => {
+    try {
+      const exportFormats = await invoke<PluginExportFormat[]>("get_plugin_export_formats");
+      set({ exportFormats });
+    } catch (e) {
+      console.error("Failed to fetch plugin export formats:", e);
+    }
+  },
+
+  executeExport: async (pluginId: string, formatId: string, page: unknown, notebookId: string, options?: unknown) => {
+    return invoke("execute_plugin_export", { pluginId, formatId, page, notebookId, options: options ?? {} });
+  },
+
+  renderExportOptions: async (pluginId: string, formatId: string) => {
+    return invoke("render_export_options", { pluginId, formatId });
+  },
+
+  fetchImportFormats: async () => {
+    try {
+      const importFormats = await invoke<PluginImportFormat[]>("get_plugin_import_formats");
+      set({ importFormats });
+    } catch (e) {
+      console.error("Failed to fetch plugin import formats:", e);
+    }
+  },
+
+  executeImport: async (pluginId: string, formatId: string, fileContent: string, fileName: string, notebookId: string) => {
+    return invoke("execute_plugin_import", { pluginId, formatId, fileContent, fileName, notebookId });
   },
 }));

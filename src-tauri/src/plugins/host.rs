@@ -48,6 +48,31 @@ pub struct PluginBlockType {
     pub icon_svg: Option<String>,
 }
 
+/// An export format registered by a plugin.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginExportFormat {
+    pub plugin_id: String,
+    pub format_id: String,
+    pub label: String,
+    pub file_extension: String,
+    pub mime_type: String,
+    pub icon_svg: Option<String>,
+    pub accepts_options: bool,
+}
+
+/// An import format registered by a plugin.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginImportFormat {
+    pub plugin_id: String,
+    pub format_id: String,
+    pub label: String,
+    pub file_extensions: Vec<String>,
+    pub description: Option<String>,
+    pub icon_svg: Option<String>,
+}
+
 /// Plugin manifest with runtime enabled/disabled status.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -648,6 +673,197 @@ impl PluginHost {
         })?;
 
         plugin.call("handle_block_action", action)
+    }
+
+    /// Get export formats registered by plugins.
+    pub fn get_plugin_export_formats(&self) -> Vec<PluginExportFormat> {
+        let mut formats = Vec::new();
+
+        for manifest in self.registry.list_manifests() {
+            if !self.is_plugin_enabled(&manifest.id) {
+                continue;
+            }
+            for hook in &manifest.hooks {
+                if let HookPoint::ExportFormat { format_id } = hook {
+                    let plugin_mutex = match self.registry.get(&manifest.id) {
+                        Some(m) => m,
+                        None => continue,
+                    };
+
+                    let mut plugin = match plugin_mutex.lock() {
+                        Ok(p) => p,
+                        Err(e) => {
+                            log::warn!("Failed to lock plugin '{}' for describe_export: {e}", manifest.id);
+                            continue;
+                        }
+                    };
+
+                    match plugin.call("describe_export", &serde_json::Value::Null) {
+                        Ok(val) => {
+                            let label = val.get("label").and_then(|v| v.as_str()).unwrap_or(format_id.as_str()).to_string();
+                            let file_extension = val.get("file_extension").and_then(|v| v.as_str()).unwrap_or(".txt").to_string();
+                            let mime_type = val.get("mime_type").and_then(|v| v.as_str()).unwrap_or("text/plain").to_string();
+                            let icon_svg = val.get("icon_svg").and_then(|v| v.as_str()).map(|s| s.to_string());
+                            let accepts_options = val.get("accepts_options").and_then(|v| v.as_bool()).unwrap_or(false);
+                            formats.push(PluginExportFormat {
+                                plugin_id: manifest.id.clone(),
+                                format_id: format_id.clone(),
+                                label,
+                                file_extension,
+                                mime_type,
+                                icon_svg,
+                                accepts_options,
+                            });
+                        }
+                        Err(e) => {
+                            log::warn!("Plugin '{}' describe_export failed: {e}", manifest.id);
+                        }
+                    }
+                }
+            }
+        }
+
+        formats
+    }
+
+    /// Execute a plugin export. Returns JSON with content, encoding, filename.
+    pub fn execute_plugin_export(
+        &self,
+        plugin_id: &str,
+        format_id: &str,
+        page: &serde_json::Value,
+        notebook_id: &str,
+        options: &serde_json::Value,
+    ) -> Result<serde_json::Value, PluginError> {
+        if !self.is_plugin_enabled(plugin_id) {
+            return Err(PluginError::Runtime(format!(
+                "plugin '{plugin_id}' is disabled"
+            )));
+        }
+        let plugin_mutex = self.registry.get(plugin_id).ok_or_else(|| {
+            PluginError::NotFound(plugin_id.to_string())
+        })?;
+
+        let input = json!({
+            "format_id": format_id,
+            "page": page,
+            "notebook_id": notebook_id,
+            "options": options,
+        });
+
+        let mut plugin = plugin_mutex.lock().map_err(|e| {
+            PluginError::Runtime(format!("lock: {e}"))
+        })?;
+
+        plugin.call("handle_export", &input)
+    }
+
+    /// Render export options form. Returns JSON with html.
+    pub fn render_export_options(
+        &self,
+        plugin_id: &str,
+        format_id: &str,
+    ) -> Result<serde_json::Value, PluginError> {
+        if !self.is_plugin_enabled(plugin_id) {
+            return Err(PluginError::Runtime(format!(
+                "plugin '{plugin_id}' is disabled"
+            )));
+        }
+        let plugin_mutex = self.registry.get(plugin_id).ok_or_else(|| {
+            PluginError::NotFound(plugin_id.to_string())
+        })?;
+
+        let input = json!({ "format_id": format_id });
+
+        let mut plugin = plugin_mutex.lock().map_err(|e| {
+            PluginError::Runtime(format!("lock: {e}"))
+        })?;
+
+        plugin.call("render_options", &input)
+    }
+
+    /// Get import formats registered by plugins.
+    pub fn get_plugin_import_formats(&self) -> Vec<PluginImportFormat> {
+        let mut formats = Vec::new();
+
+        for manifest in self.registry.list_manifests() {
+            if !self.is_plugin_enabled(&manifest.id) {
+                continue;
+            }
+            for hook in &manifest.hooks {
+                if let HookPoint::ImportFormat { format_id } = hook {
+                    let plugin_mutex = match self.registry.get(&manifest.id) {
+                        Some(m) => m,
+                        None => continue,
+                    };
+
+                    let mut plugin = match plugin_mutex.lock() {
+                        Ok(p) => p,
+                        Err(e) => {
+                            log::warn!("Failed to lock plugin '{}' for describe_import: {e}", manifest.id);
+                            continue;
+                        }
+                    };
+
+                    match plugin.call("describe_import", &serde_json::Value::Null) {
+                        Ok(val) => {
+                            let label = val.get("label").and_then(|v| v.as_str()).unwrap_or(format_id.as_str()).to_string();
+                            let file_extensions = val.get("file_extensions")
+                                .and_then(|v| v.as_array())
+                                .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+                                .unwrap_or_default();
+                            let description = val.get("description").and_then(|v| v.as_str()).map(|s| s.to_string());
+                            let icon_svg = val.get("icon_svg").and_then(|v| v.as_str()).map(|s| s.to_string());
+                            formats.push(PluginImportFormat {
+                                plugin_id: manifest.id.clone(),
+                                format_id: format_id.clone(),
+                                label,
+                                file_extensions,
+                                description,
+                                icon_svg,
+                            });
+                        }
+                        Err(e) => {
+                            log::warn!("Plugin '{}' describe_import failed: {e}", manifest.id);
+                        }
+                    }
+                }
+            }
+        }
+
+        formats
+    }
+
+    /// Execute a plugin import. Returns JSON with pages array and message.
+    pub fn execute_plugin_import(
+        &self,
+        plugin_id: &str,
+        format_id: &str,
+        file_content: &str,
+        file_name: &str,
+        notebook_id: &str,
+    ) -> Result<serde_json::Value, PluginError> {
+        if !self.is_plugin_enabled(plugin_id) {
+            return Err(PluginError::Runtime(format!(
+                "plugin '{plugin_id}' is disabled"
+            )));
+        }
+        let plugin_mutex = self.registry.get(plugin_id).ok_or_else(|| {
+            PluginError::NotFound(plugin_id.to_string())
+        })?;
+
+        let input = json!({
+            "format_id": format_id,
+            "file_content": file_content,
+            "file_name": file_name,
+            "notebook_id": notebook_id,
+        });
+
+        let mut plugin = plugin_mutex.lock().map_err(|e| {
+            PluginError::Runtime(format!("lock: {e}"))
+        })?;
+
+        plugin.call("handle_import", &input)
     }
 
     /// Get plugins directory path
