@@ -62,8 +62,10 @@ export function PluginSidebarPanel({
 
       if (msg.type === "plugin-panel-action" && panel.pluginId) {
         handlePanelAction(panel.pluginId, msg.payload).then((result: unknown) => {
-          const r = result as { html?: string } | null;
-          if (r?.html) {
+          const r = result as { html?: string; forward_to_iframe?: boolean; message?: unknown } | null;
+          if (r?.forward_to_iframe && r.message && iframeRef.current?.contentWindow) {
+            iframeRef.current.contentWindow.postMessage(r.message, "*");
+          } else if (r?.html) {
             setHtml(r.html);
           }
         }).catch((err: unknown) =>
