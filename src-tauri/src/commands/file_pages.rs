@@ -620,3 +620,194 @@ fn detect_database_row_changes(
 
     None
 }
+
+/// Duplicate a database page — copies schema (properties, views) and optionally rows.
+/// Returns the newly created page.
+#[tauri::command(rename_all = "camelCase")]
+pub fn duplicate_database_page(
+    state: State<AppState>,
+    notebook_id: String,
+    page_id: String,
+    include_rows: bool,
+) -> CommandResult<Page> {
+    let storage = state.storage.lock().map_err(|e| CommandError {
+        message: format!("Failed to acquire storage lock: {}", e),
+    })?;
+
+    let nb_uuid = Uuid::parse_str(&notebook_id).map_err(|e| CommandError {
+        message: format!("Invalid notebook ID: {}", e),
+    })?;
+    let pg_uuid = Uuid::parse_str(&page_id).map_err(|e| CommandError {
+        message: format!("Invalid page ID: {}", e),
+    })?;
+
+    // 1. Load original page
+    let original = storage
+        .get_page_any_type(nb_uuid, pg_uuid)
+        .map_err(|e| CommandError {
+            message: format!("Page not found: {}", e),
+        })?;
+
+    if original.page_type != PageType::Database {
+        return Err(CommandError {
+            message: "Only database pages can be duplicated with this command".to_string(),
+        });
+    }
+
+    // 2. Read original content
+    let content_str = storage.read_native_file_content(&original).map_err(|e| CommandError {
+        message: format!("Failed to read database content: {}", e),
+    })?;
+
+    let mut content: serde_json::Value = serde_json::from_str(&content_str).map_err(|e| CommandError {
+        message: format!("Failed to parse database JSON: {}", e),
+    })?;
+
+    // 3. Regenerate UUIDs in properties, rows, and views
+    let mut prop_id_map = std::collections::HashMap::new();
+
+    if let Some(props) = content.get_mut("properties").and_then(|v| v.as_array_mut()) {
+        for prop in props.iter_mut() {
+            if let Some(old_id) = prop.get("id").and_then(|v| v.as_str()).map(|s| s.to_string()) {
+                let new_id = Uuid::new_v4().to_string();
+                prop["id"] = serde_json::Value::String(new_id.clone());
+                prop_id_map.insert(old_id, new_id);
+            }
+            // Clear relation back-references (the duplicate is independent)
+            if let Some(rc) = prop.get_mut("relationConfig") {
+                if let Some(obj) = rc.as_object_mut() {
+                    obj.remove("backRelationPropertyId");
+                }
+            }
+        }
+    }
+
+    if let Some(views) = content.get_mut("views").and_then(|v| v.as_array_mut()) {
+        for view in views.iter_mut() {
+            view["id"] = serde_json::Value::String(Uuid::new_v4().to_string());
+            // Remap property references in sorts, filters, groups, hiddenProperties, pinnedProperties
+            remap_view_property_refs(view, &prop_id_map);
+        }
+    }
+
+    if include_rows {
+        if let Some(rows) = content.get_mut("rows").and_then(|v| v.as_array_mut()) {
+            for row in rows.iter_mut() {
+                row["id"] = serde_json::Value::String(Uuid::new_v4().to_string());
+                // Remap cell keys from old property IDs to new ones
+                if let Some(cells) = row.get("cells").and_then(|v| v.as_object()).cloned() {
+                    let mut new_cells = serde_json::Map::new();
+                    for (key, val) in cells {
+                        let new_key = prop_id_map.get(&key).cloned().unwrap_or(key);
+                        new_cells.insert(new_key, val);
+                    }
+                    row["cells"] = serde_json::Value::Object(new_cells);
+                }
+            }
+        }
+    } else {
+        content["rows"] = serde_json::Value::Array(vec![]);
+    }
+
+    // 4. Create new page
+    let new_title = format!("{} (copy)", original.title);
+    let mut new_page = storage.create_page(nb_uuid, new_title).map_err(|e| CommandError {
+        message: format!("Failed to create page: {}", e),
+    })?;
+
+    // Set page type to database
+    new_page.page_type = PageType::Database;
+    new_page.file_extension = Some("database".to_string());
+    new_page.source_file = Some(format!("files/{}.database", new_page.id));
+    new_page.storage_mode = Some(FileStorageMode::Embedded);
+    new_page.folder_id = original.folder_id;
+    new_page.section_id = original.section_id;
+    storage.update_page(&new_page).map_err(|e| CommandError {
+        message: format!("Failed to update page: {}", e),
+    })?;
+
+    // 5. Write cloned content
+    let new_content = serde_json::to_string_pretty(&content).map_err(|e| CommandError {
+        message: format!("Failed to serialize database content: {}", e),
+    })?;
+    storage
+        .write_native_file_content(&new_page, &new_content)
+        .map_err(|e| CommandError {
+            message: format!("Failed to write database content: {}", e),
+        })?;
+
+    // 6. Notify sync
+    state.sync_manager.queue_page_update(nb_uuid, new_page.id);
+
+    // 7. Index the new page
+    if let Ok(mut search_index) = state.search_index.lock() {
+        let _ = search_index.index_page(&new_page);
+    }
+
+    log::info!(
+        "Duplicated database page '{}' -> '{}' (include_rows={})",
+        original.title,
+        new_page.title,
+        include_rows,
+    );
+
+    Ok(new_page)
+}
+
+/// Remap property ID references within a view's sorts, filters, groups, etc.
+fn remap_view_property_refs(
+    view: &mut serde_json::Value,
+    prop_id_map: &std::collections::HashMap<String, String>,
+) {
+    // Helper: remap a "propertyId" field in an array of objects
+    fn remap_array(arr: &mut serde_json::Value, key: &str, map: &std::collections::HashMap<String, String>) {
+        if let Some(items) = arr.as_array_mut() {
+            for item in items {
+                if let Some(old) = item.get(key).and_then(|v| v.as_str()).map(|s| s.to_string()) {
+                    if let Some(new) = map.get(&old) {
+                        item[key] = serde_json::Value::String(new.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    if let Some(sorts) = view.get_mut("sorts") {
+        remap_array(sorts, "propertyId", prop_id_map);
+    }
+    if let Some(filters) = view.get_mut("filters") {
+        remap_array(filters, "propertyId", prop_id_map);
+    }
+    if let Some(groups) = view.get_mut("groups") {
+        remap_array(groups, "propertyId", prop_id_map);
+    }
+    // hiddenProperties and pinnedProperties are arrays of property IDs (strings)
+    fn remap_id_array(arr: &mut serde_json::Value, map: &std::collections::HashMap<String, String>) {
+        if let Some(items) = arr.as_array_mut() {
+            for item in items.iter_mut() {
+                if let Some(old) = item.as_str().map(|s| s.to_string()) {
+                    if let Some(new) = map.get(&old) {
+                        *item = serde_json::Value::String(new.clone());
+                    }
+                }
+            }
+        }
+    }
+    if let Some(hidden) = view.get_mut("hiddenProperties") {
+        remap_id_array(hidden, prop_id_map);
+    }
+    if let Some(pinned) = view.get_mut("pinnedProperties") {
+        remap_id_array(pinned, prop_id_map);
+    }
+    // config.columnWidths: remap keys
+    if let Some(config) = view.get_mut("config") {
+        if let Some(widths) = config.get("columnWidths").and_then(|v| v.as_object()).cloned() {
+            let mut new_widths = serde_json::Map::new();
+            for (key, val) in widths {
+                let new_key = prop_id_map.get(&key).cloned().unwrap_or(key);
+                new_widths.insert(new_key, val);
+            }
+            config["columnWidths"] = serde_json::Value::Object(new_widths);
+        }
+    }
+}

@@ -106,6 +106,7 @@ interface FolderTreeItemProps {
   onMoveToNotebook?: (pageId: string, pageTitle: string) => void;
   onMoveFolderToNotebook?: (folderId: string, folderName: string) => void;
   onSmartOrganize?: (pageId: string, pageTitle: string) => void;
+  onDuplicateDatabase?: (pageId: string, includeRows: boolean) => void;
   onArchivePage?: (pageId: string) => void;
   onUnarchivePage?: (pageId: string) => void;
   onArchiveFolder?: (folderId: string) => void;
@@ -141,6 +142,7 @@ export const FolderTreeItem = memo(function FolderTreeItem({
   onMoveToNotebook,
   onMoveFolderToNotebook,
   onSmartOrganize,
+  onDuplicateDatabase,
   onArchivePage,
   onUnarchivePage,
   onArchiveFolder,
@@ -548,6 +550,7 @@ export const FolderTreeItem = memo(function FolderTreeItem({
               onMoveToSection={onMoveToSection}
               onMoveToNotebook={onMoveToNotebook}
               onSmartOrganize={onSmartOrganize}
+              onDuplicateDatabase={onDuplicateDatabase}
               onArchivePage={onArchivePage}
               onUnarchivePage={onUnarchivePage}
               onSetPageColor={onSetPageColor}
@@ -834,6 +837,7 @@ interface DraggablePageItemProps {
   onOpenInTab?: (pageId: string, pageTitle: string) => void; // Open page in a new tab
   onOpenInNewPane?: (pageId: string) => void; // Open page in a new split pane
   onCreateSubpage?: (parentPageId: string) => void;
+  onDuplicateDatabase?: (pageId: string, includeRows: boolean) => void;
   onDeletePage?: (pageId: string, pageTitle: string) => void; // Delete the page
   onToggleFavorite?: (pageId: string) => void; // Toggle favorite status
   sections?: Section[];
@@ -859,6 +863,7 @@ const DraggablePageItem = memo(function DraggablePageItem({
   onOpenInTab,
   onOpenInNewPane,
   onCreateSubpage,
+  onDuplicateDatabase,
   onDeletePage,
   onToggleFavorite,
   sections,
@@ -1484,6 +1489,46 @@ const DraggablePageItem = memo(function DraggablePageItem({
                   />
                 ))}
               </div>
+            </>
+          )}
+
+          {/* Duplicate database option */}
+          {onDuplicateDatabase && page.pageType === "database" && (
+            <>
+              <div
+                className="my-1 border-t"
+                style={{ borderColor: "var(--color-border)" }}
+              />
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowContextMenu(false);
+                  onDuplicateDatabase(page.id, true);
+                }}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-sm transition-colors hover:bg-[var(--color-bg-tertiary)]"
+                style={{ color: "var(--color-text-primary)" }}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="8" y="8" width="12" height="12" rx="2" />
+                  <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />
+                </svg>
+                Duplicate
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowContextMenu(false);
+                  onDuplicateDatabase(page.id, false);
+                }}
+                className="flex w-full items-center gap-2 px-3 py-1.5 text-sm transition-colors hover:bg-[var(--color-bg-tertiary)]"
+                style={{ color: "var(--color-text-secondary)" }}
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="8" y="8" width="12" height="12" rx="2" />
+                  <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />
+                </svg>
+                Duplicate (schema only)
+              </button>
             </>
           )}
 

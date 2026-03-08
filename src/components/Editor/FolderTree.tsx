@@ -658,6 +658,18 @@ END:VCALENDAR`;
     [notebookId, unarchivePage]
   );
 
+  // Handle duplicating a database page
+  const handleDuplicateDatabase = useCallback(
+    async (pageId: string, includeRows: boolean) => {
+      const newPage = await api.duplicateDatabasePage(notebookId, pageId, includeRows);
+      await loadPages(notebookId);
+      // Select the new page
+      const selectPage = usePageStore.getState().selectPage;
+      selectPage(newPage.id);
+    },
+    [notebookId, loadPages]
+  );
+
   // Handle archiving a folder
   const handleArchiveFolder = useCallback(
     async (folderId: string) => {
@@ -939,6 +951,7 @@ END:VCALENDAR`;
           onMoveFolderToSection={onMoveFolderToSection}
           onMoveToNotebook={onMoveToNotebook}
           onSmartOrganize={onSmartOrganize}
+          onDuplicateDatabase={handleDuplicateDatabase}
           onArchivePage={handleArchivePage}
           onUnarchivePage={handleUnarchivePage}
           onArchiveFolder={handleArchiveFolder}
@@ -973,6 +986,7 @@ END:VCALENDAR`;
       onMoveFolderToSection,
       onMoveToNotebook,
       onSmartOrganize,
+      handleDuplicateDatabase,
       handleArchivePage,
       handleUnarchivePage,
       handleArchiveFolder,
@@ -1531,6 +1545,7 @@ END:VCALENDAR`;
                   onMoveToSection={onMovePageToSection}
                   onMoveToNotebook={onMoveToNotebook}
                   onSmartOrganize={onSmartOrganize}
+                  onDuplicateDatabase={handleDuplicateDatabase}
                   onArchivePage={handleArchivePage}
                   onUnarchivePage={handleUnarchivePage}
                   onSetPageColor={handleSetPageColor}

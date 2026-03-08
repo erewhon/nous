@@ -2085,6 +2085,21 @@ export async function updateFileContent(
 }
 
 /**
+ * Duplicate a database page (schema + optionally rows).
+ */
+export async function duplicateDatabasePage(
+  notebookId: string,
+  pageId: string,
+  includeRows: boolean
+): Promise<Page> {
+  return invoke<Page>("duplicate_database_page", {
+    notebookId,
+    pageId,
+    includeRows,
+  });
+}
+
+/**
  * Get the file path for a file-based page
  */
 export async function getFilePath(

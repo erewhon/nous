@@ -873,6 +873,7 @@ pub fn run() {
             commands::import_file_as_page,
             commands::get_file_content,
             commands::update_file_content,
+            commands::duplicate_database_page,
             commands::get_file_path,
             commands::get_readable_html,
             commands::check_linked_file_modified,
