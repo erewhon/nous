@@ -21,7 +21,7 @@ hooks = ["on_database_row_added", "on_database_row_updated", "command_palette"]
 ]]
 
 -- Command palette entry for managing automations
-function describe_commands()
+function get_commands()
   return nous.json_encode({
     {
       id = "list_automations",

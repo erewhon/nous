@@ -8,7 +8,7 @@ hooks = ["command_palette"]
 ]]
 
 -- Command palette entry
-function describe_commands()
+function get_commands()
   return nous.json_encode({
     {
       id = "create_sprint_workspace",

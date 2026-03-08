@@ -437,7 +437,7 @@ end
 -- Command Palette: Quick Log Food
 -- ═══════════════════════════════════════════════════════════════
 
-function describe_commands(_input_json)
+function get_commands(_input_json)
   return nous.json_encode({
     commands = {
       {

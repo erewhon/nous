@@ -8,7 +8,7 @@ hooks = ["command_palette"]
 ]]
 
 -- Command palette entries for each template
-function describe_commands()
+function get_commands()
   return nous.json_encode({
     {
       id = "template_crm",
