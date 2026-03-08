@@ -69,6 +69,17 @@ export function PluginSidebarPanel({
         }).catch((err: unknown) =>
           console.error("Plugin panel action failed:", err)
         );
+      } else if (msg.type === "plugin-panel-notification") {
+        // Show a web notification on behalf of the sandboxed iframe
+        if ("Notification" in window && Notification.permission === "granted") {
+          new Notification(msg.title || "Nous", { body: msg.body || "" });
+        } else if ("Notification" in window && Notification.permission !== "denied") {
+          Notification.requestPermission().then((perm) => {
+            if (perm === "granted") {
+              new Notification(msg.title || "Nous", { body: msg.body || "" });
+            }
+          });
+        }
       } else if (msg.type === "plugin-panel-resize" && typeof msg.height === "number") {
         // Could use this for bottom panels in the future
       }

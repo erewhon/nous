@@ -30,7 +30,6 @@ import { DatabaseEditor, type DatabaseUndoRedoState } from "../Database";
 import { HtmlViewer } from "../Html";
 import { OutlinePanel } from "./OutlinePanel";
 import { PluginSidebarPanel } from "./PluginSidebarPanel";
-import { PomodoroTimer } from "./PomodoroTimer";
 import { BacklinksPanel } from "./BacklinksPanel";
 import { SimilarPagesPanel } from "./SimilarPagesPanel";
 import type { EditorData, Page } from "../../types/page";
@@ -1122,8 +1121,6 @@ export function EditorPaneContent({
         </div>
       )}
 
-      {/* Pomodoro Timer */}
-      {isActive && <PomodoroTimer />}
     </div>
   );
 }
