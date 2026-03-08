@@ -990,9 +990,30 @@ impl ActionExecutor {
                     page.section_id = Some(section_id);
                 }
 
-                // Set content with carried forward blocks (may be empty)
+                // Build page content: template blocks + carry forward blocks
+                let template_blocks = template_id
+                    .and_then(|tpl_id| get_builtin_template_blocks(tpl_id));
+
+                let mut final_blocks = template_blocks.unwrap_or_default();
+
                 if !carry_forward_blocks.is_empty() {
-                    page.content.blocks = carry_forward_blocks;
+                    if final_blocks.is_empty() {
+                        // No template — just use carry forward blocks
+                        final_blocks = carry_forward_blocks;
+                    } else if let Some(section_name) = insert_after_section {
+                        // Insert carry forward blocks after the named section
+                        let insert_pos = find_section_end(&final_blocks, section_name);
+                        for (i, block) in carry_forward_blocks.into_iter().enumerate() {
+                            final_blocks.insert(insert_pos + i, block);
+                        }
+                    } else {
+                        // Append carry forward blocks after template blocks
+                        final_blocks.extend(carry_forward_blocks);
+                    }
+                }
+
+                if !final_blocks.is_empty() {
+                    page.content.blocks = final_blocks;
                     page.content.time = Some(chrono::Utc::now().timestamp_millis());
                 }
                 storage.update_page(&page)?;
@@ -1014,9 +1035,29 @@ impl ActionExecutor {
                     page.template_id = Some(tpl_id.clone());
                 }
 
-                // Set content with carried forward blocks
-                page.content.blocks = carry_forward_blocks;
-                page.content.time = Some(chrono::Utc::now().timestamp_millis());
+                // Build page content: template blocks + carry forward blocks
+                let tpl_blocks = template_id
+                    .and_then(|tpl_id| get_builtin_template_blocks(tpl_id));
+
+                let mut final_blocks = tpl_blocks.unwrap_or_default();
+
+                if !carry_forward_blocks.is_empty() {
+                    if final_blocks.is_empty() {
+                        final_blocks = carry_forward_blocks;
+                    } else if let Some(section_name) = insert_after_section {
+                        let insert_pos = find_section_end(&final_blocks, section_name);
+                        for (i, block) in carry_forward_blocks.into_iter().enumerate() {
+                            final_blocks.insert(insert_pos + i, block);
+                        }
+                    } else {
+                        final_blocks.extend(carry_forward_blocks);
+                    }
+                }
+
+                if !final_blocks.is_empty() {
+                    page.content.blocks = final_blocks;
+                    page.content.time = Some(chrono::Utc::now().timestamp_millis());
+                }
                 storage.update_page(&page)?;
 
                 context.created_pages.push(page.id.to_string());
@@ -2852,8 +2893,9 @@ fn extract_unchecked_items_from_block(block: &EditorBlock) -> Vec<(usize, String
                 let checked = item.get("checked").and_then(|c| c.as_bool()).unwrap_or(true);
                 if !checked {
                     if let Some(text) = item.get("text").and_then(|t| t.as_str()) {
-                        if !text.trim().is_empty() {
-                            results.push((idx, text.to_string()));
+                        let clean = sanitize_checklist_text(text);
+                        if !clean.trim().is_empty() {
+                            results.push((idx, clean));
                         }
                     }
                 }
@@ -3051,4 +3093,93 @@ fn remove_carried_forward_section(blocks: Vec<EditorBlock>) -> Vec<EditorBlock> 
     }
 
     result
+}
+
+/// Strip drag-and-drop corruption from checklist item text.
+///
+/// When blocks are dragged in the editor, the browser may insert the plain-text
+/// drag payload (`__EDITOR_BLOCK__{...}`) into contenteditable fields. This
+/// function removes that corruption so carry forward doesn't propagate it.
+fn sanitize_checklist_text(text: &str) -> String {
+    if let Some(pos) = text.find("__EDITOR_BLOCK__") {
+        // Strip the __EDITOR_BLOCK__ blob and any trailing garbage.
+        // Also trim any digits immediately preceding the marker (drag artifact).
+        let mut clean_end = pos;
+        while clean_end > 0
+            && text.as_bytes()[clean_end - 1].is_ascii_digit()
+        {
+            clean_end -= 1;
+        }
+        text[..clean_end].trim_end().to_string()
+    } else {
+        text.to_string()
+    }
+}
+
+/// Generate template blocks for known built-in template IDs.
+/// Returns None if the template_id is not a known built-in template.
+/// This allows the backend to apply templates during scheduled/background actions
+/// where the frontend templateStore is unavailable.
+fn get_builtin_template_blocks(template_id: &str) -> Option<Vec<EditorBlock>> {
+    match template_id {
+        "daily-journal" => {
+            let today = Local::now();
+            let date_str = today.format("%A, %B %e, %Y").to_string();
+
+            Some(vec![
+                EditorBlock {
+                    id: Uuid::new_v4().to_string(),
+                    block_type: "header".to_string(),
+                    data: serde_json::json!({ "text": date_str, "level": 1 }),
+                },
+                EditorBlock {
+                    id: Uuid::new_v4().to_string(),
+                    block_type: "header".to_string(),
+                    data: serde_json::json!({ "text": "Gratitude", "level": 2 }),
+                },
+                EditorBlock {
+                    id: Uuid::new_v4().to_string(),
+                    block_type: "paragraph".to_string(),
+                    data: serde_json::json!({ "text": "What am I grateful for today?" }),
+                },
+                EditorBlock {
+                    id: Uuid::new_v4().to_string(),
+                    block_type: "header".to_string(),
+                    data: serde_json::json!({ "text": "Today's Goals", "level": 2 }),
+                },
+                EditorBlock {
+                    id: Uuid::new_v4().to_string(),
+                    block_type: "checklist".to_string(),
+                    data: serde_json::json!({
+                        "items": [
+                            { "text": "Goal 1", "checked": false },
+                            { "text": "Goal 2", "checked": false },
+                            { "text": "Goal 3", "checked": false },
+                        ]
+                    }),
+                },
+                EditorBlock {
+                    id: Uuid::new_v4().to_string(),
+                    block_type: "header".to_string(),
+                    data: serde_json::json!({ "text": "Notes & Thoughts", "level": 2 }),
+                },
+                EditorBlock {
+                    id: Uuid::new_v4().to_string(),
+                    block_type: "paragraph".to_string(),
+                    data: serde_json::json!({ "text": "" }),
+                },
+                EditorBlock {
+                    id: Uuid::new_v4().to_string(),
+                    block_type: "header".to_string(),
+                    data: serde_json::json!({ "text": "End of Day Reflection", "level": 2 }),
+                },
+                EditorBlock {
+                    id: Uuid::new_v4().to_string(),
+                    block_type: "paragraph".to_string(),
+                    data: serde_json::json!({ "text": "What went well? What could be improved?" }),
+                },
+            ])
+        }
+        _ => None,
+    }
 }

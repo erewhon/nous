@@ -686,6 +686,8 @@ pub fn import_scrivener_project(
             color: None,
             is_daily_note: false,
             daily_note_date: None,
+            plugin_page_type: None,
+            plugin_data: None,
             created_at: now,
             updated_at: now,
         };

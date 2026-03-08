@@ -72,6 +72,14 @@ export interface PluginDecorationType {
   description?: string;
 }
 
+export interface PluginPageType {
+  pluginId: string;
+  pageTypeId: string;
+  label: string;
+  description?: string;
+  iconSvg?: string;
+}
+
 interface PluginStore {
   plugins: PluginManifest[];
   commands: PluginCommand[];
@@ -82,13 +90,15 @@ interface PluginStore {
   panelTypes: PluginPanelType[];
   openPanels: Set<string>; // Set of "pluginId:panelId"
   decorationTypes: PluginDecorationType[];
+  pageTypes: PluginPageType[];
   loading: boolean;
 
+  syncAiConfig: () => Promise<void>;
   fetchPlugins: () => Promise<void>;
   reloadPlugin: (pluginId: string) => Promise<void>;
   setPluginEnabled: (pluginId: string, enabled: boolean) => Promise<void>;
   fetchCommands: () => Promise<void>;
-  executeCommand: (pluginId: string, commandId: string) => Promise<void>;
+  executeCommand: (pluginId: string, commandId: string, context?: Record<string, unknown>) => Promise<Record<string, unknown>>;
   fetchViewTypes: () => Promise<void>;
   renderView: (pluginId: string, viewType: string, content: unknown, view: unknown) => Promise<unknown>;
   handleViewAction: (pluginId: string, action: unknown) => Promise<unknown>;
@@ -107,6 +117,9 @@ interface PluginStore {
   isPanelOpen: (pluginId: string, panelId: string) => boolean;
   fetchDecorationTypes: () => Promise<void>;
   computeDecorations: (pluginId: string, decorationId: string, blocks: unknown) => Promise<unknown>;
+  fetchPageTypes: () => Promise<void>;
+  renderPage: (pluginId: string, pageTypeId: string, pageData: unknown) => Promise<unknown>;
+  handlePageAction: (pluginId: string, action: unknown) => Promise<unknown>;
 }
 
 export const usePluginStore = create<PluginStore>((set) => ({
@@ -119,7 +132,28 @@ export const usePluginStore = create<PluginStore>((set) => ({
   panelTypes: [],
   openPanels: new Set<string>(),
   decorationTypes: [],
+  pageTypes: [],
   loading: false,
+
+  syncAiConfig: async () => {
+    try {
+      // Dynamically import to avoid circular dependency
+      const { useAIStore } = await import("./aiStore");
+      const store = useAIStore.getState();
+      const providerType = store.getActiveProviderType();
+      const apiKey = store.getActiveApiKey();
+      const model = store.getActiveModel();
+      const baseUrl = store.getActiveBaseUrl();
+      await invoke("set_plugin_ai_config", {
+        providerType,
+        apiKey: apiKey || null,
+        baseUrl: baseUrl || null,
+        model: model || null,
+      });
+    } catch (e) {
+      console.error("Failed to sync AI config to plugins:", e);
+    }
+  },
 
   fetchPlugins: async () => {
     set({ loading: true });
@@ -164,9 +198,14 @@ export const usePluginStore = create<PluginStore>((set) => ({
     }
   },
 
-  executeCommand: async (pluginId: string, commandId: string) => {
+  executeCommand: async (pluginId: string, commandId: string, context?: Record<string, unknown>) => {
     try {
-      await invoke("execute_plugin_command", { pluginId, commandId });
+      const result = await invoke<Record<string, unknown>>("execute_plugin_command", {
+        pluginId,
+        commandId,
+        context: context ?? null,
+      });
+      return result;
     } catch (e) {
       console.error("Failed to execute plugin command:", e);
       throw e;
@@ -278,6 +317,23 @@ export const usePluginStore = create<PluginStore>((set) => ({
 
   computeDecorations: async (pluginId: string, decorationId: string, blocks: unknown) => {
     return invoke("compute_plugin_decorations", { pluginId, decorationId, blocks });
+  },
+
+  fetchPageTypes: async () => {
+    try {
+      const pageTypes = await invoke<PluginPageType[]>("get_plugin_page_types");
+      set({ pageTypes });
+    } catch (e) {
+      console.error("Failed to fetch plugin page types:", e);
+    }
+  },
+
+  renderPage: async (pluginId: string, pageTypeId: string, pageData: unknown) => {
+    return invoke("render_plugin_page", { pluginId, pageTypeId, pageData });
+  },
+
+  handlePageAction: async (pluginId: string, action: unknown) => {
+    return invoke("handle_plugin_page_action", { pluginId, action });
   },
 
   isPanelOpen: (pluginId: string, panelId: string): boolean => {

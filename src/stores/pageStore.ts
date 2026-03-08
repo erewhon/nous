@@ -109,7 +109,8 @@ interface PageActions {
     folderId?: string,
     parentPageId?: string,
     sectionId?: string,
-    templateId?: string
+    templateId?: string,
+    pluginPageType?: string
   ) => Promise<Page | null>;
   createSubpage: (
     notebookId: string,
@@ -267,7 +268,8 @@ export const usePageStore = create<PageStore>()(
         folderId,
         parentPageId,
         sectionId,
-        templateId
+        templateId,
+        pluginPageType
       ) => {
         set({ error: null });
         try {
@@ -277,7 +279,8 @@ export const usePageStore = create<PageStore>()(
             folderId,
             parentPageId,
             sectionId,
-            templateId
+            templateId,
+            pluginPageType
           );
           const state = get();
           const activePaneId = state.activePaneId || state.panes[0]?.id;

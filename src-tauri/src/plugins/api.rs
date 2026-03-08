@@ -13,6 +13,7 @@ use super::manifest::CapabilitySet;
 use crate::energy::EnergyStorage;
 use crate::goals::GoalsStorage;
 use crate::inbox::InboxStorage;
+use crate::python_bridge::{AIConfig, ChatMessage, PythonAI};
 use crate::search::SearchIndex;
 use crate::storage::{FileStorage, FileStorageMode, PageType};
 
@@ -29,6 +30,8 @@ pub struct HostApi {
     pub(crate) inbox_storage: Arc<Mutex<InboxStorage>>,
     pub(crate) search_index: Option<Arc<Mutex<SearchIndex>>>,
     pub(crate) energy_storage: Option<Arc<Mutex<EnergyStorage>>>,
+    pub(crate) python_ai: Option<Arc<Mutex<PythonAI>>>,
+    pub(crate) ai_config: Arc<Mutex<Option<AIConfig>>>,
     pub(crate) http_client: reqwest::blocking::Client,
 }
 
@@ -51,6 +54,8 @@ impl HostApi {
             inbox_storage,
             search_index: None,
             energy_storage: None,
+            python_ai: None,
+            ai_config: Arc::new(Mutex::new(None)),
             http_client,
         }
     }
@@ -63,6 +68,19 @@ impl HostApi {
     /// Set the energy storage reference (called after construction when Arc is available).
     pub fn set_energy_storage(&mut self, energy_storage: Arc<Mutex<EnergyStorage>>) {
         self.energy_storage = Some(energy_storage);
+    }
+
+    /// Set the Python AI bridge reference (called after construction when Arc is available).
+    pub fn set_python_ai(&mut self, python_ai: Arc<Mutex<PythonAI>>) {
+        self.python_ai = Some(python_ai);
+    }
+
+    /// Set the AI config from the user's frontend settings.
+    /// Uses interior mutability so it can be called after Arc wrapping.
+    pub fn set_ai_config(&self, config: AIConfig) {
+        if let Ok(mut guard) = self.ai_config.lock() {
+            *guard = Some(config);
+        }
     }
 
     // -- Capability gate helper --
@@ -363,6 +381,16 @@ impl HostApi {
                         m.insert("id".to_string(), serde_json::json!(Uuid::new_v4().to_string()));
                     });
                 }
+                // Ensure select/multiSelect options have IDs
+                if let Some(options) = prop.get_mut("options").and_then(|o| o.as_array_mut()) {
+                    for opt in options.iter_mut() {
+                        if opt.get("id").is_none() {
+                            if let Some(obj) = opt.as_object_mut() {
+                                obj.insert("id".to_string(), serde_json::json!(Uuid::new_v4().to_string()));
+                            }
+                        }
+                    }
+                }
                 prop
             })
             .collect();
@@ -467,6 +495,7 @@ impl HostApi {
 
         // Build name→id map from properties
         let name_to_id = Self::build_property_name_map(&db);
+        let select_map = Self::build_select_label_map(&db);
 
         let now = chrono::Utc::now().to_rfc3339();
         let rows_arr = db
@@ -480,6 +509,8 @@ impl HostApi {
             for (key, value) in input_row {
                 // Resolve property name to ID, fall back to using key as-is (might be an ID)
                 let prop_id = name_to_id.get(&key).cloned().unwrap_or(key);
+                // Resolve select/multiSelect labels to option IDs
+                let value = Self::resolve_select_value(value, &prop_id, &select_map);
                 cells.insert(prop_id, value);
             }
             rows_arr.push(serde_json::json!({
@@ -547,6 +578,7 @@ impl HostApi {
             .map_err(|e| PluginError::CallFailed(format!("invalid updates JSON: {e}")))?;
 
         let name_to_id = Self::build_property_name_map(&db);
+        let select_map = Self::build_select_label_map(&db);
         let now = chrono::Utc::now().to_rfc3339();
 
         let rows_arr = db
@@ -590,7 +622,8 @@ impl HostApi {
 
             for (key, value) in cell_updates {
                 let prop_id = name_to_id.get(key).cloned().unwrap_or_else(|| key.clone());
-                cells.insert(prop_id, value.clone());
+                let value = Self::resolve_select_value(value.clone(), &prop_id, &select_map);
+                cells.insert(prop_id, value);
             }
 
             // Update timestamp
@@ -739,6 +772,75 @@ impl HostApi {
             }
         }
         map
+    }
+
+    /// Build a map from (property_id, option_label) → option_id for select/multiSelect properties.
+    /// This allows plugins to write option labels and have them resolved to IDs automatically.
+    fn build_select_label_map(db: &serde_json::Value) -> std::collections::HashMap<(String, String), String> {
+        let mut map = std::collections::HashMap::new();
+        if let Some(props) = db.get("properties").and_then(|v| v.as_array()) {
+            for prop in props {
+                let prop_type = prop.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                if prop_type != "select" && prop_type != "multiSelect" {
+                    continue;
+                }
+                let prop_id = match prop.get("id").and_then(|v| v.as_str()) {
+                    Some(id) => id,
+                    None => continue,
+                };
+                if let Some(options) = prop.get("options").and_then(|v| v.as_array()) {
+                    for opt in options {
+                        if let (Some(label), Some(opt_id)) = (
+                            opt.get("label").and_then(|v| v.as_str()),
+                            opt.get("id").and_then(|v| v.as_str()),
+                        ) {
+                            map.insert(
+                                (prop_id.to_string(), label.to_string()),
+                                opt_id.to_string(),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        map
+    }
+
+    /// Resolve a cell value for a select/multiSelect property: if the value is an
+    /// option label string, replace it with the corresponding option ID.
+    fn resolve_select_value(
+        value: serde_json::Value,
+        prop_id: &str,
+        select_map: &std::collections::HashMap<(String, String), String>,
+    ) -> serde_json::Value {
+        match &value {
+            serde_json::Value::String(label) => {
+                if let Some(opt_id) = select_map.get(&(prop_id.to_string(), label.clone())) {
+                    serde_json::Value::String(opt_id.clone())
+                } else {
+                    value
+                }
+            }
+            serde_json::Value::Array(arr) => {
+                // multiSelect: resolve each label
+                let resolved: Vec<serde_json::Value> = arr
+                    .iter()
+                    .map(|v| {
+                        if let Some(label) = v.as_str() {
+                            if let Some(opt_id) = select_map.get(&(prop_id.to_string(), label.to_string())) {
+                                serde_json::Value::String(opt_id.clone())
+                            } else {
+                                v.clone()
+                            }
+                        } else {
+                            v.clone()
+                        }
+                    })
+                    .collect();
+                serde_json::Value::Array(resolved)
+            }
+            _ => value,
+        }
     }
 
     // -- Page WRITE APIs --
@@ -1398,6 +1500,64 @@ impl HostApi {
             "headers": resp_headers,
             "body": body_str,
         }))
+    }
+
+    // -- AI API --
+
+    /// Send a prompt to the AI provider. Gated on NETWORK capability.
+    pub fn ai_complete(
+        &self,
+        caps: CapabilitySet,
+        plugin_id: &str,
+        prompt: &str,
+        system_prompt: Option<&str>,
+    ) -> Result<String, PluginError> {
+        Self::require(caps, CapabilitySet::NETWORK, plugin_id)?;
+
+        let python_ai = self
+            .python_ai
+            .as_ref()
+            .ok_or_else(|| PluginError::CallFailed("AI not available".to_string()))?;
+        let python_ai = python_ai.lock().map_err(|e| {
+            PluginError::CallFailed(format!("python_ai lock: {e}"))
+        })?;
+
+        // Use the user's AI config if available, otherwise fall back to defaults
+        let stored = self.ai_config.lock().ok().and_then(|g| g.clone());
+        let config = match stored {
+            Some(base) => AIConfig {
+                provider_type: base.provider_type,
+                api_key: base.api_key,
+                base_url: base.base_url,
+                model: base.model,
+                temperature: Some(0.3),
+                max_tokens: Some(1000),
+            },
+            None => AIConfig {
+                provider_type: "openai".to_string(),
+                temperature: Some(0.3),
+                max_tokens: Some(1000),
+                ..Default::default()
+            },
+        };
+
+        let mut messages = Vec::new();
+        if let Some(sys) = system_prompt {
+            messages.push(ChatMessage {
+                role: "system".to_string(),
+                content: sys.to_string(),
+            });
+        }
+        messages.push(ChatMessage {
+            role: "user".to_string(),
+            content: prompt.to_string(),
+        });
+
+        let response = python_ai
+            .chat(messages, config)
+            .map_err(|e| PluginError::CallFailed(format!("AI chat failed: {e}")))?;
+
+        Ok(response.content)
     }
 
     // -- Logging APIs (no capability required) --

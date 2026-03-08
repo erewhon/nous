@@ -157,7 +157,7 @@ function createDefaultSettings(): AISettings {
   return {
     providers,
     defaultProvider: "openai",
-    defaultModel: "gpt-4o",
+    defaultModel: "gpt-4.1",
     temperature: 0.7,
     maxTokens: 4096,
     maxContextMessages: 10,

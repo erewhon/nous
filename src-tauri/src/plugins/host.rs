@@ -94,6 +94,17 @@ pub struct PluginDecorationType {
     pub description: Option<String>,
 }
 
+/// A page type registered by a plugin for custom page rendering.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginPageType {
+    pub plugin_id: String,
+    pub page_type_id: String,
+    pub label: String,
+    pub description: Option<String>,
+    pub icon_svg: Option<String>,
+}
+
 /// Plugin manifest with runtime enabled/disabled status.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -156,6 +167,11 @@ impl PluginHost {
 
     pub fn is_plugin_enabled(&self, plugin_id: &str) -> bool {
         !self.disabled.contains(plugin_id)
+    }
+
+    /// Update the AI config used by plugins for `nous.ai_complete()`.
+    pub fn set_ai_config(&self, config: crate::python_bridge::AIConfig) {
+        self.api.set_ai_config(config);
     }
 
     /// Load all plugins from the plugins directory and built-ins.
@@ -435,20 +451,30 @@ impl PluginHost {
         &self,
         plugin_id: &str,
         command_id: &str,
+        context: Option<&serde_json::Value>,
     ) -> Result<serde_json::Value, PluginError> {
         let plugin_mutex = self.registry.get(plugin_id).ok_or_else(|| {
             PluginError::NotFound(plugin_id.to_string())
         })?;
 
-        let input = json!({
+        let mut input = json!({
             "command_id": command_id,
         });
+
+        // Merge extra context fields (notebook_id, query, etc.) into the input
+        if let Some(ctx) = context {
+            if let (Some(input_obj), Some(ctx_obj)) = (input.as_object_mut(), ctx.as_object()) {
+                for (k, v) in ctx_obj {
+                    input_obj.insert(k.clone(), v.clone());
+                }
+            }
+        }
 
         let mut plugin = plugin_mutex.lock().map_err(|e| {
             PluginError::Runtime(format!("lock: {e}"))
         })?;
 
-        plugin.call("execute_command", &input)
+        plugin.call("handle_command", &input)
     }
 
     /// Dispatch an event to all plugins that registered for the given hook.
@@ -515,7 +541,7 @@ impl PluginHost {
                         }
                     };
 
-                    match plugin.call("describe_view", &serde_json::Value::Null) {
+                    match plugin.call("describe_view", &serde_json::json!({"view_type": view_type})) {
                         Ok(val) => {
                             let label = val.get("label").and_then(|v| v.as_str()).unwrap_or(view_type.as_str()).to_string();
                             let icon_svg = val.get("icon_svg").and_then(|v| v.as_str()).map(|s| s.to_string());
@@ -1056,6 +1082,110 @@ impl PluginHost {
         })?;
 
         plugin.call("compute_decorations", &input)
+    }
+
+    /// Get page types registered by plugins.
+    pub fn get_plugin_page_types(&self) -> Vec<PluginPageType> {
+        let mut page_types = Vec::new();
+
+        for manifest in self.registry.list_manifests() {
+            if !self.is_plugin_enabled(&manifest.id) {
+                continue;
+            }
+            for hook in &manifest.hooks {
+                if let HookPoint::PluginPageType { page_type_id } = hook {
+                    let plugin_mutex = match self.registry.get(&manifest.id) {
+                        Some(m) => m,
+                        None => continue,
+                    };
+
+                    let mut plugin = match plugin_mutex.lock() {
+                        Ok(p) => p,
+                        Err(e) => {
+                            log::warn!("Failed to lock plugin '{}' for describe_page_type: {e}", manifest.id);
+                            continue;
+                        }
+                    };
+
+                    match plugin.call("describe_page_type", &serde_json::Value::Null) {
+                        Ok(val) => {
+                            let label = val.get("label").and_then(|v| v.as_str()).unwrap_or(page_type_id.as_str()).to_string();
+                            let description = val.get("description").and_then(|v| v.as_str()).map(|s| s.to_string());
+                            let icon_svg = val.get("icon_svg").and_then(|v| v.as_str()).map(|s| s.to_string());
+                            page_types.push(PluginPageType {
+                                plugin_id: manifest.id.clone(),
+                                page_type_id: page_type_id.clone(),
+                                label,
+                                description,
+                                icon_svg,
+                            });
+                        }
+                        Err(e) => {
+                            log::warn!("Plugin '{}' describe_page_type failed: {e}", manifest.id);
+                            page_types.push(PluginPageType {
+                                plugin_id: manifest.id.clone(),
+                                page_type_id: page_type_id.clone(),
+                                label: page_type_id.clone(),
+                                description: None,
+                                icon_svg: None,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        page_types
+    }
+
+    /// Render a plugin page. Returns JSON with html.
+    pub fn render_plugin_page(
+        &self,
+        plugin_id: &str,
+        page_type_id: &str,
+        page_data: &serde_json::Value,
+    ) -> Result<serde_json::Value, PluginError> {
+        if !self.is_plugin_enabled(plugin_id) {
+            return Err(PluginError::Runtime(format!(
+                "plugin '{plugin_id}' is disabled"
+            )));
+        }
+        let plugin_mutex = self.registry.get(plugin_id).ok_or_else(|| {
+            PluginError::NotFound(plugin_id.to_string())
+        })?;
+
+        let input = json!({
+            "page_type_id": page_type_id,
+            "page": page_data,
+        });
+
+        let mut plugin = plugin_mutex.lock().map_err(|e| {
+            PluginError::Runtime(format!("lock: {e}"))
+        })?;
+
+        plugin.call("render_page", &input)
+    }
+
+    /// Handle an interactive action from a plugin page.
+    pub fn handle_plugin_page_action(
+        &self,
+        plugin_id: &str,
+        action: &serde_json::Value,
+    ) -> Result<serde_json::Value, PluginError> {
+        if !self.is_plugin_enabled(plugin_id) {
+            return Err(PluginError::Runtime(format!(
+                "plugin '{plugin_id}' is disabled"
+            )));
+        }
+        let plugin_mutex = self.registry.get(plugin_id).ok_or_else(|| {
+            PluginError::NotFound(plugin_id.to_string())
+        })?;
+
+        let mut plugin = plugin_mutex.lock().map_err(|e| {
+            PluginError::Runtime(format!("lock: {e}"))
+        })?;
+
+        plugin.call("handle_page_action", action)
     }
 
     /// Get plugins directory path

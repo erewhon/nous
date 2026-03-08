@@ -310,6 +310,7 @@ pub fn run() {
         );
         api.set_search_index(Arc::clone(&search_index_arc));
         api.set_energy_storage(Arc::clone(&energy_storage_arc));
+        api.set_python_ai(Arc::clone(&python_ai_arc));
         let api = Arc::new(api);
         let mut host = plugins::PluginHost::new(api, library_path.join("plugins"));
         if let Err(e) = host.load_all() {
@@ -1019,6 +1020,10 @@ pub fn run() {
             commands::handle_plugin_panel_action,
             commands::get_plugin_decoration_types,
             commands::compute_plugin_decorations,
+            commands::get_plugin_page_types,
+            commands::render_plugin_page,
+            commands::handle_plugin_page_action,
+            commands::set_plugin_ai_config,
             // Freeze watchdog
             freeze_watchdog::freeze_pong,
         ])

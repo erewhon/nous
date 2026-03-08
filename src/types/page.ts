@@ -114,6 +114,9 @@ export const PageSchema = z.object({
   // Daily notes
   isDailyNote: z.boolean().default(false),
   dailyNoteDate: z.string().nullable().optional(), // "YYYY-MM-DD" format
+  // Plugin page type
+  pluginPageType: z.string().nullable().optional(), // Plugin type identifier (e.g. "kanban")
+  pluginData: z.unknown().nullable().optional(), // Opaque JSON data for plugin page types
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });

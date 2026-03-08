@@ -30,18 +30,21 @@ export type ProviderConfig = z.infer<typeof ProviderConfigSchema>;
 // Default models for each provider
 export const DEFAULT_MODELS: Record<ProviderType, Array<{ id: string; name: string }>> = {
   openai: [
+    { id: "gpt-4.1", name: "GPT-4.1" },
+    { id: "gpt-4.1-mini", name: "GPT-4.1 Mini" },
+    { id: "gpt-4.1-nano", name: "GPT-4.1 Nano" },
     { id: "gpt-4o", name: "GPT-4o" },
     { id: "gpt-4o-mini", name: "GPT-4o Mini" },
-    { id: "gpt-4-turbo", name: "GPT-4 Turbo" },
-    { id: "gpt-3.5-turbo", name: "GPT-3.5 Turbo" },
+    { id: "o3", name: "o3" },
+    { id: "o3-mini", name: "o3 Mini" },
     { id: "o1", name: "o1" },
-    { id: "o1-mini", name: "o1 Mini" },
   ],
   anthropic: [
+    { id: "claude-opus-4-6-20260320", name: "Claude Opus 4.6" },
+    { id: "claude-sonnet-4-6-20260320", name: "Claude Sonnet 4.6" },
+    { id: "claude-haiku-4-5-20251001", name: "Claude Haiku 4.5" },
     { id: "claude-sonnet-4-20250514", name: "Claude Sonnet 4" },
-    { id: "claude-opus-4-5-20251101", name: "Claude Opus 4.5" },
     { id: "claude-opus-4-20250514", name: "Claude Opus 4" },
-    { id: "claude-3-5-haiku-20241022", name: "Claude 3.5 Haiku" },
   ],
   ollama: [
     { id: "llama3.2", name: "Llama 3.2" },
@@ -54,9 +57,9 @@ export const DEFAULT_MODELS: Record<ProviderType, Array<{ id: string; name: stri
     { id: "local-model", name: "Local Model" },
   ],
   bedrock: [
-    { id: "anthropic.claude-3-5-sonnet-20241022-v2:0", name: "Claude 3.5 Sonnet v2" },
-    { id: "anthropic.claude-3-5-haiku-20241022-v1:0", name: "Claude 3.5 Haiku" },
-    { id: "anthropic.claude-3-sonnet-20240229-v1:0", name: "Claude 3 Sonnet" },
+    { id: "anthropic.claude-sonnet-4-6-20260320-v1:0", name: "Claude Sonnet 4.6" },
+    { id: "anthropic.claude-sonnet-4-20250514-v1:0", name: "Claude Sonnet 4" },
+    { id: "anthropic.claude-haiku-4-5-20251001-v1:0", name: "Claude Haiku 4.5" },
     { id: "amazon.titan-text-premier-v1:0", name: "Titan Text Premier" },
     { id: "amazon.titan-text-express-v1", name: "Titan Text Express" },
     { id: "meta.llama3-2-90b-instruct-v1:0", name: "Llama 3.2 90B" },

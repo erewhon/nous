@@ -360,6 +360,8 @@ mod tests {
             is_favorite: false,
             is_daily_note: false,
             daily_note_date: None,
+            plugin_page_type: None,
+            plugin_data: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }

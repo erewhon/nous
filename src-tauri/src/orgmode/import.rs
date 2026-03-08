@@ -665,6 +665,8 @@ fn import_org_file(content: &str, notebook_id: Uuid, fallback_title: &str) -> Pa
         color: None,
         is_daily_note: false,
         daily_note_date: None,
+        plugin_page_type: None,
+        plugin_data: None,
         created_at,
         updated_at: now,
     }

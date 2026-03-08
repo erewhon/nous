@@ -149,12 +149,19 @@ export function CheckboxCell({ value, onChange }: CellEditorProps) {
 
 // Date cell
 export function DateCell({ value, onChange }: CellEditorProps) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
   return (
     <input
+      ref={inputRef}
       type="date"
       className="db-cell-input"
       value={typeof value === "string" ? value : ""}
-      onChange={(e) => onChange(e.target.value || null)}
+      onChange={(e) => {
+        onChange(e.target.value || null);
+        // WebKitGTK native date picker doesn't dismiss on selection — blur to close it
+        inputRef.current?.blur();
+      }}
     />
   );
 }

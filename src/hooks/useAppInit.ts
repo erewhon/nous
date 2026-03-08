@@ -7,6 +7,7 @@ import { useGoalsStore } from "../stores/goalsStore";
 import { useContactStore } from "../stores/contactStore";
 import { useEnergyStore } from "../stores/energyStore";
 import { useInboxStore } from "../stores/inboxStore";
+import { usePluginStore } from "../stores/pluginStore";
 import { useWindowLibrary } from "../contexts/WindowContext";
 
 // Check goals every 15 minutes
@@ -30,6 +31,11 @@ export function useAppInit() {
   const restoredForNotebookRef = useRef<string | null>(null);
 
   const loadAllFavorites = usePageStore((s) => s.loadAllFavorites);
+
+  // Sync AI config to plugin host at startup
+  useEffect(() => {
+    usePluginStore.getState().syncAiConfig();
+  }, []);
 
   // Load notebooks and cross-notebook favorites when library is available
   useEffect(() => {

@@ -427,6 +427,8 @@ pub fn import_website_mirror_cmd(
             is_favorite: false,
             is_daily_note: false,
             daily_note_date: None,
+            plugin_page_type: None,
+            plugin_data: None,
             created_at: now,
             updated_at: now,
         };
@@ -715,6 +717,8 @@ pub fn rescan_website_mirror_cmd(
                 is_favorite: false,
                 is_daily_note: false,
                 daily_note_date: None,
+                plugin_page_type: None,
+                plugin_data: None,
                 created_at: now,
                 updated_at: now,
             };

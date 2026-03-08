@@ -12,10 +12,12 @@ interface PluginDatabaseViewProps {
   ) => void;
   onUpdateView: (updater: (prev: DatabaseView) => DatabaseView) => void;
   relationContext?: RelationContext;
+  notebookId?: string;
+  onRefreshFromDisk?: () => void;
 }
 
 export function PluginDatabaseView(props: PluginDatabaseViewProps) {
-  const { content, view } = props;
+  const { content, view, notebookId, onRefreshFromDisk } = props;
   const renderView = usePluginStore((s) => s.renderView);
   const handleViewAction = usePluginStore((s) => s.handleViewAction);
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -72,9 +74,20 @@ export function PluginDatabaseView(props: PluginDatabaseViewProps) {
       if (!data || typeof data !== "object") return;
 
       if (data.type === "plugin-view-action" && pluginId) {
-        handleViewAction(pluginId, data.payload).catch((err) =>
-          console.error("Plugin view action failed:", err)
-        );
+        const payload = { ...data.payload, notebookId: notebookId ?? "" };
+        handleViewAction(pluginId, payload)
+          .then((result) => {
+            const res = result as { forward_to_iframe?: boolean; message?: unknown; refresh_database?: boolean } | null;
+            if (res?.forward_to_iframe && res.message && iframeRef.current?.contentWindow) {
+              iframeRef.current.contentWindow.postMessage(res.message, "*");
+            }
+            if (res?.refresh_database && onRefreshFromDisk) {
+              onRefreshFromDisk();
+            }
+          })
+          .catch((err) =>
+            console.error("Plugin view action failed:", err)
+          );
       } else if (data.type === "plugin-view-resize" && typeof data.height === "number") {
         setHeight(data.height);
       }
@@ -82,7 +95,7 @@ export function PluginDatabaseView(props: PluginDatabaseViewProps) {
 
     window.addEventListener("message", handler);
     return () => window.removeEventListener("message", handler);
-  }, [pluginId, handleViewAction]);
+  }, [pluginId, handleViewAction, notebookId, onRefreshFromDisk]);
 
   if (loading) {
     return (

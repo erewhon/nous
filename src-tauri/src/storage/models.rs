@@ -467,6 +467,12 @@ pub struct Page {
     /// Date for daily notes in "YYYY-MM-DD" format
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub daily_note_date: Option<String>,
+    /// Plugin page type identifier (e.g. "kanban") — when set, a plugin renders the page
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub plugin_page_type: Option<String>,
+    /// Opaque JSON data for plugin page types
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub plugin_data: Option<serde_json::Value>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -500,6 +506,8 @@ impl Page {
             is_favorite: false,
             is_daily_note: false,
             daily_note_date: None,
+            plugin_page_type: None,
+            plugin_data: None,
             created_at: now,
             updated_at: now,
         }

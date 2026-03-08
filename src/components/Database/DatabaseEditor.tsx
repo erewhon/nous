@@ -161,6 +161,20 @@ export function DatabaseEditor({
     };
   }, []);
 
+  // Reload content from disk (e.g., after a plugin modifies the database via backend API)
+  const refreshFromDisk = useCallback(async () => {
+    if (isInlineMode || !notebookId || !page) return;
+    try {
+      const result = await api.getFileContent(notebookId, page.id);
+      if (result.content) {
+        const parsed = migrateDatabaseContent(JSON.parse(result.content));
+        setContent(parsed);
+      }
+    } catch (err) {
+      console.error("Failed to refresh database from disk:", err);
+    }
+  }, [isInlineMode, notebookId, page]);
+
   // Flush pending baseline into undo stack
   const flushPendingBaseline = useCallback(() => {
     if (pendingBaselineRef.current) {
@@ -607,6 +621,8 @@ export function DatabaseEditor({
             onUpdateContent={handleUpdateContent}
             onUpdateView={handleUpdateView}
             relationContext={relationContext}
+            notebookId={notebookId}
+            onRefreshFromDisk={refreshFromDisk}
           />
         );
       default:

@@ -576,6 +576,8 @@ pub fn import_evernote_enex(
             color: None,
             is_daily_note: false,
             daily_note_date: None,
+            plugin_page_type: None,
+            plugin_data: None,
             created_at: note.created.unwrap_or(now),
             updated_at: note.updated.unwrap_or(now),
         };

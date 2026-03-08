@@ -75,7 +75,7 @@ function render_panel(input_json)
   local s = _pomo_state
 
   -- Reset today's sessions if date changed
-  local today = os.date("%Y-%m-%d")
+  local today = nous.current_date().iso
   if s.todayDate ~= today then
     s.todaySessions = 0
     s.todayDate = today
@@ -540,7 +540,7 @@ function render_panel(input_json)
 ]],
     s.workDuration, s.breakDuration, s.longBreakDuration, s.sessionsBeforeLongBreak,
     s.soundEnabled and "on" or "",
-    notebook_id:gsub("'", "\\'"),
+    (notebook_id:gsub("'", "\\'")),
     s.mode, s.timeRemaining,
     s.isRunning and "true" or "false",
     s.sessionsCompleted, s.todaySessions,
@@ -578,7 +578,7 @@ function handle_panel_action(input_json)
       pcall(function()
         nous.database_add_rows(notebook_id, db_id, nous.json_encode({
           {
-            ["Date"] = os.date("!%Y-%m-%dT%H:%M:%SZ"),
+            ["Date"] = nous.current_date().iso,
             ["Mode"] = mode,
             ["Duration"] = tostring(duration),
             ["Completed"] = "Yes",

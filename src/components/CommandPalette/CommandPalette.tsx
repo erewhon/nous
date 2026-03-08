@@ -14,6 +14,7 @@ import { usePluginStore } from "../../stores/pluginStore";
 import { useRAGStore } from "../../stores/ragStore";
 import { useSectionStore } from "../../stores/sectionStore";
 import { useThemeStore } from "../../stores/themeStore";
+import { useToastStore } from "../../stores/toastStore";
 import { searchPages, exportPageToFile, importMarkdownFile, convertDocument, importMarkdown } from "../../utils/api";
 import { save, open } from "@tauri-apps/plugin-dialog";
 import { highlightText } from "../../utils/highlightText";
@@ -61,7 +62,7 @@ export function CommandPalette({
   const { recentSearches, searchScope, searchMode, addRecentSearch, setSearchScope, setSearchMode, clearRecentSearches } =
     useSearchStore();
   const { actions, runAction: executeAction, openActionLibrary } = useActionStore();
-  const { commands: pluginCommands, fetchCommands: fetchPluginCommands, executeCommand: executePluginCommand, exportFormats: pluginExportFormats, fetchExportFormats: fetchPluginExportFormats, executeExport: executePluginExport, importFormats: pluginImportFormats, fetchImportFormats: fetchPluginImportFormats, executeImport: executePluginImport, panelTypes: pluginPanelTypes, fetchPanelTypes: fetchPluginPanelTypes, togglePanel: togglePluginPanel, openPanels: pluginOpenPanels } = usePluginStore();
+  const { commands: pluginCommands, fetchCommands: fetchPluginCommands, executeCommand: executePluginCommand, exportFormats: pluginExportFormats, fetchExportFormats: fetchPluginExportFormats, executeExport: executePluginExport, importFormats: pluginImportFormats, fetchImportFormats: fetchPluginImportFormats, executeImport: executePluginImport, panelTypes: pluginPanelTypes, fetchPanelTypes: fetchPluginPanelTypes, togglePanel: togglePluginPanel, openPanels: pluginOpenPanels, pageTypes: pluginPageTypes, fetchPageTypes: fetchPluginPageTypes } = usePluginStore();
   const { isConfigured: ragConfigured, settings: ragSettings, hybridSearch, semanticSearch } = useRAGStore();
   const expertMode = useThemeStore((s) => s.expertMode);
 
@@ -72,8 +73,9 @@ export function CommandPalette({
       fetchPluginExportFormats();
       fetchPluginImportFormats();
       fetchPluginPanelTypes();
+      fetchPluginPageTypes();
     }
-  }, [isOpen, fetchPluginCommands, fetchPluginExportFormats, fetchPluginImportFormats, fetchPluginPanelTypes]);
+  }, [isOpen, fetchPluginCommands, fetchPluginExportFormats, fetchPluginImportFormats, fetchPluginPanelTypes, fetchPluginPageTypes]);
 
   // Debounced search
   useEffect(() => {
@@ -615,9 +617,17 @@ export function CommandPalette({
         action: async () => {
           onClose();
           try {
-            await executePluginCommand(cmd.pluginId, cmd.id);
+            const result = await executePluginCommand(cmd.pluginId, cmd.id, {
+              notebook_id: selectedNotebookId ?? "",
+            });
+            if (result?.message && typeof result.message === "string") {
+              useToastStore.getState().info(result.message);
+            }
           } catch (error) {
             console.error("Failed to execute plugin command:", error);
+            useToastStore.getState().error(
+              error instanceof Error ? error.message : "Plugin command failed"
+            );
           }
         },
         keywords: cmd.keywords,
@@ -732,6 +742,34 @@ export function CommandPalette({
       });
     }
 
+    // Add plugin page type creation commands
+    for (const pt of pluginPageTypes) {
+      cmds.push({
+        id: `create-plugin-page-${pt.pluginId}-${pt.pageTypeId}`,
+        title: `New ${pt.label}`,
+        subtitle: pt.description || "Plugin Page",
+        icon: pt.iconSvg ? (
+          <span
+            style={{ display: "flex", width: 16, height: 16 }}
+            dangerouslySetInnerHTML={{ __html: pt.iconSvg }}
+          />
+        ) : (
+          <IconPage />
+        ),
+        category: "action",
+        action: async () => {
+          if (selectedNotebookId) {
+            const page = await createPage(selectedNotebookId, pt.label, undefined, undefined, undefined, undefined, pt.pageTypeId);
+            if (page) {
+              selectPage(page.id);
+            }
+          }
+          onClose();
+        },
+        keywords: ["new", "create", "plugin", pt.label.toLowerCase(), pt.pageTypeId],
+      });
+    }
+
     // Only show local pages/notebooks if no search query (to avoid duplication)
     if (!query.trim()) {
       // Pages in current notebook
@@ -792,6 +830,7 @@ export function CommandPalette({
     pluginPanelTypes,
     pluginOpenPanels,
     togglePluginPanel,
+    pluginPageTypes,
     expertMode,
   ]);
 

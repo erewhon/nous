@@ -755,6 +755,24 @@ impl LuaPlugin {
             })?;
         }
 
+        // -- AI API --
+        {
+            let api_ref = Arc::clone(api);
+            let pid = plugin_id.clone();
+            let c = caps;
+            let ai_complete = self.lua.create_function(
+                move |_, (prompt, system_prompt): (String, Option<String>)| {
+                    let result = api_ref
+                        .ai_complete(c, &pid, &prompt, system_prompt.as_deref())
+                        .map_err(|e| LuaError::external(e))?;
+                    Ok(result)
+                },
+            ).map_err(|e| PluginError::InitFailed(format!("ai_complete: {e}")))?;
+            nous.set("ai_complete", ai_complete).map_err(|e| {
+                PluginError::InitFailed(format!("set ai_complete: {e}"))
+            })?;
+        }
+
         // Set nous as a global
         self.lua.globals().set("nous", nous).map_err(|e| {
             PluginError::InitFailed(format!("set global nous: {e}"))

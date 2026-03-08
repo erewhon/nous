@@ -63,6 +63,7 @@ function on_database_row_added(input_json)
   local database_id = input.database_id
   local row_ids = input.row_ids or {}
 
+  if not notebook_id or not database_id then return end
   if #row_ids == 0 then return end
 
   -- Load the database to inspect its schema
@@ -106,7 +107,7 @@ function on_database_row_added(input_json)
     nous.database_update_rows(notebook_id, database_id, nous.json_encode(updates))
     nous.log_info(string.format(
       "Database automation: auto-filled %d new row(s) in '%s'",
-      #updates, input.database_title or database_id
+      #updates, input.database_title or database_id or "unknown"
     ))
   end
 end
@@ -119,6 +120,7 @@ function on_database_row_updated(input_json)
   local database_id = input.database_id
   local row_ids = input.row_ids or {}
 
+  if not notebook_id or not database_id then return end
   if #row_ids == 0 then return end
 
   -- Load the database
@@ -164,7 +166,7 @@ function on_database_row_updated(input_json)
         local title = get_cell_value(row.cells, find_property_id(properties, { "Title", "Name", "Task" }))
         nous.log_warn(string.format(
           "Task '%s' is now BLOCKED in '%s'",
-          title or row_id, input.database_title or database_id
+          title or row_id or "unknown", input.database_title or database_id or "unknown"
         ))
       end
     end
@@ -174,7 +176,7 @@ function on_database_row_updated(input_json)
     nous.database_update_rows(notebook_id, database_id, nous.json_encode(updates))
     nous.log_info(string.format(
       "Database automation: auto-updated %d row(s) in '%s'",
-      #updates, input.database_title or database_id
+      #updates, input.database_title or database_id or "unknown"
     ))
   end
 end

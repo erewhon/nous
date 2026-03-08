@@ -42,12 +42,13 @@ const AI_PROVIDERS: { value: AIProviderType; label: string }[] = [
 ];
 
 const AI_MODELS: Record<AIProviderType, string[]> = {
-  openai: ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"],
+  openai: ["gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano", "gpt-4o", "gpt-4o-mini", "o3", "o3-mini", "o1"],
   anthropic: [
+    "claude-opus-4-6-20260320",
+    "claude-sonnet-4-6-20260320",
+    "claude-haiku-4-5-20251001",
     "claude-sonnet-4-20250514",
-    "claude-opus-4-5-20251101",
     "claude-opus-4-20250514",
-    "claude-3-5-haiku-20241022",
   ],
   ollama: ["llama3.2", "llama3.1", "mistral", "codellama", "phi3"],
   lmstudio: ["local-model"],

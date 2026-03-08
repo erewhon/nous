@@ -30,6 +30,7 @@ import { DatabaseEditor, type DatabaseUndoRedoState } from "../Database";
 import { HtmlViewer } from "../Html";
 import { OutlinePanel } from "./OutlinePanel";
 import { PluginSidebarPanel } from "./PluginSidebarPanel";
+import { PluginPageView } from "./PluginPageView";
 import { usePluginDecorations } from "./usePluginDecorations";
 import { BacklinksPanel } from "./BacklinksPanel";
 import { SimilarPagesPanel } from "./SimilarPagesPanel";
@@ -89,6 +90,8 @@ export function EditorPaneContent({
   const openPanels = usePluginStore((s) => s.openPanels);
   const togglePanel = usePluginStore((s) => s.togglePanel);
   const fetchPanelTypes = usePluginStore((s) => s.fetchPanelTypes);
+  const pluginPageTypes = usePluginStore((s) => s.pageTypes);
+  const fetchPageTypes = usePluginStore((s) => s.fetchPageTypes);
   const [isSaving, setIsSaving] = useState(false);
   const lastSavedRef = useRef<Date | null>(null);
   // Separate state for explicit save indicator only (Ctrl+S) — NOT updated during auto-save
@@ -102,6 +105,14 @@ export function EditorPaneContent({
   const selectedPage = pages.find((p) => p.id === pane.pageId);
   const isStandardPage =
     selectedPage?.pageType === "standard" || !selectedPage?.pageType;
+
+  // Check if this page is a plugin page type
+  const activePluginPageType = useMemo(() => {
+    if (!selectedPage?.pluginPageType) return null;
+    return pluginPageTypes.find(
+      (pt) => pt.pageTypeId === selectedPage.pluginPageType
+    ) ?? null;
+  }, [selectedPage?.pluginPageType, pluginPageTypes]);
 
   // Real-time collaboration session
   const collab = useCollabSession();
@@ -132,10 +143,11 @@ export function EditorPaneContent({
     onStateChange: handleUndoRedoStateChange,
   });
 
-  // Fetch plugin panel types once
+  // Fetch plugin panel types and page types once
   useEffect(() => {
     fetchPanelTypes();
-  }, [fetchPanelTypes]);
+    fetchPageTypes();
+  }, [fetchPanelTypes, fetchPageTypes]);
 
   // Plugin panels that are currently open
   const activePluginPanels = useMemo(
@@ -873,6 +885,33 @@ export function EditorPaneContent({
                   onUndoRedoStateChange={setDbUndoState}
                 />
               </div>
+            </>
+          ) : activePluginPageType ? (
+            /* Plugin page type gets header + full-area iframe */
+            <>
+              <div className="relative">
+                <PageHeader
+                  page={selectedPage}
+                  isSaving={false}
+                  lastSaved={null}
+                  stats={null}
+                  zenMode={zenMode}
+                  onExitZenMode={() => setZenMode(false)}
+                  onEnterZenMode={() => setZenMode(true)}
+                  historyCount={0}
+                  canUndo={false}
+                  canRedo={false}
+                  onUndo={() => {}}
+                  onRedo={() => {}}
+                />
+              </div>
+              <PluginPageView
+                key={selectedPage.id}
+                page={selectedPage}
+                notebookId={notebookId}
+                pluginPageType={activePluginPageType}
+                className="min-h-[calc(100vh-300px)]"
+              />
             </>
           ) : (
             <>

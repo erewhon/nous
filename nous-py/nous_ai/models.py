@@ -47,11 +47,11 @@ class ProviderConfig(BaseModel):
         """Set default model based on provider if not specified."""
         if not self.model:
             defaults = {
-                ProviderType.OPENAI: "gpt-4o",
-                ProviderType.ANTHROPIC: "claude-sonnet-4-20250514",
+                ProviderType.OPENAI: "gpt-4.1",
+                ProviderType.ANTHROPIC: "claude-sonnet-4-6-20260320",
                 ProviderType.OLLAMA: "llama3.2",
                 ProviderType.LMSTUDIO: "local-model",
-                ProviderType.BEDROCK: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+                ProviderType.BEDROCK: "anthropic.claude-sonnet-4-6-20260320-v1:0",
             }
             self.model = defaults.get(self.provider_type, "gpt-4o")
 

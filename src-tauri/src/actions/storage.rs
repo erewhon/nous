@@ -52,6 +52,10 @@ impl ActionStorage {
                 if needs_regen {
                     if let Ok(existing) = self.load_action_from_path(&path) {
                         action.enabled = existing.enabled;
+                        // Preserve user-configured notebook preference
+                        if existing.default_notebook_id.is_some() {
+                            action.default_notebook_id = existing.default_notebook_id;
+                        }
                     }
                 }
                 let content = serde_json::to_string_pretty(&action)?;

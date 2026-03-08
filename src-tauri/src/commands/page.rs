@@ -76,6 +76,8 @@ pub fn create_page(
     parent_page_id: Option<String>,
     section_id: Option<String>,
     template_id: Option<String>,
+    plugin_page_type: Option<String>,
+    plugin_data: Option<serde_json::Value>,
 ) -> CommandResult<Page> {
     let storage = state.storage.lock().unwrap();
     let nb_id = Uuid::parse_str(&notebook_id).map_err(|e| CommandError {
@@ -108,6 +110,13 @@ pub fn create_page(
     // If template_id specified, set it on the page
     if template_id.is_some() {
         page.template_id = template_id;
+        storage.update_page(&page)?;
+    }
+
+    // If plugin_page_type specified, set it on the page with optional initial data
+    if plugin_page_type.is_some() || plugin_data.is_some() {
+        page.plugin_page_type = plugin_page_type;
+        page.plugin_data = plugin_data;
         storage.update_page(&page)?;
     }
 
@@ -177,6 +186,8 @@ pub fn update_page(
     is_daily_note: Option<bool>,
     daily_note_date: Option<Option<String>>, // Some(Some("YYYY-MM-DD")) to set, Some(None) to clear
     color: Option<Option<String>>,           // Some(Some(hex)) to set, Some(None) to clear
+    plugin_page_type: Option<Option<String>>, // Some(Some(type)) to set, Some(None) to clear
+    plugin_data: Option<Option<serde_json::Value>>, // Some(Some(data)) to set, Some(None) to clear
     #[allow(unused_variables)] commit: Option<bool>, // Whether to create a git commit (default: false)
     pane_id: Option<String>,                         // Editor pane ID for CRDT multi-pane merge
 ) -> CommandResult<Page> {
@@ -295,6 +306,14 @@ pub fn update_page(
     // Allow setting color (Some(Some(hex)) to set, Some(None) to clear)
     if let Some(c) = color {
         page.color = c;
+    }
+    // Allow setting plugin_page_type (Some(Some(type)) to set, Some(None) to clear)
+    if let Some(ppt) = plugin_page_type {
+        page.plugin_page_type = ppt;
+    }
+    // Allow setting plugin_data (Some(Some(data)) to set, Some(None) to clear)
+    if let Some(pd) = plugin_data {
+        page.plugin_data = pd;
     }
     page.updated_at = chrono::Utc::now();
 

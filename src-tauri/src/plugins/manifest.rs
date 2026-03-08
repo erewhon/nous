@@ -30,6 +30,7 @@ bitflags::bitflags! {
         const IMPORT          = 0b1000_0000_0000_0000;
         const SIDEBAR_PANEL       = 0b0001_0000_0000_0000_0000;
         const EDITOR_DECORATION   = 0b0010_0000_0000_0000_0000;
+        const PAGE_TYPE           = 0b0100_0000_0000_0000_0000;
     }
 }
 
@@ -57,6 +58,7 @@ impl CapabilitySet {
                 "import" => CapabilitySet::IMPORT,
                 "sidebar_panel" => CapabilitySet::SIDEBAR_PANEL,
                 "editor_decoration" => CapabilitySet::EDITOR_DECORATION,
+                "page_type" => CapabilitySet::PAGE_TYPE,
                 other => {
                     return Err(PluginError::ManifestParse(format!(
                         "unknown capability: {other}"
@@ -90,6 +92,7 @@ impl fmt::Display for CapabilitySet {
             (CapabilitySet::IMPORT, "import"),
             (CapabilitySet::SIDEBAR_PANEL, "sidebar_panel"),
             (CapabilitySet::EDITOR_DECORATION, "editor_decoration"),
+            (CapabilitySet::PAGE_TYPE, "page_type"),
         ]
         .iter()
         .filter(|(cap, _)| self.contains(*cap))
@@ -151,6 +154,10 @@ pub enum HookPoint {
     EditorDecoration {
         decoration_id: String,
     },
+    /// Custom page type rendering
+    PluginPageType {
+        page_type_id: String,
+    },
 }
 
 impl HookPoint {
@@ -193,6 +200,10 @@ impl HookPoint {
             other if other.starts_with("editor_decoration:") => {
                 let decoration_id = other.strip_prefix("editor_decoration:").unwrap().to_string();
                 Ok(HookPoint::EditorDecoration { decoration_id })
+            }
+            other if other.starts_with("page_type:") => {
+                let page_type_id = other.strip_prefix("page_type:").unwrap().to_string();
+                Ok(HookPoint::PluginPageType { page_type_id })
             }
             other => Err(PluginError::ManifestParse(format!(
                 "unknown hook point: {other}"

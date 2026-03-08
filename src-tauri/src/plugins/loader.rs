@@ -39,6 +39,7 @@ static BUILTIN_PLUGINS: &[(&str, &str)] = &[
     ("export_print", include_str!("builtins/export_print.lua")),
     ("writing_stats_panel", include_str!("builtins/writing_stats_panel.lua")),
     ("writing_analysis", include_str!("builtins/writing_analysis.lua")),
+    ("kanban_board", include_str!("builtins/kanban_board.lua")),
 ];
 
 /// Scan a directory for plugin files and return loaded (but not yet initialized) plugins.

@@ -3,8 +3,47 @@
 use tauri::State;
 
 use crate::AppState;
+use crate::python_bridge::AIConfig;
 
 type CommandResult<T> = Result<T, String>;
+
+/// Push the user's AI provider settings to the plugin host so plugins can use `nous.ai_complete()`.
+#[cfg(feature = "plugins")]
+#[tauri::command(rename_all = "camelCase")]
+pub fn set_plugin_ai_config(
+    state: State<AppState>,
+    provider_type: String,
+    api_key: Option<String>,
+    base_url: Option<String>,
+    model: Option<String>,
+) -> CommandResult<()> {
+    let Some(ref ph) = state.plugin_host else {
+        return Ok(());
+    };
+    let host = ph.lock().map_err(|e| e.to_string())?;
+    host.set_ai_config(AIConfig {
+        provider_type,
+        api_key,
+        base_url,
+        model,
+        temperature: None,
+        max_tokens: None,
+    });
+    Ok(())
+}
+
+/// Set plugin AI config (stub when plugins feature disabled)
+#[cfg(not(feature = "plugins"))]
+#[tauri::command(rename_all = "camelCase")]
+pub fn set_plugin_ai_config(
+    _state: State<AppState>,
+    _provider_type: String,
+    _api_key: Option<String>,
+    _base_url: Option<String>,
+    _model: Option<String>,
+) -> CommandResult<()> {
+    Ok(())
+}
 
 /// List all loaded plugins with their manifests and enabled status
 #[cfg(feature = "plugins")]
@@ -63,19 +102,26 @@ pub fn get_plugin_commands(_state: State<AppState>) -> CommandResult<Vec<serde_j
 }
 
 /// Execute a command registered by a plugin
+/// Async + spawn_blocking because plugin commands may make HTTP requests.
 #[cfg(feature = "plugins")]
 #[tauri::command]
-pub fn execute_plugin_command(
-    state: State<AppState>,
+pub async fn execute_plugin_command(
+    state: State<'_, AppState>,
     plugin_id: String,
     command_id: String,
+    context: Option<serde_json::Value>,
 ) -> CommandResult<serde_json::Value> {
-    let Some(ref ph) = state.plugin_host else {
-        return Err("Plugin host not available".to_string());
-    };
-    let host = ph.lock().map_err(|e| e.to_string())?;
-    host.execute_plugin_command(&plugin_id, &command_id)
-        .map_err(|e| e.to_string())
+    let ph = state.plugin_host.clone();
+    tokio::task::spawn_blocking(move || {
+        let Some(ref ph) = ph else {
+            return Err("Plugin host not available".to_string());
+        };
+        let host = ph.lock().map_err(|e| e.to_string())?;
+        host.execute_plugin_command(&plugin_id, &command_id, context.as_ref())
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Execute a plugin command (stub when plugins feature disabled)
@@ -85,6 +131,7 @@ pub fn execute_plugin_command(
     _state: State<AppState>,
     _plugin_id: String,
     _command_id: String,
+    _context: Option<serde_json::Value>,
 ) -> CommandResult<serde_json::Value> {
     Err("Plugins feature not enabled".to_string())
 }
@@ -110,21 +157,27 @@ pub fn get_plugin_view_types(_state: State<AppState>) -> CommandResult<Vec<serde
 }
 
 /// Render a plugin database view
+/// Async + spawn_blocking to avoid holding the command thread pool during rendering.
 #[cfg(feature = "plugins")]
 #[tauri::command]
-pub fn render_plugin_view(
-    state: State<AppState>,
+pub async fn render_plugin_view(
+    state: State<'_, AppState>,
     plugin_id: String,
     view_type: String,
     content: serde_json::Value,
     view: serde_json::Value,
 ) -> CommandResult<serde_json::Value> {
-    let Some(ref ph) = state.plugin_host else {
-        return Err("Plugin host not available".to_string());
-    };
-    let host = ph.lock().map_err(|e| e.to_string())?;
-    host.render_plugin_view(&plugin_id, &view_type, &content, &view)
-        .map_err(|e| e.to_string())
+    let ph = state.plugin_host.clone();
+    tokio::task::spawn_blocking(move || {
+        let Some(ref ph) = ph else {
+            return Err("Plugin host not available".to_string());
+        };
+        let host = ph.lock().map_err(|e| e.to_string())?;
+        host.render_plugin_view(&plugin_id, &view_type, &content, &view)
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Render plugin view (stub when plugins feature disabled)
@@ -141,19 +194,25 @@ pub fn render_plugin_view(
 }
 
 /// Handle an interactive action from a plugin database view
+/// Async + spawn_blocking because plugin actions may make HTTP requests.
 #[cfg(feature = "plugins")]
 #[tauri::command]
-pub fn handle_plugin_view_action(
-    state: State<AppState>,
+pub async fn handle_plugin_view_action(
+    state: State<'_, AppState>,
     plugin_id: String,
     action: serde_json::Value,
 ) -> CommandResult<serde_json::Value> {
-    let Some(ref ph) = state.plugin_host else {
-        return Err("Plugin host not available".to_string());
-    };
-    let host = ph.lock().map_err(|e| e.to_string())?;
-    host.handle_plugin_view_action(&plugin_id, &action)
-        .map_err(|e| e.to_string())
+    let ph = state.plugin_host.clone();
+    tokio::task::spawn_blocking(move || {
+        let Some(ref ph) = ph else {
+            return Err("Plugin host not available".to_string());
+        };
+        let host = ph.lock().map_err(|e| e.to_string())?;
+        host.handle_plugin_view_action(&plugin_id, &action)
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Handle plugin view action (stub when plugins feature disabled)
@@ -426,19 +485,25 @@ pub fn render_plugin_panel(
 }
 
 /// Handle an interactive action from a plugin sidebar panel
+/// Async + spawn_blocking because panel actions may make HTTP requests.
 #[cfg(feature = "plugins")]
 #[tauri::command(rename_all = "camelCase")]
-pub fn handle_plugin_panel_action(
-    state: State<AppState>,
+pub async fn handle_plugin_panel_action(
+    state: State<'_, AppState>,
     plugin_id: String,
     action: serde_json::Value,
 ) -> CommandResult<serde_json::Value> {
-    let Some(ref ph) = state.plugin_host else {
-        return Err("Plugin host not available".to_string());
-    };
-    let host = ph.lock().map_err(|e| e.to_string())?;
-    host.handle_plugin_panel_action(&plugin_id, &action)
-        .map_err(|e| e.to_string())
+    let ph = state.plugin_host.clone();
+    tokio::task::spawn_blocking(move || {
+        let Some(ref ph) = ph else {
+            return Err("Plugin host not available".to_string());
+        };
+        let host = ph.lock().map_err(|e| e.to_string())?;
+        host.handle_plugin_panel_action(&plugin_id, &action)
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Handle plugin panel action (stub when plugins feature disabled)
@@ -497,6 +562,82 @@ pub fn compute_plugin_decorations(
     _plugin_id: String,
     _decoration_id: String,
     _blocks: serde_json::Value,
+) -> CommandResult<serde_json::Value> {
+    Err("Plugins feature not enabled".to_string())
+}
+
+/// Get page types registered by plugins
+#[cfg(feature = "plugins")]
+#[tauri::command]
+pub fn get_plugin_page_types(
+    state: State<AppState>,
+) -> CommandResult<Vec<crate::plugins::host::PluginPageType>> {
+    let Some(ref ph) = state.plugin_host else {
+        return Ok(vec![]);
+    };
+    let host = ph.lock().map_err(|e| e.to_string())?;
+    Ok(host.get_plugin_page_types())
+}
+
+/// Get plugin page types (stub when plugins feature disabled)
+#[cfg(not(feature = "plugins"))]
+#[tauri::command]
+pub fn get_plugin_page_types(_state: State<AppState>) -> CommandResult<Vec<serde_json::Value>> {
+    Ok(vec![])
+}
+
+/// Render a plugin page
+#[cfg(feature = "plugins")]
+#[tauri::command(rename_all = "camelCase")]
+pub fn render_plugin_page(
+    state: State<AppState>,
+    plugin_id: String,
+    page_type_id: String,
+    page_data: serde_json::Value,
+) -> CommandResult<serde_json::Value> {
+    let Some(ref ph) = state.plugin_host else {
+        return Err("Plugin host not available".to_string());
+    };
+    let host = ph.lock().map_err(|e| e.to_string())?;
+    host.render_plugin_page(&plugin_id, &page_type_id, &page_data)
+        .map_err(|e| e.to_string())
+}
+
+/// Render plugin page (stub when plugins feature disabled)
+#[cfg(not(feature = "plugins"))]
+#[tauri::command(rename_all = "camelCase")]
+pub fn render_plugin_page(
+    _state: State<AppState>,
+    _plugin_id: String,
+    _page_type_id: String,
+    _page_data: serde_json::Value,
+) -> CommandResult<serde_json::Value> {
+    Err("Plugins feature not enabled".to_string())
+}
+
+/// Handle an interactive action from a plugin page
+#[cfg(feature = "plugins")]
+#[tauri::command(rename_all = "camelCase")]
+pub fn handle_plugin_page_action(
+    state: State<AppState>,
+    plugin_id: String,
+    action: serde_json::Value,
+) -> CommandResult<serde_json::Value> {
+    let Some(ref ph) = state.plugin_host else {
+        return Err("Plugin host not available".to_string());
+    };
+    let host = ph.lock().map_err(|e| e.to_string())?;
+    host.handle_plugin_page_action(&plugin_id, &action)
+        .map_err(|e| e.to_string())
+}
+
+/// Handle plugin page action (stub when plugins feature disabled)
+#[cfg(not(feature = "plugins"))]
+#[tauri::command(rename_all = "camelCase")]
+pub fn handle_plugin_page_action(
+    _state: State<AppState>,
+    _plugin_id: String,
+    _action: serde_json::Value,
 ) -> CommandResult<serde_json::Value> {
     Err("Plugins feature not enabled".to_string())
 }

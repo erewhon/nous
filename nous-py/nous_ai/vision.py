@@ -74,7 +74,7 @@ async def analyze_screenshot(
 
     if ptype == ProviderType.ANTHROPIC:
         result = await _analyze_anthropic(
-            b64_image, user_prompt, api_key, model or "claude-sonnet-4-20250514"
+            b64_image, user_prompt, api_key, model or "claude-sonnet-4-6-20260320"
         )
     elif ptype == ProviderType.OLLAMA:
         result = await _analyze_ollama(
@@ -83,7 +83,7 @@ async def analyze_screenshot(
     else:
         # OpenAI-compatible (OpenAI, LMStudio)
         result = await _analyze_openai(
-            b64_image, user_prompt, api_key, model or "gpt-4o", base_url
+            b64_image, user_prompt, api_key, model or "gpt-4.1", base_url
         )
 
     return result

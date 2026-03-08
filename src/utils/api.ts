@@ -96,7 +96,9 @@ export async function createPage(
   folderId?: string,
   parentPageId?: string,
   sectionId?: string,
-  templateId?: string
+  templateId?: string,
+  pluginPageType?: string,
+  pluginData?: unknown
 ): Promise<Page> {
   return invoke<Page>("create_page", {
     notebookId,
@@ -105,6 +107,8 @@ export async function createPage(
     parentPageId,
     sectionId,
     templateId,
+    pluginPageType,
+    pluginData,
   });
 }
 
