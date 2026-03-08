@@ -18,7 +18,6 @@ interface GuestSidebarProps {
 }
 
 export function GuestSidebar({ pages, currentPageId, onSelectPage }: GuestSidebarProps) {
-  // Group pages by folder
   const grouped = new Map<string, ManifestPage[]>();
   const rootPages: ManifestPage[] = [];
 
@@ -33,118 +32,40 @@ export function GuestSidebar({ pages, currentPageId, onSelectPage }: GuestSideba
   }
 
   return (
-    <div style={{
-      width: 240,
-      minWidth: 240,
-      borderRight: "1px solid #333",
-      backgroundColor: "#141425",
-      display: "flex",
-      flexDirection: "column",
-      overflow: "hidden",
-    }}>
-      {/* Header */}
-      <div style={{
-        padding: "0.75rem 1rem",
-        borderBottom: "1px solid #333",
-        fontSize: "0.75rem",
-        fontWeight: 600,
-        color: "#e0e0e0",
-        textTransform: "uppercase",
-        letterSpacing: "0.05em",
-      }}>
+    <div className="guest-sidebar">
+      <div className="guest-sidebar-header">
         Pages ({pages.length})
       </div>
 
-      {/* Page list */}
-      <div style={{
-        flex: 1,
-        overflowY: "auto",
-        padding: "0.5rem 0",
-      }}>
-        {/* Root pages */}
+      <div className="guest-sidebar-list">
         {rootPages.map((page) => (
-          <PageItem
+          <button
             key={page.id}
-            page={page}
-            isActive={page.id === currentPageId}
+            className={`guest-sidebar-page ${page.id === currentPageId ? "active" : ""}`}
             onClick={() => onSelectPage(page.id)}
-          />
+          >
+            {page.title || "Untitled"}
+          </button>
         ))}
 
-        {/* Grouped pages */}
         {[...grouped.entries()].map(([folderId, folderPages]) => {
-          // Get folder name from any page in the group
           const folderName = folderPages[0]?.folderName || "Folder";
           return (
-          <div key={folderId}>
-            <div style={{
-              padding: "0.5rem 1rem 0.25rem",
-              fontSize: "0.65rem",
-              fontWeight: 600,
-              color: "#666",
-              textTransform: "uppercase",
-              letterSpacing: "0.05em",
-            }}>
-              {folderName}
+            <div key={folderId}>
+              <div className="guest-sidebar-folder">{folderName}</div>
+              {folderPages.map((page) => (
+                <button
+                  key={page.id}
+                  className={`guest-sidebar-page indented ${page.id === currentPageId ? "active" : ""}`}
+                  onClick={() => onSelectPage(page.id)}
+                >
+                  {page.title || "Untitled"}
+                </button>
+              ))}
             </div>
-            {folderPages.map((page) => (
-              <PageItem
-                key={page.id}
-                page={page}
-                isActive={page.id === currentPageId}
-                onClick={() => onSelectPage(page.id)}
-                indent
-              />
-            ))}
-          </div>
           );
         })}
       </div>
     </div>
-  );
-}
-
-function PageItem({
-  page,
-  isActive,
-  onClick,
-  indent = false,
-}: {
-  page: ManifestPage;
-  isActive: boolean;
-  onClick: () => void;
-  indent?: boolean;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        display: "block",
-        width: "100%",
-        textAlign: "left",
-        padding: `0.375rem ${indent ? "1.5rem" : "1rem"}`,
-        fontSize: "0.8rem",
-        color: isActive ? "#e0e0e0" : "#999",
-        backgroundColor: isActive ? "rgba(59, 130, 246, 0.15)" : "transparent",
-        border: "none",
-        cursor: "pointer",
-        borderLeft: isActive ? "2px solid #3b82f6" : "2px solid transparent",
-        overflow: "hidden",
-        textOverflow: "ellipsis",
-        whiteSpace: "nowrap",
-      }}
-      onMouseEnter={(e) => {
-        if (!isActive) {
-          (e.target as HTMLElement).style.backgroundColor = "rgba(255,255,255,0.05)";
-        }
-      }}
-      onMouseLeave={(e) => {
-        if (!isActive) {
-          (e.target as HTMLElement).style.backgroundColor = "transparent";
-        }
-      }}
-    >
-      {page.title || "Untitled"}
-    </button>
   );
 }
