@@ -28,7 +28,8 @@ bitflags::bitflags! {
         const BLOCK_RENDER    = 0b0010_0000_0000_0000;
         const EXPORT          = 0b0100_0000_0000_0000;
         const IMPORT          = 0b1000_0000_0000_0000;
-        const SIDEBAR_PANEL   = 0b0001_0000_0000_0000_0000;
+        const SIDEBAR_PANEL       = 0b0001_0000_0000_0000_0000;
+        const EDITOR_DECORATION   = 0b0010_0000_0000_0000_0000;
     }
 }
 
@@ -55,6 +56,7 @@ impl CapabilitySet {
                 "export" => CapabilitySet::EXPORT,
                 "import" => CapabilitySet::IMPORT,
                 "sidebar_panel" => CapabilitySet::SIDEBAR_PANEL,
+                "editor_decoration" => CapabilitySet::EDITOR_DECORATION,
                 other => {
                     return Err(PluginError::ManifestParse(format!(
                         "unknown capability: {other}"
@@ -87,6 +89,7 @@ impl fmt::Display for CapabilitySet {
             (CapabilitySet::EXPORT, "export"),
             (CapabilitySet::IMPORT, "import"),
             (CapabilitySet::SIDEBAR_PANEL, "sidebar_panel"),
+            (CapabilitySet::EDITOR_DECORATION, "editor_decoration"),
         ]
         .iter()
         .filter(|(cap, _)| self.contains(*cap))
@@ -144,6 +147,10 @@ pub enum HookPoint {
     SidebarPanel {
         panel_id: String,
     },
+    /// Editor decoration overlay
+    EditorDecoration {
+        decoration_id: String,
+    },
 }
 
 impl HookPoint {
@@ -182,6 +189,10 @@ impl HookPoint {
             other if other.starts_with("sidebar_panel:") => {
                 let panel_id = other.strip_prefix("sidebar_panel:").unwrap().to_string();
                 Ok(HookPoint::SidebarPanel { panel_id })
+            }
+            other if other.starts_with("editor_decoration:") => {
+                let decoration_id = other.strip_prefix("editor_decoration:").unwrap().to_string();
+                Ok(HookPoint::EditorDecoration { decoration_id })
             }
             other => Err(PluginError::ManifestParse(format!(
                 "unknown hook point: {other}"

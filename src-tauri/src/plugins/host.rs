@@ -84,6 +84,16 @@ pub struct PluginPanelType {
     pub default_width: Option<u32>,
 }
 
+/// Description of a decoration type provided by a plugin.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginDecorationType {
+    pub plugin_id: String,
+    pub decoration_id: String,
+    pub label: String,
+    pub description: Option<String>,
+}
+
 /// Plugin manifest with runtime enabled/disabled status.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -972,6 +982,80 @@ impl PluginHost {
         })?;
 
         plugin.call("handle_panel_action", action)
+    }
+
+    /// Get decoration types registered by plugins.
+    pub fn get_plugin_decoration_types(&self) -> Vec<PluginDecorationType> {
+        let mut types = Vec::new();
+
+        for manifest in self.registry.list_manifests() {
+            if !self.is_plugin_enabled(&manifest.id) {
+                continue;
+            }
+            for hook in &manifest.hooks {
+                if let HookPoint::EditorDecoration { decoration_id } = hook {
+                    let plugin_mutex = match self.registry.get(&manifest.id) {
+                        Some(m) => m,
+                        None => continue,
+                    };
+
+                    let mut plugin = match plugin_mutex.lock() {
+                        Ok(p) => p,
+                        Err(e) => {
+                            log::warn!("Failed to lock plugin '{}' for describe_decorations: {e}", manifest.id);
+                            continue;
+                        }
+                    };
+
+                    match plugin.call("describe_decorations", &serde_json::Value::Null) {
+                        Ok(val) => {
+                            let label = val.get("label").and_then(|v| v.as_str()).unwrap_or(decoration_id.as_str()).to_string();
+                            let description = val.get("description").and_then(|v| v.as_str()).map(|s| s.to_string());
+                            types.push(PluginDecorationType {
+                                plugin_id: manifest.id.clone(),
+                                decoration_id: decoration_id.clone(),
+                                label,
+                                description,
+                            });
+                        }
+                        Err(e) => {
+                            log::warn!("Plugin '{}' describe_decorations failed: {e}", manifest.id);
+                        }
+                    }
+                }
+            }
+        }
+
+        types
+    }
+
+    /// Compute decorations for a page. The plugin receives block content and
+    /// returns a list of decoration instructions (highlights, badges, etc.).
+    pub fn compute_decorations(
+        &self,
+        plugin_id: &str,
+        decoration_id: &str,
+        blocks: &serde_json::Value,
+    ) -> Result<serde_json::Value, PluginError> {
+        if !self.is_plugin_enabled(plugin_id) {
+            return Err(PluginError::Runtime(format!(
+                "plugin '{plugin_id}' is disabled"
+            )));
+        }
+        let plugin_mutex = self.registry.get(plugin_id).ok_or_else(|| {
+            PluginError::NotFound(plugin_id.to_string())
+        })?;
+
+        let input = json!({
+            "decoration_id": decoration_id,
+            "blocks": blocks,
+        });
+
+        let mut plugin = plugin_mutex.lock().map_err(|e| {
+            PluginError::Runtime(format!("lock: {e}"))
+        })?;
+
+        plugin.call("compute_decorations", &input)
     }
 
     /// Get plugins directory path

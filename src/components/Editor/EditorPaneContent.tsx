@@ -30,6 +30,7 @@ import { DatabaseEditor, type DatabaseUndoRedoState } from "../Database";
 import { HtmlViewer } from "../Html";
 import { OutlinePanel } from "./OutlinePanel";
 import { PluginSidebarPanel } from "./PluginSidebarPanel";
+import { usePluginDecorations } from "./usePluginDecorations";
 import { BacklinksPanel } from "./BacklinksPanel";
 import { SimilarPagesPanel } from "./SimilarPagesPanel";
 import type { EditorData, Page } from "../../types/page";
@@ -141,6 +142,12 @@ export function EditorPaneContent({
     () => panelTypes.filter((p) => openPanels.has(`${p.pluginId}:${p.panelId}`)),
     [panelTypes, openPanels]
   );
+
+  // Plugin editor decorations (highlights, badges on blocks)
+  usePluginDecorations({
+    enabled: isStandardPage && !zenMode && !!selectedPage,
+    blocks: selectedPage?.content?.blocks || [],
+  });
 
   // Typewriter scrolling for zen mode
   useTypewriterScroll({

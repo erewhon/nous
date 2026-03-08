@@ -452,6 +452,55 @@ pub fn handle_plugin_panel_action(
     Err("Plugins feature not enabled".to_string())
 }
 
+/// Get editor decoration types registered by plugins
+#[cfg(feature = "plugins")]
+#[tauri::command]
+pub fn get_plugin_decoration_types(
+    state: State<AppState>,
+) -> CommandResult<Vec<crate::plugins::host::PluginDecorationType>> {
+    let Some(ref ph) = state.plugin_host else {
+        return Ok(vec![]);
+    };
+    let host = ph.lock().map_err(|e| e.to_string())?;
+    Ok(host.get_plugin_decoration_types())
+}
+
+/// Get plugin decoration types (stub when plugins feature disabled)
+#[cfg(not(feature = "plugins"))]
+#[tauri::command]
+pub fn get_plugin_decoration_types(_state: State<AppState>) -> CommandResult<Vec<serde_json::Value>> {
+    Ok(vec![])
+}
+
+/// Compute decorations for a page's blocks
+#[cfg(feature = "plugins")]
+#[tauri::command(rename_all = "camelCase")]
+pub fn compute_plugin_decorations(
+    state: State<AppState>,
+    plugin_id: String,
+    decoration_id: String,
+    blocks: serde_json::Value,
+) -> CommandResult<serde_json::Value> {
+    let Some(ref ph) = state.plugin_host else {
+        return Err("Plugin host not available".to_string());
+    };
+    let host = ph.lock().map_err(|e| e.to_string())?;
+    host.compute_decorations(&plugin_id, &decoration_id, &blocks)
+        .map_err(|e| e.to_string())
+}
+
+/// Compute plugin decorations (stub when plugins feature disabled)
+#[cfg(not(feature = "plugins"))]
+#[tauri::command(rename_all = "camelCase")]
+pub fn compute_plugin_decorations(
+    _state: State<AppState>,
+    _plugin_id: String,
+    _decoration_id: String,
+    _blocks: serde_json::Value,
+) -> CommandResult<serde_json::Value> {
+    Err("Plugins feature not enabled".to_string())
+}
+
 /// Enable or disable a plugin by ID
 #[cfg(feature = "plugins")]
 #[tauri::command]

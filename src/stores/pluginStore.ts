@@ -65,6 +65,13 @@ export interface PluginPanelType {
   defaultWidth?: number;
 }
 
+export interface PluginDecorationType {
+  pluginId: string;
+  decorationId: string;
+  label: string;
+  description?: string;
+}
+
 interface PluginStore {
   plugins: PluginManifest[];
   commands: PluginCommand[];
@@ -74,6 +81,7 @@ interface PluginStore {
   importFormats: PluginImportFormat[];
   panelTypes: PluginPanelType[];
   openPanels: Set<string>; // Set of "pluginId:panelId"
+  decorationTypes: PluginDecorationType[];
   loading: boolean;
 
   fetchPlugins: () => Promise<void>;
@@ -97,6 +105,8 @@ interface PluginStore {
   handlePanelAction: (pluginId: string, action: unknown) => Promise<unknown>;
   togglePanel: (pluginId: string, panelId: string) => void;
   isPanelOpen: (pluginId: string, panelId: string) => boolean;
+  fetchDecorationTypes: () => Promise<void>;
+  computeDecorations: (pluginId: string, decorationId: string, blocks: unknown) => Promise<unknown>;
 }
 
 export const usePluginStore = create<PluginStore>((set) => ({
@@ -108,6 +118,7 @@ export const usePluginStore = create<PluginStore>((set) => ({
   importFormats: [],
   panelTypes: [],
   openPanels: new Set<string>(),
+  decorationTypes: [],
   loading: false,
 
   fetchPlugins: async () => {
@@ -254,6 +265,19 @@ export const usePluginStore = create<PluginStore>((set) => ({
       }
       return { openPanels: next };
     });
+  },
+
+  fetchDecorationTypes: async () => {
+    try {
+      const decorationTypes = await invoke<PluginDecorationType[]>("get_plugin_decoration_types");
+      set({ decorationTypes });
+    } catch (e) {
+      console.error("Failed to fetch plugin decoration types:", e);
+    }
+  },
+
+  computeDecorations: async (pluginId: string, decorationId: string, blocks: unknown) => {
+    return invoke("compute_plugin_decorations", { pluginId, decorationId, blocks });
   },
 
   isPanelOpen: (pluginId: string, panelId: string): boolean => {

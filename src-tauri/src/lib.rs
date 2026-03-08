@@ -1017,6 +1017,8 @@ pub fn run() {
             commands::get_plugin_panel_types,
             commands::render_plugin_panel,
             commands::handle_plugin_panel_action,
+            commands::get_plugin_decoration_types,
+            commands::compute_plugin_decorations,
             // Freeze watchdog
             freeze_watchdog::freeze_pong,
         ])
