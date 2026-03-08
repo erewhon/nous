@@ -46,10 +46,17 @@ local function find_or_create_food_db(notebook_id)
   -- Create new database
   local props = nous.json_encode({
     { name = "Food Name", type = "text" },
+    { name = "Meal", type = "select", options = {
+      { label = "Breakfast", color = "#f59e0b" },
+      { label = "Lunch", color = "#10b981" },
+      { label = "Dinner", color = "#3b82f6" },
+      { label = "Snack", color = "#8b5cf6" },
+    }},
     { name = "Calories", type = "number" },
     { name = "Protein", type = "number" },
     { name = "Carbs", type = "number" },
     { name = "Fat", type = "number" },
+    { name = "Fiber", type = "number" },
     { name = "Serving", type = "text" },
     { name = "Date", type = "date" }
   })
@@ -266,7 +273,7 @@ function render_view(input_json)
 
   -- Find relevant columns by name
   local col_map = {}
-  local target_cols = { calories = true, protein = true, carbs = true, fat = true, date = true, ["food name"] = true }
+  local target_cols = { calories = true, protein = true, carbs = true, fat = true, fiber = true, date = true, ["food name"] = true }
   for _, prop in ipairs(properties) do
     local lower = string.lower(prop.name)
     if target_cols[lower] then
@@ -294,7 +301,7 @@ function render_view(input_json)
     end
 
     if not daily[date_str] then
-      daily[date_str] = { calories = 0, protein = 0, carbs = 0, fat = 0, count = 0 }
+      daily[date_str] = { calories = 0, protein = 0, carbs = 0, fat = 0, fiber = 0, count = 0 }
       table.insert(dates_order, date_str)
     end
     local d = daily[date_str]
@@ -303,6 +310,7 @@ function render_view(input_json)
     if col_map["protein"] then d.protein = d.protein + (tonumber(cells[col_map["protein"]] or "0") or 0) end
     if col_map["carbs"] then d.carbs = d.carbs + (tonumber(cells[col_map["carbs"]] or "0") or 0) end
     if col_map["fat"] then d.fat = d.fat + (tonumber(cells[col_map["fat"]] or "0") or 0) end
+    if col_map["fiber"] then d.fiber = d.fiber + (tonumber(cells[col_map["fiber"]] or "0") or 0) end
   end
 
   -- Sort dates descending, take last 7
@@ -395,14 +403,15 @@ function render_view(input_json)
   local summary = ""
   if today_data then
     summary = string.format([[
-<div style="display:flex;gap:16px;margin-top:12px;padding:10px;background:#1a1a2e;border-radius:6px;justify-content:center;">
+<div style="display:flex;gap:16px;margin-top:12px;padding:10px;background:#1a1a2e;border-radius:6px;justify-content:center;flex-wrap:wrap;">
   <div style="text-align:center;"><div style="font-size:20px;font-weight:700;color:#e0e0e0;">%d</div><div style="font-size:10px;color:#888;">Calories</div></div>
   <div style="text-align:center;"><div style="font-size:20px;font-weight:700;color:#22c55e;">%sg</div><div style="font-size:10px;color:#888;">Protein</div></div>
   <div style="text-align:center;"><div style="font-size:20px;font-weight:700;color:#eab308;">%sg</div><div style="font-size:10px;color:#888;">Carbs</div></div>
   <div style="text-align:center;"><div style="font-size:20px;font-weight:700;color:#ef4444;">%sg</div><div style="font-size:10px;color:#888;">Fat</div></div>
+  <div style="text-align:center;"><div style="font-size:20px;font-weight:700;color:#06b6d4;">%sg</div><div style="font-size:10px;color:#888;">Fiber</div></div>
   <div style="text-align:center;"><div style="font-size:20px;font-weight:700;color:#ccc;">%d</div><div style="font-size:10px;color:#888;">Items</div></div>
 </div>
-]], today_data.calories, today_data.protein, today_data.carbs, today_data.fat, today_data.count)
+]], today_data.calories, today_data.protein, today_data.carbs, today_data.fat, today_data.fiber, today_data.count)
   end
 
   local html = '<div style="padding:16px;overflow-x:auto;">'

@@ -40,6 +40,18 @@ function describe_commands()
       subtitle = "Items, Categories, and Locations databases for stock management",
       keywords = { "inventory", "stock", "items", "warehouse", "template" },
     },
+    {
+      id = "template_food_log",
+      title = "Create Food & Nutrition Log",
+      subtitle = "Track meals, calories, macros, and daily nutrition with goals",
+      keywords = { "food", "nutrition", "calories", "diet", "meals", "macros", "template" },
+    },
+    {
+      id = "template_time_tracking",
+      title = "Create Time Tracking Workspace",
+      subtitle = "Time entries, projects, and clients for tracking billable hours",
+      keywords = { "time", "tracking", "hours", "billable", "timesheet", "clients", "template" },
+    },
   })
 end
 
@@ -62,6 +74,10 @@ function handle_command(input_json)
     return create_habit_tracker(notebook_id)
   elseif cmd_id == "template_inventory" then
     return create_inventory(notebook_id)
+  elseif cmd_id == "template_food_log" then
+    return create_food_log(notebook_id)
+  elseif cmd_id == "template_time_tracking" then
+    return create_time_tracking(notebook_id)
   end
 
   return nous.json_encode({ success = false, error = "Unknown command" })
@@ -588,5 +604,212 @@ function create_inventory(notebook_id)
   return nous.json_encode({
     success = true,
     message = "Inventory Tracker created with 3 databases: Categories, Locations, and Inventory Items.",
+  })
+end
+
+-- =============================================================================
+-- Food & Nutrition Log
+-- =============================================================================
+
+function create_food_log(notebook_id)
+  -- 1. Nutrition Goals
+  local goals = nous.json_decode(nous.database_create(
+    notebook_id, "Nutrition Goals",
+    nous.json_encode({
+      { name = "Name", type = "text" },
+      { name = "Daily Calories", type = "number" },
+      { name = "Daily Protein", type = "number" },
+      { name = "Daily Carbs", type = "number" },
+      { name = "Daily Fat", type = "number" },
+      { name = "Daily Fiber", type = "number" },
+      { name = "Active", type = "checkbox" },
+      { name = "Notes", type = "text" },
+    })
+  ))
+
+  -- 2. Food Log
+  local food_log = nous.json_decode(nous.database_create(
+    notebook_id, "Food Log",
+    nous.json_encode({
+      { name = "Food Name", type = "text" },
+      { name = "Meal", type = "select", options = {
+        { label = "Breakfast", color = "#f59e0b" },
+        { label = "Lunch", color = "#10b981" },
+        { label = "Dinner", color = "#3b82f6" },
+        { label = "Snack", color = "#8b5cf6" },
+      }},
+      { name = "Calories", type = "number" },
+      { name = "Protein", type = "number" },
+      { name = "Carbs", type = "number" },
+      { name = "Fat", type = "number" },
+      { name = "Fiber", type = "number" },
+      { name = "Serving", type = "text" },
+      { name = "Date", type = "date" },
+      { name = "Notes", type = "text" },
+    })
+  ))
+
+  -- 3. Recipes (optional companion)
+  local recipes = nous.json_decode(nous.database_create(
+    notebook_id, "Recipes",
+    nous.json_encode({
+      { name = "Name", type = "text" },
+      { name = "Category", type = "select", options = {
+        { label = "Breakfast", color = "#f59e0b" },
+        { label = "Lunch", color = "#10b981" },
+        { label = "Dinner", color = "#3b82f6" },
+        { label = "Snack", color = "#8b5cf6" },
+        { label = "Dessert", color = "#ec4899" },
+        { label = "Drink", color = "#06b6d4" },
+      }},
+      { name = "Prep Time", type = "number" },
+      { name = "Calories Per Serving", type = "number" },
+      { name = "Servings", type = "number" },
+      { name = "Ingredients", type = "text" },
+      { name = "Instructions", type = "text" },
+      { name = "Source", type = "url" },
+    })
+  ))
+
+  -- Sample goals
+  nous.database_add_rows(notebook_id, goals.id, nous.json_encode({
+    { Name = "Maintenance", ["Daily Calories"] = 2000, ["Daily Protein"] = 120, ["Daily Carbs"] = 250, ["Daily Fat"] = 65, ["Daily Fiber"] = 30, Active = true },
+    { Name = "Cut", ["Daily Calories"] = 1600, ["Daily Protein"] = 150, ["Daily Carbs"] = 150, ["Daily Fat"] = 50, ["Daily Fiber"] = 35, Active = false, Notes = "Higher protein for muscle retention" },
+  }))
+
+  -- Sample food entries
+  local today = nous.current_date().iso
+  nous.database_add_rows(notebook_id, food_log.id, nous.json_encode({
+    { ["Food Name"] = "Oatmeal with berries", Meal = "Breakfast", Calories = 350, Protein = 12, Carbs = 55, Fat = 8, Fiber = 6, Serving = "1 bowl", Date = today },
+    { ["Food Name"] = "Grilled chicken salad", Meal = "Lunch", Calories = 450, Protein = 38, Carbs = 20, Fat = 22, Fiber = 5, Serving = "1 plate", Date = today },
+    { ["Food Name"] = "Greek yogurt", Meal = "Snack", Calories = 150, Protein = 15, Carbs = 12, Fat = 5, Fiber = 0, Serving = "200g", Date = today },
+    { ["Food Name"] = "Salmon with rice", Meal = "Dinner", Calories = 620, Protein = 40, Carbs = 55, Fat = 22, Fiber = 3, Serving = "1 plate", Date = today },
+  }))
+
+  -- Sample recipes
+  nous.database_add_rows(notebook_id, recipes.id, nous.json_encode({
+    { Name = "Overnight Oats", Category = "Breakfast", ["Prep Time"] = 5, ["Calories Per Serving"] = 350, Servings = 1, Ingredients = "1/2 cup oats, 1/2 cup milk, 1 tbsp chia seeds, berries" },
+    { Name = "Chicken Caesar Salad", Category = "Lunch", ["Prep Time"] = 15, ["Calories Per Serving"] = 420, Servings = 2, Ingredients = "Romaine, grilled chicken, parmesan, croutons, Caesar dressing" },
+  }))
+
+  nous.log_info("Food & Nutrition Log created")
+  return nous.json_encode({
+    success = true,
+    message = "Food & Nutrition Log created with 3 databases: Food Log, Nutrition Goals, and Recipes.",
+  })
+end
+
+-- =============================================================================
+-- Time Tracking
+-- =============================================================================
+
+function create_time_tracking(notebook_id)
+  -- 1. Clients
+  local clients = nous.json_decode(nous.database_create(
+    notebook_id, "Clients",
+    nous.json_encode({
+      { name = "Name", type = "text" },
+      { name = "Contact", type = "text" },
+      { name = "Email", type = "url" },
+      { name = "Rate", type = "number" },
+      { name = "Status", type = "select", options = {
+        { label = "Active", color = "#10b981" },
+        { label = "Inactive", color = "#6b7280" },
+        { label = "Prospect", color = "#f59e0b" },
+      }},
+      { name = "Notes", type = "text" },
+    })
+  ))
+
+  -- 2. Projects
+  local projects = nous.json_decode(nous.database_create(
+    notebook_id, "Projects",
+    nous.json_encode({
+      { name = "Name", type = "text" },
+      { name = "Status", type = "select", options = {
+        { label = "Active", color = "#10b981" },
+        { label = "On Hold", color = "#f59e0b" },
+        { label = "Completed", color = "#3b82f6" },
+        { label = "Archived", color = "#6b7280" },
+      }},
+      { name = "Budget Hours", type = "number" },
+      { name = "Rate Override", type = "number" },
+      { name = "Start Date", type = "date" },
+      { name = "Due Date", type = "date" },
+      { name = "Description", type = "text" },
+    })
+  ))
+
+  -- 3. Time Entries
+  local entries = nous.json_decode(nous.database_create(
+    notebook_id, "Time Entries",
+    nous.json_encode({
+      { name = "Description", type = "text" },
+      { name = "Date", type = "date" },
+      { name = "Hours", type = "number" },
+      { name = "Billable", type = "checkbox" },
+      { name = "Category", type = "select", options = {
+        { label = "Development", color = "#3b82f6" },
+        { label = "Design", color = "#8b5cf6" },
+        { label = "Meeting", color = "#f59e0b" },
+        { label = "Research", color = "#06b6d4" },
+        { label = "Admin", color = "#6b7280" },
+        { label = "Testing", color = "#10b981" },
+        { label = "Support", color = "#ef4444" },
+      }},
+      { name = "Notes", type = "text" },
+    })
+  ))
+
+  -- Relations
+  -- Projects -> Client
+  nous.database_update_properties(notebook_id, projects.id, nous.json_encode({
+    { name = "Client", type = "relation", relationConfig = {
+      databasePageId = clients.id, displayProperty = "Name", direction = "forward",
+    }},
+  }))
+
+  -- Time Entries -> Project
+  nous.database_update_properties(notebook_id, entries.id, nous.json_encode({
+    { name = "Project", type = "relation", relationConfig = {
+      databasePageId = projects.id, displayProperty = "Name", direction = "forward",
+    }},
+  }))
+
+  -- Time Entries -> Client
+  nous.database_update_properties(notebook_id, entries.id, nous.json_encode({
+    { name = "Client", type = "relation", relationConfig = {
+      databasePageId = clients.id, displayProperty = "Name", direction = "forward",
+    }},
+  }))
+
+  -- Sample data
+  local today = nous.current_date().iso
+  nous.database_add_rows(notebook_id, clients.id, nous.json_encode({
+    { Name = "Acme Corp", Contact = "Jane Smith", Email = "jane@acme.example.com", Rate = 150, Status = "Active" },
+    { Name = "Personal", Status = "Active", Notes = "Internal / non-billable work" },
+  }))
+
+  nous.database_add_rows(notebook_id, projects.id, nous.json_encode({
+    { Name = "Website Redesign", Status = "Active", ["Budget Hours"] = 80, ["Start Date"] = today, Description = "Full site overhaul" },
+    { Name = "API Integration", Status = "Active", ["Budget Hours"] = 40, Description = "Third-party API integration" },
+    { Name = "Internal Tools", Status = "Active", Notes = "Non-billable internal work" },
+  }))
+
+  nous.database_add_rows(notebook_id, entries.id, nous.json_encode({
+    { Description = "Homepage design mockup", Date = today, Hours = 3.5, Billable = true, Category = "Design" },
+    { Description = "API endpoint implementation", Date = today, Hours = 2.0, Billable = true, Category = "Development" },
+    { Description = "Client kickoff meeting", Date = today, Hours = 1.0, Billable = true, Category = "Meeting" },
+    { Description = "Sprint planning", Date = nous.date_offset(today, -1), Hours = 0.5, Billable = false, Category = "Admin" },
+    { Description = "Auth flow research", Date = nous.date_offset(today, -1), Hours = 2.5, Billable = true, Category = "Research" },
+    { Description = "Component library setup", Date = nous.date_offset(today, -1), Hours = 4.0, Billable = true, Category = "Development" },
+    { Description = "QA review", Date = nous.date_offset(today, -2), Hours = 1.5, Billable = true, Category = "Testing" },
+    { Description = "Bug fixes", Date = nous.date_offset(today, -2), Hours = 3.0, Billable = true, Category = "Development" },
+  }))
+
+  nous.log_info("Time Tracking workspace created")
+  return nous.json_encode({
+    success = true,
+    message = "Time Tracking workspace created with 3 databases: Clients, Projects, and Time Entries. Use rollup columns to see total hours per project.",
   })
 end
