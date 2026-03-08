@@ -376,6 +376,82 @@ pub fn execute_plugin_import(
     Err("Plugins feature not enabled".to_string())
 }
 
+/// Get sidebar panel types registered by plugins
+#[cfg(feature = "plugins")]
+#[tauri::command]
+pub fn get_plugin_panel_types(
+    state: State<AppState>,
+) -> CommandResult<Vec<crate::plugins::host::PluginPanelType>> {
+    let Some(ref ph) = state.plugin_host else {
+        return Ok(vec![]);
+    };
+    let host = ph.lock().map_err(|e| e.to_string())?;
+    Ok(host.get_plugin_panel_types())
+}
+
+/// Get plugin panel types (stub when plugins feature disabled)
+#[cfg(not(feature = "plugins"))]
+#[tauri::command]
+pub fn get_plugin_panel_types(_state: State<AppState>) -> CommandResult<Vec<serde_json::Value>> {
+    Ok(vec![])
+}
+
+/// Render a plugin sidebar panel
+#[cfg(feature = "plugins")]
+#[tauri::command(rename_all = "camelCase")]
+pub fn render_plugin_panel(
+    state: State<AppState>,
+    plugin_id: String,
+    panel_id: String,
+    context: serde_json::Value,
+) -> CommandResult<serde_json::Value> {
+    let Some(ref ph) = state.plugin_host else {
+        return Err("Plugin host not available".to_string());
+    };
+    let host = ph.lock().map_err(|e| e.to_string())?;
+    host.render_plugin_panel(&plugin_id, &panel_id, &context)
+        .map_err(|e| e.to_string())
+}
+
+/// Render plugin panel (stub when plugins feature disabled)
+#[cfg(not(feature = "plugins"))]
+#[tauri::command(rename_all = "camelCase")]
+pub fn render_plugin_panel(
+    _state: State<AppState>,
+    _plugin_id: String,
+    _panel_id: String,
+    _context: serde_json::Value,
+) -> CommandResult<serde_json::Value> {
+    Err("Plugins feature not enabled".to_string())
+}
+
+/// Handle an interactive action from a plugin sidebar panel
+#[cfg(feature = "plugins")]
+#[tauri::command(rename_all = "camelCase")]
+pub fn handle_plugin_panel_action(
+    state: State<AppState>,
+    plugin_id: String,
+    action: serde_json::Value,
+) -> CommandResult<serde_json::Value> {
+    let Some(ref ph) = state.plugin_host else {
+        return Err("Plugin host not available".to_string());
+    };
+    let host = ph.lock().map_err(|e| e.to_string())?;
+    host.handle_plugin_panel_action(&plugin_id, &action)
+        .map_err(|e| e.to_string())
+}
+
+/// Handle plugin panel action (stub when plugins feature disabled)
+#[cfg(not(feature = "plugins"))]
+#[tauri::command(rename_all = "camelCase")]
+pub fn handle_plugin_panel_action(
+    _state: State<AppState>,
+    _plugin_id: String,
+    _action: serde_json::Value,
+) -> CommandResult<serde_json::Value> {
+    Err("Plugins feature not enabled".to_string())
+}
+
 /// Enable or disable a plugin by ID
 #[cfg(feature = "plugins")]
 #[tauri::command]

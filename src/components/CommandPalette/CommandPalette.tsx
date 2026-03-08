@@ -61,7 +61,7 @@ export function CommandPalette({
   const { recentSearches, searchScope, searchMode, addRecentSearch, setSearchScope, setSearchMode, clearRecentSearches } =
     useSearchStore();
   const { actions, runAction: executeAction, openActionLibrary } = useActionStore();
-  const { commands: pluginCommands, fetchCommands: fetchPluginCommands, executeCommand: executePluginCommand, exportFormats: pluginExportFormats, fetchExportFormats: fetchPluginExportFormats, executeExport: executePluginExport, importFormats: pluginImportFormats, fetchImportFormats: fetchPluginImportFormats, executeImport: executePluginImport } = usePluginStore();
+  const { commands: pluginCommands, fetchCommands: fetchPluginCommands, executeCommand: executePluginCommand, exportFormats: pluginExportFormats, fetchExportFormats: fetchPluginExportFormats, executeExport: executePluginExport, importFormats: pluginImportFormats, fetchImportFormats: fetchPluginImportFormats, executeImport: executePluginImport, panelTypes: pluginPanelTypes, fetchPanelTypes: fetchPluginPanelTypes, togglePanel: togglePluginPanel, openPanels: pluginOpenPanels } = usePluginStore();
   const { isConfigured: ragConfigured, settings: ragSettings, hybridSearch, semanticSearch } = useRAGStore();
   const expertMode = useThemeStore((s) => s.expertMode);
 
@@ -71,8 +71,9 @@ export function CommandPalette({
       fetchPluginCommands();
       fetchPluginExportFormats();
       fetchPluginImportFormats();
+      fetchPluginPanelTypes();
     }
-  }, [isOpen, fetchPluginCommands, fetchPluginExportFormats, fetchPluginImportFormats]);
+  }, [isOpen, fetchPluginCommands, fetchPluginExportFormats, fetchPluginImportFormats, fetchPluginPanelTypes]);
 
   // Debounced search
   useEffect(() => {
@@ -714,6 +715,23 @@ export function CommandPalette({
       });
     }
 
+    // Add plugin panel toggle commands
+    for (const panel of pluginPanelTypes) {
+      const isOpen = pluginOpenPanels.has(`${panel.pluginId}:${panel.panelId}`);
+      cmds.push({
+        id: `panel-toggle-${panel.pluginId}-${panel.panelId}`,
+        title: `${isOpen ? "Hide" : "Show"} ${panel.label}`,
+        subtitle: "Sidebar Panel",
+        icon: <IconPanel />,
+        category: "action",
+        action: () => {
+          togglePluginPanel(panel.pluginId, panel.panelId);
+          onClose();
+        },
+        keywords: ["panel", "sidebar", panel.label.toLowerCase(), panel.panelId],
+      });
+    }
+
     // Only show local pages/notebooks if no search query (to avoid duplication)
     if (!query.trim()) {
       // Pages in current notebook
@@ -771,6 +789,9 @@ export function CommandPalette({
     openActionLibrary,
     pluginCommands,
     executePluginCommand,
+    pluginPanelTypes,
+    pluginOpenPanels,
+    togglePluginPanel,
     expertMode,
   ]);
 
@@ -1545,6 +1566,26 @@ function IconWand() {
       <path d="M17.8 6.2 19 5" />
       <path d="m3 21 9-9" />
       <path d="M12.2 6.2 11 5" />
+    </svg>
+  );
+}
+
+function IconPanel() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{ color: "var(--color-accent)" }}
+    >
+      <rect width="18" height="18" x="3" y="3" rx="2" />
+      <path d="M15 3v18" />
     </svg>
   );
 }

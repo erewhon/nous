@@ -28,6 +28,7 @@ bitflags::bitflags! {
         const BLOCK_RENDER    = 0b0010_0000_0000_0000;
         const EXPORT          = 0b0100_0000_0000_0000;
         const IMPORT          = 0b1000_0000_0000_0000;
+        const SIDEBAR_PANEL   = 0b0001_0000_0000_0000_0000;
     }
 }
 
@@ -53,6 +54,7 @@ impl CapabilitySet {
                 "block_render" => CapabilitySet::BLOCK_RENDER,
                 "export" => CapabilitySet::EXPORT,
                 "import" => CapabilitySet::IMPORT,
+                "sidebar_panel" => CapabilitySet::SIDEBAR_PANEL,
                 other => {
                     return Err(PluginError::ManifestParse(format!(
                         "unknown capability: {other}"
@@ -84,6 +86,7 @@ impl fmt::Display for CapabilitySet {
             (CapabilitySet::BLOCK_RENDER, "block_render"),
             (CapabilitySet::EXPORT, "export"),
             (CapabilitySet::IMPORT, "import"),
+            (CapabilitySet::SIDEBAR_PANEL, "sidebar_panel"),
         ]
         .iter()
         .filter(|(cap, _)| self.contains(*cap))
@@ -137,6 +140,10 @@ pub enum HookPoint {
     ImportFormat {
         format_id: String,
     },
+    /// Custom sidebar panel
+    SidebarPanel {
+        panel_id: String,
+    },
 }
 
 impl HookPoint {
@@ -171,6 +178,10 @@ impl HookPoint {
             other if other.starts_with("import_format:") => {
                 let format_id = other.strip_prefix("import_format:").unwrap().to_string();
                 Ok(HookPoint::ImportFormat { format_id })
+            }
+            other if other.starts_with("sidebar_panel:") => {
+                let panel_id = other.strip_prefix("sidebar_panel:").unwrap().to_string();
+                Ok(HookPoint::SidebarPanel { panel_id })
             }
             other => Err(PluginError::ManifestParse(format!(
                 "unknown hook point: {other}"

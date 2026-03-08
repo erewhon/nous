@@ -37,6 +37,7 @@ static BUILTIN_PLUGINS: &[(&str, &str)] = &[
     ("database_templates", include_str!("builtins/database_templates.lua")),
     ("export_revealjs", include_str!("builtins/export_revealjs.lua")),
     ("export_print", include_str!("builtins/export_print.lua")),
+    ("writing_stats_panel", include_str!("builtins/writing_stats_panel.lua")),
 ];
 
 /// Scan a directory for plugin files and return loaded (but not yet initialized) plugins.

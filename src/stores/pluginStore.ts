@@ -57,6 +57,14 @@ export interface PluginImportFormat {
   iconSvg?: string;
 }
 
+export interface PluginPanelType {
+  pluginId: string;
+  panelId: string;
+  label: string;
+  iconSvg?: string;
+  defaultWidth?: number;
+}
+
 interface PluginStore {
   plugins: PluginManifest[];
   commands: PluginCommand[];
@@ -64,6 +72,8 @@ interface PluginStore {
   blockTypes: PluginBlockType[];
   exportFormats: PluginExportFormat[];
   importFormats: PluginImportFormat[];
+  panelTypes: PluginPanelType[];
+  openPanels: Set<string>; // Set of "pluginId:panelId"
   loading: boolean;
 
   fetchPlugins: () => Promise<void>;
@@ -82,6 +92,11 @@ interface PluginStore {
   renderExportOptions: (pluginId: string, formatId: string) => Promise<unknown>;
   fetchImportFormats: () => Promise<void>;
   executeImport: (pluginId: string, formatId: string, fileContent: string, fileName: string, notebookId: string) => Promise<unknown>;
+  fetchPanelTypes: () => Promise<void>;
+  renderPanel: (pluginId: string, panelId: string, context: unknown) => Promise<unknown>;
+  handlePanelAction: (pluginId: string, action: unknown) => Promise<unknown>;
+  togglePanel: (pluginId: string, panelId: string) => void;
+  isPanelOpen: (pluginId: string, panelId: string) => boolean;
 }
 
 export const usePluginStore = create<PluginStore>((set) => ({
@@ -91,6 +106,8 @@ export const usePluginStore = create<PluginStore>((set) => ({
   blockTypes: [],
   exportFormats: [],
   importFormats: [],
+  panelTypes: [],
+  openPanels: new Set<string>(),
   loading: false,
 
   fetchPlugins: async () => {
@@ -207,5 +224,39 @@ export const usePluginStore = create<PluginStore>((set) => ({
 
   executeImport: async (pluginId: string, formatId: string, fileContent: string, fileName: string, notebookId: string) => {
     return invoke("execute_plugin_import", { pluginId, formatId, fileContent, fileName, notebookId });
+  },
+
+  fetchPanelTypes: async () => {
+    try {
+      const panelTypes = await invoke<PluginPanelType[]>("get_plugin_panel_types");
+      set({ panelTypes });
+    } catch (e) {
+      console.error("Failed to fetch plugin panel types:", e);
+    }
+  },
+
+  renderPanel: async (pluginId: string, panelId: string, context: unknown) => {
+    return invoke("render_plugin_panel", { pluginId, panelId, context });
+  },
+
+  handlePanelAction: async (pluginId: string, action: unknown) => {
+    return invoke("handle_plugin_panel_action", { pluginId, action });
+  },
+
+  togglePanel: (pluginId: string, panelId: string) => {
+    set((state) => {
+      const key = `${pluginId}:${panelId}`;
+      const next = new Set(state.openPanels);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return { openPanels: next };
+    });
+  },
+
+  isPanelOpen: (pluginId: string, panelId: string): boolean => {
+    return usePluginStore.getState().openPanels.has(`${pluginId}:${panelId}`);
   },
 }));

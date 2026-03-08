@@ -29,11 +29,13 @@ import { CanvasEditor } from "../Canvas";
 import { DatabaseEditor, type DatabaseUndoRedoState } from "../Database";
 import { HtmlViewer } from "../Html";
 import { OutlinePanel } from "./OutlinePanel";
+import { PluginSidebarPanel } from "./PluginSidebarPanel";
 import { PomodoroTimer } from "./PomodoroTimer";
 import { BacklinksPanel } from "./BacklinksPanel";
 import { SimilarPagesPanel } from "./SimilarPagesPanel";
 import type { EditorData, Page } from "../../types/page";
 import { calculatePageStats, type PageStats } from "../../utils/pageStats";
+import { usePluginStore } from "../../stores/pluginStore";
 import { useWritingGoalsStore } from "../../stores/writingGoalsStore";
 import { useKeybindingsStore } from "../../stores/keybindingsStore";
 import { useCollabSession } from "../../collab/useCollabSession";
@@ -83,6 +85,10 @@ export function EditorPaneContent({
   const zenModeSettings = useThemeStore((state) => state.zenModeSettings);
   const showOutline = useThemeStore((state) => state.showOutline);
   const toggleOutline = useThemeStore((state) => state.toggleOutline);
+  const panelTypes = usePluginStore((s) => s.panelTypes);
+  const openPanels = usePluginStore((s) => s.openPanels);
+  const togglePanel = usePluginStore((s) => s.togglePanel);
+  const fetchPanelTypes = usePluginStore((s) => s.fetchPanelTypes);
   const [isSaving, setIsSaving] = useState(false);
   const lastSavedRef = useRef<Date | null>(null);
   // Separate state for explicit save indicator only (Ctrl+S) — NOT updated during auto-save
@@ -125,6 +131,17 @@ export function EditorPaneContent({
     enabled: isStandardPage && !!pane.pageId,
     onStateChange: handleUndoRedoStateChange,
   });
+
+  // Fetch plugin panel types once
+  useEffect(() => {
+    fetchPanelTypes();
+  }, [fetchPanelTypes]);
+
+  // Plugin panels that are currently open
+  const activePluginPanels = useMemo(
+    () => panelTypes.filter((p) => openPanels.has(`${p.pluginId}:${p.panelId}`)),
+    [panelTypes, openPanels]
+  );
 
   // Typewriter scrolling for zen mode
   useTypewriterScroll({
@@ -1059,6 +1076,18 @@ export function EditorPaneContent({
                     editorScrollRef={editorScrollRef}
                   />
                 )}
+                {!zenMode &&
+                  activePluginPanels.map((panel) => (
+                    <PluginSidebarPanel
+                      key={`${panel.pluginId}:${panel.panelId}`}
+                      panel={panel}
+                      context={{
+                        current_page_id: selectedPage.id,
+                        current_notebook_id: notebookId,
+                      }}
+                      onClose={() => togglePanel(panel.pluginId, panel.panelId)}
+                    />
+                  ))}
               </div>
             </>
           )}

@@ -73,6 +73,17 @@ pub struct PluginImportFormat {
     pub icon_svg: Option<String>,
 }
 
+/// A sidebar panel type registered by a plugin.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginPanelType {
+    pub plugin_id: String,
+    pub panel_id: String,
+    pub label: String,
+    pub icon_svg: Option<String>,
+    pub default_width: Option<u32>,
+}
+
 /// Plugin manifest with runtime enabled/disabled status.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -864,6 +875,103 @@ impl PluginHost {
         })?;
 
         plugin.call("handle_import", &input)
+    }
+
+    /// Get sidebar panel types registered by plugins.
+    pub fn get_plugin_panel_types(&self) -> Vec<PluginPanelType> {
+        let mut panels = Vec::new();
+
+        for manifest in self.registry.list_manifests() {
+            if !self.is_plugin_enabled(&manifest.id) {
+                continue;
+            }
+            for hook in &manifest.hooks {
+                if let HookPoint::SidebarPanel { panel_id } = hook {
+                    let plugin_mutex = match self.registry.get(&manifest.id) {
+                        Some(m) => m,
+                        None => continue,
+                    };
+
+                    let mut plugin = match plugin_mutex.lock() {
+                        Ok(p) => p,
+                        Err(e) => {
+                            log::warn!("Failed to lock plugin '{}' for describe_panel: {e}", manifest.id);
+                            continue;
+                        }
+                    };
+
+                    match plugin.call("describe_panel", &serde_json::Value::Null) {
+                        Ok(val) => {
+                            let label = val.get("label").and_then(|v| v.as_str()).unwrap_or(panel_id.as_str()).to_string();
+                            let icon_svg = val.get("icon_svg").and_then(|v| v.as_str()).map(|s| s.to_string());
+                            let default_width = val.get("default_width").and_then(|v| v.as_u64()).map(|w| w as u32);
+                            panels.push(PluginPanelType {
+                                plugin_id: manifest.id.clone(),
+                                panel_id: panel_id.clone(),
+                                label,
+                                icon_svg,
+                                default_width,
+                            });
+                        }
+                        Err(e) => {
+                            log::warn!("Plugin '{}' describe_panel failed: {e}", manifest.id);
+                        }
+                    }
+                }
+            }
+        }
+
+        panels
+    }
+
+    /// Render a plugin sidebar panel. Returns JSON with html, styles, height.
+    pub fn render_plugin_panel(
+        &self,
+        plugin_id: &str,
+        panel_id: &str,
+        context: &serde_json::Value,
+    ) -> Result<serde_json::Value, PluginError> {
+        if !self.is_plugin_enabled(plugin_id) {
+            return Err(PluginError::Runtime(format!(
+                "plugin '{plugin_id}' is disabled"
+            )));
+        }
+        let plugin_mutex = self.registry.get(plugin_id).ok_or_else(|| {
+            PluginError::NotFound(plugin_id.to_string())
+        })?;
+
+        let input = json!({
+            "panel_id": panel_id,
+            "context": context,
+        });
+
+        let mut plugin = plugin_mutex.lock().map_err(|e| {
+            PluginError::Runtime(format!("lock: {e}"))
+        })?;
+
+        plugin.call("render_panel", &input)
+    }
+
+    /// Handle an interactive action from a plugin sidebar panel.
+    pub fn handle_plugin_panel_action(
+        &self,
+        plugin_id: &str,
+        action: &serde_json::Value,
+    ) -> Result<serde_json::Value, PluginError> {
+        if !self.is_plugin_enabled(plugin_id) {
+            return Err(PluginError::Runtime(format!(
+                "plugin '{plugin_id}' is disabled"
+            )));
+        }
+        let plugin_mutex = self.registry.get(plugin_id).ok_or_else(|| {
+            PluginError::NotFound(plugin_id.to_string())
+        })?;
+
+        let mut plugin = plugin_mutex.lock().map_err(|e| {
+            PluginError::Runtime(format!("lock: {e}"))
+        })?;
+
+        plugin.call("handle_panel_action", action)
     }
 
     /// Get plugins directory path
