@@ -54,9 +54,9 @@ function find_or_create_pomo_db(notebook_id)
   -- Create new database
   local props = nous.json_encode({
     { name = "Date", type = "text" },
+    { name = "Time", type = "text" },
     { name = "Mode", type = "text" },
-    { name = "Duration", type = "number" },
-    { name = "Completed", type = "text" },
+    { name = "Duration (min)", type = "number" },
   })
   local ok2, result_json = pcall(function() return nous.database_create(notebook_id, "Pomodoro Log", props) end)
   if ok2 and result_json then
@@ -576,12 +576,14 @@ function handle_panel_action(input_json)
     local db_id = find_or_create_pomo_db(notebook_id)
     if db_id then
       pcall(function()
+        local dt = nous.current_datetime()
+        local time_str = string.format("%02d:%02d", dt.hour, dt.minute)
         nous.database_add_rows(notebook_id, db_id, nous.json_encode({
           {
-            ["Date"] = nous.current_date().iso,
+            ["Date"] = dt.iso,
+            ["Time"] = time_str,
             ["Mode"] = mode,
-            ["Duration"] = tostring(duration),
-            ["Completed"] = "Yes",
+            ["Duration (min)"] = tostring(duration),
           }
         }))
       end)

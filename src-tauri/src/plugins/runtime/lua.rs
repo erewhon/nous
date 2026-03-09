@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use chrono::Datelike;
+use chrono::{Datelike, Timelike};
 use mlua::prelude::*;
 
 use crate::plugins::api::HostApi;
@@ -93,6 +93,26 @@ impl LuaPlugin {
             }).map_err(|e| PluginError::InitFailed(format!("current_date: {e}")))?;
             nous.set("current_date", current_date).map_err(|e| {
                 PluginError::InitFailed(format!("set current_date: {e}"))
+            })?;
+        }
+
+        {
+            let current_datetime = self.lua.create_function(|lua, ()| {
+                let now = chrono::Local::now();
+                let tbl = lua.create_table()?;
+                tbl.set("year", now.year())?;
+                tbl.set("month", now.month())?;
+                tbl.set("day", now.day())?;
+                tbl.set("hour", now.hour())?;
+                tbl.set("minute", now.minute())?;
+                tbl.set("second", now.second())?;
+                tbl.set("wday", now.weekday().num_days_from_sunday() + 1)?;
+                tbl.set("iso", now.format("%Y-%m-%dT%H:%M:%S").to_string())?;
+                tbl.set("iso_utc", now.to_utc().format("%Y-%m-%dT%H:%M:%SZ").to_string())?;
+                Ok(tbl)
+            }).map_err(|e| PluginError::InitFailed(format!("current_datetime: {e}")))?;
+            nous.set("current_datetime", current_datetime).map_err(|e| {
+                PluginError::InitFailed(format!("set current_datetime: {e}"))
             })?;
         }
 
