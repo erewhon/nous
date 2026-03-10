@@ -298,7 +298,7 @@
   border-right: 1px solid var(--color-border);
   border-bottom: 1px solid var(--color-border);
   vertical-align: middle;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .db-cell:last-child {
