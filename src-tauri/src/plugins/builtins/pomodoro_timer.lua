@@ -37,13 +37,21 @@ function describe_panel(_input_json)
 end
 
 function find_or_create_pomo_db(notebook_id)
-  if _pomo_db_id then return _pomo_db_id end
   if not notebook_id or notebook_id == "" then return nil end
 
-  -- Search existing databases
+  -- Search existing databases (also validates cache)
   local ok, list_json = pcall(function() return nous.database_list(notebook_id) end)
   if ok and list_json then
     local dbs = nous.json_decode(list_json)
+    -- Validate cache — database may have been deleted
+    if _pomo_db_id then
+      local found = false
+      for _, db in ipairs(dbs) do
+        if db.id == _pomo_db_id then found = true; break end
+      end
+      if not found then _pomo_db_id = nil end
+    end
+    if _pomo_db_id then return _pomo_db_id end
     for _, db in ipairs(dbs) do
       if db.title == "Pomodoro Log" then
         _pomo_db_id = db.id

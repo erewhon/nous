@@ -73,14 +73,23 @@ local function ensure_food_db_columns(notebook_id, db_id)
   end
 end
 
-local function find_or_create_food_db(notebook_id)
-  if _food_db_id then return _food_db_id end
+-- Find existing Food Log database (no auto-create)
+local function find_food_db(notebook_id)
   if not notebook_id or notebook_id == "" then return nil end
 
   local ok, list_json = pcall(function() return nous.database_list(notebook_id) end)
   if ok and list_json then
     local databases = nous.json_decode(list_json)
     if type(databases) == "table" then
+      -- Validate cache — the database may have been deleted
+      if _food_db_id then
+        local found = false
+        for _, db in ipairs(databases) do
+          if db.id == _food_db_id then found = true; break end
+        end
+        if not found then _food_db_id = nil end
+      end
+      if _food_db_id then return _food_db_id end
       for _, db in ipairs(databases) do
         if db.title == "Food Log" then
           _food_db_id = db.id
@@ -90,6 +99,12 @@ local function find_or_create_food_db(notebook_id)
       end
     end
   end
+  return nil
+end
+
+-- Explicitly create the Food Log database
+local function create_food_db(notebook_id)
+  if not notebook_id or notebook_id == "" then return nil end
 
   local props = nous.json_encode({
     { name = "Food Name", type = "text" },
@@ -341,7 +356,7 @@ end
 -- Get today's totals from Food Log database
 local function get_today_totals(notebook_id)
   local totals = { calories = 0, protein = 0, carbs = 0, fat = 0, fiber = 0, count = 0 }
-  local db_id = find_or_create_food_db(notebook_id)
+  local db_id = find_food_db(notebook_id)
   if not db_id then return totals end
 
   local ok, db_json = pcall(function() return nous.database_get(notebook_id, db_id) end)
@@ -380,7 +395,7 @@ end
 -- Get frequently logged foods (top N by occurrence count, with most recent nutrition data)
 local function get_frequent_foods(notebook_id, limit)
   limit = limit or 6
-  local db_id = find_or_create_food_db(notebook_id)
+  local db_id = find_food_db(notebook_id)
   if not db_id then return {} end
 
   local ok, db_json = pcall(function() return nous.database_get(notebook_id, db_id) end)
@@ -462,13 +477,21 @@ function render_block(input_json)
   -- Check for pending log action
   if data.action == "log_food" and data.food then
     local food = data.food
-    local db_id = find_or_create_food_db(notebook_id)
+    local db_id = find_food_db(notebook_id)
     if db_id then
       local rows = nous.json_encode({ build_food_row(food, data.meal or "Snack") })
       nous.database_add_rows(notebook_id, db_id, rows)
       status_msg = '<div style="padding:8px 12px;background:#064e3b;color:#34d399;border-radius:4px;font-size:13px;margin-bottom:8px;">Logged: ' .. esc(food.name) .. ' (' .. esc(data.meal or "Snack") .. ')</div>'
     else
-      status_msg = '<div style="padding:8px 12px;background:#7f1d1d;color:#fca5a5;border-radius:4px;font-size:13px;margin-bottom:8px;">Could not find or create Food Log database</div>'
+      -- Auto-create for block action (user already clicked "Log")
+      local new_id = create_food_db(notebook_id)
+      if new_id then
+        local rows = nous.json_encode({ build_food_row(food, data.meal or "Snack") })
+        nous.database_add_rows(notebook_id, new_id, rows)
+        status_msg = '<div style="padding:8px 12px;background:#064e3b;color:#34d399;border-radius:4px;font-size:13px;margin-bottom:8px;">Created Food Log &amp; logged: ' .. esc(food.name) .. '</div>'
+      else
+        status_msg = '<div style="padding:8px 12px;background:#7f1d1d;color:#fca5a5;border-radius:4px;font-size:13px;margin-bottom:8px;">Could not create Food Log database</div>'
+      end
     end
   end
 
@@ -602,6 +625,32 @@ function render_panel(input_json)
   local input = nous.json_decode(input_json)
   local ctx = input.context or {}
   local notebook_id = ctx.current_notebook_id or ""
+
+  -- Check if Food Log database exists; if not, show setup prompt
+  local db_id = find_food_db(notebook_id)
+  if not db_id then
+    return nous.json_encode({ html = string.format([[
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: transparent; color: #c8c8d8; padding: 20px 16px; }
+</style>
+<div style="text-align:center;padding-top:20px;">
+  <div style="font-size:28px;margin-bottom:12px;">🍽</div>
+  <div style="font-size:13px;color:#aaa;margin-bottom:16px;">No Food Log database found in this notebook.</div>
+  <button id="create-db" style="padding:8px 20px;font-size:13px;background:#6366f1;color:#fff;border:none;border-radius:6px;cursor:pointer;">Create Food Log</button>
+</div>
+<script>
+document.getElementById('create-db').addEventListener('click', function() {
+  this.textContent = 'Creating...';
+  this.disabled = true;
+  window.parent.postMessage({
+    type: 'plugin-panel-action',
+    payload: { action: 'create_food_db', notebookId: '%s' }
+  }, '*');
+});
+</script>]], esc(notebook_id)) })
+  end
+
   local goals = _food_goals
   local totals = get_today_totals(notebook_id)
   local frequent = get_frequent_foods(notebook_id, 6)
@@ -1006,7 +1055,28 @@ function handle_panel_action(input_json)
   local input = nous.json_decode(input_json)
   local action = input.action or ""
 
-  if action == "search" then
+  if action == "create_food_db" then
+    local notebook_id = input.notebookId or ""
+    local db_id = create_food_db(notebook_id)
+    if db_id then
+      -- Return a simple success page; user can hit Refresh to get full panel
+      return nous.json_encode({
+        html = [[
+<style>* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: transparent; color: #c8c8d8; padding: 20px 16px; text-align: center; }</style>
+<div style="padding-top:20px;">
+  <div style="font-size:28px;margin-bottom:12px;">✓</div>
+  <div style="font-size:13px;color:#34d399;margin-bottom:6px;">Food Log created!</div>
+  <div style="font-size:11px;color:#888;">Click the refresh button above to start tracking.</div>
+</div>]]
+      })
+    end
+    return nous.json_encode({
+      forward_to_iframe = true,
+      message = { type = "panel-db-error", error = "Failed to create database" }
+    })
+
+  elseif action == "search" then
     local query = input.query or ""
     if query == "" then
       return nous.json_encode({ handled = true })
@@ -1027,7 +1097,7 @@ function handle_panel_action(input_json)
     local meal = input.meal or "Snack"
     local notebook_id = input.notebookId or ""
     if food and notebook_id ~= "" then
-      local db_id = find_or_create_food_db(notebook_id)
+      local db_id = find_food_db(notebook_id)
       if db_id then
         pcall(function()
           nous.database_add_rows(notebook_id, db_id, nous.json_encode({ build_food_row(food, meal) }))
@@ -1035,6 +1105,11 @@ function handle_panel_action(input_json)
         return nous.json_encode({
           forward_to_iframe = true,
           message = { type = "panel-food-logged", name = food.name }
+        })
+      else
+        return nous.json_encode({
+          forward_to_iframe = true,
+          message = { type = "panel-search-results", foods = {}, error = "No Food Log database. Refresh the panel to create one." }
         })
       end
     end
@@ -1055,7 +1130,7 @@ function handle_panel_action(input_json)
         end
       end
       if food then
-        local db_id = find_or_create_food_db(notebook_id)
+        local db_id = find_food_db(notebook_id)
         if db_id then
           pcall(function()
             nous.database_add_rows(notebook_id, db_id, nous.json_encode({ build_food_row(food, meal) }))
@@ -1687,7 +1762,7 @@ function handle_action(input_json)
       })
     end
 
-    local db_id = find_or_create_food_db(notebook_id)
+    local db_id = find_food_db(notebook_id)
     if not db_id then
       return nous.json_encode({
         forward_to_iframe = true,
@@ -1750,7 +1825,7 @@ function handle_command(input_json)
 
     local food = results[1]
     local notebook_id = input.notebook_id or ""
-    local db_id = find_or_create_food_db(notebook_id)
+    local db_id = find_food_db(notebook_id)
     if not db_id then
       return nous.json_encode({ handled = true, message = "Could not find or create Food Log database" })
     end
