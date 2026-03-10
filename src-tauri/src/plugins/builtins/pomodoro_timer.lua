@@ -21,6 +21,7 @@ _pomo_state = _pomo_state or {
   longBreakDuration = 15,
   sessionsBeforeLongBreak = 4,
   soundEnabled = true,
+  project = "",
 }
 
 -- Cache the database ID once found/created
@@ -55,6 +56,7 @@ function find_or_create_pomo_db(notebook_id)
   local props = nous.json_encode({
     { name = "Date", type = "text" },
     { name = "Time", type = "text" },
+    { name = "Project", type = "text" },
     { name = "Mode", type = "text" },
     { name = "Duration (min)", type = "number" },
   })
@@ -245,6 +247,10 @@ function render_panel(input_json)
 
   <div id="session-dots" class="session-dots"></div>
 
+  <input id="project-input" type="text" placeholder="Working on..." value="%s"
+    style="width:100%%;background:rgba(255,255,255,0.05);color:#e0e0e0;border:1px solid rgba(255,255,255,0.08);border-radius:5px;padding:5px 10px;font-size:12px;text-align:center;outline:none;margin:2px 0;"
+  />
+
   <div class="controls">
     <button id="btn-start" class="btn btn-primary">Start</button>
     <button id="btn-pause" class="btn btn-secondary" style="display:none;">Pause</button>
@@ -354,6 +360,10 @@ function render_panel(input_json)
     }
   }
 
+  function getProject() {
+    return (document.getElementById('project-input').value || '').trim();
+  }
+
   function saveState() {
     window.parent.postMessage({
       type: 'plugin-panel-action',
@@ -368,7 +378,8 @@ function render_panel(input_json)
         breakDuration: state.breakDuration,
         longBreakDuration: state.longBreakDuration,
         sessionsBeforeLongBreak: state.sessionsBeforeLongBreak,
-        soundEnabled: state.soundEnabled
+        soundEnabled: state.soundEnabled,
+        project: getProject()
       }
     }, '*');
   }
@@ -380,7 +391,8 @@ function render_panel(input_json)
         action: 'log_session',
         notebookId: NOTEBOOK_ID,
         mode: mode,
-        duration: duration
+        duration: duration,
+        project: getProject()
       }
     }, '*');
   }
@@ -521,6 +533,11 @@ function render_panel(input_json)
     });
   });
 
+  // Project input — save on blur
+  document.getElementById('project-input').addEventListener('blur', function() {
+    saveState();
+  });
+
   // Sound toggle
   var soundBtn = document.getElementById('sound-toggle');
   soundBtn.addEventListener('click', function() {
@@ -538,6 +555,7 @@ function render_panel(input_json)
 })();
 </script>
 ]],
+    (s.project:gsub('"', "&quot;")),
     s.workDuration, s.breakDuration, s.longBreakDuration, s.sessionsBeforeLongBreak,
     s.soundEnabled and "on" or "",
     (notebook_id:gsub("'", "\\'")),
@@ -566,12 +584,14 @@ function handle_panel_action(input_json)
     if input.longBreakDuration then _pomo_state.longBreakDuration = input.longBreakDuration end
     if input.sessionsBeforeLongBreak then _pomo_state.sessionsBeforeLongBreak = input.sessionsBeforeLongBreak end
     if input.soundEnabled ~= nil then _pomo_state.soundEnabled = input.soundEnabled end
+    if input.project ~= nil then _pomo_state.project = input.project end
     return nous.json_encode({ saved = true })
 
   elseif action == "log_session" then
     local notebook_id = input.notebookId or ""
     local mode = input.mode or "work"
     local duration = input.duration or 25
+    local project = input.project or _pomo_state.project or ""
 
     local db_id = find_or_create_pomo_db(notebook_id)
     if db_id then
@@ -582,6 +602,7 @@ function handle_panel_action(input_json)
           {
             ["Date"] = dt.iso,
             ["Time"] = time_str,
+            ["Project"] = project,
             ["Mode"] = mode,
             ["Duration (min)"] = tostring(duration),
           }
