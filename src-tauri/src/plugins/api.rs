@@ -113,9 +113,12 @@ impl HostApi {
         let storage = self.storage.lock().map_err(|e| {
             PluginError::CallFailed(format!("storage lock: {e}"))
         })?;
-        let pages = storage
+        let pages: Vec<_> = storage
             .list_pages(nid)
-            .map_err(|e| PluginError::CallFailed(e.to_string()))?;
+            .map_err(|e| PluginError::CallFailed(e.to_string()))?
+            .into_iter()
+            .filter(|p| p.deleted_at.is_none())
+            .collect();
         serde_json::to_value(&pages).map_err(PluginError::Json)
     }
 
@@ -291,7 +294,7 @@ impl HostApi {
 
         let databases: Vec<serde_json::Value> = pages
             .into_iter()
-            .filter(|p| p.page_type == PageType::Database)
+            .filter(|p| p.page_type == PageType::Database && p.deleted_at.is_none())
             .map(|p| {
                 // Try to read database content to get property/row counts
                 let (prop_count, row_count) = storage
