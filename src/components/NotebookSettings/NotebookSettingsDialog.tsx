@@ -147,16 +147,23 @@ export function NotebookSettingsDialog({
     lastSyncAt: cloudLastSyncAt,
     createCloudNotebook,
     deleteCloudNotebook,
+    syncNotebook: syncCloudNotebook,
+    listRemotePageIds,
     loadNotebooks: loadCloudNotebooks,
-    isLoading: cloudLoading,
     error: cloudError,
-    clearError: clearCloudError,
   } = useCloudStore();
   const cloudUnlocked = cloudAuthed && cloudEncrypted && cloudUnlockedFn();
   const cloudNotebook = cloudNotebooks.find(
     (cn) => cn.localNotebookId === notebook?.id,
   );
   const [cloudEnabling, setCloudEnabling] = useState(false);
+  const [cloudSyncing, setCloudSyncing] = useState(false);
+  const [cloudPageCount, setCloudPageCount] = useState<number | null>(null);
+  const [cloudProgress, setCloudProgress] = useState<{
+    current: number;
+    total: number;
+    message: string;
+  } | null>(null);
   const [cloudLocalError, setCloudLocalError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -164,6 +171,16 @@ export function NotebookSettingsDialog({
       loadCloudNotebooks();
     }
   }, [cloudAuthed, loadCloudNotebooks]);
+
+  useEffect(() => {
+    if (cloudNotebook) {
+      listRemotePageIds(cloudNotebook.id)
+        .then((ids) => setCloudPageCount(ids.length))
+        .catch(() => setCloudPageCount(null));
+    } else {
+      setCloudPageCount(null);
+    }
+  }, [cloudNotebook, listRemotePageIds]);
 
   // Load sync status
   const loadSyncStatusData = useCallback(async () => {
@@ -1323,7 +1340,11 @@ export function NotebookSettingsDialog({
                   ) : cloudSyncStatus[cloudNotebook.id] === "error" ? (
                     <span className="text-red-500">Sync error</span>
                   ) : (
-                    <span className="text-green-500">Ready</span>
+                    <span className="text-green-500">
+                      {cloudPageCount !== null
+                        ? `${cloudPageCount} page${cloudPageCount !== 1 ? "s" : ""} synced`
+                        : "Ready"}
+                    </span>
                   )}
                   {(cloudLastSyncAt[cloudNotebook.id] || cloudNotebook.lastSyncAt) && (
                     <span>
@@ -1340,15 +1361,38 @@ export function NotebookSettingsDialog({
                   <button
                     onClick={async () => {
                       if (!notebook || !cloudNotebook) return;
-                      // TODO: trigger full sync of all pages
+                      setCloudLocalError(null);
+                      setCloudSyncing(true);
+                      try {
+                        await syncCloudNotebook(
+                          notebook.id,
+                          cloudNotebook.id,
+                          (current, total, message) => {
+                            setCloudProgress({ current, total, message });
+                          },
+                        );
+                        setCloudProgress(null);
+                        // Refresh page count
+                        listRemotePageIds(cloudNotebook.id)
+                          .then((ids) => setCloudPageCount(ids.length))
+                          .catch(() => {});
+                      } catch (e) {
+                        setCloudLocalError(
+                          e instanceof Error ? e.message : "Sync failed",
+                        );
+                        setCloudProgress(null);
+                      } finally {
+                        setCloudSyncing(false);
+                      }
                     }}
+                    disabled={cloudSyncing}
                     className="rounded-md px-3 py-1.5 text-xs font-medium transition-colors hover:opacity-90"
                     style={{
                       backgroundColor: "var(--color-accent)",
                       color: "white",
                     }}
                   >
-                    Sync Now
+                    {cloudSyncing ? "Syncing..." : "Sync Now"}
                   </button>
                   <button
                     onClick={async () => {
@@ -1381,6 +1425,33 @@ export function NotebookSettingsDialog({
               <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
                 End-to-end encrypted sync to Nous Cloud. Your data is encrypted before it leaves this device.
               </p>
+            )}
+
+            {cloudProgress && (
+              <div className="mt-3 rounded-lg p-2.5" style={{ backgroundColor: "var(--color-bg-tertiary)" }}>
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-xs" style={{ color: "var(--color-text-secondary)" }}>
+                    {cloudProgress.message}
+                  </span>
+                  {cloudProgress.total > 0 && (
+                    <span className="text-xs font-medium" style={{ color: "var(--color-text-primary)" }}>
+                      {cloudProgress.current} / {cloudProgress.total}
+                    </span>
+                  )}
+                </div>
+                <div
+                  className="h-1.5 rounded-full overflow-hidden"
+                  style={{ backgroundColor: "var(--color-bg-secondary)" }}
+                >
+                  <div
+                    className="h-full rounded-full transition-all duration-150"
+                    style={{
+                      backgroundColor: "var(--color-accent)",
+                      width: `${cloudProgress.total > 0 ? (cloudProgress.current / cloudProgress.total) * 100 : 100}%`,
+                    }}
+                  />
+                </div>
+              </div>
             )}
 
             {(cloudLocalError || cloudError) && (
@@ -1791,39 +1862,10 @@ export function NotebookSettingsDialog({
 
         {/* Footer */}
         <div
-          className="flex flex-shrink-0 items-center justify-between border-t px-6 py-4"
+          className="flex flex-shrink-0 items-center justify-between border-t px-6 py-3"
           style={{ borderColor: "var(--color-border)" }}
         >
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => setShowMoveDialog(true)}
-              className="rounded-lg px-3 py-2 text-sm font-medium transition-colors hover:bg-[--color-bg-tertiary]"
-              style={{ color: "var(--color-text-secondary)" }}
-            >
-              Move to Library
-            </button>
-            <button
-              onClick={() => setShowMergeDialog(true)}
-              className="rounded-lg px-3 py-2 text-sm font-medium transition-colors hover:bg-[--color-bg-tertiary]"
-              style={{ color: "var(--color-text-secondary)" }}
-            >
-              Merge Into...
-            </button>
-            <button
-              onClick={async () => {
-                if (!notebook) return;
-                if (notebook.archived) {
-                  await unarchiveNotebook(notebook.id);
-                } else {
-                  await archiveNotebook(notebook.id);
-                }
-                onClose();
-              }}
-              className="rounded-lg px-3 py-2 text-sm font-medium transition-colors hover:bg-[--color-bg-tertiary]"
-              style={{ color: "var(--color-text-secondary)" }}
-            >
-              {notebook?.archived ? "Unarchive" : "Archive"}
-            </button>
             <button
               onClick={() => {
                 if (!notebook) return;
@@ -1837,7 +1879,7 @@ export function NotebookSettingsDialog({
                   })
                 );
               }}
-              className="rounded-lg px-3 py-2 text-sm font-medium transition-colors hover:bg-[--color-bg-tertiary]"
+              className="rounded-lg px-3 py-1.5 text-xs font-medium transition-colors hover:bg-[--color-bg-tertiary]"
               style={{ color: "var(--color-text-secondary)" }}
             >
               Share
@@ -1855,23 +1897,32 @@ export function NotebookSettingsDialog({
                   })
                 );
               }}
-              className="rounded-lg px-3 py-2 text-sm font-medium transition-colors hover:bg-[--color-bg-tertiary]"
+              className="rounded-lg px-3 py-1.5 text-xs font-medium transition-colors hover:bg-[--color-bg-tertiary]"
               style={{ color: "var(--color-text-secondary)" }}
             >
               Collaborate
             </button>
-            <button
-              onClick={() => setShowDeleteConfirm(true)}
-              className="rounded-lg px-3 py-2 text-sm font-medium transition-colors hover:bg-red-500/10"
-              style={{ color: "var(--color-error)" }}
-            >
-              Delete
-            </button>
+            {/* More actions menu */}
+            <MoreActionsMenu
+              notebook={notebook}
+              onMove={() => setShowMoveDialog(true)}
+              onMerge={() => setShowMergeDialog(true)}
+              onArchive={async () => {
+                if (!notebook) return;
+                if (notebook.archived) {
+                  await unarchiveNotebook(notebook.id);
+                } else {
+                  await archiveNotebook(notebook.id);
+                }
+                onClose();
+              }}
+              onDelete={() => setShowDeleteConfirm(true)}
+            />
           </div>
-          <div className="flex gap-3">
+          <div className="flex gap-2">
             <button
               onClick={onClose}
-              className="rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+              className="rounded-lg px-3 py-1.5 text-sm font-medium transition-colors"
               style={{
                 backgroundColor: "var(--color-bg-tertiary)",
                 color: "var(--color-text-secondary)",
@@ -1882,12 +1933,12 @@ export function NotebookSettingsDialog({
             <button
               onClick={handleSave}
               disabled={!name.trim() || isSaving || !hasChanges}
-              className="rounded-lg px-4 py-2 text-sm font-medium text-white transition-colors disabled:opacity-50"
+              className="rounded-lg px-3 py-1.5 text-sm font-medium text-white transition-colors disabled:opacity-50"
               style={{
                 background: "linear-gradient(to bottom right, var(--color-accent), var(--color-accent-secondary))",
               }}
             >
-              {isSaving ? "Saving..." : "Save Changes"}
+              {isSaving ? "Saving..." : "Save"}
             </button>
           </div>
         </div>
@@ -1989,6 +2040,92 @@ export function NotebookSettingsDialog({
             onClose();
           }}
         />
+      )}
+    </div>
+  );
+}
+
+function MoreActionsMenu({
+  notebook,
+  onMove,
+  onMerge,
+  onArchive,
+  onDelete,
+}: {
+  notebook: Notebook | null;
+  onMove: () => void;
+  onMerge: () => void;
+  onArchive: () => void;
+  onDelete: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handleClick = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [open]);
+
+  const itemClass =
+    "w-full text-left px-3 py-1.5 text-xs rounded transition-colors hover:bg-[--color-bg-tertiary]";
+
+  return (
+    <div className="relative" ref={menuRef}>
+      <button
+        onClick={() => setOpen(!open)}
+        className="rounded-lg px-2 py-1.5 text-xs font-medium transition-colors hover:bg-[--color-bg-tertiary]"
+        style={{ color: "var(--color-text-muted)" }}
+        title="More actions"
+      >
+        &middot;&middot;&middot;
+      </button>
+      {open && (
+        <div
+          className="absolute bottom-full left-0 mb-1 w-40 rounded-lg border py-1 shadow-lg"
+          style={{
+            backgroundColor: "var(--color-bg-panel)",
+            borderColor: "var(--color-border)",
+          }}
+        >
+          <button
+            onClick={() => { setOpen(false); onMove(); }}
+            className={itemClass}
+            style={{ color: "var(--color-text-secondary)" }}
+          >
+            Move to Library
+          </button>
+          <button
+            onClick={() => { setOpen(false); onMerge(); }}
+            className={itemClass}
+            style={{ color: "var(--color-text-secondary)" }}
+          >
+            Merge Into...
+          </button>
+          <button
+            onClick={() => { setOpen(false); onArchive(); }}
+            className={itemClass}
+            style={{ color: "var(--color-text-secondary)" }}
+          >
+            {notebook?.archived ? "Unarchive" : "Archive"}
+          </button>
+          <div
+            className="my-1 border-t"
+            style={{ borderColor: "var(--color-border)" }}
+          />
+          <button
+            onClick={() => { setOpen(false); onDelete(); }}
+            className={itemClass}
+            style={{ color: "var(--color-error)" }}
+          >
+            Delete
+          </button>
+        </div>
       )}
     </div>
   );

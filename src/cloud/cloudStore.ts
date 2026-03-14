@@ -84,6 +84,13 @@ interface CloudActions {
     pageId: string,
   ) => Promise<void>;
 
+  // Full notebook sync
+  syncNotebook: (
+    localNotebookId: string,
+    cloudNotebookId: string,
+    onProgress?: (current: number, total: number, message: string) => void,
+  ) => Promise<void>;
+
   // Helpers
   getApi: () => CloudAPI;
   clearError: () => void;
@@ -109,6 +116,9 @@ function getOrCreateApi(
       refreshToken: refreshToken ?? undefined,
       onTokensChanged,
     });
+  } else {
+    // Keep tokens in sync with store (e.g., after rehydration)
+    apiInstance.updateTokens(accessToken, refreshToken);
   }
   return apiInstance;
 }
@@ -413,6 +423,90 @@ export const useCloudStore = create<CloudStore>()(
       deleteRemotePage: async (cloudNotebookId, pageId) => {
         const api = get().getApi();
         await api.deletePage(cloudNotebookId, pageId);
+      },
+
+      // ─── Full Notebook Sync ────────────────────────────────────────────
+
+      syncNotebook: async (localNotebookId, cloudNotebookId, onProgress) => {
+        set((state) => ({
+          syncStatus: { ...state.syncStatus, [cloudNotebookId]: "syncing" },
+          syncErrors: { ...state.syncErrors, [cloudNotebookId]: "" },
+        }));
+
+        try {
+          // Dynamic import to avoid circular deps with Tauri
+          const { listPages, getPage } = await import("../utils/api");
+
+          // 1. Get all local pages
+          const pages = await listPages(localNotebookId, true);
+          const total = pages.length + 2; // +1 for meta, +1 for cleanup
+          let current = 0;
+
+          onProgress?.(current, total, "Starting sync...");
+
+          // 2. Get notebook key
+          const key = await getNotebookKey(get, cloudNotebookId);
+
+          // 3. Upload each page
+          for (const page of pages) {
+            current++;
+            onProgress?.(current, total, `Uploading page: ${page.title || page.id}`);
+
+            const fullPage = await getPage(localNotebookId, page.id);
+            const encrypted = await encryptJSON(key, fullPage);
+            const api = get().getApi();
+            await api.uploadPage(cloudNotebookId, page.id, encrypted);
+          }
+
+          // 4. Upload notebook metadata (page list, sections, folders, etc.)
+          current++;
+          onProgress?.(current, total, "Uploading metadata...");
+          const meta = {
+            syncedAt: new Date().toISOString(),
+            pageIds: pages.map((p) => p.id),
+            pageSummaries: pages.map((p) => ({
+              id: p.id,
+              title: p.title,
+              folderId: p.folderId,
+              sectionId: p.sectionId,
+              parentPageId: p.parentPageId,
+              position: p.position,
+              isArchived: p.isArchived,
+              pageType: p.pageType,
+              updatedAt: p.updatedAt,
+            })),
+          };
+          await get().syncMeta(cloudNotebookId, meta);
+
+          // 5. Clean up remote pages that no longer exist locally
+          current++;
+          onProgress?.(current, total, "Cleaning up...");
+          const localPageIds = new Set(pages.map((p) => p.id));
+          const remotePageIds = await get().listRemotePageIds(cloudNotebookId);
+          for (const remoteId of remotePageIds) {
+            if (!localPageIds.has(remoteId)) {
+              await get().deleteRemotePage(cloudNotebookId, remoteId);
+            }
+          }
+
+          onProgress?.(total, total, "Sync complete");
+
+          set((state) => ({
+            syncStatus: { ...state.syncStatus, [cloudNotebookId]: "idle" },
+            lastSyncAt: {
+              ...state.lastSyncAt,
+              [cloudNotebookId]: new Date().toISOString(),
+            },
+          }));
+        } catch (err) {
+          const message =
+            err instanceof Error ? err.message : "Sync failed";
+          set((state) => ({
+            syncStatus: { ...state.syncStatus, [cloudNotebookId]: "error" },
+            syncErrors: { ...state.syncErrors, [cloudNotebookId]: message },
+          }));
+          throw err;
+        }
       },
 
       // ─── Helpers ────────────────────────────────────────────────────────
