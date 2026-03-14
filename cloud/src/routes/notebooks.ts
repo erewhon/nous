@@ -1,0 +1,213 @@
+import { Hono } from "hono";
+import type { Env, Variables, CloudNotebook } from "../types";
+import {
+  listNotebooks,
+  getNotebook,
+  createNotebook,
+  deleteNotebook,
+  updateNotebookSyncTime,
+} from "../db/queries";
+import {
+  putPage,
+  getPage,
+  deletePage,
+  putMeta,
+  getMeta,
+  listPageIds,
+  deleteAllNotebookData,
+} from "../storage/r2";
+import { badRequest, notFound, forbidden } from "../errors";
+
+type AppEnv = { Bindings: Env; Variables: Variables };
+
+function randomId(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return Array.from(bytes)
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function toApi(row: {
+  id: string;
+  local_notebook_id: string | null;
+  name: string;
+  created_at: string;
+  updated_at: string;
+  last_sync_at: string | null;
+  encrypted_notebook_key: string | null;
+}): CloudNotebook {
+  return {
+    id: row.id,
+    localNotebookId: row.local_notebook_id,
+    name: row.name,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    lastSyncAt: row.last_sync_at,
+    encryptedNotebookKey: row.encrypted_notebook_key,
+  };
+}
+
+const notebooks = new Hono<AppEnv>();
+
+// ─── GET /notebooks ──────────────────────────────────────────────────────────
+
+notebooks.get("/", async (c) => {
+  const userId = c.get("userId");
+  const rows = await listNotebooks(c.env.DB, userId);
+  return c.json(rows.map(toApi));
+});
+
+// ─── POST /notebooks ─────────────────────────────────────────────────────────
+
+notebooks.post("/", async (c) => {
+  const userId = c.get("userId");
+  const body = await c.req.json<{
+    name?: string;
+    localNotebookId?: string;
+    encryptedNotebookKey?: string;
+  }>();
+
+  if (!body.name?.trim()) {
+    throw badRequest("name is required");
+  }
+
+  const id = randomId();
+  await createNotebook(
+    c.env.DB,
+    id,
+    userId,
+    body.localNotebookId ?? null,
+    body.name.trim(),
+    body.encryptedNotebookKey ?? null,
+  );
+
+  const row = await getNotebook(c.env.DB, id, userId);
+  return c.json(toApi(row!), 201);
+});
+
+// ─── GET /notebooks/:id ──────────────────────────────────────────────────────
+
+notebooks.get("/:id", async (c) => {
+  const userId = c.get("userId");
+  const row = await getNotebook(c.env.DB, c.req.param("id"), userId);
+  if (!row) throw notFound("Notebook not found");
+  return c.json(toApi(row));
+});
+
+// ─── DELETE /notebooks/:id ───────────────────────────────────────────────────
+
+notebooks.delete("/:id", async (c) => {
+  const userId = c.get("userId");
+  const notebookId = c.req.param("id");
+
+  const row = await getNotebook(c.env.DB, notebookId, userId);
+  if (!row) throw notFound("Notebook not found");
+
+  // Delete all R2 data, then the DB row
+  await deleteAllNotebookData(c.env.STORAGE, userId, notebookId);
+  await deleteNotebook(c.env.DB, notebookId, userId);
+
+  return c.json({ ok: true });
+});
+
+// ─── Notebook pages (encrypted blobs) ────────────────────────────────────────
+
+/** Verify notebook ownership, return 404 if not found. */
+async function requireNotebook(
+  db: D1Database,
+  notebookId: string,
+  userId: string,
+) {
+  const row = await getNotebook(db, notebookId, userId);
+  if (!row) throw notFound("Notebook not found");
+  return row;
+}
+
+// GET /notebooks/:id/pages — list page IDs
+notebooks.get("/:id/pages", async (c) => {
+  const userId = c.get("userId");
+  const notebookId = c.req.param("id");
+  await requireNotebook(c.env.DB, notebookId, userId);
+
+  const ids = await listPageIds(c.env.STORAGE, userId, notebookId);
+  return c.json({ pageIds: ids });
+});
+
+// PUT /notebooks/:id/pages/:pageId — upload encrypted page
+notebooks.put("/:id/pages/:pageId", async (c) => {
+  const userId = c.get("userId");
+  const notebookId = c.req.param("id");
+  const pageId = c.req.param("pageId");
+  await requireNotebook(c.env.DB, notebookId, userId);
+
+  const data = await c.req.arrayBuffer();
+  if (data.byteLength === 0) {
+    throw badRequest("Request body is empty");
+  }
+
+  await putPage(c.env.STORAGE, userId, notebookId, pageId, data);
+  await updateNotebookSyncTime(c.env.DB, notebookId);
+
+  return c.json({ ok: true });
+});
+
+// GET /notebooks/:id/pages/:pageId — download encrypted page
+notebooks.get("/:id/pages/:pageId", async (c) => {
+  const userId = c.get("userId");
+  const notebookId = c.req.param("id");
+  const pageId = c.req.param("pageId");
+  await requireNotebook(c.env.DB, notebookId, userId);
+
+  const data = await getPage(c.env.STORAGE, userId, notebookId, pageId);
+  if (!data) throw notFound("Page not found");
+
+  return new Response(data, {
+    headers: { "Content-Type": "application/octet-stream" },
+  });
+});
+
+// DELETE /notebooks/:id/pages/:pageId — delete encrypted page
+notebooks.delete("/:id/pages/:pageId", async (c) => {
+  const userId = c.get("userId");
+  const notebookId = c.req.param("id");
+  const pageId = c.req.param("pageId");
+  await requireNotebook(c.env.DB, notebookId, userId);
+
+  await deletePage(c.env.STORAGE, userId, notebookId, pageId);
+  return c.json({ ok: true });
+});
+
+// ─── Notebook meta (encrypted blob) ─────────────────────────────────────────
+
+// PUT /notebooks/:id/meta — upload encrypted notebook metadata
+notebooks.put("/:id/meta", async (c) => {
+  const userId = c.get("userId");
+  const notebookId = c.req.param("id");
+  await requireNotebook(c.env.DB, notebookId, userId);
+
+  const data = await c.req.arrayBuffer();
+  if (data.byteLength === 0) {
+    throw badRequest("Request body is empty");
+  }
+
+  await putMeta(c.env.STORAGE, userId, notebookId, data);
+  await updateNotebookSyncTime(c.env.DB, notebookId);
+
+  return c.json({ ok: true });
+});
+
+// GET /notebooks/:id/meta — download encrypted notebook metadata
+notebooks.get("/:id/meta", async (c) => {
+  const userId = c.get("userId");
+  const notebookId = c.req.param("id");
+  await requireNotebook(c.env.DB, notebookId, userId);
+
+  const data = await getMeta(c.env.STORAGE, userId, notebookId);
+  if (!data) throw notFound("Metadata not found");
+
+  return new Response(data, {
+    headers: { "Content-Type": "application/octet-stream" },
+  });
+});
+
+export { notebooks };

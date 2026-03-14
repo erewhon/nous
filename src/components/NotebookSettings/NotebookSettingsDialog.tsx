@@ -10,6 +10,7 @@ import { useLibraryStore } from "../../stores/libraryStore";
 import { MoveNotebookDialog } from "../Move/MoveNotebookDialog";
 import { MergeNotebookDialog } from "../Move/MergeNotebookDialog";
 import { EncryptionSettings } from "../Encryption";
+import { useCloudStore } from "../../cloud";
 import {
   gitIsEnabled,
   gitInit,
@@ -135,6 +136,34 @@ export function NotebookSettingsDialog({
     message: string;
     phase: string;
   } | null>(null);
+
+  // Nous Cloud sync
+  const {
+    isAuthenticated: cloudAuthed,
+    hasEncryptionSetup: cloudEncrypted,
+    isEncryptionUnlocked: cloudUnlockedFn,
+    notebooks: cloudNotebooks,
+    syncStatus: cloudSyncStatus,
+    lastSyncAt: cloudLastSyncAt,
+    createCloudNotebook,
+    deleteCloudNotebook,
+    loadNotebooks: loadCloudNotebooks,
+    isLoading: cloudLoading,
+    error: cloudError,
+    clearError: clearCloudError,
+  } = useCloudStore();
+  const cloudUnlocked = cloudAuthed && cloudEncrypted && cloudUnlockedFn();
+  const cloudNotebook = cloudNotebooks.find(
+    (cn) => cn.localNotebookId === notebook?.id,
+  );
+  const [cloudEnabling, setCloudEnabling] = useState(false);
+  const [cloudLocalError, setCloudLocalError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (cloudAuthed) {
+      loadCloudNotebooks();
+    }
+  }, [cloudAuthed, loadCloudNotebooks]);
 
   // Load sync status
   const loadSyncStatusData = useCallback(async () => {
@@ -1220,7 +1249,7 @@ export function NotebookSettingsDialog({
             )}
           </div>
 
-          {/* Cloud Sync */}
+          {/* Nous Cloud Sync */}
           <div
             className="rounded-lg border p-4"
             style={{ borderColor: "var(--color-border)" }}
@@ -1232,7 +1261,148 @@ export function NotebookSettingsDialog({
                   className="text-sm font-medium"
                   style={{ color: "var(--color-text-primary)" }}
                 >
-                  Cloud Sync
+                  Nous Cloud
+                </span>
+              </div>
+              {cloudNotebook ? (
+                <span
+                  className="flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium"
+                  style={{
+                    backgroundColor: "rgba(34, 197, 94, 0.15)",
+                    color: "rgb(34, 197, 94)",
+                  }}
+                >
+                  <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
+                  Enabled
+                </span>
+              ) : cloudUnlocked ? (
+                <button
+                  onClick={async () => {
+                    if (!notebook) return;
+                    setCloudLocalError(null);
+                    setCloudEnabling(true);
+                    try {
+                      await createCloudNotebook(notebook.name, notebook.id);
+                    } catch (e) {
+                      setCloudLocalError(
+                        e instanceof Error ? e.message : "Failed to enable cloud sync",
+                      );
+                    } finally {
+                      setCloudEnabling(false);
+                    }
+                  }}
+                  disabled={cloudEnabling}
+                  className="rounded-md px-3 py-1.5 text-xs font-medium transition-colors hover:opacity-90"
+                  style={{
+                    backgroundColor: "var(--color-accent)",
+                    color: "white",
+                  }}
+                >
+                  {cloudEnabling ? "Enabling..." : "Enable"}
+                </button>
+              ) : null}
+            </div>
+
+            {!cloudAuthed ? (
+              <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
+                Sign in to Nous Cloud in{" "}
+                <strong>Settings &rarr; Cloud Sync</strong>{" "}
+                for end-to-end encrypted sync across devices.
+              </p>
+            ) : !cloudEncrypted || !cloudUnlockedFn() ? (
+              <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
+                Unlock your encryption in{" "}
+                <strong>Settings &rarr; Cloud Sync</strong>{" "}
+                to enable cloud sync.
+              </p>
+            ) : cloudNotebook ? (
+              <div className="space-y-3">
+                <div className="flex items-center gap-4 text-xs" style={{ color: "var(--color-text-muted)" }}>
+                  {cloudSyncStatus[cloudNotebook.id] === "syncing" ? (
+                    <span className="text-yellow-500">Syncing...</span>
+                  ) : cloudSyncStatus[cloudNotebook.id] === "error" ? (
+                    <span className="text-red-500">Sync error</span>
+                  ) : (
+                    <span className="text-green-500">Ready</span>
+                  )}
+                  {(cloudLastSyncAt[cloudNotebook.id] || cloudNotebook.lastSyncAt) && (
+                    <span>
+                      Last sync:{" "}
+                      <span style={{ color: "var(--color-text-secondary)" }}>
+                        {new Date(
+                          cloudLastSyncAt[cloudNotebook.id] || cloudNotebook.lastSyncAt!,
+                        ).toLocaleString()}
+                      </span>
+                    </span>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={async () => {
+                      if (!notebook || !cloudNotebook) return;
+                      // TODO: trigger full sync of all pages
+                    }}
+                    className="rounded-md px-3 py-1.5 text-xs font-medium transition-colors hover:opacity-90"
+                    style={{
+                      backgroundColor: "var(--color-accent)",
+                      color: "white",
+                    }}
+                  >
+                    Sync Now
+                  </button>
+                  <button
+                    onClick={async () => {
+                      if (!cloudNotebook) return;
+                      if (
+                        confirm(
+                          "Disable Nous Cloud sync for this notebook? Cloud data will be deleted.",
+                        )
+                      ) {
+                        try {
+                          await deleteCloudNotebook(cloudNotebook.id);
+                        } catch (e) {
+                          setCloudLocalError(
+                            e instanceof Error ? e.message : "Failed to disable",
+                          );
+                        }
+                      }
+                    }}
+                    className="rounded-md px-3 py-1.5 text-xs font-medium transition-colors"
+                    style={{
+                      backgroundColor: "var(--color-bg-tertiary)",
+                      color: "var(--color-text-secondary)",
+                    }}
+                  >
+                    Disable
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
+                End-to-end encrypted sync to Nous Cloud. Your data is encrypted before it leaves this device.
+              </p>
+            )}
+
+            {(cloudLocalError || cloudError) && (
+              <p className="mt-2 text-xs" style={{ color: "var(--color-error)" }}>
+                {cloudLocalError || cloudError}
+              </p>
+            )}
+          </div>
+
+          {/* WebDAV Sync */}
+          <div
+            className="rounded-lg border p-4"
+            style={{ borderColor: "var(--color-border)" }}
+          >
+            <div className="mb-3 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <IconWebDAV />
+                <span
+                  className="text-sm font-medium"
+                  style={{ color: "var(--color-text-primary)" }}
+                >
+                  WebDAV Sync
                 </span>
                 {notebook?.syncConfig?.managedByLibrary && (
                   <span
@@ -1587,7 +1757,7 @@ export function NotebookSettingsDialog({
 
             {!notebook?.syncConfig?.enabled && !showSyncConfig && (
               <p className="text-xs" style={{ color: "var(--color-text-muted)" }}>
-                Sync this notebook to a WebDAV server (Nextcloud, ownCloud, etc.) for offline access and multi-device sync.
+                Sync to a self-hosted WebDAV server (Nextcloud, ownCloud, etc.).
               </p>
             )}
           </div>
@@ -1962,6 +2132,28 @@ function IconCloud() {
       style={{ color: "var(--color-text-muted)" }}
     >
       <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z" />
+    </svg>
+  );
+}
+
+function IconWebDAV() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{ color: "var(--color-text-muted)" }}
+    >
+      <rect x="2" y="2" width="20" height="8" rx="2" ry="2" />
+      <rect x="2" y="14" width="20" height="8" rx="2" ry="2" />
+      <line x1="6" y1="6" x2="6.01" y2="6" />
+      <line x1="6" y1="18" x2="6.01" y2="18" />
     </svg>
   );
 }

@@ -1,0 +1,20 @@
+{
+  "name": "@nous/cloud-api",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:migrate": "wrangler d1 execute nous-cloud --file=src/db/schema.sql",
+    "db:migrate:local": "wrangler d1 execute nous-cloud --local --file=src/db/schema.sql",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "hono": "^4.7.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250312.0",
+    "typescript": "^5.9.3",
+    "wrangler": "^4.69.0"
+  }
+}

@@ -13,6 +13,7 @@ import { DailyNotesSettings } from "./DailyNotesSettings";
 import { MonitorSettings } from "./MonitorSettings";
 import { PluginSettings } from "./PluginSettings";
 import { ShareUploadSettings } from "./ShareUploadSettings";
+import { CloudSettings } from "./CloudSettings";
 import { LibrarySettingsPanel } from "../Library";
 import type { ProviderType, ProviderConfig } from "../../types/ai";
 import type { TTSProviderType } from "../../types/audio";
@@ -35,7 +36,8 @@ interface SettingsDialogProps {
     | "external-sources"
     | "daily-notes"
     | "monitor"
-    | "plugins";
+    | "plugins"
+    | "cloud";
 }
 
 type TabId =
@@ -54,7 +56,8 @@ type TabId =
   | "external-sources"
   | "daily-notes"
   | "monitor"
-  | "plugins";
+  | "plugins"
+  | "cloud";
 
 interface TabCategory {
   name: string;
@@ -77,6 +80,7 @@ const TAB_CATEGORIES: TabCategory[] = [
       { id: "backup", label: "Backup", icon: <IconBackup /> },
       { id: "sharing", label: "Sharing", icon: <IconShare /> },
       { id: "external-sources", label: "External Sources", icon: <IconFileImport /> },
+      { id: "cloud", label: "Cloud Sync", icon: <IconCloud /> },
     ],
   },
   {
@@ -280,6 +284,7 @@ export function SettingsDialog({
             {activeTab === "sharing" && <ShareUploadSettings />}
             {activeTab === "external-sources" && <ExternalSourcesSettings />}
             {activeTab === "plugins" && <PluginSettings />}
+            {activeTab === "cloud" && <CloudSettings />}
             {activeTab === "monitor" && <MonitorSettings />}
           </div>
         </div>
@@ -2543,6 +2548,24 @@ function IconCalendarSettings() {
       <line x1="8" y1="2" x2="8" y2="6" />
       <line x1="3" y1="10" x2="21" y2="10" />
       <circle cx="12" cy="15" r="2" />
+    </svg>
+  );
+}
+
+function IconCloud() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z" />
     </svg>
   );
 }

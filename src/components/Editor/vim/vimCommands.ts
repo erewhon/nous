@@ -69,45 +69,74 @@ export function moveRight(
 }
 
 export function moveDown(
-  _view: EditorView,
+  view: EditorView,
   bnEditor: BlockNoteEditor<any, any, any>,
   state: VimState,
 ): boolean {
   const count = Math.max(state.count, 1);
-  const cursor = bnEditor.getTextCursorPosition();
-  if (!cursor) return false;
 
-  let block = cursor.block;
   for (let i = 0; i < count; i++) {
-    const next = bnEditor.getNextBlock(block);
-    if (!next) break;
-    block = next;
-  }
+    const { from } = view.state.selection;
+    const coords = view.coordsAtPos(from);
+    if (!coords) break;
 
-  if (block.id !== cursor.block.id) {
-    bnEditor.setTextCursorPosition(block.id, "start");
+    // Offset by half a line height to land solidly on the next visual line
+    // (using just +1 lands at the boundary and snaps to end of current line)
+    const lineHeight = coords.bottom - coords.top;
+    const targetCoords = { left: coords.left, top: coords.bottom + Math.max(lineHeight * 0.5, 4) };
+    const pos = view.posAtCoords(targetCoords);
+
+    if (pos && pos.pos !== from) {
+      view.dispatch(
+        view.state.tr
+          .setSelection(TextSelection.create(view.state.doc, pos.pos))
+          .scrollIntoView(),
+      );
+    } else {
+      // At the bottom of the visible document — fall back to block-level
+      const cursor = bnEditor.getTextCursorPosition();
+      if (!cursor) break;
+      const next = bnEditor.getNextBlock(cursor.block);
+      if (!next) break;
+      bnEditor.setTextCursorPosition(next.id, "start");
+      // Scroll the newly focused block into view
+      view.dispatch(view.state.tr.scrollIntoView());
+    }
   }
   return true;
 }
 
 export function moveUp(
-  _view: EditorView,
+  view: EditorView,
   bnEditor: BlockNoteEditor<any, any, any>,
   state: VimState,
 ): boolean {
   const count = Math.max(state.count, 1);
-  const cursor = bnEditor.getTextCursorPosition();
-  if (!cursor) return false;
 
-  let block = cursor.block;
   for (let i = 0; i < count; i++) {
-    const prev = bnEditor.getPrevBlock(block);
-    if (!prev) break;
-    block = prev;
-  }
+    const { from } = view.state.selection;
+    const coords = view.coordsAtPos(from);
+    if (!coords) break;
 
-  if (block.id !== cursor.block.id) {
-    bnEditor.setTextCursorPosition(block.id, "start");
+    const lineHeight = coords.bottom - coords.top;
+    const targetCoords = { left: coords.left, top: coords.top - Math.max(lineHeight * 0.5, 4) };
+    const pos = view.posAtCoords(targetCoords);
+
+    if (pos && pos.pos !== from) {
+      view.dispatch(
+        view.state.tr
+          .setSelection(TextSelection.create(view.state.doc, pos.pos))
+          .scrollIntoView(),
+      );
+    } else {
+      // At the top of the visible document — fall back to block-level
+      const cursor = bnEditor.getTextCursorPosition();
+      if (!cursor) break;
+      const prev = bnEditor.getPrevBlock(cursor.block);
+      if (!prev) break;
+      bnEditor.setTextCursorPosition(prev.id, "start");
+      view.dispatch(view.state.tr.scrollIntoView());
+    }
   }
   return true;
 }
@@ -996,7 +1025,7 @@ export function matchBracket(view: EditorView): boolean {
 // ─── Half-page scroll (Ctrl+D / Ctrl+U) ─────────────────────────────────────
 
 export function scrollHalfPageDown(
-  _view: EditorView,
+  view: EditorView,
   bnEditor: BlockNoteEditor<any, any, any>,
   count: number = 15,
 ): boolean {
@@ -1012,12 +1041,13 @@ export function scrollHalfPageDown(
 
   if (block.id !== cursor.block.id) {
     bnEditor.setTextCursorPosition(block.id, "start");
+    view.dispatch(view.state.tr.scrollIntoView());
   }
   return true;
 }
 
 export function scrollHalfPageUp(
-  _view: EditorView,
+  view: EditorView,
   bnEditor: BlockNoteEditor<any, any, any>,
   count: number = 15,
 ): boolean {
@@ -1033,6 +1063,205 @@ export function scrollHalfPageUp(
 
   if (block.id !== cursor.block.id) {
     bnEditor.setTextCursorPosition(block.id, "start");
+    view.dispatch(view.state.tr.scrollIntoView());
   }
   return true;
+}
+
+// ─── Text objects (iw, aw, i", a", i(, a(, etc.) ─────────────────────────────
+
+/** Characters that count as "word" characters (same as \w). */
+function isWordChar(ch: string): boolean {
+  return /\w/.test(ch);
+}
+
+/**
+ * Find the range of a text object.
+ * Returns { from, to } in document positions, or null if not found.
+ */
+export function textObjectRange(
+  view: EditorView,
+  kind: "i" | "a",
+  object: string,
+): MotionResult | null {
+  const { from } = view.state.selection;
+  const $pos = view.state.doc.resolve(from);
+  const blockStart = $pos.start();
+  const blockEnd = $pos.end();
+  const text = view.state.doc.textBetween(blockStart, blockEnd);
+  const offset = from - blockStart;
+
+  // Word text objects: iw, aw
+  if (object === "w" || object === "W") {
+    return wordTextObject(text, offset, blockStart, kind);
+  }
+
+  // Bracket/paren text objects
+  const bracketPairs: Record<string, [string, string]> = {
+    "(": ["(", ")"],
+    ")": ["(", ")"],
+    "b": ["(", ")"],
+    "{": ["{", "}"],
+    "}": ["{", "}"],
+    "B": ["{", "}"],
+    "[": ["[", "]"],
+    "]": ["[", "]"],
+    "<": ["<", ">"],
+    ">": ["<", ">"],
+  };
+  if (bracketPairs[object]) {
+    const [open, close] = bracketPairs[object];
+    return bracketTextObject(text, offset, blockStart, kind, open, close);
+  }
+
+  // Quote text objects: i", a", i', a', i`, a`
+  if (object === '"' || object === "'" || object === "`") {
+    return quoteTextObject(text, offset, blockStart, kind, object);
+  }
+
+  return null;
+}
+
+function wordTextObject(
+  text: string,
+  offset: number,
+  blockStart: number,
+  kind: "i" | "a",
+): MotionResult | null {
+  if (text.length === 0) return null;
+  const clamped = Math.min(offset, text.length - 1);
+
+  // Find word boundaries around cursor
+  let wordStart = clamped;
+  let wordEnd = clamped;
+
+  const cursorOnWord = isWordChar(text[clamped]);
+
+  if (cursorOnWord) {
+    while (wordStart > 0 && isWordChar(text[wordStart - 1])) wordStart--;
+    while (wordEnd < text.length - 1 && isWordChar(text[wordEnd + 1])) wordEnd++;
+    wordEnd++; // exclusive end
+  } else {
+    // Cursor on whitespace/punctuation — select the whitespace run
+    const cursorIsSpace = /\s/.test(text[clamped]);
+    if (cursorIsSpace) {
+      while (wordStart > 0 && /\s/.test(text[wordStart - 1])) wordStart--;
+      while (wordEnd < text.length - 1 && /\s/.test(text[wordEnd + 1])) wordEnd++;
+      wordEnd++;
+    } else {
+      // Non-word, non-space (punctuation)
+      while (wordStart > 0 && !isWordChar(text[wordStart - 1]) && !/\s/.test(text[wordStart - 1])) wordStart--;
+      while (wordEnd < text.length - 1 && !isWordChar(text[wordEnd + 1]) && !/\s/.test(text[wordEnd + 1])) wordEnd++;
+      wordEnd++;
+    }
+  }
+
+  if (kind === "a") {
+    // Include trailing whitespace, or leading if no trailing
+    if (wordEnd < text.length && /\s/.test(text[wordEnd])) {
+      while (wordEnd < text.length && /\s/.test(text[wordEnd])) wordEnd++;
+    } else if (wordStart > 0 && /\s/.test(text[wordStart - 1])) {
+      while (wordStart > 0 && /\s/.test(text[wordStart - 1])) wordStart--;
+    }
+  }
+
+  return {
+    from: blockStart + wordStart,
+    to: blockStart + wordEnd,
+    linewise: false,
+  };
+}
+
+function bracketTextObject(
+  text: string,
+  offset: number,
+  blockStart: number,
+  kind: "i" | "a",
+  open: string,
+  close: string,
+): MotionResult | null {
+  // Find matching brackets around cursor
+  let openPos = -1;
+  let closePos = -1;
+
+  // Search backward for opening bracket
+  let depth = 0;
+  for (let i = offset; i >= 0; i--) {
+    if (text[i] === close && i !== offset) depth++;
+    if (text[i] === open) {
+      if (depth === 0) {
+        openPos = i;
+        break;
+      }
+      depth--;
+    }
+  }
+
+  if (openPos < 0) return null;
+
+  // Search forward for closing bracket from the opening bracket
+  depth = 0;
+  for (let i = openPos; i < text.length; i++) {
+    if (text[i] === open && i !== openPos) depth++;
+    if (text[i] === close) {
+      if (depth === 0) {
+        closePos = i;
+        break;
+      }
+      depth--;
+    }
+  }
+
+  if (closePos < 0) return null;
+
+  if (kind === "i") {
+    return {
+      from: blockStart + openPos + 1,
+      to: blockStart + closePos,
+      linewise: false,
+    };
+  }
+  return {
+    from: blockStart + openPos,
+    to: blockStart + closePos + 1,
+    linewise: false,
+  };
+}
+
+function quoteTextObject(
+  text: string,
+  offset: number,
+  blockStart: number,
+  kind: "i" | "a",
+  quote: string,
+): MotionResult | null {
+  // Find quote boundaries — collect all quote positions and find the pair around cursor
+  const positions: number[] = [];
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === quote && (i === 0 || text[i - 1] !== "\\")) {
+      positions.push(i);
+    }
+  }
+
+  // Find the pair of quotes that contain the cursor
+  for (let i = 0; i < positions.length - 1; i += 2) {
+    const start = positions[i];
+    const end = positions[i + 1];
+    if (offset >= start && offset <= end) {
+      if (kind === "i") {
+        return {
+          from: blockStart + start + 1,
+          to: blockStart + end,
+          linewise: false,
+        };
+      }
+      return {
+        from: blockStart + start,
+        to: blockStart + end + 1,
+        linewise: false,
+      };
+    }
+  }
+
+  return null;
 }

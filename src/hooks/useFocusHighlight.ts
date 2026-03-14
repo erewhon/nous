@@ -9,8 +9,17 @@ interface UseFocusHighlightOptions {
 }
 
 /**
+ * BlockNote DOM selector for block wrappers.
+ * Uses bn-block-outer (the visual wrapper) so dimming covers the entire block.
+ * Falls back to data-node-type selectors if class names change.
+ */
+const BLOCK_SELECTOR = '.bn-block-outer, [data-node-type="blockOuter"]';
+/** Selector for the inner block (used to find the active block from cursor). */
+const BLOCK_INNER_SELECTOR = '.bn-block, [data-node-type="blockContainer"]';
+
+/**
  * Hook that dims non-active content in zen mode.
- * - Paragraph mode: highlights the active `.ce-block`, dims siblings.
+ * - Paragraph mode: highlights the active block, dims siblings.
  * - Sentence mode: highlights the active sentence via Range API.
  */
 export function useFocusHighlight({
@@ -32,14 +41,9 @@ export function useFocusHighlight({
     if (!container) return;
 
     function cleanup() {
-      // Remove paragraph focus classes
-      const allBlocks = document.querySelectorAll(".ce-block");
-      allBlocks.forEach((block) => {
+      // Remove focus classes from all block wrappers
+      document.querySelectorAll(BLOCK_SELECTOR).forEach((block) => {
         block.classList.remove("focus-dimmed", "focus-active");
-      });
-      // Remove checklist-item-level focus classes
-      document.querySelectorAll(".cdx-checklist__item").forEach((item) => {
-        item.classList.remove("focus-dimmed", "focus-active");
       });
       activeBlockRef.current = null;
 
@@ -57,70 +61,51 @@ export function useFocusHighlight({
       const range = selection.getRangeAt(0);
       const cursorNode = range.startContainer;
 
+      // Make sure the selection is inside our editor container
+      const nodeEl = cursorNode.nodeType === Node.TEXT_NODE
+        ? cursorNode.parentElement
+        : (cursorNode as Element);
+      if (!nodeEl || !container!.contains(nodeEl)) return;
+
       if (mode === "paragraph") {
-        handleParagraphMode(cursorNode);
+        handleParagraphMode(nodeEl);
       } else if (mode === "sentence") {
-        handleSentenceMode(cursorNode, range);
+        handleSentenceMode(cursorNode, range, nodeEl);
       }
     }
 
-    function handleParagraphMode(cursorNode: Node) {
-      // Find the containing .ce-block
-      const element =
-        cursorNode.nodeType === Node.TEXT_NODE
-          ? cursorNode.parentElement
-          : (cursorNode as Element);
-      if (!element) return;
+    function handleParagraphMode(element: Element) {
+      // Find the containing block — try inner block first, then get its outer wrapper
+      const innerBlock = element.closest(BLOCK_INNER_SELECTOR);
+      if (!innerBlock) return;
 
-      const activeBlock = element.closest(".ce-block");
-      if (!activeBlock) return;
-
-      // For checklist blocks, highlight individual items instead of the whole block
-      const checklistItem = element.closest(".cdx-checklist__item");
-      const isChecklist = activeBlock.querySelector(".cdx-checklist") !== null;
-
-      // Build a unique key to detect changes
-      const activeKey = isChecklist && checklistItem
-        ? checklistItem
-        : activeBlock;
+      // The outer wrapper is the parent with bn-block-outer class
+      const activeOuter = innerBlock.closest(BLOCK_SELECTOR);
+      if (!activeOuter) return;
 
       // Skip if same element
-      if (activeKey === activeBlockRef.current) return;
-      activeBlockRef.current = activeKey;
+      if (activeOuter === activeBlockRef.current) return;
+      activeBlockRef.current = activeOuter;
 
-      // Clean up any previous checklist-item-level highlights
-      container!.querySelectorAll(".cdx-checklist__item").forEach((item) => {
-        item.classList.remove("focus-dimmed", "focus-active");
-      });
-
-      // Get all blocks in the editor
-      const allBlocks = container!.querySelectorAll(".ce-block");
-      allBlocks.forEach((block) => {
-        if (block === activeBlock) {
-          if (isChecklist && checklistItem) {
-            // For checklist: dim the block-level, then highlight individual items
-            block.classList.remove("focus-dimmed", "focus-active");
-            block.querySelectorAll(".cdx-checklist__item").forEach((item) => {
-              if (item === checklistItem) {
-                item.classList.add("focus-active");
-                item.classList.remove("focus-dimmed");
-              } else {
-                item.classList.add("focus-dimmed");
-                item.classList.remove("focus-active");
-              }
-            });
-          } else {
-            block.classList.add("focus-active");
-            block.classList.remove("focus-dimmed");
-          }
+      // Get only direct-child block wrappers in the editor's top-level block group
+      // to avoid dimming nested blocks (children of the active block)
+      const allOuters = container!.querySelectorAll(BLOCK_SELECTOR);
+      allOuters.forEach((outer) => {
+        if (outer === activeOuter || activeOuter.contains(outer)) {
+          // Active block or a child of the active block — keep visible
+          outer.classList.add("focus-active");
+          outer.classList.remove("focus-dimmed");
+        } else if (outer.contains(activeOuter)) {
+          // Ancestor of the active block — keep visible (don't dim parents)
+          outer.classList.remove("focus-dimmed", "focus-active");
         } else {
-          block.classList.add("focus-dimmed");
-          block.classList.remove("focus-active");
+          outer.classList.add("focus-dimmed");
+          outer.classList.remove("focus-active");
         }
       });
     }
 
-    function handleSentenceMode(cursorNode: Node, range: Range) {
+    function handleSentenceMode(cursorNode: Node, range: Range, element: Element) {
       // Remove previous sentence highlight
       if (sentenceHighlightRef.current) {
         sentenceHighlightRef.current.remove();
@@ -128,7 +113,7 @@ export function useFocusHighlight({
       }
 
       // Also apply paragraph-level dimming for context
-      handleParagraphMode(cursorNode);
+      handleParagraphMode(element);
 
       // Find the text node content
       const textNode =

@@ -500,6 +500,12 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
         return true;
       }
 
+      // Operator + text object prefix (di, da, ci, ca, yi, ya)
+      if (key === "i" || key === "a") {
+        setPendingKeys(op + key);
+        return true;
+      }
+
       // Operator + g prefix (dgg, cgg, ygg)
       if (key === "g") {
         setPendingKeys(op + "g");
@@ -537,6 +543,41 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
           resetPending();
           setMode(view, "insert");
           return true;
+        }
+      }
+      resetPending();
+      return true;
+    }
+
+    // ── Pending: operator + text object (e.g. "di", "ca", "yi") ────
+    if (
+      pending.length === 2 &&
+      (pending[0] === "d" || pending[0] === "c" || pending[0] === "y") &&
+      (pending[1] === "i" || pending[1] === "a")
+    ) {
+      const op = pending[0] as "d" | "c" | "y";
+      const objKind = pending[1] as "i" | "a";
+      if (key.length === 1) {
+        const range = cmd.textObjectRange(view, objKind, key);
+        if (range) {
+          const yanked = cmd.applyOperatorCharwise(
+            view,
+            op,
+            range.from,
+            range.to,
+          );
+          vim = { ...vim, register: yanked, registerType: "charwise" };
+          recordEdit({
+            type: "operator-motion",
+            operator: op,
+            motionKey: objKind + key,
+            count: Math.max(vim.count, 1),
+          });
+          if (op === "c") {
+            resetPending();
+            setMode(view, "insert");
+            return true;
+          }
         }
       }
       resetPending();

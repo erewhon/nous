@@ -3802,24 +3802,38 @@ block-ref.broken {
    Focus Highlight (Zen Mode)
    ======================================== */
 
+/* Editor.js (legacy) */
 .ce-block.focus-dimmed {
-  opacity: 0.25;
+  opacity: 0.25 !important;
   transition: opacity 0.2s ease;
 }
 
 .ce-block.focus-active {
-  opacity: 1;
+  opacity: 1 !important;
+  transition: opacity 0.2s ease;
+}
+
+/* BlockNote — outer wrapper dims the entire block visually */
+.bn-block-outer.focus-dimmed,
+[data-node-type="blockOuter"].focus-dimmed {
+  opacity: 0.25 !important;
+  transition: opacity 0.2s ease;
+}
+
+.bn-block-outer.focus-active,
+[data-node-type="blockOuter"].focus-active {
+  opacity: 1 !important;
   transition: opacity 0.2s ease;
 }
 
 /* Checklist item-level focus highlight */
 .cdx-checklist__item.focus-dimmed {
-  opacity: 0.25;
+  opacity: 0.25 !important;
   transition: opacity 0.2s ease;
 }
 
 .cdx-checklist__item.focus-active {
-  opacity: 1;
+  opacity: 1 !important;
   transition: opacity 0.2s ease;
 }
 
