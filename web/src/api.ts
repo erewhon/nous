@@ -18,6 +18,24 @@ export interface EncryptionParams {
   hash: string;
 }
 
+export interface NotebookShareInfo {
+  id: string;
+  notebookId: string;
+  mode: "public" | "password";
+  label: string | null;
+  createdAt: string;
+  expiresAt: string | null;
+}
+
+export interface ShareInfo {
+  id: string;
+  notebookId: string;
+  notebookName: string;
+  mode: "public" | "password";
+  passwordSalt: string | null;
+  wrappedKey: string | null;
+}
+
 export interface CloudNotebook {
   id: string;
   localNotebookId: string | null;
@@ -129,6 +147,45 @@ export class CloudAPI {
     return res.arrayBuffer();
   }
 
+  // ─── Share management (authenticated) ──────────────────────────────────
+
+  async createShare(
+    notebookId: string,
+    body: {
+      mode: "public" | "password";
+      passwordSalt?: string;
+      wrappedKey?: string;
+      label?: string;
+    },
+  ): Promise<NotebookShareInfo> {
+    const res = await this.authedFetch(
+      `${API_BASE}/notebooks/${notebookId}/shares`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      },
+    );
+    if (!res.ok) throw await parseError(res);
+    return res.json();
+  }
+
+  async listShares(notebookId: string): Promise<NotebookShareInfo[]> {
+    const res = await this.authedFetch(
+      `${API_BASE}/notebooks/${notebookId}/shares`,
+    );
+    if (!res.ok) throw await parseError(res);
+    return res.json();
+  }
+
+  async revokeShare(notebookId: string, shareId: string): Promise<void> {
+    const res = await this.authedFetch(
+      `${API_BASE}/notebooks/${notebookId}/shares/${shareId}`,
+      { method: "DELETE" },
+    );
+    if (!res.ok) throw await parseError(res);
+  }
+
   async downloadMeta(notebookId: string): Promise<ArrayBuffer | null> {
     const res = await this.authedFetch(
       `${API_BASE}/notebooks/${notebookId}/meta`,
@@ -201,5 +258,33 @@ export class CloudAPI {
       this.clearTokens();
       return false;
     }
+  }
+}
+
+/**
+ * API client for accessing shared notebooks without authentication.
+ */
+export class ShareAPI {
+  async getShareInfo(shareId: string): Promise<ShareInfo> {
+    const res = await fetch(`${API_BASE}/shares/${shareId}`);
+    if (!res.ok) throw await parseError(res);
+    return res.json();
+  }
+
+  async downloadMeta(shareId: string): Promise<ArrayBuffer | null> {
+    const res = await fetch(`${API_BASE}/shares/${shareId}/meta`);
+    if (res.status === 404) return null;
+    if (!res.ok) throw await parseError(res);
+    return res.arrayBuffer();
+  }
+
+  async downloadPage(
+    shareId: string,
+    pageId: string,
+  ): Promise<ArrayBuffer | null> {
+    const res = await fetch(`${API_BASE}/shares/${shareId}/pages/${pageId}`);
+    if (res.status === 404) return null;
+    if (!res.ok) throw await parseError(res);
+    return res.arrayBuffer();
   }
 }

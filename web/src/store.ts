@@ -1,8 +1,16 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { CloudAPI } from "./api";
-import type { CloudNotebook } from "./api";
-import { deriveMasterKey, unwrapNotebookKey, decryptJSON } from "./crypto";
+import type { CloudNotebook, NotebookShareInfo } from "./api";
+import {
+  deriveMasterKey,
+  unwrapNotebookKey,
+  decryptJSON,
+  exportKeyAsBase64,
+  generateShareSalt,
+  deriveShareKey,
+  wrapKeyForShare,
+} from "./crypto";
 
 export interface PageSummary {
   id: string;
@@ -51,6 +59,14 @@ interface WebActions {
   loadNotebooks: () => Promise<void>;
   loadNotebookMeta: (notebookId: string) => Promise<NotebookMeta | null>;
   loadPage: (notebookId: string, pageId: string) => Promise<unknown | null>;
+  createShare: (
+    notebookId: string,
+    mode: "public" | "password",
+    sharePassword?: string,
+    label?: string,
+  ) => Promise<{ shareId: string; shareUrl: string }>;
+  listShares: (notebookId: string) => Promise<NotebookShareInfo[]>;
+  revokeShare: (notebookId: string, shareId: string) => Promise<void>;
   clearError: () => void;
 }
 
@@ -221,23 +237,75 @@ export const useWebStore = create<WebStore>()(
       },
 
       loadNotebookMeta: async (notebookId) => {
-        const state = get();
-        const api = getApi(state);
+        // Ensure notebooks are loaded (race with sidebar)
+        let { notebooks } = get();
+        if (notebooks.length === 0) {
+          await get().loadNotebooks();
+          notebooks = get().notebooks;
+        }
+        const api = getApi(get());
         const encrypted = await api.downloadMeta(notebookId);
         if (!encrypted) return null;
 
-        const key = await getNotebookKey(api, state.notebooks, notebookId);
+        const key = await getNotebookKey(api, notebooks, notebookId);
         return decryptJSON<NotebookMeta>(key, encrypted);
       },
 
       loadPage: async (notebookId, pageId) => {
-        const state = get();
-        const api = getApi(state);
+        let { notebooks } = get();
+        if (notebooks.length === 0) {
+          await get().loadNotebooks();
+          notebooks = get().notebooks;
+        }
+        const api = getApi(get());
         const encrypted = await api.downloadPage(notebookId, pageId);
         if (!encrypted) return null;
 
-        const key = await getNotebookKey(api, state.notebooks, notebookId);
+        const key = await getNotebookKey(api, notebooks, notebookId);
         return decryptJSON(key, encrypted);
+      },
+
+      createShare: async (notebookId, mode, sharePassword, label) => {
+        const state = get();
+        const api = getApi(state);
+        const nbKey = await getNotebookKey(api, state.notebooks, notebookId);
+
+        if (mode === "public") {
+          const result = await api.createShare(notebookId, {
+            mode: "public",
+            label,
+          });
+          const keyBase64 = await exportKeyAsBase64(nbKey);
+          return {
+            shareId: result.id,
+            shareUrl: `${window.location.origin}/s/${result.id}#key=${keyBase64}`,
+          };
+        } else {
+          if (!sharePassword) throw new Error("Password required");
+          const salt = generateShareSalt();
+          const shareKey = await deriveShareKey(sharePassword, salt);
+          const wrappedKey = await wrapKeyForShare(shareKey, nbKey);
+          const result = await api.createShare(notebookId, {
+            mode: "password",
+            passwordSalt: salt,
+            wrappedKey,
+            label,
+          });
+          return {
+            shareId: result.id,
+            shareUrl: `${window.location.origin}/s/${result.id}`,
+          };
+        }
+      },
+
+      listShares: async (notebookId) => {
+        const api = getApi(get());
+        return api.listShares(notebookId);
+      },
+
+      revokeShare: async (notebookId, shareId) => {
+        const api = getApi(get());
+        await api.revokeShare(notebookId, shareId);
       },
 
       clearError: () => set({ error: null }),

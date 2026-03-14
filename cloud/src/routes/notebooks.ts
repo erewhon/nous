@@ -6,6 +6,9 @@ import {
   createNotebook,
   deleteNotebook,
   updateNotebookSyncTime,
+  createShare,
+  listSharesForNotebook,
+  revokeShare,
 } from "../db/queries";
 import {
   putPage,
@@ -208,6 +211,81 @@ notebooks.get("/:id/meta", async (c) => {
   return new Response(data, {
     headers: { "Content-Type": "application/octet-stream" },
   });
+});
+
+// ─── Notebook shares (management) ───────────────────────────────────────────
+
+// POST /notebooks/:id/shares — create a share
+notebooks.post("/:id/shares", async (c) => {
+  const userId = c.get("userId");
+  const notebookId = c.req.param("id");
+  await requireNotebook(c.env.DB, notebookId, userId);
+
+  const body = await c.req.json<{
+    mode: "public" | "password";
+    passwordSalt?: string;
+    wrappedKey?: string;
+    label?: string;
+    expiresAt?: string;
+  }>();
+
+  if (body.mode !== "public" && body.mode !== "password") {
+    throw badRequest("mode must be 'public' or 'password'");
+  }
+
+  if (body.mode === "password") {
+    if (!body.passwordSalt || !body.wrappedKey) {
+      throw badRequest("passwordSalt and wrappedKey required for password mode");
+    }
+  }
+
+  const id = randomId();
+  await createShare(
+    c.env.DB,
+    id,
+    notebookId,
+    userId,
+    body.mode,
+    body.mode === "password" ? (body.passwordSalt ?? null) : null,
+    body.mode === "password" ? (body.wrappedKey ?? null) : null,
+    body.label?.trim() || null,
+    body.expiresAt || null,
+  );
+
+  return c.json({
+    id,
+    notebookId,
+    mode: body.mode,
+    label: body.label?.trim() || null,
+    createdAt: new Date().toISOString(),
+    expiresAt: body.expiresAt || null,
+  }, 201);
+});
+
+// GET /notebooks/:id/shares — list shares for notebook
+notebooks.get("/:id/shares", async (c) => {
+  const userId = c.get("userId");
+  const notebookId = c.req.param("id");
+  await requireNotebook(c.env.DB, notebookId, userId);
+
+  const rows = await listSharesForNotebook(c.env.DB, notebookId, userId);
+  return c.json(
+    rows.map((r) => ({
+      id: r.id,
+      notebookId: r.notebook_id,
+      mode: r.mode,
+      label: r.label,
+      createdAt: r.created_at,
+      expiresAt: r.expires_at,
+    })),
+  );
+});
+
+// DELETE /notebooks/:id/shares/:shareId — revoke a share
+notebooks.delete("/:id/shares/:shareId", async (c) => {
+  const userId = c.get("userId");
+  await revokeShare(c.env.DB, c.req.param("shareId"), userId);
+  return c.json({ ok: true });
 });
 
 export { notebooks };

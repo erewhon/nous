@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useWebStore, type NotebookMeta, type PageSummary } from "../store";
 import { PageContent } from "../components/BlockRenderer";
+import { ShareDialog } from "../components/ShareDialog";
 
 export function NotebookPage() {
   const { notebookId, pageId } = useParams<{
@@ -14,6 +15,7 @@ export function NotebookPage() {
   const [loadingMeta, setLoadingMeta] = useState(true);
   const [loadingPage, setLoadingPage] = useState(false);
   const [error, setError] = useState("");
+  const [showShareDialog, setShowShareDialog] = useState(false);
 
   const notebook = notebooks.find((n) => n.id === notebookId);
 
@@ -111,7 +113,16 @@ export function NotebookPage() {
   return (
     <div className="main-content">
       <div className="page-list-header">
-        <h2>{notebook?.name || "Notebook"}</h2>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <h2>{notebook?.name || "Notebook"}</h2>
+          <button
+            className="btn btn-ghost"
+            style={{ border: "1px solid var(--border)" }}
+            onClick={() => setShowShareDialog(true)}
+          >
+            Share
+          </button>
+        </div>
         <div className="subtitle">
           {pages.length} {pages.length === 1 ? "page" : "pages"}
           {meta?.syncedAt && (
@@ -119,6 +130,13 @@ export function NotebookPage() {
           )}
         </div>
       </div>
+
+      {showShareDialog && notebookId && (
+        <ShareDialog
+          notebookId={notebookId}
+          onClose={() => setShowShareDialog(false)}
+        />
+      )}
 
       {pages.length === 0 ? (
         <div className="empty-state">

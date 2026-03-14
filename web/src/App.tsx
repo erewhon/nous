@@ -5,12 +5,12 @@ import {
   Route,
   Link,
   useParams,
-  Navigate,
 } from "react-router-dom";
 import { useWebStore } from "./store";
 import { LoginPage } from "./pages/LoginPage";
 import { UnlockPage } from "./pages/UnlockPage";
 import { NotebookPage } from "./pages/NotebookPage";
+import { SharePage } from "./pages/SharePage";
 
 function NotebookSidebar() {
   const { notebooks, loadNotebooks, isLoading, email, logout, lockEncryption } =
@@ -102,29 +102,33 @@ function MainLayout() {
   );
 }
 
-export function App() {
-  const { isAuthenticated, isUnlocked, hasEncryptionSetup } = useWebStore();
-
-  if (!isAuthenticated) {
-    return (
-      <BrowserRouter>
-        <LoginPage />
-      </BrowserRouter>
-    );
-  }
+function AuthenticatedRoutes() {
+  const { isUnlocked, hasEncryptionSetup } = useWebStore();
 
   if (!hasEncryptionSetup || !isUnlocked) {
-    return (
-      <BrowserRouter>
-        <UnlockPage />
-      </BrowserRouter>
-    );
+    return <UnlockPage />;
   }
+
+  return <MainLayout />;
+}
+
+export function App() {
+  const { isAuthenticated } = useWebStore();
 
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/*" element={<MainLayout />} />
+        {/* Public share routes — no auth needed */}
+        <Route path="/s/:shareId" element={<SharePage />} />
+        <Route path="/s/:shareId/page/:pageId" element={<SharePage />} />
+
+        {/* Authenticated routes */}
+        <Route
+          path="/*"
+          element={
+            isAuthenticated ? <AuthenticatedRoutes /> : <LoginPage />
+          }
+        />
       </Routes>
     </BrowserRouter>
   );

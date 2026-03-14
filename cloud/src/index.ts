@@ -5,6 +5,7 @@ import { authMiddleware } from "./middleware/auth";
 import { auth } from "./routes/auth";
 import { me } from "./routes/me";
 import { notebooks } from "./routes/notebooks";
+import { sharesPublic } from "./routes/shares";
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -20,8 +21,9 @@ app.use("*", corsMiddleware);
 // Health check
 app.get("/", (c) => c.json({ status: "ok", service: "nous-cloud" }));
 
-// Public auth routes
+// Public routes
 app.route("/auth", auth);
+app.route("/shares", sharesPublic);
 
 // Protected routes
 app.use("/me/*", authMiddleware);

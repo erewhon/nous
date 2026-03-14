@@ -2,6 +2,7 @@ import type {
   UserRow,
   RefreshTokenRow,
   CloudNotebookRow,
+  NotebookShareRow,
 } from "../types";
 
 // ─── Users ──────────────────────────────────────────────────────────────────
@@ -174,5 +175,66 @@ export async function updateNotebookSyncTime(
       "UPDATE cloud_notebooks SET last_sync_at = datetime('now'), updated_at = datetime('now') WHERE id = ?",
     )
     .bind(id)
+    .run();
+}
+
+// ─── Notebook Shares ─────────────────────────────────────────────────────────
+
+export async function createShare(
+  db: D1Database,
+  id: string,
+  notebookId: string,
+  userId: string,
+  mode: "public" | "password",
+  passwordSalt: string | null,
+  wrappedKey: string | null,
+  label: string | null,
+  expiresAt: string | null,
+): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO notebook_shares (id, notebook_id, user_id, mode, password_salt, wrapped_key, label, expires_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(id, notebookId, userId, mode, passwordSalt, wrappedKey, label, expiresAt)
+    .run();
+}
+
+export async function getShareById(
+  db: D1Database,
+  id: string,
+): Promise<NotebookShareRow | null> {
+  return db
+    .prepare(
+      "SELECT * FROM notebook_shares WHERE id = ? AND revoked_at IS NULL",
+    )
+    .bind(id)
+    .first<NotebookShareRow>();
+}
+
+export async function listSharesForNotebook(
+  db: D1Database,
+  notebookId: string,
+  userId: string,
+): Promise<NotebookShareRow[]> {
+  const result = await db
+    .prepare(
+      "SELECT * FROM notebook_shares WHERE notebook_id = ? AND user_id = ? AND revoked_at IS NULL ORDER BY created_at DESC",
+    )
+    .bind(notebookId, userId)
+    .all<NotebookShareRow>();
+  return result.results;
+}
+
+export async function revokeShare(
+  db: D1Database,
+  id: string,
+  userId: string,
+): Promise<void> {
+  await db
+    .prepare(
+      "UPDATE notebook_shares SET revoked_at = datetime('now') WHERE id = ? AND user_id = ?",
+    )
+    .bind(id, userId)
     .run();
 }

@@ -41,6 +41,19 @@ export interface CloudNotebookRow {
   encrypted_notebook_key: string | null;
 }
 
+export interface NotebookShareRow {
+  id: string;
+  notebook_id: string;
+  user_id: string;
+  mode: "public" | "password";
+  password_salt: string | null;
+  wrapped_key: string | null;
+  label: string | null;
+  created_at: string;
+  expires_at: string | null;
+  revoked_at: string | null;
+}
+
 /** JWT payload. */
 export interface JWTPayload {
   sub: string;

@@ -10,7 +10,8 @@ export const corsMiddleware = cors({
     if (!origin) return origin;
     if (origin === "tauri://localhost") return origin;
     if (origin.startsWith("http://localhost")) return origin;
-    if (origin.startsWith("https://nous.page")) return origin;
+    if (origin === "https://nous.page") return origin;
+    if (origin.endsWith(".nous.page")) return origin;
     return null;
   },
   allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
