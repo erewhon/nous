@@ -1,5 +1,5 @@
-import { useEffect, useState, useCallback } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useEffect, useState, useCallback, useRef } from "react";
+import { useParams, Link, useNavigate } from "react-router-dom";
 import { useWebStore, type NotebookMeta, type PageSummary } from "../store";
 import { PageContent } from "../components/BlockRenderer";
 import { PageEditor } from "../components/PageEditor";
@@ -11,6 +11,7 @@ export function NotebookPage() {
     notebookId: string;
     pageId?: string;
   }>();
+  const navigate = useNavigate();
   const { notebooks, loadNotebookMeta, loadPage } = useWebStore();
   const [meta, setMeta] = useState<NotebookMeta | null>(null);
   const [pageData, setPageData] = useState<unknown>(null);
@@ -19,6 +20,8 @@ export function NotebookPage() {
   const [error, setError] = useState("");
   const [showShareDialog, setShowShareDialog] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
+
+  const contentRef = useRef<HTMLDivElement>(null);
 
   const notebook = notebooks.find((n) => n.id === notebookId);
 
@@ -56,19 +59,52 @@ export function NotebookPage() {
     return () => window.removeEventListener("beforeunload", handler);
   }, [isEditing]);
 
-  const handleSaved = useCallback(() => {
-    // Reload page data to reflect saved changes
+  // Wiki-link click handler (event delegation)
+  useEffect(() => {
+    const container = contentRef.current;
+    if (!container || !meta || !notebookId) return;
+
+    const handler = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+
+      // Match <wiki-link> (read-only renderer) or .bn-wiki-link (BlockNote editor)
+      const wikiLink = target.closest("wiki-link, .bn-wiki-link") as HTMLElement | null;
+      if (!wikiLink) return;
+
+      const pageTitle =
+        wikiLink.getAttribute("data-page-title") ??
+        wikiLink.textContent?.trim() ??
+        "";
+      if (!pageTitle) return;
+
+      // Look up page by title in meta
+      const pages = meta.pageSummaries ?? [];
+      const found = pages.find(
+        (p) => p.title.toLowerCase() === pageTitle.toLowerCase(),
+      );
+
+      if (found) {
+        e.preventDefault();
+        e.stopPropagation();
+        navigate(`/notebook/${notebookId}/page/${found.id}`);
+      }
+    };
+
+    container.addEventListener("click", handler);
+    return () => container.removeEventListener("click", handler);
+  }, [meta, notebookId, navigate]);
+
+  const handleDone = useCallback(() => {
+    // Reload page data to reflect saved changes, exit edit mode
     if (notebookId && pageId) {
       loadPage(notebookId, pageId).then((data) => {
         setPageData(data);
         setIsEditing(false);
       });
+    } else {
+      setIsEditing(false);
     }
   }, [notebookId, pageId, loadPage]);
-
-  const handleCancelEdit = useCallback(() => {
-    setIsEditing(false);
-  }, []);
 
   if (loadingMeta) {
     return (
@@ -97,7 +133,7 @@ export function NotebookPage() {
 
   if (pageId && currentPage) {
     return (
-      <div className="main-content">
+      <div className="main-content" ref={contentRef}>
         <div
           style={{
             padding: "12px 24px",
@@ -133,8 +169,7 @@ export function NotebookPage() {
             notebookId={notebookId}
             pageId={pageId}
             pageData={pageData as Record<string, unknown>}
-            onSaved={handleSaved}
-            onCancel={handleCancelEdit}
+            onDone={handleDone}
           />
         ) : (
           <div className="page-viewer">

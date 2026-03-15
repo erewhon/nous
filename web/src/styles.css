@@ -612,11 +612,27 @@ a:hover {
   margin: 8px 0;
 }
 
-/* Wiki links and block refs (rendered as plain text in web viewer) */
-wiki-link,
+/* Wiki links and block refs */
+wiki-link {
+  color: var(--accent);
+  cursor: pointer;
+}
+
+wiki-link:hover {
+  text-decoration: underline;
+}
+
 block-ref {
   color: var(--accent);
   cursor: default;
+}
+
+.bn-wiki-link {
+  cursor: pointer !important;
+}
+
+.bn-wiki-link:hover {
+  text-decoration: underline;
 }
 
 /* Inline code */
@@ -819,14 +835,42 @@ code:not(pre code) {
   gap: 8px;
 }
 
-.editor-dirty-indicator {
+.editor-status {
   font-size: 12px;
+}
+
+.editor-status-dirty {
   color: var(--text-dim);
 }
 
-.editor-save-error {
-  font-size: 12px;
+.editor-status-saving {
+  color: var(--text-muted);
+}
+
+.editor-status-saved {
+  color: var(--success);
+}
+
+.editor-status-error {
   color: var(--danger);
+}
+
+.editor-conflict-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 24px;
+  background: rgba(239, 68, 68, 0.1);
+  border-bottom: 1px solid var(--danger);
+  font-size: 13px;
+  color: var(--danger);
+  gap: 12px;
+}
+
+.editor-conflict-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .editor-save-btn {

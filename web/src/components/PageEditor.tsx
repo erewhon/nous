@@ -1,6 +1,7 @@
 /**
  * BlockNote editor for web page editing.
- * Manual save only (Ctrl+S or Save button). No auto-save.
+ * Auto-saves 3s after last change. Ctrl+S for immediate save.
+ * Conflict detection: checks server version before saving.
  */
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { useCreateBlockNote } from "@blocknote/react";
@@ -15,31 +16,38 @@ import {
 } from "../utils/blockFormatConverter";
 import { useWebStore } from "../store";
 
+const AUTO_SAVE_DELAY = 3000;
+
+type SaveStatus = "clean" | "dirty" | "saving" | "saved" | "conflict" | "error";
+
 interface PageEditorProps {
   notebookId: string;
   pageId: string;
   pageData: Record<string, unknown>;
-  onSaved: () => void;
-  onCancel: () => void;
+  onDone: () => void;
 }
 
 export function PageEditor({
   notebookId,
   pageId,
   pageData,
-  onSaved,
-  onCancel,
+  onDone,
 }: PageEditorProps) {
-  const { savePage, updatePageInMeta } = useWebStore();
+  const { savePage, updatePageInMeta, loadPage } = useWebStore();
 
   const [title, setTitle] = useState(
     (pageData.title as string) ?? "Untitled",
   );
-  const [saving, setSaving] = useState(false);
-  const [isDirty, setIsDirty] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("clean");
   const [saveError, setSaveError] = useState("");
+  const [conflictMessage, setConflictMessage] = useState("");
 
   const originalTitle = useRef((pageData.title as string) ?? "Untitled");
+  const loadedUpdatedAt = useRef((pageData.updatedAt as string) ?? "");
+  const savingRef = useRef(false);
+  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const titleRef = useRef(title);
+  titleRef.current = title;
 
   const initialContent = useMemo(() => {
     const content = pageData.content as EditorData | undefined;
@@ -54,108 +62,208 @@ export function PageEditor({
     initialContent,
   });
 
-  const handleSave = useCallback(async () => {
-    if (saving) return;
-    setSaving(true);
+  // Core save logic — used by auto-save, Ctrl+S, and Done button
+  const performSave = useCallback(async (force = false): Promise<boolean> => {
+    if (savingRef.current) return false;
+    savingRef.current = true;
+    setSaveStatus("saving");
     setSaveError("");
+    setConflictMessage("");
 
     try {
+      // Conflict detection: check server version before saving
+      if (!force) {
+        const serverData = await loadPage(notebookId, pageId) as Record<string, unknown> | null;
+        if (serverData) {
+          const serverUpdatedAt = (serverData.updatedAt as string) ?? "";
+          if (
+            serverUpdatedAt &&
+            loadedUpdatedAt.current &&
+            serverUpdatedAt > loadedUpdatedAt.current
+          ) {
+            setSaveStatus("conflict");
+            setConflictMessage(
+              `This page was modified elsewhere at ${new Date(serverUpdatedAt).toLocaleTimeString()}. Save anyway?`,
+            );
+            savingRef.current = false;
+            return false;
+          }
+        }
+      }
+
+      const currentTitle = titleRef.current;
       const bnDoc = editor.document;
       const editorJsData = blockNoteToEditorJs(bnDoc);
+      const now = new Date().toISOString();
 
-      // Merge with original page data to preserve fields we don't edit
       const updatedPageData = {
         ...pageData,
-        title,
+        title: currentTitle,
         content: editorJsData,
-        updatedAt: new Date().toISOString(),
+        updatedAt: now,
       };
 
       await savePage(notebookId, pageId, updatedPageData);
 
+      // Update our loaded timestamp so future conflict checks are correct
+      loadedUpdatedAt.current = now;
+
       // Update meta if title changed
-      if (title !== originalTitle.current) {
-        await updatePageInMeta(notebookId, pageId, title);
-        originalTitle.current = title;
+      if (currentTitle !== originalTitle.current) {
+        await updatePageInMeta(notebookId, pageId, currentTitle);
+        originalTitle.current = currentTitle;
       }
 
-      setIsDirty(false);
-      onSaved();
+      setSaveStatus("saved");
+      return true;
     } catch (err) {
-      setSaveError(
-        err instanceof Error ? err.message : "Save failed",
-      );
+      setSaveStatus("error");
+      setSaveError(err instanceof Error ? err.message : "Save failed");
+      return false;
     } finally {
-      setSaving(false);
+      savingRef.current = false;
     }
-  }, [
-    editor,
-    saving,
-    title,
-    pageData,
-    notebookId,
-    pageId,
-    savePage,
-    updatePageInMeta,
-    onSaved,
-  ]);
+  }, [editor, pageData, notebookId, pageId, savePage, updatePageInMeta, loadPage]);
+
+  // Force save (overwrite conflict)
+  const handleForceOverwrite = useCallback(async () => {
+    await performSave(true);
+  }, [performSave]);
+
+  const dismissConflict = useCallback(() => {
+    setSaveStatus("dirty");
+    setConflictMessage("");
+  }, []);
+
+  // Schedule auto-save
+  const scheduleAutoSave = useCallback(() => {
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+    }
+    autoSaveTimerRef.current = setTimeout(() => {
+      performSave();
+    }, AUTO_SAVE_DELAY);
+  }, [performSave]);
+
+  // Mark dirty and schedule auto-save
+  const markDirty = useCallback(() => {
+    setSaveStatus("dirty");
+    setSaveError("");
+    setConflictMessage("");
+    scheduleAutoSave();
+  }, [scheduleAutoSave]);
 
   // Ctrl+S handler
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === "s") {
         e.preventDefault();
-        handleSave();
+        if (autoSaveTimerRef.current) {
+          clearTimeout(autoSaveTimerRef.current);
+        }
+        performSave();
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [handleSave]);
+  }, [performSave]);
 
-  // Track dirty state from editor changes
+  // Track editor content changes
   useEffect(() => {
-    const onChange = () => setIsDirty(true);
-    editor.onEditorContentChange(onChange);
+    editor.onEditorContentChange(markDirty);
     return () => {
       editor.onEditorContentChange(() => {});
     };
-  }, [editor]);
+  }, [editor, markDirty]);
 
-  // Track dirty state from title changes
+  // Track title changes
   useEffect(() => {
     if (title !== originalTitle.current) {
-      setIsDirty(true);
+      markDirty();
     }
-  }, [title]);
+  }, [title, markDirty]);
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (autoSaveTimerRef.current) {
+        clearTimeout(autoSaveTimerRef.current);
+      }
+    };
+  }, []);
+
+  // Done = save immediately then exit
+  const handleDone = useCallback(async () => {
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+    }
+    if (saveStatus === "dirty" || saveStatus === "error") {
+      const ok = await performSave();
+      if (ok) onDone();
+      // If conflict/error, stay in editor
+    } else {
+      onDone();
+    }
+  }, [saveStatus, performSave, onDone]);
+
+  const statusLabel = (() => {
+    switch (saveStatus) {
+      case "saving": return "Saving...";
+      case "saved": return "Saved";
+      case "dirty": return "Unsaved changes";
+      case "conflict": return "Conflict";
+      case "error": return saveError || "Save failed";
+      default: return "";
+    }
+  })();
+
+  const statusClass = (() => {
+    switch (saveStatus) {
+      case "saved": return "editor-status-saved";
+      case "saving": return "editor-status-saving";
+      case "error": return "editor-status-error";
+      case "conflict": return "editor-status-error";
+      default: return "editor-status-dirty";
+    }
+  })();
 
   return (
     <div className="page-editor">
       <div className="editor-toolbar">
         <div className="editor-toolbar-left">
-          {isDirty && (
-            <span className="editor-dirty-indicator">Unsaved changes</span>
-          )}
-          {saveError && (
-            <span className="editor-save-error">{saveError}</span>
+          {statusLabel && (
+            <span className={`editor-status ${statusClass}`}>
+              {statusLabel}
+            </span>
           )}
         </div>
         <div className="editor-toolbar-right">
           <button
-            className="btn btn-ghost"
-            onClick={onCancel}
-            disabled={saving}
-          >
-            Cancel
-          </button>
-          <button
             className="btn btn-primary editor-save-btn"
-            onClick={handleSave}
-            disabled={saving}
+            onClick={handleDone}
+            disabled={saveStatus === "saving"}
           >
-            {saving ? "Saving..." : "Save"}
+            Done
           </button>
         </div>
       </div>
+
+      {saveStatus === "conflict" && conflictMessage && (
+        <div className="editor-conflict-bar">
+          <span>{conflictMessage}</span>
+          <div className="editor-conflict-actions">
+            <button className="btn btn-ghost" onClick={dismissConflict}>
+              Cancel
+            </button>
+            <button
+              className="btn btn-primary editor-save-btn"
+              onClick={handleForceOverwrite}
+            >
+              Overwrite
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="page-viewer">
         <input
