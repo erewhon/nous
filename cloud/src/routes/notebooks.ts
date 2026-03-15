@@ -240,6 +240,7 @@ notebooks.post("/:id/shares", async (c) => {
 
   const body = await c.req.json<{
     mode: "public" | "password";
+    permissions?: "r" | "rw";
     passwordSalt?: string;
     wrappedKey?: string;
     label?: string;
@@ -249,6 +250,8 @@ notebooks.post("/:id/shares", async (c) => {
   if (body.mode !== "public" && body.mode !== "password") {
     throw badRequest("mode must be 'public' or 'password'");
   }
+
+  const permissions = body.permissions === "rw" ? "rw" : "r";
 
   if (body.mode === "password") {
     if (!body.passwordSalt || !body.wrappedKey) {
@@ -263,6 +266,7 @@ notebooks.post("/:id/shares", async (c) => {
     notebookId,
     userId,
     body.mode,
+    permissions,
     body.mode === "password" ? (body.passwordSalt ?? null) : null,
     body.mode === "password" ? (body.wrappedKey ?? null) : null,
     body.label?.trim() || null,
@@ -273,6 +277,7 @@ notebooks.post("/:id/shares", async (c) => {
     id,
     notebookId,
     mode: body.mode,
+    permissions,
     label: body.label?.trim() || null,
     createdAt: new Date().toISOString(),
     expiresAt: body.expiresAt || null,
@@ -291,6 +296,7 @@ notebooks.get("/:id/shares", async (c) => {
       id: r.id,
       notebookId: r.notebook_id,
       mode: r.mode,
+      permissions: r.permissions,
       label: r.label,
       createdAt: r.created_at,
       expiresAt: r.expires_at,

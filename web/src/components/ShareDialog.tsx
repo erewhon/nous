@@ -32,6 +32,9 @@ export function ShareDialog({ notebookId, onClose }: ShareDialogProps) {
   // Expiration
   const [expirySelection, setExpirySelection] = useState("");
 
+  // Permissions
+  const [allowEditing, setAllowEditing] = useState(false);
+
   // Password form
   const [showPasswordForm, setShowPasswordForm] = useState(false);
   const [sharePassword, setSharePassword] = useState("");
@@ -71,6 +74,7 @@ export function ShareDialog({ notebookId, onClose }: ShareDialogProps) {
         undefined,
         undefined,
         getExpiresAt(),
+        allowEditing ? "rw" : "r",
       );
       setGeneratedUrl(shareUrl);
       await loadShares();
@@ -101,6 +105,7 @@ export function ShareDialog({ notebookId, onClose }: ShareDialogProps) {
         sharePassword,
         shareLabel || undefined,
         getExpiresAt(),
+        allowEditing ? "rw" : "r",
       );
       setGeneratedUrl(shareUrl);
       setShowPasswordForm(false);
@@ -213,6 +218,21 @@ export function ShareDialog({ notebookId, onClose }: ShareDialogProps) {
             <div className="share-actions">
               {expiryPicker}
 
+              <div className="form-group">
+                <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={allowEditing}
+                    onChange={(e) => setAllowEditing(e.target.checked)}
+                    style={{ width: 16, height: 16 }}
+                  />
+                  Allow editing
+                </label>
+                <div style={{ fontSize: 12, color: "var(--text-dim)", marginTop: 2 }}>
+                  Recipients can edit pages in this notebook.
+                </div>
+              </div>
+
               <button
                 className="btn btn-primary"
                 onClick={handleCreatePublic}
@@ -311,6 +331,11 @@ export function ShareDialog({ notebookId, onClose }: ShareDialogProps) {
                   <div>
                     <div style={{ fontSize: 13 }}>
                       {share.mode === "public" ? "Public link" : "Password-protected"}
+                      {share.permissions === "rw" && (
+                        <span style={{ color: "var(--accent)", marginLeft: 6, fontSize: 11 }}>
+                          Editable
+                        </span>
+                      )}
                       {share.label && (
                         <span style={{ color: "var(--text-dim)" }}>
                           {" "}&mdash; {share.label}

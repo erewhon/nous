@@ -187,6 +187,7 @@ export async function createShare(
   notebookId: string,
   userId: string,
   mode: "public" | "password",
+  permissions: "r" | "rw",
   passwordSalt: string | null,
   wrappedKey: string | null,
   label: string | null,
@@ -194,10 +195,10 @@ export async function createShare(
 ): Promise<void> {
   await db
     .prepare(
-      `INSERT INTO notebook_shares (id, notebook_id, user_id, mode, password_salt, wrapped_key, label, expires_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO notebook_shares (id, notebook_id, user_id, mode, permissions, password_salt, wrapped_key, label, expires_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-    .bind(id, notebookId, userId, mode, passwordSalt, wrappedKey, label, expiresAt)
+    .bind(id, notebookId, userId, mode, permissions, passwordSalt, wrappedKey, label, expiresAt)
     .run();
 }
 

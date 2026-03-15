@@ -1,4 +1,5 @@
 export { useCloudStore } from "./cloudStore";
+export { useCloudAutoSync } from "./useCloudAutoSync";
 export { CloudAPI } from "./api";
 export type { CloudNotebook, AuthResponse, EncryptionParams } from "./api";
 export {

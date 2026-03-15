@@ -150,6 +150,8 @@ export function NotebookSettingsDialog({
     syncNotebook: syncCloudNotebook,
     listRemotePageIds,
     loadNotebooks: loadCloudNotebooks,
+    autoSyncSettings,
+    setAutoSync,
     error: cloudError,
   } = useCloudStore();
   const cloudUnlocked = cloudAuthed && cloudEncrypted && cloudUnlockedFn();
@@ -1419,6 +1421,37 @@ export function NotebookSettingsDialog({
                   >
                     Disable
                   </button>
+                </div>
+                <div className="flex items-center gap-2 mt-2">
+                  <span className="text-xs" style={{ color: "var(--color-text-muted)" }}>Auto-sync:</span>
+                  <select
+                    value={
+                      autoSyncSettings[cloudNotebook.id]?.enabled
+                        ? String(autoSyncSettings[cloudNotebook.id].intervalMinutes)
+                        : "0"
+                    }
+                    onChange={(e) => {
+                      const mins = Number(e.target.value);
+                      if (mins === 0) {
+                        setAutoSync(cloudNotebook.id, false, 0);
+                      } else {
+                        setAutoSync(cloudNotebook.id, true, mins);
+                      }
+                    }}
+                    className="rounded-md text-xs px-2 py-1"
+                    style={{
+                      backgroundColor: "var(--color-bg-tertiary)",
+                      color: "var(--color-text-primary)",
+                      border: "1px solid var(--color-border)",
+                    }}
+                  >
+                    <option value="0">Manual only</option>
+                    <option value="5">Every 5 min</option>
+                    <option value="10">Every 10 min</option>
+                    <option value="15">Every 15 min</option>
+                    <option value="30">Every 30 min</option>
+                    <option value="60">Every hour</option>
+                  </select>
                 </div>
               </div>
             ) : (

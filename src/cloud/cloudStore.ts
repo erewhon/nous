@@ -41,6 +41,9 @@ interface CloudState {
   syncErrors: Record<string, string>;
   lastSyncAt: Record<string, string>;
 
+  // Auto-sync settings (persisted)
+  autoSyncSettings: Record<string, { enabled: boolean; intervalMinutes: number }>;
+
   // Loading
   isLoading: boolean;
   error: string | null;
@@ -91,6 +94,9 @@ interface CloudActions {
     onProgress?: (current: number, total: number, message: string) => void,
   ) => Promise<void>;
 
+  // Auto-sync
+  setAutoSync: (cloudNotebookId: string, enabled: boolean, intervalMinutes: number) => void;
+
   // Helpers
   getApi: () => CloudAPI;
   clearError: () => void;
@@ -140,6 +146,7 @@ export const useCloudStore = create<CloudStore>()(
       syncStatus: {},
       syncErrors: {},
       lastSyncAt: {},
+      autoSyncSettings: {},
       isLoading: false,
       error: null,
 
@@ -225,6 +232,7 @@ export const useCloudStore = create<CloudStore>()(
           syncStatus: {},
           syncErrors: {},
           lastSyncAt: {},
+          autoSyncSettings: {},
           error: null,
         });
       },
@@ -346,10 +354,14 @@ export const useCloudStore = create<CloudStore>()(
           const api = get().getApi();
           await api.deleteNotebook(id);
           notebookKeyCache.delete(id);
-          set((state) => ({
-            notebooks: state.notebooks.filter((n) => n.id !== id),
-            isLoading: false,
-          }));
+          set((state) => {
+            const { [id]: _, ...restAutoSync } = state.autoSyncSettings;
+            return {
+              notebooks: state.notebooks.filter((n) => n.id !== id),
+              autoSyncSettings: restAutoSync,
+              isLoading: false,
+            };
+          });
         } catch (err) {
           set({
             error:
@@ -684,6 +696,21 @@ export const useCloudStore = create<CloudStore>()(
         });
       },
 
+      setAutoSync: (cloudNotebookId, enabled, intervalMinutes) => {
+        set((state) => {
+          if (!enabled) {
+            const { [cloudNotebookId]: _, ...rest } = state.autoSyncSettings;
+            return { autoSyncSettings: rest };
+          }
+          return {
+            autoSyncSettings: {
+              ...state.autoSyncSettings,
+              [cloudNotebookId]: { enabled, intervalMinutes },
+            },
+          };
+        });
+      },
+
       clearError: () => set({ error: null }),
     }),
     {
@@ -696,6 +723,7 @@ export const useCloudStore = create<CloudStore>()(
         refreshToken: state.refreshToken,
         hasEncryptionSetup: state.hasEncryptionSetup,
         masterKeySalt: state.masterKeySalt,
+        autoSyncSettings: state.autoSyncSettings,
       }),
     },
   ),

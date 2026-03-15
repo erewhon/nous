@@ -87,6 +87,7 @@ interface WebActions {
     sharePassword?: string,
     label?: string,
     expiresAt?: string,
+    permissions?: "r" | "rw",
   ) => Promise<{ shareId: string; shareUrl: string }>;
   listShares: (notebookId: string) => Promise<NotebookShareInfo[]>;
   revokeShare: (notebookId: string, shareId: string) => Promise<void>;
@@ -318,7 +319,7 @@ export const useWebStore = create<WebStore>()(
         return decryptJSON(key, result.data);
       },
 
-      createShare: async (notebookId, mode, sharePassword, label, expiresAt) => {
+      createShare: async (notebookId, mode, sharePassword, label, expiresAt, permissions) => {
         const state = get();
         const api = getApi(state);
         const nbKey = await getNotebookKey(api, state.notebooks, notebookId);
@@ -326,6 +327,7 @@ export const useWebStore = create<WebStore>()(
         if (mode === "public") {
           const result = await api.createShare(notebookId, {
             mode: "public",
+            permissions,
             label,
             expiresAt,
           });
@@ -341,6 +343,7 @@ export const useWebStore = create<WebStore>()(
           const wrappedKey = await wrapKeyForShare(shareKey, nbKey);
           const result = await api.createShare(notebookId, {
             mode: "password",
+            permissions,
             passwordSalt: salt,
             wrappedKey,
             label,
@@ -442,15 +445,15 @@ export const useWebStore = create<WebStore>()(
 
         const { ShareAPI } = await import("./api");
         const shareApi = new ShareAPI();
-        const encrypted = await shareApi.downloadMeta(shareId);
-        if (!encrypted) return null;
+        const result = await shareApi.downloadMeta(shareId);
+        if (!result) return null;
 
         const cached = notebookKeyCache.get(`share:${shareId}`);
         const key =
           cached ?? await unwrapNotebookKey(masterKey, saved.wrappedNotebookKey);
         if (!cached) notebookKeyCache.set(`share:${shareId}`, key);
 
-        return decryptJSON<NotebookMeta>(key, encrypted);
+        return decryptJSON<NotebookMeta>(key, result.data);
       },
 
       loadSavedSharePage: async (shareId, pageId) => {
@@ -460,15 +463,15 @@ export const useWebStore = create<WebStore>()(
 
         const { ShareAPI } = await import("./api");
         const shareApi = new ShareAPI();
-        const encrypted = await shareApi.downloadPage(shareId, pageId);
-        if (!encrypted) return null;
+        const result = await shareApi.downloadPage(shareId, pageId);
+        if (!result) return null;
 
         const cached = notebookKeyCache.get(`share:${shareId}`);
         const key =
           cached ?? await unwrapNotebookKey(masterKey, saved.wrappedNotebookKey);
         if (!cached) notebookKeyCache.set(`share:${shareId}`, key);
 
-        return decryptJSON(key, encrypted);
+        return decryptJSON(key, result.data);
       },
 
       clearError: () => set({ error: null }),

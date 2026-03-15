@@ -45,12 +45,14 @@ import { useTasksStore } from "./stores/tasksStore";
 import { useSectionStore } from "./stores/sectionStore";
 import { useToastStore } from "./stores/toastStore";
 import { useWindowLibrary } from "./contexts/WindowContext";
+import { useCloudAutoSync } from "./cloud";
 import { exportPageToFile } from "./utils/api";
 import { save } from "@tauri-apps/plugin-dialog";
 
 function App() {
   useAppInit();
   useMainThreadWatchdog({ thresholdMs: 500 });
+  useCloudAutoSync();
 
   // On startup, dump diagnostics from the previous session
   useEffect(() => {

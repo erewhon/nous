@@ -44,13 +44,15 @@ CREATE INDEX IF NOT EXISTS idx_cloud_notebooks_user ON cloud_notebooks(user_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_cloud_notebooks_user_local
   ON cloud_notebooks(user_id, local_notebook_id);
 
--- Notebook shares (read-only sharing links)
+-- Notebook shares
 CREATE TABLE IF NOT EXISTS notebook_shares (
   id TEXT PRIMARY KEY,
   notebook_id TEXT NOT NULL REFERENCES cloud_notebooks(id) ON DELETE CASCADE,
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   -- 'public' = key-in-URL-fragment, 'password' = password-protected
   mode TEXT NOT NULL CHECK (mode IN ('public', 'password')),
+  -- 'r' = read-only, 'rw' = read-write
+  permissions TEXT NOT NULL DEFAULT 'r' CHECK (permissions IN ('r', 'rw')),
   -- For password mode: PBKDF2 salt (hex) used to derive the wrapping key
   password_salt TEXT,
   -- For password mode: notebook key wrapped with password-derived key (base64)

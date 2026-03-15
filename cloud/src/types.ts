@@ -46,6 +46,7 @@ export interface NotebookShareRow {
   notebook_id: string;
   user_id: string;
   mode: "public" | "password";
+  permissions: "r" | "rw";
   password_salt: string | null;
   wrapped_key: string | null;
   label: string | null;

@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, type FormEvent } from "react";
+import { useEffect, useState, useCallback, useMemo, lazy, Suspense, type FormEvent } from "react";
 import { useParams, Link } from "react-router-dom";
 import { ShareAPI } from "../api";
 import type { ShareInfo } from "../api";
@@ -11,6 +11,12 @@ import {
 } from "../crypto";
 import { PageContent } from "../components/BlockRenderer";
 import { PageList } from "../components/PageList";
+
+const SharePageEditor = lazy(() =>
+  import("../components/SharePageEditor").then((m) => ({
+    default: m.SharePageEditor,
+  })),
+);
 
 type Phase = "loading" | "needPassword" | "unlocked" | "error";
 
@@ -28,6 +34,7 @@ export function SharePage() {
   const [loadingPage, setLoadingPage] = useState(false);
   const [phase, setPhase] = useState<Phase>("loading");
   const [error, setError] = useState("");
+  const [isEditing, setIsEditing] = useState(false);
 
   // Save to library
   const { isAuthenticated, isUnlocked, saveShareToLibrary, savedShares } =
@@ -41,6 +48,8 @@ export function SharePage() {
   const [passwordError, setPasswordError] = useState("");
   const [unlocking, setUnlocking] = useState(false);
 
+  const isWritable = shareInfo?.permissions === "rw";
+
   // 1. Fetch share info
   useEffect(() => {
     if (!shareId) return;
@@ -50,7 +59,6 @@ export function SharePage() {
       .then((info) => {
         setShareInfo(info);
         if (info.mode === "public") {
-          // Extract key from URL fragment
           const hash = window.location.hash;
           const keyMatch = hash.match(/key=([A-Za-z0-9+/=]+)/);
           if (!keyMatch) {
@@ -79,13 +87,13 @@ export function SharePage() {
     if (!notebookKey || !shareId) return;
     api
       .downloadMeta(shareId)
-      .then((encrypted) => {
-        if (!encrypted) {
+      .then((result) => {
+        if (!result) {
           setError("Notebook metadata not found.");
           setPhase("error");
           return;
         }
-        return decryptJSON<NotebookMeta>(notebookKey, encrypted);
+        return decryptJSON<NotebookMeta>(notebookKey, result.data);
       })
       .then((m) => {
         if (m) {
@@ -106,16 +114,25 @@ export function SharePage() {
       return;
     }
     setLoadingPage(true);
+    setIsEditing(false);
     api
       .downloadPage(shareId, pageId)
-      .then((encrypted) => {
-        if (!encrypted) return null;
-        return decryptJSON(notebookKey, encrypted);
+      .then((result) => {
+        if (!result) return null;
+        return decryptJSON(notebookKey, result.data);
       })
       .then((data) => setPageData(data))
       .catch((err) => setError(err.message))
       .finally(() => setLoadingPage(false));
   }, [notebookKey, shareId, pageId, api]);
+
+  // beforeunload warning when editing
+  useEffect(() => {
+    if (!isEditing) return;
+    const handler = (e: BeforeUnloadEvent) => { e.preventDefault(); };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [isEditing]);
 
   const handlePasswordSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -134,6 +151,21 @@ export function SharePage() {
       setUnlocking(false);
     }
   };
+
+  const handleEditDone = useCallback(() => {
+    setIsEditing(false);
+    // Reload page data to reflect saved changes
+    if (notebookKey && shareId && pageId) {
+      api
+        .downloadPage(shareId, pageId)
+        .then((result) => {
+          if (!result) return null;
+          return decryptJSON(notebookKey, result.data);
+        })
+        .then((data) => { if (data) setPageData(data); })
+        .catch(() => {});
+    }
+  }, [notebookKey, shareId, pageId, api]);
 
   // ─── Render phases ──────────────────────────────────────────────────────
 
@@ -199,6 +231,28 @@ export function SharePage() {
 
   // Viewing a specific page
   if (pageId && currentPage) {
+    // Editing mode
+    if (isEditing && notebookKey && pageData) {
+      return (
+        <Suspense
+          fallback={
+            <div className="loading">
+              <div className="spinner" />
+              Loading editor...
+            </div>
+          }
+        >
+          <SharePageEditor
+            shareId={shareId!}
+            pageId={pageId}
+            pageData={pageData as Record<string, unknown>}
+            notebookKey={notebookKey}
+            onDone={handleEditDone}
+          />
+        </Suspense>
+      );
+    }
+
     return (
       <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}>
         <div
@@ -206,6 +260,9 @@ export function SharePage() {
             padding: "12px 24px",
             borderBottom: "1px solid var(--border)",
             background: "var(--surface)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
           }}
         >
           <Link
@@ -214,6 +271,15 @@ export function SharePage() {
           >
             &larr; {shareInfo?.notebookName || "Back"}
           </Link>
+          {isWritable && !loadingPage && pageData != null && (
+            <button
+              className="btn btn-primary"
+              style={{ fontSize: 12, padding: "4px 12px" }}
+              onClick={() => setIsEditing(true)}
+            >
+              Edit
+            </button>
+          )}
         </div>
         {loadingPage ? (
           <div className="loading">
@@ -255,6 +321,7 @@ export function SharePage() {
         >
           <div style={{ fontSize: 13, color: "var(--text-dim)" }}>
             {pages.length} {pages.length === 1 ? "page" : "pages"}
+            {isWritable && <> &middot; Editable</>}
             {meta?.syncedAt && (
               <> &middot; Last updated {formatDate(meta.syncedAt)}</>
             )}

@@ -22,6 +22,7 @@ export interface NotebookShareInfo {
   id: string;
   notebookId: string;
   mode: "public" | "password";
+  permissions: "r" | "rw";
   label: string | null;
   createdAt: string;
   expiresAt: string | null;
@@ -32,6 +33,7 @@ export interface ShareInfo {
   notebookId: string;
   notebookName: string;
   mode: "public" | "password";
+  permissions: "r" | "rw";
   passwordSalt: string | null;
   wrappedKey: string | null;
 }
@@ -170,6 +172,7 @@ export class CloudAPI {
     notebookId: string,
     body: {
       mode: "public" | "password";
+      permissions?: "r" | "rw";
       passwordSalt?: string;
       wrappedKey?: string;
       label?: string;
@@ -362,20 +365,64 @@ export class ShareAPI {
     return res.json();
   }
 
-  async downloadMeta(shareId: string): Promise<ArrayBuffer | null> {
+  async downloadMeta(
+    shareId: string,
+  ): Promise<{ data: ArrayBuffer; etag: string } | null> {
     const res = await fetch(`${API_BASE}/shares/${shareId}/meta`);
     if (res.status === 404) return null;
     if (!res.ok) throw await parseError(res);
-    return res.arrayBuffer();
+    const data = await res.arrayBuffer();
+    const etag = res.headers.get("ETag") ?? "";
+    return { data, etag };
+  }
+
+  async uploadMeta(
+    shareId: string,
+    encrypted: ArrayBuffer,
+    ifMatch?: string,
+  ): Promise<string> {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/octet-stream",
+    };
+    if (ifMatch) headers["If-Match"] = ifMatch;
+    const res = await fetch(`${API_BASE}/shares/${shareId}/meta`, {
+      method: "PUT",
+      headers,
+      body: encrypted,
+    });
+    if (res.status === 412) throw new ETagConflictError();
+    if (!res.ok) throw await parseError(res);
+    return res.headers.get("ETag") ?? "";
   }
 
   async downloadPage(
     shareId: string,
     pageId: string,
-  ): Promise<ArrayBuffer | null> {
+  ): Promise<{ data: ArrayBuffer; etag: string } | null> {
     const res = await fetch(`${API_BASE}/shares/${shareId}/pages/${pageId}`);
     if (res.status === 404) return null;
     if (!res.ok) throw await parseError(res);
-    return res.arrayBuffer();
+    const data = await res.arrayBuffer();
+    const etag = res.headers.get("ETag") ?? "";
+    return { data, etag };
+  }
+
+  async uploadPage(
+    shareId: string,
+    pageId: string,
+    encrypted: ArrayBuffer,
+    ifMatch?: string,
+  ): Promise<string> {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/octet-stream",
+    };
+    if (ifMatch) headers["If-Match"] = ifMatch;
+    const res = await fetch(
+      `${API_BASE}/shares/${shareId}/pages/${pageId}`,
+      { method: "PUT", headers, body: encrypted },
+    );
+    if (res.status === 412) throw new ETagConflictError();
+    if (!res.ok) throw await parseError(res);
+    return res.headers.get("ETag") ?? "";
   }
 }
