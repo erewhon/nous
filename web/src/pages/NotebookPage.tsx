@@ -1,10 +1,13 @@
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, lazy, Suspense } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { useWebStore, type NotebookMeta, type PageSummary } from "../store";
 import { PageContent } from "../components/BlockRenderer";
-import { PageEditor } from "../components/PageEditor";
 import { PageList } from "../components/PageList";
 import { ShareDialog } from "../components/ShareDialog";
+
+const PageEditor = lazy(() =>
+  import("../components/PageEditor").then((m) => ({ default: m.PageEditor })),
+);
 
 export function NotebookPage() {
   const { notebookId, pageId } = useParams<{
@@ -165,12 +168,21 @@ export function NotebookPage() {
             Decrypting page...
           </div>
         ) : isEditing && notebookId && pageData ? (
-          <PageEditor
-            notebookId={notebookId}
-            pageId={pageId}
-            pageData={pageData as Record<string, unknown>}
-            onDone={handleDone}
-          />
+          <Suspense
+            fallback={
+              <div className="loading">
+                <div className="spinner" />
+                Loading editor...
+              </div>
+            }
+          >
+            <PageEditor
+              notebookId={notebookId}
+              pageId={pageId}
+              pageData={pageData as Record<string, unknown>}
+              onDone={handleDone}
+            />
+          </Suspense>
         ) : (
           <div className="page-viewer">
             <h1 className="page-title">
