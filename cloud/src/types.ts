@@ -54,6 +54,13 @@ export interface NotebookShareRow {
   revoked_at: string | null;
 }
 
+export interface SavedShareRow {
+  user_id: string;
+  share_id: string;
+  wrapped_notebook_key: string;
+  saved_at: string;
+}
+
 /** JWT payload. */
 export interface JWTPayload {
   sub: string;

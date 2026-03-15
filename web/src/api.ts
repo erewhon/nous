@@ -36,6 +36,14 @@ export interface ShareInfo {
   wrappedKey: string | null;
 }
 
+export interface SavedShareInfo {
+  shareId: string;
+  notebookName: string;
+  ownerEmail: string;
+  wrappedNotebookKey: string;
+  savedAt: string;
+}
+
 export interface CloudNotebook {
   id: string;
   localNotebookId: string | null;
@@ -181,6 +189,34 @@ export class CloudAPI {
   async revokeShare(notebookId: string, shareId: string): Promise<void> {
     const res = await this.authedFetch(
       `${API_BASE}/notebooks/${notebookId}/shares/${shareId}`,
+      { method: "DELETE" },
+    );
+    if (!res.ok) throw await parseError(res);
+  }
+
+  // ─── Saved shares ────────────────────────────────────────────────────────
+
+  async saveShareToLibrary(
+    shareId: string,
+    wrappedNotebookKey: string,
+  ): Promise<void> {
+    const res = await this.authedFetch(`${API_BASE}/me/saved-shares`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ shareId, wrappedNotebookKey }),
+    });
+    if (!res.ok) throw await parseError(res);
+  }
+
+  async listSavedShares(): Promise<SavedShareInfo[]> {
+    const res = await this.authedFetch(`${API_BASE}/me/saved-shares`);
+    if (!res.ok) throw await parseError(res);
+    return res.json();
+  }
+
+  async removeSavedShare(shareId: string): Promise<void> {
+    const res = await this.authedFetch(
+      `${API_BASE}/me/saved-shares/${shareId}`,
       { method: "DELETE" },
     );
     if (!res.ok) throw await parseError(res);

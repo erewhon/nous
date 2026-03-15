@@ -461,6 +461,13 @@ export const useCloudStore = create<CloudStore>()(
           // 4. Upload notebook metadata (page list, sections, folders, etc.)
           current++;
           onProgress?.(current, total, "Uploading metadata...");
+
+          const { listFolders, listSections } = await import("../utils/api");
+          const [folders, sections] = await Promise.all([
+            listFolders(localNotebookId).catch(() => []),
+            listSections(localNotebookId).catch(() => []),
+          ]);
+
           const meta = {
             syncedAt: new Date().toISOString(),
             pageIds: pages.map((p) => p.id),
@@ -474,6 +481,22 @@ export const useCloudStore = create<CloudStore>()(
               isArchived: p.isArchived,
               pageType: p.pageType,
               updatedAt: p.updatedAt,
+            })),
+            folders: folders.map((f) => ({
+              id: f.id,
+              name: f.name,
+              parentId: f.parentId ?? null,
+              sectionId: f.sectionId ?? null,
+              folderType: f.folderType,
+              isArchived: f.isArchived,
+              color: f.color ?? null,
+              position: f.position,
+            })),
+            sections: sections.map((s) => ({
+              id: s.id,
+              name: s.name,
+              color: s.color ?? null,
+              position: s.position,
             })),
           };
           await get().syncMeta(cloudNotebookId, meta);

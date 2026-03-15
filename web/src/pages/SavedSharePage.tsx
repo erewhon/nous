@@ -3,51 +3,51 @@ import { useParams, Link } from "react-router-dom";
 import { useWebStore, type NotebookMeta, type PageSummary } from "../store";
 import { PageContent } from "../components/BlockRenderer";
 import { PageList } from "../components/PageList";
-import { ShareDialog } from "../components/ShareDialog";
 
-export function NotebookPage() {
-  const { notebookId, pageId } = useParams<{
-    notebookId: string;
+export function SavedSharePage() {
+  const { shareId, pageId } = useParams<{
+    shareId: string;
     pageId?: string;
   }>();
-  const { notebooks, loadNotebookMeta, loadPage } = useWebStore();
+  const { savedShares, loadSavedShareMeta, loadSavedSharePage, removeSavedShare } =
+    useWebStore();
+
   const [meta, setMeta] = useState<NotebookMeta | null>(null);
   const [pageData, setPageData] = useState<unknown>(null);
   const [loadingMeta, setLoadingMeta] = useState(true);
   const [loadingPage, setLoadingPage] = useState(false);
   const [error, setError] = useState("");
-  const [showShareDialog, setShowShareDialog] = useState(false);
 
-  const notebook = notebooks.find((n) => n.id === notebookId);
+  const saved = savedShares.find((s) => s.shareId === shareId);
 
   useEffect(() => {
-    if (!notebookId) return;
+    if (!shareId) return;
     setLoadingMeta(true);
     setError("");
-    loadNotebookMeta(notebookId)
+    loadSavedShareMeta(shareId)
       .then((m) => setMeta(m))
       .catch((e) => setError(e.message))
       .finally(() => setLoadingMeta(false));
-  }, [notebookId, loadNotebookMeta]);
+  }, [shareId, loadSavedShareMeta]);
 
   useEffect(() => {
-    if (!notebookId || !pageId) {
+    if (!shareId || !pageId) {
       setPageData(null);
       return;
     }
     setLoadingPage(true);
     setError("");
-    loadPage(notebookId, pageId)
+    loadSavedSharePage(shareId, pageId)
       .then((data) => setPageData(data))
       .catch((e) => setError(e.message))
       .finally(() => setLoadingPage(false));
-  }, [notebookId, pageId, loadPage]);
+  }, [shareId, pageId, loadSavedSharePage]);
 
   if (loadingMeta) {
     return (
       <div className="loading">
         <div className="spinner" />
-        Loading notebook...
+        Loading shared notebook...
       </div>
     );
   }
@@ -74,10 +74,10 @@ export function NotebookPage() {
           }}
         >
           <Link
-            to={`/notebook/${notebookId}`}
+            to={`/shared/${shareId}`}
             style={{ fontSize: 13, color: "var(--text-dim)" }}
           >
-            &larr; {notebook?.name || "Back"}
+            &larr; {saved?.notebookName || "Back"}
           </Link>
         </div>
         {loadingPage ? (
@@ -107,31 +107,39 @@ export function NotebookPage() {
             justifyContent: "space-between",
           }}
         >
-          <h2>{notebook?.name || "Notebook"}</h2>
+          <div>
+            <h2>{saved?.notebookName || "Shared Notebook"}</h2>
+            {saved?.ownerEmail && (
+              <div
+                style={{
+                  fontSize: 12,
+                  color: "var(--text-dim)",
+                  marginTop: 2,
+                }}
+              >
+                Shared by {saved.ownerEmail}
+              </div>
+            )}
+          </div>
           <button
             className="btn btn-ghost"
-            style={{ border: "1px solid var(--border)" }}
-            onClick={() => setShowShareDialog(true)}
+            style={{ color: "var(--danger)", fontSize: 12 }}
+            onClick={async () => {
+              if (shareId) {
+                await removeSavedShare(shareId);
+                window.location.href = "/";
+              }
+            }}
           >
-            Share
+            Remove
           </button>
         </div>
         <div className="subtitle">
           {pages.length} {pages.length === 1 ? "page" : "pages"}
-          {meta?.syncedAt && (
-            <> &middot; Last synced {formatDate(meta.syncedAt)}</>
-          )}
         </div>
       </div>
 
-      {showShareDialog && notebookId && (
-        <ShareDialog
-          notebookId={notebookId}
-          onClose={() => setShowShareDialog(false)}
-        />
-      )}
-
-      {meta && <PageList meta={meta} basePath={`/notebook/${notebookId}`} />}
+      {meta && <PageList meta={meta} basePath={`/shared/${shareId}`} />}
     </div>
   );
 }
@@ -147,29 +155,4 @@ function getPageContent(pageData: unknown): unknown {
   if (data?.content) return data.content;
   if (data?.blocks) return data;
   return null;
-}
-
-function formatDate(iso: string): string {
-  try {
-    const d = new Date(iso);
-    const now = new Date();
-    const diffMs = now.getTime() - d.getTime();
-    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-
-    if (diffDays === 0) {
-      return d.toLocaleTimeString(undefined, {
-        hour: "numeric",
-        minute: "2-digit",
-      });
-    }
-    if (diffDays === 1) return "Yesterday";
-    if (diffDays < 7) return `${diffDays} days ago`;
-    return d.toLocaleDateString(undefined, {
-      month: "short",
-      day: "numeric",
-      year: d.getFullYear() !== now.getFullYear() ? "numeric" : undefined,
-    });
-  } catch {
-    return iso;
-  }
 }

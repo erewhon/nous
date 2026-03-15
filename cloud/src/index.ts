@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { HTTPException } from "hono/http-exception";
 import type { Env, Variables } from "./types";
 import { corsMiddleware } from "./middleware/cors";
 import { authMiddleware } from "./middleware/auth";
@@ -11,6 +12,9 @@ const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 // Global error handler
 app.onError((err, c) => {
+  if (err instanceof HTTPException) {
+    return c.json({ message: err.message }, err.status);
+  }
   console.error("Unhandled error:", err.message, err.stack);
   return c.json({ message: err.message }, 500);
 });

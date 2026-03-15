@@ -64,3 +64,15 @@ CREATE TABLE IF NOT EXISTS notebook_shares (
 
 CREATE INDEX IF NOT EXISTS idx_notebook_shares_notebook ON notebook_shares(notebook_id);
 CREATE INDEX IF NOT EXISTS idx_notebook_shares_user ON notebook_shares(user_id);
+
+-- Saved shares (shares bookmarked by recipient users)
+CREATE TABLE IF NOT EXISTS saved_shares (
+  user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  share_id TEXT NOT NULL REFERENCES notebook_shares(id) ON DELETE CASCADE,
+  -- Notebook key re-wrapped with this user's master key (base64)
+  wrapped_notebook_key TEXT NOT NULL,
+  saved_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (user_id, share_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_saved_shares_user ON saved_shares(user_id);

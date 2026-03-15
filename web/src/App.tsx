@@ -11,15 +11,28 @@ import { LoginPage } from "./pages/LoginPage";
 import { UnlockPage } from "./pages/UnlockPage";
 import { NotebookPage } from "./pages/NotebookPage";
 import { SharePage } from "./pages/SharePage";
+import { SavedSharePage } from "./pages/SavedSharePage";
 
 function NotebookSidebar() {
-  const { notebooks, loadNotebooks, isLoading, email, logout, lockEncryption } =
-    useWebStore();
-  const { notebookId } = useParams<{ notebookId?: string }>();
+  const {
+    notebooks,
+    savedShares,
+    loadNotebooks,
+    loadSavedShares,
+    isLoading,
+    email,
+    logout,
+    lockEncryption,
+  } = useWebStore();
+  const { notebookId, shareId } = useParams<{
+    notebookId?: string;
+    shareId?: string;
+  }>();
 
   useEffect(() => {
     loadNotebooks();
-  }, [loadNotebooks]);
+    loadSavedShares();
+  }, [loadNotebooks, loadSavedShares]);
 
   return (
     <div className="sidebar">
@@ -42,29 +55,66 @@ function NotebookSidebar() {
           <div className="loading">
             <div className="spinner" />
           </div>
-        ) : notebooks.length === 0 ? (
-          <div style={{ padding: 16, color: "var(--text-dim)", fontSize: 13 }}>
-            No notebooks synced yet. Sync a notebook from the Nous desktop app.
-          </div>
         ) : (
-          notebooks.map((nb) => (
-            <Link
-              key={nb.id}
-              to={`/notebook/${nb.id}`}
-              className={`notebook-item ${nb.id === notebookId ? "active" : ""}`}
-              style={{ textDecoration: "none" }}
-            >
-              <span className="icon">📓</span>
-              <div>
-                <div className="name">{nb.name}</div>
-                {nb.lastSyncAt && (
-                  <div className="meta">
-                    Synced {formatRelative(nb.lastSyncAt)}
-                  </div>
-                )}
+          <>
+            {notebooks.length === 0 && savedShares.length === 0 && (
+              <div
+                style={{ padding: 16, color: "var(--text-dim)", fontSize: 13 }}
+              >
+                No notebooks synced yet. Sync a notebook from the Nous desktop
+                app.
               </div>
-            </Link>
-          ))
+            )}
+            {notebooks.map((nb) => (
+              <Link
+                key={nb.id}
+                to={`/notebook/${nb.id}`}
+                className={`notebook-item ${nb.id === notebookId ? "active" : ""}`}
+                style={{ textDecoration: "none" }}
+              >
+                <span className="icon">📓</span>
+                <div>
+                  <div className="name">{nb.name}</div>
+                  {nb.lastSyncAt && (
+                    <div className="meta">
+                      Synced {formatRelative(nb.lastSyncAt)}
+                    </div>
+                  )}
+                </div>
+              </Link>
+            ))}
+
+            {savedShares.length > 0 && (
+              <>
+                <div
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: "var(--text-dim)",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.05em",
+                    padding: "16px 12px 6px",
+                  }}
+                >
+                  Shared with me
+                </div>
+                {savedShares.map((ss) => (
+                  <Link
+                    key={ss.shareId}
+                    to={`/shared/${ss.shareId}`}
+                    className={`notebook-item ${ss.shareId === shareId ? "active" : ""}`}
+                    style={{ textDecoration: "none" }}
+                  >
+                    <span className="icon">📤</span>
+                    <div>
+                      <div className="name">{ss.notebookName}</div>
+                      <div className="meta">{ss.ownerEmail}</div>
+                    </div>
+                  </Link>
+                ))}
+              </>
+            )}
+          </>
         )}
       </div>
 
@@ -96,6 +146,11 @@ function MainLayout() {
         <Route
           path="notebook/:notebookId/page/:pageId"
           element={<NotebookPage />}
+        />
+        <Route path="shared/:shareId" element={<SavedSharePage />} />
+        <Route
+          path="shared/:shareId/page/:pageId"
+          element={<SavedSharePage />}
         />
       </Routes>
     </div>

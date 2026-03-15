@@ -2,7 +2,7 @@ import { useEffect, useState, useMemo, type FormEvent } from "react";
 import { useParams, Link } from "react-router-dom";
 import { ShareAPI } from "../api";
 import type { ShareInfo } from "../api";
-import type { NotebookMeta, PageSummary } from "../store";
+import { useWebStore, type NotebookMeta, type PageSummary } from "../store";
 import {
   importKeyFromBase64,
   deriveShareKey,
@@ -10,6 +10,7 @@ import {
   decryptJSON,
 } from "../crypto";
 import { PageContent } from "../components/BlockRenderer";
+import { PageList } from "../components/PageList";
 
 type Phase = "loading" | "needPassword" | "unlocked" | "error";
 
@@ -27,6 +28,13 @@ export function SharePage() {
   const [loadingPage, setLoadingPage] = useState(false);
   const [phase, setPhase] = useState<Phase>("loading");
   const [error, setError] = useState("");
+
+  // Save to library
+  const { isAuthenticated, isUnlocked, saveShareToLibrary, savedShares } =
+    useWebStore();
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const alreadySaved = savedShares.some((s) => s.shareId === shareId);
 
   // Password form
   const [password, setPassword] = useState("");
@@ -187,9 +195,6 @@ export function SharePage() {
 
   // phase === "unlocked"
   const pages = meta?.pageSummaries?.filter((p) => !p.isArchived) || [];
-  const sortedPages = [...pages].sort(
-    (a, b) => (a.position ?? 0) - (b.position ?? 0),
-  );
   const currentPage = pageId ? pages.find((p) => p.id === pageId) : null;
 
   // Viewing a specific page
@@ -240,31 +245,52 @@ export function SharePage() {
         <h1 style={{ fontSize: 24, fontWeight: 700, letterSpacing: "-0.02em" }}>
           {shareInfo?.notebookName || "Shared Notebook"}
         </h1>
-        <div style={{ fontSize: 13, color: "var(--text-dim)", marginTop: 4 }}>
-          {pages.length} {pages.length === 1 ? "page" : "pages"}
-          {meta?.syncedAt && <> &middot; Last updated {formatDate(meta.syncedAt)}</>}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginTop: 4,
+          }}
+        >
+          <div style={{ fontSize: 13, color: "var(--text-dim)" }}>
+            {pages.length} {pages.length === 1 ? "page" : "pages"}
+            {meta?.syncedAt && (
+              <> &middot; Last updated {formatDate(meta.syncedAt)}</>
+            )}
+          </div>
+          {isAuthenticated && isUnlocked && notebookKey && !alreadySaved && !saved && (
+            <button
+              className="btn btn-primary"
+              style={{ fontSize: 12, padding: "4px 12px" }}
+              disabled={saving}
+              onClick={async () => {
+                if (!shareId || !notebookKey) return;
+                setSaving(true);
+                try {
+                  await saveShareToLibrary(shareId, notebookKey);
+                  setSaved(true);
+                } catch {
+                  // ignore
+                } finally {
+                  setSaving(false);
+                }
+              }}
+            >
+              {saving ? "Saving..." : "Save to Library"}
+            </button>
+          )}
+          {(alreadySaved || saved) && (
+            <span style={{ fontSize: 12, color: "var(--text-dim)" }}>
+              Saved to library
+            </span>
+          )}
         </div>
       </div>
 
-      {pages.length === 0 ? (
-        <div className="empty-state">
-          <h3>No pages</h3>
-          <p>This notebook is empty.</p>
-        </div>
-      ) : (
-        <div className="page-list" style={{ maxWidth: 720, margin: "0 auto" }}>
-          {sortedPages.map((page) => (
-            <Link
-              key={page.id}
-              to={`/s/${shareId}/page/${page.id}`}
-              className="page-item"
-            >
-              <div className="title">{page.title || "Untitled"}</div>
-              {page.updatedAt && (
-                <div className="updated">{formatDate(page.updatedAt)}</div>
-              )}
-            </Link>
-          ))}
+      {meta && (
+        <div style={{ maxWidth: 720, margin: "0 auto" }}>
+          <PageList meta={meta} basePath={`/s/${shareId}`} />
         </div>
       )}
     </div>

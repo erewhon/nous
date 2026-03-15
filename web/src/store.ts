@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { CloudAPI } from "./api";
-import type { CloudNotebook, NotebookShareInfo } from "./api";
+import type { CloudNotebook, NotebookShareInfo, SavedShareInfo } from "./api";
 import {
   deriveMasterKey,
   unwrapNotebookKey,
@@ -24,10 +24,30 @@ export interface PageSummary {
   updatedAt?: string;
 }
 
+export interface FolderSummary {
+  id: string;
+  name: string;
+  parentId: string | null;
+  sectionId: string | null;
+  folderType: string;
+  isArchived: boolean;
+  color: string | null;
+  position: number;
+}
+
+export interface SectionSummary {
+  id: string;
+  name: string;
+  color: string | null;
+  position: number;
+}
+
 export interface NotebookMeta {
   syncedAt: string;
   pageIds: string[];
   pageSummaries: PageSummary[];
+  folders?: FolderSummary[];
+  sections?: SectionSummary[];
 }
 
 interface WebState {
@@ -45,6 +65,7 @@ interface WebState {
 
   // Data
   notebooks: CloudNotebook[];
+  savedShares: SavedShareInfo[];
 
   // UI
   isLoading: boolean;
@@ -67,6 +88,14 @@ interface WebActions {
   ) => Promise<{ shareId: string; shareUrl: string }>;
   listShares: (notebookId: string) => Promise<NotebookShareInfo[]>;
   revokeShare: (notebookId: string, shareId: string) => Promise<void>;
+  saveShareToLibrary: (shareId: string, notebookKey: CryptoKey) => Promise<void>;
+  loadSavedShares: () => Promise<void>;
+  removeSavedShare: (shareId: string) => Promise<void>;
+  loadSavedShareMeta: (shareId: string) => Promise<NotebookMeta | null>;
+  loadSavedSharePage: (
+    shareId: string,
+    pageId: string,
+  ) => Promise<unknown | null>;
   clearError: () => void;
 }
 
@@ -140,6 +169,7 @@ export const useWebStore = create<WebStore>()(
       masterKeySalt: null,
       isUnlocked: false,
       notebooks: [],
+      savedShares: [],
       isLoading: false,
       error: null,
 
@@ -191,6 +221,7 @@ export const useWebStore = create<WebStore>()(
           masterKeySalt: null,
           isUnlocked: false,
           notebooks: [],
+          savedShares: [],
           error: null,
         });
       },
@@ -306,6 +337,68 @@ export const useWebStore = create<WebStore>()(
       revokeShare: async (notebookId, shareId) => {
         const api = getApi(get());
         await api.revokeShare(notebookId, shareId);
+      },
+
+      saveShareToLibrary: async (shareId, notebookKey) => {
+        if (!masterKey) throw new Error("Encryption not unlocked");
+        const wrapped = await wrapKeyForShare(masterKey, notebookKey);
+        const api = getApi(get());
+        await api.saveShareToLibrary(shareId, wrapped);
+        await get().loadSavedShares();
+      },
+
+      loadSavedShares: async () => {
+        try {
+          const api = getApi(get());
+          const savedShares = await api.listSavedShares();
+          set({ savedShares });
+        } catch {
+          // Non-fatal
+        }
+      },
+
+      removeSavedShare: async (shareId) => {
+        const api = getApi(get());
+        await api.removeSavedShare(shareId);
+        set((state) => ({
+          savedShares: state.savedShares.filter((s) => s.shareId !== shareId),
+        }));
+      },
+
+      loadSavedShareMeta: async (shareId) => {
+        if (!masterKey) throw new Error("Encryption not unlocked");
+        const saved = get().savedShares.find((s) => s.shareId === shareId);
+        if (!saved) throw new Error("Saved share not found");
+
+        const { ShareAPI } = await import("./api");
+        const shareApi = new ShareAPI();
+        const encrypted = await shareApi.downloadMeta(shareId);
+        if (!encrypted) return null;
+
+        const cached = notebookKeyCache.get(`share:${shareId}`);
+        const key =
+          cached ?? await unwrapNotebookKey(masterKey, saved.wrappedNotebookKey);
+        if (!cached) notebookKeyCache.set(`share:${shareId}`, key);
+
+        return decryptJSON<NotebookMeta>(key, encrypted);
+      },
+
+      loadSavedSharePage: async (shareId, pageId) => {
+        if (!masterKey) throw new Error("Encryption not unlocked");
+        const saved = get().savedShares.find((s) => s.shareId === shareId);
+        if (!saved) throw new Error("Saved share not found");
+
+        const { ShareAPI } = await import("./api");
+        const shareApi = new ShareAPI();
+        const encrypted = await shareApi.downloadPage(shareId, pageId);
+        if (!encrypted) return null;
+
+        const cached = notebookKeyCache.get(`share:${shareId}`);
+        const key =
+          cached ?? await unwrapNotebookKey(masterKey, saved.wrappedNotebookKey);
+        if (!cached) notebookKeyCache.set(`share:${shareId}`, key);
+
+        return decryptJSON(key, encrypted);
       },
 
       clearError: () => set({ error: null }),

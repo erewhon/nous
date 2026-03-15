@@ -3,6 +3,7 @@ import type {
   RefreshTokenRow,
   CloudNotebookRow,
   NotebookShareRow,
+  SavedShareRow,
 } from "../types";
 
 // ─── Users ──────────────────────────────────────────────────────────────────
@@ -236,5 +237,60 @@ export async function revokeShare(
       "UPDATE notebook_shares SET revoked_at = datetime('now') WHERE id = ? AND user_id = ?",
     )
     .bind(id, userId)
+    .run();
+}
+
+// ─── Saved Shares ────────────────────────────────────────────────────────────
+
+export async function saveShare(
+  db: D1Database,
+  userId: string,
+  shareId: string,
+  wrappedNotebookKey: string,
+): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO saved_shares (user_id, share_id, wrapped_notebook_key)
+       VALUES (?, ?, ?)
+       ON CONFLICT (user_id, share_id) DO UPDATE SET wrapped_notebook_key = excluded.wrapped_notebook_key`,
+    )
+    .bind(userId, shareId, wrappedNotebookKey)
+    .run();
+}
+
+export async function listSavedShares(
+  db: D1Database,
+  userId: string,
+): Promise<
+  Array<
+    SavedShareRow & { notebook_name: string; share_mode: string; owner_email: string }
+  >
+> {
+  const result = await db
+    .prepare(
+      `SELECT ss.*, cn.name AS notebook_name, ns.mode AS share_mode, u.email AS owner_email
+       FROM saved_shares ss
+       JOIN notebook_shares ns ON ns.id = ss.share_id AND ns.revoked_at IS NULL
+       JOIN cloud_notebooks cn ON cn.id = ns.notebook_id
+       JOIN users u ON u.id = ns.user_id
+       WHERE ss.user_id = ?
+       AND (ns.expires_at IS NULL OR ns.expires_at > datetime('now'))
+       ORDER BY ss.saved_at DESC`,
+    )
+    .bind(userId)
+    .all<
+      SavedShareRow & { notebook_name: string; share_mode: string; owner_email: string }
+    >();
+  return result.results;
+}
+
+export async function removeSavedShare(
+  db: D1Database,
+  userId: string,
+  shareId: string,
+): Promise<void> {
+  await db
+    .prepare("DELETE FROM saved_shares WHERE user_id = ? AND share_id = ?")
+    .bind(userId, shareId)
     .run();
 }

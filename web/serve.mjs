@@ -9,7 +9,7 @@ import { join, extname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
-const DIST = join(__dirname, "dist");
+const DIST = __dirname;
 const PORT = 3201;
 
 const MIME = {
