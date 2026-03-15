@@ -19,7 +19,7 @@ import {
   listPageIds,
   deleteAllNotebookData,
 } from "../storage/r2";
-import { badRequest, notFound, forbidden } from "../errors";
+import { badRequest, notFound, forbidden, preconditionFailed } from "../errors";
 
 type AppEnv = { Bindings: Env; Variables: Variables };
 
@@ -137,6 +137,7 @@ notebooks.get("/:id/pages", async (c) => {
 });
 
 // PUT /notebooks/:id/pages/:pageId — upload encrypted page
+// Supports If-Match header for optimistic concurrency control.
 notebooks.put("/:id/pages/:pageId", async (c) => {
   const userId = c.get("userId");
   const notebookId = c.req.param("id");
@@ -148,10 +149,15 @@ notebooks.put("/:id/pages/:pageId", async (c) => {
     throw badRequest("Request body is empty");
   }
 
-  await putPage(c.env.STORAGE, userId, notebookId, pageId, data);
+  const ifMatch = c.req.header("If-Match");
+  const result = await putPage(c.env.STORAGE, userId, notebookId, pageId, data, ifMatch);
+  if (!result) {
+    throw preconditionFailed("Page was modified by another client");
+  }
+
   await updateNotebookSyncTime(c.env.DB, notebookId);
 
-  return c.json({ ok: true });
+  return c.json({ ok: true }, 200, { "ETag": result.etag });
 });
 
 // GET /notebooks/:id/pages/:pageId — download encrypted page
@@ -161,11 +167,14 @@ notebooks.get("/:id/pages/:pageId", async (c) => {
   const pageId = c.req.param("pageId");
   await requireNotebook(c.env.DB, notebookId, userId);
 
-  const data = await getPage(c.env.STORAGE, userId, notebookId, pageId);
-  if (!data) throw notFound("Page not found");
+  const result = await getPage(c.env.STORAGE, userId, notebookId, pageId);
+  if (!result) throw notFound("Page not found");
 
-  return new Response(data, {
-    headers: { "Content-Type": "application/octet-stream" },
+  return new Response(result.data, {
+    headers: {
+      "Content-Type": "application/octet-stream",
+      "ETag": result.etag,
+    },
   });
 });
 
@@ -193,10 +202,15 @@ notebooks.put("/:id/meta", async (c) => {
     throw badRequest("Request body is empty");
   }
 
-  await putMeta(c.env.STORAGE, userId, notebookId, data);
+  const ifMatch = c.req.header("If-Match");
+  const result = await putMeta(c.env.STORAGE, userId, notebookId, data, ifMatch);
+  if (!result) {
+    throw preconditionFailed("Metadata was modified by another client");
+  }
+
   await updateNotebookSyncTime(c.env.DB, notebookId);
 
-  return c.json({ ok: true });
+  return c.json({ ok: true }, 200, { "ETag": result.etag });
 });
 
 // GET /notebooks/:id/meta — download encrypted notebook metadata
@@ -205,11 +219,14 @@ notebooks.get("/:id/meta", async (c) => {
   const notebookId = c.req.param("id");
   await requireNotebook(c.env.DB, notebookId, userId);
 
-  const data = await getMeta(c.env.STORAGE, userId, notebookId);
-  if (!data) throw notFound("Metadata not found");
+  const result = await getMeta(c.env.STORAGE, userId, notebookId);
+  if (!result) throw notFound("Metadata not found");
 
-  return new Response(data, {
-    headers: { "Content-Type": "application/octet-stream" },
+  return new Response(result.data, {
+    headers: {
+      "Content-Type": "application/octet-stream",
+      "ETag": result.etag,
+    },
   });
 });
 

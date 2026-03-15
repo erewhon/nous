@@ -15,6 +15,7 @@ import {
   type EditorData,
 } from "../utils/blockFormatConverter";
 import { useWebStore } from "../store";
+import { ETagConflictError } from "../api";
 
 const AUTO_SAVE_DELAY = 3000;
 
@@ -43,7 +44,6 @@ export function PageEditor({
   const [conflictMessage, setConflictMessage] = useState("");
 
   const originalTitle = useRef((pageData.title as string) ?? "Untitled");
-  const loadedUpdatedAt = useRef((pageData.updatedAt as string) ?? "");
   const savingRef = useRef(false);
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const titleRef = useRef(title);
@@ -62,7 +62,9 @@ export function PageEditor({
     initialContent,
   });
 
-  // Core save logic — used by auto-save, Ctrl+S, and Done button
+  // Core save logic — used by auto-save, Ctrl+S, and Done button.
+  // ETag-based conflict detection: the store sends If-Match with the
+  // cached ETag; the server returns 412 if the page was modified.
   const performSave = useCallback(async (force = false): Promise<boolean> => {
     if (savingRef.current) return false;
     savingRef.current = true;
@@ -71,26 +73,6 @@ export function PageEditor({
     setConflictMessage("");
 
     try {
-      // Conflict detection: check server version before saving
-      if (!force) {
-        const serverData = await loadPage(notebookId, pageId) as Record<string, unknown> | null;
-        if (serverData) {
-          const serverUpdatedAt = (serverData.updatedAt as string) ?? "";
-          if (
-            serverUpdatedAt &&
-            loadedUpdatedAt.current &&
-            serverUpdatedAt > loadedUpdatedAt.current
-          ) {
-            setSaveStatus("conflict");
-            setConflictMessage(
-              `This page was modified elsewhere at ${new Date(serverUpdatedAt).toLocaleTimeString()}. Save anyway?`,
-            );
-            savingRef.current = false;
-            return false;
-          }
-        }
-      }
-
       const currentTitle = titleRef.current;
       const bnDoc = editor.document;
       const editorJsData = blockNoteToEditorJs(bnDoc);
@@ -103,10 +85,12 @@ export function PageEditor({
         updatedAt: now,
       };
 
-      await savePage(notebookId, pageId, updatedPageData);
+      if (force) {
+        // Reload to get fresh ETag, then save
+        await loadPage(notebookId, pageId);
+      }
 
-      // Update our loaded timestamp so future conflict checks are correct
-      loadedUpdatedAt.current = now;
+      await savePage(notebookId, pageId, updatedPageData);
 
       // Update meta if title changed
       if (currentTitle !== originalTitle.current) {
@@ -117,6 +101,13 @@ export function PageEditor({
       setSaveStatus("saved");
       return true;
     } catch (err) {
+      if (err instanceof ETagConflictError) {
+        setSaveStatus("conflict");
+        setConflictMessage(
+          "This page was modified by another client (e.g., desktop sync). Save anyway?",
+        );
+        return false;
+      }
       setSaveStatus("error");
       setSaveError(err instanceof Error ? err.message : "Save failed");
       return false;

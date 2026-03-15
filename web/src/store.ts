@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { CloudAPI } from "./api";
+import { CloudAPI, ETagConflictError } from "./api";
 import type { CloudNotebook, NotebookShareInfo, SavedShareInfo } from "./api";
 import {
   deriveMasterKey,
@@ -115,6 +115,8 @@ type WebStore = WebState & WebActions;
 
 let masterKey: CryptoKey | null = null;
 const notebookKeyCache = new Map<string, CryptoKey>();
+const pageEtagCache = new Map<string, string>(); // "notebookId:pageId" → etag
+const metaEtagCache = new Map<string, string>(); // notebookId → etag
 let apiInstance: CloudAPI | null = null;
 
 function getApi(state: WebState): CloudAPI {
@@ -287,11 +289,15 @@ export const useWebStore = create<WebStore>()(
           notebooks = get().notebooks;
         }
         const api = getApi(get());
-        const encrypted = await api.downloadMeta(notebookId);
-        if (!encrypted) return null;
+        const result = await api.downloadMeta(notebookId);
+        if (!result) return null;
+
+        if (result.etag) {
+          metaEtagCache.set(notebookId, result.etag);
+        }
 
         const key = await getNotebookKey(api, notebooks, notebookId);
-        return decryptJSON<NotebookMeta>(key, encrypted);
+        return decryptJSON<NotebookMeta>(key, result.data);
       },
 
       loadPage: async (notebookId, pageId) => {
@@ -301,11 +307,15 @@ export const useWebStore = create<WebStore>()(
           notebooks = get().notebooks;
         }
         const api = getApi(get());
-        const encrypted = await api.downloadPage(notebookId, pageId);
-        if (!encrypted) return null;
+        const result = await api.downloadPage(notebookId, pageId);
+        if (!result) return null;
+
+        if (result.etag) {
+          pageEtagCache.set(`${notebookId}:${pageId}`, result.etag);
+        }
 
         const key = await getNotebookKey(api, notebooks, notebookId);
-        return decryptJSON(key, encrypted);
+        return decryptJSON(key, result.data);
       },
 
       createShare: async (notebookId, mode, sharePassword, label, expiresAt) => {
@@ -388,7 +398,11 @@ export const useWebStore = create<WebStore>()(
         const api = getApi(get());
         const key = await getNotebookKey(api, notebooks, notebookId);
         const encrypted = await encryptJSON(key, pageData);
-        await api.uploadPage(notebookId, pageId, encrypted);
+        const ifMatch = pageEtagCache.get(`${notebookId}:${pageId}`);
+        const newEtag = await api.uploadPage(notebookId, pageId, encrypted, ifMatch);
+        if (newEtag) {
+          pageEtagCache.set(`${notebookId}:${pageId}`, newEtag);
+        }
       },
 
       updatePageInMeta: async (notebookId, pageId, title) => {
@@ -400,17 +414,25 @@ export const useWebStore = create<WebStore>()(
         const api = getApi(get());
         const key = await getNotebookKey(api, notebooks, notebookId);
 
-        const encryptedMeta = await api.downloadMeta(notebookId);
-        if (!encryptedMeta) return;
+        const result = await api.downloadMeta(notebookId);
+        if (!result) return;
 
-        const meta = await decryptJSON<NotebookMeta>(key, encryptedMeta);
+        if (result.etag) {
+          metaEtagCache.set(notebookId, result.etag);
+        }
+
+        const meta = await decryptJSON<NotebookMeta>(key, result.data);
         const page = meta.pageSummaries?.find((p) => p.id === pageId);
         if (page) {
           page.title = title;
           page.updatedAt = new Date().toISOString();
         }
         const reEncrypted = await encryptJSON(key, meta);
-        await api.uploadMeta(notebookId, reEncrypted);
+        const ifMatch = metaEtagCache.get(notebookId);
+        const newEtag = await api.uploadMeta(notebookId, reEncrypted, ifMatch);
+        if (newEtag) {
+          metaEtagCache.set(notebookId, newEtag);
+        }
       },
 
       loadSavedShareMeta: async (shareId) => {

@@ -19,14 +19,50 @@ function notebookPrefix(userId: string, notebookId: string): string {
   return `notebooks/${userId}/${notebookId}/`;
 }
 
+/** Strip surrounding quotes from an HTTP ETag value. */
+function stripEtagQuotes(etag: string): string {
+  if (etag.startsWith('"') && etag.endsWith('"')) {
+    return etag.slice(1, -1);
+  }
+  if (etag.startsWith('W/"') && etag.endsWith('"')) {
+    return etag.slice(3, -1);
+  }
+  return etag;
+}
+
+export interface PutResult {
+  etag: string; // httpEtag (quoted, ready for headers)
+}
+
+/**
+ * Upload encrypted page. If ifMatch is provided, only succeeds if the
+ * existing object's ETag matches (optimistic concurrency).
+ * Returns null if the ETag condition fails (caller should return 412).
+ */
 export async function putPage(
   bucket: R2Bucket,
   userId: string,
   notebookId: string,
   pageId: string,
   data: ArrayBuffer,
-): Promise<void> {
-  await bucket.put(pagePath(userId, notebookId, pageId), data);
+  ifMatch?: string,
+): Promise<PutResult | null> {
+  const options: R2PutOptions = {};
+  if (ifMatch) {
+    options.onlyIf = { etagMatches: stripEtagQuotes(ifMatch) };
+  }
+  const obj = await bucket.put(
+    pagePath(userId, notebookId, pageId),
+    data,
+    options,
+  );
+  if (!obj) return null; // ETag condition failed
+  return { etag: obj.httpEtag };
+}
+
+export interface GetResult {
+  data: ArrayBuffer;
+  etag: string; // httpEtag (quoted)
 }
 
 export async function getPage(
@@ -34,10 +70,10 @@ export async function getPage(
   userId: string,
   notebookId: string,
   pageId: string,
-): Promise<ArrayBuffer | null> {
+): Promise<GetResult | null> {
   const obj = await bucket.get(pagePath(userId, notebookId, pageId));
   if (!obj) return null;
-  return obj.arrayBuffer();
+  return { data: await obj.arrayBuffer(), etag: obj.httpEtag };
 }
 
 export async function deletePage(
@@ -54,18 +90,29 @@ export async function putMeta(
   userId: string,
   notebookId: string,
   data: ArrayBuffer,
-): Promise<void> {
-  await bucket.put(metaPath(userId, notebookId), data);
+  ifMatch?: string,
+): Promise<PutResult | null> {
+  const options: R2PutOptions = {};
+  if (ifMatch) {
+    options.onlyIf = { etagMatches: stripEtagQuotes(ifMatch) };
+  }
+  const obj = await bucket.put(
+    metaPath(userId, notebookId),
+    data,
+    options,
+  );
+  if (!obj) return null;
+  return { etag: obj.httpEtag };
 }
 
 export async function getMeta(
   bucket: R2Bucket,
   userId: string,
   notebookId: string,
-): Promise<ArrayBuffer | null> {
+): Promise<GetResult | null> {
   const obj = await bucket.get(metaPath(userId, notebookId));
   if (!obj) return null;
-  return obj.arrayBuffer();
+  return { data: await obj.arrayBuffer(), etag: obj.httpEtag };
 }
 
 /**

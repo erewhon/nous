@@ -47,10 +47,13 @@ sharesPublic.get("/:shareId", async (c) => {
 // GET /shares/:shareId/meta — download encrypted notebook metadata
 sharesPublic.get("/:shareId/meta", async (c) => {
   const share = await requireValidShare(c.env.DB, c.req.param("shareId"));
-  const data = await getMeta(c.env.STORAGE, share.user_id, share.notebook_id);
-  if (!data) throw notFound("Metadata not found");
-  return new Response(data, {
-    headers: { "Content-Type": "application/octet-stream" },
+  const result = await getMeta(c.env.STORAGE, share.user_id, share.notebook_id);
+  if (!result) throw notFound("Metadata not found");
+  return new Response(result.data, {
+    headers: {
+      "Content-Type": "application/octet-stream",
+      "ETag": result.etag,
+    },
   });
 });
 
@@ -64,14 +67,17 @@ sharesPublic.get("/:shareId/pages", async (c) => {
 // GET /shares/:shareId/pages/:pageId — download encrypted page
 sharesPublic.get("/:shareId/pages/:pageId", async (c) => {
   const share = await requireValidShare(c.env.DB, c.req.param("shareId"));
-  const data = await getPage(
+  const result = await getPage(
     c.env.STORAGE,
     share.user_id,
     share.notebook_id,
     c.req.param("pageId"),
   );
-  if (!data) throw notFound("Page not found");
-  return new Response(data, {
-    headers: { "Content-Type": "application/octet-stream" },
+  if (!result) throw notFound("Page not found");
+  return new Response(result.data, {
+    headers: {
+      "Content-Type": "application/octet-stream",
+      "ETag": result.etag,
+    },
   });
 });
