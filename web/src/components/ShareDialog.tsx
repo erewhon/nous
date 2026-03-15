@@ -7,6 +7,19 @@ interface ShareDialogProps {
   onClose: () => void;
 }
 
+const EXPIRY_OPTIONS = [
+  { label: "Never", value: "" },
+  { label: "1 hour", hours: 1 },
+  { label: "24 hours", hours: 24 },
+  { label: "7 days", hours: 24 * 7 },
+  { label: "30 days", hours: 24 * 30 },
+  { label: "90 days", hours: 24 * 90 },
+] as const;
+
+function expiryToISO(hours: number): string {
+  return new Date(Date.now() + hours * 3600_000).toISOString();
+}
+
 export function ShareDialog({ notebookId, onClose }: ShareDialogProps) {
   const { createShare, listShares, revokeShare } = useWebStore();
   const [shares, setShares] = useState<NotebookShareInfo[]>([]);
@@ -15,6 +28,9 @@ export function ShareDialog({ notebookId, onClose }: ShareDialogProps) {
   const [error, setError] = useState("");
   const [generatedUrl, setGeneratedUrl] = useState("");
   const [copied, setCopied] = useState(false);
+
+  // Expiration
+  const [expirySelection, setExpirySelection] = useState("");
 
   // Password form
   const [showPasswordForm, setShowPasswordForm] = useState(false);
@@ -38,12 +54,26 @@ export function ShareDialog({ notebookId, onClose }: ShareDialogProps) {
     }
   };
 
+  const getExpiresAt = (): string | undefined => {
+    if (!expirySelection) return undefined;
+    const opt = EXPIRY_OPTIONS.find((o) => "hours" in o && String(o.hours) === expirySelection);
+    if (opt && "hours" in opt) return expiryToISO(opt.hours);
+    return undefined;
+  };
+
   const handleCreatePublic = async () => {
     setCreating(true);
     setError("");
     try {
-      const { shareUrl } = await createShare(notebookId, "public");
+      const { shareUrl } = await createShare(
+        notebookId,
+        "public",
+        undefined,
+        undefined,
+        getExpiresAt(),
+      );
       setGeneratedUrl(shareUrl);
+      await loadShares();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create share");
     } finally {
@@ -70,6 +100,7 @@ export function ShareDialog({ notebookId, onClose }: ShareDialogProps) {
         "password",
         sharePassword,
         shareLabel || undefined,
+        getExpiresAt(),
       );
       setGeneratedUrl(shareUrl);
       setShowPasswordForm(false);
@@ -98,6 +129,32 @@ export function ShareDialog({ notebookId, onClose }: ShareDialogProps) {
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
+
+  const expiryPicker = (
+    <div className="form-group">
+      <label>Expires</label>
+      <select
+        value={expirySelection}
+        onChange={(e) => setExpirySelection(e.target.value)}
+        style={{
+          width: "100%",
+          padding: "10px 12px",
+          background: "var(--bg)",
+          border: "1px solid var(--border)",
+          borderRadius: "var(--radius)",
+          color: "var(--text)",
+          fontSize: 14,
+          fontFamily: "inherit",
+        }}
+      >
+        {EXPIRY_OPTIONS.map((opt) => (
+          <option key={opt.label} value={"hours" in opt ? String(opt.hours) : ""}>
+            {opt.label}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
 
   return (
     <div className="dialog-overlay" onClick={onClose}>
@@ -144,7 +201,7 @@ export function ShareDialog({ notebookId, onClose }: ShareDialogProps) {
                 style={{ marginTop: 8 }}
                 onClick={() => {
                   setGeneratedUrl("");
-                  loadShares();
+                  setExpirySelection("");
                 }}
               >
                 Done
@@ -154,6 +211,8 @@ export function ShareDialog({ notebookId, onClose }: ShareDialogProps) {
 
           {!generatedUrl && !showPasswordForm && (
             <div className="share-actions">
+              {expiryPicker}
+
               <button
                 className="btn btn-primary"
                 onClick={handleCreatePublic}
@@ -211,6 +270,7 @@ export function ShareDialog({ notebookId, onClose }: ShareDialogProps) {
                   placeholder='e.g. "For Alice"'
                 />
               </div>
+              {expiryPicker}
               <div style={{ display: "flex", gap: 8 }}>
                 <button
                   type="submit"
@@ -259,6 +319,16 @@ export function ShareDialog({ notebookId, onClose }: ShareDialogProps) {
                     </div>
                     <div style={{ fontSize: 12, color: "var(--text-dim)" }}>
                       Created {formatRelative(share.createdAt)}
+                      {share.expiresAt && (
+                        <>
+                          {" "}&middot;{" "}
+                          {new Date(share.expiresAt) < new Date() ? (
+                            <span style={{ color: "var(--danger)" }}>Expired</span>
+                          ) : (
+                            <>Expires {formatRelative(share.expiresAt, true)}</>
+                          )}
+                        </>
+                      )}
                     </div>
                   </div>
                   <button
@@ -284,17 +354,19 @@ export function ShareDialog({ notebookId, onClose }: ShareDialogProps) {
   );
 }
 
-function formatRelative(iso: string): string {
+function formatRelative(iso: string, future = false): string {
   try {
     const d = new Date(iso);
     const now = new Date();
-    const diffMin = Math.floor((now.getTime() - d.getTime()) / 60000);
-    if (diffMin < 1) return "just now";
-    if (diffMin < 60) return `${diffMin}m ago`;
+    const diffMs = future ? d.getTime() - now.getTime() : now.getTime() - d.getTime();
+    const diffMin = Math.floor(diffMs / 60000);
+    if (diffMin < 0) return future ? "now" : "just now";
+    if (diffMin < 1) return future ? "in < 1m" : "just now";
+    if (diffMin < 60) return future ? `in ${diffMin}m` : `${diffMin}m ago`;
     const diffH = Math.floor(diffMin / 60);
-    if (diffH < 24) return `${diffH}h ago`;
+    if (diffH < 24) return future ? `in ${diffH}h` : `${diffH}h ago`;
     const diffD = Math.floor(diffH / 24);
-    if (diffD < 7) return `${diffD}d ago`;
+    if (diffD < 7) return future ? `in ${diffD}d` : `${diffD}d ago`;
     return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
   } catch {
     return "";

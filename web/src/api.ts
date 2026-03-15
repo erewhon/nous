@@ -164,6 +164,7 @@ export class CloudAPI {
       passwordSalt?: string;
       wrappedKey?: string;
       label?: string;
+      expiresAt?: string;
     },
   ): Promise<NotebookShareInfo> {
     const res = await this.authedFetch(

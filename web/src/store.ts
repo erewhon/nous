@@ -85,6 +85,7 @@ interface WebActions {
     mode: "public" | "password",
     sharePassword?: string,
     label?: string,
+    expiresAt?: string,
   ) => Promise<{ shareId: string; shareUrl: string }>;
   listShares: (notebookId: string) => Promise<NotebookShareInfo[]>;
   revokeShare: (notebookId: string, shareId: string) => Promise<void>;
@@ -296,7 +297,7 @@ export const useWebStore = create<WebStore>()(
         return decryptJSON(key, encrypted);
       },
 
-      createShare: async (notebookId, mode, sharePassword, label) => {
+      createShare: async (notebookId, mode, sharePassword, label, expiresAt) => {
         const state = get();
         const api = getApi(state);
         const nbKey = await getNotebookKey(api, state.notebooks, notebookId);
@@ -305,6 +306,7 @@ export const useWebStore = create<WebStore>()(
           const result = await api.createShare(notebookId, {
             mode: "public",
             label,
+            expiresAt,
           });
           const keyBase64 = await exportKeyAsBase64(nbKey);
           return {
@@ -321,6 +323,7 @@ export const useWebStore = create<WebStore>()(
             passwordSalt: salt,
             wrappedKey,
             label,
+            expiresAt,
           });
           return {
             shareId: result.id,

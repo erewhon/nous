@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Link } from "react-router-dom";
+import { useState, useMemo } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import type {
   NotebookMeta,
   PageSummary,
@@ -14,15 +14,32 @@ interface PageListProps {
 }
 
 export function PageList({ meta, basePath }: PageListProps) {
-  const pages = meta.pageSummaries?.filter((p) => !p.isArchived) || [];
+  const [query, setQuery] = useState("");
+  const allPages = meta.pageSummaries?.filter((p) => !p.isArchived) || [];
   const folders = meta.folders?.filter((f) => !f.isArchived) || [];
   const sections = (meta.sections || []).sort(
     (a, b) => a.position - b.position,
   );
 
-  const hasSections = sections.length > 0;
+  const isSearching = query.length > 0;
 
-  if (pages.length === 0) {
+  const searchResults = useMemo(() => {
+    if (!isSearching) return [];
+    const q = query.toLowerCase();
+    return allPages
+      .filter((p) => (p.title || "").toLowerCase().includes(q))
+      .sort((a, b) => {
+        // Exact prefix match first
+        const aTitle = (a.title || "").toLowerCase();
+        const bTitle = (b.title || "").toLowerCase();
+        const aPrefix = aTitle.startsWith(q) ? 0 : 1;
+        const bPrefix = bTitle.startsWith(q) ? 0 : 1;
+        if (aPrefix !== bPrefix) return aPrefix - bPrefix;
+        return aTitle.localeCompare(bTitle);
+      });
+  }, [query, allPages, isSearching]);
+
+  if (allPages.length === 0) {
     return (
       <div className="empty-state">
         <h3>No pages</h3>
@@ -31,24 +48,116 @@ export function PageList({ meta, basePath }: PageListProps) {
     );
   }
 
-  if (hasSections) {
+  const showSearchBar = allPages.length > 5;
+
+  return (
+    <div>
+      {showSearchBar && (
+        <div className="search-bar">
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Filter pages..."
+            className="search-input"
+          />
+          {query && (
+            <button
+              className="search-clear"
+              onClick={() => setQuery("")}
+            >
+              &times;
+            </button>
+          )}
+        </div>
+      )}
+
+      {isSearching ? (
+        <SearchResults
+          results={searchResults}
+          query={query}
+          folders={folders}
+          sections={sections}
+          basePath={basePath}
+        />
+      ) : sections.length > 0 ? (
+        <SectionedPageList
+          pages={allPages}
+          folders={folders}
+          sections={sections}
+          basePath={basePath}
+        />
+      ) : (
+        <FolderTreePageList
+          pages={allPages}
+          folders={folders}
+          sectionId={null}
+          basePath={basePath}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Search results ───────────────────────────────────────────────────────────
+
+function SearchResults({
+  results,
+  query,
+  folders,
+  sections,
+  basePath,
+}: {
+  results: PageSummary[];
+  query: string;
+  folders: FolderSummary[];
+  sections: SectionSummary[];
+  basePath: string;
+}) {
+  if (results.length === 0) {
     return (
-      <SectionedPageList
-        pages={pages}
-        folders={folders}
-        sections={sections}
-        basePath={basePath}
-      />
+      <div className="empty-state" style={{ padding: "40px 24px" }}>
+        <h3>No matches</h3>
+        <p>No pages match &ldquo;{query}&rdquo;</p>
+      </div>
     );
   }
 
+  const folderMap = new Map(folders.map((f) => [f.id, f]));
+  const sectionMap = new Map(sections.map((s) => [s.id, s]));
+
   return (
-    <FolderTreePageList
-      pages={pages}
-      folders={folders}
-      sectionId={null}
-      basePath={basePath}
-    />
+    <div className="page-list">
+      {results.map((page) => {
+        const breadcrumbs: string[] = [];
+        if (page.sectionId) {
+          const s = sectionMap.get(page.sectionId);
+          if (s) breadcrumbs.push(s.name);
+        }
+        if (page.folderId) {
+          const f = folderMap.get(page.folderId);
+          if (f) breadcrumbs.push(f.name);
+        }
+
+        return (
+          <Link
+            key={page.id}
+            to={`${basePath}/page/${page.id}`}
+            className="page-item"
+          >
+            <div className="title">{page.title || "Untitled"}</div>
+            <div className="search-meta">
+              {breadcrumbs.length > 0 && (
+                <span className="breadcrumb">{breadcrumbs.join(" / ")}</span>
+              )}
+              {page.updatedAt && (
+                <span className="updated">{formatDate(page.updatedAt)}</span>
+              )}
+            </div>
+          </Link>
+        );
+      })}
+    </div>
   );
 }
 
@@ -65,7 +174,21 @@ function SectionedPageList({
   sections: SectionSummary[];
   basePath: string;
 }) {
-  const [activeSection, setActiveSection] = useState<string | null>(sections[0]?.id ?? null);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const sectionParam = searchParams.get("section");
+  const initialSection = sectionParam && sections.some((s) => s.id === sectionParam)
+    ? sectionParam
+    : sections[0]?.id ?? null;
+  const [activeSection, setActiveSectionState] = useState<string | null>(initialSection);
+
+  const setActiveSection = (id: string | null) => {
+    setActiveSectionState(id);
+    if (id && id !== sections[0]?.id) {
+      setSearchParams({ section: id }, { replace: true });
+    } else {
+      setSearchParams({}, { replace: true });
+    }
+  };
 
   // Pages/folders not assigned to any section
   const unsectionedPages = pages.filter((p) => !p.sectionId);
