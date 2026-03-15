@@ -785,3 +785,158 @@ code:not(pre code) {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--text-dim);
 }
+
+/* ─── Page Editor ─────────────────────────────────────────────────────────── */
+
+.page-editor {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+.editor-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 24px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.editor-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.editor-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.editor-dirty-indicator {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.editor-save-error {
+  font-size: 12px;
+  color: var(--danger);
+}
+
+.editor-save-btn {
+  width: auto;
+  padding: 6px 20px;
+}
+
+.editor-title-input {
+  width: 100%;
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.2;
+  margin-bottom: 24px;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-family: inherit;
+  outline: none;
+}
+
+.editor-title-input::placeholder {
+  color: var(--text-dim);
+}
+
+.editor-container {
+  flex: 1;
+}
+
+/* ─── BlockNote dark theme overrides ──────────────────────────────────────── */
+
+.editor-container .bn-editor {
+  --bn-colors-editor-background: transparent;
+  --bn-colors-editor-text: var(--text);
+  --bn-colors-menu-background: var(--surface);
+  --bn-colors-menu-text: var(--text);
+  --bn-colors-tooltip-background: var(--surface);
+  --bn-colors-tooltip-text: var(--text);
+  --bn-colors-hovered-background: var(--surface-hover);
+  --bn-colors-selected-background: rgba(129, 140, 248, 0.15);
+  --bn-colors-disabled-background: var(--surface);
+  --bn-colors-disabled-text: var(--text-dim);
+  --bn-colors-side-menu: var(--text-dim);
+  --bn-colors-highlights-gray-background: #374151;
+  --bn-colors-highlights-yellow-background: #854d0e80;
+  --bn-colors-highlights-green-background: #16653480;
+  --bn-colors-highlights-blue-background: #1e40af80;
+  --bn-colors-highlights-purple-background: #581c8780;
+  --bn-colors-highlights-red-background: #991b1b80;
+  --bn-colors-highlights-orange-background: #9a340180;
+  --bn-colors-highlights-pink-background: #9d174d80;
+  font-size: 16px;
+  line-height: 1.7;
+}
+
+/* ─── Custom block styles (BlockNote editor) ──────────────────────────────── */
+
+.bn-callout {
+  display: flex;
+  gap: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin: 4px 0;
+}
+
+.bn-callout-icon {
+  font-size: 20px;
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+}
+
+.bn-callout-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.bn-quote {
+  border-left: 3px solid var(--accent);
+  padding: 8px 16px;
+  margin: 4px 0;
+}
+
+.bn-delimiter {
+  margin: 24px 0;
+}
+
+.bn-delimiter hr {
+  border: none;
+  border-top: 1px solid var(--border);
+}
+
+/* ─── Placeholder blocks ─────────────────────────────────────────────────── */
+
+.bn-placeholder-block {
+  background: var(--surface);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 16px 20px;
+  margin: 4px 0;
+  color: var(--text-dim);
+  font-size: 13px;
+  user-select: none;
+}
+
+.bn-placeholder-label {
+  opacity: 0.7;
+}

@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useParams, Link } from "react-router-dom";
 import { useWebStore, type NotebookMeta, type PageSummary } from "../store";
 import { PageContent } from "../components/BlockRenderer";
+import { PageEditor } from "../components/PageEditor";
 import { PageList } from "../components/PageList";
 import { ShareDialog } from "../components/ShareDialog";
 
@@ -17,6 +18,7 @@ export function NotebookPage() {
   const [loadingPage, setLoadingPage] = useState(false);
   const [error, setError] = useState("");
   const [showShareDialog, setShowShareDialog] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
 
   const notebook = notebooks.find((n) => n.id === notebookId);
 
@@ -37,11 +39,36 @@ export function NotebookPage() {
     }
     setLoadingPage(true);
     setError("");
+    setIsEditing(false);
     loadPage(notebookId, pageId)
       .then((data) => setPageData(data))
       .catch((e) => setError(e.message))
       .finally(() => setLoadingPage(false));
   }, [notebookId, pageId, loadPage]);
+
+  // Warn on unsaved changes
+  useEffect(() => {
+    if (!isEditing) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [isEditing]);
+
+  const handleSaved = useCallback(() => {
+    // Reload page data to reflect saved changes
+    if (notebookId && pageId) {
+      loadPage(notebookId, pageId).then((data) => {
+        setPageData(data);
+        setIsEditing(false);
+      });
+    }
+  }, [notebookId, pageId, loadPage]);
+
+  const handleCancelEdit = useCallback(() => {
+    setIsEditing(false);
+  }, []);
 
   if (loadingMeta) {
     return (
@@ -64,6 +91,10 @@ export function NotebookPage() {
   const pages = meta?.pageSummaries?.filter((p) => !p.isArchived) || [];
   const currentPage = pageId ? pages.find((p) => p.id === pageId) : null;
 
+  // Can edit own notebooks with standard page type
+  const canEdit =
+    !!notebook && (!currentPage?.pageType || currentPage.pageType === "standard");
+
   if (pageId && currentPage) {
     return (
       <div className="main-content">
@@ -71,6 +102,9 @@ export function NotebookPage() {
           style={{
             padding: "12px 24px",
             borderBottom: "1px solid var(--border)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
           }}
         >
           <Link
@@ -79,12 +113,29 @@ export function NotebookPage() {
           >
             &larr; {notebook?.name || "Back"}
           </Link>
+          {canEdit && !isEditing && !loadingPage && (
+            <button
+              className="btn btn-ghost"
+              style={{ border: "1px solid var(--border)" }}
+              onClick={() => setIsEditing(true)}
+            >
+              Edit
+            </button>
+          )}
         </div>
         {loadingPage ? (
           <div className="loading">
             <div className="spinner" />
             Decrypting page...
           </div>
+        ) : isEditing && notebookId && pageData ? (
+          <PageEditor
+            notebookId={notebookId}
+            pageId={pageId}
+            pageData={pageData as Record<string, unknown>}
+            onSaved={handleSaved}
+            onCancel={handleCancelEdit}
+          />
         ) : (
           <div className="page-viewer">
             <h1 className="page-title">

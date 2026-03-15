@@ -101,6 +101,36 @@ export async function decryptJSON<T = unknown>(
   return JSON.parse(new TextDecoder().decode(bytes));
 }
 
+// ─── Encryption ─────────────────────────────────────────────────────────────
+
+export async function encrypt(
+  key: CryptoKey,
+  data: Uint8Array,
+): Promise<ArrayBuffer> {
+  const iv = crypto.getRandomValues(new Uint8Array(IV_BYTES));
+  const ciphertext = new Uint8Array(
+    await crypto.subtle.encrypt(
+      { name: "AES-GCM", iv: iv.buffer as ArrayBuffer },
+      key,
+      data.buffer as ArrayBuffer,
+    ),
+  );
+
+  const result = new Uint8Array(iv.length + ciphertext.length);
+  result.set(iv);
+  result.set(ciphertext, iv.length);
+
+  return result.buffer;
+}
+
+export async function encryptJSON(
+  key: CryptoKey,
+  value: unknown,
+): Promise<ArrayBuffer> {
+  const json = JSON.stringify(value);
+  return encrypt(key, new TextEncoder().encode(json));
+}
+
 // ─── Sharing ────────────────────────────────────────────────────────────────
 
 function toBase64(buf: Uint8Array): string {

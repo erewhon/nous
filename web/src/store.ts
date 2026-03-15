@@ -6,6 +6,7 @@ import {
   deriveMasterKey,
   unwrapNotebookKey,
   decryptJSON,
+  encryptJSON,
   exportKeyAsBase64,
   generateShareSalt,
   deriveShareKey,
@@ -92,6 +93,16 @@ interface WebActions {
   saveShareToLibrary: (shareId: string, notebookKey: CryptoKey) => Promise<void>;
   loadSavedShares: () => Promise<void>;
   removeSavedShare: (shareId: string) => Promise<void>;
+  savePage: (
+    notebookId: string,
+    pageId: string,
+    pageData: unknown,
+  ) => Promise<void>;
+  updatePageInMeta: (
+    notebookId: string,
+    pageId: string,
+    title: string,
+  ) => Promise<void>;
   loadSavedShareMeta: (shareId: string) => Promise<NotebookMeta | null>;
   loadSavedSharePage: (
     shareId: string,
@@ -366,6 +377,40 @@ export const useWebStore = create<WebStore>()(
         set((state) => ({
           savedShares: state.savedShares.filter((s) => s.shareId !== shareId),
         }));
+      },
+
+      savePage: async (notebookId, pageId, pageData) => {
+        let { notebooks } = get();
+        if (notebooks.length === 0) {
+          await get().loadNotebooks();
+          notebooks = get().notebooks;
+        }
+        const api = getApi(get());
+        const key = await getNotebookKey(api, notebooks, notebookId);
+        const encrypted = await encryptJSON(key, pageData);
+        await api.uploadPage(notebookId, pageId, encrypted);
+      },
+
+      updatePageInMeta: async (notebookId, pageId, title) => {
+        let { notebooks } = get();
+        if (notebooks.length === 0) {
+          await get().loadNotebooks();
+          notebooks = get().notebooks;
+        }
+        const api = getApi(get());
+        const key = await getNotebookKey(api, notebooks, notebookId);
+
+        const encryptedMeta = await api.downloadMeta(notebookId);
+        if (!encryptedMeta) return;
+
+        const meta = await decryptJSON<NotebookMeta>(key, encryptedMeta);
+        const page = meta.pageSummaries?.find((p) => p.id === pageId);
+        if (page) {
+          page.title = title;
+          page.updatedAt = new Date().toISOString();
+        }
+        const reEncrypted = await encryptJSON(key, meta);
+        await api.uploadMeta(notebookId, reEncrypted);
       },
 
       loadSavedShareMeta: async (shareId) => {

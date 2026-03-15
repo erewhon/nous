@@ -232,6 +232,37 @@ export class CloudAPI {
     return res.arrayBuffer();
   }
 
+  async uploadPage(
+    notebookId: string,
+    pageId: string,
+    encrypted: ArrayBuffer,
+  ): Promise<void> {
+    const res = await this.authedFetch(
+      `${API_BASE}/notebooks/${notebookId}/pages/${pageId}`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/octet-stream" },
+        body: encrypted,
+      },
+    );
+    if (!res.ok) throw await parseError(res);
+  }
+
+  async uploadMeta(
+    notebookId: string,
+    encrypted: ArrayBuffer,
+  ): Promise<void> {
+    const res = await this.authedFetch(
+      `${API_BASE}/notebooks/${notebookId}/meta`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/octet-stream" },
+        body: encrypted,
+      },
+    );
+    if (!res.ok) throw await parseError(res);
+  }
+
   private setTokens(accessToken: string, refreshToken: string) {
     this.accessToken = accessToken;
     this.refreshToken = refreshToken;
