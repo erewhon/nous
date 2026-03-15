@@ -92,11 +92,10 @@ export function PageEditor({
 
       await savePage(notebookId, pageId, updatedPageData);
 
-      // Update meta if title changed
-      if (currentTitle !== originalTitle.current) {
-        await updatePageInMeta(notebookId, pageId, currentTitle);
-        originalTitle.current = currentTitle;
-      }
+      // Always update meta so the server-side timestamp reflects the edit.
+      // Desktop sync compares meta timestamps to decide pull vs push.
+      await updatePageInMeta(notebookId, pageId, currentTitle);
+      originalTitle.current = currentTitle;
 
       setSaveStatus("saved");
       return true;

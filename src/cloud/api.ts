@@ -41,6 +41,13 @@ class CloudAPIError extends Error {
   }
 }
 
+export class ETagConflictError extends Error {
+  constructor() {
+    super("Page was modified by another client");
+    this.name = "ETagConflictError";
+  }
+}
+
 async function parseError(res: Response): Promise<CloudAPIError> {
   let message: string;
   try {
@@ -182,24 +189,35 @@ export class CloudAPI {
     notebookId: string,
     pageId: string,
     encrypted: ArrayBuffer,
-  ): Promise<void> {
+    ifMatch?: string,
+  ): Promise<string> {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/octet-stream",
+    };
+    if (ifMatch) {
+      headers["If-Match"] = ifMatch;
+    }
     const res = await this.authedFetch(
       `${API_BASE}/notebooks/${notebookId}/pages/${pageId}`,
-      { method: "PUT", body: encrypted },
+      { method: "PUT", headers, body: encrypted },
     );
+    if (res.status === 412) throw new ETagConflictError();
     if (!res.ok) throw await parseError(res);
+    return res.headers.get("ETag") ?? "";
   }
 
   async downloadPage(
     notebookId: string,
     pageId: string,
-  ): Promise<ArrayBuffer | null> {
+  ): Promise<{ data: ArrayBuffer; etag: string } | null> {
     const res = await this.authedFetch(
       `${API_BASE}/notebooks/${notebookId}/pages/${pageId}`,
     );
     if (res.status === 404) return null;
     if (!res.ok) throw await parseError(res);
-    return res.arrayBuffer();
+    const data = await res.arrayBuffer();
+    const etag = res.headers.get("ETag") ?? "";
+    return { data, etag };
   }
 
   async deletePage(notebookId: string, pageId: string): Promise<void> {
@@ -215,21 +233,34 @@ export class CloudAPI {
   async uploadMeta(
     notebookId: string,
     encrypted: ArrayBuffer,
-  ): Promise<void> {
+    ifMatch?: string,
+  ): Promise<string> {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/octet-stream",
+    };
+    if (ifMatch) {
+      headers["If-Match"] = ifMatch;
+    }
     const res = await this.authedFetch(
       `${API_BASE}/notebooks/${notebookId}/meta`,
-      { method: "PUT", body: encrypted },
+      { method: "PUT", headers, body: encrypted },
     );
+    if (res.status === 412) throw new ETagConflictError();
     if (!res.ok) throw await parseError(res);
+    return res.headers.get("ETag") ?? "";
   }
 
-  async downloadMeta(notebookId: string): Promise<ArrayBuffer | null> {
+  async downloadMeta(
+    notebookId: string,
+  ): Promise<{ data: ArrayBuffer; etag: string } | null> {
     const res = await this.authedFetch(
       `${API_BASE}/notebooks/${notebookId}/meta`,
     );
     if (res.status === 404) return null;
     if (!res.ok) throw await parseError(res);
-    return res.arrayBuffer();
+    const data = await res.arrayBuffer();
+    const etag = res.headers.get("ETag") ?? "";
+    return { data, etag };
   }
 
   // ─── Internal ────────────────────────────────────────────────────────────

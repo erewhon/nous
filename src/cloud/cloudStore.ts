@@ -7,7 +7,7 @@
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { CloudAPI } from "./api";
+import { CloudAPI, ETagConflictError } from "./api";
 import type { CloudNotebook } from "./api";
 import {
   deriveMasterKey,
@@ -101,6 +101,8 @@ type CloudStore = CloudState & CloudActions;
 // In-memory only — never persisted
 let masterKey: CryptoKey | null = null;
 const notebookKeyCache = new Map<string, CryptoKey>();
+const pageEtagCache = new Map<string, string>(); // "notebookId:pageId" → etag
+const metaEtagCache = new Map<string, string>(); // notebookId → etag
 let apiInstance: CloudAPI | null = null;
 
 function getOrCreateApi(
@@ -208,6 +210,8 @@ export const useCloudStore = create<CloudStore>()(
         }
         masterKey = null;
         notebookKeyCache.clear();
+        pageEtagCache.clear();
+        metaEtagCache.clear();
         apiInstance = null;
         set({
           isAuthenticated: false,
@@ -370,7 +374,12 @@ export const useCloudStore = create<CloudStore>()(
         }));
 
         try {
-          await api.uploadPage(cloudNotebookId, pageId, encrypted);
+          const cacheKey = `${cloudNotebookId}:${pageId}`;
+          const ifMatch = pageEtagCache.get(cacheKey);
+          const newEtag = await api.uploadPage(cloudNotebookId, pageId, encrypted, ifMatch);
+          if (newEtag) {
+            pageEtagCache.set(cacheKey, newEtag);
+          }
           set((state) => ({
             syncStatus: { ...state.syncStatus, [cloudNotebookId]: "idle" },
             lastSyncAt: {
@@ -379,6 +388,29 @@ export const useCloudStore = create<CloudStore>()(
             },
           }));
         } catch (err) {
+          if (err instanceof ETagConflictError) {
+            // Server has a different version. Re-fetch ETag and retry —
+            // syncPage is called with explicit local content, so local wins.
+            const result = await api.downloadPage(cloudNotebookId, pageId);
+            if (result?.etag) {
+              pageEtagCache.set(`${cloudNotebookId}:${pageId}`, result.etag);
+            }
+            const newEtag = await api.uploadPage(
+              cloudNotebookId, pageId, encrypted,
+              result?.etag,
+            );
+            if (newEtag) {
+              pageEtagCache.set(`${cloudNotebookId}:${pageId}`, newEtag);
+            }
+            set((state) => ({
+              syncStatus: { ...state.syncStatus, [cloudNotebookId]: "idle" },
+              lastSyncAt: {
+                ...state.lastSyncAt,
+                [cloudNotebookId]: new Date().toISOString(),
+              },
+            }));
+            return;
+          }
           const message =
             err instanceof Error ? err.message : "Sync failed";
           set((state) => ({
@@ -391,11 +423,15 @@ export const useCloudStore = create<CloudStore>()(
 
       downloadPage: async (cloudNotebookId, pageId) => {
         const api = get().getApi();
-        const encrypted = await api.downloadPage(cloudNotebookId, pageId);
-        if (!encrypted) return null;
+        const result = await api.downloadPage(cloudNotebookId, pageId);
+        if (!result) return null;
+
+        if (result.etag) {
+          pageEtagCache.set(`${cloudNotebookId}:${pageId}`, result.etag);
+        }
 
         const key = await getNotebookKey(get, cloudNotebookId);
-        return decryptJSON(key, encrypted);
+        return decryptJSON(key, result.data);
       },
 
       syncMeta: async (cloudNotebookId, meta) => {
@@ -403,16 +439,42 @@ export const useCloudStore = create<CloudStore>()(
         const encrypted = await encryptJSON(key, meta);
 
         const api = get().getApi();
-        await api.uploadMeta(cloudNotebookId, encrypted);
+        const ifMatch = metaEtagCache.get(cloudNotebookId);
+        try {
+          const newEtag = await api.uploadMeta(cloudNotebookId, encrypted, ifMatch);
+          if (newEtag) {
+            metaEtagCache.set(cloudNotebookId, newEtag);
+          }
+        } catch (err) {
+          if (err instanceof ETagConflictError) {
+            // Re-fetch to get fresh ETag, then retry
+            const result = await api.downloadMeta(cloudNotebookId);
+            if (result?.etag) {
+              metaEtagCache.set(cloudNotebookId, result.etag);
+            }
+            const newEtag = await api.uploadMeta(
+              cloudNotebookId, encrypted, result?.etag,
+            );
+            if (newEtag) {
+              metaEtagCache.set(cloudNotebookId, newEtag);
+            }
+            return;
+          }
+          throw err;
+        }
       },
 
       downloadMeta: async (cloudNotebookId) => {
         const api = get().getApi();
-        const encrypted = await api.downloadMeta(cloudNotebookId);
-        if (!encrypted) return null;
+        const result = await api.downloadMeta(cloudNotebookId);
+        if (!result) return null;
+
+        if (result.etag) {
+          metaEtagCache.set(cloudNotebookId, result.etag);
+        }
 
         const key = await getNotebookKey(get, cloudNotebookId);
-        return decryptJSON(key, encrypted);
+        return decryptJSON(key, result.data);
       },
 
       listRemotePageIds: async (cloudNotebookId) => {
@@ -435,32 +497,96 @@ export const useCloudStore = create<CloudStore>()(
 
         try {
           // Dynamic import to avoid circular deps with Tauri
-          const { listPages, getPage } = await import("../utils/api");
+          const { listPages, getPage, updatePage } = await import("../utils/api");
 
-          // 1. Get all local pages
+          // 1. Get notebook key
+          const key = await getNotebookKey(get, cloudNotebookId);
+          const api = get().getApi();
+
+          // 2. Download server meta to get server-side timestamps
+          onProgress?.(0, 1, "Checking server state...");
+          const serverMeta = await get().downloadMeta(cloudNotebookId) as {
+            pageSummaries?: Array<{ id: string; updatedAt?: string }>;
+          } | null;
+          const serverTimestamps = new Map<string, string>();
+          if (serverMeta?.pageSummaries) {
+            for (const ps of serverMeta.pageSummaries) {
+              if (ps.updatedAt) {
+                serverTimestamps.set(ps.id, ps.updatedAt);
+              }
+            }
+          }
+
+          // 3. Get all local pages
           const pages = await listPages(localNotebookId, true);
           const total = pages.length + 2; // +1 for meta, +1 for cleanup
           let current = 0;
+          let pulled = 0;
 
-          onProgress?.(current, total, "Starting sync...");
-
-          // 2. Get notebook key
-          const key = await getNotebookKey(get, cloudNotebookId);
-
-          // 3. Upload each page
+          // 4. Sync each page (bidirectional)
           for (const page of pages) {
             current++;
-            onProgress?.(current, total, `Uploading page: ${page.title || page.id}`);
+            const serverUpdatedAt = serverTimestamps.get(page.id);
+            const localUpdatedAt = page.updatedAt;
 
+            // If server has a newer version, pull it down
+            if (serverUpdatedAt && localUpdatedAt && serverUpdatedAt > localUpdatedAt) {
+              onProgress?.(current, total, `Pulling page: ${page.title || page.id}`);
+              const result = await api.downloadPage(cloudNotebookId, page.id);
+              if (result) {
+                if (result.etag) {
+                  pageEtagCache.set(`${cloudNotebookId}:${page.id}`, result.etag);
+                }
+                const serverPage = await decryptJSON(key, result.data) as Record<string, unknown>;
+                // Update local page with server content
+                await updatePage(localNotebookId, page.id, {
+                  title: serverPage.title as string | undefined,
+                  content: serverPage.content as import("../types/page").EditorData | undefined,
+                });
+                pulled++;
+              }
+              continue;
+            }
+
+            // Otherwise, push local version to server
+            onProgress?.(current, total, `Uploading page: ${page.title || page.id}`);
             const fullPage = await getPage(localNotebookId, page.id);
             const encrypted = await encryptJSON(key, fullPage);
-            const api = get().getApi();
-            await api.uploadPage(cloudNotebookId, page.id, encrypted);
+            const cacheKey = `${cloudNotebookId}:${page.id}`;
+            const ifMatch = pageEtagCache.get(cacheKey);
+            try {
+              const newEtag = await api.uploadPage(cloudNotebookId, page.id, encrypted, ifMatch);
+              if (newEtag) {
+                pageEtagCache.set(cacheKey, newEtag);
+              }
+            } catch (err) {
+              if (err instanceof ETagConflictError) {
+                // ETag mismatch but timestamps said local is newer —
+                // re-fetch ETag and retry upload.
+                const result = await api.downloadPage(cloudNotebookId, page.id);
+                if (result?.etag) {
+                  pageEtagCache.set(cacheKey, result.etag);
+                }
+                const newEtag = await api.uploadPage(
+                  cloudNotebookId, page.id, encrypted, result?.etag,
+                );
+                if (newEtag) {
+                  pageEtagCache.set(cacheKey, newEtag);
+                }
+              } else {
+                throw err;
+              }
+            }
           }
 
-          // 4. Upload notebook metadata (page list, sections, folders, etc.)
+          // 5. Upload notebook metadata
           current++;
           onProgress?.(current, total, "Uploading metadata...");
+
+          // Re-read local pages if any were pulled from server
+          const freshPages = pulled > 0
+            ? await listPages(localNotebookId, true)
+            : pages;
 
           const { listFolders, listSections } = await import("../utils/api");
           const [folders, sections] = await Promise.all([
@@ -470,8 +596,8 @@ export const useCloudStore = create<CloudStore>()(
 
           const meta = {
             syncedAt: new Date().toISOString(),
-            pageIds: pages.map((p) => p.id),
-            pageSummaries: pages.map((p) => ({
+            pageIds: freshPages.map((p) => p.id),
+            pageSummaries: freshPages.map((p) => ({
               id: p.id,
               title: p.title,
               folderId: p.folderId,
@@ -501,10 +627,10 @@ export const useCloudStore = create<CloudStore>()(
           };
           await get().syncMeta(cloudNotebookId, meta);
 
-          // 5. Clean up remote pages that no longer exist locally
+          // 6. Clean up remote pages that no longer exist locally
           current++;
           onProgress?.(current, total, "Cleaning up...");
-          const localPageIds = new Set(pages.map((p) => p.id));
+          const localPageIds = new Set(freshPages.map((p) => p.id));
           const remotePageIds = await get().listRemotePageIds(cloudNotebookId);
           for (const remoteId of remotePageIds) {
             if (!localPageIds.has(remoteId)) {
@@ -512,7 +638,7 @@ export const useCloudStore = create<CloudStore>()(
             }
           }
 
-          onProgress?.(total, total, "Sync complete");
+          onProgress?.(total, total, `Sync complete${pulled > 0 ? ` (${pulled} page${pulled > 1 ? "s" : ""} pulled from server)` : ""}`);
 
           set((state) => ({
             syncStatus: { ...state.syncStatus, [cloudNotebookId]: "idle" },
