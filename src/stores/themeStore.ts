@@ -77,6 +77,7 @@ interface ThemeState {
   uiMode: UIMode;
   notebookSortBy: NotebookSortOption;
   pageSortBy: PageSortOption;
+  sectionSortBy: string; // "manual" | "name-asc" | "name-desc" | "created-desc" | "created-asc" | "modified-desc"
   panelWidths: PanelWidths;
   sidebarMode: SidebarMode;  // "full" = classic 3-panel, "rail" = icon rail + accordion
   autoHidePanels: boolean;  // Auto-hide all panels together
@@ -106,6 +107,7 @@ interface ThemeState {
   setUIMode: (mode: UIMode) => void;
   setNotebookSortBy: (sort: NotebookSortOption) => void;
   setPageSortBy: (sort: PageSortOption) => void;
+  setSectionSortBy: (sort: string) => void;
   setPanelWidth: (panel: keyof PanelWidths, width: number) => void;
   setSidebarMode: (mode: SidebarMode) => void;
   setAutoHidePanels: (enabled: boolean) => void;
@@ -423,6 +425,7 @@ export const useThemeStore = create<ThemeState>()(
       uiMode: "classic" as UIMode,
       notebookSortBy: "name-asc" as NotebookSortOption,
       pageSortBy: "position" as PageSortOption,
+      sectionSortBy: "manual",
       panelWidths: DEFAULT_PANEL_WIDTHS,
       sidebarMode: "full" as SidebarMode,
       autoHidePanels: false,
@@ -547,6 +550,9 @@ export const useThemeStore = create<ThemeState>()(
       },
       setPageSortBy: (sort) => {
         set({ pageSortBy: sort });
+      },
+      setSectionSortBy: (sort) => {
+        set({ sectionSortBy: sort });
       },
 
       setPanelWidth: (panel, width) => {

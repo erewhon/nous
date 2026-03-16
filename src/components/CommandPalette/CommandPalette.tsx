@@ -941,15 +941,15 @@ export function CommandPalette({
     if (recentMatches.length > 0) {
       groups.push({ category: "Recent Searches", commands: recentMatches });
     }
-    // Show search results first when there's a query
-    if (searchMatches.length > 0) {
-      groups.push({ category: "Search Results", commands: searchMatches });
-    }
     if (actionCommands.length > 0) {
       groups.push({ category: "Actions", commands: actionCommands });
     }
     if (automationCommands.length > 0) {
       groups.push({ category: "Automations", commands: automationCommands });
+    }
+    // Search results after actions/automations so they're easier to find
+    if (searchMatches.length > 0) {
+      groups.push({ category: "Search Results", commands: searchMatches });
     }
     if (pageResults.length > 0) {
       groups.push({ category: "Pages", commands: pageResults });

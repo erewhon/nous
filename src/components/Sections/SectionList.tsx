@@ -194,7 +194,8 @@ export function SectionList({
 }: SectionListProps) {
   const [editingSection, setEditingSection] = useState<Section | null>(null);
   const [isCreating, setIsCreating] = useState(false);
-  const [sortOption, setSortOption] = useState<SectionSortOption>("manual");
+  const sortOption = useThemeStore((state) => state.sectionSortBy) as SectionSortOption;
+  const setSortOption = useThemeStore((state) => state.setSectionSortBy);
   const [showSortMenu, setShowSortMenu] = useState(false);
   const autoHidePanels = useThemeStore((state) => state.autoHidePanels);
   const setAutoHidePanels = useThemeStore((state) => state.setAutoHidePanels);

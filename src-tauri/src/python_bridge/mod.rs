@@ -2992,14 +2992,14 @@ impl PythonAI {
         })
     }
 
-    pub fn discover_chat_models(&self, provider: &str, base_url: &str) -> Result<Vec<DiscoveredChatModel>> {
+    pub fn discover_chat_models(&self, provider: &str, base_url: &str, api_key: Option<&str>) -> Result<Vec<DiscoveredChatModel>> {
         Python::attach(|py| {
             self.setup_python_path(py)?;
 
             let chat_module = py.import("nous_ai.chat")?;
             let discover_fn = chat_module.getattr("discover_chat_models_sync")?;
 
-            let result = discover_fn.call1((provider, base_url))?;
+            let result = discover_fn.call1((provider, base_url, api_key.unwrap_or("")))?;
             let models_list: Vec<HashMap<String, Py<PyAny>>> = result.extract()?;
 
             let mut models = Vec::new();

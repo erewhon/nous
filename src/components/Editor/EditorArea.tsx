@@ -432,7 +432,7 @@ export function EditorArea() {
             onTransitionEnd={() => setPanelsTransitioning(false)}
           >
             {((!autoHidePanels || panelsHovered) || panelsTransitioning) && (
-              <div style={{ width: `${panelWidths.sections}px` }}>
+              <div style={{ width: `${panelWidths.sections}px`, height: "100%" }}>
                 <SectionList
                   sections={sections}
                   selectedSectionId={selectedSectionId}
@@ -470,7 +470,7 @@ export function EditorArea() {
             onTransitionEnd={() => setPanelsTransitioning(false)}
           >
             {((!autoHidePanels || panelsHovered) || panelsTransitioning) && (
-              <div style={{ width: `${panelWidths.folderTree}px` }}>
+              <div style={{ width: `${panelWidths.folderTree}px`, height: "100%" }}>
                 <FolderTree
                   notebookId={selectedNotebook.id}
                   notebook={selectedNotebook}

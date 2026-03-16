@@ -186,6 +186,22 @@ export function FolderTree({
   const autoHidePanels = useThemeStore((state) => state.autoHidePanels);
   const setAutoHidePanels = useThemeStore((state) => state.setAutoHidePanels);
   const globalPageSortBy = useThemeStore((state) => state.pageSortBy);
+  const sectionSortBy = useThemeStore((state) => state.sectionSortBy);
+
+  // Sort sections to match the section panel's sort order
+  const sortedSections = useMemo(() => {
+    if (sectionSortBy === "manual") return sections;
+    return [...sections].sort((a, b) => {
+      switch (sectionSortBy) {
+        case "name-asc": return a.name.localeCompare(b.name);
+        case "name-desc": return b.name.localeCompare(a.name);
+        case "created-desc": return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        case "created-asc": return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+        case "modified-desc": return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+        default: return 0;
+      }
+    });
+  }, [sections, sectionSortBy]);
 
   // Resolve selected section for per-section sort
   const selectedSection = useMemo(
@@ -946,7 +962,7 @@ END:VCALENDAR`;
           getChildPages={getChildPagesForParent}
           expandedPageIds={expandedPageIds}
           onTogglePageExpand={togglePageExpanded}
-          sections={sectionsEnabled ? sections : undefined}
+          sections={sectionsEnabled ? sortedSections : undefined}
           onMoveToSection={onMovePageToSection}
           onMoveFolderToSection={onMoveFolderToSection}
           onMoveToNotebook={onMoveToNotebook}
@@ -1541,7 +1557,7 @@ END:VCALENDAR`;
                   onCreateSubpage={handleCreateSubpage}
                   onDeletePage={handleDeletePage}
                   onToggleFavorite={handleToggleFavorite}
-                  sections={sectionsEnabled ? sections : undefined}
+                  sections={sectionsEnabled ? sortedSections : undefined}
                   onMoveToSection={onMovePageToSection}
                   onMoveToNotebook={onMoveToNotebook}
                   onSmartOrganize={onSmartOrganize}

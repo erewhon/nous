@@ -541,9 +541,11 @@ export const useAIStore = create<AIState>()(
         try {
           const providerConfig = get().settings.providers.find((p) => p.type === providerType);
           const baseUrl = providerConfig?.baseUrl || (providerType === "ollama" ? "http://localhost:11434" : "http://localhost:1234");
+          const apiKey = providerConfig?.apiKey || undefined;
           const models = await invoke<Array<{ id: string; name: string; contextLength?: number }>>("discover_ai_models", {
             provider: providerType,
             baseUrl,
+            apiKey,
           });
           const existingIds = new Set(providerConfig?.models.map((m) => m.id) || []);
           let added = 0;

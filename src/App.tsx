@@ -217,7 +217,7 @@ function App() {
   const [showGraph, setShowGraph] = useState(false);
   const [showWebResearch, setShowWebResearch] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<"ai" | "web-research">("ai");
+  const [settingsTab, setSettingsTab] = useState("theme");
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showTemplateDialog, setShowTemplateDialog] = useState(false);
   const [showTagManager, setShowTagManager] = useState(false);
@@ -271,8 +271,8 @@ function App() {
     [selectPage]
   );
 
-  const handleOpenSettings = useCallback((tab?: "ai" | "web-research") => {
-    if (tab) setSettingsTab(tab);
+  const handleOpenSettings = useCallback((tab?: string) => {
+    setSettingsTab(tab ?? "theme");
     setShowSettings(true);
   }, []);
 
@@ -505,7 +505,7 @@ function App() {
       <SettingsDialog
         isOpen={showSettings}
         onClose={() => setShowSettings(false)}
-        initialTab={settingsTab}
+        initialTab={settingsTab as "theme" | "ai" | "web-research"}
       />
 
       {/* Delete Confirmation Dialog */}

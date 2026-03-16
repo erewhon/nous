@@ -136,8 +136,9 @@ const PROVIDER_INFO: Record<
   },
   lmstudio: {
     label: "OpenAI Compatible",
-    description: "vLLM, LM Studio, or any OpenAI-compatible server",
-    needsApiKey: false,
+    description: "vLLM, LM Studio, OpenRouter, or any OpenAI-compatible server",
+    needsApiKey: true,
+    apiKeyPlaceholder: "API key (optional for local servers)",
   },
   bedrock: {
     label: "AWS Bedrock",
@@ -856,8 +857,8 @@ function ProviderAccordion({
             </div>
           )}
 
-          {/* Base URL (for local providers) */}
-          {!info.needsApiKey && !info.needsRegion && (
+          {/* Base URL (for local/compatible providers) */}
+          {(!info.needsRegion && (provider.type === "ollama" || provider.type === "lmstudio")) && (
             <div className="mb-4">
               <label
                 className="mb-1.5 block text-xs font-medium"
@@ -883,7 +884,7 @@ function ProviderAccordion({
               >
                 {provider.type === "ollama"
                   ? "Make sure Ollama is running locally"
-                  : "Make sure LM Studio is running with local server enabled"}
+                  : "OpenAI-compatible endpoint (e.g. http://localhost:1234/v1)"}
               </p>
             </div>
           )}

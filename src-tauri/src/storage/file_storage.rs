@@ -1092,7 +1092,8 @@ impl FileStorage {
         }
 
         let content = fs::read_to_string(&sections_path)?;
-        let sections: Vec<Section> = serde_json::from_str(&content)?;
+        let mut sections: Vec<Section> = serde_json::from_str(&content)?;
+        sections.sort_by_key(|s| s.position);
 
         Ok(sections)
     }

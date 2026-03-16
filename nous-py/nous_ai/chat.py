@@ -1528,7 +1528,7 @@ When the user asks you to "create", "write", "make", "generate", or "save" conte
         # Ensure /v1 suffix for OpenAI-compatible API
         if not local_base_url.rstrip("/").endswith("/v1"):
             local_base_url = local_base_url.rstrip("/") + "/v1"
-        client = AsyncOpenAI(api_key="not-needed", base_url=local_base_url)
+        client = AsyncOpenAI(api_key=api_key or "not-needed", base_url=local_base_url)
 
         oai_messages: list[dict[str, Any]] = [{"role": "system", "content": system_message}]
         if conversation_history:
@@ -2403,7 +2403,7 @@ When the user asks you to "create", "write", "make", "generate", or "save" conte
         # Ensure /v1 suffix for OpenAI-compatible API
         if not local_base_url.rstrip("/").endswith("/v1"):
             local_base_url = local_base_url.rstrip("/") + "/v1"
-        client = AsyncOpenAI(api_key="not-needed", base_url=local_base_url)
+        client = AsyncOpenAI(api_key=api_key or "not-needed", base_url=local_base_url)
 
         oai_messages: list[dict[str, Any]] = [{"role": "system", "content": system_message}]
         if conversation_history:
@@ -2618,12 +2618,13 @@ def _ollama_get_context_length(base_url: str, model_name: str) -> int | None:
     return None
 
 
-def discover_chat_models_sync(provider: str, base_url: str) -> list[dict[str, Any]]:
-    """Discover available chat models from a local provider.
+def discover_chat_models_sync(provider: str, base_url: str, api_key: str = "") -> list[dict[str, Any]]:
+    """Discover available chat models from a local or remote provider.
 
     Args:
         provider: Provider type ('ollama' or 'lmstudio').
         base_url: Base URL of the provider server.
+        api_key: Optional API key for authenticated endpoints.
 
     Returns:
         List of dicts with 'id', 'name', and optional 'context_length' keys.
@@ -2635,6 +2636,8 @@ def discover_chat_models_sync(provider: str, base_url: str) -> list[dict[str, An
         if provider == "ollama":
             url = f"{base_url.rstrip('/')}/api/tags"
             req = urllib.request.Request(url, method="GET")
+            if api_key:
+                req.add_header("Authorization", f"Bearer {api_key}")
             with urllib.request.urlopen(req, timeout=5) as resp:
                 data = json.loads(resp.read().decode())
                 models = data.get("models", [])
@@ -2656,7 +2659,9 @@ def discover_chat_models_sync(provider: str, base_url: str) -> list[dict[str, An
                 clean_url = clean_url[:-3]
             url = f"{clean_url}/v1/models"
             req = urllib.request.Request(url, method="GET")
-            with urllib.request.urlopen(req, timeout=5) as resp:
+            if api_key:
+                req.add_header("Authorization", f"Bearer {api_key}")
+            with urllib.request.urlopen(req, timeout=10) as resp:
                 data = json.loads(resp.read().decode())
                 models = data.get("data", [])
                 return [

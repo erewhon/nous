@@ -1092,33 +1092,68 @@ export const usePageStore = create<PageStore>()(
       refreshPages: async (pageIds) => {
         if (pageIds.length === 0) return;
         const state = get();
-        const results = await Promise.allSettled(
-          pageIds.map((pageId) => {
-            const page = state.pages.find((p) => p.id === pageId);
-            if (page) {
-              return api.getPage(page.notebookId, pageId);
-            }
-            return Promise.reject(new Error(`Page ${pageId} not in store`));
+
+        // Separate into existing pages (update) and new pages (add)
+        const existingIds: string[] = [];
+        const newIds: string[] = [];
+        for (const pageId of pageIds) {
+          if (state.pages.find((p) => p.id === pageId)) {
+            existingIds.push(pageId);
+          } else {
+            newIds.push(pageId);
+          }
+        }
+
+        // Fetch existing pages
+        const existingResults = await Promise.allSettled(
+          existingIds.map((pageId) => {
+            const page = state.pages.find((p) => p.id === pageId)!;
+            return api.getPage(page.notebookId, pageId);
           })
         );
-        const freshPages = results
+        const freshExisting = existingResults
           .filter(
             (r): r is PromiseFulfilledResult<Page> => r.status === "fulfilled"
           )
           .map((r) => r.value);
-        if (freshPages.length > 0) {
+
+        // Fetch newly created pages — try all loaded notebooks
+        const newPages: Page[] = [];
+        if (newIds.length > 0) {
+          const { useNotebookStore } = await import("./notebookStore");
+          const selectedId = useNotebookStore.getState().selectedNotebookId;
+          const notebookIds = selectedId
+            ? [selectedId]
+            : useNotebookStore.getState().notebooks.map((n) => n.id);
+          for (const pageId of newIds) {
+            for (const nbId of notebookIds) {
+              try {
+                const page = await api.getPage(nbId, pageId);
+                newPages.push(page);
+                break;
+              } catch {
+                // Page not in this notebook, try next
+              }
+            }
+          }
+        }
+
+        if (freshExisting.length > 0 || newPages.length > 0) {
           // Only update pages whose content actually changed to avoid
           // unnecessary editor re-renders that discard unsaved edits.
-          const changedPages = freshPages.filter((fresh) => {
+          const changedPages = freshExisting.filter((fresh) => {
             const current = get().pages.find((p) => p.id === fresh.id);
             return hasContentChanged(current, fresh);
           });
-          if (changedPages.length > 0) {
+          if (changedPages.length > 0 || newPages.length > 0) {
             set((state) => ({
-              pages: state.pages.map((p) => {
-                const fresh = changedPages.find((f) => f.id === p.id);
-                return fresh ?? p;
-              }),
+              pages: [
+                ...state.pages.map((p) => {
+                  const fresh = changedPages.find((f) => f.id === p.id);
+                  return fresh ?? p;
+                }),
+                ...newPages,
+              ],
               pageDataVersion: state.pageDataVersion + 1,
             }));
           }
