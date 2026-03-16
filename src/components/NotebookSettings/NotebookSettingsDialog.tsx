@@ -39,7 +39,7 @@ const AI_PROVIDERS: { value: AIProviderType; label: string }[] = [
   { value: "openai", label: "OpenAI" },
   { value: "anthropic", label: "Anthropic" },
   { value: "ollama", label: "Ollama" },
-  { value: "lmstudio", label: "LM Studio" },
+  { value: "lmstudio", label: "OpenAI Compatible" },
 ];
 
 const AI_MODELS: Record<AIProviderType, string[]> = {

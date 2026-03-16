@@ -1048,8 +1048,11 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
     let unlisten: UnlistenFn | null = null;
 
     // Add an empty assistant message that we'll update as chunks arrive
-    const assistantMsgIndex = displayMessages.length + 1; // +1 because we just added user message
-    setDisplayMessages(prev => [...prev, { role: "assistant", content: "" }]);
+    let assistantMsgIndex = 0;
+    setDisplayMessages(prev => {
+      assistantMsgIndex = prev.length; // index of the new assistant message
+      return [...prev, { role: "assistant", content: "" }];
+    });
 
     try {
       // Set up event listener for streaming events
@@ -2111,7 +2114,12 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
           </div>
         ) : (
           <div className="space-y-5">
-            {visibleDisplayMessages.map((msg, i) => (
+            {visibleDisplayMessages.map((msg, i) => {
+              // Skip empty assistant placeholder while waiting for first chunk
+              if (msg.role === "assistant" && !msg.content && !msg.thinking && !msg.toolCalls?.length) {
+                return null;
+              }
+              return (
               <div
                 key={i}
                 className={`group/msg relative flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
@@ -2452,7 +2460,8 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
                   )}
                 </div>
               </div>
-            ))}
+              );
+            })}
             {conversation.isLoading && (
               <div className="flex justify-start">
                 <div
@@ -2720,7 +2729,7 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
                         className="px-3 py-1 text-xs font-medium uppercase"
                         style={{ color: "var(--color-text-muted)" }}
                       >
-                        {provider}
+                        {{ openai: "OpenAI", anthropic: "Anthropic", ollama: "Ollama", lmstudio: "OpenAI Compatible", bedrock: "AWS Bedrock" }[provider] ?? provider}
                       </div>
                       {models.map((model) => {
                         const isActive = chatModelOverride === model.id ||

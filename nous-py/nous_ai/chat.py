@@ -2396,7 +2396,7 @@ When the user asks you to "create", "write", "make", "generate", or "save" conte
                 _emit_chunks_with_delay(callback, "chunk", response_content)
 
     else:
-        # Ollama/LMStudio/vLLM/other — use OpenAI-compatible endpoint with tools
+        # Ollama/LMStudio/vLLM/other — use OpenAI-compatible endpoint
         local_base_url = base_url or (
             "http://localhost:11434" if provider_type == "ollama" else "http://localhost:1234/v1"
         )
@@ -2410,48 +2410,92 @@ When the user asks you to "create", "write", "make", "generate", or "save" conte
             oai_messages.extend(conversation_history)
         oai_messages.append({"role": "user", "content": user_message})
 
-        response = await client.chat.completions.create(
+        # Stream from the start for real-time output + reasoning/thinking support
+        stream = await client.chat.completions.create(
             model=config.model,
             messages=oai_messages,
             tools=all_tools,
             tool_choice="auto",
             temperature=config.temperature,
             max_tokens=config.max_tokens,
+            stream=True,
         )
 
-        response_model = response.model or config.model
-        if response.usage:
-            tokens_used = response.usage.total_tokens
+        # Collect streamed response, handling reasoning + content + tool calls
+        tool_calls_by_index: dict[int, dict[str, Any]] = {}
 
-        choice = response.choices[0]
+        async for chunk in stream:
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta
+            finish_reason = chunk.choices[0].finish_reason
 
-        while choice.finish_reason == "tool_calls" and choice.message.tool_calls:
-            oai_messages.append(
-                {
-                    "role": "assistant",
-                    "content": choice.message.content,
-                    "tool_calls": [
-                        {
-                            "id": tc.id,
-                            "type": "function",
-                            "function": {
-                                "name": tc.function.name,
-                                "arguments": tc.function.arguments,
-                            },
+            # Handle reasoning/thinking tokens (vLLM: delta.reasoning)
+            reasoning_text = getattr(delta, "reasoning", None) or getattr(delta, "reasoning_content", None)
+            if reasoning_text:
+                thinking_content += reasoning_text
+                callback({"type": "thinking", "content": reasoning_text})
+
+            # Handle content tokens
+            if delta.content:
+                response_content += delta.content
+                callback({"type": "chunk", "content": delta.content})
+
+            # Accumulate tool calls from stream deltas
+            if delta.tool_calls:
+                for tc_delta in delta.tool_calls:
+                    idx = tc_delta.index
+                    if idx not in tool_calls_by_index:
+                        tool_calls_by_index[idx] = {
+                            "id": tc_delta.id or "",
+                            "function_name": "",
+                            "function_arguments": "",
                         }
-                        for tc in choice.message.tool_calls
-                    ],
-                }
-            )
+                    entry = tool_calls_by_index[idx]
+                    if tc_delta.id:
+                        entry["id"] = tc_delta.id
+                    if tc_delta.function:
+                        if tc_delta.function.name:
+                            entry["function_name"] += tc_delta.function.name
+                        if tc_delta.function.arguments:
+                            entry["function_arguments"] += tc_delta.function.arguments
 
-            for tool_call in choice.message.tool_calls:
-                func_name = tool_call.function.name
-                func_args = json.loads(tool_call.function.arguments)
+            if finish_reason:
+                response_model = chunk.model or config.model
+
+            if hasattr(chunk, "usage") and chunk.usage:
+                tokens_used = chunk.usage.total_tokens
+
+        # Process any tool calls that were streamed
+        if tool_calls_by_index:
+            collected_tool_calls = [
+                tool_calls_by_index[i] for i in sorted(tool_calls_by_index.keys())
+            ]
+
+            oai_messages.append({
+                "role": "assistant",
+                "content": response_content or None,
+                "tool_calls": [
+                    {
+                        "id": tc["id"],
+                        "type": "function",
+                        "function": {
+                            "name": tc["function_name"],
+                            "arguments": tc["function_arguments"],
+                        },
+                    }
+                    for tc in collected_tool_calls
+                ],
+            })
+
+            for tc in collected_tool_calls:
+                func_name = tc["function_name"]
+                func_args = json.loads(tc["function_arguments"])
 
                 action = {
                     "tool": func_name,
                     "arguments": func_args,
-                    "tool_call_id": tool_call.id,
+                    "tool_call_id": tc["id"],
                 }
                 actions.append(action)
                 callback({"type": "action", **action})
@@ -2487,27 +2531,38 @@ When the user asks you to "create", "write", "make", "generate", or "save" conte
                     result = "Action completed"
 
                 oai_messages.append(
-                    {"role": "tool", "tool_call_id": tool_call.id, "content": result}
+                    {"role": "tool", "tool_call_id": tc["id"], "content": result}
                 )
 
-            response = await client.chat.completions.create(
+            # Follow-up request after tool execution (streaming)
+            response_content = ""
+            follow_stream = await client.chat.completions.create(
                 model=config.model,
                 messages=oai_messages,
-                tools=all_tools,
-                tool_choice="auto",
                 temperature=config.temperature,
                 max_tokens=config.max_tokens,
+                stream=True,
             )
 
-            if response.usage:
-                tokens_used = (tokens_used or 0) + response.usage.total_tokens
+            async for chunk in follow_stream:
+                if not chunk.choices:
+                    continue
+                delta = chunk.choices[0].delta
 
-            choice = response.choices[0]
+                reasoning_text = getattr(delta, "reasoning", None) or getattr(delta, "reasoning_content", None)
+                if reasoning_text:
+                    thinking_content += reasoning_text
+                    callback({"type": "thinking", "content": reasoning_text})
 
-        if choice.message.content:
-            response_content = _strip_tool_call_tags(choice.message.content)
-            if response_content:
-                _emit_chunks_with_delay(callback, "chunk", response_content)
+                if delta.content:
+                    response_content += delta.content
+                    callback({"type": "chunk", "content": delta.content})
+
+                if chunk.choices[0].finish_reason:
+                    response_model = chunk.model or config.model
+
+                if hasattr(chunk, "usage") and chunk.usage:
+                    tokens_used = (tokens_used or 0) + chunk.usage.total_tokens
 
     # Emit done event
     callback(
