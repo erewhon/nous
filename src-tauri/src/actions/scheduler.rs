@@ -93,16 +93,19 @@ async fn scheduler_loop(
     let mut next_check: Option<DateTime<Utc>> = None;
 
     loop {
-        // Calculate how long to wait
+        // Calculate how long to wait.
+        // Cap at 60s so we catch missed runs after system sleep/suspend
+        // (tokio timers don't advance during sleep).
         let wait_duration = if let Some(next) = next_check {
             let now = Utc::now();
             if next <= now {
                 Duration::from_secs(0)
             } else {
-                (next - now).to_std().unwrap_or(Duration::from_secs(60))
+                let until_next = (next - now).to_std().unwrap_or(Duration::from_secs(60));
+                until_next.min(Duration::from_secs(60))
             }
         } else {
-            Duration::from_secs(60) // Default check interval
+            Duration::from_secs(60)
         };
 
         tokio::select! {
@@ -132,12 +135,11 @@ async fn scheduler_loop(
                                 }
                             }
 
-                            // Calculate next run time
+                            // Update last_run and calculate next run time
                             action.next_run = calculate_next_run(&action.schedule);
-
-                            // Update in storage
-                            if let Some(next) = action.next_run {
-                                if let Ok(storage) = action_storage.lock() {
+                            if let Ok(storage) = action_storage.lock() {
+                                let _ = storage.update_last_run(action.id);
+                                if let Some(next) = action.next_run {
                                     let _ = storage.update_next_run(action.id, next);
                                 }
                             }
@@ -158,6 +160,45 @@ async fn scheduler_loop(
                     Some(SchedulerMessage::Reload) => {
                         log::info!("Scheduler: Reloading scheduled actions");
                         scheduled_actions = load_scheduled_actions(&action_storage);
+
+                        // Catch-up: execute any actions whose next_run is in the past
+                        // (missed during system sleep or daemon downtime)
+                        let now = Utc::now();
+                        for action in &mut scheduled_actions {
+                            if let Some(next_run) = action.next_run {
+                                if next_run <= now {
+                                    log::info!(
+                                        "Scheduler: Catch-up executing missed action: {} ({}) — was due at {}",
+                                        action.name, action.id, next_run
+                                    );
+
+                                    if let Ok(exec) = executor.lock() {
+                                        match exec.execute_action(action.id, None, None) {
+                                            Ok(result) => {
+                                                log::info!(
+                                                    "Catch-up action '{}' completed: {} steps, {} errors",
+                                                    action.name,
+                                                    result.steps_completed,
+                                                    result.errors.len()
+                                                );
+                                            }
+                                            Err(e) => {
+                                                log::error!("Catch-up action '{}' failed: {}", action.name, e);
+                                            }
+                                        }
+                                    }
+
+                                    // Advance to next run
+                                    action.next_run = calculate_next_run(&action.schedule);
+                                    if let Some(next) = action.next_run {
+                                        if let Ok(storage) = action_storage.lock() {
+                                            let _ = storage.update_next_run(action.id, next);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
                         next_check = scheduled_actions
                             .iter()
                             .filter_map(|a| a.next_run)
