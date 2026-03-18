@@ -207,6 +207,24 @@ export class CloudAPI {
     if (!res.ok) throw await parseError(res);
   }
 
+  // ─── Collaboration ──────────────────────────────────────────────────────
+
+  async startCollabSession(
+    notebookId: string,
+    pageId: string,
+  ): Promise<{ token: string; roomId: string; partykitHost: string; party: string }> {
+    const res = await this.authedFetch(
+      `${API_BASE}/notebooks/${notebookId}/collab-session`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pageId }),
+      },
+    );
+    if (!res.ok) throw await parseError(res);
+    return res.json();
+  }
+
   // ─── Saved shares ────────────────────────────────────────────────────────
 
   async saveShareToLibrary(
@@ -424,5 +442,27 @@ export class ShareAPI {
     if (res.status === 412) throw new ETagConflictError();
     if (!res.ok) throw await parseError(res);
     return res.headers.get("ETag") ?? "";
+  }
+
+  async startCollabSession(
+    shareId: string,
+    pageId: string,
+  ): Promise<{
+    token: string;
+    roomId: string;
+    partykitHost: string;
+    party: string;
+    permissions: "r" | "rw";
+  }> {
+    const res = await fetch(
+      `${API_BASE}/shares/${shareId}/collab-session`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pageId }),
+      },
+    );
+    if (!res.ok) throw await parseError(res);
+    return res.json();
   }
 }
