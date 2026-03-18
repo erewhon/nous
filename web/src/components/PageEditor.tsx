@@ -1,7 +1,8 @@
 /**
  * BlockNote editor for web page editing.
- * Auto-saves 3s after last change. Ctrl+S for immediate save.
- * Conflict detection: checks server version before saving.
+ * Supports two modes:
+ * 1. REST mode: auto-saves with 3s debounce, ETag conflict detection
+ * 2. Collab mode: real-time Yjs collaboration via party.nous.page
  */
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { useCreateBlockNote } from "@blocknote/react";
@@ -15,7 +16,13 @@ import {
   type EditorData,
 } from "../utils/blockFormatConverter";
 import { useWebStore } from "../store";
-import { ETagConflictError } from "../api";
+import { ETagConflictError, CloudAPI } from "../api";
+import { blocksToYXmlFragment } from "@blocknote/core/yjs";
+import {
+  WebCollabProvider,
+  type CollaborationOptions,
+  type ConnectionStatus,
+} from "../collab/WebCollabProvider";
 
 const AUTO_SAVE_DELAY = 3000;
 
@@ -43,28 +50,44 @@ export function PageEditor({
   const [saveError, setSaveError] = useState("");
   const [conflictMessage, setConflictMessage] = useState("");
 
+  // Collab state
+  const [collabProvider, setCollabProvider] = useState<WebCollabProvider | null>(null);
+  const [collabOptions, setCollabOptions] = useState<CollaborationOptions | null>(null);
+  const [collabStatus, setCollabStatus] = useState<ConnectionStatus>("disconnected");
+  const [participantCount, setParticipantCount] = useState(0);
+  const [collabStarting, setCollabStarting] = useState(false);
+  const [editorKey, setEditorKey] = useState(0); // force re-create editor
+
+  const isCollab = collabProvider !== null;
+
   const originalTitle = useRef((pageData.title as string) ?? "Untitled");
   const savingRef = useRef(false);
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const titleRef = useRef(title);
   titleRef.current = title;
+  const collabProviderRef = useRef<WebCollabProvider | null>(null);
+  collabProviderRef.current = collabProvider;
 
   const initialContent = useMemo(() => {
+    if (collabOptions) return undefined; // collab mode — content comes from Yjs
     const content = pageData.content as EditorData | undefined;
     if (content?.blocks) {
       return editorJsToBlockNote(content);
     }
     return undefined;
-  }, [pageData]);
+  }, [pageData, collabOptions]);
 
-  const editor = useCreateBlockNote({
-    schema,
-    initialContent,
-  });
+  const editor = useCreateBlockNote(
+    {
+      schema,
+      initialContent,
+      collaboration: collabOptions ?? undefined,
+    },
+    [editorKey],
+  );
 
-  // Core save logic — used by auto-save, Ctrl+S, and Done button.
-  // ETag-based conflict detection: the store sends If-Match with the
-  // cached ETag; the server returns 412 if the page was modified.
+  // ─── REST save logic (disabled during collab) ─────────────────────────
+
   const performSave = useCallback(async (force = false): Promise<boolean> => {
     if (savingRef.current) return false;
     savingRef.current = true;
@@ -86,14 +109,10 @@ export function PageEditor({
       };
 
       if (force) {
-        // Reload to get fresh ETag, then save
         await loadPage(notebookId, pageId);
       }
 
       await savePage(notebookId, pageId, updatedPageData);
-
-      // Always update meta so the server-side timestamp reflects the edit.
-      // Desktop sync compares meta timestamps to decide pull vs push.
       await updatePageInMeta(notebookId, pageId, currentTitle);
       originalTitle.current = currentTitle;
 
@@ -103,7 +122,7 @@ export function PageEditor({
       if (err instanceof ETagConflictError) {
         setSaveStatus("conflict");
         setConflictMessage(
-          "This page was modified by another client (e.g., desktop sync). Save anyway?",
+          "This page was modified by another client. Save anyway?",
         );
         return false;
       }
@@ -115,7 +134,6 @@ export function PageEditor({
     }
   }, [editor, pageData, notebookId, pageId, savePage, updatePageInMeta, loadPage]);
 
-  // Force save (overwrite conflict)
   const handleForceOverwrite = useCallback(async () => {
     await performSave(true);
   }, [performSave]);
@@ -125,78 +143,184 @@ export function PageEditor({
     setConflictMessage("");
   }, []);
 
-  // Schedule auto-save
   const scheduleAutoSave = useCallback(() => {
-    if (autoSaveTimerRef.current) {
-      clearTimeout(autoSaveTimerRef.current);
-    }
+    if (isCollab) return; // no REST save during collab
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
     autoSaveTimerRef.current = setTimeout(() => {
       performSave();
     }, AUTO_SAVE_DELAY);
-  }, [performSave]);
+  }, [performSave, isCollab]);
 
-  // Mark dirty and schedule auto-save
   const markDirty = useCallback(() => {
+    if (isCollab) return; // Yjs handles persistence
     setSaveStatus("dirty");
     setSaveError("");
     setConflictMessage("");
     scheduleAutoSave();
-  }, [scheduleAutoSave]);
+  }, [scheduleAutoSave, isCollab]);
 
-  // Ctrl+S handler
+  // Ctrl+S
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === "s") {
         e.preventDefault();
-        if (autoSaveTimerRef.current) {
-          clearTimeout(autoSaveTimerRef.current);
+        if (!isCollab) {
+          if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+          performSave();
         }
-        performSave();
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [performSave]);
+  }, [performSave, isCollab]);
 
-  // Track editor content changes
+  // Track editor content changes (REST mode only)
   useEffect(() => {
+    if (isCollab) return;
     editor.onEditorContentChange(markDirty);
+    return () => { editor.onEditorContentChange(() => {}); };
+  }, [editor, markDirty, isCollab]);
+
+  useEffect(() => {
+    if (!isCollab && title !== originalTitle.current) markDirty();
+  }, [title, markDirty, isCollab]);
+
+  useEffect(() => {
     return () => {
-      editor.onEditorContentChange(() => {});
+      if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
     };
-  }, [editor, markDirty]);
+  }, []);
 
-  // Track title changes
-  useEffect(() => {
-    if (title !== originalTitle.current) {
-      markDirty();
+  // ─── Collab session management ────────────────────────────────────────
+
+  const startCollab = useCallback(async () => {
+    setCollabStarting(true);
+    try {
+      const { accessToken, refreshToken } = useWebStore.getState();
+      const api = new CloudAPI({
+        accessToken: accessToken ?? undefined,
+        refreshToken: refreshToken ?? undefined,
+      });
+      const session = await api.startCollabSession(notebookId, pageId);
+
+      const provider = new WebCollabProvider({
+        host: session.partykitHost,
+        roomId: session.roomId,
+        token: session.token,
+        party: session.party,
+        user: { name: "Web User", color: "#3b82f6" },
+        onStatusChange: (state) => setCollabStatus(state.status),
+        onParticipantsChange: (count) => setParticipantCount(count),
+        onSynced: () => {
+          // Seed content if the Y.Doc is empty (we're the first client)
+          if (provider.fragment.length === 0) {
+            const content = pageData.content as EditorData | undefined;
+            if (content?.blocks) {
+              // Store blocks for seeding after editor re-creation
+              (provider as any)._pendingSeed = editorJsToBlockNote(content);
+            }
+          }
+        },
+      });
+
+      setCollabProvider(provider);
+      setCollabOptions(provider.getCollaborationOptions());
+      setCollabStatus("connecting");
+      setSaveStatus("clean");
+      // Force editor re-creation with collaboration options
+      setEditorKey((k) => k + 1);
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Failed to start live session");
+      setSaveStatus("error");
+    } finally {
+      setCollabStarting(false);
     }
-  }, [title, markDirty]);
+  }, [notebookId, pageId, pageData]);
 
-  // Cleanup timer on unmount
+  // Seed content after editor re-creation in collab mode
+  useEffect(() => {
+    if (!isCollab || !collabProvider) return;
+    const pendingSeed = (collabProvider as any)._pendingSeed;
+    if (pendingSeed && collabProvider.fragment.length === 0) {
+      try {
+        blocksToYXmlFragment(editor, pendingSeed, collabProvider.fragment);
+      } catch (e) {
+        console.error("Failed to seed collab content:", e);
+      }
+      delete (collabProvider as any)._pendingSeed;
+    }
+  }, [editor, isCollab, collabProvider]);
+
+  const stopCollab = useCallback(async () => {
+    if (!collabProvider) return;
+
+    // Extract current content from editor and save to blob store
+    try {
+      const bnDoc = editor.document;
+      const editorJsData = blockNoteToEditorJs(bnDoc);
+      const currentTitle = titleRef.current;
+      const now = new Date().toISOString();
+
+      const updatedPageData = {
+        ...pageData,
+        title: currentTitle,
+        content: editorJsData,
+        updatedAt: now,
+      };
+
+      await savePage(notebookId, pageId, updatedPageData);
+      await updatePageInMeta(notebookId, pageId, currentTitle);
+    } catch (err) {
+      console.error("Failed to save on collab stop:", err);
+    }
+
+    collabProvider.destroy();
+    setCollabProvider(null);
+    setCollabOptions(null);
+    setCollabStatus("disconnected");
+    setParticipantCount(0);
+    setSaveStatus("saved");
+    // Force editor re-creation without collaboration
+    setEditorKey((k) => k + 1);
+  }, [collabProvider, editor, pageData, notebookId, pageId, savePage, updatePageInMeta]);
+
+  // Cleanup on unmount — save and destroy collab
   useEffect(() => {
     return () => {
-      if (autoSaveTimerRef.current) {
-        clearTimeout(autoSaveTimerRef.current);
+      const provider = collabProviderRef.current;
+      if (provider) {
+        provider.destroy();
       }
     };
   }, []);
 
-  // Done = save immediately then exit
+  // ─── Done handler ─────────────────────────────────────────────────────
+
   const handleDone = useCallback(async () => {
-    if (autoSaveTimerRef.current) {
-      clearTimeout(autoSaveTimerRef.current);
-    }
-    if (saveStatus === "dirty" || saveStatus === "error") {
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    if (isCollab) {
+      await stopCollab();
+      onDone();
+    } else if (saveStatus === "dirty" || saveStatus === "error") {
       const ok = await performSave();
       if (ok) onDone();
-      // If conflict/error, stay in editor
     } else {
       onDone();
     }
-  }, [saveStatus, performSave, onDone]);
+  }, [saveStatus, performSave, onDone, isCollab, stopCollab]);
+
+  // ─── Render ───────────────────────────────────────────────────────────
 
   const statusLabel = (() => {
+    if (isCollab) {
+      if (collabStatus === "connected") {
+        return participantCount > 1
+          ? `Live (${participantCount} users)`
+          : "Live";
+      }
+      if (collabStatus === "connecting") return "Connecting...";
+      return "Disconnected";
+    }
     switch (saveStatus) {
       case "saving": return "Saving...";
       case "saved": return "Saved";
@@ -208,11 +332,15 @@ export function PageEditor({
   })();
 
   const statusClass = (() => {
+    if (isCollab) {
+      return collabStatus === "connected"
+        ? "editor-status-live"
+        : "editor-status-saving";
+    }
     switch (saveStatus) {
       case "saved": return "editor-status-saved";
       case "saving": return "editor-status-saving";
-      case "error": return "editor-status-error";
-      case "conflict": return "editor-status-error";
+      case "error": case "conflict": return "editor-status-error";
       default: return "editor-status-dirty";
     }
   })();
@@ -228,6 +356,25 @@ export function PageEditor({
           )}
         </div>
         <div className="editor-toolbar-right">
+          {!isCollab && (
+            <button
+              className="btn btn-ghost editor-collab-btn"
+              onClick={startCollab}
+              disabled={collabStarting}
+              title="Start live collaboration session"
+            >
+              {collabStarting ? "Starting..." : "Live Edit"}
+            </button>
+          )}
+          {isCollab && (
+            <button
+              className="btn btn-ghost editor-collab-btn"
+              onClick={stopCollab}
+              title="Stop live session and save"
+            >
+              Stop Live
+            </button>
+          )}
           <button
             className="btn btn-primary editor-save-btn"
             onClick={handleDone}

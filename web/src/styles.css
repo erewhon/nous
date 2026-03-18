@@ -855,6 +855,18 @@ code:not(pre code) {
   color: var(--danger);
 }
 
+.editor-status-live {
+  color: #3b82f6;
+  font-weight: 600;
+}
+
+.editor-collab-btn {
+  font-size: 12px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
 .editor-conflict-bar {
   display: flex;
   align-items: center;
