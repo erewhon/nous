@@ -359,6 +359,53 @@ fn install_systemd(exe_path: &std::path::Path) -> Result<()> {
     std::fs::create_dir_all(&service_dir)?;
 
     let service_path = service_dir.join("nous-daemon.service");
+
+    // Discover Python paths for PyO3
+    let home = dirs::home_dir().unwrap_or_default();
+    let uv_python_dir = home.join(".local/share/uv/python");
+    let mut python_lib_path = String::new();
+    let mut pythonpath = String::new();
+
+    // Find the uv-managed Python lib directory
+    if uv_python_dir.exists() {
+        if let Ok(entries) = std::fs::read_dir(&uv_python_dir) {
+            for entry in entries.flatten() {
+                let lib_dir = entry.path().join("lib");
+                if lib_dir.exists() {
+                    python_lib_path = lib_dir.to_string_lossy().to_string();
+                    break;
+                }
+            }
+        }
+    }
+
+    // Find nous-py path (sibling of the exe or in the project)
+    if let Some(exe_dir) = exe_path.parent() {
+        // Check standard locations
+        let candidates = [
+            exe_dir.join("nous-py"),
+            exe_dir.join("../../nous-py"),
+            home.join("Projects/erewhon/nous/nous-py"),
+        ];
+        for candidate in &candidates {
+            if candidate.exists() {
+                pythonpath = candidate.canonicalize()
+                    .unwrap_or(candidate.clone())
+                    .to_string_lossy()
+                    .to_string();
+                break;
+            }
+        }
+    }
+
+    let mut env_lines = vec!["Environment=RUST_LOG=info".to_string()];
+    if !python_lib_path.is_empty() {
+        env_lines.push(format!("Environment=LD_LIBRARY_PATH={python_lib_path}"));
+    }
+    if !pythonpath.is_empty() {
+        env_lines.push(format!("Environment=PYTHONPATH={pythonpath}"));
+    }
+
     let content = format!(
         r#"[Unit]
 Description=Nous Daemon - Headless notebook service
@@ -369,12 +416,13 @@ Type=simple
 ExecStart={exe} daemon start
 Restart=on-failure
 RestartSec=5
-Environment=RUST_LOG=info
+{env}
 
 [Install]
 WantedBy=default.target
 "#,
-        exe = exe_path.display()
+        exe = exe_path.display(),
+        env = env_lines.join("\n"),
     );
 
     std::fs::write(&service_path, content)?;
