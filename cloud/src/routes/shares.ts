@@ -11,6 +11,7 @@ import {
   listPageIds,
 } from "../storage/r2";
 import { notFound, forbidden, badRequest, preconditionFailed } from "../errors";
+import { generateCollabToken } from "../crypto/collab-token";
 
 /**
  * Public share endpoints (no auth required).
@@ -128,4 +129,34 @@ sharesPublic.put("/:shareId/pages/:pageId", async (c) => {
   }
 
   return c.json({ ok: true }, 200, { "ETag": result.etag });
+});
+
+// POST /shares/:shareId/collab-session — create a collab session token via share
+sharesPublic.post("/:shareId/collab-session", async (c) => {
+  const share = await requireValidShare(c.env.DB, c.req.param("shareId"));
+
+  const body = await c.req.json<{ pageId: string }>();
+  if (!body.pageId) throw badRequest("pageId is required");
+
+  if (!c.env.COLLAB_HMAC_SECRET) {
+    throw badRequest("Collaboration not configured on this server");
+  }
+
+  const permissions = share.permissions === "rw" ? "rw" as const : "r" as const;
+
+  const { token, roomId } = await generateCollabToken(
+    share.notebook_id,
+    body.pageId,
+    c.env.COLLAB_HMAC_SECRET,
+    86400,
+    permissions,
+  );
+
+  return c.json({
+    token,
+    roomId,
+    partykitHost: "party.nous.page",
+    party: "collab-server",
+    permissions,
+  });
 });

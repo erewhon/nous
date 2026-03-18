@@ -3,6 +3,8 @@ export interface Env {
   DB: D1Database;
   STORAGE: R2Bucket;
   JWT_SECRET: string;
+  /** HMAC secret (hex-encoded) for signing collab session tokens. Same key as collab Worker. */
+  COLLAB_HMAC_SECRET: string;
 }
 
 /** Variables set by middleware on the Hono context. */

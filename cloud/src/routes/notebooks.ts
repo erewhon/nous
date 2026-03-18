@@ -20,6 +20,7 @@ import {
   deleteAllNotebookData,
 } from "../storage/r2";
 import { badRequest, notFound, forbidden, preconditionFailed } from "../errors";
+import { generateCollabToken } from "../crypto/collab-token";
 
 type AppEnv = { Bindings: Env; Variables: Variables };
 
@@ -309,6 +310,35 @@ notebooks.delete("/:id/shares/:shareId", async (c) => {
   const userId = c.get("userId");
   await revokeShare(c.env.DB, c.req.param("shareId"), userId);
   return c.json({ ok: true });
+});
+
+// POST /notebooks/:id/collab-session — create a collab session token for a page
+notebooks.post("/:id/collab-session", async (c) => {
+  const userId = c.get("userId");
+  const notebookId = c.req.param("id");
+  await requireNotebook(c.env.DB, notebookId, userId);
+
+  const body = await c.req.json<{ pageId: string }>();
+  if (!body.pageId) throw badRequest("pageId is required");
+
+  if (!c.env.COLLAB_HMAC_SECRET) {
+    throw badRequest("Collaboration not configured on this server");
+  }
+
+  const { token, roomId } = await generateCollabToken(
+    notebookId,
+    body.pageId,
+    c.env.COLLAB_HMAC_SECRET,
+    86400, // 24 hours
+    "rw",
+  );
+
+  return c.json({
+    token,
+    roomId,
+    partykitHost: "party.nous.page",
+    party: "collab-server",
+  });
 });
 
 export { notebooks };
