@@ -14,6 +14,7 @@ from nous_sdk.models import (
     Section,
     InboxItem,
     Goal,
+    Database,
     SearchResult,
 )
 
@@ -285,6 +286,23 @@ class Nous:
         data = self._get(f"/api/notebooks/{nb_id}/folders")
         return [Folder.from_dict(d) for d in data]
 
+    def create_folder(
+        self,
+        notebook: str,
+        name: str,
+        parent_id: str | None = None,
+        section_id: str | None = None,
+    ) -> Folder:
+        """Create a folder in a notebook."""
+        nb_id = self._resolve_notebook_id(notebook)
+        body: dict[str, Any] = {"name": name}
+        if parent_id:
+            body["parent_id"] = parent_id
+        if section_id:
+            body["section_id"] = section_id
+        data = self._post(f"/api/notebooks/{nb_id}/folders", json=body)
+        return Folder.from_dict(data)
+
     # ─── Sections ───────────────────────────────────────────────────────
 
     def list_sections(self, notebook: str) -> list[Section]:
@@ -292,6 +310,22 @@ class Nous:
         nb_id = self._resolve_notebook_id(notebook)
         data = self._get(f"/api/notebooks/{nb_id}/sections")
         return [Section.from_dict(d) for d in data]
+
+    # ─── Databases ───────────────────────────────────────────────────────
+
+    def list_databases(self, notebook: str) -> list[Database]:
+        """List all databases in a notebook."""
+        nb_id = self._resolve_notebook_id(notebook)
+        data = self._get(f"/api/notebooks/{nb_id}/databases")
+        return [Database.from_dict(d) for d in data]
+
+    def get_database(self, notebook: str, database_id: str) -> dict[str, Any]:
+        """Get full database content (properties, rows, views).
+
+        Returns a dict with 'id', 'title', 'tags', and 'database' (the full DB data).
+        """
+        nb_id = self._resolve_notebook_id(notebook)
+        return self._get(f"/api/notebooks/{nb_id}/databases/{database_id}")
 
     # ─── Search ─────────────────────────────────────────────────────────
 

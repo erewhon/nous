@@ -36,7 +36,9 @@ impl Default for NotebookType {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum FolderType {
+    #[serde(alias = "Standard")]
     Standard,
+    #[serde(alias = "Archive")]
     Archive,
 }
 
@@ -181,7 +183,9 @@ pub struct Folder {
     /// Position for ordering within parent
     #[serde(default)]
     pub position: i32,
+    #[serde(default = "chrono::Utc::now")]
     pub created_at: DateTime<Utc>,
+    #[serde(default = "chrono::Utc::now")]
     pub updated_at: DateTime<Utc>,
 }
 

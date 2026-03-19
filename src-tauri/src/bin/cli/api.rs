@@ -20,7 +20,7 @@ use regex::Regex;
 use nous_lib::commands::{create_daily_note_core, find_daily_note};
 use nous_lib::inbox::{CaptureRequest, CaptureSource};
 use nous_lib::share::storage::ShareStorage;
-use nous_lib::storage::{EditorBlock, EditorData, Page};
+use nous_lib::storage::{EditorBlock, EditorData, Page, PageType};
 
 use super::daemon::{DaemonEvent, DaemonState};
 
@@ -160,6 +160,13 @@ struct MovePageRequest {
     section_id: Option<String>,
 }
 
+#[derive(Deserialize)]
+struct CreateFolderRequest {
+    name: String,
+    parent_id: Option<String>,
+    section_id: Option<String>,
+}
+
 // Track daemon start time
 static START_TIME: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
 
@@ -233,6 +240,20 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/energy/checkins", get(get_energy_checkins))
         .route("/api/energy/patterns", get(get_energy_patterns))
         .route("/api/sync/trigger", post(trigger_sync))
+        // Databases
+        .route(
+            "/api/notebooks/{notebook_id}/databases",
+            get(list_databases),
+        )
+        .route(
+            "/api/notebooks/{notebook_id}/databases/{db_id}",
+            get(get_database),
+        )
+        // Folder creation
+        .route(
+            "/api/notebooks/{notebook_id}/folders",
+            post(create_folder),
+        )
         // Share routes
         .route("/share/{share_id}", get(serve_share))
         .route("/share/{share_id}/", get(serve_share))
@@ -1545,4 +1566,108 @@ async fn handle_ws_events(mut socket: WebSocket, state: AppState) {
     }
 
     log::info!("WebSocket client disconnected from /api/events");
+}
+
+// ===== Databases =====
+
+async fn list_databases(
+    State(state): State<AppState>,
+    Path(notebook_id): Path<String>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let nb_id = parse_uuid(&notebook_id)?;
+    let storage = state.storage.lock().unwrap();
+    let pages = storage
+        .list_pages(nb_id)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let databases: Vec<serde_json::Value> = pages
+        .into_iter()
+        .filter(|p| p.page_type == PageType::Database && p.deleted_at.is_none())
+        .map(|p| {
+            let (prop_count, row_count) = storage
+                .read_native_file_content(&p)
+                .ok()
+                .and_then(|content| serde_json::from_str::<serde_json::Value>(&content).ok())
+                .map(|v| {
+                    let props = v.get("properties").and_then(|a| a.as_array()).map_or(0, |a| a.len());
+                    let rows = v.get("rows").and_then(|a| a.as_array()).map_or(0, |a| a.len());
+                    (props, rows)
+                })
+                .unwrap_or((0, 0));
+
+            serde_json::json!({
+                "id": p.id.to_string(),
+                "title": p.title,
+                "tags": p.tags,
+                "folderId": p.folder_id,
+                "sectionId": p.section_id,
+                "propertyCount": prop_count,
+                "rowCount": row_count,
+            })
+        })
+        .collect();
+
+    Ok(Json(ApiResponse { data: databases }))
+}
+
+async fn get_database(
+    State(state): State<AppState>,
+    Path((notebook_id, db_id)): Path<(String, String)>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let nb_id = parse_uuid(&notebook_id)?;
+    let pg_id = parse_uuid(&db_id)?;
+    let storage = state.storage.lock().unwrap();
+
+    let page = storage
+        .get_page(nb_id, pg_id)
+        .map_err(|e| api_err(StatusCode::NOT_FOUND, e.to_string()))?;
+
+    if page.page_type != PageType::Database {
+        return Err(api_err(StatusCode::BAD_REQUEST, "Not a database page"));
+    }
+
+    let content = storage
+        .read_native_file_content(&page)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let db_data: serde_json::Value = serde_json::from_str(&content)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, format!("Invalid database JSON: {e}")))?;
+
+    Ok(Json(ApiResponse {
+        data: serde_json::json!({
+            "id": page.id.to_string(),
+            "title": page.title,
+            "tags": page.tags,
+            "database": db_data,
+        }),
+    }))
+}
+
+// ===== Create Folder =====
+
+async fn create_folder(
+    State(state): State<AppState>,
+    Path(notebook_id): Path<String>,
+    Json(req): Json<CreateFolderRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let nb_id = parse_uuid(&notebook_id)?;
+    let storage = state.storage.lock().unwrap();
+
+    let parent_id = req.parent_id
+        .as_deref()
+        .and_then(|s| Uuid::parse_str(s).ok());
+
+    let mut folder = storage
+        .create_folder(nb_id, req.name.clone(), parent_id)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    // Set section if provided (requires a separate update)
+    if let Some(ref sid) = req.section_id {
+        if let Ok(uuid) = Uuid::parse_str(sid) {
+            folder.section_id = Some(uuid);
+            let _ = storage.update_folder(&folder);
+        }
+    }
+
+    Ok((StatusCode::CREATED, Json(ApiResponse { data: folder })))
 }

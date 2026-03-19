@@ -156,6 +156,29 @@ class Goal:
 
 
 @dataclass
+class Database:
+    id: str
+    title: str
+    tags: list[str] = field(default_factory=list)
+    folder_id: str | None = None
+    section_id: str | None = None
+    property_count: int = 0
+    row_count: int = 0
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> Database:
+        return cls(
+            id=d["id"],
+            title=d.get("title", ""),
+            tags=d.get("tags", []),
+            folder_id=d.get("folderId"),
+            section_id=d.get("sectionId"),
+            property_count=d.get("propertyCount", 0),
+            row_count=d.get("rowCount", 0),
+        )
+
+
+@dataclass
 class SearchResult:
     page_id: str
     notebook_id: str
