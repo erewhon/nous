@@ -123,6 +123,45 @@ def list_folders(
 
 
 @mcp.tool()
+def create_folder(
+    notebook: str,
+    name: str,
+    parent: str | None = None,
+    section: str | None = None,
+) -> str:
+    """Create a folder in a notebook.
+
+    Args:
+        notebook: Notebook name or UUID.
+        name: Folder name.
+        parent: Optional parent folder name or UUID (for nesting).
+        section: Optional section name or UUID to place the folder in.
+
+    Returns JSON with id, name of the created folder.
+    """
+    storage = _get_storage()
+    nb = storage.resolve_notebook(notebook)
+
+    parent_id = None
+    if parent:
+        folders = storage.list_folders(nb["id"])
+        match = next(
+            (f for f in folders if f["id"] == parent or f["name"].lower() == parent.lower()),
+            None,
+        )
+        if match:
+            parent_id = match["id"]
+
+    section_id = None
+    if section:
+        sec = storage.resolve_section(nb["id"], section)
+        section_id = sec["id"]
+
+    folder = storage.create_folder(nb["id"], name, parent_id=parent_id, section_id=section_id)
+    return json.dumps({"id": folder["id"], "name": folder["name"]}, indent=2)
+
+
+@mcp.tool()
 def list_pages(
     notebook: str,
     folder: str | None = None,
