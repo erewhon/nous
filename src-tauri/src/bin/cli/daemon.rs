@@ -23,6 +23,13 @@ use nous_lib::sync::{LogEmitter, SyncManager};
 
 use super::api;
 
+/// Event broadcast for WebSocket subscribers
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct DaemonEvent {
+    pub event: String,
+    pub data: serde_json::Value,
+}
+
 /// Shared state for the daemon (passed to HTTP handlers and schedulers)
 pub struct DaemonState {
     pub storage: Arc<Mutex<FileStorage>>,
@@ -34,6 +41,7 @@ pub struct DaemonState {
     pub sync_manager: Arc<SyncManager>,
     pub action_scheduler: Mutex<ActionScheduler>,
     pub library_path: PathBuf,
+    pub event_tx: tokio::sync::broadcast::Sender<DaemonEvent>,
 }
 
 /// Default daemon port
@@ -155,6 +163,9 @@ pub async fn run(library_name: Option<&str>, port: Option<u16>) -> Result<()> {
     );
     log::info!("Sync scheduler started");
 
+    // Create event broadcast channel (capacity 256 — events are small)
+    let (event_tx, _) = tokio::sync::broadcast::channel::<DaemonEvent>(256);
+
     // Build shared daemon state
     let state = Arc::new(DaemonState {
         storage: storage_arc,
@@ -166,6 +177,7 @@ pub async fn run(library_name: Option<&str>, port: Option<u16>) -> Result<()> {
         sync_manager: sync_manager_arc,
         action_scheduler: Mutex::new(action_scheduler),
         library_path: library_path.clone(),
+        event_tx,
     });
 
     // Start HTTP API

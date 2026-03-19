@@ -5,7 +5,7 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Path, Query, State, WebSocketUpgrade, ws::{Message, WebSocket}},
     http::StatusCode,
     response::{Html, IntoResponse},
     routing::{delete, get, post, put},
@@ -22,7 +22,15 @@ use nous_lib::inbox::{CaptureRequest, CaptureSource};
 use nous_lib::share::storage::ShareStorage;
 use nous_lib::storage::{EditorBlock, EditorData, Page};
 
-use super::daemon::DaemonState;
+use super::daemon::{DaemonEvent, DaemonState};
+
+/// Emit an event to all WebSocket subscribers (fire-and-forget).
+fn emit_event(state: &DaemonState, event: &str, data: serde_json::Value) {
+    let _ = state.event_tx.send(DaemonEvent {
+        event: event.to_string(),
+        data,
+    });
+}
 
 // ===== Request/Response types =====
 
@@ -255,6 +263,8 @@ pub fn build_router(state: AppState) -> Router {
         )
         // Inbox delete
         .route("/api/inbox/{item_id}", delete(delete_inbox_item))
+        // WebSocket event stream
+        .route("/api/events", get(ws_events))
         .with_state(state)
 }
 
@@ -550,6 +560,12 @@ async fn create_page(
     // Queue sync
     state.sync_manager.queue_page_update(nb_id, page.id);
 
+    emit_event(&state, "page.created", serde_json::json!({
+        "notebookId": notebook_id,
+        "pageId": page.id.to_string(),
+        "title": page.title,
+    }));
+
     Ok((StatusCode::CREATED, Json(ApiResponse { data: page })))
 }
 
@@ -600,6 +616,12 @@ async fn update_page(
     }
 
     state.sync_manager.queue_page_update(nb_id, pg_id);
+
+    emit_event(&state, "page.updated", serde_json::json!({
+        "notebookId": notebook_id,
+        "pageId": page_id,
+        "title": page.title,
+    }));
 
     Ok(Json(ApiResponse { data: page }))
 }
@@ -839,7 +861,13 @@ async fn capture_inbox(
     };
 
     match inbox.capture(capture) {
-        Ok(item) => Ok((StatusCode::CREATED, Json(ApiResponse { data: item }))),
+        Ok(item) => {
+            emit_event(&state, "inbox.captured", serde_json::json!({
+                "itemId": item.id.to_string(),
+                "title": item.title,
+            }));
+            Ok((StatusCode::CREATED, Json(ApiResponse { data: item })))
+        }
         Err(e) => Err(api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),
     }
 }
@@ -1383,6 +1411,12 @@ async fn delete_page(
         .update_page(&page)
         .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
+    emit_event(&state, "page.deleted", serde_json::json!({
+        "notebookId": notebook_id,
+        "pageId": page_id.to_string(),
+        "title": page.title,
+    }));
+
     Ok(Json(ApiResponse {
         data: serde_json::json!({"ok": true}),
     }))
@@ -1458,7 +1492,57 @@ async fn delete_inbox_item(
     inbox
         .delete_item(id)
         .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    emit_event(&state, "inbox.deleted", serde_json::json!({"itemId": item_id}));
     Ok(Json(ApiResponse {
         data: serde_json::json!({"ok": true}),
     }))
+}
+
+// ===== WebSocket Event Stream =====
+
+async fn ws_events(
+    ws: WebSocketUpgrade,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| handle_ws_events(socket, state))
+}
+
+async fn handle_ws_events(mut socket: WebSocket, state: AppState) {
+    let mut rx = state.event_tx.subscribe();
+
+    log::info!("WebSocket client connected to /api/events");
+
+    loop {
+        tokio::select! {
+            // Forward broadcast events to the WebSocket client
+            result = rx.recv() => {
+                match result {
+                    Ok(event) => {
+                        let json = serde_json::to_string(&event).unwrap_or_default();
+                        if socket.send(Message::Text(json.into())).await.is_err() {
+                            break; // Client disconnected
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        log::warn!("WebSocket client lagged, missed {} events", n);
+                    }
+                    Err(_) => break, // Channel closed
+                }
+            }
+            // Handle incoming messages (ping/pong, close)
+            msg = socket.recv() => {
+                match msg {
+                    Some(Ok(Message::Close(_))) | None => break,
+                    Some(Ok(Message::Ping(data))) => {
+                        if socket.send(Message::Pong(data)).await.is_err() {
+                            break;
+                        }
+                    }
+                    _ => {} // Ignore text/binary from client
+                }
+            }
+        }
+    }
+
+    log::info!("WebSocket client disconnected from /api/events");
 }

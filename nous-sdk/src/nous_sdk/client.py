@@ -393,6 +393,44 @@ class Nous:
         nb_id = self._resolve_notebook_id(notebook)
         return self._post("/api/sync/trigger", json={"notebook_id": nb_id})
 
+    # ─── Events (async) ────────────────────────────────────────────────
+
+    async def events(
+        self,
+        event_types: list[str] | None = None,
+    ):
+        """Async generator that yields real-time events from the daemon.
+
+        Args:
+            event_types: Optional filter — only yield events matching these types
+                        (e.g. ["page.created", "page.updated"]).
+
+        Usage:
+            async for event in app.events():
+                print(event["event"], event["data"])
+
+            async for event in app.events(["page.created"]):
+                print(f"New page: {event['data']['title']}")
+        """
+        import json
+        import websockets
+
+        ws_url = self.base_url.replace("http://", "ws://").replace("https://", "wss://")
+        ws_url = f"{ws_url}/api/events"
+
+        async for ws in websockets.connect(ws_url):
+            try:
+                async for message in ws:
+                    try:
+                        event = json.loads(message)
+                        if event_types and event.get("event") not in event_types:
+                            continue
+                        yield event
+                    except json.JSONDecodeError:
+                        continue
+            except websockets.ConnectionClosed:
+                continue  # Auto-reconnect
+
     # ─── Cleanup ────────────────────────────────────────────────────────
 
     def close(self) -> None:
