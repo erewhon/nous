@@ -141,6 +141,17 @@ struct ResolvePageQuery {
     title: String,
 }
 
+#[derive(Deserialize)]
+struct UpdateTagsRequest {
+    tags: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct MovePageRequest {
+    folder_id: Option<String>,
+    section_id: Option<String>,
+}
+
 // Track daemon start time
 static START_TIME: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
 
@@ -220,6 +231,30 @@ pub fn build_router(state: AppState) -> Router {
         .route("/share/{share_id}/{*path}", get(serve_share_file))
         .route("/api/shares", get(list_shares))
         .route("/api/shares/{share_id}", delete(delete_share))
+        // Folders and sections
+        .route(
+            "/api/notebooks/{notebook_id}/folders",
+            get(list_folders),
+        )
+        .route(
+            "/api/notebooks/{notebook_id}/sections",
+            get(list_sections),
+        )
+        // Page delete and tag management
+        .route(
+            "/api/notebooks/{notebook_id}/pages/{page_id}",
+            delete(delete_page),
+        )
+        .route(
+            "/api/notebooks/{notebook_id}/pages/{page_id}/tags",
+            put(update_tags),
+        )
+        .route(
+            "/api/notebooks/{notebook_id}/pages/{page_id}/move",
+            post(move_page),
+        )
+        // Inbox delete
+        .route("/api/inbox/{item_id}", delete(delete_inbox_item))
         .with_state(state)
 }
 
@@ -1301,4 +1336,129 @@ fn extract_block_text(block: &EditorBlock, html_tag_re: &Regex) -> String {
     // Strip HTML tags and decode entities
     let stripped = html_tag_re.replace_all(&raw, "");
     decode_html_entities(&stripped).to_string()
+}
+
+// ===== Folders & Sections =====
+
+async fn list_folders(
+    State(state): State<AppState>,
+    Path(notebook_id): Path<String>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let nb_id = parse_uuid(&notebook_id)?;
+    let storage = state.storage.lock().unwrap();
+    let folders = storage
+        .list_folders(nb_id)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    Ok(Json(ApiResponse { data: folders }))
+}
+
+async fn list_sections(
+    State(state): State<AppState>,
+    Path(notebook_id): Path<String>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let nb_id = parse_uuid(&notebook_id)?;
+    let storage = state.storage.lock().unwrap();
+    let sections = storage
+        .list_sections(nb_id)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    Ok(Json(ApiResponse { data: sections }))
+}
+
+// ===== Page Delete, Tags, Move =====
+
+async fn delete_page(
+    State(state): State<AppState>,
+    Path((notebook_id, page_id)): Path<(String, String)>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let nb_id = parse_uuid(&notebook_id)?;
+    let page_id = parse_uuid(&page_id)?;
+    let storage = state.storage.lock().unwrap();
+
+    // Soft delete (move to trash)
+    let mut page = storage
+        .get_page(nb_id, page_id)
+        .map_err(|e| api_err(StatusCode::NOT_FOUND, e.to_string()))?;
+    page.deleted_at = Some(chrono::Utc::now());
+    storage
+        .update_page(&page)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(Json(ApiResponse {
+        data: serde_json::json!({"ok": true}),
+    }))
+}
+
+async fn update_tags(
+    State(state): State<AppState>,
+    Path((notebook_id, page_id)): Path<(String, String)>,
+    Json(req): Json<UpdateTagsRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let nb_id = parse_uuid(&notebook_id)?;
+    let page_id = parse_uuid(&page_id)?;
+    let storage = state.storage.lock().unwrap();
+
+    let mut page = storage
+        .get_page(nb_id, page_id)
+        .map_err(|e| api_err(StatusCode::NOT_FOUND, e.to_string()))?;
+    page.tags = req.tags;
+    storage
+        .update_page(&page)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(Json(ApiResponse {
+        data: serde_json::json!({"tags": page.tags}),
+    }))
+}
+
+async fn move_page(
+    State(state): State<AppState>,
+    Path((notebook_id, page_id)): Path<(String, String)>,
+    Json(req): Json<MovePageRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let nb_id = parse_uuid(&notebook_id)?;
+    let page_id = parse_uuid(&page_id)?;
+    let storage = state.storage.lock().unwrap();
+
+    let mut page = storage
+        .get_page(nb_id, page_id)
+        .map_err(|e| api_err(StatusCode::NOT_FOUND, e.to_string()))?;
+
+    if let Some(ref fid) = req.folder_id {
+        page.folder_id = if fid.is_empty() {
+            None
+        } else {
+            Some(Uuid::parse_str(fid).map_err(|e| api_err(StatusCode::BAD_REQUEST, e.to_string()))?)
+        };
+    }
+    if let Some(ref sid) = req.section_id {
+        page.section_id = if sid.is_empty() {
+            None
+        } else {
+            Some(Uuid::parse_str(sid).map_err(|e| api_err(StatusCode::BAD_REQUEST, e.to_string()))?)
+        };
+    }
+
+    storage
+        .update_page(&page)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(Json(ApiResponse {
+        data: serde_json::json!({"ok": true}),
+    }))
+}
+
+// ===== Inbox Delete =====
+
+async fn delete_inbox_item(
+    State(state): State<AppState>,
+    Path(item_id): Path<String>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let id = parse_uuid(&item_id)?;
+    let inbox = state.inbox_storage.lock().unwrap();
+    inbox
+        .delete_item(id)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    Ok(Json(ApiResponse {
+        data: serde_json::json!({"ok": true}),
+    }))
 }
