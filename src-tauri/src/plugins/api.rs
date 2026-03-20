@@ -762,7 +762,7 @@ impl HostApi {
     }
 
     /// Build a map from property name → property id from a database JSON value.
-    fn build_property_name_map(db: &serde_json::Value) -> std::collections::HashMap<String, String> {
+    pub fn build_property_name_map(db: &serde_json::Value) -> std::collections::HashMap<String, String> {
         let mut map = std::collections::HashMap::new();
         if let Some(props) = db.get("properties").and_then(|v| v.as_array()) {
             for prop in props {
@@ -779,7 +779,7 @@ impl HostApi {
 
     /// Build a map from (property_id, option_label) → option_id for select/multiSelect properties.
     /// This allows plugins to write option labels and have them resolved to IDs automatically.
-    fn build_select_label_map(db: &serde_json::Value) -> std::collections::HashMap<(String, String), String> {
+    pub fn build_select_label_map(db: &serde_json::Value) -> std::collections::HashMap<(String, String), String> {
         let mut map = std::collections::HashMap::new();
         if let Some(props) = db.get("properties").and_then(|v| v.as_array()) {
             for prop in props {
@@ -811,7 +811,7 @@ impl HostApi {
 
     /// Resolve a cell value for a select/multiSelect property: if the value is an
     /// option label string, replace it with the corresponding option ID.
-    fn resolve_select_value(
+    pub fn resolve_select_value(
         value: serde_json::Value,
         prop_id: &str,
         select_map: &std::collections::HashMap<(String, String), String>,

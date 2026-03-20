@@ -327,6 +327,63 @@ class Nous:
         nb_id = self._resolve_notebook_id(notebook)
         return self._get(f"/api/notebooks/{nb_id}/databases/{database_id}")
 
+    def add_database_rows(
+        self,
+        notebook: str,
+        database_id: str,
+        rows: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Add rows to a database.
+
+        Args:
+            notebook: Notebook name or ID.
+            database_id: Database page UUID.
+            rows: List of row dicts. Keys are property names (resolved to IDs
+                  automatically). Select/multiSelect values can use labels.
+
+        Returns dict with databaseId, rowsAdded, totalRows.
+
+        Example:
+            app.add_database_rows("Finance", db_id, [
+                {"Date": "2026-03-19", "Amount": 42.50, "Category": "Groceries"},
+                {"Date": "2026-03-19", "Amount": 15.00, "Category": "Transport"},
+            ])
+        """
+        nb_id = self._resolve_notebook_id(notebook)
+        return self._post(
+            f"/api/notebooks/{nb_id}/databases/{database_id}/rows",
+            json={"rows": rows},
+        )
+
+    def update_database_rows(
+        self,
+        notebook: str,
+        database_id: str,
+        updates: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Update existing rows in a database.
+
+        Args:
+            notebook: Notebook name or ID.
+            database_id: Database page UUID.
+            updates: List of update dicts, each with:
+                - "row": row UUID or integer index
+                - "cells": dict of property names → new values
+
+        Returns dict with databaseId, rowsUpdated.
+
+        Example:
+            app.update_database_rows("Finance", db_id, [
+                {"row": "some-uuid", "cells": {"Category": "Entertainment"}},
+                {"row": 0, "cells": {"Amount": 50.00}},
+            ])
+        """
+        nb_id = self._resolve_notebook_id(notebook)
+        return self._put(
+            f"/api/notebooks/{nb_id}/databases/{database_id}/rows",
+            json={"updates": updates},
+        )
+
     # ─── Search ─────────────────────────────────────────────────────────
 
     def search(

@@ -20,6 +20,7 @@ use regex::Regex;
 use nous_lib::commands::{create_daily_note_core, find_daily_note};
 use nous_lib::inbox::{CaptureRequest, CaptureSource};
 use nous_lib::share::storage::ShareStorage;
+use nous_lib::plugins::api::HostApi;
 use nous_lib::storage::{EditorBlock, EditorData, Page, PageType};
 
 use super::daemon::{DaemonEvent, DaemonState};
@@ -167,6 +168,18 @@ struct CreateFolderRequest {
     section_id: Option<String>,
 }
 
+#[derive(Deserialize)]
+struct AddRowsRequest {
+    /// Array of row objects: [{"PropertyName": "value", ...}, ...]
+    rows: Vec<serde_json::Map<String, serde_json::Value>>,
+}
+
+#[derive(Deserialize)]
+struct UpdateRowsRequest {
+    /// Array of updates: [{"row": "uuid-or-index", "cells": {"PropName": "value"}}, ...]
+    updates: Vec<serde_json::Value>,
+}
+
 // Track daemon start time
 static START_TIME: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
 
@@ -248,6 +261,14 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/api/notebooks/{notebook_id}/databases/{db_id}",
             get(get_database),
+        )
+        .route(
+            "/api/notebooks/{notebook_id}/databases/{db_id}/rows",
+            post(add_database_rows),
+        )
+        .route(
+            "/api/notebooks/{notebook_id}/databases/{db_id}/rows",
+            put(update_database_rows),
         )
         // Folder creation
         .route(
@@ -1670,4 +1691,168 @@ async fn create_folder(
     }
 
     Ok((StatusCode::CREATED, Json(ApiResponse { data: folder })))
+}
+
+// ===== Database Rows =====
+
+async fn add_database_rows(
+    State(state): State<AppState>,
+    Path((notebook_id, db_id)): Path<(String, String)>,
+    Json(req): Json<AddRowsRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let nb_id = parse_uuid(&notebook_id)?;
+    let pg_id = parse_uuid(&db_id)?;
+    let storage = state.storage.lock().unwrap();
+
+    let page = storage
+        .get_page(nb_id, pg_id)
+        .map_err(|e| api_err(StatusCode::NOT_FOUND, e.to_string()))?;
+    if page.page_type != PageType::Database {
+        return Err(api_err(StatusCode::BAD_REQUEST, "Not a database page"));
+    }
+
+    let content = storage
+        .read_native_file_content(&page)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let mut db: serde_json::Value = serde_json::from_str(&content)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, format!("Invalid database JSON: {e}")))?;
+
+    let name_to_id = HostApi::build_property_name_map(&db);
+    let select_map = HostApi::build_select_label_map(&db);
+    let now = chrono::Utc::now().to_rfc3339();
+
+    let rows_arr = db
+        .get_mut("rows")
+        .and_then(|v| v.as_array_mut())
+        .ok_or_else(|| api_err(StatusCode::INTERNAL_SERVER_ERROR, "database has no rows array"))?;
+
+    let added = req.rows.len();
+    for input_row in req.rows {
+        let mut cells = serde_json::Map::new();
+        for (key, value) in input_row {
+            let prop_id = name_to_id.get(&key).cloned().unwrap_or(key);
+            let value = HostApi::resolve_select_value(value, &prop_id, &select_map);
+            cells.insert(prop_id, value);
+        }
+        rows_arr.push(serde_json::json!({
+            "id": Uuid::new_v4().to_string(),
+            "cells": cells,
+            "createdAt": now,
+            "updatedAt": now,
+        }));
+    }
+
+    let total = rows_arr.len();
+
+    let db_json = serde_json::to_string_pretty(&db)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, format!("serialize: {e}")))?;
+    storage
+        .write_native_file_content(&page, &db_json)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    emit_event(&state, "database.rows_added", serde_json::json!({
+        "notebookId": notebook_id,
+        "databaseId": db_id,
+        "rowsAdded": added,
+        "totalRows": total,
+    }));
+
+    Ok((StatusCode::CREATED, Json(ApiResponse {
+        data: serde_json::json!({
+            "databaseId": db_id,
+            "rowsAdded": added,
+            "totalRows": total,
+        }),
+    })))
+}
+
+async fn update_database_rows(
+    State(state): State<AppState>,
+    Path((notebook_id, db_id)): Path<(String, String)>,
+    Json(req): Json<UpdateRowsRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let nb_id = parse_uuid(&notebook_id)?;
+    let pg_id = parse_uuid(&db_id)?;
+    let storage = state.storage.lock().unwrap();
+
+    let page = storage
+        .get_page(nb_id, pg_id)
+        .map_err(|e| api_err(StatusCode::NOT_FOUND, e.to_string()))?;
+    if page.page_type != PageType::Database {
+        return Err(api_err(StatusCode::BAD_REQUEST, "Not a database page"));
+    }
+
+    let content = storage
+        .read_native_file_content(&page)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let mut db: serde_json::Value = serde_json::from_str(&content)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, format!("Invalid database JSON: {e}")))?;
+
+    let name_to_id = HostApi::build_property_name_map(&db);
+    let select_map = HostApi::build_select_label_map(&db);
+    let now = chrono::Utc::now().to_rfc3339();
+
+    let rows_arr = db
+        .get_mut("rows")
+        .and_then(|v| v.as_array_mut())
+        .ok_or_else(|| api_err(StatusCode::INTERNAL_SERVER_ERROR, "database has no rows array"))?;
+
+    let mut updated_count = 0usize;
+    for update in &req.updates {
+        let row_ref = match update.get("row") {
+            Some(v) => v,
+            None => continue,
+        };
+        let cell_updates = match update.get("cells").and_then(|v| v.as_object()) {
+            Some(c) => c,
+            None => continue,
+        };
+
+        let row = if let Some(idx) = row_ref.as_u64() {
+            rows_arr.get_mut(idx as usize)
+        } else if let Some(uuid_str) = row_ref.as_str() {
+            rows_arr.iter_mut().find(|r| {
+                r.get("id").and_then(|v| v.as_str()) == Some(uuid_str)
+            })
+        } else {
+            None
+        };
+
+        let Some(row) = row else { continue };
+
+        let cells = match row.get_mut("cells").and_then(|v| v.as_object_mut()) {
+            Some(c) => c,
+            None => continue,
+        };
+
+        for (key, value) in cell_updates {
+            let prop_id = name_to_id.get(key).cloned().unwrap_or_else(|| key.clone());
+            let value = HostApi::resolve_select_value(value.clone(), &prop_id, &select_map);
+            cells.insert(prop_id, value);
+        }
+
+        if let Some(obj) = row.as_object_mut() {
+            obj.insert("updatedAt".to_string(), serde_json::json!(now));
+        }
+        updated_count += 1;
+    }
+
+    let db_json = serde_json::to_string_pretty(&db)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, format!("serialize: {e}")))?;
+    storage
+        .write_native_file_content(&page, &db_json)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    emit_event(&state, "database.rows_updated", serde_json::json!({
+        "notebookId": notebook_id,
+        "databaseId": db_id,
+        "rowsUpdated": updated_count,
+    }));
+
+    Ok(Json(ApiResponse {
+        data: serde_json::json!({
+            "databaseId": db_id,
+            "rowsUpdated": updated_count,
+        }),
+    }))
 }
