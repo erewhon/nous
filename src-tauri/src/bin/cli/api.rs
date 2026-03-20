@@ -292,6 +292,11 @@ pub fn build_router(state: AppState) -> Router {
             post(import_artwork),
         )
         // Share routes
+        // Gallery
+        .route(
+            "/gallery/{notebook_id}",
+            get(serve_gallery),
+        )
         .route("/share/{share_id}", get(serve_share))
         .route("/share/{share_id}/", get(serve_share))
         .route("/share/{share_id}/{*path}", get(serve_share_file))
@@ -2013,4 +2018,14 @@ fn find_import_script() -> Option<std::path::PathBuf> {
     }
 
     None
+}
+
+// ===== Gallery =====
+
+async fn serve_gallery(
+    Path(notebook_id): Path<String>,
+) -> impl IntoResponse {
+    let html = include_str!("gallery.html")
+        .replace("{{NOTEBOOK_ID}}", &notebook_id);
+    Html(html)
 }

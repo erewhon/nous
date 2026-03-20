@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Art Gallery</title>
+<style>
+  :root {
+    --bg: #0f0f0f;
+    --surface: #1a1a1a;
+    --border: #2a2a2a;
+    --text: #e0e0e0;
+    --text-dim: #888;
+    --accent: #6366f1;
+    --accent-hover: #818cf8;
+    --danger: #ef4444;
+    --success: #22c55e;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+
+  /* Header */
+  .header {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 16px 24px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .header h1 {
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    flex-shrink: 0;
+  }
+  .header-right {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .artwork-count {
+    font-size: 13px;
+    color: var(--text-dim);
+  }
+
+  /* Import bar */
+  .import-bar {
+    display: flex;
+    gap: 8px;
+    flex: 1;
+    min-width: 300px;
+    max-width: 600px;
+  }
+  .import-bar input {
+    flex: 1;
+    padding: 8px 14px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  .import-bar input:focus {
+    border-color: var(--accent);
+  }
+  .import-bar input::placeholder {
+    color: var(--text-dim);
+  }
+  .btn {
+    padding: 8px 16px;
+    border-radius: 8px;
+    border: none;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+  .btn-primary {
+    background: var(--accent);
+    color: white;
+  }
+  .btn-primary:hover { background: var(--accent-hover); }
+  .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  /* Filter bar */
+  .filters {
+    padding: 12px 24px;
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+  .filter-tag {
+    padding: 4px 12px;
+    border-radius: 20px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-dim);
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .filter-tag:hover { border-color: var(--accent); color: var(--text); }
+  .filter-tag.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: white;
+  }
+
+  /* Status messages */
+  .status {
+    padding: 12px 24px;
+    font-size: 13px;
+    color: var(--text-dim);
+    text-align: center;
+  }
+  .status.error { color: var(--danger); }
+  .status.success { color: var(--success); }
+
+  /* Gallery grid */
+  .gallery {
+    padding: 24px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 20px;
+  }
+
+  /* Artwork card */
+  .card {
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    transition: transform 0.2s, box-shadow 0.2s;
+    cursor: pointer;
+  }
+  .card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 12px 24px rgba(0,0,0,0.3);
+  }
+  .card-img {
+    width: 100%;
+    aspect-ratio: 4/3;
+    object-fit: cover;
+    background: #111;
+    display: block;
+  }
+  .card-img.no-image {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 48px;
+    color: var(--text-dim);
+    background: linear-gradient(135deg, #1a1a2e, #16213e);
+  }
+  .card-body {
+    padding: 14px;
+  }
+  .card-title {
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.4;
+    margin-bottom: 4px;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .card-artist {
+    font-size: 12px;
+    color: var(--accent);
+    margin-bottom: 8px;
+  }
+  .card-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .card-tag {
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: rgba(99, 102, 241, 0.15);
+    color: var(--accent);
+  }
+
+  /* Loading */
+  .loading-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+  }
+  .loading-card {
+    background: var(--surface);
+    border-radius: 16px;
+    padding: 32px 48px;
+    text-align: center;
+    border: 1px solid var(--border);
+  }
+  .spinner {
+    width: 32px; height: 32px;
+    border: 3px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    margin: 0 auto 12px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Empty state */
+  .empty {
+    text-align: center;
+    padding: 80px 24px;
+    color: var(--text-dim);
+  }
+  .empty h2 { font-size: 20px; margin-bottom: 8px; color: var(--text); }
+  .empty p { font-size: 14px; max-width: 400px; margin: 0 auto; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Art Gallery</h1>
+  <div class="import-bar">
+    <input type="text" id="url-input" placeholder="Paste artwork URL to import..." />
+    <button class="btn btn-primary" id="import-btn" onclick="importArtwork()">Import</button>
+  </div>
+  <div class="header-right">
+    <span class="artwork-count" id="count"></span>
+  </div>
+</div>
+
+<div class="filters" id="filters"></div>
+<div id="status"></div>
+<div class="gallery" id="gallery"></div>
+<div id="loading" style="display:none">
+  <div class="loading-overlay">
+    <div class="loading-card">
+      <div class="spinner"></div>
+      <div>Importing artwork...</div>
+      <div style="font-size:12px;color:var(--text-dim);margin-top:4px">Fetching page, extracting image, researching...</div>
+    </div>
+  </div>
+</div>
+
+<script>
+const NOTEBOOK_ID = '{{NOTEBOOK_ID}}';
+const API = '';  // relative to current host
+
+let artworks = [];
+let activeFilter = null;
+
+async function loadArtworks() {
+  try {
+    const res = await fetch(`${API}/api/notebooks/${NOTEBOOK_ID}/pages`);
+    const data = await res.json();
+    const pages = data.data || data;
+
+    // Filter to artwork-tagged pages
+    artworks = pages
+      .filter(p => p.tags && p.tags.includes('artwork') && !p.deletedAt)
+      .map(p => ({
+        id: p.id,
+        title: p.title || 'Untitled',
+        tags: p.tags || [],
+        updatedAt: p.updatedAt || '',
+        imageUrl: extractImageUrl(p),
+        artist: extractArtist(p),
+      }))
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+
+    renderGallery();
+    renderFilters();
+    document.getElementById('count').textContent = `${artworks.length} artwork${artworks.length !== 1 ? 's' : ''}`;
+  } catch (err) {
+    showStatus('Failed to load artworks: ' + err.message, 'error');
+  }
+}
+
+function extractImageUrl(page) {
+  // Look for image URL in content blocks
+  if (!page.content || !page.content.blocks) return null;
+  for (const block of page.content.blocks) {
+    if (block.type === 'image' && block.data && block.data.file) {
+      return block.data.file.url || block.data.url;
+    }
+    // Check paragraph text for markdown image
+    const text = block.data?.text || '';
+    const match = text.match(/!\[.*?\]\((https?:\/\/[^\)]+)\)/);
+    if (match) return match[1];
+    // Check for bare image URL
+    const urlMatch = text.match(/(https?:\/\/[^\s]+\.(jpg|jpeg|png|webp|gif))/i);
+    if (urlMatch) return urlMatch[1];
+  }
+  return null;
+}
+
+function extractArtist(page) {
+  // Look for artist in tags (skip common tags)
+  const skip = new Set(['artwork', 'oil-on-canvas', 'watercolor', 'impressionist', 'impressionism',
+    'renaissance', 'baroque', 'modern', 'contemporary', 'portrait', 'landscape', 'abstract',
+    'sculpture', 'photograph', 'realism', 'surrealism', 'cubism', 'expressionism']);
+  for (const tag of (page.tags || [])) {
+    if (!skip.has(tag) && tag !== 'artwork') {
+      // Capitalize each word
+      return tag.split(/[-\s]/).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+    }
+  }
+  return null;
+}
+
+function renderGallery() {
+  const container = document.getElementById('gallery');
+  const filtered = activeFilter
+    ? artworks.filter(a => a.tags.includes(activeFilter))
+    : artworks;
+
+  if (filtered.length === 0) {
+    container.innerHTML = '';
+    if (artworks.length === 0) {
+      container.innerHTML = `
+        <div class="empty" style="grid-column: 1/-1">
+          <h2>No artwork yet</h2>
+          <p>Paste a URL above to import your first artwork. Try a museum page, WikiArt, or any page with a painting.</p>
+        </div>`;
+    } else {
+      container.innerHTML = `<div class="empty" style="grid-column:1/-1"><p>No artworks match this filter.</p></div>`;
+    }
+    return;
+  }
+
+  container.innerHTML = filtered.map(art => `
+    <div class="card" onclick="window.open('/api/notebooks/${NOTEBOOK_ID}/pages/${art.id}', '_blank')">
+      ${art.imageUrl
+        ? `<img class="card-img" src="${escapeHtml(art.imageUrl)}" alt="${escapeHtml(art.title)}" loading="lazy" onerror="this.outerHTML='<div class=\\'card-img no-image\\'>&#x1f3a8;</div>'">`
+        : `<div class="card-img no-image">&#x1f3a8;</div>`
+      }
+      <div class="card-body">
+        <div class="card-title">${escapeHtml(art.title)}</div>
+        ${art.artist ? `<div class="card-artist">${escapeHtml(art.artist)}</div>` : ''}
+        <div class="card-tags">
+          ${art.tags.filter(t => t !== 'artwork').slice(0, 4).map(t =>
+            `<span class="card-tag">${escapeHtml(t)}</span>`
+          ).join('')}
+        </div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function renderFilters() {
+  const container = document.getElementById('filters');
+  // Collect all tags (except 'artwork') with counts
+  const tagCounts = {};
+  for (const art of artworks) {
+    for (const tag of art.tags) {
+      if (tag === 'artwork') continue;
+      tagCounts[tag] = (tagCounts[tag] || 0) + 1;
+    }
+  }
+  // Sort by count descending, take top 20
+  const sorted = Object.entries(tagCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 20);
+
+  if (sorted.length === 0) {
+    container.style.display = 'none';
+    return;
+  }
+  container.style.display = 'flex';
+
+  container.innerHTML = `
+    <button class="filter-tag ${!activeFilter ? 'active' : ''}" onclick="setFilter(null)">All</button>
+    ${sorted.map(([tag, count]) => `
+      <button class="filter-tag ${activeFilter === tag ? 'active' : ''}"
+              onclick="setFilter('${escapeHtml(tag)}')">${escapeHtml(tag)} (${count})</button>
+    `).join('')}
+  `;
+}
+
+function setFilter(tag) {
+  activeFilter = tag;
+  renderGallery();
+  renderFilters();
+}
+
+async function importArtwork() {
+  const input = document.getElementById('url-input');
+  const url = input.value.trim();
+  if (!url) return;
+  if (!url.startsWith('http://') && !url.startsWith('https://')) {
+    showStatus('Please enter a valid URL starting with http:// or https://', 'error');
+    return;
+  }
+
+  const btn = document.getElementById('import-btn');
+  btn.disabled = true;
+  document.getElementById('loading').style.display = 'block';
+  showStatus('');
+
+  try {
+    const res = await fetch(`${API}/api/notebooks/${NOTEBOOK_ID}/import/artwork`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+    });
+    const data = await res.json();
+
+    if (!res.ok) {
+      throw new Error(data.error || 'Import failed');
+    }
+
+    const result = data.data || data;
+    input.value = '';
+    showStatus(`Imported: ${result.title}`, 'success');
+
+    // Reload the gallery
+    await loadArtworks();
+  } catch (err) {
+    showStatus('Import failed: ' + err.message, 'error');
+  } finally {
+    btn.disabled = false;
+    document.getElementById('loading').style.display = 'none';
+  }
+}
+
+function showStatus(msg, type) {
+  const el = document.getElementById('status');
+  if (!msg) { el.innerHTML = ''; return; }
+  el.innerHTML = `<div class="status ${type || ''}">${escapeHtml(msg)}</div>`;
+  if (type === 'success') {
+    setTimeout(() => { if (el.textContent.includes(msg)) el.innerHTML = ''; }, 5000);
+  }
+}
+
+function escapeHtml(s) {
+  if (!s) return '';
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// Enter key imports
+document.getElementById('url-input').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') importArtwork();
+});
+
+// Initial load
+loadArtworks();
+</script>
+</body>
+</html>
