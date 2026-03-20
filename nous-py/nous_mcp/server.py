@@ -1691,5 +1691,148 @@ def main() -> None:
     mcp.run(transport="stdio")
 
 
+# ===== Financial Tools =====
+
+
+@mcp.tool()
+def query_spending(
+    notebook: str,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    category: str | None = None,
+    merchant: str | None = None,
+    account: str | None = None,
+    group_by: str | None = None,
+    limit: int = 50,
+) -> str:
+    """Query spending from the Transactions database.
+
+    Args:
+        notebook: Notebook name or UUID containing the Transactions database.
+        start_date: Filter from this date (YYYY-MM-DD).
+        end_date: Filter to this date (YYYY-MM-DD).
+        category: Filter by category name (case-insensitive).
+        merchant: Filter by merchant name (substring match).
+        account: Filter by account name.
+        group_by: Optional grouping — "category", "merchant", "month", or "account".
+        limit: Max rows to return when not grouping (default 50).
+
+    Returns JSON with matching transactions or grouped summary.
+    """
+    from nous_mcp.finance import (
+        load_transactions, filter_transactions, summarize_by_category,
+        monthly_totals, top_merchants,
+    )
+
+    storage = _get_storage()
+    nb = storage.resolve_notebook(notebook)
+    rows, _ = load_transactions(storage, nb["id"])
+
+    filtered = filter_transactions(
+        rows, start_date=start_date, end_date=end_date,
+        category=category, merchant=merchant, account=account,
+    )
+
+    if group_by == "category":
+        return json.dumps(summarize_by_category(filtered), indent=2)
+    elif group_by == "month":
+        return json.dumps(monthly_totals(filtered), indent=2)
+    elif group_by == "merchant":
+        return json.dumps(top_merchants(filtered, limit=limit), indent=2)
+    elif group_by == "account":
+        from collections import defaultdict
+        groups: dict[str, list] = defaultdict(list)
+        for r in filtered:
+            groups[str(r.get("Account", "Unknown"))].append(r)
+        result = {}
+        for acct, acct_rows in groups.items():
+            total = sum(abs(float(r.get("Amount", 0))) for r in acct_rows)
+            result[acct] = {"total": round(total, 2), "count": len(acct_rows)}
+        return json.dumps(result, indent=2)
+    else:
+        # Return individual rows, sorted by date descending
+        sorted_rows = sorted(filtered, key=lambda r: str(r.get("Date", "")), reverse=True)
+        return json.dumps(sorted_rows[:limit], indent=2)
+
+
+@mcp.tool()
+def get_spending_summary(
+    notebook: str,
+    month: str | None = None,
+) -> str:
+    """Get a spending summary for a month (or current month by default).
+
+    Args:
+        notebook: Notebook name or UUID.
+        month: Month in YYYY-MM format (default: current month).
+
+    Returns JSON with totalSpent, totalIncome, net, topCategories,
+    topMerchants, transactionCount, dailyAverage.
+    """
+    from nous_mcp.finance import load_transactions, get_month_summary
+    from datetime import date as date_type
+
+    if not month:
+        month = date_type.today().strftime("%Y-%m")
+
+    storage = _get_storage()
+    nb = storage.resolve_notebook(notebook)
+    rows, _ = load_transactions(storage, nb["id"])
+
+    summary = get_month_summary(rows, month)
+    return json.dumps(summary, indent=2)
+
+
+@mcp.tool()
+def compare_spending(
+    notebook: str,
+    period1: str,
+    period2: str,
+) -> str:
+    """Compare spending between two months.
+
+    Args:
+        notebook: Notebook name or UUID.
+        period1: First month (YYYY-MM).
+        period2: Second month (YYYY-MM).
+
+    Returns JSON with period totals, difference, percentage change,
+    and per-category comparison.
+    """
+    from nous_mcp.finance import load_transactions, compare_months
+
+    storage = _get_storage()
+    nb = storage.resolve_notebook(notebook)
+    rows, _ = load_transactions(storage, nb["id"])
+
+    comparison = compare_months(rows, period1, period2)
+    return json.dumps(comparison, indent=2)
+
+
+@mcp.tool()
+def get_spending_trends(
+    notebook: str,
+    months: int = 6,
+    category: str | None = None,
+) -> str:
+    """Get spending trends over the last N months.
+
+    Args:
+        notebook: Notebook name or UUID.
+        months: Number of months to look back (default 6).
+        category: Optional category to focus on.
+
+    Returns JSON with monthly totals array, trend direction, and averages.
+    """
+    from nous_mcp.finance import load_transactions, spending_trends
+
+    storage = _get_storage()
+    nb = storage.resolve_notebook(notebook)
+    rows, _ = load_transactions(storage, nb["id"])
+
+    trends = spending_trends(rows, months=months, category=category)
+    return json.dumps(trends, indent=2)
+
+
 if __name__ == "__main__":
     main()
