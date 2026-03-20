@@ -8,11 +8,13 @@
   :root {
     --bg: #0f0f0f;
     --surface: #1a1a1a;
+    --surface2: #222;
     --border: #2a2a2a;
     --text: #e0e0e0;
     --text-dim: #888;
     --accent: #6366f1;
     --accent-hover: #818cf8;
+    --accent-bg: rgba(99, 102, 241, 0.12);
     --danger: #ef4444;
     --success: #22c55e;
   }
@@ -23,217 +25,152 @@
     color: var(--text);
     min-height: 100vh;
   }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
 
   /* Header */
   .header {
-    position: sticky;
-    top: 0;
-    z-index: 10;
+    position: sticky; top: 0; z-index: 10;
     background: var(--surface);
     border-bottom: 1px solid var(--border);
-    padding: 16px 24px;
-    display: flex;
-    align-items: center;
-    gap: 16px;
-    flex-wrap: wrap;
+    padding: 12px 24px;
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
   }
-  .header h1 {
-    font-size: 20px;
-    font-weight: 700;
-    letter-spacing: -0.02em;
-    flex-shrink: 0;
-  }
-  .header-right {
-    margin-left: auto;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-  .artwork-count {
-    font-size: 13px;
-    color: var(--text-dim);
-  }
+  .header h1 { font-size: 18px; font-weight: 700; letter-spacing: -0.02em; flex-shrink: 0; }
+  .header-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  .artwork-count { font-size: 13px; color: var(--text-dim); }
 
-  /* Import bar */
-  .import-bar {
-    display: flex;
-    gap: 8px;
-    flex: 1;
-    min-width: 300px;
-    max-width: 600px;
+  /* Import + Search bar */
+  .import-bar { display: flex; gap: 8px; flex: 1; min-width: 280px; max-width: 560px; }
+  .import-bar input, .search-input {
+    flex: 1; padding: 7px 12px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--bg);
+    color: var(--text); font-size: 13px; outline: none; transition: border-color 0.2s;
   }
-  .import-bar input {
-    flex: 1;
-    padding: 8px 14px;
-    border-radius: 8px;
-    border: 1px solid var(--border);
-    background: var(--bg);
-    color: var(--text);
-    font-size: 14px;
-    outline: none;
-    transition: border-color 0.2s;
-  }
-  .import-bar input:focus {
-    border-color: var(--accent);
-  }
-  .import-bar input::placeholder {
-    color: var(--text-dim);
-  }
+  .import-bar input:focus, .search-input:focus { border-color: var(--accent); }
+  .import-bar input::placeholder, .search-input::placeholder { color: var(--text-dim); }
+  .search-input { max-width: 200px; }
   .btn {
-    padding: 8px 16px;
-    border-radius: 8px;
-    border: none;
-    font-size: 13px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.15s;
-    white-space: nowrap;
+    padding: 7px 14px; border-radius: 8px; border: none;
+    font-size: 12px; font-weight: 600; cursor: pointer; transition: all 0.15s; white-space: nowrap;
   }
-  .btn-primary {
-    background: var(--accent);
-    color: white;
-  }
+  .btn-primary { background: var(--accent); color: white; }
   .btn-primary:hover { background: var(--accent-hover); }
   .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-ghost { background: transparent; color: var(--text-dim); border: 1px solid var(--border); }
+  .btn-ghost:hover { color: var(--text); border-color: var(--text-dim); }
 
-  /* Filter bar */
+  /* Filters */
   .filters {
-    padding: 12px 24px;
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-    border-bottom: 1px solid var(--border);
-    background: var(--surface);
+    padding: 10px 24px; display: flex; gap: 6px; flex-wrap: wrap;
+    border-bottom: 1px solid var(--border); background: var(--surface);
   }
   .filter-tag {
-    padding: 4px 12px;
-    border-radius: 20px;
-    border: 1px solid var(--border);
-    background: transparent;
-    color: var(--text-dim);
-    font-size: 12px;
-    cursor: pointer;
-    transition: all 0.15s;
+    padding: 3px 10px; border-radius: 20px; border: 1px solid var(--border);
+    background: transparent; color: var(--text-dim); font-size: 11px;
+    cursor: pointer; transition: all 0.15s;
   }
   .filter-tag:hover { border-color: var(--accent); color: var(--text); }
-  .filter-tag.active {
-    background: var(--accent);
-    border-color: var(--accent);
-    color: white;
-  }
+  .filter-tag.active { background: var(--accent); border-color: var(--accent); color: white; }
 
-  /* Status messages */
-  .status {
-    padding: 12px 24px;
-    font-size: 13px;
-    color: var(--text-dim);
-    text-align: center;
-  }
+  /* Status */
+  .status { padding: 10px 24px; font-size: 13px; color: var(--text-dim); text-align: center; }
   .status.error { color: var(--danger); }
   .status.success { color: var(--success); }
 
   /* Gallery grid */
-  .gallery {
-    padding: 24px;
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: 20px;
-  }
+  .gallery { padding: 20px; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
 
-  /* Artwork card */
+  /* Card */
   .card {
-    border-radius: 12px;
-    overflow: hidden;
-    border: 1px solid var(--border);
-    background: var(--surface);
-    transition: transform 0.2s, box-shadow 0.2s;
-    cursor: pointer;
+    border-radius: 10px; overflow: hidden; border: 1px solid var(--border);
+    background: var(--surface); transition: transform 0.2s, box-shadow 0.2s; cursor: pointer;
   }
-  .card:hover {
-    transform: translateY(-4px);
-    box-shadow: 0 12px 24px rgba(0,0,0,0.3);
+  .card:hover { transform: translateY(-3px); box-shadow: 0 8px 20px rgba(0,0,0,0.3); }
+  .card-img { width: 100%; aspect-ratio: 4/3; object-fit: cover; background: #111; display: block; }
+  .card-img-placeholder {
+    width: 100%; aspect-ratio: 4/3; display: flex; align-items: center; justify-content: center;
+    font-size: 40px; color: var(--text-dim); background: linear-gradient(135deg, #1a1a2e, #16213e);
   }
-  .card-img {
-    width: 100%;
-    aspect-ratio: 4/3;
-    object-fit: cover;
-    background: #111;
-    display: block;
-  }
-  .card-img.no-image {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 48px;
-    color: var(--text-dim);
-    background: linear-gradient(135deg, #1a1a2e, #16213e);
-  }
-  .card-body {
-    padding: 14px;
-  }
+  .card-body { padding: 12px; }
   .card-title {
-    font-size: 14px;
-    font-weight: 600;
-    line-height: 1.4;
-    margin-bottom: 4px;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
+    font-size: 13px; font-weight: 600; line-height: 1.4; margin-bottom: 3px;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
   }
-  .card-artist {
-    font-size: 12px;
-    color: var(--accent);
-    margin-bottom: 8px;
+  .card-artist { font-size: 11px; color: var(--accent); margin-bottom: 6px; }
+  .card-tags { display: flex; flex-wrap: wrap; gap: 3px; }
+  .card-tag { font-size: 10px; padding: 1px 7px; border-radius: 10px; background: var(--accent-bg); color: var(--accent); }
+
+  /* Detail overlay */
+  .detail-overlay {
+    position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,0.8);
+    display: flex; justify-content: center; overflow-y: auto;
+    animation: fadeIn 0.15s ease;
   }
-  .card-tags {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+  .detail {
+    width: 100%; max-width: 900px; min-height: 100vh;
+    background: var(--bg); border-left: 1px solid var(--border); border-right: 1px solid var(--border);
   }
-  .card-tag {
-    font-size: 10px;
-    padding: 2px 8px;
-    border-radius: 10px;
-    background: rgba(99, 102, 241, 0.15);
-    color: var(--accent);
+  .detail-header {
+    position: sticky; top: 0; z-index: 5;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 24px; background: var(--surface); border-bottom: 1px solid var(--border);
+  }
+  .detail-header h2 { font-size: 16px; font-weight: 600; flex: 1; margin-right: 12px; }
+  .detail-nav { display: flex; gap: 4px; }
+  .detail-nav button {
+    width: 32px; height: 32px; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--surface); color: var(--text-dim); cursor: pointer; font-size: 16px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .detail-nav button:hover { color: var(--text); border-color: var(--text-dim); }
+  .detail-img { width: 100%; max-height: 70vh; object-fit: contain; background: #000; display: block; }
+  .detail-img-placeholder {
+    width: 100%; height: 300px; display: flex; align-items: center; justify-content: center;
+    font-size: 64px; color: var(--text-dim); background: #111;
+  }
+  .detail-body { padding: 24px; }
+  .detail-meta {
+    display: grid; grid-template-columns: auto 1fr; gap: 4px 16px;
+    font-size: 13px; margin-bottom: 20px;
+  }
+  .detail-meta dt { color: var(--text-dim); font-weight: 500; }
+  .detail-meta dd { color: var(--text); }
+  .detail-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 20px; }
+  .detail-tag {
+    font-size: 11px; padding: 3px 10px; border-radius: 12px;
+    background: var(--accent-bg); color: var(--accent); cursor: pointer;
+  }
+  .detail-tag:hover { background: var(--accent); color: white; }
+  .detail-section { margin-bottom: 24px; }
+  .detail-section h3 {
+    font-size: 14px; font-weight: 600; margin-bottom: 8px;
+    padding-bottom: 6px; border-bottom: 1px solid var(--border);
+  }
+  .detail-section-content {
+    font-size: 13px; line-height: 1.7; color: var(--text);
+    white-space: pre-wrap; word-wrap: break-word;
   }
 
   /* Loading */
   .loading-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(0,0,0,0.6);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 100;
+    position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+    display: flex; align-items: center; justify-content: center; z-index: 100;
   }
   .loading-card {
-    background: var(--surface);
-    border-radius: 16px;
-    padding: 32px 48px;
-    text-align: center;
-    border: 1px solid var(--border);
+    background: var(--surface); border-radius: 16px; padding: 28px 40px;
+    text-align: center; border: 1px solid var(--border);
   }
   .spinner {
-    width: 32px; height: 32px;
-    border: 3px solid var(--border);
-    border-top-color: var(--accent);
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-    margin: 0 auto 12px;
+    width: 28px; height: 28px; border: 3px solid var(--border);
+    border-top-color: var(--accent); border-radius: 50%;
+    animation: spin 0.8s linear infinite; margin: 0 auto 10px;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
-
-  /* Empty state */
-  .empty {
-    text-align: center;
-    padding: 80px 24px;
-    color: var(--text-dim);
-  }
-  .empty h2 { font-size: 20px; margin-bottom: 8px; color: var(--text); }
-  .empty p { font-size: 14px; max-width: 400px; margin: 0 auto; }
+  .empty { text-align: center; padding: 60px 24px; color: var(--text-dim); }
+  .empty h2 { font-size: 18px; margin-bottom: 6px; color: var(--text); }
+  .empty p { font-size: 13px; max-width: 380px; margin: 0 auto; }
 </style>
 </head>
 <body>
@@ -245,6 +182,7 @@
     <button class="btn btn-primary" id="import-btn" onclick="importArtwork()">Import</button>
   </div>
   <div class="header-right">
+    <input type="text" class="search-input" id="search-input" placeholder="Search..." oninput="onSearch()" />
     <span class="artwork-count" id="count"></span>
   </div>
 </div>
@@ -252,22 +190,26 @@
 <div class="filters" id="filters"></div>
 <div id="status"></div>
 <div class="gallery" id="gallery"></div>
+<div id="detail-overlay" style="display:none"></div>
 <div id="loading" style="display:none">
   <div class="loading-overlay">
     <div class="loading-card">
       <div class="spinner"></div>
       <div>Importing artwork...</div>
-      <div style="font-size:12px;color:var(--text-dim);margin-top:4px">Fetching page, extracting image, researching...</div>
+      <div style="font-size:11px;color:var(--text-dim);margin-top:4px">Fetching, extracting, researching...</div>
     </div>
   </div>
 </div>
 
 <script>
 const NOTEBOOK_ID = '{{NOTEBOOK_ID}}';
-const API = '';  // relative to current host
+const API = '';
 
 let artworks = [];
+let fullPages = {};  // cache of full page data by id
 let activeFilter = null;
+let searchQuery = '';
+let detailIndex = -1;
 
 async function loadArtworks() {
   try {
@@ -275,7 +217,6 @@ async function loadArtworks() {
     const data = await res.json();
     const pages = data.data || data;
 
-    // Filter to artwork-tagged pages
     artworks = pages
       .filter(p => p.tags && p.tags.includes('artwork') && !p.deletedAt)
       .map(p => ({
@@ -292,75 +233,74 @@ async function loadArtworks() {
     renderFilters();
     document.getElementById('count').textContent = `${artworks.length} artwork${artworks.length !== 1 ? 's' : ''}`;
   } catch (err) {
-    showStatus('Failed to load artworks: ' + err.message, 'error');
+    showStatus('Failed to load: ' + err.message, 'error');
   }
 }
 
 function extractImageUrl(page) {
-  // Look for image URL in content blocks
   if (!page.content || !page.content.blocks) return null;
   for (const block of page.content.blocks) {
-    if (block.type === 'image' && block.data && block.data.file) {
-      return block.data.file.url || block.data.url;
-    }
-    // Check paragraph text for markdown image
+    if (block.type === 'image' && block.data && block.data.file) return block.data.file.url || block.data.url;
     const text = block.data?.text || '';
     const match = text.match(/!\[.*?\]\((https?:\/\/[^\)]+)\)/);
     if (match) return match[1];
-    // Check for bare image URL
-    const urlMatch = text.match(/(https?:\/\/[^\s]+\.(jpg|jpeg|png|webp|gif))/i);
+    const urlMatch = text.match(/(https?:\/\/[^\s]+\.(jpg|jpeg|png|webp|gif)[^\s]*)/i);
     if (urlMatch) return urlMatch[1];
   }
   return null;
 }
 
 function extractArtist(page) {
-  // Look for artist in tags (skip common tags)
-  const skip = new Set(['artwork', 'oil-on-canvas', 'watercolor', 'impressionist', 'impressionism',
-    'renaissance', 'baroque', 'modern', 'contemporary', 'portrait', 'landscape', 'abstract',
-    'sculpture', 'photograph', 'realism', 'surrealism', 'cubism', 'expressionism']);
+  const skip = new Set(['artwork','oil-on-canvas','watercolor','acrylic','tempera','fresco',
+    'impressionist','impressionism','post-impressionist','renaissance','baroque','modern',
+    'contemporary','portrait','landscape','still-life','abstract','sculpture','photograph',
+    'realism','surrealism','cubism','expressionism','seascape','self-portrait','religious',
+    'oil-on-canvas','charcoal','ink','etching','lithograph','gouache','mixed-media',
+    'neoclassical','romantic','romanticism','rococo','mannerism','art-nouveau','art-deco',
+    'pop-art','minimalism','bronze','marble']);
   for (const tag of (page.tags || [])) {
-    if (!skip.has(tag) && tag !== 'artwork') {
-      // Capitalize each word
-      return tag.split(/[-\s]/).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-    }
+    if (!skip.has(tag)) return tag.split(/[-]/).map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
   }
   return null;
 }
 
+function getFilteredArtworks() {
+  let list = artworks;
+  if (activeFilter) list = list.filter(a => a.tags.includes(activeFilter));
+  if (searchQuery) {
+    const q = searchQuery.toLowerCase();
+    list = list.filter(a =>
+      a.title.toLowerCase().includes(q) ||
+      (a.artist || '').toLowerCase().includes(q) ||
+      a.tags.some(t => t.includes(q))
+    );
+  }
+  return list;
+}
+
 function renderGallery() {
   const container = document.getElementById('gallery');
-  const filtered = activeFilter
-    ? artworks.filter(a => a.tags.includes(activeFilter))
-    : artworks;
+  const filtered = getFilteredArtworks();
 
   if (filtered.length === 0) {
-    container.innerHTML = '';
-    if (artworks.length === 0) {
-      container.innerHTML = `
-        <div class="empty" style="grid-column: 1/-1">
-          <h2>No artwork yet</h2>
-          <p>Paste a URL above to import your first artwork. Try a museum page, WikiArt, or any page with a painting.</p>
-        </div>`;
-    } else {
-      container.innerHTML = `<div class="empty" style="grid-column:1/-1"><p>No artworks match this filter.</p></div>`;
-    }
+    container.innerHTML = artworks.length === 0
+      ? `<div class="empty" style="grid-column:1/-1"><h2>No artwork yet</h2><p>Paste a URL above to import your first artwork.</p></div>`
+      : `<div class="empty" style="grid-column:1/-1"><p>No artworks match your filter.</p></div>`;
     return;
   }
 
-  container.innerHTML = filtered.map(art => `
-    <div class="card" onclick="window.open('/api/notebooks/${NOTEBOOK_ID}/pages/${art.id}', '_blank')">
+  container.innerHTML = filtered.map((art, i) => `
+    <div class="card" onclick="openDetail('${art.id}')">
       ${art.imageUrl
-        ? `<img class="card-img" src="${escapeHtml(art.imageUrl)}" alt="${escapeHtml(art.title)}" loading="lazy" onerror="this.outerHTML='<div class=\\'card-img no-image\\'>&#x1f3a8;</div>'">`
-        : `<div class="card-img no-image">&#x1f3a8;</div>`
-      }
+        ? `<img class="card-img" src="${esc(art.imageUrl)}" alt="${esc(art.title)}" loading="lazy"
+            onerror="this.outerHTML='<div class=\\'card-img-placeholder\\'>&#x1f3a8;</div>'">`
+        : `<div class="card-img-placeholder">&#x1f3a8;</div>`}
       <div class="card-body">
-        <div class="card-title">${escapeHtml(art.title)}</div>
-        ${art.artist ? `<div class="card-artist">${escapeHtml(art.artist)}</div>` : ''}
+        <div class="card-title">${esc(art.title)}</div>
+        ${art.artist ? `<div class="card-artist">${esc(art.artist)}</div>` : ''}
         <div class="card-tags">
-          ${art.tags.filter(t => t !== 'artwork').slice(0, 4).map(t =>
-            `<span class="card-tag">${escapeHtml(t)}</span>`
-          ).join('')}
+          ${art.tags.filter(t => t !== 'artwork').slice(0, 3).map(t =>
+            `<span class="card-tag">${esc(t)}</span>`).join('')}
         </div>
       </div>
     </div>
@@ -369,7 +309,6 @@ function renderGallery() {
 
 function renderFilters() {
   const container = document.getElementById('filters');
-  // Collect all tags (except 'artwork') with counts
   const tagCounts = {};
   for (const art of artworks) {
     for (const tag of art.tags) {
@@ -377,43 +316,177 @@ function renderFilters() {
       tagCounts[tag] = (tagCounts[tag] || 0) + 1;
     }
   }
-  // Sort by count descending, take top 20
-  const sorted = Object.entries(tagCounts)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 20);
-
-  if (sorted.length === 0) {
-    container.style.display = 'none';
-    return;
-  }
+  const sorted = Object.entries(tagCounts).sort((a, b) => b[1] - a[1]).slice(0, 20);
+  if (sorted.length === 0) { container.style.display = 'none'; return; }
   container.style.display = 'flex';
-
   container.innerHTML = `
     <button class="filter-tag ${!activeFilter ? 'active' : ''}" onclick="setFilter(null)">All</button>
-    ${sorted.map(([tag, count]) => `
-      <button class="filter-tag ${activeFilter === tag ? 'active' : ''}"
-              onclick="setFilter('${escapeHtml(tag)}')">${escapeHtml(tag)} (${count})</button>
-    `).join('')}
-  `;
+    ${sorted.map(([tag, count]) =>
+      `<button class="filter-tag ${activeFilter === tag ? 'active' : ''}"
+        onclick="setFilter('${esc(tag)}')">${esc(tag)} (${count})</button>`
+    ).join('')}`;
 }
 
-function setFilter(tag) {
-  activeFilter = tag;
-  renderGallery();
-  renderFilters();
+function setFilter(tag) { activeFilter = tag; renderGallery(); renderFilters(); }
+function onSearch() { searchQuery = document.getElementById('search-input').value.trim(); renderGallery(); }
+
+// ─── Detail view ──────────────────────────────────────────────────────
+
+async function openDetail(pageId) {
+  const filtered = getFilteredArtworks();
+  detailIndex = filtered.findIndex(a => a.id === pageId);
+  const art = filtered[detailIndex];
+  if (!art) return;
+
+  // Fetch full page content if not cached
+  if (!fullPages[pageId]) {
+    try {
+      const res = await fetch(`${API}/api/notebooks/${NOTEBOOK_ID}/pages/${pageId}`);
+      const data = await res.json();
+      fullPages[pageId] = data.data || data;
+    } catch (err) {
+      showStatus('Failed to load page: ' + err.message, 'error');
+      return;
+    }
+  }
+
+  renderDetail(art, fullPages[pageId], filtered.length);
+  document.getElementById('detail-overlay').style.display = 'flex';
+  document.body.style.overflow = 'hidden';
 }
+
+function closeDetail() {
+  document.getElementById('detail-overlay').style.display = 'none';
+  document.body.style.overflow = '';
+  detailIndex = -1;
+}
+
+function navDetail(dir) {
+  const filtered = getFilteredArtworks();
+  const newIndex = detailIndex + dir;
+  if (newIndex < 0 || newIndex >= filtered.length) return;
+  openDetail(filtered[newIndex].id);
+}
+
+function renderDetail(art, page, total) {
+  const content = parsePageContent(page);
+  const overlay = document.getElementById('detail-overlay');
+
+  overlay.innerHTML = `
+    <div class="detail-overlay" onclick="if(event.target===this)closeDetail()">
+      <div class="detail">
+        <div class="detail-header">
+          <h2>${esc(art.title)}</h2>
+          <div class="detail-nav">
+            <button onclick="navDetail(-1)" title="Previous" ${detailIndex <= 0 ? 'disabled' : ''}>&larr;</button>
+            <button onclick="navDetail(1)" title="Next" ${detailIndex >= total - 1 ? 'disabled' : ''}>&rarr;</button>
+            <button onclick="closeDetail()" title="Close">&times;</button>
+          </div>
+        </div>
+
+        ${art.imageUrl
+          ? `<img class="detail-img" src="${esc(art.imageUrl)}" alt="${esc(art.title)}"
+              onerror="this.outerHTML='<div class=\\'detail-img-placeholder\\'>&#x1f3a8;</div>'">`
+          : `<div class="detail-img-placeholder">&#x1f3a8;</div>`}
+
+        <div class="detail-body">
+          <dl class="detail-meta">
+            ${content.artist ? `<dt>Artist</dt><dd>${esc(content.artist)}</dd>` : ''}
+            ${content.date ? `<dt>Date</dt><dd>${esc(content.date)}</dd>` : ''}
+            ${content.medium ? `<dt>Medium</dt><dd>${esc(content.medium)}</dd>` : ''}
+            ${content.dimensions ? `<dt>Dimensions</dt><dd>${esc(content.dimensions)}</dd>` : ''}
+            ${content.source ? `<dt>Source</dt><dd><a href="${esc(content.source)}" target="_blank" rel="noopener">${esc(shortenUrl(content.source))}</a></dd>` : ''}
+          </dl>
+
+          <div class="detail-tags">
+            ${art.tags.filter(t => t !== 'artwork').map(t =>
+              `<span class="detail-tag" onclick="closeDetail();setFilter('${esc(t)}')">${esc(t)}</span>`
+            ).join('')}
+          </div>
+
+          ${content.research ? `
+            <div class="detail-section">
+              <h3>Research</h3>
+              <div class="detail-section-content">${esc(content.research)}</div>
+            </div>` : ''}
+
+          ${content.sourceText ? `
+            <div class="detail-section">
+              <h3>Source Text</h3>
+              <div class="detail-section-content" style="max-height:300px;overflow-y:auto;color:var(--text-dim)">${esc(content.sourceText)}</div>
+            </div>` : ''}
+        </div>
+      </div>
+    </div>`;
+}
+
+function parsePageContent(page) {
+  const result = { artist: null, date: null, medium: null, dimensions: null, source: null, research: null, sourceText: null };
+  if (!page || !page.content || !page.content.blocks) return result;
+
+  let currentSection = null;
+  const sections = {};
+
+  for (const block of page.content.blocks) {
+    const text = block.data?.text || '';
+
+    // Parse bold metadata lines: **Key:** Value
+    const metaMatch = text.match(/^\*\*(\w+):\*\*\s*(.+)/);
+    if (metaMatch) {
+      const key = metaMatch[1].toLowerCase();
+      const val = metaMatch[2].replace(/<[^>]+>/g, '').trim();
+      if (key === 'artist') result.artist = val;
+      else if (key === 'date') result.date = val;
+      else if (key === 'medium') result.medium = val;
+      else if (key === 'dimensions') result.dimensions = val;
+      continue;
+    }
+
+    // Parse "Source: URL" line
+    if (text.startsWith('Source:') || text.startsWith('Source :')) {
+      const urlMatch = text.match(/https?:\/\/[^\s<]+/);
+      if (urlMatch) result.source = urlMatch[0];
+      continue;
+    }
+
+    // Track sections by headers
+    if (block.type === 'header') {
+      currentSection = text.toLowerCase().replace(/<[^>]+>/g, '').trim();
+      continue;
+    }
+
+    // Accumulate section content
+    if (currentSection && text) {
+      const clean = text.replace(/<[^>]+>/g, '');
+      if (!sections[currentSection]) sections[currentSection] = [];
+      sections[currentSection].push(clean);
+    }
+  }
+
+  if (sections['research']) result.research = sections['research'].join('\n\n');
+  if (sections['source text']) result.sourceText = sections['source text'].join('\n\n');
+
+  return result;
+}
+
+function shortenUrl(url) {
+  try {
+    const u = new URL(url);
+    const path = u.pathname.length > 40 ? u.pathname.slice(0, 40) + '...' : u.pathname;
+    return u.hostname + path;
+  } catch { return url.slice(0, 60); }
+}
+
+// ─── Import ───────────────────────────────────────────────────────────
 
 async function importArtwork() {
   const input = document.getElementById('url-input');
   const url = input.value.trim();
-  if (!url) return;
-  if (!url.startsWith('http://') && !url.startsWith('https://')) {
-    showStatus('Please enter a valid URL starting with http:// or https://', 'error');
-    return;
+  if (!url || (!url.startsWith('http://') && !url.startsWith('https://'))) {
+    showStatus('Enter a valid URL', 'error'); return;
   }
 
-  const btn = document.getElementById('import-btn');
-  btn.disabled = true;
+  document.getElementById('import-btn').disabled = true;
   document.getElementById('loading').style.display = 'block';
   showStatus('');
 
@@ -424,45 +497,49 @@ async function importArtwork() {
       body: JSON.stringify({ url }),
     });
     const data = await res.json();
-
-    if (!res.ok) {
-      throw new Error(data.error || 'Import failed');
-    }
+    if (!res.ok) throw new Error(data.error || 'Import failed');
 
     const result = data.data || data;
     input.value = '';
     showStatus(`Imported: ${result.title}`, 'success');
-
-    // Reload the gallery
     await loadArtworks();
+
+    // Auto-open the new artwork
+    if (result.pageId) openDetail(result.pageId);
   } catch (err) {
     showStatus('Import failed: ' + err.message, 'error');
   } finally {
-    btn.disabled = false;
+    document.getElementById('import-btn').disabled = false;
     document.getElementById('loading').style.display = 'none';
   }
 }
 
+// ─── Keyboard shortcuts ───────────────────────────────────────────────
+
+document.addEventListener('keydown', (e) => {
+  if (detailIndex >= 0) {
+    if (e.key === 'Escape') closeDetail();
+    else if (e.key === 'ArrowLeft') navDetail(-1);
+    else if (e.key === 'ArrowRight') navDetail(1);
+  }
+});
+
+// ─── Helpers ──────────────────────────────────────────────────────────
+
 function showStatus(msg, type) {
   const el = document.getElementById('status');
   if (!msg) { el.innerHTML = ''; return; }
-  el.innerHTML = `<div class="status ${type || ''}">${escapeHtml(msg)}</div>`;
-  if (type === 'success') {
-    setTimeout(() => { if (el.textContent.includes(msg)) el.innerHTML = ''; }, 5000);
-  }
+  el.innerHTML = `<div class="status ${type || ''}">${esc(msg)}</div>`;
+  if (type === 'success') setTimeout(() => { if (el.textContent.includes(msg)) el.innerHTML = ''; }, 5000);
 }
 
-function escapeHtml(s) {
+function esc(s) {
   if (!s) return '';
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-// Enter key imports
-document.getElementById('url-input').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') importArtwork();
-});
+document.getElementById('url-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') importArtwork(); });
 
-// Initial load
 loadArtworks();
 </script>
 </body>
