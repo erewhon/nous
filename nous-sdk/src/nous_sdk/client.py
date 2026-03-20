@@ -484,6 +484,37 @@ class Nous:
         nb_id = self._resolve_notebook_id(notebook)
         return self._post("/api/sync/trigger", json={"notebook_id": nb_id})
 
+    # ─── Artwork Import ───────────────────────────────────────────────
+
+    def import_artwork(
+        self,
+        notebook: str,
+        url: str,
+        ai_enrich: bool = True,
+        folder_id: str | None = None,
+        section_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Import artwork from a URL: extracts image, text, AI research, creates page.
+
+        Args:
+            notebook: Notebook name or ID.
+            url: URL of the artwork page to import.
+            ai_enrich: Whether to run AI research enrichment (default True).
+            folder_id: Optional folder UUID for the created page.
+            section_id: Optional section UUID for the created page.
+
+        Returns dict with pageId, title, imageUrl, artist, tags.
+        """
+        nb_id = self._resolve_notebook_id(notebook)
+        body: dict[str, Any] = {"url": url}
+        if not ai_enrich:
+            body["ai_enrich"] = False
+        if folder_id:
+            body["folder_id"] = folder_id
+        if section_id:
+            body["section_id"] = section_id
+        return self._post(f"/api/notebooks/{nb_id}/import/artwork", json=body)
+
     # ─── Events (async) ────────────────────────────────────────────────
 
     async def events(

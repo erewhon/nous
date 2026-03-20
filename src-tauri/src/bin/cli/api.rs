@@ -169,6 +169,17 @@ struct CreateFolderRequest {
 }
 
 #[derive(Deserialize)]
+struct ImportArtworkRequest {
+    url: String,
+    /// Whether to run AI research enrichment (default: true)
+    ai_enrich: Option<bool>,
+    /// Folder ID to place the artwork page in
+    folder_id: Option<String>,
+    /// Section ID to place the artwork page in
+    section_id: Option<String>,
+}
+
+#[derive(Deserialize)]
 struct AddRowsRequest {
     /// Array of row objects: [{"PropertyName": "value", ...}, ...]
     rows: Vec<serde_json::Map<String, serde_json::Value>>,
@@ -274,6 +285,11 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/api/notebooks/{notebook_id}/folders",
             post(create_folder),
+        )
+        // Artwork import
+        .route(
+            "/api/notebooks/{notebook_id}/import/artwork",
+            post(import_artwork),
         )
         // Share routes
         .route("/share/{share_id}", get(serve_share))
@@ -1855,4 +1871,146 @@ async fn update_database_rows(
             "rowsUpdated": updated_count,
         }),
     }))
+}
+
+// ===== Artwork Import =====
+
+async fn import_artwork(
+    State(state): State<AppState>,
+    Path(notebook_id): Path<String>,
+    Json(req): Json<ImportArtworkRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    // Validate the URL
+    if !req.url.starts_with("http://") && !req.url.starts_with("https://") {
+        return Err(api_err(StatusCode::BAD_REQUEST, "Only http/https URLs are supported"));
+    }
+
+    // Find the import_artwork.py script
+    let script_path = find_import_script();
+    if script_path.is_none() {
+        return Err(api_err(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "import_artwork.py script not found",
+        ));
+    }
+    let script_path = script_path.unwrap();
+
+    // Resolve notebook name for the script
+    let nb_name = {
+        let storage = state.storage.lock().unwrap();
+        let notebooks = storage.list_notebooks()
+            .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        notebooks.into_iter()
+            .find(|n| n.id.to_string() == notebook_id)
+            .map(|n| n.name)
+            .ok_or_else(|| api_err(StatusCode::NOT_FOUND, "Notebook not found"))?
+    };
+
+    // Build command args
+    let mut args = vec![
+        script_path.to_string_lossy().to_string(),
+        req.url.clone(),
+        "--notebook".to_string(),
+        nb_name,
+        "--json".to_string(),
+    ];
+    if req.ai_enrich == Some(false) {
+        args.push("--no-ai".to_string());
+    }
+    if let Some(ref fid) = req.folder_id {
+        args.push("--folder-id".to_string());
+        args.push(fid.clone());
+    }
+    if let Some(ref sid) = req.section_id {
+        args.push("--section-id".to_string());
+        args.push(sid.clone());
+    }
+
+    // Find nous-sdk project dir for uv run
+    let sdk_dir = std::env::var("PYTHONPATH")
+        .ok()
+        .and_then(|p| p.split(':').next().map(|s| {
+            std::path::PathBuf::from(s).parent().map(|pp| pp.join("nous-sdk")).unwrap_or_default()
+        }))
+        .unwrap_or_else(|| std::path::PathBuf::from("nous-sdk"));
+
+    // Run the import script via uv (handles dependencies)
+    let output = tokio::process::Command::new("uv")
+        .arg("run")
+        .arg("--project")
+        .arg(&sdk_dir)
+        .arg("python")
+        .args(&args)
+        .env("PYTHONPATH", std::env::var("PYTHONPATH").unwrap_or_default())
+        .output()
+        .await
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to run import: {e}")))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        log::error!("Artwork import failed: {stderr}");
+
+        // Try to parse JSON error from stdout
+        if let Ok(result) = serde_json::from_str::<serde_json::Value>(&stdout) {
+            if let Some(err) = result.get("error").and_then(|v| v.as_str()) {
+                return Err(api_err(StatusCode::INTERNAL_SERVER_ERROR, err.to_string()));
+            }
+        }
+        return Err(api_err(StatusCode::INTERNAL_SERVER_ERROR, stderr.to_string()));
+    }
+
+    let result: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, format!("Invalid script output: {e}")))?;
+
+    emit_event(&state, "artwork.imported", serde_json::json!({
+        "notebookId": notebook_id,
+        "url": req.url,
+        "title": result.get("title"),
+        "pageId": result.get("pageId"),
+    }));
+
+    Ok((StatusCode::CREATED, Json(ApiResponse { data: result })))
+}
+
+fn find_import_script() -> Option<std::path::PathBuf> {
+    // Check PYTHONPATH for nous-py location (set by systemd service / build-daemon.sh)
+    if let Ok(pypath) = std::env::var("PYTHONPATH") {
+        for path in pypath.split(':') {
+            let p = std::path::PathBuf::from(path);
+            // PYTHONPATH points to nous-py, scripts are in nous-py/scripts/
+            let candidate = p.join("scripts/import_artwork.py");
+            if candidate.exists() {
+                return Some(candidate);
+            }
+            // Or PYTHONPATH might point to the parent
+            let candidate2 = p.join("../scripts/import_artwork.py");
+            if candidate2.exists() {
+                return Some(candidate2);
+            }
+        }
+    }
+
+    // Check relative to current dir (dev mode)
+    let candidates = [
+        std::path::PathBuf::from("nous-py/scripts/import_artwork.py"),
+        std::path::PathBuf::from("../nous-py/scripts/import_artwork.py"),
+    ];
+    for c in &candidates {
+        if c.exists() {
+            return Some(c.clone());
+        }
+    }
+
+    // Check relative to the executable
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(exe_dir) = exe.parent() {
+            let from_exe = exe_dir.join("../../nous-py/scripts/import_artwork.py");
+            if from_exe.exists() {
+                return Some(from_exe);
+            }
+        }
+    }
+
+    None
 }
