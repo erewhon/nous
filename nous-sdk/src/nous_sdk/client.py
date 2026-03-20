@@ -70,8 +70,12 @@ class Nous:
         path: str,
         json: Any = None,
         params: dict[str, Any] | None = None,
+        timeout: float | None = None,
     ) -> Any:
-        resp = self._client.request(method, path, json=json, params=params)
+        kwargs: dict[str, Any] = {"json": json, "params": params}
+        if timeout is not None:
+            kwargs["timeout"] = timeout
+        resp = self._client.request(method, path, **kwargs)
         if resp.status_code >= 400:
             try:
                 body = resp.json()
@@ -493,6 +497,7 @@ class Nous:
         ai_enrich: bool = True,
         folder_id: str | None = None,
         section_id: str | None = None,
+        timeout: float = 120.0,
     ) -> dict[str, Any]:
         """Import artwork from a URL: extracts image, text, AI research, creates page.
 
@@ -502,6 +507,7 @@ class Nous:
             ai_enrich: Whether to run AI research enrichment (default True).
             folder_id: Optional folder UUID for the created page.
             section_id: Optional section UUID for the created page.
+            timeout: Request timeout in seconds (default 120 — AI enrichment is slow).
 
         Returns dict with pageId, title, imageUrl, artist, tags.
         """
@@ -513,7 +519,8 @@ class Nous:
             body["folder_id"] = folder_id
         if section_id:
             body["section_id"] = section_id
-        return self._post(f"/api/notebooks/{nb_id}/import/artwork", json=body)
+        return self._request("POST", f"/api/notebooks/{nb_id}/import/artwork",
+                           json=body, params=None, timeout=timeout)
 
     # ─── Events (async) ────────────────────────────────────────────────
 

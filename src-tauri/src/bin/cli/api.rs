@@ -1931,22 +1931,39 @@ async fn import_artwork(
         args.push(sid.clone());
     }
 
-    // Find nous-sdk project dir for uv run
-    let sdk_dir = std::env::var("PYTHONPATH")
+    // Find nous-py project dir for uv run (has openai, httpx, etc.)
+    let nous_py_dir = std::env::var("PYTHONPATH")
         .ok()
-        .and_then(|p| p.split(':').next().map(|s| {
-            std::path::PathBuf::from(s).parent().map(|pp| pp.join("nous-sdk")).unwrap_or_default()
-        }))
-        .unwrap_or_else(|| std::path::PathBuf::from("nous-sdk"));
+        .and_then(|p| p.split(':').next().map(|s| std::path::PathBuf::from(s)))
+        .unwrap_or_else(|| std::path::PathBuf::from("nous-py"));
 
-    // Run the import script via uv (handles dependencies)
-    let output = tokio::process::Command::new("uv")
-        .arg("run")
-        .arg("--project")
-        .arg(&sdk_dir)
-        .arg("python")
+    // Build PYTHONPATH: nous-py + nous-py/scripts + nous-sdk/src
+    let sdk_src = nous_py_dir.parent()
+        .map(|p| p.join("nous-sdk/src"))
+        .unwrap_or_else(|| std::path::PathBuf::from("nous-sdk/src"));
+    let scripts_dir = nous_py_dir.join("scripts");
+    let pythonpath = format!(
+        "{}:{}:{}",
+        nous_py_dir.display(),
+        scripts_dir.display(),
+        sdk_src.display(),
+    );
+
+    // Use the nous-py venv's Python directly (has all deps installed)
+    let venv_python = nous_py_dir.join(".venv/bin/python");
+    let python = if venv_python.exists() {
+        venv_python
+    } else {
+        // Fallback to PYO3_PYTHON or system python
+        std::env::var("PYO3_PYTHON")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| std::path::PathBuf::from("python3"))
+    };
+
+    let output = tokio::process::Command::new(&python)
         .args(&args)
-        .env("PYTHONPATH", std::env::var("PYTHONPATH").unwrap_or_default())
+        .env("PYTHONPATH", &pythonpath)
+        .env("LD_LIBRARY_PATH", std::env::var("LD_LIBRARY_PATH").unwrap_or_default())
         .output()
         .await
         .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to run import: {e}")))?;
