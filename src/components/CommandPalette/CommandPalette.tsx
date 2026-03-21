@@ -190,6 +190,55 @@ export function CommandPalette({
     });
 
     cmds.push({
+      id: "action-art-gallery",
+      title: "Open Art Gallery",
+      subtitle: "Visual gallery of artwork in this notebook",
+      icon: <IconGallery />,
+      category: "action",
+      action: () => {
+        if (selectedNotebookId) {
+          window.open(`http://127.0.0.1:7667/gallery/${selectedNotebookId}`, "_blank");
+          onClose();
+        }
+      },
+      keywords: ["art", "gallery", "artwork", "paintings", "images", "visual"],
+      expert: true,
+    });
+
+    cmds.push({
+      id: "action-import-artwork",
+      title: "Import Artwork",
+      subtitle: "Import artwork from a URL with AI research",
+      icon: <IconGallery />,
+      category: "action",
+      action: () => {
+        onClose();
+        const url = window.prompt("Paste artwork URL:");
+        if (url && selectedNotebookId) {
+          // Show a notification and trigger the import via daemon API
+          fetch(`http://127.0.0.1:7667/api/notebooks/${selectedNotebookId}/import/artwork`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ url }),
+          })
+            .then((res) => res.json())
+            .then((data) => {
+              const result = data.data || data;
+              if (result.title) {
+                // Select the new page
+                if (result.pageId) {
+                  selectPage(result.pageId);
+                }
+              }
+            })
+            .catch((err) => console.error("Artwork import failed:", err));
+        }
+      },
+      keywords: ["art", "artwork", "import", "painting", "image", "scrape"],
+      expert: true,
+    });
+
+    cmds.push({
       id: "action-random-note",
       title: "Random Note",
       subtitle: "Open a random page",
@@ -1705,4 +1754,24 @@ function PageTypeIcon({ pageType }: { pageType: PageType }) {
         </svg>
       );
   }
+}
+
+function IconGallery() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+      <circle cx="9" cy="9" r="2" />
+      <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />
+    </svg>
+  );
 }
