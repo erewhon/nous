@@ -169,6 +169,11 @@ struct CreateFolderRequest {
 }
 
 #[derive(Deserialize)]
+struct ImageCacheQuery {
+    url: String,
+}
+
+#[derive(Deserialize)]
 struct ImportArtworkRequest {
     url: String,
     /// Whether to run AI research enrichment (default: true)
@@ -293,9 +298,14 @@ pub fn build_router(state: AppState) -> Router {
         )
         // Share routes
         // Gallery
+        // Gallery
         .route(
             "/gallery/{notebook_id}",
             get(serve_gallery),
+        )
+        .route(
+            "/api/image-cache/{hash}",
+            get(serve_cached_image),
         )
         .route("/share/{share_id}", get(serve_share))
         .route("/share/{share_id}/", get(serve_share))
@@ -2045,4 +2055,97 @@ async fn serve_gallery(
     let html = include_str!("gallery.html")
         .replace("{{NOTEBOOK_ID}}", &notebook_id);
     Html(html)
+}
+
+// ===== Image Cache =====
+
+async fn serve_cached_image(
+    State(state): State<AppState>,
+    Path(hash): Path<String>,
+    Query(query): Query<ImageCacheQuery>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    use axum::http::header;
+    use sha2::{Sha256, Digest};
+
+    // Verify hash matches URL (prevents abuse)
+    let expected_hash = format!("{:x}", Sha256::digest(query.url.as_bytes()));
+    if hash != expected_hash[..16] {
+        return Err(api_err(StatusCode::BAD_REQUEST, "Hash mismatch"));
+    }
+
+    // Cache directory
+    let cache_dir = state.library_path.join(".cache/images");
+    let _ = std::fs::create_dir_all(&cache_dir);
+
+    // Determine file extension from URL
+    let ext = query.url.rsplit('.').next()
+        .and_then(|e| {
+            let e = e.split('?').next().unwrap_or(e).to_lowercase();
+            match e.as_str() {
+                "jpg" | "jpeg" | "png" | "webp" | "gif" => Some(e),
+                _ => None,
+            }
+        })
+        .unwrap_or_else(|| "jpg".to_string());
+
+    let cache_path = cache_dir.join(format!("{}.{}", &expected_hash[..16], ext));
+
+    // Serve from cache if exists
+    if cache_path.exists() {
+        let data = tokio::fs::read(&cache_path).await
+            .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        let content_type = match ext.as_str() {
+            "png" => "image/png",
+            "webp" => "image/webp",
+            "gif" => "image/gif",
+            _ => "image/jpeg",
+        };
+        return Ok((
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, content_type), (header::CACHE_CONTROL, "public, max-age=31536000")],
+            data,
+        ));
+    }
+
+    // Fetch from source
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .user_agent("Mozilla/5.0 (compatible; NousBot/1.0)")
+        .build()
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let resp = client.get(&query.url).send().await
+        .map_err(|e| api_err(StatusCode::BAD_GATEWAY, format!("Failed to fetch image: {e}")))?;
+
+    if !resp.status().is_success() {
+        return Err(api_err(StatusCode::BAD_GATEWAY,
+            format!("Source returned {}", resp.status())));
+    }
+
+    let content_type_str = resp.headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("image/jpeg");
+    let ct: &'static str = match content_type_str {
+        s if s.contains("png") => "image/png",
+        s if s.contains("webp") => "image/webp",
+        s if s.contains("gif") => "image/gif",
+        _ => "image/jpeg",
+    };
+
+    let data = resp.bytes().await
+        .map_err(|e| api_err(StatusCode::BAD_GATEWAY, format!("Failed to read image: {e}")))?;
+
+    // Save to cache (fire-and-forget)
+    let cache_path_clone = cache_path.clone();
+    let data_clone = data.clone();
+    tokio::spawn(async move {
+        let _ = tokio::fs::write(&cache_path_clone, &data_clone).await;
+    });
+
+    Ok((
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, ct), (header::CACHE_CONTROL, "public, max-age=31536000")],
+        data.to_vec(),
+    ))
 }

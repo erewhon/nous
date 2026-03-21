@@ -153,6 +153,35 @@
     white-space: pre-wrap; word-wrap: break-word;
   }
 
+  /* Collections */
+  .collections-bar {
+    display: flex; gap: 6px; align-items: center;
+    padding: 0 24px 0 0;
+  }
+  .collection-select {
+    padding: 5px 10px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--bg); color: var(--text); font-size: 12px; outline: none;
+  }
+  .collection-select:focus { border-color: var(--accent); }
+  .detail-collections {
+    display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 16px;
+  }
+  .collection-badge {
+    font-size: 11px; padding: 3px 10px; border-radius: 12px;
+    background: rgba(34, 197, 94, 0.15); color: var(--success);
+    display: flex; align-items: center; gap: 4px;
+  }
+  .collection-badge .remove {
+    cursor: pointer; opacity: 0.6; font-size: 14px; line-height: 1;
+  }
+  .collection-badge .remove:hover { opacity: 1; }
+  .add-to-collection {
+    font-size: 11px; padding: 3px 10px; border-radius: 12px;
+    border: 1px dashed var(--border); background: transparent;
+    color: var(--text-dim); cursor: pointer;
+  }
+  .add-to-collection:hover { border-color: var(--accent); color: var(--accent); }
+
   /* Loading */
   .loading-overlay {
     position: fixed; inset: 0; background: rgba(0,0,0,0.6);
@@ -182,6 +211,11 @@
     <button class="btn btn-primary" id="import-btn" onclick="importArtwork()">Import</button>
   </div>
   <div class="header-right">
+    <div class="collections-bar">
+      <select class="collection-select" id="collection-filter" onchange="onCollectionFilter()">
+        <option value="">All Artwork</option>
+      </select>
+    </div>
     <input type="text" class="search-input" id="search-input" placeholder="Search..." oninput="onSearch()" />
     <span class="artwork-count" id="count"></span>
   </div>
@@ -210,6 +244,7 @@ let fullPages = {};  // cache of full page data by id
 let activeFilter = null;
 let searchQuery = '';
 let detailIndex = -1;
+let activeCollection = '';
 
 async function loadArtworks() {
   try {
@@ -231,7 +266,10 @@ async function loadArtworks() {
 
     renderGallery();
     renderFilters();
+    renderCollectionFilter();
     document.getElementById('count').textContent = `${artworks.length} artwork${artworks.length !== 1 ? 's' : ''}`;
+    // Pre-compute image hashes for cache proxy URLs, then re-render
+    precomputeHashes();
   } catch (err) {
     showStatus('Failed to load: ' + err.message, 'error');
   }
@@ -266,6 +304,7 @@ function extractArtist(page) {
 
 function getFilteredArtworks() {
   let list = artworks;
+  if (activeCollection) list = list.filter(a => a.tags.includes(`collection:${activeCollection}`));
   if (activeFilter) list = list.filter(a => a.tags.includes(activeFilter));
   if (searchQuery) {
     const q = searchQuery.toLowerCase();
@@ -292,7 +331,7 @@ function renderGallery() {
   container.innerHTML = filtered.map((art, i) => `
     <div class="card" onclick="openDetail('${art.id}')">
       ${art.imageUrl
-        ? `<img class="card-img" src="${esc(art.imageUrl)}" alt="${esc(art.title)}" loading="lazy"
+        ? `<img class="card-img" src="${esc(cachedImageUrl(art.imageUrl))}" alt="${esc(art.title)}" loading="lazy"
             onerror="this.outerHTML='<div class=\\'card-img-placeholder\\'>&#x1f3a8;</div>'">`
         : `<div class="card-img-placeholder">&#x1f3a8;</div>`}
       <div class="card-body">
@@ -312,7 +351,7 @@ function renderFilters() {
   const tagCounts = {};
   for (const art of artworks) {
     for (const tag of art.tags) {
-      if (tag === 'artwork') continue;
+      if (tag === 'artwork' || tag.startsWith('collection:')) continue;
       tagCounts[tag] = (tagCounts[tag] || 0) + 1;
     }
   }
@@ -385,7 +424,7 @@ function renderDetail(art, page, total) {
         </div>
 
         ${art.imageUrl
-          ? `<img class="detail-img" src="${esc(art.imageUrl)}" alt="${esc(art.title)}"
+          ? `<img class="detail-img" src="${esc(cachedImageUrl(art.imageUrl))}" alt="${esc(art.title)}"
               onerror="this.outerHTML='<div class=\\'detail-img-placeholder\\'>&#x1f3a8;</div>'">`
           : `<div class="detail-img-placeholder">&#x1f3a8;</div>`}
 
@@ -398,8 +437,17 @@ function renderDetail(art, page, total) {
             ${content.source ? `<dt>Source</dt><dd><a href="${esc(content.source)}" target="_blank" rel="noopener">${esc(shortenUrl(content.source))}</a></dd>` : ''}
           </dl>
 
+          <div class="detail-collections">
+            ${getArtworkCollections(art).map(c =>
+              `<span class="collection-badge">${esc(c)}
+                <span class="remove" onclick="removeFromCollection('${art.id}','${esc(c)}')">&times;</span>
+              </span>`
+            ).join('')}
+            <button class="add-to-collection" onclick="promptAddToCollection('${art.id}')">+ Collection</button>
+          </div>
+
           <div class="detail-tags">
-            ${art.tags.filter(t => t !== 'artwork').map(t =>
+            ${art.tags.filter(t => t !== 'artwork' && !t.startsWith('collection:')).map(t =>
               `<span class="detail-tag" onclick="closeDetail();setFilter('${esc(t)}')">${esc(t)}</span>`
             ).join('')}
           </div>
@@ -469,12 +517,148 @@ function parsePageContent(page) {
   return result;
 }
 
+// Image cache: proxy images through daemon for caching + reliability
+const imageHashCache = new Map();
+
+async function sha256hex16(str) {
+  const data = new TextEncoder().encode(str);
+  const hash = await crypto.subtle.digest('SHA-256', data);
+  return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 16);
+}
+
+function cachedImageUrl(originalUrl) {
+  if (!originalUrl) return null;
+  // Use a pre-computed hash if available, otherwise return a data-src for lazy loading
+  const hash = imageHashCache.get(originalUrl);
+  if (hash) return `${API}/api/image-cache/${hash}?url=${encodeURIComponent(originalUrl)}`;
+  // Compute hash async and store for next render
+  sha256hex16(originalUrl).then(h => {
+    imageHashCache.set(originalUrl, h);
+  });
+  // Return original for first render, cached version will be used on next render
+  return originalUrl;
+}
+
+// Pre-compute hashes for all artworks on load
+async function precomputeHashes() {
+  for (const art of artworks) {
+    if (art.imageUrl && !imageHashCache.has(art.imageUrl)) {
+      const hash = await sha256hex16(art.imageUrl);
+      imageHashCache.set(art.imageUrl, hash);
+    }
+  }
+  // Re-render with cached URLs
+  renderGallery();
+}
+
 function shortenUrl(url) {
   try {
     const u = new URL(url);
     const path = u.pathname.length > 40 ? u.pathname.slice(0, 40) + '...' : u.pathname;
     return u.hostname + path;
   } catch { return url.slice(0, 60); }
+}
+
+// ─── Collections ──────────────────────────────────────────────────────
+
+function getCollections() {
+  const collections = new Set();
+  for (const art of artworks) {
+    for (const tag of art.tags) {
+      if (tag.startsWith('collection:')) {
+        collections.add(tag.slice(11));
+      }
+    }
+  }
+  return [...collections].sort();
+}
+
+function renderCollectionFilter() {
+  const select = document.getElementById('collection-filter');
+  const collections = getCollections();
+  select.innerHTML = `
+    <option value="">All Artwork</option>
+    ${collections.map(c =>
+      `<option value="${esc(c)}" ${activeCollection === c ? 'selected' : ''}>${esc(c)}</option>`
+    ).join('')}
+    <option value="__new__">+ New Collection...</option>
+  `;
+}
+
+function onCollectionFilter() {
+  const val = document.getElementById('collection-filter').value;
+  if (val === '__new__') {
+    const name = window.prompt('Collection name:');
+    if (name) {
+      activeCollection = name.trim();
+    }
+    // Reset dropdown to show the name (it won't be in the list yet if empty)
+    document.getElementById('collection-filter').value = '';
+    renderCollectionFilter();
+    document.getElementById('collection-filter').value = activeCollection;
+  } else {
+    activeCollection = val;
+  }
+  renderGallery();
+}
+
+function getArtworkCollections(art) {
+  return art.tags.filter(t => t.startsWith('collection:')).map(t => t.slice(11));
+}
+
+async function addToCollection(pageId, collectionName) {
+  const art = artworks.find(a => a.id === pageId);
+  if (!art) return;
+  const tag = `collection:${collectionName}`;
+  if (art.tags.includes(tag)) return;
+
+  // Update tags via daemon API
+  const newTags = [...art.tags, tag];
+  try {
+    await fetch(`${API}/api/notebooks/${NOTEBOOK_ID}/pages/${pageId}/tags`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tags: newTags }),
+    });
+    art.tags = newTags;
+    renderCollectionFilter();
+    // Re-render detail if open
+    if (detailIndex >= 0 && fullPages[pageId]) renderDetail(art, fullPages[pageId], getFilteredArtworks().length);
+  } catch (err) {
+    showStatus('Failed to add to collection: ' + err.message, 'error');
+  }
+}
+
+async function removeFromCollection(pageId, collectionName) {
+  const art = artworks.find(a => a.id === pageId);
+  if (!art) return;
+  const tag = `collection:${collectionName}`;
+
+  const newTags = art.tags.filter(t => t !== tag);
+  try {
+    await fetch(`${API}/api/notebooks/${NOTEBOOK_ID}/pages/${pageId}/tags`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tags: newTags }),
+    });
+    art.tags = newTags;
+    renderCollectionFilter();
+    renderGallery();
+    if (detailIndex >= 0 && fullPages[pageId]) renderDetail(art, fullPages[pageId], getFilteredArtworks().length);
+  } catch (err) {
+    showStatus('Failed to remove from collection: ' + err.message, 'error');
+  }
+}
+
+function promptAddToCollection(pageId) {
+  const existing = getCollections();
+  let name;
+  if (existing.length > 0) {
+    name = window.prompt(`Add to collection:\nExisting: ${existing.join(', ')}\n\nEnter collection name:`);
+  } else {
+    name = window.prompt('Enter collection name:');
+  }
+  if (name) addToCollection(pageId, name.trim());
 }
 
 // ─── Import ───────────────────────────────────────────────────────────
