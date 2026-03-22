@@ -206,6 +206,32 @@ export function CommandPalette({
     });
 
     cmds.push({
+      id: "action-plan-tomorrow",
+      title: "Plan Tomorrow",
+      subtitle: "Create tomorrow's daily note with goals context",
+      icon: <IconPage />,
+      category: "action",
+      action: () => {
+        onClose();
+        if (selectedNotebookId) {
+          fetch(`http://127.0.0.1:7667/api/notebooks/${selectedNotebookId}/agile-daily`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ date: "tomorrow" }),
+          })
+            .then((res) => res.json())
+            .then((data) => {
+              const result = data.data || data;
+              if (result.pageId) selectPage(result.pageId);
+            })
+            .catch((err) => console.error("Plan tomorrow failed:", err));
+        }
+      },
+      keywords: ["plan", "tomorrow", "evening", "agile", "outcomes", "rule of 3"],
+      expert: true,
+    });
+
+    cmds.push({
       id: "action-import-artwork",
       title: "Import Artwork",
       subtitle: "Import artwork from a URL with AI research",

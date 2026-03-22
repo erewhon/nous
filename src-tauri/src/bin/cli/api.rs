@@ -174,6 +174,12 @@ struct ImageCacheQuery {
 }
 
 #[derive(Deserialize)]
+struct AgileDailyRequest {
+    /// "today", "tomorrow", or "YYYY-MM-DD"
+    date: Option<String>,
+}
+
+#[derive(Deserialize)]
 struct ImportArtworkRequest {
     url: String,
     /// Whether to run AI research enrichment (default: true)
@@ -295,6 +301,11 @@ pub fn build_router(state: AppState) -> Router {
         .route(
             "/api/notebooks/{notebook_id}/import/artwork",
             post(import_artwork),
+        )
+        // Agile Results daily note
+        .route(
+            "/api/notebooks/{notebook_id}/agile-daily",
+            post(agile_daily_note),
         )
         // Share routes
         // Gallery
@@ -1901,14 +1912,8 @@ async fn import_artwork(
     }
 
     // Find the import_artwork.py script
-    let script_path = find_import_script();
-    if script_path.is_none() {
-        return Err(api_err(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "import_artwork.py script not found",
-        ));
-    }
-    let script_path = script_path.unwrap();
+    let script_path = find_script("import_artwork.py")
+        .ok_or_else(|| api_err(StatusCode::INTERNAL_SERVER_ERROR, "import_artwork.py not found"))?;
 
     // Resolve notebook name for the script
     let nb_name = {
@@ -2005,18 +2010,18 @@ async fn import_artwork(
     Ok((StatusCode::CREATED, Json(ApiResponse { data: result })))
 }
 
-fn find_import_script() -> Option<std::path::PathBuf> {
+fn find_script(name: &str) -> Option<std::path::PathBuf> {
     // Check PYTHONPATH for nous-py location (set by systemd service / build-daemon.sh)
     if let Ok(pypath) = std::env::var("PYTHONPATH") {
         for path in pypath.split(':') {
             let p = std::path::PathBuf::from(path);
             // PYTHONPATH points to nous-py, scripts are in nous-py/scripts/
-            let candidate = p.join("scripts/import_artwork.py");
+            let candidate = p.join(format!("scripts/{name}"));
             if candidate.exists() {
                 return Some(candidate);
             }
             // Or PYTHONPATH might point to the parent
-            let candidate2 = p.join("../scripts/import_artwork.py");
+            let candidate2 = p.join(format!("../scripts/{name}"));
             if candidate2.exists() {
                 return Some(candidate2);
             }
@@ -2025,8 +2030,8 @@ fn find_import_script() -> Option<std::path::PathBuf> {
 
     // Check relative to current dir (dev mode)
     let candidates = [
-        std::path::PathBuf::from("nous-py/scripts/import_artwork.py"),
-        std::path::PathBuf::from("../nous-py/scripts/import_artwork.py"),
+        std::path::PathBuf::from(format!("nous-py/scripts/{name}")),
+        std::path::PathBuf::from(format!("../nous-py/scripts/{name}")),
     ];
     for c in &candidates {
         if c.exists() {
@@ -2037,7 +2042,7 @@ fn find_import_script() -> Option<std::path::PathBuf> {
     // Check relative to the executable
     if let Ok(exe) = std::env::current_exe() {
         if let Some(exe_dir) = exe.parent() {
-            let from_exe = exe_dir.join("../../nous-py/scripts/import_artwork.py");
+            let from_exe = exe_dir.join(format!("../../nous-py/scripts/{name}"));
             if from_exe.exists() {
                 return Some(from_exe);
             }
@@ -2148,4 +2153,76 @@ async fn serve_cached_image(
         [(header::CONTENT_TYPE, ct), (header::CACHE_CONTROL, "public, max-age=31536000")],
         data.to_vec(),
     ))
+}
+
+// ===== Agile Results Daily Note =====
+
+async fn agile_daily_note(
+    State(state): State<AppState>,
+    Path(notebook_id): Path<String>,
+    Json(req): Json<AgileDailyRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let script_path = find_script("agile_daily.py")
+        .ok_or_else(|| api_err(StatusCode::INTERNAL_SERVER_ERROR, "agile_daily.py not found"))?;
+
+    // Resolve notebook name
+    let nb_name = {
+        let storage = state.storage.lock().unwrap();
+        let notebooks = storage.list_notebooks()
+            .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        notebooks.into_iter()
+            .find(|n| n.id.to_string() == notebook_id)
+            .map(|n| n.name)
+            .ok_or_else(|| api_err(StatusCode::NOT_FOUND, "Notebook not found"))?
+    };
+
+    let date_arg = req.date.unwrap_or_else(|| "today".to_string());
+    let command = if date_arg == "tomorrow" { "tomorrow" } else { "daily" };
+
+    let mut args = vec![
+        script_path.to_string_lossy().to_string(),
+        command.to_string(),
+        "--notebook".to_string(),
+        nb_name,
+        "--json".to_string(),
+    ];
+    if date_arg != "today" && date_arg != "tomorrow" {
+        args.push("--date".to_string());
+        args.push(date_arg);
+    }
+
+    let nous_py_dir = std::env::var("PYTHONPATH")
+        .ok()
+        .and_then(|p| p.split(':').next().map(|s| std::path::PathBuf::from(s)))
+        .unwrap_or_else(|| std::path::PathBuf::from("nous-py"));
+
+    let sdk_src = nous_py_dir.parent()
+        .map(|p| p.join("nous-sdk/src"))
+        .unwrap_or_else(|| std::path::PathBuf::from("nous-sdk/src"));
+    let scripts_dir = nous_py_dir.join("scripts");
+    let pythonpath = format!("{}:{}:{}", nous_py_dir.display(), scripts_dir.display(), sdk_src.display());
+
+    let venv_python = nous_py_dir.join(".venv/bin/python");
+    let python = if venv_python.exists() { venv_python } else {
+        std::env::var("PYO3_PYTHON").map(std::path::PathBuf::from)
+            .unwrap_or_else(|_| std::path::PathBuf::from("python3"))
+    };
+
+    let output = tokio::process::Command::new(&python)
+        .args(&args)
+        .env("PYTHONPATH", &pythonpath)
+        .env("LD_LIBRARY_PATH", std::env::var("LD_LIBRARY_PATH").unwrap_or_default())
+        .output()
+        .await
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to run: {e}")))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(api_err(StatusCode::INTERNAL_SERVER_ERROR, stderr.to_string()));
+    }
+
+    let result: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, format!("Invalid output: {e}")))?;
+
+    Ok((StatusCode::CREATED, Json(ApiResponse { data: result })))
 }

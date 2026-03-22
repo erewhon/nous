@@ -37,6 +37,7 @@ class Page:
     section_id: str | None = None
     page_type: str = "standard"
     is_daily_note: bool = False
+    daily_note_date: str | None = None
     created_at: str = ""
     updated_at: str = ""
     content: dict[str, Any] | None = None
@@ -52,6 +53,7 @@ class Page:
             section_id=d.get("sectionId"),
             page_type=d.get("pageType", "standard"),
             is_daily_note=d.get("isDailyNote", False),
+            daily_note_date=d.get("dailyNoteDate"),
             created_at=d.get("createdAt", ""),
             updated_at=d.get("updatedAt", ""),
             content=d.get("content"),
