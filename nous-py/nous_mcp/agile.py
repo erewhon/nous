@@ -152,40 +152,46 @@ def build_alignment_prompt(
     yearly_text: str | None,
     week_summary: list[dict] | None = None,
 ) -> str:
-    """Build the prompt for the AI alignment review."""
-    parts = ["Review my planning alignment. Be brief, direct, and encouraging.\n"]
+    """Build a concise alignment review prompt.
 
-    parts.append("## Today's Daily Note\n")
-    parts.append(daily_text[:2000])
+    Keeps total size small so local LLMs can handle it.
+    """
+    parts = []
+
+    # Extract just the outcomes/checklist items from daily note (not full text)
+    daily_items = get_daily_outcomes(daily_text)
+    if daily_items:
+        parts.append("TODAY'S ITEMS:")
+        for item in daily_items[:10]:
+            status = "DONE" if item["checked"] else "TODO"
+            parts.append(f"  [{status}] {item['text'][:80]}")
+    else:
+        parts.append("TODAY: No items yet")
 
     if weekly_text:
-        parts.append("\n## Current Weekly Plan\n")
-        parts.append(weekly_text[:1000])
+        # Trim to just the goals lines
+        parts.append("\nWEEKLY GOALS:")
+        for line in weekly_text.split("\n"):
+            line = line.strip()
+            if line and (line[0].isdigit() or line.startswith("- ")):
+                parts.append(f"  {line[:80]}")
 
     if monthly_text:
-        parts.append("\n## Current Monthly Plan\n")
-        parts.append(monthly_text[:1000])
-
-    if yearly_text:
-        parts.append("\n## Yearly Vision\n")
-        parts.append(yearly_text[:500])
+        parts.append("\nMONTHLY GOALS:")
+        for line in monthly_text.split("\n"):
+            line = line.strip()
+            if line and (line[0].isdigit() or line.startswith("- ")):
+                parts.append(f"  {line[:80]}")
 
     if week_summary:
-        parts.append("\n## This Week So Far\n")
-        for day in week_summary:
-            done = day["completed"]
-            total = day["total_items"]
-            parts.append(f"- {day['day']}: {done}/{total} items done")
-            if day["outcomes"]:
-                for o in day["outcomes"][:3]:
-                    parts.append(f"  - {o}")
+        total_done = sum(d["completed"] for d in week_summary)
+        total_items = sum(d["total_items"] for d in week_summary)
+        parts.append(f"\nWEEK PROGRESS: {total_done}/{total_items} items done across {len(week_summary)} days")
 
     parts.append("""
-\nPlease provide:
-1. **Alignment check**: Are today's outcomes supporting the weekly and monthly goals? (1-2 sentences)
-2. **Blind spots**: Any weekly/monthly goals getting no attention this week? (brief list)
-3. **One suggestion**: One concrete small action I could add or adjust today. (1 sentence)
-
-Keep it under 150 words total. Be a supportive coach, not a critic.""")
+Review alignment. Reply with EXACTLY this format:
+ALIGNED: (1-2 sentences on what's on track)
+GAPS: (list any weekly/monthly goals getting no attention)
+SUGGEST: (one concrete small action for today)""")
 
     return "\n".join(parts)
