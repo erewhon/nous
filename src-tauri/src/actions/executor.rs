@@ -124,6 +124,8 @@ pub struct ActionExecutor {
     #[cfg(feature = "plugins")]
     plugin_host: Option<Arc<Mutex<crate::plugins::PluginHost>>>,
     variable_resolver: VariableResolver,
+    /// Optional event sender for broadcasting page changes to WebSocket clients.
+    event_tx: Option<crate::events::EventSender>,
 }
 
 impl ActionExecutor {
@@ -143,6 +145,7 @@ impl ActionExecutor {
             #[cfg(feature = "plugins")]
             plugin_host: None,
             variable_resolver: VariableResolver::new(),
+            event_tx: None,
         }
     }
 
@@ -173,6 +176,33 @@ impl ActionExecutor {
     #[cfg(feature = "plugins")]
     pub fn set_plugin_host(&mut self, host: Option<Arc<Mutex<crate::plugins::PluginHost>>>) {
         self.plugin_host = host;
+    }
+
+    /// Set the event sender for broadcasting page changes.
+    pub fn set_event_tx(&mut self, tx: crate::events::EventSender) {
+        self.event_tx = Some(tx);
+    }
+
+    /// Emit an event (fire-and-forget, no error if no listeners).
+    fn emit_event(&self, event: crate::events::AppEvent) {
+        if let Some(ref tx) = self.event_tx {
+            let _ = tx.send(event);
+        }
+    }
+
+    /// Best-effort page title lookup for event emission.
+    fn get_page_title(&self, page_id_str: &str, _result: &ActionExecutionResult) -> String {
+        if let Ok(uuid) = Uuid::parse_str(page_id_str) {
+            if let Ok(storage) = self.storage.lock() {
+                let notebooks = storage.list_notebooks().unwrap_or_default();
+                for nb in &notebooks {
+                    if let Ok(page) = storage.get_page(nb.id, uuid) {
+                        return page.title;
+                    }
+                }
+            }
+        }
+        String::new()
     }
 
     /// Execute an action by ID
@@ -252,6 +282,33 @@ impl ActionExecutor {
             result.errors.len(),
             result.errors,
         );
+
+        // Emit events for created and modified pages
+        if self.event_tx.is_some() {
+            // Get page titles for created pages
+            for page_id_str in &result.created_pages {
+                let title = self.get_page_title(page_id_str, &result);
+                self.emit_event(crate::events::AppEvent::page_created(
+                    &context.current_notebook_id.map(|id| id.to_string()).unwrap_or_default(),
+                    page_id_str,
+                    &title,
+                ));
+            }
+            for page_id_str in &result.modified_pages {
+                let title = self.get_page_title(page_id_str, &result);
+                self.emit_event(crate::events::AppEvent::page_updated(
+                    &context.current_notebook_id.map(|id| id.to_string()).unwrap_or_default(),
+                    page_id_str,
+                    &title,
+                ));
+            }
+            // Emit action completion event
+            self.emit_event(crate::events::AppEvent::action_completed(
+                &action.name,
+                &result.created_pages,
+                &result.modified_pages,
+            ));
+        }
 
         // Update last run time
         if let Ok(mut action_storage) = self.action_storage.lock() {

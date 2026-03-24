@@ -23,14 +23,12 @@ use nous_lib::share::storage::ShareStorage;
 use nous_lib::plugins::api::HostApi;
 use nous_lib::storage::{EditorBlock, EditorData, Page, PageType};
 
-use super::daemon::{DaemonEvent, DaemonState};
+use super::daemon::DaemonState;
+use nous_lib::events::AppEvent;
 
 /// Emit an event to all WebSocket subscribers (fire-and-forget).
 fn emit_event(state: &DaemonState, event: &str, data: serde_json::Value) {
-    let _ = state.event_tx.send(DaemonEvent {
-        event: event.to_string(),
-        data,
-    });
+    let _ = state.event_tx.send(AppEvent::new(event, data));
 }
 
 // ===== Request/Response types =====

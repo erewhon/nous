@@ -23,12 +23,8 @@ use nous_lib::sync::{LogEmitter, SyncManager};
 
 use super::api;
 
-/// Event broadcast for WebSocket subscribers
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct DaemonEvent {
-    pub event: String,
-    pub data: serde_json::Value,
-}
+/// Re-export AppEvent as DaemonEvent for backward compatibility
+pub type DaemonEvent = nous_lib::events::AppEvent;
 
 /// Shared state for the daemon (passed to HTTP handlers and schedulers)
 pub struct DaemonState {
@@ -41,7 +37,7 @@ pub struct DaemonState {
     pub sync_manager: Arc<SyncManager>,
     pub action_scheduler: Mutex<ActionScheduler>,
     pub library_path: PathBuf,
-    pub event_tx: tokio::sync::broadcast::Sender<DaemonEvent>,
+    pub event_tx: nous_lib::events::EventSender,
 }
 
 /// Default daemon port
@@ -127,6 +123,9 @@ pub async fn run(library_name: Option<&str>, port: Option<u16>) -> Result<()> {
     let action_storage_arc = Arc::new(Mutex::new(action_storage));
     let python_ai_arc = Arc::new(Mutex::new(python_ai));
 
+    // Create event broadcast channel (capacity 256 — events are small)
+    let (event_tx, _) = tokio::sync::broadcast::channel::<nous_lib::events::AppEvent>(256);
+
     // Initialize action executor
     let mut action_executor = ActionExecutor::new(
         Arc::clone(&storage_arc),
@@ -136,6 +135,7 @@ pub async fn run(library_name: Option<&str>, port: Option<u16>) -> Result<()> {
     action_executor.set_goals_storage(Arc::clone(&goals_storage_arc));
     action_executor.set_energy_storage(Arc::clone(&energy_storage_arc));
     action_executor.set_inbox_storage(Arc::clone(&inbox_storage_arc));
+    action_executor.set_event_tx(event_tx.clone());
     let action_executor_arc = Arc::new(Mutex::new(action_executor));
 
     // Initialize action scheduler and start it
@@ -162,9 +162,6 @@ pub async fn run(library_name: Option<&str>, port: Option<u16>) -> Result<()> {
         Arc::clone(&energy_storage_arc),
     );
     log::info!("Sync scheduler started");
-
-    // Create event broadcast channel (capacity 256 — events are small)
-    let (event_tx, _) = tokio::sync::broadcast::channel::<DaemonEvent>(256);
 
     // Build shared daemon state
     let state = Arc::new(DaemonState {

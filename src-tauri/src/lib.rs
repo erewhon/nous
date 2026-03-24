@@ -6,6 +6,7 @@ use tauri::Manager;
 pub mod actions;
 mod chat_sessions;
 pub mod collab;
+pub mod events;
 pub mod commands;
 pub mod contacts;
 pub mod energy;
