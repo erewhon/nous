@@ -1834,5 +1834,152 @@ def get_spending_trends(
     return json.dumps(trends, indent=2)
 
 
+# ===== Agile Results Tools =====
+
+
+@mcp.tool()
+def check_alignment(
+    notebook: str,
+    date: str | None = None,
+) -> str:
+    """Check if today's daily outcomes align with weekly and monthly goals.
+
+    Provides a gentle review: alignment check, blind spots, and one suggestion.
+    Call this when the user asks to "check my alignment", "review my plan",
+    "am I on track", or "nudge me".
+
+    Args:
+        notebook: Notebook name or UUID (e.g. "Agile Results").
+        date: Date to check (YYYY-MM-DD, default: today).
+
+    Returns the alignment review as text.
+    """
+    from datetime import date as date_type
+    from nous_mcp.agile import (
+        get_page_text, get_daily_note_text, get_week_daily_notes,
+        build_alignment_prompt,
+    )
+
+    target = date_type.fromisoformat(date) if date else date_type.today()
+
+    storage = _get_storage()
+    nb = storage.resolve_notebook(notebook)
+    nb_id = nb["id"]
+
+    daily_text = get_daily_note_text(storage, nb_id, target)
+    if not daily_text:
+        return f"No daily note found for {target.isoformat()}. Create one first."
+
+    weekly_text = get_page_text(storage, nb_id, "Weekly Plan")
+    monthly_text = get_page_text(storage, nb_id, "Monthly Plan")
+    yearly_text = get_page_text(storage, nb_id, "Yearly Vision")
+
+    if not weekly_text and not monthly_text:
+        return "No Weekly Plan or Monthly Plan pages found. Create them with your Rule of 3 goals."
+
+    week_summary = get_week_daily_notes(storage, nb_id, target)
+
+    prompt = build_alignment_prompt(
+        daily_text, weekly_text, monthly_text, yearly_text, week_summary
+    )
+
+    # Return the prompt as context — the AI model will generate the review
+    return prompt
+
+
+@mcp.tool()
+def get_week_progress(
+    notebook: str,
+    date: str | None = None,
+) -> str:
+    """Get a summary of this week's daily outcomes and completion rates.
+
+    Shows each day's outcomes, completion rate, and overall progress.
+    Call this when the user asks "how's my week going", "weekly progress",
+    or "what have I done this week".
+
+    Args:
+        notebook: Notebook name or UUID.
+        date: Any date in the target week (YYYY-MM-DD, default: today).
+
+    Returns JSON with daily summaries and overall stats.
+    """
+    from datetime import date as date_type
+    from nous_mcp.agile import get_page_text, get_week_daily_notes
+
+    target = date_type.fromisoformat(date) if date else date_type.today()
+
+    storage = _get_storage()
+    nb = storage.resolve_notebook(notebook)
+    nb_id = nb["id"]
+
+    days = get_week_daily_notes(storage, nb_id, target)
+
+    if not days:
+        return json.dumps({"message": "No daily notes found for this week."})
+
+    total_items = sum(d["total_items"] for d in days)
+    total_done = sum(d["completed"] for d in days)
+    overall_rate = round(total_done / total_items * 100) if total_items > 0 else 0
+
+    # Check weekly goals
+    weekly_text = get_page_text(storage, nb_id, "Weekly Plan")
+
+    result = {
+        "week": f"{days[0]['date']} to {days[-1]['date']}",
+        "days": days,
+        "overall": {
+            "totalItems": total_items,
+            "completed": total_done,
+            "completionRate": overall_rate,
+            "daysTracked": len(days),
+        },
+    }
+    if weekly_text:
+        result["weeklyPlan"] = weekly_text[:500]
+
+    return json.dumps(result, indent=2)
+
+
+@mcp.tool()
+def get_planning_context(
+    notebook: str,
+) -> str:
+    """Get current weekly goals, monthly goals, and yearly vision.
+
+    Call this when the user asks "what are my goals", "show my plan",
+    or needs context for planning.
+
+    Args:
+        notebook: Notebook name or UUID.
+
+    Returns the content of the Weekly Plan, Monthly Plan, and Yearly Vision pages.
+    """
+    from nous_mcp.agile import get_page_text
+
+    storage = _get_storage()
+    nb = storage.resolve_notebook(notebook)
+    nb_id = nb["id"]
+
+    parts = []
+
+    weekly = get_page_text(storage, nb_id, "Weekly Plan")
+    if weekly:
+        parts.append(f"## Weekly Plan\n{weekly}")
+
+    monthly = get_page_text(storage, nb_id, "Monthly Plan")
+    if monthly:
+        parts.append(f"## Monthly Plan\n{monthly}")
+
+    yearly = get_page_text(storage, nb_id, "Yearly Vision")
+    if yearly:
+        parts.append(f"## Yearly Vision\n{yearly}")
+
+    if not parts:
+        return "No planning pages found. Create Weekly Plan, Monthly Plan, and/or Yearly Vision pages."
+
+    return "\n\n".join(parts)
+
+
 if __name__ == "__main__":
     main()
