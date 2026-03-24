@@ -421,15 +421,15 @@ async fn resolve_page(
         };
     }
 
-    // Match by title prefix
+    // Match by title prefix (exclude trashed pages)
     let pages = storage
         .list_pages(nb_id)
         .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    // Try exact match first
+    // Try exact match first (active pages only)
     let exact: Vec<&Page> = pages
         .iter()
-        .filter(|p| p.title.to_lowercase() == title_lower)
+        .filter(|p| p.deleted_at.is_none() && p.title.to_lowercase() == title_lower)
         .collect();
     if exact.len() == 1 {
         return Ok(Json(ApiResponse {
@@ -437,10 +437,10 @@ async fn resolve_page(
         }));
     }
 
-    // Try prefix match
+    // Try prefix match (active pages only)
     let prefix: Vec<&Page> = pages
         .iter()
-        .filter(|p| p.title.to_lowercase().starts_with(&title_lower))
+        .filter(|p| p.deleted_at.is_none() && p.title.to_lowercase().starts_with(&title_lower))
         .collect();
     match prefix.len() {
         0 => Err(api_err(
@@ -1336,15 +1336,149 @@ fn make_paragraph_content(text: &str) -> EditorData {
     }
 }
 
+/// Parse markdown-ish text into Editor.js blocks.
+/// Supports headers (##), unordered lists (- ), ordered lists (1. ),
+/// checklists (- [ ] / - [x] ), and paragraphs.
 fn text_to_blocks(text: &str) -> Vec<EditorBlock> {
-    text.split("\n\n")
-        .filter(|s| !s.trim().is_empty())
-        .map(|paragraph| EditorBlock {
+    let mut blocks: Vec<EditorBlock> = Vec::new();
+    let mut current_list: Vec<String> = Vec::new();
+    let mut list_style = "unordered"; // "unordered" or "ordered"
+    let mut current_checklist: Vec<(String, bool)> = Vec::new();
+    let mut paragraph_lines: Vec<String> = Vec::new();
+
+    let flush_paragraph = |lines: &mut Vec<String>, blocks: &mut Vec<EditorBlock>| {
+        if !lines.is_empty() {
+            let text = lines.join("\n");
+            if !text.trim().is_empty() {
+                blocks.push(EditorBlock {
+                    id: Uuid::new_v4().to_string()[..10].to_string(),
+                    block_type: "paragraph".to_string(),
+                    data: serde_json::json!({ "text": text.trim() }),
+                });
+            }
+            lines.clear();
+        }
+    };
+
+    let flush_list = |items: &mut Vec<String>, style: &str, blocks: &mut Vec<EditorBlock>| {
+        if !items.is_empty() {
+            let list_items: Vec<serde_json::Value> = items
+                .iter()
+                .map(|item| serde_json::json!({ "content": item, "items": [] }))
+                .collect();
+            blocks.push(EditorBlock {
+                id: Uuid::new_v4().to_string()[..10].to_string(),
+                block_type: "list".to_string(),
+                data: serde_json::json!({ "style": style, "items": list_items }),
+            });
+            items.clear();
+        }
+    };
+
+    let flush_checklist = |items: &mut Vec<(String, bool)>, blocks: &mut Vec<EditorBlock>| {
+        if !items.is_empty() {
+            let cl_items: Vec<serde_json::Value> = items
+                .iter()
+                .map(|(text, checked)| serde_json::json!({ "text": text, "checked": checked }))
+                .collect();
+            blocks.push(EditorBlock {
+                id: Uuid::new_v4().to_string()[..10].to_string(),
+                block_type: "checklist".to_string(),
+                data: serde_json::json!({ "items": cl_items }),
+            });
+            items.clear();
+        }
+    };
+
+    for line in text.lines() {
+        let trimmed = line.trim();
+
+        // Empty line — flush current paragraph
+        if trimmed.is_empty() {
+            flush_paragraph(&mut paragraph_lines, &mut blocks);
+            continue;
+        }
+
+        // Header: # ## ### etc.
+        if trimmed.starts_with('#') {
+            flush_paragraph(&mut paragraph_lines, &mut blocks);
+            flush_list(&mut current_list, list_style, &mut blocks);
+            flush_checklist(&mut current_checklist, &mut blocks);
+
+            let level = trimmed.chars().take_while(|c| *c == '#').count().min(6);
+            let header_text = trimmed[level..].trim().to_string();
+            if !header_text.is_empty() {
+                blocks.push(EditorBlock {
+                    id: Uuid::new_v4().to_string()[..10].to_string(),
+                    block_type: "header".to_string(),
+                    data: serde_json::json!({ "text": header_text, "level": level }),
+                });
+            }
+            continue;
+        }
+
+        // Checklist: - [ ] or - [x]
+        if (trimmed.starts_with("- [ ] ") || trimmed.starts_with("- [x] ") || trimmed.starts_with("- [X] ")) {
+            flush_paragraph(&mut paragraph_lines, &mut blocks);
+            flush_list(&mut current_list, list_style, &mut blocks);
+
+            let checked = trimmed.starts_with("- [x]") || trimmed.starts_with("- [X]");
+            let item_text = trimmed[6..].trim().to_string();
+            current_checklist.push((item_text, checked));
+            continue;
+        }
+
+        // Unordered list: - or *
+        if (trimmed.starts_with("- ") || trimmed.starts_with("* ")) && !trimmed.starts_with("- [") {
+            flush_paragraph(&mut paragraph_lines, &mut blocks);
+            flush_checklist(&mut current_checklist, &mut blocks);
+
+            if list_style != "unordered" && !current_list.is_empty() {
+                flush_list(&mut current_list, list_style, &mut blocks);
+            }
+            list_style = "unordered";
+            current_list.push(trimmed[2..].trim().to_string());
+            continue;
+        }
+
+        // Ordered list: 1. 2. etc.
+        if trimmed.len() > 2 {
+            let dot_pos = trimmed.find(". ");
+            if let Some(pos) = dot_pos {
+                if pos <= 3 && trimmed[..pos].chars().all(|c| c.is_ascii_digit()) {
+                    flush_paragraph(&mut paragraph_lines, &mut blocks);
+                    flush_checklist(&mut current_checklist, &mut blocks);
+
+                    if list_style != "ordered" && !current_list.is_empty() {
+                        flush_list(&mut current_list, list_style, &mut blocks);
+                    }
+                    list_style = "ordered";
+                    current_list.push(trimmed[pos + 2..].trim().to_string());
+                    continue;
+                }
+            }
+        }
+
+        // Regular text — accumulate as paragraph
+        flush_list(&mut current_list, list_style, &mut blocks);
+        flush_checklist(&mut current_checklist, &mut blocks);
+        paragraph_lines.push(trimmed.to_string());
+    }
+
+    // Flush remaining
+    flush_paragraph(&mut paragraph_lines, &mut blocks);
+    flush_list(&mut current_list, list_style, &mut blocks);
+    flush_checklist(&mut current_checklist, &mut blocks);
+
+    if blocks.is_empty() {
+        blocks.push(EditorBlock {
             id: Uuid::new_v4().to_string()[..10].to_string(),
             block_type: "paragraph".to_string(),
-            data: serde_json::json!({ "text": paragraph.trim() }),
-        })
-        .collect()
+            data: serde_json::json!({ "text": "" }),
+        });
+    }
+
+    blocks
 }
 
 /// Snap a byte offset down to a char boundary.
