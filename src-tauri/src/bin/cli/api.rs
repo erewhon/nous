@@ -306,11 +306,14 @@ pub fn build_router(state: AppState) -> Router {
             post(agile_daily_note),
         )
         // Share routes
-        // Gallery
-        // Gallery
+        // Dashboards
         .route(
             "/gallery/{notebook_id}",
             get(serve_gallery),
+        )
+        .route(
+            "/finance/{notebook_id}",
+            get(serve_finance),
         )
         .route(
             "/api/image-cache/{hash}",
@@ -2190,6 +2193,14 @@ async fn serve_gallery(
     Path(notebook_id): Path<String>,
 ) -> impl IntoResponse {
     let html = include_str!("gallery.html")
+        .replace("{{NOTEBOOK_ID}}", &notebook_id);
+    Html(html)
+}
+
+async fn serve_finance(
+    Path(notebook_id): Path<String>,
+) -> impl IntoResponse {
+    let html = include_str!("finance.html")
         .replace("{{NOTEBOOK_ID}}", &notebook_id);
     Html(html)
 }

@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Finance Dashboard</title>
+<style>
+  :root {
+    --bg: #0f0f0f; --surface: #1a1a1a; --surface2: #222; --border: #2a2a2a;
+    --text: #e0e0e0; --text-dim: #888; --accent: #6366f1; --accent-hover: #818cf8;
+    --success: #22c55e; --danger: #ef4444; --warning: #f59e0b;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+  .header { position: sticky; top: 0; z-index: 10; background: var(--surface); border-bottom: 1px solid var(--border); padding: 12px 24px; display: flex; align-items: center; gap: 16px; }
+  .header h1 { font-size: 18px; font-weight: 700; }
+  .header-right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+  select { padding: 6px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 12px; outline: none; }
+
+  .dashboard { padding: 20px; max-width: 1200px; margin: 0 auto; }
+
+  /* Summary cards */
+  .summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 24px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+  .card-label { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
+  .card-value { font-size: 24px; font-weight: 700; }
+  .card-value.income { color: var(--success); }
+  .card-value.expense { color: var(--danger); }
+  .card-value.net-positive { color: var(--success); }
+  .card-value.net-negative { color: var(--danger); }
+  .card-sub { font-size: 11px; color: var(--text-dim); margin-top: 4px; }
+
+  /* Chart containers */
+  .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
+  @media (max-width: 768px) { .charts { grid-template-columns: 1fr; } }
+  .chart-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; }
+  .chart-card h3 { font-size: 13px; font-weight: 600; margin-bottom: 12px; color: var(--text-dim); }
+  .chart-card.full { grid-column: 1 / -1; }
+
+  /* Bar chart */
+  .bar-chart { display: flex; align-items: flex-end; gap: 4px; height: 200px; padding-top: 8px; }
+  .bar-group { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; height: 100%; justify-content: flex-end; }
+  .bar { width: 100%; max-width: 40px; border-radius: 4px 4px 0 0; transition: height 0.3s; cursor: pointer; position: relative; }
+  .bar:hover { opacity: 0.8; }
+  .bar-label { font-size: 10px; color: var(--text-dim); text-align: center; margin-top: 4px; }
+  .bar-tooltip { display: none; position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; font-size: 11px; white-space: nowrap; z-index: 5; }
+  .bar:hover .bar-tooltip { display: block; }
+
+  /* Category list */
+  .cat-list { max-height: 250px; overflow-y: auto; }
+  .cat-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--border); }
+  .cat-row:last-child { border-bottom: none; }
+  .cat-color { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
+  .cat-name { font-size: 13px; flex: 1; }
+  .cat-amount { font-size: 13px; font-weight: 600; }
+  .cat-pct { font-size: 11px; color: var(--text-dim); width: 40px; text-align: right; }
+  .cat-bar-bg { flex: 1; max-width: 100px; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
+  .cat-bar-fill { height: 100%; border-radius: 3px; }
+
+  /* Transaction list */
+  .tx-list { max-height: 400px; overflow-y: auto; }
+  .tx-row { display: grid; grid-template-columns: 90px 1fr auto; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+  .tx-row:last-child { border-bottom: none; }
+  .tx-date { color: var(--text-dim); }
+  .tx-cat { font-size: 11px; color: var(--accent); }
+
+  .empty { text-align: center; padding: 60px; color: var(--text-dim); }
+  .empty h2 { font-size: 18px; color: var(--text); margin-bottom: 8px; }
+  .loading { text-align: center; padding: 40px; color: var(--text-dim); }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Finance Dashboard</h1>
+  <div class="header-right">
+    <select id="month-select" onchange="onMonthChange()"></select>
+    <select id="db-select" onchange="onDbChange()"></select>
+  </div>
+</div>
+
+<div class="dashboard" id="dashboard">
+  <div class="loading">Loading financial data...</div>
+</div>
+
+<script>
+const NOTEBOOK_ID = '{{NOTEBOOK_ID}}';
+const API = '';
+
+const COLORS = ['#6366f1','#f59e0b','#22c55e','#ef4444','#8b5cf6','#ec4899','#14b8a6','#f97316','#06b6d4','#84cc16','#a855f7','#e11d48'];
+
+let databases = [];
+let selectedDbId = '';
+let selectedMonth = '';
+let transactions = [];
+let properties = [];
+
+async function init() {
+  // Find databases in this notebook
+  const res = await fetch(`${API}/api/notebooks/${NOTEBOOK_ID}/databases`);
+  const data = await res.json();
+  databases = (data.data || data).filter(d => d.title.toLowerCase().includes('transaction'));
+
+  if (databases.length === 0) {
+    // Try all databases
+    databases = data.data || data;
+  }
+
+  const dbSelect = document.getElementById('db-select');
+  dbSelect.innerHTML = databases.map(d => `<option value="${d.id}">${d.title} (${d.rowCount} rows)</option>`).join('');
+
+  if (databases.length > 0) {
+    selectedDbId = databases[0].id;
+    await loadDatabase();
+  } else {
+    document.getElementById('dashboard').innerHTML = '<div class="empty"><h2>No databases found</h2><p>Create a Transactions database in this notebook.</p></div>';
+  }
+}
+
+async function loadDatabase() {
+  document.getElementById('dashboard').innerHTML = '<div class="loading">Loading...</div>';
+
+  const res = await fetch(`${API}/api/notebooks/${NOTEBOOK_ID}/databases/${selectedDbId}`);
+  const data = await res.json();
+  const db = (data.data || data).database;
+
+  properties = db.properties || [];
+  const rows = db.rows || [];
+
+  // Resolve option IDs to labels
+  const optionMap = {};
+  for (const prop of properties) {
+    if (prop.type === 'select' || prop.type === 'multiSelect') {
+      for (const opt of (prop.options || [])) {
+        optionMap[`${prop.id}:${opt.id}`] = opt.label;
+      }
+    }
+  }
+
+  const propIdToName = {};
+  for (const p of properties) { propIdToName[p.id] = p.name; }
+
+  transactions = rows.map(row => {
+    const flat = {};
+    for (const [pid, val] of Object.entries(row.cells || {})) {
+      const name = propIdToName[pid] || pid;
+      if (typeof val === 'string' && optionMap[`${pid}:${val}`]) {
+        flat[name] = optionMap[`${pid}:${val}`];
+      } else {
+        flat[name] = val;
+      }
+    }
+    flat._id = row.id;
+    return flat;
+  });
+
+  // Build month selector
+  const months = new Set();
+  for (const tx of transactions) {
+    const d = String(tx.Date || '').slice(0, 7);
+    if (d) months.add(d);
+  }
+  const sortedMonths = [...months].sort().reverse();
+
+  const monthSelect = document.getElementById('month-select');
+  monthSelect.innerHTML = `<option value="">All Time</option>` +
+    sortedMonths.map(m => `<option value="${m}">${m}</option>`).join('');
+
+  if (!selectedMonth && sortedMonths.length > 0) {
+    selectedMonth = sortedMonths[0];
+    monthSelect.value = selectedMonth;
+  }
+
+  renderDashboard();
+}
+
+function getFiltered() {
+  if (!selectedMonth) return transactions;
+  return transactions.filter(tx => String(tx.Date || '').startsWith(selectedMonth));
+}
+
+function toNum(v) { return typeof v === 'number' ? v : parseFloat(v) || 0; }
+
+function renderDashboard() {
+  const filtered = getFiltered();
+  if (filtered.length === 0) {
+    document.getElementById('dashboard').innerHTML = '<div class="empty"><h2>No transactions</h2><p>Add transactions to the database to see your dashboard.</p></div>';
+    return;
+  }
+
+  // Calculate summary stats
+  const debits = filtered.filter(tx => String(tx.Type || 'debit').toLowerCase() !== 'credit' && String(tx.Category || '').toLowerCase() !== 'income');
+  const credits = filtered.filter(tx => String(tx.Type || '').toLowerCase() === 'credit' || String(tx.Category || '').toLowerCase() === 'income');
+
+  const totalSpent = debits.reduce((s, tx) => s + Math.abs(toNum(tx.Amount)), 0);
+  const totalIncome = credits.reduce((s, tx) => s + Math.abs(toNum(tx.Amount)), 0);
+  const net = totalIncome - totalSpent;
+  const txCount = filtered.length;
+
+  // Category breakdown
+  const catTotals = {};
+  for (const tx of debits) {
+    const cat = tx.Category || 'Uncategorized';
+    catTotals[cat] = (catTotals[cat] || 0) + Math.abs(toNum(tx.Amount));
+  }
+  const sortedCats = Object.entries(catTotals).sort((a, b) => b[1] - a[1]);
+
+  // Monthly trend (last 6 months)
+  const monthlySpend = {};
+  const monthlyIncome = {};
+  for (const tx of transactions) {
+    const m = String(tx.Date || '').slice(0, 7);
+    if (!m) continue;
+    const amt = Math.abs(toNum(tx.Amount));
+    const isIncome = String(tx.Type || '').toLowerCase() === 'credit' || String(tx.Category || '').toLowerCase() === 'income';
+    if (isIncome) { monthlyIncome[m] = (monthlyIncome[m] || 0) + amt; }
+    else { monthlySpend[m] = (monthlySpend[m] || 0) + amt; }
+  }
+  const allMonths = [...new Set([...Object.keys(monthlySpend), ...Object.keys(monthlyIncome)])].sort().slice(-6);
+
+  // Top merchants
+  const merchTotals = {};
+  for (const tx of debits) {
+    const m = tx.Merchant || tx.Description || 'Unknown';
+    merchTotals[m] = (merchTotals[m] || 0) + Math.abs(toNum(tx.Amount));
+  }
+  const topMerchants = Object.entries(merchTotals).sort((a, b) => b[1] - a[1]).slice(0, 8);
+
+  // Recent transactions
+  const recent = [...filtered].sort((a, b) => String(b.Date || '').localeCompare(String(a.Date || ''))).slice(0, 20);
+
+  const maxMonthly = Math.max(...allMonths.map(m => (monthlySpend[m] || 0)), 1);
+  const maxCat = sortedCats.length > 0 ? sortedCats[0][1] : 1;
+  const maxMerch = topMerchants.length > 0 ? topMerchants[0][1] : 1;
+
+  document.getElementById('dashboard').innerHTML = `
+    <div class="summary">
+      <div class="card">
+        <div class="card-label">Total Spent</div>
+        <div class="card-value expense">$${totalSpent.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
+        <div class="card-sub">${debits.length} transactions</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Total Income</div>
+        <div class="card-value income">$${totalIncome.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
+        <div class="card-sub">${credits.length} transactions</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Net</div>
+        <div class="card-value ${net >= 0 ? 'net-positive' : 'net-negative'}">$${net.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</div>
+        <div class="card-sub">${selectedMonth || 'All time'}</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Transactions</div>
+        <div class="card-value">${txCount}</div>
+        <div class="card-sub">${selectedMonth ? 'this month' : 'total'}</div>
+      </div>
+    </div>
+
+    <div class="charts">
+      <div class="chart-card">
+        <h3>Monthly Spending</h3>
+        <div class="bar-chart">
+          ${allMonths.map(m => {
+            const spend = monthlySpend[m] || 0;
+            const h = Math.max(4, (spend / maxMonthly) * 180);
+            return `<div class="bar-group">
+              <div class="bar" style="height:${h}px;background:var(--accent)">
+                <div class="bar-tooltip">$${spend.toLocaleString(undefined, {maximumFractionDigits: 0})}</div>
+              </div>
+              <div class="bar-label">${m.slice(5)}</div>
+            </div>`;
+          }).join('')}
+        </div>
+      </div>
+
+      <div class="chart-card">
+        <h3>Spending by Category</h3>
+        <div class="cat-list">
+          ${sortedCats.map(([cat, total], i) => {
+            const pct = totalSpent > 0 ? (total / totalSpent * 100) : 0;
+            return `<div class="cat-row">
+              <div class="cat-color" style="background:${COLORS[i % COLORS.length]}"></div>
+              <div class="cat-name">${esc(cat)}</div>
+              <div class="cat-bar-bg"><div class="cat-bar-fill" style="width:${(total/maxCat*100)}%;background:${COLORS[i % COLORS.length]}"></div></div>
+              <div class="cat-amount">$${total.toLocaleString(undefined, {maximumFractionDigits: 0})}</div>
+              <div class="cat-pct">${pct.toFixed(0)}%</div>
+            </div>`;
+          }).join('')}
+        </div>
+      </div>
+
+      <div class="chart-card">
+        <h3>Top Merchants</h3>
+        <div class="cat-list">
+          ${topMerchants.map(([merch, total], i) => `
+            <div class="cat-row">
+              <div class="cat-color" style="background:${COLORS[(i + 4) % COLORS.length]}"></div>
+              <div class="cat-name">${esc(merch)}</div>
+              <div class="cat-bar-bg"><div class="cat-bar-fill" style="width:${(total/maxMerch*100)}%;background:${COLORS[(i + 4) % COLORS.length]}"></div></div>
+              <div class="cat-amount">$${total.toLocaleString(undefined, {maximumFractionDigits: 0})}</div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+
+      <div class="chart-card">
+        <h3>Recent Transactions</h3>
+        <div class="tx-list">
+          ${recent.map(tx => {
+            const amt = toNum(tx.Amount);
+            const isIncome = String(tx.Type || '').toLowerCase() === 'credit' || String(tx.Category || '').toLowerCase() === 'income';
+            return `<div class="tx-row">
+              <div class="tx-date">${tx.Date || ''}</div>
+              <div>
+                <div>${esc(tx.Description || tx.Merchant || 'Unknown')}</div>
+                <div class="tx-cat">${esc(tx.Category || '')}</div>
+              </div>
+              <div style="font-weight:600;color:${isIncome ? 'var(--success)' : 'var(--danger)'}">
+                ${isIncome ? '+' : '-'}$${Math.abs(amt).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+              </div>
+            </div>`;
+          }).join('')}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function onMonthChange() {
+  selectedMonth = document.getElementById('month-select').value;
+  renderDashboard();
+}
+
+function onDbChange() {
+  selectedDbId = document.getElementById('db-select').value;
+  selectedMonth = '';
+  loadDatabase();
+}
+
+function esc(s) {
+  if (!s) return '';
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+init();
+</script>
+</body>
+</html>

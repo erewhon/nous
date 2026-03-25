@@ -190,6 +190,22 @@ export function CommandPalette({
     });
 
     cmds.push({
+      id: "action-finance-dashboard",
+      title: "Open Finance Dashboard",
+      subtitle: "View spending charts and transaction analysis",
+      icon: <IconZap />,
+      category: "action",
+      action: () => {
+        if (selectedNotebookId) {
+          window.open(`http://127.0.0.1:7667/finance/${selectedNotebookId}`, "_blank");
+          onClose();
+        }
+      },
+      keywords: ["finance", "money", "spending", "budget", "transactions", "dashboard", "charts"],
+      expert: true,
+    });
+
+    cmds.push({
       id: "action-art-gallery",
       title: "Open Art Gallery",
       subtitle: "Visual gallery of artwork in this notebook",
