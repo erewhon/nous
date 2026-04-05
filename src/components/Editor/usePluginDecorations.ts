@@ -84,7 +84,7 @@ export function usePluginDecorations({
             dt.decorationId,
             blockData
           )) as { decorations?: Decoration[] } | null;
-          if (result?.decorations) {
+          if (result?.decorations && Array.isArray(result.decorations)) {
             allDecorations.push(...result.decorations);
           }
         } catch (e) {
