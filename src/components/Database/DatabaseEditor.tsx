@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { Page } from "../../types/page";
 import { usePageStore } from "../../stores/pageStore";
 import type {
@@ -161,9 +162,15 @@ export function DatabaseEditor({
     };
   }, []);
 
-  // Reload content from disk (e.g., after a plugin modifies the database via backend API)
+  // Reload content from disk (e.g., after a plugin or MCP server modifies the database).
+  // Cancels any pending debounced save to prevent overwriting the fresh data.
   const refreshFromDisk = useCallback(async () => {
     if (isInlineMode || !notebookId || !page) return;
+    // Cancel pending save so stale in-memory content doesn't overwrite fresh disk data
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = null;
+    }
     try {
       const result = await api.getFileContent(notebookId, page.id);
       if (result.content) {
@@ -174,6 +181,32 @@ export function DatabaseEditor({
       console.error("Failed to refresh database from disk:", err);
     }
   }, [isInlineMode, notebookId, page]);
+
+  // Listen for external database updates (MCP server, daemon API) and refresh from disk.
+  useEffect(() => {
+    if (isInlineMode || !page) return;
+    let unlisten: UnlistenFn | null = null;
+
+    const setup = async () => {
+      unlisten = await listen<{ notebookId: string; pageIds: string[] }>(
+        "mcp-database-updated",
+        (event) => {
+          const { pageIds } = event.payload;
+          if (pageIds.includes(page.id)) {
+            console.log(
+              `[database] External update detected for ${page.title}, refreshing from disk`
+            );
+            refreshFromDisk();
+          }
+        }
+      );
+    };
+
+    setup();
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, [isInlineMode, page, refreshFromDisk]);
 
   // Flush pending baseline into undo stack
   const flushPendingBaseline = useCallback(() => {

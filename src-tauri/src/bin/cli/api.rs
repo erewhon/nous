@@ -200,6 +200,22 @@ struct UpdateRowsRequest {
     updates: Vec<serde_json::Value>,
 }
 
+#[derive(Deserialize)]
+struct CreateDatabaseRequest {
+    title: String,
+    /// Property definitions: [{"name": "...", "type": "text|select|...", "options": [...]}]
+    properties: Vec<serde_json::Value>,
+    tags: Option<Vec<String>>,
+    folder_id: Option<String>,
+    section_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct DeleteRowsRequest {
+    /// Row IDs (UUIDs) to delete
+    row_ids: Vec<String>,
+}
+
 // Track daemon start time
 static START_TIME: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
 
@@ -276,7 +292,7 @@ pub fn build_router(state: AppState) -> Router {
         // Databases
         .route(
             "/api/notebooks/{notebook_id}/databases",
-            get(list_databases),
+            get(list_databases).post(create_database),
         )
         .route(
             "/api/notebooks/{notebook_id}/databases/{db_id}",
@@ -284,11 +300,7 @@ pub fn build_router(state: AppState) -> Router {
         )
         .route(
             "/api/notebooks/{notebook_id}/databases/{db_id}/rows",
-            post(add_database_rows),
-        )
-        .route(
-            "/api/notebooks/{notebook_id}/databases/{db_id}/rows",
-            put(update_database_rows),
+            post(add_database_rows).put(update_database_rows).delete(delete_database_rows),
         )
         // Folder creation
         .route(
@@ -2030,6 +2042,188 @@ async fn update_database_rows(
         data: serde_json::json!({
             "databaseId": db_id,
             "rowsUpdated": updated_count,
+        }),
+    }))
+}
+
+// ===== Create Database =====
+
+async fn create_database(
+    State(state): State<AppState>,
+    Path(notebook_id): Path<String>,
+    Json(req): Json<CreateDatabaseRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let nb_id = parse_uuid(&notebook_id)?;
+    let storage = state.storage.lock().unwrap();
+
+    // Create the page
+    let mut page = storage
+        .create_page(nb_id, req.title)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    page.page_type = PageType::Database;
+    page.storage_mode = Some(nous_lib::storage::FileStorageMode::Embedded);
+    page.file_extension = Some("database".to_string());
+    page.source_file = Some(format!("files/{}.database", page.id));
+
+    if let Some(tags) = req.tags {
+        page.tags = tags;
+    }
+    if let Some(fid) = req.folder_id {
+        if let Ok(uuid) = Uuid::parse_str(&fid) {
+            page.folder_id = Some(uuid);
+        }
+    }
+    if let Some(sid) = req.section_id {
+        if let Ok(uuid) = Uuid::parse_str(&sid) {
+            page.section_id = Some(uuid);
+        }
+    }
+
+    storage
+        .update_page(&page)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    // Build properties with generated UUIDs
+    let colors = [
+        "#ef4444", "#f97316", "#f59e0b", "#22c55e", "#14b8a6",
+        "#3b82f6", "#6366f1", "#8b5cf6", "#ec4899", "#64748b",
+    ];
+    let mut built_properties = Vec::new();
+    let mut color_idx = 0usize;
+
+    for spec in &req.properties {
+        let name = spec.get("name").and_then(|v| v.as_str()).unwrap_or("Column");
+        let prop_type = spec.get("type").and_then(|v| v.as_str()).unwrap_or("text");
+
+        let mut prop = serde_json::json!({
+            "id": Uuid::new_v4().to_string(),
+            "name": name,
+            "type": prop_type,
+        });
+
+        // Build options for select/multiSelect
+        if prop_type == "select" || prop_type == "multiSelect" {
+            if let Some(opts) = spec.get("options").and_then(|v| v.as_array()) {
+                let built_opts: Vec<serde_json::Value> = opts
+                    .iter()
+                    .map(|opt| {
+                        let label = opt.as_str().unwrap_or("Option");
+                        let color = colors[color_idx % colors.len()];
+                        color_idx += 1;
+                        serde_json::json!({
+                            "id": Uuid::new_v4().to_string(),
+                            "label": label,
+                            "color": color,
+                        })
+                    })
+                    .collect();
+                prop["options"] = serde_json::json!(built_opts);
+            }
+        }
+
+        built_properties.push(prop);
+    }
+
+    // Create the .database file
+    let db_content = serde_json::json!({
+        "version": 2,
+        "properties": built_properties,
+        "rows": [],
+        "views": [{
+            "id": Uuid::new_v4().to_string(),
+            "name": "Table",
+            "type": "table",
+            "sorts": [],
+            "filters": [],
+            "config": {},
+        }],
+    });
+
+    let db_json = serde_json::to_string_pretty(&db_content)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, format!("serialize: {e}")))?;
+    storage
+        .write_native_file_content(&page, &db_json)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    state.sync_manager.queue_page_update(nb_id, page.id);
+
+    emit_event(&state, "database.created", serde_json::json!({
+        "notebookId": notebook_id,
+        "databaseId": page.id.to_string(),
+        "title": page.title,
+        "propertyCount": built_properties.len(),
+    }));
+
+    Ok((StatusCode::CREATED, Json(ApiResponse {
+        data: serde_json::json!({
+            "id": page.id.to_string(),
+            "title": page.title,
+            "notebookId": notebook_id,
+            "propertyCount": built_properties.len(),
+        }),
+    })))
+}
+
+// ===== Delete Database Rows =====
+
+async fn delete_database_rows(
+    State(state): State<AppState>,
+    Path((notebook_id, db_id)): Path<(String, String)>,
+    Json(req): Json<DeleteRowsRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let nb_id = parse_uuid(&notebook_id)?;
+    let pg_id = parse_uuid(&db_id)?;
+    let storage = state.storage.lock().unwrap();
+
+    let page = storage
+        .get_page(nb_id, pg_id)
+        .map_err(|e| api_err(StatusCode::NOT_FOUND, e.to_string()))?;
+    if page.page_type != PageType::Database {
+        return Err(api_err(StatusCode::BAD_REQUEST, "Not a database page"));
+    }
+
+    let content = storage
+        .read_native_file_content(&page)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let mut db: serde_json::Value = serde_json::from_str(&content)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, format!("Invalid database JSON: {e}")))?;
+
+    let rows_arr = db
+        .get_mut("rows")
+        .and_then(|v| v.as_array_mut())
+        .ok_or_else(|| api_err(StatusCode::INTERNAL_SERVER_ERROR, "database has no rows array"))?;
+
+    let before = rows_arr.len();
+    let ids_to_delete: std::collections::HashSet<&str> =
+        req.row_ids.iter().map(|s| s.as_str()).collect();
+    rows_arr.retain(|row| {
+        row.get("id")
+            .and_then(|v| v.as_str())
+            .map_or(true, |id| !ids_to_delete.contains(id))
+    });
+    let deleted = before - rows_arr.len();
+    let total = rows_arr.len();
+
+    // Drop the mutable borrow on `db` before serializing
+    let db_json = serde_json::to_string_pretty(&db)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, format!("serialize: {e}")))?;
+    storage
+        .write_native_file_content(&page, &db_json)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    emit_event(&state, "database.rows_deleted", serde_json::json!({
+        "notebookId": notebook_id,
+        "databaseId": db_id,
+        "rowsDeleted": deleted,
+        "totalRows": total,
+    }));
+
+    Ok(Json(ApiResponse {
+        data: serde_json::json!({
+            "databaseId": db_id,
+            "rowsDeleted": deleted,
+            "totalRows": total,
         }),
     }))
 }

@@ -44,6 +44,14 @@ class NousDaemonClient:
 
     # --- Status ---
 
+    def is_available(self) -> bool:
+        """Check if daemon is reachable. Returns False if not running."""
+        try:
+            self.client.get(self._url("/api/status"))
+            return True
+        except (httpx.ConnectError, httpx.ConnectTimeout):
+            return False
+
     def status(self) -> dict:
         """Check daemon status. Raises if daemon is not running."""
         try:
@@ -265,5 +273,82 @@ class NousDaemonClient:
         resp = self.client.post(
             self._url(f"/api/notebooks/{notebook_id}/daily-notes/{date}"),
             json=body,
+        )
+        return self._unwrap(resp)
+
+    # --- Databases ---
+
+    def list_databases(self, notebook_id: str) -> list[dict]:
+        resp = self.client.get(
+            self._url(f"/api/notebooks/{notebook_id}/databases")
+        )
+        return self._unwrap(resp)
+
+    def get_database(self, notebook_id: str, db_id: str) -> dict:
+        resp = self.client.get(
+            self._url(f"/api/notebooks/{notebook_id}/databases/{db_id}")
+        )
+        return self._unwrap(resp)
+
+    def create_database(
+        self,
+        notebook_id: str,
+        title: str,
+        properties: list[dict],
+        *,
+        tags: list[str] | None = None,
+        folder_id: str | None = None,
+        section_id: str | None = None,
+    ) -> dict:
+        body: dict[str, Any] = {
+            "title": title,
+            "properties": properties,
+        }
+        if tags is not None:
+            body["tags"] = tags
+        if folder_id is not None:
+            body["folder_id"] = folder_id
+        if section_id is not None:
+            body["section_id"] = section_id
+        resp = self.client.post(
+            self._url(f"/api/notebooks/{notebook_id}/databases"),
+            json=body,
+        )
+        return self._unwrap(resp)
+
+    def add_database_rows(
+        self,
+        notebook_id: str,
+        db_id: str,
+        rows: list[dict],
+    ) -> dict:
+        resp = self.client.post(
+            self._url(f"/api/notebooks/{notebook_id}/databases/{db_id}/rows"),
+            json={"rows": rows},
+        )
+        return self._unwrap(resp)
+
+    def update_database_rows(
+        self,
+        notebook_id: str,
+        db_id: str,
+        updates: list[dict],
+    ) -> dict:
+        resp = self.client.put(
+            self._url(f"/api/notebooks/{notebook_id}/databases/{db_id}/rows"),
+            json={"updates": updates},
+        )
+        return self._unwrap(resp)
+
+    def delete_database_rows(
+        self,
+        notebook_id: str,
+        db_id: str,
+        row_ids: list[str],
+    ) -> dict:
+        resp = self.client.request(
+            "DELETE",
+            self._url(f"/api/notebooks/{notebook_id}/databases/{db_id}/rows"),
+            json={"row_ids": row_ids},
         )
         return self._unwrap(resp)

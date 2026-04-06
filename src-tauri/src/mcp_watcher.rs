@@ -62,6 +62,8 @@ impl WriteTracker {
 enum ChangeKind {
     /// A page JSON changed: notebooks/{nb_id}/pages/{page_id}.json
     Page { notebook_id: String, page_id: String },
+    /// A database file changed: notebooks/{nb_id}/files/{page_id}.database
+    Database { notebook_id: String, page_id: String },
     /// An inbox item changed
     Inbox,
     /// Goals or goal progress changed
@@ -83,6 +85,19 @@ fn classify_path(path: &std::path::Path, library_path: &std::path::Path) -> Opti
     {
         let page_id = components[3].trim_end_matches(".json").to_string();
         return Some(ChangeKind::Page {
+            notebook_id: components[1].to_string(),
+            page_id,
+        });
+    }
+
+    // notebooks/{nb_id}/files/{page_id}.database
+    if components.len() == 4
+        && components[0] == "notebooks"
+        && components[2] == "files"
+        && components[3].ends_with(".database")
+    {
+        let page_id = components[3].trim_end_matches(".database").to_string();
+        return Some(ChangeKind::Database {
             notebook_id: components[1].to_string(),
             page_id,
         });
@@ -165,6 +180,7 @@ pub fn start_library_watcher(
 
             // Classify and deduplicate
             let mut page_changes: HashMap<String, Vec<String>> = HashMap::new();
+            let mut database_changes: HashMap<String, Vec<String>> = HashMap::new();
             let mut inbox_changed = false;
             let mut goals_changed = false;
 
@@ -175,6 +191,15 @@ pub fn start_library_watcher(
                         page_id,
                     }) => {
                         page_changes
+                            .entry(notebook_id)
+                            .or_default()
+                            .push(page_id);
+                    }
+                    Some(ChangeKind::Database {
+                        notebook_id,
+                        page_id,
+                    }) => {
+                        database_changes
                             .entry(notebook_id)
                             .or_default()
                             .push(page_id);
@@ -214,6 +239,41 @@ pub fn start_library_watcher(
                 } else {
                     log::info!(
                         "[mcp-watcher] Emitted sync-pages-updated for {} page(s) in {}",
+                        page_ids.len(),
+                        &notebook_id[..8.min(notebook_id.len())]
+                    );
+                }
+            }
+
+            // Emit database-updated events
+            for (notebook_id, page_ids) in &database_changes {
+                // Database changes share the pages cooldown namespace
+                // to avoid double-refreshes
+                let last = last_pages_emit
+                    .get(&format!("db:{}", notebook_id))
+                    .copied()
+                    .unwrap_or(Instant::now() - CATEGORY_COOLDOWN * 2);
+                if now.duration_since(last) < CATEGORY_COOLDOWN {
+                    continue;
+                }
+                last_pages_emit.insert(format!("db:{}", notebook_id), now);
+
+                #[derive(Clone, serde::Serialize)]
+                #[serde(rename_all = "camelCase")]
+                struct DatabaseUpdated {
+                    notebook_id: String,
+                    page_ids: Vec<String>,
+                }
+
+                let payload = DatabaseUpdated {
+                    notebook_id: notebook_id.clone(),
+                    page_ids: page_ids.clone(),
+                };
+                if let Err(e) = app_clone.emit("mcp-database-updated", &payload) {
+                    log::warn!("Failed to emit mcp-database-updated: {}", e);
+                } else {
+                    log::info!(
+                        "[mcp-watcher] Emitted mcp-database-updated for {} database(s) in {}",
                         page_ids.len(),
                         &notebook_id[..8.min(notebook_id.len())]
                     );
@@ -270,10 +330,10 @@ pub fn start_library_watcher(
                     continue;
                 }
 
-                // Skip non-JSON files
+                // Skip files that aren't .json or .database
                 if path
                     .extension()
-                    .map_or(true, |ext| ext != "json")
+                    .map_or(true, |ext| ext != "json" && ext != "database")
                 {
                     continue;
                 }

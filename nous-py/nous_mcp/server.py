@@ -965,6 +965,15 @@ _resolve_option_label = resolve_option_label
 _format_database_as_table = format_database_as_table
 
 
+def _daemon_available() -> bool:
+    """Check if the daemon is reachable for routing writes."""
+    try:
+        daemon = _get_daemon()
+        return daemon.is_available()
+    except RuntimeError:
+        return False
+
+
 @mcp.tool()
 def list_databases(
     notebook: str,
@@ -1075,15 +1084,30 @@ def create_database(
     tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
 
     daemon = _get_daemon()
-
     prop_specs = json.loads(properties)
+
+    # Route through daemon API when available — daemon is single writer,
+    # prevents file collisions with the desktop app.
+    if _daemon_available():
+        logger.info("Creating database via daemon API")
+        result = daemon.create_database(
+            nb["id"],
+            title,
+            prop_specs,
+            tags=tag_list if tag_list else None,
+            folder_id=folder_id,
+            section_id=section_id,
+        )
+        return json.dumps(result, indent=2)
+
+    # Fallback: direct file access (daemon not running)
+    logger.info("Creating database via direct file access (daemon unavailable)")
     built_properties = []
     color_idx = 0
     for spec in prop_specs:
         prop, color_idx = _build_property(spec, color_idx)
         built_properties.append(prop)
 
-    # Create the page via daemon — Rust auto-sets sourceFile from fileExtension + page ID
     page = daemon.create_page(
         nb["id"],
         title,
@@ -1098,7 +1122,6 @@ def create_database(
     )
     page_id = page["id"]
 
-    # Create the .database file
     db_content = {
         "version": 2,
         "properties": built_properties,
@@ -1153,6 +1176,17 @@ def add_database_rows(
     if pg.get("pageType") != "database":
         raise ValueError(f"Page '{pg.get('title')}' is not a database")
 
+    row_specs = json.loads(rows)
+
+    # Route through daemon API when available — daemon is single writer,
+    # prevents file collisions with the desktop app.
+    if _daemon_available():
+        logger.info("Adding database rows via daemon API")
+        result = daemon.add_database_rows(nb["id"], pg["id"], row_specs)
+        return json.dumps(result, indent=2)
+
+    # Fallback: direct file access (daemon not running)
+    logger.info("Adding database rows via direct file access (daemon unavailable)")
     db_content = storage.read_database_content(nb["id"], pg["id"])
     if db_content is None:
         raise ValueError(f"Database file not found for page '{pg.get('title')}'")
@@ -1160,7 +1194,6 @@ def add_database_rows(
     properties = db_content.get("properties", [])
     prop_by_name = {p["name"].lower(): p for p in properties}
 
-    row_specs = json.loads(rows)
     now = datetime.now(UTC).isoformat()
 
     new_rows = []
@@ -1224,6 +1257,17 @@ def update_database_rows(
     if pg.get("pageType") != "database":
         raise ValueError(f"Page '{pg.get('title')}' is not a database")
 
+    update_specs = json.loads(updates)
+
+    # Route through daemon API when available — daemon is single writer,
+    # prevents file collisions with the desktop app.
+    if _daemon_available():
+        logger.info("Updating database rows via daemon API")
+        result = daemon.update_database_rows(nb["id"], pg["id"], update_specs)
+        return json.dumps(result, indent=2)
+
+    # Fallback: direct file access (daemon not running)
+    logger.info("Updating database rows via direct file access (daemon unavailable)")
     db_content = storage.read_database_content(nb["id"], pg["id"])
     if db_content is None:
         raise ValueError(f"Database file not found for page '{pg.get('title')}'")
@@ -1233,7 +1277,6 @@ def update_database_rows(
     existing_rows = db_content.get("rows", [])
     row_id_map = {r["id"]: i for i, r in enumerate(existing_rows)}
 
-    update_specs = json.loads(updates)
     now = datetime.now(UTC).isoformat()
     updated_count = 0
 
@@ -1687,6 +1730,11 @@ def main() -> None:
         logger.error("Nous daemon is not running: %s", e)
         logger.error("Start the daemon with: nous daemon start")
         sys.exit(1)
+
+    # Register workflow tools (composite tools that orchestrate multiple operations)
+    from nous_mcp.workflow import register_workflow_tools
+
+    register_workflow_tools(mcp, _get_storage, _get_daemon, _daemon_available)
 
     mcp.run(transport="stdio")
 
