@@ -7,6 +7,7 @@ import type {
   DatabaseFilter,
   DatabaseView,
   TableViewConfig,
+  BoardViewConfig,
   DatabaseContentV2,
   DatabaseRow,
   RollupConfig,
@@ -82,7 +83,9 @@ export function DatabaseToolbar({
   const groupByPropertyId =
     view.type === "table"
       ? ((view.config as TableViewConfig).groupByPropertyId ?? null)
-      : null;
+      : view.type === "board"
+        ? ((view.config as BoardViewConfig).groupByPropertyId ?? null)
+        : null;
 
   const handleSetGroupBy = (propertyId: string | null) => {
     onUpdateView((prev) => ({
@@ -208,8 +211,8 @@ export function DatabaseToolbar({
           )}
         </div>
 
-        {/* Group (table view only) */}
-        {view.type === "table" && (
+        {/* Group */}
+        {(view.type === "table" || view.type === "board") && (
           <div className="db-toolbar-btn-group">
             <button
               className={`db-toolbar-btn ${groupByPropertyId ? "db-toolbar-btn-active" : ""}`}
@@ -233,10 +236,13 @@ export function DatabaseToolbar({
             </button>
             {showGroup && (
               <GroupPopover
-                properties={properties}
+                properties={view.type === "board"
+                  ? properties.filter(p => p.type === "select" || p.type === "multiSelect")
+                  : properties}
                 groupByPropertyId={groupByPropertyId}
                 onSetGroupBy={handleSetGroupBy}
                 onClose={() => setShowGroup(false)}
+                showNone={view.type !== "board"}
               />
             )}
           </div>
@@ -983,11 +989,13 @@ function GroupPopover({
   groupByPropertyId,
   onSetGroupBy,
   onClose,
+  showNone = true,
 }: {
   properties: PropertyDef[];
   groupByPropertyId: string | null;
   onSetGroupBy: (propertyId: string | null) => void;
   onClose: () => void;
+  showNone?: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -1001,12 +1009,14 @@ function GroupPopover({
   return (
     <div ref={ref} className="db-popover">
       <div className="db-popover-title">Group by</div>
-      <button
-        className={`db-select-option ${!groupByPropertyId ? "db-select-option-checked" : ""}`}
-        onClick={() => onSetGroupBy(null)}
-      >
-        None
-      </button>
+      {showNone && (
+        <button
+          className={`db-select-option ${!groupByPropertyId ? "db-select-option-checked" : ""}`}
+          onClick={() => onSetGroupBy(null)}
+        >
+          None
+        </button>
+      )}
       {properties.map((prop) => (
         <button
           key={prop.id}

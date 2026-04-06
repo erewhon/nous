@@ -43,6 +43,7 @@ export function DatabaseBoard({
   content,
   view,
   onUpdateContent,
+  onUpdateView,
   relationContext,
   pageLinkPages,
   onNavigatePageLink,
@@ -141,8 +142,15 @@ export function DatabaseBoard({
       }
     }
 
-    // Build column objects
-    for (const opt of options) {
+    // Build column objects — respect custom column order if set
+    const orderedOptions = config.columnOrder?.length
+      ? config.columnOrder
+          .map(id => options.find(o => o.id === id))
+          .filter((o): o is SelectOption => o != null)
+          .concat(options.filter(o => !config.columnOrder!.includes(o.id)))
+      : options;
+
+    for (const opt of orderedOptions) {
       if (hiddenColumns.has(opt.id)) continue;
       cols.push({
         id: opt.id,
@@ -282,6 +290,21 @@ export function DatabaseBoard({
     [content.properties, onUpdateContent]
   );
 
+  const handleMoveColumn = useCallback(
+    (index: number, direction: -1 | 1) => {
+      const newIndex = index + direction;
+      const currentOrder = columns.map((c) => c.id).filter((id) => id !== NO_VALUE_COLUMN);
+      if (newIndex < 0 || newIndex >= currentOrder.length) return;
+      const [moved] = currentOrder.splice(index, 1);
+      currentOrder.splice(newIndex, 0, moved);
+      onUpdateView((prev) => ({
+        ...prev,
+        config: { ...prev.config, columnOrder: currentOrder },
+      }));
+    },
+    [columns, onUpdateView]
+  );
+
   if (!groupProp) {
     return (
       <div className="db-board-empty">
@@ -305,7 +328,7 @@ export function DatabaseBoard({
         onDragEnd={handleDragEnd}
       >
         <div className="db-board-container">
-          {columns.map((col) => (
+          {columns.map((col, colIdx) => (
             <BoardColumn
               key={col.id}
               id={col.id}
@@ -317,6 +340,10 @@ export function DatabaseBoard({
               onAddCard={() => handleAddCard(col.id)}
               pageLinkPages={pageLinkPages}
               formulaValues={relationContext?.formulaValues}
+              canMoveLeft={colIdx > 0 && col.id !== NO_VALUE_COLUMN}
+              canMoveRight={colIdx < columns.length - 1 && col.id !== NO_VALUE_COLUMN && columns[colIdx + 1]?.id !== NO_VALUE_COLUMN}
+              onMoveLeft={() => handleMoveColumn(colIdx, -1)}
+              onMoveRight={() => handleMoveColumn(colIdx, 1)}
             />
           ))}
         </div>
@@ -362,6 +389,10 @@ function BoardColumn({
   onAddCard,
   pageLinkPages,
   formulaValues,
+  canMoveLeft,
+  canMoveRight,
+  onMoveLeft,
+  onMoveRight,
 }: {
   id: string;
   label: string;
@@ -372,6 +403,10 @@ function BoardColumn({
   onAddCard: () => void;
   pageLinkPages?: Array<{ id: string; title: string }>;
   formulaValues?: Map<string, Map<string, CellValue>>;
+  canMoveLeft?: boolean;
+  canMoveRight?: boolean;
+  onMoveLeft?: () => void;
+  onMoveRight?: () => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id });
 
@@ -388,6 +423,16 @@ function BoardColumn({
           {label}
         </span>
         <span className="db-board-column-count">{rows.length}</span>
+        {(canMoveLeft || canMoveRight) && (
+          <span className="db-board-column-reorder">
+            {canMoveLeft && (
+              <button className="db-board-move-btn" onClick={onMoveLeft} title="Move left">‹</button>
+            )}
+            {canMoveRight && (
+              <button className="db-board-move-btn" onClick={onMoveRight} title="Move right">›</button>
+            )}
+          </span>
+        )}
       </div>
       <div className="db-board-column-cards">
         {rows.map((row) => (

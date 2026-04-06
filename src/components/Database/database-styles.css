@@ -1204,7 +1204,38 @@
 .db-board-column-count {
   font-size: 11px;
   color: var(--color-text-muted);
+}
+
+.db-board-column-reorder {
   margin-left: auto;
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.db-board-column:hover .db-board-column-reorder {
+  opacity: 1;
+}
+
+.db-board-move-btn {
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.db-board-move-btn:hover {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
 }
 
 .db-board-column-cards {

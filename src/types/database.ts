@@ -176,6 +176,7 @@ export type TableViewConfig = z.infer<typeof TableViewConfigSchema>;
 export const BoardViewConfigSchema = z.object({
   groupByPropertyId: z.string(),
   hiddenColumns: z.array(z.string()).optional(),
+  columnOrder: z.array(z.string()).optional(),
 });
 export type BoardViewConfig = z.infer<typeof BoardViewConfigSchema>;
 
