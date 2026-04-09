@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from datetime import UTC, date, datetime
 from html import unescape as html_unescape
 from uuid import uuid4
 
@@ -27,6 +28,15 @@ logger = logging.getLogger(__name__)
 REQUIRED_COLUMNS: list[tuple[str, str, list[str] | None]] = [
     ("External Ref", "text", None),
 ]
+
+STATUS_TAG_MAP: dict[str, str] = {
+    "spec needed": "spec-needed",
+    "ready": "ready",
+    "in progress": "in-progress",
+    "done": "done",
+}
+
+ALL_STATUS_TAGS = set(STATUS_TAG_MAP.values())
 
 
 # ---------------------------------------------------------------------------
@@ -281,6 +291,98 @@ def _format_task_content(
     return f"## Task: {title}\n\n{metadata}\n---\n\n{content}".rstrip()
 
 
+def _find_task_row(
+    db_content: dict,
+    task_name: str,
+) -> tuple[dict | None, int | None, dict]:
+    """Find a database row matching a task name.
+
+    Returns (row, row_index, prop_map) where prop_map is {prop_name_lower: prop_dict}.
+    Row and row_index are None if not found.
+    """
+    properties = db_content.get("properties", [])
+    prop_map = {p["name"].lower(): p for p in properties}
+
+    task_prop = prop_map.get("task")
+    if task_prop is None:
+        return None, None, prop_map
+
+    task_prop_id = task_prop["id"]
+    name_lower = task_name.lower()
+
+    for i, row in enumerate(db_content.get("rows", [])):
+        cell_val = row.get("cells", {}).get(task_prop_id, "")
+        clean = re.sub(r"<[^>]+>", "", str(cell_val))
+        clean = html_unescape(clean).strip().lower()
+        if clean == name_lower:
+            return row, i, prop_map
+
+    return None, None, prop_map
+
+
+def _check_dependency_status(
+    db_content: dict,
+    depends_on_value: str,
+) -> dict | str:
+    """Check if all dependencies are Done.
+
+    Returns "all satisfied" or {"warning": "Dependency 'X' is still 'Y'"}.
+    """
+    if not depends_on_value or depends_on_value == "None":
+        return "all satisfied"
+
+    properties = db_content.get("properties", [])
+    rows = db_content.get("rows", [])
+
+    # Find property IDs
+    task_prop_id = None
+    status_prop = None
+    for p in properties:
+        if p["name"].lower() == "task":
+            task_prop_id = p["id"]
+        elif p["name"].lower() == "status":
+            status_prop = p
+
+    if task_prop_id is None or status_prop is None:
+        return "all satisfied"
+
+    status_options = {opt["id"]: opt["label"] for opt in status_prop.get("options", [])}
+
+    # Parse depends_on entries — format: "uuid:Name, uuid:Name" or just "Name"
+    entries = [e.strip() for e in depends_on_value.split(",") if e.strip()]
+    row_by_id = {r["id"]: r for r in rows}
+
+    warnings: list[str] = []
+    for entry in entries:
+        if ":" in entry:
+            row_id, dep_name = entry.split(":", 1)
+            dep_row = row_by_id.get(row_id)
+        else:
+            dep_name = entry
+            dep_row = None
+            # Try to find by name
+            for r in rows:
+                cell_val = r.get("cells", {}).get(task_prop_id, "")
+                clean = re.sub(r"<[^>]+>", "", str(cell_val))
+                clean = html_unescape(clean).strip()
+                if clean.lower() == dep_name.lower():
+                    dep_row = r
+                    break
+
+        if dep_row is None:
+            warnings.append(f"Dependency '{dep_name}' not found in database")
+            continue
+
+        status_cell = dep_row.get("cells", {}).get(status_prop["id"], "")
+        status_label = status_options.get(status_cell, str(status_cell))
+        if status_label.lower() != "done":
+            warnings.append(f"Dependency '{dep_name}' is still '{status_label}'")
+
+    if warnings:
+        return {"warning": "; ".join(warnings)}
+    return "all satisfied"
+
+
 def _ensure_schema(
     storage: NousStorage,
     notebook_id: str,
@@ -511,6 +613,143 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
                 "project": project,
                 "status": status,
                 "warnings": warnings,
+            },
+            indent=2,
+        )
+
+    @mcp.tool()
+    def update_task_status(
+        task: str,
+        status: str,
+        notes: str | None = None,
+        external_ref: str | None = None,
+        completed_date: str | None = None,
+        notebook: str = "Forge",
+        database: str = "Project Tasks",
+    ) -> str:
+        """Update a task's status in both the page tags and database row.
+
+        Optionally appends implementation notes to the task page.
+        When setting status to "Done", auto-sets completed_date to today if not provided.
+        When setting status to "In Progress", checks dependency status (advisory, not blocking).
+
+        Args:
+            task: Task name (supports "Task: " prefix or bare name, prefix match).
+            status: New status — "Spec Needed", "Ready", "In Progress", or "Done".
+            notes: Implementation notes to append to the page (optional).
+            external_ref: Set or update the External Ref field (optional).
+            completed_date: Completed date in YYYY-MM-DD format (auto-set for Done).
+            notebook: Notebook name or UUID (default: "Forge").
+            database: Task database title (default: "Project Tasks").
+
+        Returns JSON with task, previous_status, new_status, notes_appended,
+        dependencies, completed_date.
+        """
+        from nous_mcp.markdown import markdown_to_blocks
+
+        storage = get_storage()
+        daemon = get_daemon()
+        nb = storage.resolve_notebook(notebook)
+        notebook_id = nb["id"]
+
+        # --- Normalize task name ---
+        task_name = task.strip()
+        if task_name.lower().startswith("task: "):
+            task_name = task_name[6:].strip()
+
+        # --- Resolve task page ---
+        page_title = f"Task: {task_name}"
+        try:
+            page = daemon.resolve_page(notebook_id, page_title)
+        except Exception:
+            # Try bare name as fallback
+            try:
+                page = daemon.resolve_page(notebook_id, task_name)
+            except Exception:
+                raise ValueError(
+                    f"Task '{task_name}' not found. "
+                    f"Tried both 'Task: {task_name}' and '{task_name}'."
+                )
+
+        # --- Resolve database and find row ---
+        db_page = daemon.resolve_page(notebook_id, database)
+        if db_page.get("pageType") != "database":
+            raise ValueError(f"Page '{db_page.get('title')}' is not a database")
+
+        db_content = storage.read_database_content(notebook_id, db_page["id"])
+        if db_content is None:
+            raise ValueError(f"Database file not found for '{database}'")
+
+        row, row_index, prop_map = _find_task_row(db_content, task_name)
+
+        # --- Determine previous status ---
+        previous_status = "Unknown"
+        if row and "status" in prop_map:
+            status_prop = prop_map["status"]
+            status_cell = row.get("cells", {}).get(status_prop["id"], "")
+            status_options = {
+                opt["id"]: opt["label"]
+                for opt in status_prop.get("options", [])
+            }
+            previous_status = status_options.get(status_cell, str(status_cell))
+
+        # --- Update page tags ---
+        current_tags = page.get("tags", [])
+        new_tags = [t for t in current_tags if t.lower() not in ALL_STATUS_TAGS]
+        new_status_tag = STATUS_TAG_MAP.get(status.lower(), status.lower().replace(" ", "-"))
+        new_tags.append(new_status_tag)
+        daemon.update_page(notebook_id, page["id"], tags=new_tags)
+
+        # --- Update database row ---
+        if row is not None:
+            update_cells: dict[str, str | int] = {"Status": status}
+
+            # Auto-set completed date
+            if status.lower() == "done":
+                if completed_date is None:
+                    completed_date = date.today().isoformat()
+                update_cells["Completed"] = completed_date
+
+            if external_ref is not None:
+                update_cells["External Ref"] = external_ref
+
+            daemon.update_database_rows(
+                notebook_id,
+                db_page["id"],
+                [{"row": row["id"], "cells": update_cells}],
+            )
+
+        # --- Append implementation notes ---
+        notes_appended = False
+        if notes:
+            today_iso = date.today().isoformat()
+            notes_md = (
+                f"\n\n## Implementation Notes\n\n"
+                f"### {today_iso} — Status: {status}\n\n"
+                f"{notes}\n"
+            )
+            blocks = markdown_to_blocks(notes_md)
+            daemon.append_to_page(notebook_id, page["id"], blocks=blocks)
+            notes_appended = True
+            logger.info("Appended implementation notes to '%s'", page_title)
+
+        # --- Check dependencies (advisory) ---
+        dependencies: dict | str = "all satisfied"
+        if status.lower() == "in progress" and row:
+            depends_on_cell = ""
+            if "depends on" in prop_map:
+                depends_prop = prop_map["depends on"]
+                depends_on_cell = row.get("cells", {}).get(depends_prop["id"], "")
+            dependencies = _check_dependency_status(db_content, depends_on_cell)
+
+        return json.dumps(
+            {
+                "task": task_name,
+                "previous_status": previous_status,
+                "new_status": status,
+                "notes_appended": notes_appended,
+                "dependencies": dependencies,
+                "completed_date": completed_date,
             },
             indent=2,
         )

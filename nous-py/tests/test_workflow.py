@@ -9,10 +9,13 @@ from uuid import uuid4
 import pytest
 
 from nous_mcp.workflow import (
+    ALL_STATUS_TAGS,
     REQUIRED_COLUMNS,
+    _check_dependency_status,
     _ensure_database_column,
     _ensure_schema,
     _ensure_select_option,
+    _find_task_row,
     _format_task_content,
     _resolve_dependencies,
     _resolve_project_folder,
@@ -654,3 +657,266 @@ class TestCreateTask:
         assert result["page_id"] == "page-123"
         assert result["row_id"] is None
         assert any("database row failed" in w for w in result["warnings"])
+
+
+# ---------------------------------------------------------------------------
+# _find_task_row
+# ---------------------------------------------------------------------------
+
+
+class TestFindTaskRow:
+    def test_finds_row_by_name(self):
+        db = _make_db_content(
+            project_options=["Nous"],
+            rows=[{"id": "r1", "cells": {"prop-task": "Setup database"}}],
+        )
+        row, idx, _ = _find_task_row(db, "Setup database")
+        assert row["id"] == "r1"
+        assert idx == 0
+
+    def test_case_insensitive(self):
+        db = _make_db_content(
+            project_options=["Nous"],
+            rows=[{"id": "r1", "cells": {"prop-task": "Setup Database"}}],
+        )
+        row, _, _ = _find_task_row(db, "setup database")
+        assert row is not None
+
+    def test_returns_none_for_missing(self):
+        db = _make_db_content(project_options=["Nous"])
+        row, idx, _ = _find_task_row(db, "Ghost")
+        assert row is None
+        assert idx is None
+
+
+# ---------------------------------------------------------------------------
+# _check_dependency_status
+# ---------------------------------------------------------------------------
+
+
+class TestCheckDependencyStatus:
+    def _make_db_with_deps(self, dep_status_label="Done"):
+        db = _make_db_content(project_options=["Nous"])
+        # Find the status option ID for the given label
+        status_prop = next(p for p in db["properties"] if p["name"] == "Status")
+        status_opt = next(
+            (o for o in status_prop["options"] if o["label"] == dep_status_label),
+            status_prop["options"][0],  # fallback
+        )
+        db["rows"] = [
+            {
+                "id": "dep-row",
+                "cells": {
+                    "prop-task": "Prerequisite",
+                    "prop-status": status_opt["id"],
+                },
+            },
+        ]
+        return db
+
+    def test_all_satisfied_when_deps_done(self):
+        db = self._make_db_with_deps("Done")
+        result = _check_dependency_status(db, "dep-row:Prerequisite")
+        assert result == "all satisfied"
+
+    def test_warning_when_dep_not_done(self):
+        db = self._make_db_with_deps("Ready")
+        result = _check_dependency_status(db, "dep-row:Prerequisite")
+        assert isinstance(result, dict)
+        assert "warning" in result
+        assert "Prerequisite" in result["warning"]
+        assert "Ready" in result["warning"]
+
+    def test_no_deps_returns_satisfied(self):
+        db = _make_db_content()
+        assert _check_dependency_status(db, "None") == "all satisfied"
+        assert _check_dependency_status(db, "") == "all satisfied"
+
+
+# ---------------------------------------------------------------------------
+# update_task_status (registered tool)
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateTaskStatus:
+    def _setup(self, db=None, task_page_tags=None):
+        if db is None:
+            db = _make_db_content(
+                project_options=["Nous"],
+                include_external_ref=True,
+                rows=[
+                    {
+                        "id": "row-1",
+                        "cells": {
+                            "prop-task": "My Task",
+                            "prop-project": "opt-proj-nous",
+                            "prop-status": "opt-ready",
+                            "prop-depends": "None",
+                        },
+                    },
+                ],
+            )
+        storage = _make_storage(
+            folders=[{"id": "folder-nous", "name": "Nous"}],
+            db_content=db,
+        )
+        daemon = _make_daemon()
+        daemon.resolve_page.side_effect = self._make_resolve_page(task_page_tags)
+        daemon.update_page.return_value = {}
+        daemon.update_database_rows.return_value = {"rowsUpdated": 1}
+        daemon.append_to_page.return_value = {}
+        tools = _register_tools(storage, daemon)
+        return tools["update_task_status"], storage, daemon
+
+    @staticmethod
+    def _make_resolve_page(task_page_tags=None):
+        tags = task_page_tags or ["task", "nous", "ready"]
+
+        def resolver(notebook_id, title_or_id):
+            if title_or_id == "Project Tasks":
+                return {
+                    "id": DB_PAGE_ID,
+                    "title": "Project Tasks",
+                    "pageType": "database",
+                }
+            # Task page
+            return {
+                "id": "page-task-1",
+                "title": f"Task: My Task",
+                "tags": list(tags),
+                "pageType": "standard",
+            }
+
+        return resolver
+
+    def test_updates_status_in_tags_and_db(self):
+        update, storage, daemon = self._setup()
+        result = json.loads(update(task="My Task", status="In Progress"))
+
+        assert result["previous_status"] == "Ready"
+        assert result["new_status"] == "In Progress"
+
+        # Check tags updated
+        tag_call = daemon.update_page.call_args_list[0]
+        new_tags = tag_call.kwargs["tags"]
+        assert "in-progress" in new_tags
+        assert "ready" not in new_tags
+
+        # Check DB row updated
+        daemon.update_database_rows.assert_called_once()
+
+    def test_done_auto_sets_completed_date(self):
+        update, storage, daemon = self._setup()
+        result = json.loads(update(task="My Task", status="Done"))
+
+        assert result["completed_date"] is not None
+        # Check the DB update includes Completed
+        db_update = daemon.update_database_rows.call_args[0][2]
+        assert "Completed" in db_update[0]["cells"]
+
+    def test_done_with_explicit_date(self):
+        update, storage, daemon = self._setup()
+        result = json.loads(update(
+            task="My Task", status="Done", completed_date="2026-01-15"
+        ))
+        assert result["completed_date"] == "2026-01-15"
+
+    def test_notes_appended(self):
+        update, storage, daemon = self._setup()
+        result = json.loads(update(
+            task="My Task", status="In Progress",
+            notes="Started working on the implementation."
+        ))
+        assert result["notes_appended"] is True
+        daemon.append_to_page.assert_called_once()
+
+    def test_no_notes_when_none(self):
+        update, storage, daemon = self._setup()
+        result = json.loads(update(task="My Task", status="Ready"))
+        assert result["notes_appended"] is False
+        daemon.append_to_page.assert_not_called()
+
+    def test_in_progress_checks_deps_all_satisfied(self):
+        db = _make_db_content(
+            project_options=["Nous"],
+            include_external_ref=True,
+            rows=[
+                {
+                    "id": "dep-row",
+                    "cells": {
+                        "prop-task": "Prerequisite",
+                        "prop-status": "opt-done",
+                    },
+                },
+                {
+                    "id": "row-1",
+                    "cells": {
+                        "prop-task": "My Task",
+                        "prop-project": "opt-proj-nous",
+                        "prop-status": "opt-ready",
+                        "prop-depends": "dep-row:Prerequisite",
+                    },
+                },
+            ],
+        )
+        update, storage, daemon = self._setup(db=db)
+        result = json.loads(update(task="My Task", status="In Progress"))
+        assert result["dependencies"] == "all satisfied"
+
+    def test_in_progress_warns_unmet_deps(self):
+        db = _make_db_content(
+            project_options=["Nous"],
+            include_external_ref=True,
+            rows=[
+                {
+                    "id": "dep-row",
+                    "cells": {
+                        "prop-task": "Prerequisite",
+                        "prop-status": "opt-ready",
+                    },
+                },
+                {
+                    "id": "row-1",
+                    "cells": {
+                        "prop-task": "My Task",
+                        "prop-project": "opt-proj-nous",
+                        "prop-status": "opt-ready",
+                        "prop-depends": "dep-row:Prerequisite",
+                    },
+                },
+            ],
+        )
+        update, storage, daemon = self._setup(db=db)
+        result = json.loads(update(task="My Task", status="In Progress"))
+        assert isinstance(result["dependencies"], dict)
+        assert "warning" in result["dependencies"]
+        # Status still updated despite warning
+        assert result["new_status"] == "In Progress"
+
+    def test_task_prefix_stripped(self):
+        update, storage, daemon = self._setup()
+        result = json.loads(update(task="Task: My Task", status="Done"))
+        assert result["task"] == "My Task"
+
+    def test_unknown_task_raises(self):
+        update, storage, daemon = self._setup()
+        daemon.resolve_page.side_effect = Exception("Not found")
+        with pytest.raises(ValueError, match="not found"):
+            update(task="Ghost Task", status="Done")
+
+    def test_external_ref_updated(self):
+        update, storage, daemon = self._setup()
+        update(task="My Task", status="In Progress", external_ref="PROJ-456")
+        db_update = daemon.update_database_rows.call_args[0][2]
+        assert db_update[0]["cells"]["External Ref"] == "PROJ-456"
+
+    def test_old_status_tags_removed(self):
+        update, storage, daemon = self._setup(
+            task_page_tags=["task", "nous", "ready", "spec-needed"]
+        )
+        update(task="My Task", status="Done")
+        tag_call = daemon.update_page.call_args_list[0]
+        new_tags = tag_call.kwargs["tags"]
+        assert "ready" not in new_tags
+        assert "spec-needed" not in new_tags
+        assert "done" in new_tags
