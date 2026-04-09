@@ -549,6 +549,168 @@ def _migrate_dependencies(
     }
 
 
+def _topological_sort(
+    tasks: list[dict],
+    db_content: dict,
+) -> tuple[list[dict], list[str]]:
+    """Sort tasks in dependency order using Kahn's algorithm.
+
+    Each task dict must have "id", "task" (name), "deps" (list of dep names),
+    and "priority" (int).
+
+    Returns (sorted_tasks, cycle_names) where cycle_names lists tasks
+    involved in a cycle (empty if no cycle).
+    """
+    # Build adjacency: task_id → set of task_ids it depends on
+    id_to_task = {t["id"]: t for t in tasks}
+    name_to_id: dict[str, str] = {}
+    for t in tasks:
+        name_to_id[t["task"].lower()] = t["id"]
+
+    # For each task, find which of our task set it depends on
+    in_degree: dict[str, int] = {t["id"]: 0 for t in tasks}
+    dependents: dict[str, list[str]] = {t["id"]: [] for t in tasks}  # dep_id → [task_ids that depend on it]
+
+    for t in tasks:
+        depends_on_cell = t.get("_depends_on_raw", "")
+        parsed = _parse_depends_on(depends_on_cell)
+        dep_ids_in_set: list[str] = []
+        for uid, dep_name in parsed:
+            # Try UUID match within our task set
+            if uid and uid in id_to_task:
+                dep_ids_in_set.append(uid)
+            elif dep_name.lower() in name_to_id:
+                dep_ids_in_set.append(name_to_id[dep_name.lower()])
+        in_degree[t["id"]] = len(dep_ids_in_set)
+        for dep_id in dep_ids_in_set:
+            dependents[dep_id].append(t["id"])
+
+    # Kahn's algorithm with priority tie-breaking
+    queue: list[dict] = []
+    for t in tasks:
+        if in_degree[t["id"]] == 0:
+            queue.append(t)
+    # Sort initial queue by priority (lower = higher priority)
+    queue.sort(key=lambda t: (t.get("priority", 99), t["task"]))
+
+    result: list[dict] = []
+    while queue:
+        current = queue.pop(0)
+        result.append(current)
+        for dep_id in dependents.get(current["id"], []):
+            in_degree[dep_id] -= 1
+            if in_degree[dep_id] == 0:
+                queue.append(id_to_task[dep_id])
+                queue.sort(key=lambda t: (t.get("priority", 99), t["task"]))
+
+    # Detect cycles
+    cycle_names: list[str] = []
+    if len(result) < len(tasks):
+        remaining = {t["id"] for t in tasks} - {t["id"] for t in result}
+        cycle_names = [id_to_task[tid]["task"] for tid in remaining]
+
+    return result, cycle_names
+
+
+def _get_project_tasks(
+    db_content: dict,
+    project_name: str,
+    include_done: bool = False,
+    feature: str | None = None,
+) -> list[dict]:
+    """Extract tasks for a project from database content.
+
+    Returns list of dicts with id, task, status, priority, phase, deps, _depends_on_raw.
+    """
+    properties = db_content.get("properties", [])
+    rows = db_content.get("rows", [])
+    prop_map = {p["name"].lower(): p for p in properties}
+
+    task_prop = prop_map.get("task")
+    project_prop = prop_map.get("project")
+    status_prop = prop_map.get("status")
+    priority_prop = prop_map.get("priority")
+    phase_prop = prop_map.get("phase")
+    depends_prop = prop_map.get("depends on")
+    notes_prop = prop_map.get("notes")
+
+    if not task_prop or not project_prop:
+        return []
+
+    # Build option maps
+    proj_options = {o["id"]: o["label"] for o in project_prop.get("options", [])}
+    status_options = {o["id"]: o["label"] for o in status_prop.get("options", [])} if status_prop else {}
+    phase_options = {o["id"]: o["label"] for o in phase_prop.get("options", [])} if phase_prop else {}
+
+    feature_tag = feature.lower().replace(" ", "-") if feature else None
+
+    result: list[dict] = []
+    for row in rows:
+        cells = row.get("cells", {})
+
+        # Filter by project
+        proj_cell = cells.get(project_prop["id"], "")
+        proj_label = proj_options.get(proj_cell, str(proj_cell))
+        if proj_label.lower() != project_name.lower():
+            continue
+
+        # Get status
+        status_cell = cells.get(status_prop["id"], "") if status_prop else ""
+        status_label = status_options.get(status_cell, str(status_cell) if status_cell else "Unknown")
+
+        # Filter done
+        if not include_done and status_label.lower() == "done":
+            continue
+
+        # Task name
+        task_cell = cells.get(task_prop["id"], "")
+        task_name = re.sub(r"<[^>]+>", "", str(task_cell))
+        task_name = html_unescape(task_name).strip()
+        if not task_name:
+            continue
+
+        # Feature filter (heuristic: check notes and task name)
+        if feature:
+            match = False
+            notes_cell = cells.get(notes_prop["id"], "") if notes_prop else ""
+            if feature.lower() in str(notes_cell).lower():
+                match = True
+            elif feature.lower() in task_name.lower():
+                match = True
+            elif feature_tag and feature_tag in task_name.lower().replace(" ", "-"):
+                match = True
+            if not match:
+                continue
+
+        # Priority
+        prio_cell = cells.get(priority_prop["id"], 99) if priority_prop else 99
+        try:
+            priority_val = int(prio_cell) if prio_cell else 99
+        except (ValueError, TypeError):
+            priority_val = 99
+
+        # Phase
+        phase_cell = cells.get(phase_prop["id"], "") if phase_prop else ""
+        phase_label = phase_options.get(phase_cell, str(phase_cell) if phase_cell else "—")
+
+        # Depends on
+        depends_raw = cells.get(depends_prop["id"], "") if depends_prop else ""
+        parsed_deps = _parse_depends_on(depends_raw)
+        dep_names = [name for _, name in parsed_deps]
+
+        result.append({
+            "id": row["id"],
+            "task": task_name,
+            "status": status_label,
+            "priority": priority_val,
+            "phase": phase_label,
+            "deps": dep_names,
+            "_depends_on_raw": depends_raw,
+        })
+
+    return result
+
+
 def _ensure_schema(
     storage: NousStorage,
     notebook_id: str,
@@ -1207,3 +1369,77 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
         parts.append(page_content)
 
         return "\n".join(parts)
+
+    @mcp.tool()
+    def get_feature_tasks(
+        project: str,
+        feature: str | None = None,
+        include_done: bool = False,
+        notebook: str = "Forge",
+        database: str = "Project Tasks",
+    ) -> str:
+        """Get all tasks for a project/feature in dependency-resolved execution order.
+
+        Returns tasks topologically sorted so no task appears before its dependencies.
+        Tasks at the same dependency level are sorted by priority.
+
+        Args:
+            project: Project name.
+            feature: Optional feature name to filter tasks (matches in notes or task name).
+            include_done: Include completed tasks (default: False).
+            notebook: Notebook name or UUID (default: "Forge").
+            database: Task database title (default: "Project Tasks").
+
+        Returns JSON with project, feature, task counts, and execution_order list.
+        """
+        storage = get_storage()
+        daemon = get_daemon()
+        nb = storage.resolve_notebook(notebook)
+        notebook_id = nb["id"]
+
+        db_page = daemon.resolve_page(notebook_id, database)
+        if db_page.get("pageType") != "database":
+            raise ValueError(f"Page '{db_page.get('title')}' is not a database")
+
+        db_content = storage.read_database_content(notebook_id, db_page["id"])
+        if db_content is None:
+            raise ValueError(f"Database file not found for '{database}'")
+
+        tasks = _get_project_tasks(
+            db_content, project,
+            include_done=include_done,
+            feature=feature,
+        )
+
+        # Topological sort
+        sorted_tasks, cycle_names = _topological_sort(tasks, db_content)
+
+        # Build execution order
+        completed = sum(1 for t in sorted_tasks if t["status"].lower() == "done")
+        execution_order: list[dict] = []
+        for i, t in enumerate(sorted_tasks, 1):
+            entry: dict = {
+                "position": i,
+                "task": t["task"],
+                "status": t["status"],
+                "priority": t["priority"],
+                "phase": t["phase"],
+                "deps": t["deps"],
+            }
+            execution_order.append(entry)
+
+        result: dict = {
+            "project": project,
+            "feature": feature,
+            "total_tasks": len(sorted_tasks) + len(cycle_names),
+            "completed": completed,
+            "remaining": len(sorted_tasks) - completed + len(cycle_names),
+            "execution_order": execution_order,
+        }
+
+        if cycle_names:
+            result["cycle_error"] = (
+                f"Dependency cycle detected involving: {', '.join(cycle_names)}"
+            )
+
+        return json.dumps(result, indent=2)

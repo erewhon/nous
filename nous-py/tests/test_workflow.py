@@ -17,12 +17,14 @@ from nous_mcp.workflow import (
     _ensure_select_option,
     _find_task_row,
     _format_task_content,
+    _get_project_tasks,
     _get_row_status,
     _migrate_dependencies,
     _parse_depends_on,
     _resolve_dep_row,
     _resolve_dependencies,
     _resolve_project_folder,
+    _topological_sort,
     register_workflow_tools,
 )
 
@@ -1412,3 +1414,323 @@ class TestGetTaskSpec:
         get_spec, _, _ = self._setup()
         result = get_spec(task="Task: My Task")
         assert "## Task Metadata" in result
+
+
+# ---------------------------------------------------------------------------
+# _topological_sort
+# ---------------------------------------------------------------------------
+
+
+class TestTopologicalSort:
+    def _make_tasks(self, specs):
+        """Build task dicts from (id, name, priority, depends_on_raw) tuples."""
+        tasks = []
+        for tid, name, prio, deps_raw in specs:
+            parsed = _parse_depends_on(deps_raw)
+            tasks.append({
+                "id": tid,
+                "task": name,
+                "priority": prio,
+                "status": "Ready",
+                "deps": [n for _, n in parsed],
+                "_depends_on_raw": deps_raw,
+            })
+        return tasks
+
+    def test_simple_chain(self):
+        tasks = self._make_tasks([
+            ("a", "A", 1, ""),
+            ("b", "B", 1, "a:A"),
+            ("c", "C", 1, "b:B"),
+        ])
+        db = _make_db_content()
+        sorted_tasks, cycles = _topological_sort(tasks, db)
+        names = [t["task"] for t in sorted_tasks]
+        assert names == ["A", "B", "C"]
+        assert cycles == []
+
+    def test_priority_tiebreak(self):
+        tasks = self._make_tasks([
+            ("a", "Low Prio", 5, ""),
+            ("b", "High Prio", 1, ""),
+            ("c", "Mid Prio", 3, ""),
+        ])
+        db = _make_db_content()
+        sorted_tasks, _ = _topological_sort(tasks, db)
+        names = [t["task"] for t in sorted_tasks]
+        assert names == ["High Prio", "Mid Prio", "Low Prio"]
+
+    def test_diamond_dependency(self):
+        # A → B, A → C, B → D, C → D
+        tasks = self._make_tasks([
+            ("a", "A", 1, ""),
+            ("b", "B", 1, "a:A"),
+            ("c", "C", 1, "a:A"),
+            ("d", "D", 1, "b:B, c:C"),
+        ])
+        db = _make_db_content()
+        sorted_tasks, cycles = _topological_sort(tasks, db)
+        names = [t["task"] for t in sorted_tasks]
+        assert names.index("A") < names.index("B")
+        assert names.index("A") < names.index("C")
+        assert names.index("B") < names.index("D")
+        assert names.index("C") < names.index("D")
+        assert cycles == []
+
+    def test_cycle_detection(self):
+        tasks = self._make_tasks([
+            ("a", "A", 1, "b:B"),
+            ("b", "B", 1, "a:A"),
+        ])
+        db = _make_db_content()
+        sorted_tasks, cycles = _topological_sort(tasks, db)
+        assert len(cycles) == 2
+        assert "A" in cycles
+        assert "B" in cycles
+
+    def test_empty_list(self):
+        db = _make_db_content()
+        sorted_tasks, cycles = _topological_sort([], db)
+        assert sorted_tasks == []
+        assert cycles == []
+
+    def test_no_deps_all_by_priority(self):
+        tasks = self._make_tasks([
+            ("a", "Z Task", 3, ""),
+            ("b", "A Task", 1, ""),
+            ("c", "M Task", 2, ""),
+        ])
+        db = _make_db_content()
+        sorted_tasks, _ = _topological_sort(tasks, db)
+        names = [t["task"] for t in sorted_tasks]
+        assert names == ["A Task", "M Task", "Z Task"]
+
+
+# ---------------------------------------------------------------------------
+# _get_project_tasks
+# ---------------------------------------------------------------------------
+
+
+class TestGetProjectTasks:
+    def _make_project_db(self):
+        return _make_db_content(
+            project_options=["Nous", "Other"],
+            include_external_ref=True,
+            rows=[
+                {
+                    "id": "r1",
+                    "cells": {
+                        "prop-task": "Task A",
+                        "prop-project": "opt-proj-nous",
+                        "prop-status": "opt-ready",
+                        "prop-priority": 1,
+                        "prop-depends": "",
+                        "prop-notes": "credit optimizer related",
+                    },
+                },
+                {
+                    "id": "r2",
+                    "cells": {
+                        "prop-task": "Task B",
+                        "prop-project": "opt-proj-nous",
+                        "prop-status": "opt-done",
+                        "prop-priority": 2,
+                        "prop-depends": "r1:Task A",
+                    },
+                },
+                {
+                    "id": "r3",
+                    "cells": {
+                        "prop-task": "Task C",
+                        "prop-project": "opt-proj-other",
+                        "prop-status": "opt-ready",
+                        "prop-priority": 1,
+                    },
+                },
+            ],
+        )
+
+    def test_filters_by_project(self):
+        db = self._make_project_db()
+        tasks = _get_project_tasks(db, "Nous", include_done=True)
+        names = [t["task"] for t in tasks]
+        assert "Task A" in names
+        assert "Task B" in names
+        assert "Task C" not in names
+
+    def test_excludes_done_by_default(self):
+        db = self._make_project_db()
+        tasks = _get_project_tasks(db, "Nous")
+        names = [t["task"] for t in tasks]
+        assert "Task A" in names
+        assert "Task B" not in names
+
+    def test_includes_done_with_flag(self):
+        db = self._make_project_db()
+        tasks = _get_project_tasks(db, "Nous", include_done=True)
+        names = [t["task"] for t in tasks]
+        assert "Task B" in names
+
+    def test_feature_filter(self):
+        db = self._make_project_db()
+        tasks = _get_project_tasks(db, "Nous", include_done=True, feature="credit optimizer")
+        names = [t["task"] for t in tasks]
+        assert "Task A" in names  # notes contain "credit optimizer"
+        assert "Task B" not in names  # no match
+
+    def test_empty_project(self):
+        db = self._make_project_db()
+        tasks = _get_project_tasks(db, "Nonexistent")
+        assert tasks == []
+
+
+# ---------------------------------------------------------------------------
+# get_feature_tasks (registered tool)
+# ---------------------------------------------------------------------------
+
+
+class TestGetFeatureTasksTool:
+    def _setup(self, db=None):
+        if db is None:
+            db = _make_db_content(
+                project_options=["Nous"],
+                include_external_ref=True,
+                rows=[
+                    {
+                        "id": "r-setup",
+                        "cells": {
+                            "prop-task": "Setup",
+                            "prop-project": "opt-proj-nous",
+                            "prop-status": "opt-done",
+                            "prop-priority": 1,
+                            "prop-phase": "opt-infra",
+                            "prop-depends": "",
+                        },
+                    },
+                    {
+                        "id": "r-api",
+                        "cells": {
+                            "prop-task": "Build API",
+                            "prop-project": "opt-proj-nous",
+                            "prop-status": "opt-ready",
+                            "prop-priority": 2,
+                            "prop-phase": "opt-feature",
+                            "prop-depends": "r-setup:Setup",
+                        },
+                    },
+                    {
+                        "id": "r-tests",
+                        "cells": {
+                            "prop-task": "Add Tests",
+                            "prop-project": "opt-proj-nous",
+                            "prop-status": "opt-ready",
+                            "prop-priority": 3,
+                            "prop-phase": "opt-feature",
+                            "prop-depends": "r-api:Build API",
+                        },
+                    },
+                ],
+            )
+        storage = _make_storage(
+            folders=[{"id": "folder-nous", "name": "Nous"}],
+            db_content=db,
+        )
+        daemon = _make_daemon()
+        tools = _register_tools(storage, daemon)
+        return tools["get_feature_tasks"], storage, daemon
+
+    def test_returns_tasks_in_topo_order(self):
+        get_tasks, _, _ = self._setup()
+        result = json.loads(get_tasks(project="Nous", include_done=True))
+
+        assert result["project"] == "Nous"
+        assert result["total_tasks"] == 3
+        order = result["execution_order"]
+        names = [t["task"] for t in order]
+        # Setup before Build API before Add Tests
+        assert names.index("Setup") < names.index("Build API")
+        assert names.index("Build API") < names.index("Add Tests")
+
+    def test_excludes_done_by_default(self):
+        get_tasks, _, _ = self._setup()
+        result = json.loads(get_tasks(project="Nous"))
+
+        names = [t["task"] for t in result["execution_order"]]
+        assert "Setup" not in names
+        assert "Build API" in names
+
+    def test_completed_count(self):
+        get_tasks, _, _ = self._setup()
+        result = json.loads(get_tasks(project="Nous", include_done=True))
+        assert result["completed"] == 1
+        assert result["remaining"] == 2
+
+    def test_cycle_detection(self):
+        db = _make_db_content(
+            project_options=["Nous"],
+            include_external_ref=True,
+            rows=[
+                {
+                    "id": "r1",
+                    "cells": {
+                        "prop-task": "Task A",
+                        "prop-project": "opt-proj-nous",
+                        "prop-status": "opt-ready",
+                        "prop-priority": 1,
+                        "prop-depends": "r2:Task B",
+                    },
+                },
+                {
+                    "id": "r2",
+                    "cells": {
+                        "prop-task": "Task B",
+                        "prop-project": "opt-proj-nous",
+                        "prop-status": "opt-ready",
+                        "prop-priority": 1,
+                        "prop-depends": "r1:Task A",
+                    },
+                },
+            ],
+        )
+        get_tasks, _, _ = self._setup(db=db)
+        result = json.loads(get_tasks(project="Nous"))
+        assert "cycle_error" in result
+        assert "Task A" in result["cycle_error"]
+
+    def test_empty_project(self):
+        get_tasks, _, _ = self._setup()
+        result = json.loads(get_tasks(project="Nonexistent"))
+        assert result["total_tasks"] == 0
+        assert result["execution_order"] == []
+
+    def test_priority_ordering_at_same_level(self):
+        db = _make_db_content(
+            project_options=["Nous"],
+            include_external_ref=True,
+            rows=[
+                {
+                    "id": "r1",
+                    "cells": {
+                        "prop-task": "Low Prio",
+                        "prop-project": "opt-proj-nous",
+                        "prop-status": "opt-ready",
+                        "prop-priority": 5,
+                        "prop-depends": "",
+                    },
+                },
+                {
+                    "id": "r2",
+                    "cells": {
+                        "prop-task": "High Prio",
+                        "prop-project": "opt-proj-nous",
+                        "prop-status": "opt-ready",
+                        "prop-priority": 1,
+                        "prop-depends": "",
+                    },
+                },
+            ],
+        )
+        get_tasks, _, _ = self._setup(db=db)
+        result = json.loads(get_tasks(project="Nous"))
+        names = [t["task"] for t in result["execution_order"]]
+        assert names == ["High Prio", "Low Prio"]
