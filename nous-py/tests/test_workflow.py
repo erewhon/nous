@@ -1261,3 +1261,154 @@ class TestMigrateDependenciesTool:
 
         assert result["migrated"] == 0
         daemon.update_page.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# get_task_spec (registered tool)
+# ---------------------------------------------------------------------------
+
+
+class TestGetTaskSpec:
+    def _setup(self, db=None, status_opt="opt-ready"):
+        if db is None:
+            db = _make_db_content(
+                project_options=["Nous"],
+                include_external_ref=True,
+                rows=[
+                    {
+                        "id": "row-1",
+                        "cells": {
+                            "prop-task": "My Task",
+                            "prop-project": "opt-proj-nous",
+                            "prop-status": status_opt,
+                            "prop-priority": 2,
+                            "prop-phase": "opt-feature",
+                            "prop-depends": "None",
+                            "prop-extref": "PROJ-42",
+                        },
+                    },
+                ],
+            )
+        storage = _make_storage(
+            folders=[{"id": "folder-nous", "name": "Nous"}],
+            db_content=db,
+        )
+        daemon = _make_daemon()
+
+        # resolve_page returns task page or DB page depending on arg
+        def resolve_page(notebook_id, title_or_id):
+            if title_or_id == "Project Tasks":
+                return {
+                    "id": DB_PAGE_ID,
+                    "title": "Project Tasks",
+                    "pageType": "database",
+                }
+            return {
+                "id": "page-task-1",
+                "title": "Task: My Task",
+                "tags": ["task", "nous"],
+                "pageType": "standard",
+                "content": {"blocks": [
+                    {"type": "paragraph", "data": {"text": "Build the thing."}},
+                ]},
+            }
+
+        daemon.resolve_page.side_effect = resolve_page
+        tools = _register_tools(storage, daemon)
+        return tools["get_task_spec"], storage, daemon
+
+    def test_returns_metadata_and_content(self):
+        get_spec, _, _ = self._setup()
+        result = get_spec(task="My Task")
+
+        assert "## Task Metadata" in result
+        assert "**Project:** Nous" in result
+        assert "**Status:** Ready" in result
+        assert "**Priority:** 2" in result
+        assert "**Phase:** Feature" in result
+        assert "**External Ref:** PROJ-42" in result
+        assert "---" in result
+
+    def test_dependency_status_shown(self):
+        db = _make_db_content(
+            project_options=["Nous"],
+            include_external_ref=True,
+            rows=[
+                {"id": "dep1", "cells": {"prop-task": "Setup", "prop-status": "opt-done"}},
+                {
+                    "id": "row-1",
+                    "cells": {
+                        "prop-task": "My Task",
+                        "prop-project": "opt-proj-nous",
+                        "prop-status": "opt-ready",
+                        "prop-depends": "dep1:Setup",
+                    },
+                },
+            ],
+        )
+        get_spec, _, _ = self._setup(db=db)
+        result = get_spec(task="My Task")
+        assert "Setup: done" in result
+
+    def test_done_task_notice(self):
+        get_spec, _, _ = self._setup(status_opt="opt-done")
+        result = get_spec(task="My Task")
+        assert "already marked Done" in result
+
+    def test_in_progress_warning(self):
+        get_spec, _, _ = self._setup(status_opt="opt-inprogress")
+        result = get_spec(task="My Task")
+        assert "already In Progress" in result
+
+    def test_blocked_warning(self):
+        db = _make_db_content(
+            project_options=["Nous"],
+            include_external_ref=True,
+            rows=[
+                {"id": "dep1", "cells": {"prop-task": "Blocker", "prop-status": "opt-ready"}},
+                {
+                    "id": "row-1",
+                    "cells": {
+                        "prop-task": "My Task",
+                        "prop-project": "opt-proj-nous",
+                        "prop-status": "opt-ready",
+                        "prop-depends": "dep1:Blocker",
+                    },
+                },
+            ],
+        )
+        get_spec, _, _ = self._setup(db=db)
+        result = get_spec(task="My Task")
+        assert "Blocked" in result
+        assert "Blocker" in result
+
+    def test_no_external_ref(self):
+        db = _make_db_content(
+            project_options=["Nous"],
+            include_external_ref=True,
+            rows=[
+                {
+                    "id": "row-1",
+                    "cells": {
+                        "prop-task": "My Task",
+                        "prop-project": "opt-proj-nous",
+                        "prop-status": "opt-ready",
+                        "prop-depends": "None",
+                    },
+                },
+            ],
+        )
+        get_spec, _, _ = self._setup(db=db)
+        result = get_spec(task="My Task")
+        assert "**External Ref:** None" in result
+
+    def test_unknown_task_raises(self):
+        get_spec, _, daemon = self._setup()
+        daemon.resolve_page.side_effect = Exception("Not found")
+        with pytest.raises(ValueError, match="not found"):
+            get_spec(task="Ghost Task")
+
+    def test_task_prefix_stripped(self):
+        get_spec, _, _ = self._setup()
+        result = get_spec(task="Task: My Task")
+        assert "## Task Metadata" in result

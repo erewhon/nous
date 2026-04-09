@@ -1045,3 +1045,165 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
             )
 
         return json.dumps(result, indent=2)
+
+    @mcp.tool()
+    def get_task_spec(
+        task: str,
+        notebook: str = "Forge",
+        database: str = "Project Tasks",
+    ) -> str:
+        """Get the full spec for a task: page content, metadata, and dependency status.
+
+        Single call for agents starting work on a task. Returns markdown
+        combining metadata header, guardrails, dependency status, and page content.
+
+        Args:
+            task: Task name (supports "Task: " prefix or bare name).
+            notebook: Notebook name or UUID (default: "Forge").
+            database: Task database title (default: "Project Tasks").
+
+        Returns markdown with metadata, guardrails, and full page content.
+        """
+        from nous_mcp.markdown import export_page_to_markdown
+
+        storage = get_storage()
+        daemon = get_daemon()
+        nb = storage.resolve_notebook(notebook)
+        notebook_id = nb["id"]
+
+        # --- Normalize task name ---
+        task_name = task.strip()
+        if task_name.lower().startswith("task: "):
+            task_name = task_name[6:].strip()
+
+        # --- Resolve task page ---
+        page_title = f"Task: {task_name}"
+        try:
+            page = daemon.resolve_page(notebook_id, page_title)
+        except Exception:
+            try:
+                page = daemon.resolve_page(notebook_id, task_name)
+            except Exception:
+                raise ValueError(
+                    f"Task '{task_name}' not found. "
+                    f"Tried both 'Task: {task_name}' and '{task_name}'."
+                )
+
+        # --- Get page content as markdown ---
+        page_content = export_page_to_markdown(page)
+
+        # --- Get database metadata ---
+        db_page = daemon.resolve_page(notebook_id, database)
+        db_content = None
+        row = None
+        prop_map: dict = {}
+        if db_page.get("pageType") == "database":
+            db_content = storage.read_database_content(notebook_id, db_page["id"])
+            if db_content:
+                row, _, prop_map = _find_task_row(db_content, task_name)
+
+        # --- Extract metadata from row ---
+        project = "Unknown"
+        status = "Unknown"
+        priority = "—"
+        phase = "—"
+        external_ref = "None"
+
+        if row and db_content:
+            status = _get_row_status(row, db_content)
+            cells = row.get("cells", {})
+
+            if "project" in prop_map:
+                proj_prop = prop_map["project"]
+                proj_cell = cells.get(proj_prop["id"], "")
+                proj_options = {
+                    o["id"]: o["label"] for o in proj_prop.get("options", [])
+                }
+                project = proj_options.get(proj_cell, str(proj_cell) if proj_cell else "Unknown")
+
+            if "priority" in prop_map:
+                prio_cell = cells.get(prop_map["priority"]["id"], "")
+                priority = str(prio_cell) if prio_cell else "—"
+
+            if "phase" in prop_map:
+                phase_prop = prop_map["phase"]
+                phase_cell = cells.get(phase_prop["id"], "")
+                phase_options = {
+                    o["id"]: o["label"] for o in phase_prop.get("options", [])
+                }
+                phase = phase_options.get(phase_cell, str(phase_cell) if phase_cell else "—")
+
+            if "external ref" in prop_map:
+                ext_cell = cells.get(prop_map["external ref"]["id"], "")
+                if ext_cell:
+                    external_ref = str(ext_cell)
+
+        # --- Dependency status ---
+        dep_section = "None"
+        blocking: list[str] = []
+        if row and db_content:
+            depends_on_cell = ""
+            if "depends on" in prop_map:
+                depends_prop = prop_map["depends on"]
+                depends_on_cell = row.get("cells", {}).get(depends_prop["id"], "")
+
+            parsed = _parse_depends_on(depends_on_cell)
+            if parsed:
+                dep_parts: list[str] = []
+                for uid, dep_name in parsed:
+                    dep_row = _resolve_dep_row(db_content, uid, dep_name)
+                    if dep_row:
+                        dep_status = _get_row_status(dep_row, db_content)
+                        satisfied = dep_status.lower() == "done"
+                        marker = "done" if satisfied else f"**{dep_status}**"
+                        dep_parts.append(f"- {dep_name}: {marker}")
+                        if not satisfied:
+                            blocking.append(dep_name)
+                    else:
+                        dep_parts.append(f"- {dep_name}: **Not Found**")
+                        blocking.append(dep_name)
+                dep_section = "\n".join(dep_parts)
+            else:
+                dep_section = "None"
+
+        # --- Build guardrails ---
+        guardrails: list[str] = []
+        if status.lower() == "done":
+            guardrails.append("> **Note:** This task is already marked Done.")
+        elif status.lower() == "in progress":
+            guardrails.append(
+                "> **Warning:** This task is already In Progress "
+                "— another agent may be working on it."
+            )
+        if blocking:
+            guardrails.append(
+                f"> **Blocked:** Dependencies not yet Done: {', '.join(blocking)}"
+            )
+
+        # --- Assemble output ---
+        parts: list[str] = []
+
+        if guardrails:
+            parts.append("\n".join(guardrails))
+            parts.append("")
+
+        parts.append("## Task Metadata")
+        parts.append(f"- **Project:** {project}")
+        parts.append(f"- **Status:** {status}")
+        parts.append(f"- **Priority:** {priority}")
+        parts.append(f"- **Phase:** {phase}")
+        parts.append(f"- **External Ref:** {external_ref}")
+        parts.append(f"- **Dependencies:**")
+        if dep_section == "None":
+            parts.append("  None")
+        else:
+            # Indent dep lines under the Dependencies bullet
+            for line in dep_section.split("\n"):
+                parts.append(f"  {line}")
+
+        parts.append("")
+        parts.append("---")
+        parts.append("")
+        parts.append(page_content)
+
+        return "\n".join(parts)
