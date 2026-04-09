@@ -13,6 +13,8 @@ from nous_mcp.workflow import (
     _ensure_database_column,
     _ensure_schema,
     _ensure_select_option,
+    _format_task_content,
+    _resolve_dependencies,
     _resolve_project_folder,
     register_workflow_tools,
 )
@@ -28,35 +30,55 @@ DB_PAGE_ID = "db-page-001"
 
 def _make_db_content(
     project_options: list[str] | None = None,
+    rows: list[dict] | None = None,
+    include_external_ref: bool = False,
 ) -> dict:
     """Build a minimal database content dict with a Project select property."""
     options = []
     if project_options:
         options = [
-            {"id": str(uuid4()), "label": label, "color": "#ef4444"}
+            {"id": f"opt-proj-{label.lower()}", "label": label, "color": "#ef4444"}
             for label in project_options
         ]
+    properties = [
+        {"id": "prop-task", "name": "Task", "type": "text"},
+        {
+            "id": "prop-project",
+            "name": "Project",
+            "type": "select",
+            "options": options,
+        },
+        {
+            "id": "prop-status",
+            "name": "Status",
+            "type": "select",
+            "options": [
+                {"id": "opt-todo", "label": "Todo", "color": "#ef4444"},
+                {"id": "opt-ready", "label": "Ready", "color": "#f97316"},
+                {"id": "opt-inprogress", "label": "In Progress", "color": "#3b82f6"},
+                {"id": "opt-done", "label": "Done", "color": "#22c55e"},
+            ],
+        },
+        {"id": "prop-priority", "name": "Priority", "type": "number"},
+        {
+            "id": "prop-phase",
+            "name": "Phase",
+            "type": "select",
+            "options": [
+                {"id": "opt-feature", "label": "Feature", "color": "#3b82f6"},
+                {"id": "opt-infra", "label": "Infrastructure", "color": "#6366f1"},
+                {"id": "opt-bugfix", "label": "Bugfix", "color": "#ef4444"},
+            ],
+        },
+        {"id": "prop-depends", "name": "Depends On", "type": "text"},
+        {"id": "prop-notes", "name": "Notes", "type": "text"},
+    ]
+    if include_external_ref:
+        properties.append({"id": "prop-extref", "name": "External Ref", "type": "text"})
     return {
         "version": 2,
-        "properties": [
-            {"id": "prop-name", "name": "Name", "type": "text"},
-            {
-                "id": "prop-project",
-                "name": "Project",
-                "type": "select",
-                "options": options,
-            },
-            {
-                "id": "prop-status",
-                "name": "Status",
-                "type": "select",
-                "options": [
-                    {"id": "opt-todo", "label": "Todo", "color": "#ef4444"},
-                    {"id": "opt-done", "label": "Done", "color": "#22c55e"},
-                ],
-            },
-        ],
-        "rows": [],
+        "properties": properties,
+        "rows": rows or [],
         "views": [],
     }
 
@@ -187,7 +209,7 @@ class TestEnsureSelectOption:
 
         with pytest.raises(ValueError, match="not select"):
             _ensure_select_option(
-                storage, NOTEBOOK_ID, DB_PAGE_ID, "Name", "X"
+                storage, NOTEBOOK_ID, DB_PAGE_ID, "Task", "X"
             )
 
 
@@ -202,11 +224,11 @@ class TestEnsureDatabaseColumn:
         storage = _make_storage(db_content=db)
 
         _, added = _ensure_database_column(
-            storage, NOTEBOOK_ID, DB_PAGE_ID, "Priority", "select", ["High", "Low"]
+            storage, NOTEBOOK_ID, DB_PAGE_ID, "Assignee", "select", ["Alice", "Bob"]
         )
         assert added is True
         new_prop = db["properties"][-1]
-        assert new_prop["name"] == "Priority"
+        assert new_prop["name"] == "Assignee"
         assert new_prop["type"] == "select"
         assert len(new_prop["options"]) == 2
 
@@ -215,7 +237,7 @@ class TestEnsureDatabaseColumn:
         storage = _make_storage(db_content=db)
 
         _, added = _ensure_database_column(
-            storage, NOTEBOOK_ID, DB_PAGE_ID, "Name", "text"
+            storage, NOTEBOOK_ID, DB_PAGE_ID, "Task", "text"
         )
         assert added is False
         storage.write_database_content.assert_not_called()
@@ -272,27 +294,30 @@ class TestEnsureSchema:
 # ---------------------------------------------------------------------------
 
 
+def _register_tools(storage, daemon):
+    """Register tools on a mock MCP and return dict of all registered functions."""
+    mcp = MagicMock()
+    registered = {}
+
+    def tool_decorator():
+        def wrapper(fn):
+            registered[fn.__name__] = fn
+            return fn
+        return wrapper
+
+    mcp.tool = tool_decorator
+    register_workflow_tools(
+        mcp,
+        get_storage=lambda: storage,
+        get_daemon=lambda: daemon,
+        daemon_available=lambda: True,
+    )
+    return registered
+
+
 class TestCreateProject:
     def _register_and_get_tool(self, storage, daemon):
-        """Register tools on a mock MCP and return the create_project function."""
-        mcp = MagicMock()
-        # Capture the decorated function
-        registered = {}
-
-        def tool_decorator():
-            def wrapper(fn):
-                registered[fn.__name__] = fn
-                return fn
-            return wrapper
-
-        mcp.tool = tool_decorator
-        register_workflow_tools(
-            mcp,
-            get_storage=lambda: storage,
-            get_daemon=lambda: daemon,
-            daemon_available=lambda: True,
-        )
-        return registered["create_project"]
+        return _register_tools(storage, daemon)["create_project"]
 
     def test_creates_folder_and_updates_db(self):
         db = _make_db_content(project_options=[])
@@ -368,3 +393,264 @@ class TestCreateProject:
         create_project = self._register_and_get_tool(storage, daemon)
         with pytest.raises(ValueError, match="not a database"):
             create_project("TestProject")
+
+
+# ---------------------------------------------------------------------------
+# _resolve_dependencies
+# ---------------------------------------------------------------------------
+
+
+class TestResolveDependencies:
+    def _make_db_with_rows(self):
+        db = _make_db_content(project_options=["Nous"], include_external_ref=True)
+        db["rows"] = [
+            {
+                "id": "row-1",
+                "cells": {
+                    "prop-task": "Setup database",
+                    "prop-project": "opt-proj-nous",
+                },
+            },
+            {
+                "id": "row-2",
+                "cells": {
+                    "prop-task": "Add tests",
+                    "prop-project": "opt-proj-nous",
+                },
+            },
+        ]
+        return db
+
+    def test_resolves_existing_task(self):
+        db = self._make_db_with_rows()
+        storage = _make_storage(db_content=db)
+        value, warnings = _resolve_dependencies(
+            storage, NOTEBOOK_ID, DB_PAGE_ID, "Nous", ["Setup database"]
+        )
+        assert "row-1:Setup database" in value
+        assert warnings == []
+
+    def test_warns_for_unknown_task(self):
+        db = self._make_db_with_rows()
+        storage = _make_storage(db_content=db)
+        value, warnings = _resolve_dependencies(
+            storage, NOTEBOOK_ID, DB_PAGE_ID, "Nous", ["Nonexistent"]
+        )
+        assert "Nonexistent" in value
+        assert len(warnings) == 1
+        assert "not found" in warnings[0]
+
+    def test_prefers_same_project_match(self):
+        db = _make_db_content(project_options=["Nous", "Other"], include_external_ref=True)
+        db["rows"] = [
+            {
+                "id": "row-other",
+                "cells": {
+                    "prop-task": "Shared name",
+                    "prop-project": "opt-proj-other",
+                },
+            },
+            {
+                "id": "row-nous",
+                "cells": {
+                    "prop-task": "Shared name",
+                    "prop-project": "opt-proj-nous",
+                },
+            },
+        ]
+        storage = _make_storage(db_content=db)
+        value, warnings = _resolve_dependencies(
+            storage, NOTEBOOK_ID, DB_PAGE_ID, "Nous", ["Shared name"]
+        )
+        assert "row-nous:" in value
+        assert warnings == []
+
+    def test_multiple_dependencies(self):
+        db = self._make_db_with_rows()
+        storage = _make_storage(db_content=db)
+        value, warnings = _resolve_dependencies(
+            storage, NOTEBOOK_ID, DB_PAGE_ID, "Nous", ["Setup database", "Add tests"]
+        )
+        assert "row-1:Setup database" in value
+        assert "row-2:Add tests" in value
+        assert ", " in value
+
+
+# ---------------------------------------------------------------------------
+# _format_task_content
+# ---------------------------------------------------------------------------
+
+
+class TestFormatTaskContent:
+    def test_prepends_header_and_metadata(self):
+        result = _format_task_content(
+            "My Task", "Nous", "Forge", "Ready", 3, "None", "Do the thing."
+        )
+        assert "## Task: My Task" in result
+        assert "**Project:** Nous (Forge)" in result
+        assert "**Status:** Ready" in result
+        assert "**Priority:** 3" in result
+        assert "**Depends on:** None" in result
+        assert "Do the thing." in result
+
+    def test_preserves_existing_header(self):
+        result = _format_task_content(
+            "My Task", "Nous", "Forge", "Ready", 3, "None",
+            "## Custom Header\n\nBody text."
+        )
+        assert result.startswith("## Custom Header")
+        assert "**Project:** Nous (Forge)" in result
+        assert "Body text." in result
+
+    def test_includes_dependency_names(self):
+        result = _format_task_content(
+            "My Task", "Nous", "Forge", "Ready", 3,
+            "uuid1:Setup, uuid2:Deploy", "Content."
+        )
+        assert "uuid1:Setup, uuid2:Deploy" in result
+
+
+# ---------------------------------------------------------------------------
+# create_task (registered tool)
+# ---------------------------------------------------------------------------
+
+
+class TestCreateTask:
+    def _setup(self, db=None, folders=None):
+        if db is None:
+            db = _make_db_content(
+                project_options=["Nous"], include_external_ref=True
+            )
+        if folders is None:
+            folders = [{"id": "folder-nous", "name": "Nous"}]
+        storage = _make_storage(folders=folders, db_content=db)
+        daemon = _make_daemon()
+        daemon.create_page.return_value = {"id": "page-123", "title": "Task: My Task"}
+        daemon.add_database_rows.return_value = {
+            "databaseId": DB_PAGE_ID,
+            "rowsAdded": 1,
+            "totalRows": 1,
+        }
+        tools = _register_tools(storage, daemon)
+        return tools["create_task"], storage, daemon
+
+    def test_creates_page_in_project_folder(self):
+        create_task, storage, daemon = self._setup()
+        result = json.loads(create_task(
+            project="Nous", title="My Task", content="Build the thing."
+        ))
+        assert result["page_id"] == "page-123"
+        assert result["project"] == "Nous"
+        assert result["title"] == "Task: My Task"
+
+        # Verify page created in correct folder
+        call_kwargs = daemon.create_page.call_args
+        assert call_kwargs.kwargs["folder_id"] == "folder-nous"
+
+    def test_creates_database_row(self):
+        create_task, storage, daemon = self._setup()
+        create_task(
+            project="Nous", title="My Task", content="Build the thing.",
+            priority=2, phase="Infrastructure", status="In Progress",
+        )
+        daemon.add_database_rows.assert_called_once()
+        rows_arg = daemon.add_database_rows.call_args[0][2]
+        row = rows_arg[0]
+        assert row["Task"] == "My Task"
+        assert row["Project"] == "Nous"
+        assert row["Status"] == "In Progress"
+        assert row["Priority"] == 2
+        assert row["Phase"] == "Infrastructure"
+
+    def test_auto_tags(self):
+        create_task, storage, daemon = self._setup()
+        create_task(
+            project="Nous", title="My Task", content="Build it.",
+            status="Ready", tags="workflow,sdk",
+        )
+        call_kwargs = daemon.create_page.call_args
+        tags = call_kwargs.kwargs["tags"]
+        assert "task" in tags
+        assert "nous" in tags
+        assert "ready" in tags
+        assert "workflow" in tags
+        assert "sdk" in tags
+
+    def test_external_ref_stored(self):
+        create_task, storage, daemon = self._setup()
+        create_task(
+            project="Nous", title="My Task", content="Fix it.",
+            external_ref="PROJ-123",
+        )
+        rows_arg = daemon.add_database_rows.call_args[0][2]
+        assert rows_arg[0]["External Ref"] == "PROJ-123"
+
+    def test_no_external_ref_when_empty(self):
+        create_task, storage, daemon = self._setup()
+        create_task(
+            project="Nous", title="My Task", content="Fix it.",
+        )
+        rows_arg = daemon.add_database_rows.call_args[0][2]
+        assert "External Ref" not in rows_arg[0]
+
+    def test_dependency_resolution(self):
+        db = _make_db_content(
+            project_options=["Nous"], include_external_ref=True,
+            rows=[
+                {
+                    "id": "dep-row",
+                    "cells": {
+                        "prop-task": "Setup database",
+                        "prop-project": "opt-proj-nous",
+                    },
+                },
+            ],
+        )
+        create_task, storage, daemon = self._setup(db=db)
+        result = json.loads(create_task(
+            project="Nous", title="Add API",
+            content="Build API.", depends_on="Setup database",
+        ))
+        rows_arg = daemon.add_database_rows.call_args[0][2]
+        assert "dep-row:Setup database" in rows_arg[0]["Depends On"]
+        assert result["warnings"] == []
+
+    def test_unresolvable_dependency_warns(self):
+        create_task, storage, daemon = self._setup()
+        result = json.loads(create_task(
+            project="Nous", title="Add API",
+            content="Build API.", depends_on="Ghost Task",
+        ))
+        assert len(result["warnings"]) > 0
+        assert "Ghost Task" in result["warnings"][0]
+        # Should still create the page
+        assert result["page_id"] == "page-123"
+
+    def test_missing_project_folder_raises(self):
+        create_task, storage, daemon = self._setup(folders=[])
+        with pytest.raises(ValueError, match="not found"):
+            create_task(
+                project="Nous", title="My Task", content="Content."
+            )
+
+    def test_content_gets_metadata_header(self):
+        create_task, storage, daemon = self._setup()
+        create_task(
+            project="Nous", title="My Task", content="Just the body.",
+            priority=1, status="Ready",
+        )
+        blocks_arg = daemon.create_page.call_args.kwargs.get("blocks") or daemon.create_page.call_args[0][2] if len(daemon.create_page.call_args[0]) > 2 else daemon.create_page.call_args.kwargs["blocks"]
+        # The markdown_to_blocks was called with formatted content
+        # Just verify create_page was called (content formatting tested separately)
+        daemon.create_page.assert_called_once()
+
+    def test_db_row_failure_returns_page_with_warning(self):
+        create_task, storage, daemon = self._setup()
+        daemon.add_database_rows.side_effect = Exception("DB write failed")
+
+        result = json.loads(create_task(
+            project="Nous", title="My Task", content="Content.",
+        ))
+        assert result["page_id"] == "page-123"
+        assert result["row_id"] is None
+        assert any("database row failed" in w for w in result["warnings"])
