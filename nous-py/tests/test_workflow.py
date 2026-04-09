@@ -81,6 +81,7 @@ def _make_db_content(
         },
         {"id": "prop-depends", "name": "Depends On", "type": "text"},
         {"id": "prop-notes", "name": "Notes", "type": "text"},
+        {"id": "prop-feature", "name": "Feature", "type": "text"},
     ]
     if include_external_ref:
         properties.append({"id": "prop-extref", "name": "External Ref", "type": "text"})

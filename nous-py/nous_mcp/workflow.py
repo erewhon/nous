@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 
 REQUIRED_COLUMNS: list[tuple[str, str, list[str] | None]] = [
     ("External Ref", "text", None),
+    ("Feature", "text", None),
 ]
 
 STATUS_TAG_MAP: dict[str, str] = {
@@ -612,15 +613,23 @@ def _topological_sort(
     return result, cycle_names
 
 
-def _get_project_tasks(
+def _query_tasks(
     db_content: dict,
-    project_name: str,
-    include_done: bool = False,
+    *,
+    project: str | None = None,
     feature: str | None = None,
+    status: str | None = None,
+    phase: str | None = None,
+    priority_max: int | None = None,
+    has_external_ref: bool | None = None,
+    include_done: bool = False,
+    limit: int | None = None,
 ) -> list[dict]:
-    """Extract tasks for a project from database content.
+    """Extract tasks from database content with flexible filtering.
 
-    Returns list of dicts with id, task, status, priority, phase, deps, _depends_on_raw.
+    All filters are optional. When multiple filters are provided, they are
+    ANDed together. Returns list of dicts with id, task, project, status,
+    priority, phase, feature, external_ref, deps, _depends_on_raw.
     """
     properties = db_content.get("properties", [])
     rows = db_content.get("rows", [])
@@ -633,6 +642,8 @@ def _get_project_tasks(
     phase_prop = prop_map.get("phase")
     depends_prop = prop_map.get("depends on")
     notes_prop = prop_map.get("notes")
+    feature_prop = prop_map.get("feature")
+    ext_ref_prop = prop_map.get("external ref")
 
     if not task_prop or not project_prop:
         return []
@@ -642,58 +653,78 @@ def _get_project_tasks(
     status_options = {o["id"]: o["label"] for o in status_prop.get("options", [])} if status_prop else {}
     phase_options = {o["id"]: o["label"] for o in phase_prop.get("options", [])} if phase_prop else {}
 
-    feature_tag = feature.lower().replace(" ", "-") if feature else None
+    # Pre-compute status filter set
+    status_set: set[str] | None = None
+    if status:
+        status_set = {s.strip().lower() for s in status.split(",")}
 
     result: list[dict] = []
     for row in rows:
         cells = row.get("cells", {})
 
-        # Filter by project
+        # --- Project filter ---
         proj_cell = cells.get(project_prop["id"], "")
         proj_label = proj_options.get(proj_cell, str(proj_cell))
-        if proj_label.lower() != project_name.lower():
+        if project and proj_label.lower() != project.lower():
             continue
 
-        # Get status
+        # --- Status ---
         status_cell = cells.get(status_prop["id"], "") if status_prop else ""
         status_label = status_options.get(status_cell, str(status_cell) if status_cell else "Unknown")
 
-        # Filter done
-        if not include_done and status_label.lower() == "done":
+        if not include_done and status_label.lower() == "done" and not status_set:
+            continue
+        if status_set and status_label.lower() not in status_set:
             continue
 
-        # Task name
+        # --- Task name ---
         task_cell = cells.get(task_prop["id"], "")
         task_name = re.sub(r"<[^>]+>", "", str(task_cell))
         task_name = html_unescape(task_name).strip()
         if not task_name:
             continue
 
-        # Feature filter (heuristic: check notes and task name)
+        # --- Feature filter ---
+        feat_cell = str(cells.get(feature_prop["id"], "")).strip() if feature_prop else ""
         if feature:
-            match = False
-            notes_cell = cells.get(notes_prop["id"], "") if notes_prop else ""
-            if feature.lower() in str(notes_cell).lower():
-                match = True
-            elif feature.lower() in task_name.lower():
-                match = True
-            elif feature_tag and feature_tag in task_name.lower().replace(" ", "-"):
-                match = True
-            if not match:
-                continue
+            if feat_cell:
+                if feat_cell.lower() != feature.lower():
+                    continue
+            else:
+                # Fallback heuristic for rows without a Feature value
+                match = False
+                notes_cell = cells.get(notes_prop["id"], "") if notes_prop else ""
+                if feature.lower() in str(notes_cell).lower():
+                    match = True
+                elif feature.lower() in task_name.lower():
+                    match = True
+                if not match:
+                    continue
 
-        # Priority
+        # --- Priority ---
         prio_cell = cells.get(priority_prop["id"], 99) if priority_prop else 99
         try:
             priority_val = int(prio_cell) if prio_cell else 99
         except (ValueError, TypeError):
             priority_val = 99
 
-        # Phase
+        if priority_max is not None and priority_val > priority_max:
+            continue
+
+        # --- Phase filter ---
         phase_cell = cells.get(phase_prop["id"], "") if phase_prop else ""
         phase_label = phase_options.get(phase_cell, str(phase_cell) if phase_cell else "—")
+        if phase and phase_label.lower() != phase.lower():
+            continue
 
-        # Depends on
+        # --- External ref filter ---
+        ext_ref_cell = str(cells.get(ext_ref_prop["id"], "")).strip() if ext_ref_prop else ""
+        if has_external_ref is True and not ext_ref_cell:
+            continue
+        if has_external_ref is False and ext_ref_cell:
+            continue
+
+        # --- Dependencies ---
         depends_raw = cells.get(depends_prop["id"], "") if depends_prop else ""
         parsed_deps = _parse_depends_on(depends_raw)
         dep_names = [name for _, name in parsed_deps]
@@ -701,14 +732,62 @@ def _get_project_tasks(
         result.append({
             "id": row["id"],
             "task": task_name,
+            "project": proj_label,
             "status": status_label,
             "priority": priority_val,
             "phase": phase_label,
+            "feature": feat_cell,
+            "external_ref": ext_ref_cell,
             "deps": dep_names,
             "_depends_on_raw": depends_raw,
         })
 
+        if limit is not None and len(result) >= limit:
+            break
+
     return result
+
+
+def _get_project_tasks(
+    db_content: dict,
+    project_name: str,
+    include_done: bool = False,
+    feature: str | None = None,
+) -> list[dict]:
+    """Extract tasks for a project from database content.
+
+    Thin wrapper around _query_tasks for backward compatibility.
+    Returns list of dicts with id, task, status, priority, phase, deps, _depends_on_raw.
+    """
+    return _query_tasks(
+        db_content,
+        project=project_name,
+        feature=feature,
+        include_done=include_done,
+    )
+
+
+def _is_task_blocked(task: dict, db_content: dict) -> tuple[bool, list[str]]:
+    """Check if a task has unmet dependencies.
+
+    Returns (is_blocked, list_of_blocking_task_names).
+    """
+    depends_raw = task.get("_depends_on_raw", "")
+    parsed = _parse_depends_on(depends_raw)
+    if not parsed:
+        return False, []
+
+    blocking: list[str] = []
+    for uid, dep_name in parsed:
+        dep_row = _resolve_dep_row(db_content, uid, dep_name)
+        if dep_row:
+            dep_status = _get_row_status(dep_row, db_content)
+            if dep_status.lower() != "done":
+                blocking.append(dep_name)
+        else:
+            blocking.append(dep_name)
+
+    return bool(blocking), blocking
 
 
 def _ensure_schema(
@@ -824,6 +903,7 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
         phase: str = "Feature",
         depends_on: str | None = None,
         status: str = "Ready",
+        feature: str | None = None,
         external_ref: str | None = None,
         tags: str | None = None,
         notebook: str = "Forge",
@@ -839,6 +919,7 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
             phase: Phase — Feature, Infrastructure, Polish, Bugfix, or Launch (default "Feature").
             depends_on: Comma-separated task names this depends on (optional).
             status: Status — Spec Needed, Ready, In Progress, or Done (default "Ready").
+            feature: Feature name this task belongs to (optional, used by get_feature_tasks).
             external_ref: External reference like a Jira key or GitHub issue (optional).
             tags: Comma-separated extra tags (optional). "task" and project name are auto-added.
             notebook: Notebook name or UUID (default: "Forge").
@@ -917,6 +998,8 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
             "Depends On": depends_on_value,
             "Notes": notes_summary,
         }
+        if feature:
+            row_data["Feature"] = feature
         if external_ref:
             row_data["External Ref"] = external_ref
 
@@ -1374,6 +1457,7 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
     def get_feature_tasks(
         project: str,
         feature: str | None = None,
+        status: str | None = None,
         include_done: bool = False,
         notebook: str = "Forge",
         database: str = "Project Tasks",
@@ -1385,8 +1469,10 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
 
         Args:
             project: Project name.
-            feature: Optional feature name to filter tasks (matches in notes or task name).
-            include_done: Include completed tasks (default: False).
+            feature: Optional feature name to filter tasks (matches Feature column).
+            status: Optional status filter — comma-separated (e.g. "Ready, In Progress").
+                Overrides include_done when set.
+            include_done: Include completed tasks (default: False). Ignored if status is set.
             notebook: Notebook name or UUID (default: "Forge").
             database: Task database title (default: "Project Tasks").
 
@@ -1405,10 +1491,17 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
         if db_content is None:
             raise ValueError(f"Database file not found for '{database}'")
 
-        tasks = _get_project_tasks(
-            db_content, project,
-            include_done=include_done,
+        # When status is explicitly provided, include_done is irrelevant
+        effective_include_done = include_done
+        if status:
+            effective_include_done = True  # status filter handles it
+
+        tasks = _query_tasks(
+            db_content,
+            project=project,
             feature=feature,
+            status=status,
+            include_done=effective_include_done,
         )
 
         # Topological sort
@@ -1441,5 +1534,269 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
             result["cycle_error"] = (
                 f"Dependency cycle detected involving: {', '.join(cycle_names)}"
             )
+
+        return json.dumps(result, indent=2)
+
+    @mcp.tool()
+    def query_tasks(
+        project: str | None = None,
+        feature: str | None = None,
+        status: str | None = None,
+        phase: str | None = None,
+        priority_max: int | None = None,
+        has_external_ref: bool | None = None,
+        blocked: bool | None = None,
+        limit: int = 20,
+        notebook: str = "Forge",
+        database: str = "Project Tasks",
+    ) -> str:
+        """Query tasks with flexible filters. Returns compact rows, not full page content.
+
+        All filters are optional and ANDed together. Omit all filters to get
+        an overview of all non-done tasks. Much cheaper than get_database for
+        targeted lookups.
+
+        Args:
+            project: Filter by project name (optional).
+            feature: Filter by Feature column value (optional).
+            status: Filter by status — comma-separated (e.g. "Ready, In Progress").
+                By default, Done tasks are excluded unless status explicitly includes "Done".
+            phase: Filter by phase (e.g. "Feature", "Infrastructure").
+            priority_max: Only tasks with priority <= this value (lower = higher priority).
+            has_external_ref: True = only tasks with an external ref, False = only without.
+            blocked: True = only tasks with unmet deps, False = only unblocked tasks.
+            limit: Max results (default 20, use 0 for unlimited).
+            notebook: Notebook name or UUID (default: "Forge").
+            database: Task database title (default: "Project Tasks").
+
+        Returns JSON with filters applied, total count, and compact task list.
+        """
+        storage = get_storage()
+        daemon = get_daemon()
+        nb = storage.resolve_notebook(notebook)
+        notebook_id = nb["id"]
+
+        db_page = daemon.resolve_page(notebook_id, database)
+        if db_page.get("pageType") != "database":
+            raise ValueError(f"Page '{db_page.get('title')}' is not a database")
+
+        db_content = storage.read_database_content(notebook_id, db_page["id"])
+        if db_content is None:
+            raise ValueError(f"Database file not found for '{database}'")
+
+        # Determine if Done tasks should be included
+        include_done = False
+        if status:
+            status_set = {s.strip().lower() for s in status.split(",")}
+            if "done" in status_set:
+                include_done = True
+
+        effective_limit = limit if limit > 0 else None
+        tasks = _query_tasks(
+            db_content,
+            project=project,
+            feature=feature,
+            status=status,
+            phase=phase,
+            priority_max=priority_max,
+            has_external_ref=has_external_ref,
+            include_done=include_done,
+            limit=None if blocked is not None else effective_limit,
+        )
+
+        # Post-filter by blocked status (requires dependency resolution)
+        if blocked is not None:
+            filtered: list[dict] = []
+            for t in tasks:
+                is_blocked, blocking = _is_task_blocked(t, db_content)
+                t["blocked_by"] = blocking
+                if blocked and is_blocked:
+                    filtered.append(t)
+                elif not blocked and not is_blocked:
+                    filtered.append(t)
+            tasks = filtered
+            if effective_limit:
+                tasks = tasks[:effective_limit]
+
+        # Build compact output
+        task_list: list[dict] = []
+        for t in tasks:
+            entry: dict = {
+                "task": t["task"],
+                "project": t["project"],
+                "status": t["status"],
+                "priority": t["priority"],
+            }
+            if t.get("feature"):
+                entry["feature"] = t["feature"]
+            if t.get("phase") and t["phase"] != "—":
+                entry["phase"] = t["phase"]
+            if t.get("external_ref"):
+                entry["external_ref"] = t["external_ref"]
+            if t.get("deps"):
+                entry["deps"] = t["deps"]
+            if "blocked_by" in t:
+                entry["blocked_by"] = t["blocked_by"]
+            task_list.append(entry)
+
+        return json.dumps({
+            "total": len(task_list),
+            "filters": {
+                k: v for k, v in {
+                    "project": project, "feature": feature,
+                    "status": status, "phase": phase,
+                    "priority_max": priority_max,
+                    "has_external_ref": has_external_ref,
+                    "blocked": blocked,
+                }.items() if v is not None
+            },
+            "tasks": task_list,
+        }, indent=2)
+
+    @mcp.tool()
+    def get_next_task(
+        project: str,
+        feature: str | None = None,
+        notebook: str = "Forge",
+        database: str = "Project Tasks",
+    ) -> str:
+        """Get the highest-priority unblocked task ready for work.
+
+        Returns the single best task to work on next: highest priority among
+        Ready tasks whose dependencies are all Done. Includes full spec content
+        so an agent can start immediately.
+
+        Args:
+            project: Project name.
+            feature: Optional feature name to filter by.
+            notebook: Notebook name or UUID (default: "Forge").
+            database: Task database title (default: "Project Tasks").
+
+        Returns the task spec (same as get_task_spec) or a message if no tasks
+        are available.
+        """
+        storage = get_storage()
+        daemon = get_daemon()
+        nb = storage.resolve_notebook(notebook)
+        notebook_id = nb["id"]
+
+        db_page = daemon.resolve_page(notebook_id, database)
+        if db_page.get("pageType") != "database":
+            raise ValueError(f"Page '{db_page.get('title')}' is not a database")
+
+        db_content = storage.read_database_content(notebook_id, db_page["id"])
+        if db_content is None:
+            raise ValueError(f"Database file not found for '{database}'")
+
+        tasks = _query_tasks(
+            db_content,
+            project=project,
+            feature=feature,
+            status="Ready",
+        )
+
+        # Sort by priority (lower = higher priority)
+        tasks.sort(key=lambda t: t["priority"])
+
+        # Find first unblocked task
+        for t in tasks:
+            is_blocked, _ = _is_task_blocked(t, db_content)
+            if not is_blocked:
+                # Delegate to get_task_spec for the full output
+                return get_task_spec(
+                    task=t["task"],
+                    notebook=notebook,
+                    database=database,
+                )
+
+        # No unblocked tasks — report what's available
+        if tasks:
+            blocked_names = []
+            for t in tasks:
+                _, blocking = _is_task_blocked(t, db_content)
+                blocked_names.append(
+                    f"- {t['task']} (blocked by: {', '.join(blocking)})"
+                )
+            return json.dumps({
+                "status": "all_blocked",
+                "message": f"All {len(tasks)} Ready tasks are blocked by unmet dependencies.",
+                "blocked_tasks": blocked_names,
+            }, indent=2)
+
+        return json.dumps({
+            "status": "none_available",
+            "message": f"No Ready tasks found for project '{project}'"
+            + (f", feature '{feature}'" if feature else "")
+            + ".",
+        }, indent=2)
+
+    @mcp.tool()
+    def task_summary(
+        project: str | None = None,
+        notebook: str = "Forge",
+        database: str = "Project Tasks",
+    ) -> str:
+        """Get a compact summary of task counts by project, status, and feature.
+
+        Much cheaper than reading the full database. Use for planning sessions
+        and status checks.
+
+        Args:
+            project: Optional project name. If omitted, summarizes all projects.
+            notebook: Notebook name or UUID (default: "Forge").
+            database: Task database title (default: "Project Tasks").
+
+        Returns JSON with per-project breakdowns by status and feature.
+        """
+        storage = get_storage()
+        daemon = get_daemon()
+        nb = storage.resolve_notebook(notebook)
+        notebook_id = nb["id"]
+
+        db_page = daemon.resolve_page(notebook_id, database)
+        if db_page.get("pageType") != "database":
+            raise ValueError(f"Page '{db_page.get('title')}' is not a database")
+
+        db_content = storage.read_database_content(notebook_id, db_page["id"])
+        if db_content is None:
+            raise ValueError(f"Database file not found for '{database}'")
+
+        # Get all tasks including done
+        all_tasks = _query_tasks(
+            db_content,
+            project=project,
+            include_done=True,
+        )
+
+        # Build per-project summary
+        projects: dict[str, dict] = {}
+        for t in all_tasks:
+            proj = t["project"]
+            if proj not in projects:
+                projects[proj] = {
+                    "total": 0,
+                    "by_status": {},
+                    "by_feature": {},
+                }
+            p = projects[proj]
+            p["total"] += 1
+
+            st = t["status"]
+            p["by_status"][st] = p["by_status"].get(st, 0) + 1
+
+            feat = t.get("feature") or "(none)"
+            if feat not in p["by_feature"]:
+                p["by_feature"][feat] = {"total": 0, "by_status": {}}
+            p["by_feature"][feat]["total"] += 1
+            p["by_feature"][feat]["by_status"][st] = (
+                p["by_feature"][feat]["by_status"].get(st, 0) + 1
+            )
+
+        result: dict = {
+            "total_tasks": len(all_tasks),
+            "projects": projects,
+        }
+        if project:
+            result["project_filter"] = project
 
         return json.dumps(result, indent=2)
