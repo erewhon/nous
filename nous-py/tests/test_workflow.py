@@ -17,6 +17,10 @@ from nous_mcp.workflow import (
     _ensure_select_option,
     _find_task_row,
     _format_task_content,
+    _get_row_status,
+    _migrate_dependencies,
+    _parse_depends_on,
+    _resolve_dep_row,
     _resolve_dependencies,
     _resolve_project_folder,
     register_workflow_tools,
@@ -920,3 +924,340 @@ class TestUpdateTaskStatus:
         assert "ready" not in new_tags
         assert "spec-needed" not in new_tags
         assert "done" in new_tags
+
+
+# ---------------------------------------------------------------------------
+# _parse_depends_on
+# ---------------------------------------------------------------------------
+
+
+class TestParseDependsOn:
+    def test_uuid_format(self):
+        result = _parse_depends_on("abc-123:Task A, def-456:Task B")
+        assert result == [("abc-123", "Task A"), ("def-456", "Task B")]
+
+    def test_free_text(self):
+        result = _parse_depends_on("Task A, Task B")
+        assert result == [(None, "Task A"), (None, "Task B")]
+
+    def test_mixed_format(self):
+        result = _parse_depends_on("abc-123:Task A, Task B")
+        assert result == [("abc-123", "Task A"), (None, "Task B")]
+
+    def test_none_value(self):
+        assert _parse_depends_on("None") == []
+        assert _parse_depends_on("") == []
+        assert _parse_depends_on("  none  ") == []
+
+    def test_single_entry(self):
+        result = _parse_depends_on("abc:My Task")
+        assert result == [("abc", "My Task")]
+
+
+# ---------------------------------------------------------------------------
+# _resolve_dep_row
+# ---------------------------------------------------------------------------
+
+
+class TestResolveDepRow:
+    def _make_db(self):
+        return _make_db_content(
+            project_options=["Nous"],
+            rows=[
+                {"id": "r1", "cells": {"prop-task": "Setup database"}},
+                {"id": "r2", "cells": {"prop-task": "Add tests"}},
+            ],
+        )
+
+    def test_resolve_by_uuid(self):
+        db = self._make_db()
+        row = _resolve_dep_row(db, "r1", "Setup database")
+        assert row is not None
+        assert row["id"] == "r1"
+
+    def test_resolve_by_name(self):
+        db = self._make_db()
+        row = _resolve_dep_row(db, None, "Add tests")
+        assert row is not None
+        assert row["id"] == "r2"
+
+    def test_uuid_takes_precedence(self):
+        db = self._make_db()
+        # UUID points to r1, name says "Add tests" (r2) — UUID wins
+        row = _resolve_dep_row(db, "r1", "Add tests")
+        assert row["id"] == "r1"
+
+    def test_fallback_to_name_when_uuid_missing(self):
+        db = self._make_db()
+        row = _resolve_dep_row(db, "nonexistent-uuid", "Add tests")
+        assert row is not None
+        assert row["id"] == "r2"
+
+    def test_returns_none_when_nothing_matches(self):
+        db = self._make_db()
+        row = _resolve_dep_row(db, "bad-uuid", "Ghost Task")
+        assert row is None
+
+
+# ---------------------------------------------------------------------------
+# _migrate_dependencies
+# ---------------------------------------------------------------------------
+
+
+class TestMigrateDependencies:
+    def _make_db_for_migration(self):
+        return _make_db_content(
+            project_options=["Nous"],
+            rows=[
+                {"id": "r-setup", "cells": {"prop-task": "Setup database", "prop-depends": ""}},
+                {"id": "r-api", "cells": {"prop-task": "Add API", "prop-depends": "Setup database"}},
+                {"id": "r-tests", "cells": {"prop-task": "Add tests", "prop-depends": "Setup database, Add API"}},
+                {"id": "r-already", "cells": {"prop-task": "Deploy", "prop-depends": "r-api:Add API"}},
+            ],
+        )
+
+    def test_migrates_free_text_to_uuid(self):
+        db = self._make_db_for_migration()
+        storage = _make_storage(db_content=db)
+        result = _migrate_dependencies(storage, NOTEBOOK_ID, DB_PAGE_ID)
+
+        assert result["migrated"] == 2  # r-api and r-tests
+        assert result["unresolved"] == 0
+
+        # Check the actual values
+        api_row = db["rows"][1]
+        assert f"r-setup:Setup database" == api_row["cells"]["prop-depends"]
+
+        tests_row = db["rows"][2]
+        assert "r-setup:Setup database" in tests_row["cells"]["prop-depends"]
+        assert "r-api:Add API" in tests_row["cells"]["prop-depends"]
+
+    def test_already_uuid_format_unchanged(self):
+        db = self._make_db_for_migration()
+        storage = _make_storage(db_content=db)
+        result = _migrate_dependencies(storage, NOTEBOOK_ID, DB_PAGE_ID)
+
+        # Deploy row already had UUID format — should not be in migrated count
+        deploy_row = db["rows"][3]
+        assert deploy_row["cells"]["prop-depends"] == "r-api:Add API"
+
+    def test_unresolved_deps_tracked(self):
+        db = _make_db_content(
+            project_options=["Nous"],
+            rows=[
+                {"id": "r1", "cells": {"prop-task": "Task A", "prop-depends": "Ghost Task"}},
+            ],
+        )
+        storage = _make_storage(db_content=db)
+        result = _migrate_dependencies(storage, NOTEBOOK_ID, DB_PAGE_ID)
+
+        assert result["unresolved"] == 1
+        assert "Ghost Task" in result["unresolved_names"]
+        # Row not counted as migrated since no UUID was added
+        assert result["migrated"] == 0
+
+    def test_idempotent(self):
+        db = self._make_db_for_migration()
+        storage = _make_storage(db_content=db)
+
+        result1 = _migrate_dependencies(storage, NOTEBOOK_ID, DB_PAGE_ID)
+        storage.write_database_content.reset_mock()
+
+        result2 = _migrate_dependencies(storage, NOTEBOOK_ID, DB_PAGE_ID)
+        assert result2["migrated"] == 0
+        storage.write_database_content.assert_not_called()
+
+    def test_empty_depends_on_skipped(self):
+        db = _make_db_content(
+            project_options=["Nous"],
+            rows=[
+                {"id": "r1", "cells": {"prop-task": "Task A", "prop-depends": ""}},
+                {"id": "r2", "cells": {"prop-task": "Task B", "prop-depends": "None"}},
+            ],
+        )
+        storage = _make_storage(db_content=db)
+        result = _migrate_dependencies(storage, NOTEBOOK_ID, DB_PAGE_ID)
+        assert result["migrated"] == 0
+
+
+# ---------------------------------------------------------------------------
+# check_dependencies (registered tool)
+# ---------------------------------------------------------------------------
+
+
+class TestCheckDependenciesTool:
+    def _setup(self, db=None):
+        if db is None:
+            db = _make_db_content(
+                project_options=["Nous"],
+                include_external_ref=True,
+                rows=[
+                    {
+                        "id": "dep-done",
+                        "cells": {
+                            "prop-task": "Prerequisite Done",
+                            "prop-status": "opt-done",
+                        },
+                    },
+                    {
+                        "id": "dep-ready",
+                        "cells": {
+                            "prop-task": "Prerequisite Ready",
+                            "prop-status": "opt-ready",
+                        },
+                    },
+                    {
+                        "id": "row-main",
+                        "cells": {
+                            "prop-task": "Main Task",
+                            "prop-status": "opt-ready",
+                            "prop-depends": "dep-done:Prerequisite Done, dep-ready:Prerequisite Ready",
+                        },
+                    },
+                ],
+            )
+        storage = _make_storage(
+            folders=[{"id": "folder-nous", "name": "Nous"}],
+            db_content=db,
+        )
+        daemon = _make_daemon()
+        tools = _register_tools(storage, daemon)
+        return tools["check_dependencies"], storage, daemon
+
+    def test_mixed_dep_status(self):
+        check, _, _ = self._setup()
+        result = json.loads(check(task="Main Task"))
+
+        assert result["task"] == "Main Task"
+        assert result["ready"] is False
+        assert len(result["dependencies"]) == 2
+
+        done_dep = next(d for d in result["dependencies"] if d["task"] == "Prerequisite Done")
+        assert done_dep["satisfied"] is True
+        assert done_dep["status"] == "Done"
+
+        ready_dep = next(d for d in result["dependencies"] if d["task"] == "Prerequisite Ready")
+        assert ready_dep["satisfied"] is False
+        assert ready_dep["status"] == "Ready"
+
+        assert result["blocking"] == ["Prerequisite Ready"]
+
+    def test_all_deps_done(self):
+        db = _make_db_content(
+            project_options=["Nous"],
+            include_external_ref=True,
+            rows=[
+                {"id": "dep1", "cells": {"prop-task": "Dep A", "prop-status": "opt-done"}},
+                {
+                    "id": "row-main",
+                    "cells": {
+                        "prop-task": "Main Task",
+                        "prop-status": "opt-ready",
+                        "prop-depends": "dep1:Dep A",
+                    },
+                },
+            ],
+        )
+        check, _, _ = self._setup(db=db)
+        result = json.loads(check(task="Main Task"))
+        assert result["ready"] is True
+        assert result["blocking"] == []
+
+    def test_no_deps(self):
+        db = _make_db_content(
+            project_options=["Nous"],
+            include_external_ref=True,
+            rows=[
+                {
+                    "id": "row-main",
+                    "cells": {
+                        "prop-task": "Main Task",
+                        "prop-status": "opt-ready",
+                        "prop-depends": "None",
+                    },
+                },
+            ],
+        )
+        check, _, _ = self._setup(db=db)
+        result = json.loads(check(task="Main Task"))
+        assert result["ready"] is True
+        assert result["dependencies"] == []
+
+    def test_free_text_dep_resolved(self):
+        db = _make_db_content(
+            project_options=["Nous"],
+            include_external_ref=True,
+            rows=[
+                {"id": "dep1", "cells": {"prop-task": "Setup", "prop-status": "opt-done"}},
+                {
+                    "id": "row-main",
+                    "cells": {
+                        "prop-task": "Main Task",
+                        "prop-status": "opt-ready",
+                        "prop-depends": "Setup",  # free-text, no UUID
+                    },
+                },
+            ],
+        )
+        check, _, _ = self._setup(db=db)
+        result = json.loads(check(task="Main Task"))
+        assert result["ready"] is True
+        assert result["dependencies"][0]["task"] == "Setup"
+        assert result["dependencies"][0]["satisfied"] is True
+
+    def test_unknown_task_raises(self):
+        check, _, _ = self._setup()
+        with pytest.raises(ValueError, match="not found"):
+            check(task="Ghost Task")
+
+    def test_task_prefix_stripped(self):
+        check, _, _ = self._setup()
+        result = json.loads(check(task="Task: Main Task"))
+        assert result["task"] == "Main Task"
+
+
+# ---------------------------------------------------------------------------
+# migrate_dependencies (registered tool)
+# ---------------------------------------------------------------------------
+
+
+class TestMigrateDependenciesTool:
+    def _setup(self, db=None):
+        if db is None:
+            db = _make_db_content(
+                project_options=["Nous"],
+                include_external_ref=True,
+                rows=[
+                    {"id": "r-setup", "cells": {"prop-task": "Setup", "prop-depends": ""}},
+                    {"id": "r-api", "cells": {"prop-task": "API", "prop-depends": "Setup"}},
+                ],
+            )
+        storage = _make_storage(
+            folders=[{"id": "folder-nous", "name": "Nous"}],
+            db_content=db,
+        )
+        daemon = _make_daemon()
+        tools = _register_tools(storage, daemon)
+        return tools["migrate_dependencies"], storage, daemon
+
+    def test_migrates_and_returns_summary(self):
+        migrate, storage, daemon = self._setup()
+        result = json.loads(migrate())
+
+        assert result["migrated"] == 1
+        assert result["unresolved"] == 0
+        daemon.update_page.assert_called_once()
+
+    def test_no_changes_no_update(self):
+        db = _make_db_content(
+            project_options=["Nous"],
+            include_external_ref=True,
+            rows=[
+                {"id": "r1", "cells": {"prop-task": "Task A", "prop-depends": ""}},
+            ],
+        )
+        migrate, storage, daemon = self._setup(db=db)
+        result = json.loads(migrate())
+
+        assert result["migrated"] == 0
+        daemon.update_page.assert_not_called()

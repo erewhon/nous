@@ -383,6 +383,172 @@ def _check_dependency_status(
     return "all satisfied"
 
 
+def _parse_depends_on(value: str) -> list[tuple[str | None, str]]:
+    """Parse a depends_on field value into (uuid_or_none, name) tuples.
+
+    Handles both UUID format ("uuid:Name") and free-text ("Name").
+    """
+    if not value or value.strip().lower() == "none":
+        return []
+
+    entries = [e.strip() for e in value.split(",") if e.strip()]
+    result: list[tuple[str | None, str]] = []
+    for entry in entries:
+        if ":" in entry:
+            uid, name = entry.split(":", 1)
+            result.append((uid.strip(), name.strip()))
+        else:
+            result.append((None, entry.strip()))
+    return result
+
+
+def _resolve_dep_row(
+    db_content: dict,
+    uid: str | None,
+    name: str,
+) -> dict | None:
+    """Resolve a dependency to a database row by UUID or name."""
+    rows = db_content.get("rows", [])
+
+    # Try UUID first
+    if uid:
+        for r in rows:
+            if r["id"] == uid:
+                return r
+
+    # Fall back to name match
+    properties = db_content.get("properties", [])
+    task_prop_id = None
+    for p in properties:
+        if p["name"].lower() == "task":
+            task_prop_id = p["id"]
+            break
+    if task_prop_id is None:
+        return None
+
+    name_lower = name.lower()
+    for r in rows:
+        cell_val = r.get("cells", {}).get(task_prop_id, "")
+        clean = re.sub(r"<[^>]+>", "", str(cell_val))
+        clean = html_unescape(clean).strip()
+        if clean.lower() == name_lower:
+            return r
+    return None
+
+
+def _get_row_status(row: dict, db_content: dict) -> str:
+    """Get the human-readable status label for a database row."""
+    properties = db_content.get("properties", [])
+    status_prop = None
+    for p in properties:
+        if p["name"].lower() == "status":
+            status_prop = p
+            break
+    if status_prop is None:
+        return "Unknown"
+    options = {opt["id"]: opt["label"] for opt in status_prop.get("options", [])}
+    cell_val = row.get("cells", {}).get(status_prop["id"], "")
+    return options.get(cell_val, str(cell_val) if cell_val else "Unknown")
+
+
+def _get_row_task_name(row: dict, db_content: dict) -> str:
+    """Get the task name from a database row."""
+    properties = db_content.get("properties", [])
+    for p in properties:
+        if p["name"].lower() == "task":
+            cell_val = row.get("cells", {}).get(p["id"], "")
+            clean = re.sub(r"<[^>]+>", "", str(cell_val))
+            return html_unescape(clean).strip()
+    return ""
+
+
+def _migrate_dependencies(
+    storage: NousStorage,
+    notebook_id: str,
+    db_page_id: str,
+) -> dict:
+    """Migrate free-text dependencies to UUID:Name format.
+
+    Returns {migrated: int, unresolved: int, unresolved_names: list[str], details: list}.
+    """
+    db_content = storage.read_database_content(notebook_id, db_page_id)
+    if db_content is None:
+        raise ValueError(f"Database file not found for page {db_page_id}")
+
+    properties = db_content.get("properties", [])
+    rows = db_content.get("rows", [])
+
+    # Find property IDs
+    task_prop_id = None
+    depends_prop_id = None
+    for p in properties:
+        if p["name"].lower() == "task":
+            task_prop_id = p["id"]
+        elif p["name"].lower() == "depends on":
+            depends_prop_id = p["id"]
+
+    if task_prop_id is None or depends_prop_id is None:
+        return {"migrated": 0, "unresolved": 0, "unresolved_names": [], "details": []}
+
+    # Index all rows by task name (lowercased) for lookup
+    rows_by_name: dict[str, dict] = {}
+    for r in rows:
+        cell_val = r.get("cells", {}).get(task_prop_id, "")
+        clean = re.sub(r"<[^>]+>", "", str(cell_val))
+        clean = html_unescape(clean).strip()
+        if clean:
+            rows_by_name[clean.lower()] = r
+
+    migrated = 0
+    unresolved_names: list[str] = []
+    details: list[dict] = []
+    modified = False
+
+    for row in rows:
+        depends_val = row.get("cells", {}).get(depends_prop_id, "")
+        if not depends_val or depends_val.strip().lower() == "none":
+            continue
+
+        parsed = _parse_depends_on(depends_val)
+        new_entries: list[str] = []
+        row_changed = False
+
+        for uid, name in parsed:
+            if uid:
+                # Already has UUID — keep as-is
+                new_entries.append(f"{uid}:{name}")
+                continue
+
+            # Free-text — try to resolve
+            dep_row = rows_by_name.get(name.lower())
+            if dep_row:
+                new_entries.append(f"{dep_row['id']}:{name}")
+                row_changed = True
+            else:
+                # Can't resolve — keep original text
+                new_entries.append(name)
+                if name not in unresolved_names:
+                    unresolved_names.append(name)
+
+        if row_changed:
+            new_val = ", ".join(new_entries)
+            row.setdefault("cells", {})[depends_prop_id] = new_val
+            task_name = _get_row_task_name(row, db_content)
+            details.append({"task": task_name, "old": depends_val, "new": new_val})
+            migrated += 1
+            modified = True
+
+    if modified:
+        storage.write_database_content(notebook_id, db_page_id, db_content)
+
+    return {
+        "migrated": migrated,
+        "unresolved": len(unresolved_names),
+        "unresolved_names": unresolved_names,
+        "details": details,
+    }
+
+
 def _ensure_schema(
     storage: NousStorage,
     notebook_id: str,
@@ -753,3 +919,129 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
             },
             indent=2,
         )
+
+    @mcp.tool()
+    def check_dependencies(
+        task: str,
+        notebook: str = "Forge",
+        database: str = "Project Tasks",
+    ) -> str:
+        """Check the dependency status of a task.
+
+        Resolves each dependency (UUID or free-text) and reports its status.
+
+        Args:
+            task: Task name (supports "Task: " prefix or bare name).
+            notebook: Notebook name or UUID (default: "Forge").
+            database: Task database title (default: "Project Tasks").
+
+        Returns JSON with task, status, ready (bool), dependencies list, and blocking list.
+        """
+        storage = get_storage()
+        daemon = get_daemon()
+        nb = storage.resolve_notebook(notebook)
+        notebook_id = nb["id"]
+
+        # Resolve database
+        db_page = daemon.resolve_page(notebook_id, database)
+        if db_page.get("pageType") != "database":
+            raise ValueError(f"Page '{db_page.get('title')}' is not a database")
+
+        db_content = storage.read_database_content(notebook_id, db_page["id"])
+        if db_content is None:
+            raise ValueError(f"Database file not found for '{database}'")
+
+        # Normalize task name
+        task_name = task.strip()
+        if task_name.lower().startswith("task: "):
+            task_name = task_name[6:].strip()
+
+        # Find the task row
+        row, _, prop_map = _find_task_row(db_content, task_name)
+        if row is None:
+            raise ValueError(
+                f"Task '{task_name}' not found in database '{database}'."
+            )
+
+        task_status = _get_row_status(row, db_content)
+
+        # Parse depends_on
+        depends_on_cell = ""
+        if "depends on" in prop_map:
+            depends_prop = prop_map["depends on"]
+            depends_on_cell = row.get("cells", {}).get(depends_prop["id"], "")
+
+        parsed = _parse_depends_on(depends_on_cell)
+
+        dep_results: list[dict] = []
+        blocking: list[str] = []
+
+        for uid, dep_name in parsed:
+            dep_row = _resolve_dep_row(db_content, uid, dep_name)
+            if dep_row is None:
+                dep_results.append({
+                    "task": dep_name,
+                    "status": "Not Found",
+                    "satisfied": False,
+                })
+                blocking.append(dep_name)
+                continue
+
+            dep_status = _get_row_status(dep_row, db_content)
+            satisfied = dep_status.lower() == "done"
+            dep_results.append({
+                "task": dep_name,
+                "status": dep_status,
+                "satisfied": satisfied,
+            })
+            if not satisfied:
+                blocking.append(dep_name)
+
+        return json.dumps(
+            {
+                "task": task_name,
+                "status": task_status,
+                "ready": len(blocking) == 0,
+                "dependencies": dep_results,
+                "blocking": blocking,
+            },
+            indent=2,
+        )
+
+    @mcp.tool()
+    def migrate_dependencies(
+        notebook: str = "Forge",
+        database: str = "Project Tasks",
+    ) -> str:
+        """Migrate free-text dependency references to UUID:Name format.
+
+        Scans all rows, resolves free-text dependency names to row UUIDs,
+        and updates the Depends On field. Idempotent — safe to run multiple times.
+
+        Args:
+            notebook: Notebook name or UUID (default: "Forge").
+            database: Task database title (default: "Project Tasks").
+
+        Returns JSON with migrated count, unresolved count, and details.
+        """
+        storage = get_storage()
+        daemon = get_daemon()
+        nb = storage.resolve_notebook(notebook)
+        notebook_id = nb["id"]
+
+        db_page = daemon.resolve_page(notebook_id, database)
+        if db_page.get("pageType") != "database":
+            raise ValueError(f"Page '{db_page.get('title')}' is not a database")
+
+        result = _migrate_dependencies(storage, notebook_id, db_page["id"])
+
+        # Touch page if anything changed
+        if result["migrated"] > 0:
+            daemon.update_page(notebook_id, db_page["id"])
+            logger.info(
+                "Migrated %d dependency references (%d unresolved)",
+                result["migrated"],
+                result["unresolved"],
+            )
+
+        return json.dumps(result, indent=2)
