@@ -16,6 +16,7 @@ from nous_mcp.workflow import (
     _ensure_schema,
     _ensure_select_option,
     _find_task_row,
+    _fire_webhook,
     _format_task_content,
     _get_project_tasks,
     _get_row_status,
@@ -927,6 +928,127 @@ class TestUpdateTaskStatus:
         assert "ready" not in new_tags
         assert "spec-needed" not in new_tags
         assert "done" in new_tags
+
+
+# ---------------------------------------------------------------------------
+# _fire_webhook
+# ---------------------------------------------------------------------------
+
+
+class TestFireWebhook:
+    def test_fires_when_url_configured(self, monkeypatch):
+        """Webhook POSTs when AGENT_MONITOR_WEBHOOK_URL is set."""
+        sent = []
+
+        def mock_post(url, **kwargs):
+            sent.append({"url": url, "json": kwargs.get("json"), "headers": kwargs.get("headers")})
+            resp = MagicMock()
+            resp.status_code = 200
+            return resp
+
+        monkeypatch.setenv("AGENT_MONITOR_WEBHOOK_URL", "http://localhost:8070/api/webhook")
+        monkeypatch.delenv("AGENT_MONITOR_WEBHOOK_KEY", raising=False)
+        monkeypatch.setattr("nous_mcp.workflow.httpx.post", mock_post)
+
+        _fire_webhook("My Task", "Nous", "In Progress", "Ready")
+
+        # Wait for daemon thread
+        import time
+        time.sleep(0.1)
+
+        assert len(sent) == 1
+        payload = sent[0]["json"]
+        assert payload["source"] == "nous"
+        assert payload["task"] == "My Task"
+        assert payload["project"] == "Nous"
+        assert payload["status"] == "In Progress"
+        assert payload["previous_status"] == "Ready"
+        assert payload["kanban_column"] == "Active"
+        assert "timestamp" in payload
+
+    def test_skipped_when_url_not_set(self, monkeypatch):
+        """Webhook is silently skipped when env var is not set."""
+        monkeypatch.delenv("AGENT_MONITOR_WEBHOOK_URL", raising=False)
+
+        # Should not raise or do anything
+        _fire_webhook("My Task", "Nous", "Done", "In Progress")
+
+    def test_auth_header_included(self, monkeypatch):
+        """Authorization header sent when AGENT_MONITOR_WEBHOOK_KEY is set."""
+        sent = []
+
+        def mock_post(url, **kwargs):
+            sent.append(kwargs.get("headers", {}))
+            resp = MagicMock()
+            resp.status_code = 200
+            return resp
+
+        monkeypatch.setenv("AGENT_MONITOR_WEBHOOK_URL", "http://localhost:8070/api/webhook")
+        monkeypatch.setenv("AGENT_MONITOR_WEBHOOK_KEY", "secret-key")
+        monkeypatch.setattr("nous_mcp.workflow.httpx.post", mock_post)
+
+        _fire_webhook("My Task", "Nous", "Done", "In Progress")
+
+        import time
+        time.sleep(0.1)
+
+        assert sent[0]["Authorization"] == "Bearer secret-key"
+
+    def test_failure_does_not_raise(self, monkeypatch):
+        """Webhook failure is logged but does not propagate."""
+        def mock_post(url, **kwargs):
+            raise ConnectionError("Connection refused")
+
+        monkeypatch.setenv("AGENT_MONITOR_WEBHOOK_URL", "http://localhost:8070/api/webhook")
+        monkeypatch.setattr("nous_mcp.workflow.httpx.post", mock_post)
+
+        # Should not raise
+        _fire_webhook("My Task", "Nous", "Done", "In Progress")
+
+        import time
+        time.sleep(3)  # Wait for retry
+
+    def test_external_ref_included(self, monkeypatch):
+        """External ref is included in payload when provided."""
+        sent = []
+
+        def mock_post(url, **kwargs):
+            sent.append(kwargs.get("json"))
+            resp = MagicMock()
+            resp.status_code = 200
+            return resp
+
+        monkeypatch.setenv("AGENT_MONITOR_WEBHOOK_URL", "http://localhost:8070/api/webhook")
+        monkeypatch.setattr("nous_mcp.workflow.httpx.post", mock_post)
+
+        _fire_webhook("My Task", "Nous", "Done", "In Progress", external_ref="PROJ-123")
+
+        import time
+        time.sleep(0.1)
+
+        assert sent[0]["external_ref"] == "PROJ-123"
+
+    def test_kanban_mapping(self, monkeypatch):
+        """Status correctly maps to Kanban columns."""
+        sent = []
+
+        def mock_post(url, **kwargs):
+            sent.append(kwargs.get("json", {}).get("kanban_column"))
+            resp = MagicMock()
+            resp.status_code = 200
+            return resp
+
+        monkeypatch.setenv("AGENT_MONITOR_WEBHOOK_URL", "http://localhost:8070/api/webhook")
+        monkeypatch.setattr("nous_mcp.workflow.httpx.post", mock_post)
+
+        _fire_webhook("T", "P", "Ready", "Spec Needed")
+        _fire_webhook("T", "P", "In Progress", "Ready")
+        _fire_webhook("T", "P", "Done", "In Progress")
+
+        import time
+        time.sleep(0.1)
+
+        assert sent == ["Backlog", "Active", "Done"]
 
 
 # ---------------------------------------------------------------------------

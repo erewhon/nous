@@ -8,10 +8,15 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
+import threading
+import time
 from datetime import UTC, date, datetime
 from html import unescape as html_unescape
 from uuid import uuid4
+
+import httpx
 
 from nous_mcp.daemon_client import NousDaemonClient
 from nous_mcp.storage import NousStorage
@@ -38,6 +43,72 @@ STATUS_TAG_MAP: dict[str, str] = {
 }
 
 ALL_STATUS_TAGS = set(STATUS_TAG_MAP.values())
+
+# Nous status → Kanban column mapping for agent-monitor
+STATUS_TO_KANBAN: dict[str, str] = {
+    "spec needed": "Backlog",
+    "ready": "Backlog",
+    "in progress": "Active",
+    "done": "Done",
+}
+
+
+# ---------------------------------------------------------------------------
+# Webhook
+# ---------------------------------------------------------------------------
+
+
+def _fire_webhook(
+    task: str,
+    project: str,
+    status: str,
+    previous_status: str,
+    external_ref: str | None = None,
+) -> None:
+    """POST a status-change notification to agent-monitor (fire-and-forget).
+
+    Reads AGENT_MONITOR_WEBHOOK_URL from env. Silently no-ops if not set.
+    Runs in a daemon thread so it never blocks the caller.
+    """
+    url = os.environ.get("AGENT_MONITOR_WEBHOOK_URL")
+    if not url:
+        return
+
+    payload = {
+        "source": "nous",
+        "task": task,
+        "project": project,
+        "status": status,
+        "previous_status": previous_status,
+        "kanban_column": STATUS_TO_KANBAN.get(status.lower(), status),
+        "timestamp": datetime.now(UTC).isoformat(),
+    }
+    if external_ref:
+        payload["external_ref"] = external_ref
+
+    key = os.environ.get("AGENT_MONITOR_WEBHOOK_KEY")
+    headers: dict[str, str] = {"Content-Type": "application/json"}
+    if key:
+        headers["Authorization"] = f"Bearer {key}"
+
+    def _send() -> None:
+        attempts = 2
+        for attempt in range(attempts):
+            try:
+                resp = httpx.post(url, json=payload, headers=headers, timeout=5)
+                if resp.status_code < 400:
+                    logger.info("Webhook sent: %s → %s", task, status)
+                    return
+                logger.warning(
+                    "Webhook %d: HTTP %d", attempt + 1, resp.status_code
+                )
+            except Exception as e:
+                logger.warning("Webhook %d failed: %s", attempt + 1, e)
+            if attempt < attempts - 1:
+                time.sleep(2)
+
+    thread = threading.Thread(target=_send, daemon=True)
+    thread.start()
 
 
 # ---------------------------------------------------------------------------
@@ -1152,6 +1223,25 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
                 depends_prop = prop_map["depends on"]
                 depends_on_cell = row.get("cells", {}).get(depends_prop["id"], "")
             dependencies = _check_dependency_status(db_content, depends_on_cell)
+
+        # --- Fire webhook (fire-and-forget) ---
+        project_name = "Unknown"
+        ext_ref_val = None
+        if row and db_content:
+            if "project" in prop_map:
+                proj_prop = prop_map["project"]
+                proj_cell = row.get("cells", {}).get(proj_prop["id"], "")
+                proj_options = {o["id"]: o["label"] for o in proj_prop.get("options", [])}
+                project_name = proj_options.get(proj_cell, str(proj_cell) if proj_cell else "Unknown")
+            if "external ref" in prop_map:
+                ext_ref_val = row.get("cells", {}).get(prop_map["external ref"]["id"], "") or None
+        _fire_webhook(
+            task=task_name,
+            project=project_name,
+            status=status,
+            previous_status=previous_status,
+            external_ref=ext_ref_val,
+        )
 
         return json.dumps(
             {
