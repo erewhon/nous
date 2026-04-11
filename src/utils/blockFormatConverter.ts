@@ -336,12 +336,17 @@ function flattenChecklistItems(
 function convertTable(block: EditorBlock): BNBlock {
   const data = block.data as Record<string, unknown>;
   const content = (data.content as string[][]) ?? [];
+  const cols = content.length > 0 ? content[0].length : 0;
+  const withHeadings = (data.withHeadings as boolean) ?? false;
 
   return {
     id: block.id,
     type: "table",
     content: {
       type: "tableContent",
+      columnWidths: Array(cols).fill(undefined),
+      headerRows: withHeadings ? 1 : 0,
+      headerCols: 0,
       rows: content.map((row) => ({
         cells: row.map((cell) => parseHtmlToInlineContent(cell)),
       })),
@@ -673,6 +678,7 @@ function convertBlockToEditorJs(
             id: block.id ?? generateId(),
             type: "table",
             data: {
+              withHeadings: (block.content?.headerRows ?? 0) > 0,
               content: (block.content?.rows ?? []).map(
                 (row: { cells: BNInlineContent[][] }) =>
                   row.cells.map((cell: BNInlineContent[]) =>

@@ -46,6 +46,17 @@ Desktop notebook application with AI, databases, collaboration, and publishing. 
 - **What not to test:** Simple display components, theme/styling, static pages.
 - **Tests must pass** before a task is considered done.
 
+## Task Management
+
+Task specs and feature specs live in the **Forge** notebook in Nous. When working on a task:
+
+- Use `mcp__nous__get_page` to read the task spec from Forge (e.g., "Task: MCP Server Writes Through Daemon API")
+- Use `mcp__nous__get_database` on the "Project Tasks" database in Forge to see status and dependencies
+- Update task status via `mcp__nous__update_database_rows` in the Project Tasks database (not internal task tools)
+- Feature pages in Forge contain the full context: data model, API contracts, edge cases, test plans
+
+Do NOT create ad-hoc task tracking internally — all task state lives in Forge.
+
 ## MCP Server
 
 The Nous MCP server (`nous-sdk/`) exposes 17+ tools for external AI agents:
