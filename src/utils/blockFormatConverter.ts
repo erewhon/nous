@@ -348,7 +348,11 @@ function convertTable(block: EditorBlock): BNBlock {
       headerRows: withHeadings ? 1 : 0,
       headerCols: 0,
       rows: content.map((row) => ({
-        cells: row.map((cell) => parseHtmlToInlineContent(cell)),
+        cells: row.map((cell) => ({
+          type: "tableCell",
+          content: parseHtmlToInlineContent(cell),
+          props: {},
+        })),
       })),
     },
   };
@@ -680,10 +684,14 @@ function convertBlockToEditorJs(
             data: {
               withHeadings: (block.content?.headerRows ?? 0) > 0,
               content: (block.content?.rows ?? []).map(
-                (row: { cells: BNInlineContent[][] }) =>
-                  row.cells.map((cell: BNInlineContent[]) =>
-                    inlineContentToHtml(cell),
-                  ),
+                (row: { cells: Array<{ type: string; content: BNInlineContent[]; props?: Record<string, unknown> } | BNInlineContent[]> }) =>
+                  row.cells.map((cell) => {
+                    // BlockNote 0.47 table cells are { type: "tableCell", content: [...] }
+                    const inlineContent = Array.isArray(cell)
+                      ? cell
+                      : (cell as { content: BNInlineContent[] }).content ?? [];
+                    return inlineContentToHtml(inlineContent);
+                  }),
               ),
             },
           },
