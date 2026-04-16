@@ -42,7 +42,7 @@ infographic = [
     "cairosvg>=2.7.0",
 ]
 video = [
-    "pillow>=10.0.0",
+    "pillow>=12.2.0",
 ]
 mcp-server = [
     "mcp>=1.25.0",
