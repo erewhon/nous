@@ -33,7 +33,26 @@ logger = logging.getLogger(__name__)
 REQUIRED_COLUMNS: list[tuple[str, str, list[str] | None]] = [
     ("External Ref", "text", None),
     ("Feature", "text", None),
+    # --- Autonomy / worker metadata (null-as-manual; worker ignores tasks
+    # without Execution Mode = Auto-OK or Auto-Preferred) ---
+    ("Execution Mode", "select", ["Manual", "Auto-OK", "Auto-Preferred"]),
+    ("Model Tier", "select", ["auto", "auto-free", "auto-full"]),
+    ("Estimate", "select", ["xs", "s", "m", "l", "xl"]),
+    ("Complexity", "select", ["routine", "novel"]),
+    ("Task Type", "select", ["bug-fix", "feature", "refactor", "docs", "test", "chore"]),
+    ("Max Files", "number", None),
+    ("Requires Tests", "select", ["Yes", "No"]),
 ]
+
+# Fields in REQUIRED_COLUMNS with select type — used by read helpers
+AUTONOMY_SELECT_FIELDS = (
+    "execution mode",
+    "model tier",
+    "estimate",
+    "complexity",
+    "task type",
+    "requires tests",
+)
 
 STATUS_TAG_MAP: dict[str, str] = {
     "spec needed": "spec-needed",
@@ -694,13 +713,28 @@ def _query_tasks(
     priority_max: int | None = None,
     has_external_ref: bool | None = None,
     include_done: bool = False,
+    execution_mode: str | None = None,
+    model_tier: str | None = None,
+    task_type: str | None = None,
+    complexity: str | None = None,
+    worker_ready: bool = False,
     limit: int | None = None,
 ) -> list[dict]:
     """Extract tasks from database content with flexible filtering.
 
     All filters are optional. When multiple filters are provided, they are
     ANDed together. Returns list of dicts with id, task, project, status,
-    priority, phase, feature, external_ref, deps, _depends_on_raw.
+    priority, phase, feature, external_ref, deps, _depends_on_raw, plus
+    execution_mode, model_tier, estimate, complexity, task_type, max_files,
+    requires_tests.
+
+    Filters:
+    - execution_mode: Match exact label ("Manual", "Auto-OK", "Auto-Preferred"),
+      or comma-separated list. Null values match "Manual" (null-as-manual).
+    - model_tier / task_type / complexity: Match exact label.
+    - worker_ready: Shortcut for execution_mode IN (Auto-OK, Auto-Preferred)
+      AND status=Ready AND blocked=False. Post-filters unblocked tasks upstream
+      of this function.
     """
     properties = db_content.get("properties", [])
     rows = db_content.get("rows", [])
@@ -716,6 +750,15 @@ def _query_tasks(
     feature_prop = prop_map.get("feature")
     ext_ref_prop = prop_map.get("external ref")
 
+    # Autonomy columns (may not exist on older databases yet)
+    exec_mode_prop = prop_map.get("execution mode")
+    model_tier_prop = prop_map.get("model tier")
+    estimate_prop = prop_map.get("estimate")
+    complexity_prop = prop_map.get("complexity")
+    task_type_prop = prop_map.get("task type")
+    max_files_prop = prop_map.get("max files")
+    requires_tests_prop = prop_map.get("requires tests")
+
     if not task_prop or not project_prop:
         return []
 
@@ -723,6 +766,30 @@ def _query_tasks(
     proj_options = {o["id"]: o["label"] for o in project_prop.get("options", [])}
     status_options = {o["id"]: o["label"] for o in status_prop.get("options", [])} if status_prop else {}
     phase_options = {o["id"]: o["label"] for o in phase_prop.get("options", [])} if phase_prop else {}
+
+    def _select_label(prop: dict | None, cell_value) -> str:
+        """Resolve a select cell id back to its label. Returns '' if null/missing."""
+        if not prop or not cell_value:
+            return ""
+        options = {o["id"]: o["label"] for o in prop.get("options", [])}
+        return options.get(cell_value, str(cell_value))
+
+    # --- worker_ready shortcut: apply implicit filters ---
+    if worker_ready:
+        # Force status = Ready
+        if status:
+            requested = {s.strip().lower() for s in status.split(",")}
+            if "ready" not in requested:
+                return []
+        status = "Ready"
+        # Force execution_mode to the auto-* set unless caller narrowed it
+        if execution_mode is None:
+            execution_mode = "Auto-OK,Auto-Preferred"
+
+    # Normalize filter sets for fields that support comma-separated
+    exec_mode_set: set[str] | None = None
+    if execution_mode:
+        exec_mode_set = {s.strip().lower() for s in execution_mode.split(",")}
 
     # Pre-compute status filter set
     status_set: set[str] | None = None
@@ -795,6 +862,45 @@ def _query_tasks(
         if has_external_ref is False and ext_ref_cell:
             continue
 
+        # --- Autonomy fields ---
+        exec_mode_label = _select_label(
+            exec_mode_prop, cells.get(exec_mode_prop["id"], "") if exec_mode_prop else ""
+        )
+        # null-as-manual: unset Execution Mode is treated as "Manual"
+        exec_mode_effective = exec_mode_label or "Manual"
+
+        model_tier_label = _select_label(
+            model_tier_prop, cells.get(model_tier_prop["id"], "") if model_tier_prop else ""
+        )
+        estimate_label = _select_label(
+            estimate_prop, cells.get(estimate_prop["id"], "") if estimate_prop else ""
+        )
+        complexity_label = _select_label(
+            complexity_prop, cells.get(complexity_prop["id"], "") if complexity_prop else ""
+        )
+        task_type_label = _select_label(
+            task_type_prop, cells.get(task_type_prop["id"], "") if task_type_prop else ""
+        )
+        requires_tests_label = _select_label(
+            requires_tests_prop,
+            cells.get(requires_tests_prop["id"], "") if requires_tests_prop else "",
+        )
+        max_files_cell = cells.get(max_files_prop["id"], "") if max_files_prop else ""
+        try:
+            max_files_val = int(max_files_cell) if max_files_cell not in ("", None) else None
+        except (ValueError, TypeError):
+            max_files_val = None
+
+        # --- Autonomy filters ---
+        if exec_mode_set and exec_mode_effective.lower() not in exec_mode_set:
+            continue
+        if model_tier and model_tier_label.lower() != model_tier.lower():
+            continue
+        if task_type and task_type_label.lower() != task_type.lower():
+            continue
+        if complexity and complexity_label.lower() != complexity.lower():
+            continue
+
         # --- Dependencies ---
         depends_raw = cells.get(depends_prop["id"], "") if depends_prop else ""
         parsed_deps = _parse_depends_on(depends_raw)
@@ -811,6 +917,13 @@ def _query_tasks(
             "external_ref": ext_ref_cell,
             "deps": dep_names,
             "_depends_on_raw": depends_raw,
+            "execution_mode": exec_mode_effective,
+            "model_tier": model_tier_label,
+            "estimate": estimate_label,
+            "complexity": complexity_label,
+            "task_type": task_type_label,
+            "max_files": max_files_val,
+            "requires_tests": requires_tests_label,
         })
 
         if limit is not None and len(result) >= limit:
@@ -977,6 +1090,13 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
         feature: str | None = None,
         external_ref: str | None = None,
         tags: str | None = None,
+        execution_mode: str | None = None,
+        model_tier: str | None = None,
+        estimate: str | None = None,
+        complexity: str | None = None,
+        task_type: str | None = None,
+        max_files: int | None = None,
+        requires_tests: bool | None = None,
         notebook: str = "Forge",
         database: str = "Project Tasks",
     ) -> str:
@@ -993,6 +1113,15 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
             feature: Feature name this task belongs to (optional, used by get_feature_tasks).
             external_ref: External reference like a Jira key or GitHub issue (optional).
             tags: Comma-separated extra tags (optional). "task" and project name are auto-added.
+            execution_mode: "Manual" (default, null-as-manual), "Auto-OK", or "Auto-Preferred".
+                Gates whether the autonomous task worker can pick up this task.
+            model_tier: "auto" (local), "auto-free" (local + free cloud), or "auto-full"
+                (local + free + paid). Only consulted when execution_mode is auto-ok/auto-preferred.
+            estimate: Size estimate — "xs", "s", "m", "l", or "xl".
+            complexity: "routine" (well-worn territory) or "novel" (needs human attention even if short).
+            task_type: "bug-fix", "feature", "refactor", "docs", "test", or "chore".
+            max_files: Soft scope guardrail — worker bails if more than this many files change.
+            requires_tests: If True, worker requires tests to pass before marking Done.
             notebook: Notebook name or UUID (default: "Forge").
             database: Task database title (default: "Project Tasks").
 
@@ -1073,6 +1202,20 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
             row_data["Feature"] = feature
         if external_ref:
             row_data["External Ref"] = external_ref
+        if execution_mode:
+            row_data["Execution Mode"] = execution_mode
+        if model_tier:
+            row_data["Model Tier"] = model_tier
+        if estimate:
+            row_data["Estimate"] = estimate
+        if complexity:
+            row_data["Complexity"] = complexity
+        if task_type:
+            row_data["Task Type"] = task_type
+        if max_files is not None:
+            row_data["Max Files"] = max_files
+        if requires_tests is not None:
+            row_data["Requires Tests"] = "Yes" if requires_tests else "No"
 
         row_id: str | None = None
         try:
@@ -1106,6 +1249,13 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
         notes: str | None = None,
         external_ref: str | None = None,
         completed_date: str | None = None,
+        execution_mode: str | None = None,
+        model_tier: str | None = None,
+        estimate: str | None = None,
+        complexity: str | None = None,
+        task_type: str | None = None,
+        max_files: int | None = None,
+        requires_tests: bool | None = None,
         notebook: str = "Forge",
         database: str = "Project Tasks",
     ) -> str:
@@ -1121,6 +1271,13 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
             notes: Implementation notes to append to the page (optional).
             external_ref: Set or update the External Ref field (optional).
             completed_date: Completed date in YYYY-MM-DD format (auto-set for Done).
+            execution_mode: Update autonomy gate — "Manual", "Auto-OK", or "Auto-Preferred".
+            model_tier: Update model routing — "auto", "auto-free", or "auto-full".
+            estimate: Update size estimate — "xs", "s", "m", "l", or "xl".
+            complexity: Update complexity — "routine" or "novel".
+            task_type: Update type — "bug-fix", "feature", "refactor", "docs", "test", or "chore".
+            max_files: Update soft scope guardrail.
+            requires_tests: Update whether tests must pass before marking Done.
             notebook: Notebook name or UUID (default: "Forge").
             database: Task database title (default: "Project Tasks").
 
@@ -1194,6 +1351,20 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
 
             if external_ref is not None:
                 update_cells["External Ref"] = external_ref
+            if execution_mode is not None:
+                update_cells["Execution Mode"] = execution_mode
+            if model_tier is not None:
+                update_cells["Model Tier"] = model_tier
+            if estimate is not None:
+                update_cells["Estimate"] = estimate
+            if complexity is not None:
+                update_cells["Complexity"] = complexity
+            if task_type is not None:
+                update_cells["Task Type"] = task_type
+            if max_files is not None:
+                update_cells["Max Files"] = max_files
+            if requires_tests is not None:
+                update_cells["Requires Tests"] = "Yes" if requires_tests else "No"
 
             daemon.update_database_rows(
                 notebook_id,
@@ -1443,6 +1614,24 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
         priority = "—"
         phase = "—"
         external_ref = "None"
+        # Autonomy fields (empty strings if not set)
+        exec_mode = ""
+        model_tier_val = ""
+        estimate_val = ""
+        complexity_val = ""
+        task_type_val = ""
+        max_files_val = ""
+        requires_tests_val = ""
+
+        def _label(prop_name: str) -> str:
+            prop = prop_map.get(prop_name)
+            if not prop or not row:
+                return ""
+            cell = row.get("cells", {}).get(prop["id"], "")
+            if not cell:
+                return ""
+            options = {o["id"]: o["label"] for o in prop.get("options", [])}
+            return options.get(cell, str(cell))
 
         if row and db_content:
             status = _get_row_status(row, db_content)
@@ -1472,6 +1661,18 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
                 ext_cell = cells.get(prop_map["external ref"]["id"], "")
                 if ext_cell:
                     external_ref = str(ext_cell)
+
+            # Autonomy fields
+            exec_mode = _label("execution mode")
+            model_tier_val = _label("model tier")
+            estimate_val = _label("estimate")
+            complexity_val = _label("complexity")
+            task_type_val = _label("task type")
+            requires_tests_val = _label("requires tests")
+            if "max files" in prop_map:
+                mf_cell = cells.get(prop_map["max files"]["id"], "")
+                if mf_cell not in ("", None):
+                    max_files_val = str(mf_cell)
 
         # --- Dependency status ---
         dep_section = "None"
@@ -1528,6 +1729,23 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
         parts.append(f"- **Priority:** {priority}")
         parts.append(f"- **Phase:** {phase}")
         parts.append(f"- **External Ref:** {external_ref}")
+        # Autonomy fields — always show Execution Mode (null-as-manual)
+        if exec_mode:
+            parts.append(f"- **Execution Mode:** {exec_mode}")
+        else:
+            parts.append("- **Execution Mode:** Manual (default)")
+        if model_tier_val:
+            parts.append(f"- **Model Tier:** {model_tier_val}")
+        if estimate_val:
+            parts.append(f"- **Estimate:** {estimate_val}")
+        if complexity_val:
+            parts.append(f"- **Complexity:** {complexity_val}")
+        if task_type_val:
+            parts.append(f"- **Task Type:** {task_type_val}")
+        if max_files_val:
+            parts.append(f"- **Max Files:** {max_files_val}")
+        if requires_tests_val:
+            parts.append(f"- **Requires Tests:** {requires_tests_val}")
         parts.append(f"- **Dependencies:**")
         if dep_section == "None":
             parts.append("  None")
@@ -1636,6 +1854,11 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
         priority_max: int | None = None,
         has_external_ref: bool | None = None,
         blocked: bool | None = None,
+        execution_mode: str | None = None,
+        model_tier: str | None = None,
+        task_type: str | None = None,
+        complexity: str | None = None,
+        worker_ready: bool = False,
         limit: int = 20,
         notebook: str = "Forge",
         database: str = "Project Tasks",
@@ -1655,6 +1878,14 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
             priority_max: Only tasks with priority <= this value (lower = higher priority).
             has_external_ref: True = only tasks with an external ref, False = only without.
             blocked: True = only tasks with unmet deps, False = only unblocked tasks.
+            execution_mode: Filter by autonomy gate — comma-separated list of
+                "Manual", "Auto-OK", "Auto-Preferred". Null values are treated as "Manual".
+            model_tier: Filter by model tier — "auto", "auto-free", or "auto-full".
+            task_type: Filter by type — "bug-fix", "feature", "refactor", "docs", "test", "chore".
+            complexity: Filter by complexity — "routine" or "novel".
+            worker_ready: Convenience flag. True = tasks the autonomous worker can run:
+                status=Ready AND execution_mode IN (Auto-OK, Auto-Preferred) AND blocked=False.
+                Can be combined with other filters (e.g. project, model_tier) to narrow.
             limit: Max results (default 20, use 0 for unlimited).
             notebook: Notebook name or UUID (default: "Forge").
             database: Task database title (default: "Project Tasks").
@@ -1681,6 +1912,11 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
             if "done" in status_set:
                 include_done = True
 
+        # worker_ready implies blocked=False post-filter
+        effective_blocked = blocked
+        if worker_ready and effective_blocked is None:
+            effective_blocked = False
+
         effective_limit = limit if limit > 0 else None
         tasks = _query_tasks(
             db_content,
@@ -1691,18 +1927,23 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
             priority_max=priority_max,
             has_external_ref=has_external_ref,
             include_done=include_done,
-            limit=None if blocked is not None else effective_limit,
+            execution_mode=execution_mode,
+            model_tier=model_tier,
+            task_type=task_type,
+            complexity=complexity,
+            worker_ready=worker_ready,
+            limit=None if effective_blocked is not None else effective_limit,
         )
 
         # Post-filter by blocked status (requires dependency resolution)
-        if blocked is not None:
+        if effective_blocked is not None:
             filtered: list[dict] = []
             for t in tasks:
                 is_blocked, blocking = _is_task_blocked(t, db_content)
                 t["blocked_by"] = blocking
-                if blocked and is_blocked:
+                if effective_blocked and is_blocked:
                     filtered.append(t)
-                elif not blocked and not is_blocked:
+                elif not effective_blocked and not is_blocked:
                     filtered.append(t)
             tasks = filtered
             if effective_limit:
@@ -1727,6 +1968,21 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
                 entry["deps"] = t["deps"]
             if "blocked_by" in t:
                 entry["blocked_by"] = t["blocked_by"]
+            # Autonomy fields (only include when non-default/non-empty)
+            if t.get("execution_mode") and t["execution_mode"] != "Manual":
+                entry["execution_mode"] = t["execution_mode"]
+            if t.get("model_tier"):
+                entry["model_tier"] = t["model_tier"]
+            if t.get("estimate"):
+                entry["estimate"] = t["estimate"]
+            if t.get("complexity"):
+                entry["complexity"] = t["complexity"]
+            if t.get("task_type"):
+                entry["task_type"] = t["task_type"]
+            if t.get("max_files") is not None:
+                entry["max_files"] = t["max_files"]
+            if t.get("requires_tests"):
+                entry["requires_tests"] = t["requires_tests"]
             task_list.append(entry)
 
         return json.dumps({
@@ -1738,6 +1994,11 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
                     "priority_max": priority_max,
                     "has_external_ref": has_external_ref,
                     "blocked": blocked,
+                    "execution_mode": execution_mode,
+                    "model_tier": model_tier,
+                    "task_type": task_type,
+                    "complexity": complexity,
+                    "worker_ready": worker_ready if worker_ready else None,
                 }.items() if v is not None
             },
             "tasks": task_list,
