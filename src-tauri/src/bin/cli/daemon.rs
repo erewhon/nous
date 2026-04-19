@@ -8,7 +8,7 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use tokio::signal;
 
 use nous_lib::actions::{ActionExecutor, ActionScheduler, ActionStorage};
@@ -22,6 +22,7 @@ use nous_lib::storage::FileStorage;
 use nous_lib::sync::{LogEmitter, SyncManager};
 
 use super::api;
+use super::auth;
 
 /// Re-export AppEvent as DaemonEvent for backward compatibility
 pub type DaemonEvent = nous_lib::events::AppEvent;
@@ -177,12 +178,33 @@ pub async fn run(library_name: Option<&str>, port: Option<u16>, bind: Option<&st
         event_tx,
     });
 
-    // Start HTTP API
-    let router = api::build_router(Arc::clone(&state));
+    // Load API keys and configure auth
+    let key_path = auth::key_file_path(&data_dir);
     let bind_addr: std::net::IpAddr = bind
         .unwrap_or("127.0.0.1")
         .parse()
         .context("Invalid bind address")?;
+    let is_loopback = bind_addr.is_loopback();
+
+    let auth_state = if key_path.exists() {
+        let keys = auth::ApiKeySet::load(&key_path)?;
+        let count = if keys.is_empty() { 0 } else { 1 }; // at least one
+        log::info!("API authentication enabled ({} key(s) from {})", count, key_path.display());
+        println!("API authentication enabled (keys from {})", key_path.display());
+        api::AuthState::enabled(keys)
+    } else if !is_loopback {
+        bail!(
+            "Cannot bind to non-loopback address ({}) without API key.\n\
+             Run `nous-cli daemon keygen` first, then restart.",
+            bind_addr
+        );
+    } else {
+        log::info!("API authentication disabled (no key file, localhost only)");
+        api::AuthState::disabled()
+    };
+
+    // Start HTTP API
+    let router = api::build_router(Arc::clone(&state), auth_state);
     let addr = std::net::SocketAddr::from((bind_addr, port));
 
     log::info!("HTTP API listening on http://{}", addr);

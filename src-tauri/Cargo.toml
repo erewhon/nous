@@ -94,6 +94,7 @@ axum = { version = "0.8", features = ["ws"] }
 tower = "0.5"
 tower-http = { version = "0.6", features = ["cors"] }
 rand = "0.8"
+subtle = "2"
 async-stream = "0.3"
 bytes = "1.5"
 

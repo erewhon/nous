@@ -55,6 +55,43 @@
   "Port of the Nous daemon."
   :type 'integer)
 
+(defcustom nous-api-key nil
+  "API key for daemon authentication.
+If nil, auto-discovered from ~/.local/share/nous/daemon-api-key."
+  :type '(choice (const :tag "Auto-discover" nil) string))
+
+(defvar nous--api-key-cache 'unset
+  "Cached API key (nil = no key, string = key, `unset` = not loaded).")
+
+(defun nous--get-api-key ()
+  "Return the API key, auto-discovering from key file if needed."
+  (or nous-api-key
+      (progn
+        (when (eq nous--api-key-cache 'unset)
+          (setq nous--api-key-cache (nous--read-key-file)))
+        nous--api-key-cache)))
+
+(defun nous--read-key-file ()
+  "Read the first rw: key from the daemon key file."
+  (let ((path (expand-file-name "~/.local/share/nous/daemon-api-key")))
+    (when (file-readable-p path)
+      (with-temp-buffer
+        (insert-file-contents path)
+        (catch 'found
+          (dolist (line (split-string (buffer-string) "\n"))
+            (let ((trimmed (string-trim line)))
+              (when (and (not (string-empty-p trimmed))
+                         (not (string-prefix-p "#" trimmed))
+                         (string-prefix-p "rw:" trimmed))
+                (throw 'found trimmed))))
+          nil)))))
+
+(defun nous--auth-headers ()
+  "Return auth headers as alist, or nil if no key."
+  (let ((key (nous--get-api-key)))
+    (when key
+      (list (cons "Authorization" (concat "Bearer " key))))))
+
 ;; ===== HTTP layer =====
 
 (defun nous--api-url (path)
@@ -64,6 +101,7 @@
 (defun nous--api-get-json (path)
   "GET PATH, return parsed JSON as alist."
   (let ((url-request-method "GET")
+        (url-request-extra-headers (nous--auth-headers))
         (url-show-status nil))
     (with-current-buffer (url-retrieve-synchronously (nous--api-url path) t t 10)
       (goto-char (point-min))
@@ -75,6 +113,7 @@
 (defun nous--api-get-text (path)
   "GET PATH, return response body as string."
   (let ((url-request-method "GET")
+        (url-request-extra-headers (nous--auth-headers))
         (url-show-status nil))
     (with-current-buffer (url-retrieve-synchronously (nous--api-url path) t t 10)
       (goto-char (point-min))
@@ -86,7 +125,8 @@
 (defun nous--api-put-json (path data)
   "PUT DATA as JSON to PATH, return parsed JSON response."
   (let ((url-request-method "PUT")
-        (url-request-extra-headers '(("Content-Type" . "application/json")))
+        (url-request-extra-headers (append '(("Content-Type" . "application/json"))
+                                           (nous--auth-headers)))
         (url-request-data (encode-coding-string (json-encode data) 'utf-8))
         (url-show-status nil))
     (with-current-buffer (url-retrieve-synchronously (nous--api-url path) t t 10)
@@ -99,7 +139,8 @@
 (defun nous--api-post-json (path data)
   "POST DATA as JSON to PATH, return parsed JSON response."
   (let ((url-request-method "POST")
-        (url-request-extra-headers '(("Content-Type" . "application/json")))
+        (url-request-extra-headers (append '(("Content-Type" . "application/json"))
+                                           (nous--auth-headers)))
         (url-request-data (encode-coding-string (json-encode data) 'utf-8))
         (url-show-status nil))
     (with-current-buffer (url-retrieve-synchronously (nous--api-url path) t t 10)

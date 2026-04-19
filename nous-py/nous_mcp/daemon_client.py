@@ -7,6 +7,7 @@ BlockNote ↔ EditorJS format conversion via the Rust serde layer.
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -14,6 +15,21 @@ import httpx
 logger = logging.getLogger(__name__)
 
 DAEMON_BASE_URL = "http://localhost:7667"
+DEFAULT_KEY_FILE = Path.home() / ".local" / "share" / "nous" / "daemon-api-key"
+
+
+def _discover_api_key(key_file: Path = DEFAULT_KEY_FILE) -> str | None:
+    """Read the first rw: key from the daemon key file."""
+    if not key_file.exists():
+        return None
+    try:
+        for line in key_file.read_text().splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and line.startswith("rw:"):
+                return line
+    except OSError:
+        pass
+    return None
 
 
 class DaemonError(Exception):
@@ -23,9 +39,17 @@ class DaemonError(Exception):
 class NousDaemonClient:
     """HTTP client for the Nous daemon API."""
 
-    def __init__(self, base_url: str = DAEMON_BASE_URL) -> None:
+    def __init__(
+        self,
+        base_url: str = DAEMON_BASE_URL,
+        api_key: str | None = None,
+    ) -> None:
         self.base_url = base_url
-        self.client = httpx.Client(timeout=30)
+        self.api_key = api_key or _discover_api_key()
+        headers = {}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        self.client = httpx.Client(timeout=30, headers=headers)
 
     def _url(self, path: str) -> str:
         return f"{self.base_url}{path}"

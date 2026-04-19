@@ -1,5 +1,6 @@
 mod api;
 mod app;
+mod auth;
 mod commands;
 mod daemon;
 mod render;
@@ -152,6 +153,16 @@ enum DaemonCommand {
 
     /// Uninstall the system service
     Uninstall,
+
+    /// Generate a new API key for daemon authentication
+    Keygen {
+        /// Generate a read-only key instead of read-write
+        #[arg(long)]
+        read_only: bool,
+    },
+
+    /// Show the current API key
+    ShowKey,
 }
 
 /// Read content from stdin if piped, or resolve "-" as stdin
@@ -274,6 +285,32 @@ fn main() -> anyhow::Result<()> {
                 }
                 DaemonCommand::Uninstall => {
                     daemon::uninstall()?;
+                }
+                DaemonCommand::Keygen { read_only } => {
+                    let data_dir = nous_lib::storage::FileStorage::default_data_dir()?;
+                    let scope = if read_only { auth::Scope::ReadOnly } else { auth::Scope::ReadWrite };
+                    let key = auth::generate_key(scope);
+                    let path = auth::key_file_path(&data_dir);
+                    let comment = format!("{} key", scope);
+                    auth::write_key_to_file(&path, &key, Some(&comment))?;
+                    println!("{}", key);
+                    eprintln!("Key written to {}", path.display());
+                }
+                DaemonCommand::ShowKey => {
+                    let data_dir = nous_lib::storage::FileStorage::default_data_dir()?;
+                    let path = auth::key_file_path(&data_dir);
+                    if !path.exists() {
+                        eprintln!("No key file found at {}", path.display());
+                        eprintln!("Run `nous-cli daemon keygen` to generate one.");
+                        std::process::exit(1);
+                    }
+                    let keys = auth::ApiKeySet::load(&path)?;
+                    if let Some(key) = keys.first_rw_key() {
+                        println!("{}", key);
+                    } else {
+                        eprintln!("No read-write key found in {}", path.display());
+                        std::process::exit(1);
+                    }
                 }
             }
         }

@@ -5,14 +5,17 @@
 use std::sync::Arc;
 
 use axum::{
-    extract::{Path, Query, State, WebSocketUpgrade, ws::{Message, WebSocket}},
+    extract::{Path, Query, Request, State, WebSocketUpgrade, ws::{Message, WebSocket}},
     http::StatusCode,
+    middleware::{self, Next},
     response::{Html, IntoResponse},
     routing::{delete, get, post, put},
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+use super::auth::{ApiKeySet, Scope};
 
 use html_escape::decode_html_entities;
 use regex::Regex;
@@ -239,9 +242,98 @@ fn parse_uuid(s: &str) -> Result<Uuid, (StatusCode, Json<ApiError>)> {
     Uuid::parse_str(s).map_err(|e| api_err(StatusCode::BAD_REQUEST, format!("Invalid UUID: {}", e)))
 }
 
+// ===== Auth middleware =====
+
+/// Routes that don't require authentication.
+fn is_public_route(path: &str) -> bool {
+    path == "/api/status"
+        || path.starts_with("/share/")
+        || path.starts_with("/gallery/")
+        || path.starts_with("/finance/")
+        || path.starts_with("/api/image-cache/")
+}
+
+/// Auth state: None means auth is disabled (localhost, no key file).
+#[derive(Clone)]
+pub struct AuthState {
+    keys: Option<Arc<ApiKeySet>>,
+}
+
+impl AuthState {
+    pub fn disabled() -> Self {
+        Self { keys: None }
+    }
+
+    pub fn enabled(keys: ApiKeySet) -> Self {
+        Self { keys: Some(Arc::new(keys)) }
+    }
+}
+
+async fn auth_middleware(
+    State(auth): State<AuthState>,
+    req: Request,
+    next: Next,
+) -> axum::response::Response {
+    // Auth disabled — pass through
+    let keys = match &auth.keys {
+        None => return next.run(req).await,
+        Some(k) => k,
+    };
+
+    // Public routes — no auth required
+    if is_public_route(req.uri().path()) {
+        return next.run(req).await;
+    }
+
+    // Extract bearer token from header or query param (for WebSocket)
+    let token = req
+        .headers()
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .map(|s| s.to_string())
+        .or_else(|| {
+            // Fall back to ?token= query param (for WebSocket clients)
+            req.uri().query().and_then(|q| {
+                q.split('&')
+                    .find_map(|pair| pair.strip_prefix("token="))
+                    .map(|s| s.to_string())
+            })
+        });
+
+    let token = match token {
+        Some(t) => t,
+        None => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(ApiError { error: "Missing API key. Include Authorization: Bearer <key>".into() }),
+            ).into_response();
+        }
+    };
+
+    match keys.validate(&token) {
+        None => {
+            (
+                StatusCode::UNAUTHORIZED,
+                Json(ApiError { error: "Invalid API key".into() }),
+            ).into_response()
+        }
+        Some(scope) => {
+            if !scope.allows_method(req.method().as_str()) {
+                (
+                    StatusCode::FORBIDDEN,
+                    Json(ApiError { error: "Read-only key cannot perform write operations".into() }),
+                ).into_response()
+            } else {
+                next.run(req).await
+            }
+        }
+    }
+}
+
 // ===== Router =====
 
-pub fn build_router(state: AppState) -> Router {
+pub fn build_router(state: AppState, auth: AuthState) -> Router {
     START_TIME.get_or_init(std::time::Instant::now);
 
     Router::new()
@@ -372,6 +464,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/api/inbox/{item_id}", delete(delete_inbox_item))
         // WebSocket event stream
         .route("/api/events", get(ws_events))
+        .layer(middleware::from_fn_with_state(auth, auth_middleware))
         .with_state(state)
 }
 

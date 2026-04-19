@@ -37,7 +37,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=%h/.local/bin/nous-cli daemon start
+ExecStart=%h/.local/bin/nous-cli daemon start --bind 0.0.0.0
 Restart=on-failure
 RestartSec=5
 Environment=RUST_LOG=info
