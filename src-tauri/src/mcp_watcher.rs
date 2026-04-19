@@ -25,7 +25,7 @@ const DEBOUNCE_WINDOW: Duration = Duration::from_millis(750);
 
 /// Per-category cooldown: don't re-emit the same event category within this window.
 /// This prevents spam from the app's own periodic writes (e.g., auto-goal checks).
-const CATEGORY_COOLDOWN: Duration = Duration::from_secs(5);
+const CATEGORY_COOLDOWN: Duration = Duration::from_secs(2);
 
 /// Tracks the last time Tauri wrote to a path so we can ignore our own writes.
 #[derive(Clone, Default)]

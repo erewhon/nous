@@ -139,6 +139,9 @@ enum DaemonCommand {
         /// Port for the HTTP API (default: 7667)
         #[arg(long)]
         port: Option<u16>,
+        /// Bind address for the HTTP API (default: 127.0.0.1, use 0.0.0.0 for all interfaces)
+        #[arg(long)]
+        bind: Option<String>,
     },
 
     /// Check daemon status
@@ -258,10 +261,10 @@ fn main() -> anyhow::Result<()> {
         }
         Some(Command::Daemon(subcmd)) => {
             match subcmd {
-                DaemonCommand::Start { port } => {
+                DaemonCommand::Start { port, bind } => {
                     // Build a tokio runtime and run the daemon
                     let rt = tokio::runtime::Runtime::new()?;
-                    rt.block_on(daemon::run(cli.library.as_deref(), port))?;
+                    rt.block_on(daemon::run(cli.library.as_deref(), port, bind.as_deref()))?;
                 }
                 DaemonCommand::Status => {
                     daemon::status()?;

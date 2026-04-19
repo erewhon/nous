@@ -44,7 +44,7 @@ pub struct DaemonState {
 const DEFAULT_PORT: u16 = 7667;
 
 /// Run the daemon (foreground, blocking).
-pub async fn run(library_name: Option<&str>, port: Option<u16>) -> Result<()> {
+pub async fn run(library_name: Option<&str>, port: Option<u16>, bind: Option<&str>) -> Result<()> {
     let port = port.unwrap_or(DEFAULT_PORT);
 
     // Get base data directory
@@ -179,7 +179,11 @@ pub async fn run(library_name: Option<&str>, port: Option<u16>) -> Result<()> {
 
     // Start HTTP API
     let router = api::build_router(Arc::clone(&state));
-    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+    let bind_addr: std::net::IpAddr = bind
+        .unwrap_or("127.0.0.1")
+        .parse()
+        .context("Invalid bind address")?;
+    let addr = std::net::SocketAddr::from((bind_addr, port));
 
     log::info!("HTTP API listening on http://{}", addr);
     println!("Nous daemon listening on http://{}", addr);

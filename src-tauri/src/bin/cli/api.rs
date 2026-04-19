@@ -19,6 +19,7 @@ use regex::Regex;
 
 use nous_lib::commands::{create_daily_note_core, find_daily_note};
 use nous_lib::inbox::{CaptureRequest, CaptureSource};
+use nous_lib::markdown::{export_page_to_markdown, parse_markdown_to_blocks};
 use nous_lib::share::storage::ShareStorage;
 use nous_lib::plugins::api::HostApi;
 use nous_lib::storage::{EditorBlock, EditorData, Page, PageType};
@@ -50,6 +51,8 @@ struct CreatePageRequest {
     content: Option<String>,
     /// Structured Editor.js blocks (takes priority over `content`)
     blocks: Option<Vec<EditorBlock>>,
+    /// Markdown content (parsed to blocks; lowest priority after blocks and content)
+    markdown: Option<String>,
     tags: Option<Vec<String>>,
     folder_id: Option<String>,
     section_id: Option<String>,
@@ -67,6 +70,8 @@ struct UpdatePageRequest {
     content: Option<String>,
     /// Structured Editor.js blocks (takes priority over `content`)
     blocks: Option<Vec<EditorBlock>>,
+    /// Markdown content (parsed to blocks; lowest priority after blocks and content)
+    markdown: Option<String>,
     tags: Option<Vec<String>>,
     folder_id: Option<String>,
     section_id: Option<String>,
@@ -146,6 +151,11 @@ struct SearchQuery {
 #[derive(Deserialize)]
 struct ResolvePageQuery {
     title: String,
+}
+
+#[derive(Deserialize)]
+struct FormatQuery {
+    format: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -407,12 +417,23 @@ async fn list_pages(
 async fn get_page(
     State(state): State<AppState>,
     Path((notebook_id, page_id)): Path<(String, String)>,
-) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    Query(query): Query<FormatQuery>,
+) -> Result<axum::response::Response, (StatusCode, Json<ApiError>)> {
     let nb_id = parse_uuid(&notebook_id)?;
     let pg_id = parse_uuid(&page_id)?;
     let storage = state.storage.lock().unwrap();
     match storage.get_page(nb_id, pg_id) {
-        Ok(page) => Ok(Json(ApiResponse { data: page })),
+        Ok(page) => {
+            if query.format.as_deref() == Some("markdown") {
+                let md = export_page_to_markdown(&page);
+                Ok(axum::response::Response::builder()
+                    .header("content-type", "text/markdown; charset=utf-8")
+                    .body(axum::body::Body::from(md))
+                    .unwrap())
+            } else {
+                Ok(Json(ApiResponse { data: page }).into_response())
+            }
+        }
         Err(e) => Err(api_err(StatusCode::NOT_FOUND, e.to_string())),
     }
 }
@@ -585,11 +606,13 @@ async fn create_page(
         Err(e) => return Err(api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),
     };
 
-    // Set content if provided (blocks take priority over plain text)
+    // Set content if provided (blocks > plain text > markdown)
     if let Some(blocks) = req.blocks {
         page.content = make_block_content(blocks);
     } else if let Some(text) = req.content {
         page.content = make_paragraph_content(&text);
+    } else if let Some(md) = req.markdown {
+        page.content = make_block_content(parse_markdown_to_blocks(&md));
     }
 
     // Set tags
@@ -687,6 +710,8 @@ async fn update_page(
         page.content = make_block_content(blocks);
     } else if let Some(text) = req.content {
         page.content = make_paragraph_content(&text);
+    } else if let Some(md) = req.markdown {
+        page.content = make_block_content(parse_markdown_to_blocks(&md));
     }
     if let Some(tags) = req.tags {
         page.tags = tags;
