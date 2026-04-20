@@ -98,57 +98,72 @@ If nil, auto-discovered from ~/.local/share/nous/daemon-api-key."
   "Build full API URL for PATH."
   (format "http://%s:%d%s" nous-host nous-port path))
 
+(defun nous--response-body-utf8 ()
+  "In an HTTP response buffer, return the body decoded as a UTF-8 string.
+Kills the buffer."
+  ;; Approach: extract body as unibyte raw bytes, then flip a temp buffer
+  ;; from unibyte to multibyte. Emacs's internal multibyte representation
+  ;; IS UTF-8 for BMP characters, so flipping the flag reinterprets the
+  ;; raw bytes as the unicode characters they encode. This avoids relying
+  ;; on `decode-coding-string'/`decode-coding-region', which have been
+  ;; observed to no-op on Emacs 31.0.50 / macOS in some configurations.
+  (set-buffer-multibyte nil)
+  (goto-char (point-min))
+  (re-search-forward "\r?\n\r?\n")
+  (let ((bytes (buffer-substring-no-properties (point) (point-max))))
+    (kill-buffer)
+    (with-temp-buffer
+      (set-buffer-multibyte nil)
+      (insert bytes)
+      (set-buffer-multibyte t)
+      (buffer-string))))
+
 (defun nous--api-get-json (path)
   "GET PATH, return parsed JSON as alist."
   (let ((url-request-method "GET")
         (url-request-extra-headers (nous--auth-headers))
-        (url-show-status nil))
+        (url-show-status nil)
+        (coding-system-for-read 'binary)
+        (coding-system-for-write 'binary))
     (with-current-buffer (url-retrieve-synchronously (nous--api-url path) t t 10)
-      (goto-char (point-min))
-      (re-search-forward "\n\n")
-      (let ((result (json-parse-buffer :object-type 'alist :array-type 'list)))
-        (kill-buffer)
-        result))))
+      (json-parse-string (nous--response-body-utf8)
+                         :object-type 'alist :array-type 'list))))
 
 (defun nous--api-get-text (path)
   "GET PATH, return response body as string."
   (let ((url-request-method "GET")
         (url-request-extra-headers (nous--auth-headers))
-        (url-show-status nil))
+        (url-show-status nil)
+        (coding-system-for-read 'binary)
+        (coding-system-for-write 'binary))
     (with-current-buffer (url-retrieve-synchronously (nous--api-url path) t t 10)
-      (goto-char (point-min))
-      (re-search-forward "\n\n")
-      (let ((result (buffer-substring-no-properties (point) (point-max))))
-        (kill-buffer)
-        result))))
+      (nous--response-body-utf8))))
 
 (defun nous--api-put-json (path data)
   "PUT DATA as JSON to PATH, return parsed JSON response."
   (let ((url-request-method "PUT")
-        (url-request-extra-headers (append '(("Content-Type" . "application/json"))
+        (url-request-extra-headers (append '(("Content-Type" . "application/json; charset=utf-8"))
                                            (nous--auth-headers)))
         (url-request-data (encode-coding-string (json-encode data) 'utf-8))
-        (url-show-status nil))
+        (url-show-status nil)
+        (coding-system-for-read 'binary)
+        (coding-system-for-write 'binary))
     (with-current-buffer (url-retrieve-synchronously (nous--api-url path) t t 10)
-      (goto-char (point-min))
-      (re-search-forward "\n\n")
-      (let ((result (json-parse-buffer :object-type 'alist :array-type 'list)))
-        (kill-buffer)
-        result))))
+      (json-parse-string (nous--response-body-utf8)
+                         :object-type 'alist :array-type 'list))))
 
 (defun nous--api-post-json (path data)
   "POST DATA as JSON to PATH, return parsed JSON response."
   (let ((url-request-method "POST")
-        (url-request-extra-headers (append '(("Content-Type" . "application/json"))
+        (url-request-extra-headers (append '(("Content-Type" . "application/json; charset=utf-8"))
                                            (nous--auth-headers)))
         (url-request-data (encode-coding-string (json-encode data) 'utf-8))
-        (url-show-status nil))
+        (url-show-status nil)
+        (coding-system-for-read 'binary)
+        (coding-system-for-write 'binary))
     (with-current-buffer (url-retrieve-synchronously (nous--api-url path) t t 10)
-      (goto-char (point-min))
-      (re-search-forward "\n\n")
-      (let ((result (json-parse-buffer :object-type 'alist :array-type 'list)))
-        (kill-buffer)
-        result))))
+      (json-parse-string (nous--response-body-utf8)
+                         :object-type 'alist :array-type 'list))))
 
 ;; ===== Helpers =====
 
@@ -429,6 +444,8 @@ Return plist (:title TITLE :tags (TAG ...) :body-start LINE)."
                            (or (nous--extract-title-from-md markdown) page-id))))
     (let ((buf (get-buffer-create buf-name)))
       (with-current-buffer buf
+        (set-buffer-multibyte t)
+        (setq-local buffer-file-coding-system 'utf-8-unix)
         (let ((inhibit-read-only t))
           (erase-buffer)
           (insert markdown)
