@@ -18,15 +18,15 @@ const GIT_AUTO_COMMIT_DELAY = 30_000; // 30 seconds
 function hasContentChanged(current: Page | undefined, fresh: Page): boolean {
   if (!current?.content || !fresh.content) return true;
 
-  // If local content is at least as recent as the fresh data, keep it.
-  // This avoids overwriting optimistic local edits (via setPageContentLocal)
-  // with stale backend data that api.getPage returns before updatePageContent
-  // has finished writing.
-  if (current.content.time && fresh.content.time && current.content.time >= fresh.content.time) {
-    return false;
+  // Use page-level updatedAt as authoritative timestamp. The daemon sets this
+  // on every write, so if fresh.updatedAt > current.updatedAt, the fresh data
+  // reflects a write we haven't seen yet (from any client: desktop, Emacs, MCP).
+  if (current.updatedAt && fresh.updatedAt) {
+    if (fresh.updatedAt > current.updatedAt) return true;
+    if (fresh.updatedAt < current.updatedAt) return false;
   }
 
-  // Fresh data is newer or timestamps missing — check for structural differences
+  // Timestamps equal or missing — fall back to structural check for safety
   if (current.content.blocks.length !== fresh.content.blocks.length) return true;
   if (current.content.time !== fresh.content.time) return true;
   return false;

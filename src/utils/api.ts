@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { daemonGet } from "./daemon";
 import type { Notebook, NotebookType } from "../types/notebook";
 import type {
   Page,
@@ -25,7 +26,7 @@ import type {
 // ===== Notebook API =====
 
 export async function listNotebooks(): Promise<Notebook[]> {
-  return invoke<Notebook[]>("list_notebooks");
+  return daemonGet<Notebook[]>("/api/notebooks");
 }
 
 export async function getNotebook(notebookId: string): Promise<Notebook> {
@@ -80,14 +81,20 @@ export async function listPages(
   notebookId: string,
   includeArchived?: boolean
 ): Promise<Page[]> {
-  return invoke<Page[]>("list_pages", { notebookId, includeArchived });
+  const pages = await daemonGet<Page[]>(`/api/notebooks/${notebookId}/pages`);
+  // Daemon returns all pages — filter out deleted and (optionally) archived
+  return pages.filter((p) => {
+    if (p.deletedAt) return false;
+    if (!includeArchived && p.isArchived) return false;
+    return true;
+  });
 }
 
 export async function getPage(
   notebookId: string,
   pageId: string
 ): Promise<Page> {
-  return invoke<Page>("get_page", { notebookId, pageId });
+  return daemonGet<Page>(`/api/notebooks/${notebookId}/pages/${pageId}`);
 }
 
 export async function createPage(
@@ -266,7 +273,7 @@ export async function moveFolderToNotebook(
 // ===== Folder API =====
 
 export async function listFolders(notebookId: string): Promise<Folder[]> {
-  return invoke<Folder[]>("list_folders", { notebookId });
+  return daemonGet<Folder[]>(`/api/notebooks/${notebookId}/folders`);
 }
 
 export async function getFolder(
@@ -1716,7 +1723,7 @@ export async function cleanupExternalEditSessions(): Promise<void> {
 // ========== Section Operations ==========
 
 export async function listSections(notebookId: string): Promise<Section[]> {
-  return invoke<Section[]>("list_sections", { notebookId });
+  return daemonGet<Section[]>(`/api/notebooks/${notebookId}/sections`);
 }
 
 export async function getSection(

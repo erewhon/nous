@@ -9,6 +9,8 @@ import { useEnergyStore } from "../stores/energyStore";
 import { useInboxStore } from "../stores/inboxStore";
 import { usePluginStore } from "../stores/pluginStore";
 import { useWindowLibrary } from "../contexts/WindowContext";
+import { initDaemonClient } from "../utils/daemon";
+import { daemonEventBus } from "../utils/daemonEvents";
 
 // Check goals every 15 minutes
 const GOALS_CHECK_INTERVAL = 15 * 60 * 1000;
@@ -36,6 +38,42 @@ export function useAppInit() {
   useEffect(() => {
     usePluginStore.getState().syncAiConfig();
   }, []);
+
+  // Preload the daemon API key so the first HTTP request doesn't block on it,
+  // then connect to the daemon event stream to get push notifications for
+  // external writes (e.g. Emacs or MCP editing a page we have open).
+  useEffect(() => {
+    let unsubscribe: (() => void) | null = null;
+    (async () => {
+      try {
+        await initDaemonClient();
+      } catch (err) {
+        console.warn("[useAppInit] Daemon client init failed:", err);
+      }
+      unsubscribe = daemonEventBus.subscribe((evt) => {
+        switch (evt.event) {
+          case "page.updated":
+          case "page.created": {
+            const pageId = evt.data.pageId as string | undefined;
+            if (pageId) {
+              refreshPages([pageId]).catch(() => {});
+            }
+            break;
+          }
+          case "page.deleted": {
+            // Let the file watcher handle deletes for now; refresh is a read.
+            break;
+          }
+          default:
+            break;
+        }
+      });
+      daemonEventBus.start();
+    })();
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
+  }, [refreshPages]);
 
   // Load notebooks and cross-notebook favorites when library is available
   useEffect(() => {

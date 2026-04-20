@@ -554,6 +554,8 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            // Daemon API key (for frontend → daemon HTTP client)
+            commands::get_daemon_api_key,
             // Notebook commands
             commands::list_notebooks,
             commands::get_notebook,
