@@ -65,6 +65,8 @@ class DaemonEventBus {
       ? `${DAEMON_WS_URL}?token=${encodeURIComponent(this.apiKey)}`
       : DAEMON_WS_URL;
 
+    console.log("[daemon-events] Connecting to", url.replace(/token=[^&]+/, "token=***"));
+
     try {
       this.socket = new WebSocket(url);
     } catch (err) {
@@ -97,7 +99,8 @@ class DaemonEventBus {
       console.warn("[daemon-events] WebSocket error:", err);
     };
 
-    this.socket.onclose = () => {
+    this.socket.onclose = (evt) => {
+      console.warn(`[daemon-events] Closed (code=${evt.code}, reason=${evt.reason || "(none)"})`);
       this.socket = null;
       if (!this.stopped) {
         this.scheduleReconnect();

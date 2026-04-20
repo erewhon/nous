@@ -219,6 +219,72 @@ export const BlockNoteEditor = memo(
       // ─── Auto-save timer ────────────────────────────────────────────
       const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
       const isDirtyRef = useRef(false);
+      // Set true while applying an external update so onChange doesn't
+      // mark the editor dirty (which would schedule a redundant auto-save
+      // that in turn triggers the file watcher → feedback loop).
+      const applyingExternalRef = useRef(false);
+
+      // ─── Sync external changes into the editor ─────────────────────
+      // When initialData changes after mount (e.g. another client edited
+      // the page via the daemon API), replace the editor's content.
+      // Skipped if:
+      //   - Collab is active (Yjs is the source of truth)
+      //   - The editor has unsaved local edits (user's work takes priority)
+      //   - The content is identical (avoid cursor jumps on no-op refreshes)
+      const lastAppliedDataRef = useRef(initialData);
+      useEffect(() => {
+        if (collaboration) return;
+        if (isDirtyRef.current) return;
+        if (!initialData?.blocks) return;
+        if (lastAppliedDataRef.current === initialData) return;
+
+        // Skip if the editor is focused — user is actively working; don't
+        // disrupt their cursor / selection. The next page switch will pick
+        // up the external change.
+        const activeEl = document.activeElement;
+        const editorEl = (editor as any)?.domElement as HTMLElement | undefined;
+        if (editorEl && activeEl && editorEl.contains(activeEl)) {
+          return;
+        }
+
+        // Cheap structural check first: if block counts match, do the
+        // expensive JSON comparison to skip no-op refreshes (e.g. file
+        // watcher echoes of the desktop's own save).
+        try {
+          const currentDoc = editor.document;
+          if (currentDoc.length === initialData.blocks.length) {
+            const currentEditorData = blockNoteToEditorJs(currentDoc);
+            if (
+              JSON.stringify(currentEditorData.blocks) ===
+              JSON.stringify(initialData.blocks)
+            ) {
+              lastAppliedDataRef.current = initialData;
+              return;
+            }
+          }
+        } catch {
+          // Fall through — attempt the replace anyway
+        }
+
+        lastAppliedDataRef.current = initialData;
+
+        try {
+          const bnBlocks = editorJsToBlockNote(initialData);
+          const currentBlocks = editor.document;
+          applyingExternalRef.current = true;
+          editor.replaceBlocks(currentBlocks, bnBlocks as any);
+          // Clear the guard on the next tick — any onChange fired by
+          // replaceBlocks will have been delivered synchronously or
+          // as a microtask by then.
+          queueMicrotask(() => {
+            applyingExternalRef.current = false;
+            isDirtyRef.current = false;
+          });
+        } catch (e) {
+          applyingExternalRef.current = false;
+          console.error("Failed to apply external content update:", e);
+        }
+      }, [initialData, editor, collaboration]);
 
       const performSave = useCallback(() => {
         if (!isDirtyRef.current) return;
@@ -243,6 +309,12 @@ export const BlockNoteEditor = memo(
 
       // Editor change handler — debounced save
       const handleEditorChange = useCallback(() => {
+        // Suppress dirty/save if this change was caused by our own
+        // replaceBlocks (applying an external update). Otherwise we'd
+        // schedule a save, which writes to disk, which the file watcher
+        // picks up, which fires another refresh — cursor jumps forever.
+        if (applyingExternalRef.current) return;
+
         isDirtyRef.current = true;
 
         // Reset debounce timer

@@ -56,7 +56,9 @@ export function useAppInit() {
           case "page.created": {
             const pageId = evt.data.pageId as string | undefined;
             if (pageId) {
-              refreshPages([pageId]).catch(() => {});
+              refreshPages([pageId]).catch((err) =>
+                console.warn("[useAppInit] refreshPages failed:", err),
+              );
             }
             break;
           }

@@ -6,13 +6,14 @@ use std::sync::Arc;
 
 use axum::{
     extract::{Path, Query, Request, State, WebSocketUpgrade, ws::{Message, WebSocket}},
-    http::StatusCode,
+    http::{HeaderValue, Method, StatusCode},
     middleware::{self, Next},
     response::{Html, IntoResponse},
     routing::{delete, get, post, put},
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
+use tower_http::cors::{AllowOrigin, CorsLayer};
 use uuid::Uuid;
 
 use super::auth::{ApiKeySet, Scope};
@@ -293,11 +294,13 @@ async fn auth_middleware(
         .and_then(|v| v.strip_prefix("Bearer "))
         .map(|s| s.to_string())
         .or_else(|| {
-            // Fall back to ?token= query param (for WebSocket clients)
+            // Fall back to ?token= query param (for WebSocket clients).
+            // URL-decode since browsers encode ':' as '%3A' via encodeURIComponent.
             req.uri().query().and_then(|q| {
                 q.split('&')
                     .find_map(|pair| pair.strip_prefix("token="))
-                    .map(|s| s.to_string())
+                    .and_then(|raw| urlencoding::decode(raw).ok())
+                    .map(|s| s.into_owned())
             })
         });
 
@@ -465,6 +468,22 @@ pub fn build_router(state: AppState, auth: AuthState) -> Router {
         // WebSocket event stream
         .route("/api/events", get(ws_events))
         .layer(middleware::from_fn_with_state(auth, auth_middleware))
+        .layer(
+            // Clients authenticate via Bearer token, so allow any origin. The
+            // Tauri webview's origin varies by platform (tauri://localhost,
+            // http://tauri.localhost, etc.), so we can't pin it.
+            CorsLayer::new()
+                .allow_origin(AllowOrigin::predicate(|_origin: &HeaderValue, _req| true))
+                .allow_methods([
+                    Method::GET,
+                    Method::POST,
+                    Method::PUT,
+                    Method::DELETE,
+                    Method::OPTIONS,
+                ])
+                .allow_headers(tower_http::cors::Any)
+                .allow_credentials(false),
+        )
         .with_state(state)
 }
 

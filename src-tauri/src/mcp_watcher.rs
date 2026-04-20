@@ -212,38 +212,13 @@ pub fn start_library_watcher(
 
             let now = Instant::now();
 
-            // Emit events (with per-category cooldown)
-            for (notebook_id, page_ids) in &page_changes {
-                let last = last_pages_emit
-                    .get(notebook_id)
-                    .copied()
-                    .unwrap_or(Instant::now() - CATEGORY_COOLDOWN * 2);
-                if now.duration_since(last) < CATEGORY_COOLDOWN {
-                    continue;
-                }
-                last_pages_emit.insert(notebook_id.clone(), now);
-
-                #[derive(Clone, serde::Serialize)]
-                #[serde(rename_all = "camelCase")]
-                struct PagesUpdated {
-                    notebook_id: String,
-                    page_ids: Vec<String>,
-                }
-
-                let payload = PagesUpdated {
-                    notebook_id: notebook_id.clone(),
-                    page_ids: page_ids.clone(),
-                };
-                if let Err(e) = app_clone.emit("sync-pages-updated", &payload) {
-                    log::warn!("Failed to emit sync-pages-updated: {}", e);
-                } else {
-                    log::info!(
-                        "[mcp-watcher] Emitted sync-pages-updated for {} page(s) in {}",
-                        page_ids.len(),
-                        &notebook_id[..8.min(notebook_id.len())]
-                    );
-                }
-            }
+            // Page change events are now delivered via the daemon WebSocket
+            // (ws://localhost:7667/api/events). The file watcher no longer
+            // needs to emit them — doing so would create redundant refreshes.
+            // We still track page_changes for potential future use (e.g.
+            // detecting edits from non-daemon writers), but don't emit.
+            let _ = &page_changes;
+            let _ = &mut last_pages_emit;
 
             // Emit database-updated events
             for (notebook_id, page_ids) in &database_changes {
