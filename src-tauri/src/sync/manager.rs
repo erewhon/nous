@@ -17,6 +17,8 @@ use crate::energy::{EnergyCheckIn, EnergyStorage};
 use crate::goals::{Goal, GoalProgress, GoalsStorage};
 use crate::inbox::{InboxItem, InboxStorage};
 use crate::library::LibraryStorage;
+use crate::storage::oplog::diff_blocks;
+use crate::storage::EditorData;
 use crate::storage::Page;
 use crate::storage::FileStorage;
 
@@ -1787,6 +1789,69 @@ impl SyncManager {
         }
     }
 
+    /// Build the local CRDT document for sync, seeding from `.json` content
+    /// when a non-CRDT writer has updated it without touching `.crdt`.
+    ///
+    /// Load priority:
+    /// 1. Live CRDT store state (page open in an editor pane).
+    /// 2. On-disk `.crdt` file (preserves shared CRDT history with remote so
+    ///    `apply_update` produces a real merge — building a fresh doc from
+    ///    `.json` instead would create independent Yjs history and let the
+    ///    remote update shadow local content via Y.Map last-writer-wins on
+    ///    the `blocks` array).
+    /// 3. Fresh doc from `page_content` (only when no `.crdt` exists yet).
+    ///
+    /// After loading, the doc is seeded with any blocks present in
+    /// `page_content` but not in the CRDT — this is the bug fix for the
+    /// 2026-05-01 sync data-loss incident, where Emacs/MCP writes to `.json`
+    /// were silently overwritten by stale `.crdt` content during merge.
+    /// Seeding is skipped for live pages because the CRDT store is the
+    /// in-memory authority during editing; out-of-band `.json` writes to a
+    /// live page are addressed by the daemon-CRDT integration task.
+    fn prepare_local_doc_for_sync(
+        crdt_path: &Path,
+        page_id: Uuid,
+        page_content: &EditorData,
+        page_is_live: bool,
+        crdt_store: Option<&Arc<CrdtStore>>,
+    ) -> Result<PageDocument, SyncError> {
+        let crdt_existed = crdt_path.exists();
+        let local_doc = if page_is_live {
+            let store = crdt_store.ok_or_else(|| {
+                SyncError::Other("page_is_live=true but no CRDT store provided".into())
+            })?;
+            let state = store.get_encoded_state(page_id).ok_or_else(|| {
+                SyncError::Other("Live page disappeared from CRDT store".into())
+            })?;
+            PageDocument::from_state(&state)?
+        } else if crdt_existed {
+            let data = std::fs::read(crdt_path)?;
+            PageDocument::from_state(&data)?
+        } else {
+            PageDocument::from_editor_data(page_content)?
+        };
+
+        if !page_is_live && crdt_existed {
+            let crdt_data = local_doc.to_editor_data()?;
+            let json_changes = diff_blocks(&crdt_data, page_content);
+            if !json_changes.is_empty() {
+                log::warn!(
+                    "Sync: page {} had .json edits not in .crdt — seeding before merge ({} changes)",
+                    page_id,
+                    json_changes.len(),
+                );
+                local_doc.apply_block_changes(
+                    &json_changes,
+                    &page_content.blocks,
+                    page_content.time,
+                    page_content.version.as_deref(),
+                )?;
+            }
+        }
+
+        Ok(local_doc)
+    }
+
     async fn sync_page_concurrent_inner(
         data_dir: &Path,
         client: &WebDAVClient,
@@ -1800,31 +1865,24 @@ impl SyncManager {
         let crdt_path = Self::crdt_path_for(data_dir, notebook_id, page.id);
         let remote_path = format!("{}/pages/{}.crdt", config.remote_path, page.id);
 
-        // 1. Load or create local CRDT
+        // 1. Load or create local CRDT, seeding with any .json content not
+        //    already in the CRDT.
         //
-        // Phase 3: if the page is live in the CRDT store, use its state directly.
-        // This means edits are already in the CRDT — no need to rebuild from JSON.
-        //
-        // Fallback: when the page is not live, use the old behavior:
-        // - needs_sync → rebuild from page.content (edits happened in JSON only)
-        // - !needs_sync → load existing .crdt file
+        // See `prepare_local_doc_for_sync` for the load priority and seeding
+        // semantics. The seeding step protects against silent data loss when
+        // a non-CRDT writer (daemon HTTP, MCP, Emacs nous.el) updates .json
+        // without touching .crdt — see
+        // `docs/incident-2026-05-01-webdav-sync-data-loss.md`.
         let page_is_live = crdt_store
             .map(|cs| cs.is_live(page.id))
             .unwrap_or(false);
-        let crdt_existed = crdt_path.exists();
-        let local_doc = if page_is_live {
-            // Page is open in an editor pane — CRDT store has the authoritative state
-            let state = crdt_store.unwrap().get_encoded_state(page.id)
-                .ok_or_else(|| SyncError::Other("Live page disappeared from CRDT store".into()))?;
-            PageDocument::from_state(&state)?
-        } else if crdt_existed && !sync_info.needs_sync {
-            // No local changes — load existing CRDT for potential merge with remote
-            let data = std::fs::read(&crdt_path)?;
-            PageDocument::from_state(&data)?
-        } else {
-            // Local changes exist, or no CRDT yet — create from current page content
-            PageDocument::from_editor_data(&page.content)?
-        };
+        let local_doc = Self::prepare_local_doc_for_sync(
+            &crdt_path,
+            page.id,
+            &page.content,
+            page_is_live,
+            crdt_store,
+        )?;
 
         // 2. Use HEAD to check remote existence + ETag
         let (remote_exists, remote_etag) = match client.head(&remote_path).await {
@@ -4014,5 +4072,201 @@ impl SyncManager {
                 assets_pulled: total_assets_pulled,
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::EditorBlock;
+    use std::fs;
+
+    fn block(id: &str, text: &str) -> EditorBlock {
+        EditorBlock {
+            id: id.to_string(),
+            block_type: "paragraph".to_string(),
+            data: serde_json::json!({ "text": text }),
+        }
+    }
+
+    fn data(blocks: Vec<EditorBlock>) -> EditorData {
+        EditorData {
+            time: Some(1_700_000_000_000),
+            version: Some("2.28.0".to_string()),
+            blocks,
+        }
+    }
+
+    fn temp_dir(label: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("sync_manager_test_{}_{}", label, Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    /// Regression test for the 2026-05-01 WebDAV sync data-loss incident.
+    ///
+    /// Simulates the incident scenario:
+    /// - `.crdt` file holds 9 blocks (last desktop save).
+    /// - Daemon writes (Emacs/MCP) extend `.json` to 14 blocks without
+    ///   touching `.crdt`.
+    /// - Sync fetches a remote update equivalent to the 9-block state.
+    ///
+    /// Before the fix, the merge would collapse `.json` back to 9 blocks.
+    /// After the fix, all 14 blocks survive the merge.
+    #[test]
+    fn merge_preserves_json_blocks_not_in_crdt() {
+        let dir = temp_dir("merge_preserves");
+        let crdt_path = dir.join("page.crdt");
+
+        // Step 1: build the original 9-block CRDT and persist to .crdt + .crdt-snapshot
+        // (the snapshot represents the remote state at last sync).
+        let initial = data((0..9).map(|i| block(&format!("b{}", i), &format!("v{}", i))).collect());
+        let initial_doc = PageDocument::from_editor_data(&initial).unwrap();
+        fs::write(&crdt_path, initial_doc.encode_state()).unwrap();
+        let remote_state_blob = initial_doc.encode_state();
+
+        // Step 2: simulate Emacs/MCP appending 5 fresh blocks to .json (the
+        // CRDT on disk is left untouched — that's the divergence).
+        let mut json_blocks: Vec<_> = (0..9)
+            .map(|i| block(&format!("b{}", i), &format!("v{}", i)))
+            .collect();
+        for i in 9..14 {
+            json_blocks.push(block(&format!("b{}", i), &format!("emacs-v{}", i)));
+        }
+        let json_content = data(json_blocks);
+
+        // Step 3: prepare the local doc the same way sync would. Page is not
+        // live (closed in editor), no CRDT store.
+        let page_id = Uuid::new_v4();
+        let local_doc = SyncManager::prepare_local_doc_for_sync(
+            &crdt_path,
+            page_id,
+            &json_content,
+            false,
+            None,
+        )
+        .unwrap();
+
+        // Sanity: after seeding, all 14 blocks should be present.
+        let after_seed = local_doc.to_editor_data().unwrap();
+        assert_eq!(
+            after_seed.blocks.len(),
+            14,
+            "seeding from .json should bring all 14 blocks into the CRDT, got {}",
+            after_seed.blocks.len()
+        );
+
+        // Step 4: apply the remote update (which is the original 9-block
+        // state — the remote hadn't changed in the incident). With shared
+        // CRDT history this is a no-op merge; the 5 .json-only blocks must
+        // survive.
+        local_doc.apply_update(&remote_state_blob).unwrap();
+
+        let merged = local_doc.to_editor_data().unwrap();
+        assert_eq!(
+            merged.blocks.len(),
+            14,
+            "merge with remote should preserve the 5 .json-only blocks; got {}",
+            merged.blocks.len()
+        );
+
+        let ids: Vec<&str> = merged.blocks.iter().map(|b| b.id.as_str()).collect();
+        for i in 0..14 {
+            let expected = format!("b{}", i);
+            assert!(
+                ids.contains(&expected.as_str()),
+                "missing block {} from merged result",
+                expected
+            );
+        }
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// When `.json` and `.crdt` already agree, seeding is a no-op and the
+    /// merged result equals what a plain `apply_update` would produce.
+    #[test]
+    fn no_seed_when_json_matches_crdt() {
+        let dir = temp_dir("no_seed");
+        let crdt_path = dir.join("page.crdt");
+
+        let content = data(vec![block("a", "alpha"), block("b", "beta")]);
+        let doc = PageDocument::from_editor_data(&content).unwrap();
+        fs::write(&crdt_path, doc.encode_state()).unwrap();
+
+        let local_doc = SyncManager::prepare_local_doc_for_sync(
+            &crdt_path,
+            Uuid::new_v4(),
+            &content,
+            false,
+            None,
+        )
+        .unwrap();
+
+        let result = local_doc.to_editor_data().unwrap();
+        assert_eq!(result.blocks.len(), 2);
+        assert_eq!(result.blocks[0].id, "a");
+        assert_eq!(result.blocks[1].id, "b");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// When `.crdt` does not exist yet (first sync of a fresh page), the doc
+    /// is built from `page.content` directly — no seeding needed.
+    #[test]
+    fn no_crdt_yet_builds_from_page_content() {
+        let dir = temp_dir("no_crdt_yet");
+        let crdt_path = dir.join("missing.crdt");
+        assert!(!crdt_path.exists());
+
+        let content = data(vec![block("a", "alpha")]);
+        let local_doc = SyncManager::prepare_local_doc_for_sync(
+            &crdt_path,
+            Uuid::new_v4(),
+            &content,
+            false,
+            None,
+        )
+        .unwrap();
+
+        let result = local_doc.to_editor_data().unwrap();
+        assert_eq!(result.blocks.len(), 1);
+        assert_eq!(result.blocks[0].id, "a");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Modifications to existing blocks in `.json` are propagated into the
+    /// seeded CRDT, not just additions.
+    #[test]
+    fn seed_picks_up_modifications_to_existing_blocks() {
+        let dir = temp_dir("modify_existing");
+        let crdt_path = dir.join("page.crdt");
+
+        let initial = data(vec![block("a", "old text"), block("b", "untouched")]);
+        let initial_doc = PageDocument::from_editor_data(&initial).unwrap();
+        fs::write(&crdt_path, initial_doc.encode_state()).unwrap();
+
+        // .json has block "a" with new text — daemon edited an existing block
+        let json_content = data(vec![block("a", "new text"), block("b", "untouched")]);
+
+        let local_doc = SyncManager::prepare_local_doc_for_sync(
+            &crdt_path,
+            Uuid::new_v4(),
+            &json_content,
+            false,
+            None,
+        )
+        .unwrap();
+
+        let result = local_doc.to_editor_data().unwrap();
+        let a_block = result.blocks.iter().find(|b| b.id == "a").unwrap();
+        assert_eq!(
+            a_block.data.get("text").and_then(|v| v.as_str()),
+            Some("new text"),
+            "seeded CRDT should carry the modified block content"
+        );
+
+        let _ = fs::remove_dir_all(&dir);
     }
 }

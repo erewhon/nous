@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Build the Nous daemon (release) and install to ~/.local/bin.
-# Uses the same Python environment as run-dev.sh.
+# Uses the same Python environment as `just dev` (sources setup-python-env.sh).
 
 set -e
 

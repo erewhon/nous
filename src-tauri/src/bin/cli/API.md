@@ -182,6 +182,33 @@ Get computed energy patterns. Optional query params: `?start=2025-01-01&end=2025
 {"data": {"dayOfWeekAverages": {"monday": 3.5, "tuesday": 4.0}, "moodDayOfWeekAverages": {"monday": 3.0}, "currentStreak": 5, "typicalLowDays": ["monday"], "typicalHighDays": ["saturday"]}}
 ```
 
+### GET /api/search
+
+Search pages across all notebooks (or a specific notebook). Returns a list of `SearchResult` objects.
+
+Query params:
+- `q` (required) — search string
+- `notebook_id` (optional) — limit to one notebook
+- `limit` (optional, default 20)
+- `fuzzy` (optional) — accepted for parity with `fuzzySearchPages`; current matching is case-insensitive substring regardless of this flag. A real edit-distance backend is a follow-up.
+
+Response:
+
+```json
+{"data": [{
+  "pageId": "uuid",
+  "notebookId": "uuid",
+  "notebookName": "My Notebook",
+  "title": "Page Title",
+  "snippet": "...matched text with surrounding context...",
+  "score": 1.0,
+  "pageType": "standard",
+  "tags": ["tag1"]
+}]}
+```
+
+`score` is `1.0` for title hits, `0.5` for content-only hits (synthetic — daemon does not compute Tantivy-style relevance).
+
 ### POST /api/sync/trigger
 
 Trigger WebDAV sync for all notebooks that have sync enabled. Returns the count of notebooks synced.
@@ -189,6 +216,196 @@ Trigger WebDAV sync for all notebooks that have sync enabled. Returns the count 
 ```json
 {"data": {"synced_notebooks": 2}}
 ```
+
+## Folders
+
+### GET /api/notebooks/:notebook_id/folders
+
+List all folders in a notebook.
+
+### POST /api/notebooks/:notebook_id/folders
+
+Create a folder. Emits `folder.created`.
+
+```json
+{"name": "Folder Name", "parent_id": "optional-uuid", "section_id": "optional-uuid"}
+```
+
+### PUT /api/notebooks/:notebook_id/folders/:folder_id
+
+Update a folder. All fields optional. `parent_id`, `color`, and `section_id` use triple-state semantics: omit to leave unchanged, `null` to clear, value to set. Emits `folder.updated`.
+
+```json
+{"name": "New Name", "parent_id": null, "color": "#ff0000", "section_id": "uuid"}
+```
+
+### DELETE /api/notebooks/:notebook_id/folders/:folder_id
+
+Delete a folder. Optional query param `?move_pages_to=<folder_id>` relocates the folder's pages; otherwise pages move to root. Emits `folder.deleted`.
+
+### POST /api/notebooks/:notebook_id/folders/:folder_id/archive
+
+Archive a folder and all descendants + pages. Emits `folder.archived`.
+
+### POST /api/notebooks/:notebook_id/folders/:folder_id/unarchive
+
+Unarchive a folder and all descendants + pages. Emits `folder.unarchived`.
+
+### POST /api/notebooks/:notebook_id/folders/reorder
+
+Reorder folders within a parent.
+
+```json
+{"parent_id": "optional-uuid-or-null-for-root", "folder_ids": ["uuid1", "uuid2"]}
+```
+
+Emits `folder.reordered`.
+
+## Sections
+
+### GET /api/notebooks/:notebook_id/sections
+
+List all sections in a notebook.
+
+### POST /api/notebooks/:notebook_id/sections
+
+Create a section. Emits `section.created`.
+
+```json
+{"name": "Section Name", "color": "#optional"}
+```
+
+### PUT /api/notebooks/:notebook_id/sections/:section_id
+
+Update a section. `description`, `color`, and `system_prompt` use triple-state semantics. Emits `section.updated`.
+
+```json
+{
+  "name": "New Name",
+  "description": "Optional description (null to clear)",
+  "color": "#ff0000",
+  "system_prompt": "AI system prompt for this section",
+  "system_prompt_mode": "override",
+  "page_sort_by": "title"
+}
+```
+
+`system_prompt_mode` is `"override"` or `"concatenate"`. `page_sort_by` empty string clears.
+
+### DELETE /api/notebooks/:notebook_id/sections/:section_id
+
+Delete a section. Optional query param `?move_items_to=<section_id>` relocates items; otherwise items become section-less. Emits `section.deleted`.
+
+### POST /api/notebooks/:notebook_id/sections/reorder
+
+Reorder sections.
+
+```json
+{"section_ids": ["uuid1", "uuid2"]}
+```
+
+Emits `section.reordered`.
+
+## Page Operations
+
+### POST /api/notebooks/:notebook_id/pages/:page_id/archive
+
+Archive a page. Emits `page.archived`.
+
+### POST /api/notebooks/:notebook_id/pages/:page_id/unarchive
+
+Unarchive a page. Optional `target_folder_id` overrides the original folder.
+
+```json
+{"target_folder_id": "optional-uuid"}
+```
+
+Emits `page.unarchived`.
+
+### POST /api/notebooks/:notebook_id/pages/reorder
+
+Reorder pages within a folder.
+
+```json
+{"folder_id": "optional-uuid-or-null-for-root", "page_ids": ["uuid1", "uuid2"]}
+```
+
+Emits `page.reordered`.
+
+### PUT /api/notebooks/:notebook_id/pages/:page_id/tags
+
+Replace a page's tags. Emits `page.tags.updated`.
+
+```json
+{"tags": ["tag1", "tag2"]}
+```
+
+### POST /api/notebooks/:notebook_id/pages/:page_id/move
+
+Move a page to a different folder and/or section. Empty string clears.
+
+```json
+{"folder_id": "uuid-or-empty", "section_id": "uuid-or-empty"}
+```
+
+Emits `page.moved`.
+
+## Tags
+
+### GET /api/notebooks/:notebook_id/tags
+
+List all tags in a notebook with usage counts.
+
+```json
+{"data": [{"name": "work", "count": 12}, {"name": "todo", "count": 5}]}
+```
+
+### POST /api/notebooks/:notebook_id/tags/:tag/rename
+
+Rename a tag across all pages in the notebook. Emits `tag.renamed`.
+
+```json
+{"new_name": "new-tag-name"}
+```
+
+Returns `{"data": {"pagesUpdated": <n>}}`.
+
+### POST /api/notebooks/:notebook_id/tags/merge
+
+Merge multiple tags into one. All occurrences of any tag in `from` are replaced with `into`. Emits `tag.merged`.
+
+```json
+{"from": ["old-tag-1", "old-tag-2"], "into": "target-tag"}
+```
+
+### DELETE /api/notebooks/:notebook_id/tags/:tag
+
+Remove a tag from all pages in the notebook. Emits `tag.deleted`.
+
+## WebSocket Events
+
+Connect to `ws://127.0.0.1:7667/api/events` (Bearer token in `Authorization` header or `?token=` query param).
+
+Events are JSON: `{"event": "<name>", "data": {...}, "timestamp": "<ISO8601>"}`.
+
+Emitted events:
+
+| Event | When |
+|---|---|
+| `page.created` | Page created |
+| `page.updated` | Page edited |
+| `page.deleted` | Page soft-deleted |
+| `page.archived` / `page.unarchived` | Page archive state changed |
+| `page.moved` | Page moved between folders/sections |
+| `page.tags.updated` | Page tags replaced |
+| `page.reordered` | Pages reordered within a folder |
+| `folder.created` / `folder.updated` / `folder.deleted` | Folder lifecycle |
+| `folder.archived` / `folder.unarchived` | Folder archive state changed |
+| `folder.reordered` | Folders reordered |
+| `section.created` / `section.updated` / `section.deleted` | Section lifecycle |
+| `section.reordered` | Sections reordered |
+| `tag.renamed` / `tag.merged` / `tag.deleted` | Tag-bulk operations |
+| `inbox.deleted` | Inbox item deleted |
 
 ## Content format
 
@@ -214,4 +431,4 @@ nous-cli daemon install           # install as system service
 nous-cli daemon uninstall         # remove system service
 ```
 
-Dev mode: `./run-daemon.sh`
+Dev mode: `just daemon`
