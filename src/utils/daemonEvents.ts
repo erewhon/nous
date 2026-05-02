@@ -16,6 +16,12 @@ export interface DaemonEvent {
 
 type Listener = (event: DaemonEvent) => void;
 
+interface OpenPaneRecord {
+  notebookId: string;
+  pageId: string;
+  paneId: string;
+}
+
 class DaemonEventBus {
   private socket: WebSocket | null = null;
   private listeners = new Set<Listener>();
@@ -23,6 +29,10 @@ class DaemonEventBus {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private stopped = false;
   private apiKey: string | null | undefined = undefined;
+  // Pane registrations the editor has asked us to maintain on the daemon.
+  // Keyed by `${pageId}:${paneId}`. Re-sent on reconnect so daemon's
+  // auto-cleanup-on-disconnect doesn't strand the editor's panes.
+  private openPanes = new Map<string, OpenPaneRecord>();
 
   async start() {
     if (this.socket || this.stopped) return;
@@ -78,6 +88,16 @@ class DaemonEventBus {
     this.socket.onopen = () => {
       console.log("[daemon-events] Connected");
       this.reconnectAttempts = 0;
+      // Re-register any open panes. The daemon auto-closes panes on WS
+      // disconnect, so after a reconnect the editor needs them re-opened.
+      for (const rec of this.openPanes.values()) {
+        this.sendRaw({
+          type: "pane_open",
+          notebookId: rec.notebookId,
+          pageId: rec.pageId,
+          paneId: rec.paneId,
+        });
+      }
     };
 
     this.socket.onmessage = (msg) => {
@@ -123,6 +143,52 @@ class DaemonEventBus {
       this.connect();
     }, delay);
   }
+
+  /// Send a raw JSON message to the daemon. Drops if the socket is not
+  /// currently open — callers that need at-least-once delivery should track
+  /// their state themselves (e.g. paneOpen below).
+  private sendRaw(message: object): void {
+    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+      try {
+        this.socket.send(JSON.stringify(message));
+      } catch (err) {
+        console.warn("[daemon-events] send failed:", err);
+      }
+    } else {
+      console.debug("[daemon-events] send skipped (socket not open)");
+    }
+  }
+
+  /// Register a pane as having opened a page. Recorded locally so we can
+  /// replay on reconnect. Idempotent — calling twice with the same key is a
+  /// no-op on the daemon side (the CRDT store updates the pane base).
+  paneOpen(notebookId: string, pageId: string, paneId: string): void {
+    const key = `${pageId}:${paneId}`;
+    this.openPanes.set(key, { notebookId, pageId, paneId });
+    this.sendRaw({ type: "pane_open", notebookId, pageId, paneId });
+  }
+
+  /// Drop a pane registration. The daemon close_pane is idempotent, so a
+  /// fire-and-forget here is safe even if the socket is currently down.
+  paneClose(pageId: string, paneId: string): void {
+    const key = `${pageId}:${paneId}`;
+    this.openPanes.delete(key);
+    this.sendRaw({ type: "pane_close", pageId, paneId });
+  }
 }
 
 export const daemonEventBus = new DaemonEventBus();
+
+// Convenience exports for the common pane-lifecycle pattern. Importers can
+// either call these or grab the bus directly.
+export function paneOpen(
+  notebookId: string,
+  pageId: string,
+  paneId: string
+): void {
+  daemonEventBus.paneOpen(notebookId, pageId, paneId);
+}
+
+export function paneClose(pageId: string, paneId: string): void {
+  daemonEventBus.paneClose(pageId, paneId);
+}

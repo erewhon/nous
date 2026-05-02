@@ -132,12 +132,8 @@ pub fn migrate_chat_sessions_to_pages(
         // Update page metadata
         storage.update_page_metadata(&page).map_err(|e| e.to_string())?;
 
-        // Index for search
-        if let Ok(mut search_index) = state.search_index.lock() {
-            if let Err(e) = search_index.index_page_with_content(&page, &session_json) {
-                log::warn!("Failed to index migrated chat page: {}", e);
-            }
-        }
+        // Daemon owns the search index now; migrated chat pages become
+        // searchable on the next daemon-side write or via manual rebuild.
 
         migrated.push(MigratedSession {
             old_id: session.id.to_string(),

@@ -166,27 +166,13 @@ pub fn hybrid_search(
 
     drop(vector_index);
 
-    // Perform keyword search
-    let search_index = state.search_index.lock().map_err(|e| CommandError {
-        message: format!("Failed to acquire search index lock: {}", e),
-    })?;
-
-    let keyword_results: Vec<SearchResult> = search_index
-        .search(&query, limit * 2)
-        .map_err(|e| CommandError {
-            message: format!("Keyword search failed: {}", e),
-        })?
-        .into_iter()
-        .filter(|r| {
-            if let Ok(nb_id) = Uuid::parse_str(&r.notebook_id) {
-                !locked_ids.contains(&nb_id)
-            } else {
-                true
-            }
-        })
-        .collect();
-
-    drop(search_index);
+    // Keyword leg of hybrid search lived on the Tauri-side Tantivy reader,
+    // which the daemon now owns. Until RAG is wired through the daemon's
+    // /api/search endpoint (next sub-task), the keyword leg is empty —
+    // hybrid degrades to pure semantic. `query` is the keyword string we'd
+    // pass to the daemon; ignored here for now.
+    let _ = query;
+    let keyword_results: Vec<SearchResult> = Vec::new();
 
     // Combine results using Reciprocal Rank Fusion
     use std::collections::HashMap;

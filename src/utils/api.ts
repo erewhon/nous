@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { daemonGet, daemonPost, daemonPut, daemonDelete } from "./daemon";
+import { daemonEventBus } from "./daemonEvents";
 import type { Notebook, NotebookType } from "../types/notebook";
 import type {
   Page,
@@ -97,9 +98,6 @@ export async function getPage(
   return daemonGet<Page>(`/api/notebooks/${notebookId}/pages/${pageId}`);
 }
 
-// Stays on Tauri until "Move CRDT, search index, and plugins into the daemon"
-// ships — daemon createPage doesn't support templates, parent pages, plugin
-// page types, or plugin event dispatch.
 export async function createPage(
   notebookId: string,
   title: string,
@@ -110,22 +108,16 @@ export async function createPage(
   pluginPageType?: string,
   pluginData?: unknown
 ): Promise<Page> {
-  return invoke<Page>("create_page", {
-    notebookId,
-    title,
-    folderId,
-    parentPageId,
-    sectionId,
-    templateId,
-    pluginPageType,
-    pluginData,
-  });
+  const body: Record<string, unknown> = { title };
+  if (folderId !== undefined) body.folder_id = folderId;
+  if (parentPageId !== undefined) body.parent_page_id = parentPageId;
+  if (sectionId !== undefined) body.section_id = sectionId;
+  if (templateId !== undefined) body.template_id = templateId;
+  if (pluginPageType !== undefined) body.plugin_page_type = pluginPageType;
+  if (pluginData !== undefined) body.plugin_data = pluginData;
+  return daemonPost<Page>(`/api/notebooks/${notebookId}/pages`, body);
 }
 
-// Stays on Tauri until "Move CRDT, search index, and plugins into the daemon"
-// ships — daemon updatePage doesn't go through the CRDT store (multi-pane
-// merge), update the Tantivy search index, or dispatch plugin OnPageUpdated
-// hooks. Migrating now would silently break those.
 export async function updatePage(
   notebookId: string,
   pageId: string,
@@ -156,47 +148,50 @@ export async function updatePage(
   commit?: boolean, // Whether to create a git commit (default: false, use true for explicit saves)
   paneId?: string // Editor pane ID for CRDT multi-pane merge
 ): Promise<Page> {
-  // Tauri automatically converts camelCase to snake_case for command parameters
-  const params: Record<string, unknown> = {
-    notebookId,
-    pageId,
-    commit,
-    paneId,
-  };
-  if (updates.title !== undefined) params.title = updates.title;
-  if (updates.content !== undefined) params.content = updates.content;
-  if (updates.tags !== undefined) params.tags = updates.tags;
+  // Daemon expects snake_case keys. We omit absent fields so triple-state
+  // helpers on the daemon side correctly distinguish "no change" (omitted)
+  // from "clear" (explicit null) from "set" (value).
+  const body: Record<string, unknown> = {};
+  if (updates.title !== undefined) body.title = updates.title;
+  if (updates.content !== undefined) body.blocks = updates.content.blocks;
+  if (updates.tags !== undefined) body.tags = updates.tags;
   if (updates.systemPrompt !== undefined)
-    params.systemPrompt = updates.systemPrompt;
+    body.system_prompt = updates.systemPrompt;
   if (updates.systemPromptMode !== undefined)
-    params.systemPromptMode = updates.systemPromptMode;
-  if (updates.sectionId !== undefined) params.sectionId = updates.sectionId;
-  if (updates.pageType !== undefined) params.pageType = updates.pageType;
+    body.system_prompt_mode = updates.systemPromptMode;
+  if (updates.sectionId !== undefined) body.section_id = updates.sectionId;
+  if (updates.pageType !== undefined) body.page_type = updates.pageType;
   if (updates.fileExtension !== undefined)
-    params.fileExtension = updates.fileExtension;
-  if (updates.isFavorite !== undefined) params.isFavorite = updates.isFavorite;
+    body.file_extension = updates.fileExtension;
+  if (updates.isFavorite !== undefined) body.is_favorite = updates.isFavorite;
   if (updates.isDailyNote !== undefined)
-    params.isDailyNote = updates.isDailyNote;
+    body.is_daily_note = updates.isDailyNote;
   if (updates.dailyNoteDate !== undefined)
-    params.dailyNoteDate = updates.dailyNoteDate;
-  if (updates.color !== undefined) params.color = updates.color;
+    body.daily_note_date = updates.dailyNoteDate;
+  if (updates.color !== undefined) body.color = updates.color;
+  if (commit !== undefined) body.commit = commit;
+  if (paneId !== undefined) body.pane_id = paneId;
 
-  return invoke<Page>("update_page", params);
+  return daemonPut<Page>(`/api/notebooks/${notebookId}/pages/${pageId}`, body);
 }
 
+// Pane lifecycle moved to the daemon's /api/events WebSocket. The bus
+// records opens locally and replays them on reconnect, so callers can stay
+// fire-and-forget. Async signatures preserved for call-site stability —
+// the underlying send is synchronous but a few callers `.catch()` it.
 export async function openPageInPaneCrdt(
   notebookId: string,
   pageId: string,
   paneId: string
 ): Promise<void> {
-  return invoke("open_page_in_pane_crdt", { notebookId, pageId, paneId });
+  daemonEventBus.paneOpen(notebookId, pageId, paneId);
 }
 
 export async function closePaneForPage(
   pageId: string,
   paneId: string
 ): Promise<void> {
-  return invoke("close_pane_for_page", { pageId, paneId });
+  daemonEventBus.paneClose(pageId, paneId);
 }
 
 export async function deletePage(
@@ -428,23 +423,36 @@ export async function unarchiveFolder(
 }
 
 // ===== Search API =====
+//
+// Search now lives in the daemon (Tantivy writer + reader). The Tauri
+// commands `search_pages` / `fuzzy_search_pages` / `rebuild_search_index`
+// remain registered as no-op stubs until Phase 3 cleanup; calling them
+// returns empty results, which is why these helpers go straight to the
+// daemon HTTP API instead.
 
 export async function searchPages(
   query: string,
   limit?: number
 ): Promise<SearchResult[]> {
-  return invoke<SearchResult[]>("search_pages", { query, limit });
+  const params = new URLSearchParams({ q: query });
+  if (limit !== undefined) params.set("limit", String(limit));
+  return daemonGet<SearchResult[]>(`/api/search?${params.toString()}`);
 }
 
 export async function fuzzySearchPages(
   query: string,
   limit?: number
 ): Promise<SearchResult[]> {
-  return invoke<SearchResult[]>("fuzzy_search_pages", { query, limit });
+  const params = new URLSearchParams({ q: query, fuzzy: "1" });
+  if (limit !== undefined) params.set("limit", String(limit));
+  return daemonGet<SearchResult[]>(`/api/search?${params.toString()}`);
 }
 
 export async function rebuildSearchIndex(): Promise<void> {
-  return invoke("rebuild_search_index");
+  await daemonPost<{ ok: boolean; indexed: number }>(
+    "/api/search/rebuild",
+    {}
+  );
 }
 
 // ===== AI API =====

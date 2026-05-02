@@ -3,7 +3,6 @@ use uuid::Uuid;
 
 use nous_lib::inbox::{CaptureRequest, CaptureSource, InboxItem, InboxStorage};
 use nous_lib::library::{Library, LibraryStorage};
-use nous_lib::search::ReadOnlySearchIndex;
 use nous_lib::storage::{EditorBlock, EditorData, FileStorage, Folder, Notebook, Page, Section};
 
 /// Shared application state for CLI commands
@@ -11,7 +10,6 @@ pub struct App {
     pub library_storage: LibraryStorage,
     pub current_library: Library,
     pub storage: FileStorage,
-    pub search_index: Option<ReadOnlySearchIndex>,
 }
 
 impl App {
@@ -35,19 +33,10 @@ impl App {
         let library_path = current_library.path.clone();
         let storage = FileStorage::new(library_path);
 
-        // Try to open search index in read-only mode (may fail if index doesn't exist yet)
-        let search_dir = current_library.search_index_path();
-        let search_index = if search_dir.exists() {
-            ReadOnlySearchIndex::open(search_dir).ok()
-        } else {
-            None
-        };
-
         Ok(Self {
             library_storage,
             current_library,
             storage,
-            search_index,
         })
     }
 

@@ -18,8 +18,9 @@ use nous_lib::goals::GoalsStorage;
 use nous_lib::inbox::InboxStorage;
 use nous_lib::library::LibraryStorage;
 use nous_lib::python_bridge::PythonAI;
+use nous_lib::search::SearchIndex;
 use nous_lib::storage::FileStorage;
-use nous_lib::sync::{LogEmitter, SyncManager};
+use nous_lib::sync::{CrdtStore, LogEmitter, SyncManager};
 
 use super::api;
 use super::auth;
@@ -37,6 +38,8 @@ pub struct DaemonState {
     pub contacts_storage: Arc<Mutex<ContactsStorage>>,
     pub sync_manager: Arc<SyncManager>,
     pub action_scheduler: Mutex<ActionScheduler>,
+    pub search_index: Arc<Mutex<SearchIndex>>,
+    pub crdt_store: Arc<CrdtStore>,
     pub library_path: PathBuf,
     pub event_tx: nous_lib::events::EventSender,
 }
@@ -97,6 +100,19 @@ pub async fn run(library_name: Option<&str>, port: Option<u16>, bind: Option<&st
     let storage = FileStorage::new(library_path.clone());
     storage.init().context("Failed to initialize storage")?;
 
+    // Initialize Tantivy search index. The daemon owns the writer lock —
+    // a collision here means another process (likely a stale daemon or the
+    // desktop app from before the migration) is still holding it.
+    let search_index = SearchIndex::new(library_path.join("search_index"))
+        .context(
+            "Failed to initialize search index — another process is holding the Tantivy writer lock. \
+             Stop any running desktop app or stale daemon and retry.",
+        )?;
+
+    // Initialize CRDT store (in-memory; persists per-page Yjs state under
+    // {library_path}/notebooks/{nb_id}/sync/pages/{page_id}.crdt).
+    let crdt_store = Arc::new(CrdtStore::new(library_path.clone()));
+
     // Initialize storages
     let inbox_storage = InboxStorage::new(library_path.clone())
         .context("Failed to initialize inbox storage")?;
@@ -123,6 +139,7 @@ pub async fn run(library_name: Option<&str>, port: Option<u16>, bind: Option<&st
     let contacts_storage_arc = Arc::new(Mutex::new(contacts_storage));
     let action_storage_arc = Arc::new(Mutex::new(action_storage));
     let python_ai_arc = Arc::new(Mutex::new(python_ai));
+    let search_index_arc = Arc::new(Mutex::new(search_index));
 
     // Create event broadcast channel (capacity 256 — events are small)
     let (event_tx, _) = tokio::sync::broadcast::channel::<nous_lib::events::AppEvent>(256);
@@ -151,6 +168,7 @@ pub async fn run(library_name: Option<&str>, port: Option<u16>, bind: Option<&st
     let sync_manager = SyncManager::new(data_dir.clone());
     let sync_manager_arc = Arc::new(sync_manager);
     sync_manager_arc.set_emitter(Arc::new(LogEmitter));
+    sync_manager_arc.set_crdt_store(Arc::clone(&crdt_store));
 
     // Start sync scheduler
     let sync_scheduler = nous_lib::sync::scheduler::start_sync_scheduler(
@@ -174,6 +192,8 @@ pub async fn run(library_name: Option<&str>, port: Option<u16>, bind: Option<&st
         contacts_storage: contacts_storage_arc,
         sync_manager: sync_manager_arc,
         action_scheduler: Mutex::new(action_scheduler),
+        search_index: search_index_arc,
+        crdt_store,
         library_path: library_path.clone(),
         event_tx,
     });

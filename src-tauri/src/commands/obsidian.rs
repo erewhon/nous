@@ -55,11 +55,9 @@ pub fn import_obsidian_vault_cmd(
     let (notebook, pages) =
         import_obsidian_vault(path, &notebooks_dir, notebook_name).map_err(|e| e.to_string())?;
 
-    // Index all pages in search
-    let mut search_index = state.search_index.lock().map_err(|e| e.to_string())?;
-    for page in &pages {
-        search_index.index_page(page).map_err(|e| e.to_string())?;
-    }
+    // Daemon owns the search index now; run POST /api/search/rebuild after
+    // an Obsidian import to make the imported pages searchable.
+    let _ = pages;
 
     Ok(notebook)
 }

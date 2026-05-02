@@ -92,15 +92,16 @@ pub async fn import_notion_export(
             ImportProgress {
                 current: i + 1,
                 total: total_pages,
-                message: "Indexing pages...".to_string(),
+                message: "Pages imported (search index update is deferred)...".to_string(),
             },
         );
 
-        // Small yield to allow events to be processed
+        // Daemon owns the search index; user should run
+        // POST /api/search/rebuild after a Notion import to make the
+        // imported pages searchable. (Removed the per-page Tantivy write
+        // that ran here when Tauri owned the index.)
+        let _ = page;
         tokio::task::yield_now().await;
-
-        let mut search_index = state.search_index.lock().map_err(|e| e.to_string())?;
-        search_index.index_page(page).map_err(|e| e.to_string())?;
     }
 
     Ok(notebook)

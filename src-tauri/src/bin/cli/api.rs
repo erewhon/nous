@@ -2,6 +2,7 @@
 //!
 //! Provides REST endpoints for external processes to interact with notebooks.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use axum::{
@@ -18,15 +19,13 @@ use uuid::Uuid;
 
 use super::auth::{ApiKeySet, Scope};
 
-use html_escape::decode_html_entities;
-use regex::Regex;
-
 use nous_lib::commands::{create_daily_note_core, find_daily_note, list_daily_notes_core};
 use nous_lib::inbox::{CaptureRequest, CaptureSource};
 use nous_lib::markdown::{export_page_to_markdown, parse_markdown_to_blocks};
 use nous_lib::share::storage::ShareStorage;
 use nous_lib::plugins::api::HostApi;
-use nous_lib::storage::{EditorBlock, EditorData, Page, PageType};
+use nous_lib::git;
+use nous_lib::storage::{EditorBlock, EditorData, FileStorageMode, Page, PageType, SystemPromptMode};
 
 use super::daemon::DaemonState;
 use nous_lib::events::AppEvent;
@@ -60,9 +59,17 @@ struct CreatePageRequest {
     tags: Option<Vec<String>>,
     folder_id: Option<String>,
     section_id: Option<String>,
+    /// Parent page UUID for nested pages
+    parent_page_id: Option<String>,
+    /// Template ID this page was created from
+    template_id: Option<String>,
     page_type: Option<String>,
     is_daily_note: Option<bool>,
     daily_note_date: Option<String>,
+    /// Plugin page type identifier (e.g. "kanban") — when set, a plugin renders the page
+    plugin_page_type: Option<String>,
+    /// Opaque JSON data for plugin page types
+    plugin_data: Option<serde_json::Value>,
     /// Arbitrary extra fields to merge into the page JSON (sourceFile, storageMode, etc.)
     extra_fields: Option<serde_json::Value>,
 }
@@ -77,8 +84,43 @@ struct UpdatePageRequest {
     /// Markdown content (parsed to blocks; lowest priority after blocks and content)
     markdown: Option<String>,
     tags: Option<Vec<String>>,
-    folder_id: Option<String>,
-    section_id: Option<String>,
+    /// Triple-state: missing = no change, null/empty = clear, value = set to UUID.
+    #[serde(default, deserialize_with = "deserialize_optional_field")]
+    folder_id: Option<Option<String>>,
+    /// Triple-state: missing = no change, null/empty = clear, value = set to UUID.
+    #[serde(default, deserialize_with = "deserialize_optional_field")]
+    section_id: Option<Option<String>>,
+    /// Custom AI system prompt. Triple-state: missing = no change, null or empty string = clear.
+    #[serde(default, deserialize_with = "deserialize_optional_field")]
+    system_prompt: Option<Option<String>>,
+    /// "override" or "concatenate" — defaults to "override".
+    system_prompt_mode: Option<String>,
+    /// One of: standard, markdown, pdf, jupyter, epub, calendar, chat, canvas, database, html.
+    page_type: Option<String>,
+    /// File extension (e.g. "md", "ipynb"). Triple-state: missing = no change,
+    /// null or empty string = clear. Setting an extension on a file-based page
+    /// auto-creates source_file = files/{page_id}.{ext} and storage_mode = embedded.
+    #[serde(default, deserialize_with = "deserialize_optional_field")]
+    file_extension: Option<Option<String>>,
+    is_favorite: Option<bool>,
+    is_daily_note: Option<bool>,
+    /// Triple-state: YYYY-MM-DD; null clears.
+    #[serde(default, deserialize_with = "deserialize_optional_field")]
+    daily_note_date: Option<Option<String>>,
+    /// CSS color string. Triple-state: null clears.
+    #[serde(default, deserialize_with = "deserialize_optional_field")]
+    color: Option<Option<String>>,
+    /// Plugin page type identifier. Triple-state: null clears.
+    #[serde(default, deserialize_with = "deserialize_optional_field")]
+    plugin_page_type: Option<Option<String>>,
+    /// Opaque JSON for plugin pages. Triple-state: null clears.
+    #[serde(default, deserialize_with = "deserialize_optional_field")]
+    plugin_data: Option<Option<serde_json::Value>>,
+    /// When true, auto-commit if git is enabled for the notebook (default false).
+    commit: Option<bool>,
+    /// Editor pane ID — declared for the schema but not yet wired (CRDT sub-task).
+    #[allow(dead_code)]
+    pane_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -150,11 +192,9 @@ struct SearchQuery {
     q: String,
     notebook_id: Option<String>,
     limit: Option<usize>,
-    /// Fuzzy mode flag. Daemon search is already case-insensitive substring;
-    /// this flag is accepted for parity with the frontend `fuzzySearchPages`
-    /// call site but does not currently change matching behavior. A real
-    /// edit-distance backend is a follow-up.
-    #[allow(dead_code)]
+    /// When `1`, use Tantivy's FuzzyTermQuery on the title field
+    /// (autocomplete-friendly; edit distance 2). Otherwise, use the
+    /// standard QueryParser across title/content/tags.
     fuzzy: Option<u8>,
 }
 
@@ -440,6 +480,7 @@ pub fn build_router(state: AppState, auth: AuthState) -> Router {
     Router::new()
         .route("/api/status", get(get_status))
         .route("/api/search", get(search_pages))
+        .route("/api/search/rebuild", post(rebuild_search_index))
         .route("/api/notebooks", get(list_notebooks))
         .route("/api/notebooks/{notebook_id}/pages", get(list_pages))
         .route("/api/notebooks/{notebook_id}/pages", post(create_page))
@@ -774,99 +815,140 @@ async fn search_pages(
     Query(query): Query<SearchQuery>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     let limit = query.limit.unwrap_or(20);
-    let query_lower = query.q.to_lowercase();
-    let storage = state.storage.lock().unwrap();
-    let html_tag_re = Regex::new(r"<[^>]+>").unwrap();
+    let fuzzy = query.fuzzy.unwrap_or(0) != 0;
 
-    // Determine which notebooks to search
-    let notebook_ids: Vec<Uuid> = if let Some(ref nb_id_str) = query.notebook_id {
-        vec![parse_uuid(nb_id_str)?]
+    // If a notebook filter is in play, fetch extra hits and trim post-query
+    // since the schema doesn't index notebook_id for filtering. 4× is enough
+    // headroom in practice — the alternative is to rebuild the index with a
+    // notebook filter clause.
+    let fetch_limit = if query.notebook_id.is_some() {
+        limit.saturating_mul(4).max(limit)
     } else {
-        storage
-            .list_notebooks()
-            .unwrap_or_default()
-            .into_iter()
-            .map(|nb| nb.id)
-            .collect()
+        limit
     };
 
-    let mut title_matches = Vec::new();
-    let mut content_matches = Vec::new();
+    let nb_filter: Option<String> = query.notebook_id.as_ref().map(|s| s.to_string());
+    if let Some(ref nb_id) = nb_filter {
+        // Validate up front; return 400 on garbage rather than silently dropping.
+        parse_uuid(nb_id)?;
+    }
 
-    for nb_id in &notebook_ids {
-        let pages = match storage.list_pages(*nb_id) {
-            Ok(p) => p,
-            Err(_) => continue,
+    let results = {
+        let idx = state.search_index.lock().map_err(|e| {
+            api_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to acquire search lock: {}", e),
+            )
+        })?;
+        let res = if fuzzy {
+            idx.fuzzy_search(&query.q, fetch_limit)
+        } else {
+            idx.search(&query.q, fetch_limit)
         };
+        res.map_err(|e| {
+            api_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Search error: {}", e),
+            )
+        })?
+    };
 
-        // Get notebook name for results
-        let nb_name = storage
+    let filtered: Vec<_> = results
+        .into_iter()
+        .filter(|r| match &nb_filter {
+            Some(want) => &r.notebook_id == want,
+            None => true,
+        })
+        .take(limit)
+        .collect();
+
+    Ok(Json(ApiResponse { data: filtered }))
+}
+
+/// Rebuild the Tantivy index from scratch by reindexing every non-deleted,
+/// non-archived page across every notebook. Useful after schema changes,
+/// corrupt segments, or when the daemon was offline during many writes.
+async fn rebuild_search_index(
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let pages = {
+        let storage = state.storage.lock().map_err(|e| {
+            api_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to acquire storage lock: {}", e),
+            )
+        })?;
+        let notebooks = storage
             .list_notebooks()
-            .unwrap_or_default()
-            .into_iter()
-            .find(|n| n.id == *nb_id)
-            .map(|n| n.name.clone())
-            .unwrap_or_default();
-
-        for page in &pages {
-            if page.is_archived || page.deleted_at.is_some() {
-                continue;
-            }
-
-            let title_hit = page.title.to_lowercase().contains(&query_lower);
-
-            // Search block content
-            let mut snippet = String::new();
-            for block in &page.content.blocks {
-                let text = extract_block_text(block, &html_tag_re);
-                if text.is_empty() {
+            .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        let mut all = Vec::new();
+        for nb in notebooks {
+            let pages = match storage.list_pages(nb.id) {
+                Ok(p) => p,
+                Err(e) => {
+                    log::warn!("Failed to list pages for notebook {}: {}", nb.id, e);
                     continue;
                 }
-                let text_lower = text.to_lowercase();
-                if let Some(pos) = text_lower.find(&query_lower) {
-                    // Snap byte offsets to char boundaries
-                    let raw_start = pos.saturating_sub(50);
-                    let raw_end = (pos + query.q.len() + 50).min(text.len());
-                    let start = snap_char_boundary_down(&text, raw_start);
-                    let end = snap_char_boundary_up(&text, raw_end);
-                    let prefix = if start > 0 { "..." } else { "" };
-                    let suffix = if end < text.len() { "..." } else { "" };
-                    snippet = format!("{}{}{}", prefix, &text[start..end], suffix);
-                    break;
+            };
+            for page in pages {
+                if page.deleted_at.is_some() || page.is_archived {
+                    continue;
                 }
+                all.push(page);
             }
+        }
+        all
+    };
 
-            if title_hit || !snippet.is_empty() {
-                // Synthetic score: 1.0 for title hits, 0.5 for content hits.
-                // The frontend SearchResult schema requires a numeric score;
-                // since the daemon backend doesn't compute Tantivy-style
-                // relevance, we approximate with this two-tier signal.
-                let score = if title_hit { 1.0 } else { 0.5 };
-                let entry = serde_json::json!({
-                    "pageId": page.id.to_string(),
-                    "notebookId": nb_id.to_string(),
-                    "notebookName": nb_name,
-                    "title": page.title,
-                    "snippet": snippet,
-                    "score": score,
-                    "pageType": page.page_type,
-                    "tags": page.tags,
-                });
-                if title_hit {
-                    title_matches.push(entry);
-                } else {
-                    content_matches.push(entry);
+    let total = pages.len();
+    let mut indexed = 0usize;
+    let mut failed = 0usize;
+    {
+        let mut idx = state.search_index.lock().map_err(|e| {
+            api_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to acquire search lock: {}", e),
+            )
+        })?;
+
+        // Workaround for Tantivy 0.22.1 fastfield panic on batched commits
+        // (writer.rs:137 "index out of bounds"). `rebuild_index(&pages)` does
+        // delete_all + commit + bulk add + commit, and the second commit
+        // panics on the multi-doc fastfield serialize path.
+        //
+        // Instead: delete_all by passing an empty slice (just the delete +
+        // commit), then call `index_page` per page so each commit handles a
+        // single document. Slower (one commit per page) but avoids the
+        // multi-doc trigger. Track the underlying fix in the Forge task
+        // "Investigate Tantivy 0.22.1 fastfield panic blocking sync".
+        idx.rebuild_index(&[]).map_err(|e| {
+            api_err(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to clear index: {}", e),
+            )
+        })?;
+
+        for page in &pages {
+            match idx.index_page(page) {
+                Ok(()) => indexed += 1,
+                Err(e) => {
+                    failed += 1;
+                    log::warn!(
+                        "Rebuild: failed to index page {} ({}): {}",
+                        page.id, page.title, e
+                    );
                 }
             }
         }
     }
 
-    // Title matches first, then content matches
-    title_matches.extend(content_matches);
-    title_matches.truncate(limit);
-
     Ok(Json(ApiResponse {
-        data: title_matches,
+        data: serde_json::json!({
+            "ok": failed == 0,
+            "indexed": indexed,
+            "failed": failed,
+            "total": total,
+        }),
     }))
 }
 
@@ -926,6 +1008,24 @@ async fn create_page(
         page.daily_note_date = Some(date);
     }
 
+    // Set parent page (for nested pages)
+    if let Some(pid) = req.parent_page_id {
+        page.parent_page_id = Some(parse_uuid(&pid)?);
+    }
+
+    // Set template
+    if let Some(tid) = req.template_id {
+        page.template_id = Some(tid);
+    }
+
+    // Set plugin page type and data
+    if let Some(ppt) = req.plugin_page_type {
+        page.plugin_page_type = Some(ppt);
+    }
+    if let Some(pd) = req.plugin_data {
+        page.plugin_data = Some(pd);
+    }
+
     // Merge extra fields
     if let Some(extras) = req.extra_fields {
         if let Some(obj) = extras.as_object() {
@@ -957,6 +1057,13 @@ async fn create_page(
     // Queue sync
     state.sync_manager.queue_page_update(nb_id, page.id);
 
+    // Index the new page (best-effort — log on failure, don't fail the request).
+    if let Ok(mut idx) = state.search_index.lock() {
+        if let Err(e) = idx.index_page(&page) {
+            log::warn!("Failed to index newly created page {}: {}", page.id, e);
+        }
+    }
+
     emit_event(&state, "page.created", serde_json::json!({
         "notebookId": notebook_id,
         "pageId": page.id.to_string(),
@@ -983,29 +1090,138 @@ async fn update_page(
     if let Some(title) = req.title {
         page.title = title;
     }
-    if let Some(blocks) = req.blocks {
-        page.content = make_block_content(blocks);
+
+    // Build the proposed content from whichever input shape was provided
+    // (blocks > plain text > markdown), then route through the CRDT store
+    // when this write is associated with an editor pane. apply_save returns
+    // the canonical post-merge state if the page is currently live in any
+    // pane, so the caller sees other panes' changes too.
+    let proposed_content: Option<EditorData> = if let Some(blocks) = req.blocks {
+        Some(make_block_content(blocks))
     } else if let Some(text) = req.content {
-        page.content = make_paragraph_content(&text);
+        Some(make_paragraph_content(&text))
     } else if let Some(md) = req.markdown {
-        page.content = make_block_content(parse_markdown_to_blocks(&md));
+        Some(make_block_content(parse_markdown_to_blocks(&md)))
+    } else {
+        None
+    };
+
+    if let Some(content) = proposed_content {
+        let pane = req.pane_id.as_deref().unwrap_or("default");
+        match state.crdt_store.apply_save(pg_id, pane, &content) {
+            Ok(Some(canonical)) => page.content = canonical,
+            Ok(None) => page.content = content,
+            Err(e) => {
+                log::warn!("CRDT apply_save failed for page {}: {}", pg_id, e);
+                page.content = content;
+            }
+        }
     }
+
     if let Some(tags) = req.tags {
         page.tags = tags;
     }
-    if let Some(fid) = req.folder_id {
-        if fid.is_empty() {
-            page.folder_id = None;
-        } else if let Ok(uuid) = Uuid::parse_str(&fid) {
-            page.folder_id = Some(uuid);
+    if let Some(fid_opt) = req.folder_id {
+        page.folder_id = match fid_opt {
+            None => None,
+            Some(s) if s.is_empty() => None,
+            Some(s) => Some(
+                Uuid::parse_str(&s)
+                    .map_err(|e| api_err(StatusCode::BAD_REQUEST, format!("Invalid folder ID: {}", e)))?,
+            ),
+        };
+    }
+    if let Some(sid_opt) = req.section_id {
+        page.section_id = match sid_opt {
+            None => None,
+            Some(s) if s.is_empty() => None,
+            Some(s) => Some(
+                Uuid::parse_str(&s)
+                    .map_err(|e| api_err(StatusCode::BAD_REQUEST, format!("Invalid section ID: {}", e)))?,
+            ),
+        };
+    }
+
+    // System prompt — empty string also clears (Tauri parity).
+    if let Some(prompt_opt) = req.system_prompt {
+        page.system_prompt = match prompt_opt {
+            None => None,
+            Some(s) if s.is_empty() => None,
+            Some(s) => Some(s),
+        };
+    }
+    if let Some(mode) = req.system_prompt_mode {
+        page.system_prompt_mode = match mode.as_str() {
+            "concatenate" => SystemPromptMode::Concatenate,
+            _ => SystemPromptMode::Override,
+        };
+    }
+
+    if let Some(pt) = req.page_type {
+        page.page_type = match pt.as_str() {
+            "markdown" => PageType::Markdown,
+            "pdf" => PageType::Pdf,
+            "jupyter" => PageType::Jupyter,
+            "epub" => PageType::Epub,
+            "calendar" => PageType::Calendar,
+            "chat" => PageType::Chat,
+            "canvas" => PageType::Canvas,
+            "database" => PageType::Database,
+            "html" => PageType::Html,
+            _ => PageType::Standard,
+        };
+    }
+
+    // File extension — empty string also clears. Setting an extension on a
+    // file-based page auto-creates source_file = files/{page_id}.{ext}.
+    if let Some(ext_opt) = req.file_extension {
+        let new_ext = match ext_opt {
+            None => None,
+            Some(s) if s.is_empty() => None,
+            Some(s) => Some(s),
+        };
+        page.file_extension = new_ext.clone();
+
+        if let Some(ext) = new_ext {
+            if page.source_file.is_none() {
+                let is_file_based = matches!(
+                    page.page_type,
+                    PageType::Markdown
+                        | PageType::Calendar
+                        | PageType::Chat
+                        | PageType::Jupyter
+                        | PageType::Canvas
+                        | PageType::Database
+                );
+                if is_file_based {
+                    page.source_file = Some(format!("files/{}.{}", pg_id, ext));
+                    page.storage_mode = Some(FileStorageMode::Embedded);
+                    let files_dir = storage.get_notebook_path(nb_id).join("files");
+                    if !files_dir.exists() {
+                        let _ = std::fs::create_dir_all(&files_dir);
+                    }
+                }
+            }
         }
     }
-    if let Some(sid) = req.section_id {
-        if sid.is_empty() {
-            page.section_id = None;
-        } else if let Ok(uuid) = Uuid::parse_str(&sid) {
-            page.section_id = Some(uuid);
-        }
+
+    if let Some(fav) = req.is_favorite {
+        page.is_favorite = fav;
+    }
+    if let Some(daily) = req.is_daily_note {
+        page.is_daily_note = daily;
+    }
+    if let Some(date_opt) = req.daily_note_date {
+        page.daily_note_date = date_opt;
+    }
+    if let Some(color_opt) = req.color {
+        page.color = color_opt;
+    }
+    if let Some(ppt_opt) = req.plugin_page_type {
+        page.plugin_page_type = ppt_opt;
+    }
+    if let Some(pd_opt) = req.plugin_data {
+        page.plugin_data = pd_opt;
     }
 
     page.updated_at = chrono::Utc::now();
@@ -1014,7 +1230,26 @@ async fn update_page(
         return Err(api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()));
     }
 
+    // Grab notebook path before releasing the storage lock so the optional
+    // git auto-commit below doesn't hold the lock during disk I/O.
+    let notebook_path = storage.get_notebook_path(nb_id);
+    drop(storage);
+
     state.sync_manager.queue_page_update(nb_id, pg_id);
+
+    // Reindex (best-effort).
+    if let Ok(mut idx) = state.search_index.lock() {
+        if let Err(e) = idx.index_page(&page) {
+            log::warn!("Failed to reindex page {}: {}", pg_id, e);
+        }
+    }
+
+    if req.commit.unwrap_or(false) && git::is_git_repo(&notebook_path) {
+        let commit_message = format!("Update page: {}", page.title);
+        if let Err(e) = git::commit_all(&notebook_path, &commit_message) {
+            log::warn!("Failed to auto-commit page update: {}", e);
+        }
+    }
 
     emit_event(&state, "page.updated", serde_json::json!({
         "notebookId": notebook_id,
@@ -1819,109 +2054,6 @@ fn text_to_blocks(text: &str) -> Vec<EditorBlock> {
     blocks
 }
 
-/// Snap a byte offset down to a char boundary.
-fn snap_char_boundary_down(s: &str, idx: usize) -> usize {
-    let mut i = idx.min(s.len());
-    while i > 0 && !s.is_char_boundary(i) {
-        i -= 1;
-    }
-    i
-}
-
-/// Snap a byte offset up to a char boundary.
-fn snap_char_boundary_up(s: &str, idx: usize) -> usize {
-    let mut i = idx.min(s.len());
-    while i < s.len() && !s.is_char_boundary(i) {
-        i += 1;
-    }
-    i
-}
-
-/// Extract plain text from a block for search.
-fn extract_block_text(block: &EditorBlock, html_tag_re: &Regex) -> String {
-    let data = &block.data;
-    let block_type = block.block_type.as_str();
-
-    let raw = match block_type {
-        "paragraph" | "header" | "quote" => data
-            .get("text")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string(),
-        "code" => data
-            .get("code")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string(),
-        "list" => {
-            let items = data.get("items").and_then(|v| v.as_array());
-            match items {
-                Some(arr) => arr
-                    .iter()
-                    .filter_map(|item| {
-                        if let Some(s) = item.as_str() {
-                            Some(s.to_string())
-                        } else {
-                            item.get("content")
-                                .or(item.get("text"))
-                                .and_then(|v| v.as_str())
-                                .map(|s| s.to_string())
-                        }
-                    })
-                    .collect::<Vec<_>>()
-                    .join(" "),
-                None => String::new(),
-            }
-        }
-        "checklist" => {
-            let items = data.get("items").and_then(|v| v.as_array());
-            match items {
-                Some(arr) => arr
-                    .iter()
-                    .filter_map(|item| item.get("text").and_then(|v| v.as_str()))
-                    .collect::<Vec<_>>()
-                    .join(" "),
-                None => String::new(),
-            }
-        }
-        "callout" => {
-            let title = data
-                .get("title")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let content = data
-                .get("content")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            format!("{} {}", title, content)
-        }
-        "table" => {
-            let rows = data.get("content").and_then(|v| v.as_array());
-            match rows {
-                Some(arr) => arr
-                    .iter()
-                    .filter_map(|row| row.as_array())
-                    .flat_map(|row| {
-                        row.iter()
-                            .filter_map(|cell| cell.as_str().map(|s| s.to_string()))
-                    })
-                    .collect::<Vec<_>>()
-                    .join(" "),
-                None => String::new(),
-            }
-        }
-        _ => String::new(),
-    };
-
-    if raw.is_empty() {
-        return raw;
-    }
-
-    // Strip HTML tags and decode entities
-    let stripped = html_tag_re.replace_all(&raw, "");
-    decode_html_entities(&stripped).to_string()
-}
-
 // ===== Folders & Sections =====
 
 async fn list_folders(
@@ -1966,6 +2098,15 @@ async fn delete_page(
     storage
         .update_page(&page)
         .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    drop(storage);
+
+    // Drop from search index — best-effort.
+    if let Ok(mut idx) = state.search_index.lock() {
+        if let Err(e) = idx.remove_page(page_id) {
+            log::warn!("Failed to remove page {} from search index: {}", page_id, e);
+        }
+    }
 
     emit_event(&state, "page.deleted", serde_json::json!({
         "notebookId": notebook_id,
@@ -2076,8 +2217,34 @@ async fn ws_events(
     ws.on_upgrade(move |socket| handle_ws_events(socket, state))
 }
 
+/// Inbound commands from the WS client. Page content is loaded server-side
+/// from storage on `pane_open` — clients don't need to ship it on the wire.
+/// `tag` rename_all gives us `pane_open`/`pane_close` discriminators; the
+/// per-variant `rename_all` makes the field names `notebookId`/`pageId`/
+/// `paneId` to match the JS client's natural casing on the WS.
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum PaneCommand {
+    #[serde(rename_all = "camelCase")]
+    PaneOpen {
+        notebook_id: Uuid,
+        page_id: Uuid,
+        pane_id: String,
+    },
+    #[serde(rename_all = "camelCase")]
+    PaneClose {
+        page_id: Uuid,
+        pane_id: String,
+    },
+}
+
 async fn handle_ws_events(mut socket: WebSocket, state: AppState) {
     let mut rx = state.event_tx.subscribe();
+
+    // Track panes opened by THIS connection so we can auto-close them when
+    // the socket drops. Without this invariant a desktop crash would leave
+    // panes registered as live forever, blocking close_pane's flush logic.
+    let mut my_panes: HashSet<(Uuid, String)> = HashSet::new();
 
     log::info!("WebSocket client connected to /api/events");
 
@@ -2098,7 +2265,7 @@ async fn handle_ws_events(mut socket: WebSocket, state: AppState) {
                     Err(_) => break, // Channel closed
                 }
             }
-            // Handle incoming messages (ping/pong, close)
+            // Handle incoming messages (ping/pong, close, pane lifecycle)
             msg = socket.recv() => {
                 match msg {
                     Some(Ok(Message::Close(_))) | None => break,
@@ -2107,13 +2274,102 @@ async fn handle_ws_events(mut socket: WebSocket, state: AppState) {
                             break;
                         }
                     }
-                    _ => {} // Ignore text/binary from client
+                    Some(Ok(Message::Text(text))) => {
+                        let cmd: PaneCommand = match serde_json::from_str(&text) {
+                            Ok(c) => c,
+                            Err(e) => {
+                                log::debug!("WS: ignoring unrecognized text frame: {}", e);
+                                continue;
+                            }
+                        };
+                        if !handle_pane_command(cmd, &state, &mut my_panes, &mut socket).await {
+                            break;
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
     }
 
+    // Auto-close any panes this connection opened so the CRDT store's
+    // close_pane invariants (final flush + GC of LivePage) still run.
+    for (page_id, pane_id) in &my_panes {
+        state.crdt_store.close_pane(*page_id, pane_id);
+    }
+
     log::info!("WebSocket client disconnected from /api/events");
+}
+
+/// Apply one PaneCommand. Returns false if the connection should be closed.
+async fn handle_pane_command(
+    cmd: PaneCommand,
+    state: &AppState,
+    my_panes: &mut HashSet<(Uuid, String)>,
+    socket: &mut WebSocket,
+) -> bool {
+    match cmd {
+        PaneCommand::PaneOpen { notebook_id, page_id, pane_id } => {
+            // Load page content with the storage guard scoped to this block
+            // so the !Send MutexGuard is dropped before any .await below.
+            let load_result: Result<EditorData, String> = {
+                let storage = match state.storage.lock() {
+                    Ok(g) => g,
+                    Err(e) => {
+                        log::warn!("WS pane_open: storage lock poisoned: {}", e);
+                        return true;
+                    }
+                };
+                storage
+                    .get_page(notebook_id, page_id)
+                    .map(|p| p.content)
+                    .map_err(|e| e.to_string())
+            };
+
+            let content = match load_result {
+                Ok(c) => c,
+                Err(e) => {
+                    log::warn!(
+                        "WS pane_open: failed to load page {} for pane {}: {}",
+                        page_id, pane_id, e
+                    );
+                    return send_pane_ack(socket, "pane_open_error", page_id, &pane_id).await;
+                }
+            };
+
+            if let Err(e) = state.crdt_store.open_page(notebook_id, page_id, &pane_id, &content) {
+                log::warn!(
+                    "WS pane_open: crdt_store.open_page failed for {}/{}: {}",
+                    page_id, pane_id, e
+                );
+                return send_pane_ack(socket, "pane_open_error", page_id, &pane_id).await;
+            }
+
+            my_panes.insert((page_id, pane_id.clone()));
+            send_pane_ack(socket, "pane_opened", page_id, &pane_id).await
+        }
+        PaneCommand::PaneClose { page_id, pane_id } => {
+            state.crdt_store.close_pane(page_id, &pane_id);
+            my_panes.remove(&(page_id, pane_id.clone()));
+            send_pane_ack(socket, "pane_closed", page_id, &pane_id).await
+        }
+    }
+}
+
+/// Send a small JSON ack to the client. Returns false if the socket is dead.
+async fn send_pane_ack(
+    socket: &mut WebSocket,
+    event_type: &str,
+    page_id: Uuid,
+    pane_id: &str,
+) -> bool {
+    let payload = serde_json::json!({
+        "type": event_type,
+        "pageId": page_id.to_string(),
+        "paneId": pane_id,
+    });
+    let text = serde_json::to_string(&payload).unwrap_or_default();
+    socket.send(Message::Text(text.into())).await.is_ok()
 }
 
 // ===== Databases =====

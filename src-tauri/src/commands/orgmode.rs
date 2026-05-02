@@ -46,14 +46,9 @@ pub fn import_orgmode_cmd(
     let (notebook, pages) = import_orgmode(path, &notebooks_dir, notebook_name)
         .map_err(|e| e.to_string())?;
 
-    // Index imported pages for search
-    if let Ok(mut search_index) = state.search_index.lock() {
-        for page in &pages {
-            if let Err(e) = search_index.index_page(page) {
-                log::warn!("Failed to index imported page: {}", e);
-            }
-        }
-    }
+    // Daemon owns the search index. Run POST /api/search/rebuild after
+    // an org-mode import to make the new pages searchable.
+    let _ = pages;
 
     Ok(notebook)
 }

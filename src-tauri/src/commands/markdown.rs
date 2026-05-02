@@ -79,10 +79,8 @@ pub fn import_markdown(
     // Save the page
     storage.create_page_from(page.clone())?;
 
-    // Index the new page
-    if let Ok(mut search_index) = state.search_index.lock() {
-        let _ = search_index.index_page(&page);
-    }
+    // Search index belongs to the daemon now. Imports become searchable on
+    // the next daemon-side write or a manual POST /api/search/rebuild.
 
     Ok(page)
 }
@@ -144,10 +142,8 @@ pub fn import_markdown_file(
     // Save the page
     storage.create_page_from(page.clone())?;
 
-    // Index the new page
-    if let Ok(mut search_index) = state.search_index.lock() {
-        let _ = search_index.index_page(&page);
-    }
+    // Search index belongs to the daemon now. Imports become searchable on
+    // the next daemon-side write or a manual POST /api/search/rebuild.
 
     Ok(page)
 }

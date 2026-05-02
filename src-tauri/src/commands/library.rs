@@ -154,17 +154,9 @@ pub async fn switch_library(state: State<'_, AppState>, library_id: String) -> C
             .map_err(|e| LibraryCommandError::new(&format!("Failed to init storage: {}", e)))?;
     }
 
-    // Reinitialize search index with new library path
-    {
-        let mut search_index = state
-            .search_index
-            .lock()
-            .map_err(|e| LibraryCommandError::new(&format!("Lock error: {}", e)))?;
-
-        let search_path = library.search_index_path();
-        *search_index = crate::search::SearchIndex::new(search_path)
-            .map_err(|e| LibraryCommandError::new(&format!("Failed to init search: {}", e)))?;
-    }
+    // Search index lives in the daemon now. The daemon needs to be
+    // restarted (or pointed at the new library) for the swap to take
+    // effect on its side; Tauri no longer holds a writer.
 
     // Reinitialize goals storage with new library path
     {
@@ -220,8 +212,10 @@ pub async fn switch_library(state: State<'_, AppState>, library_id: String) -> C
         *flashcard_storage = crate::flashcards::FlashcardStorage::new(library.path.join("notebooks"));
     }
 
-    // Reinitialize CRDT store with new library path (bug fix: was not reinitialized)
-    state.crdt_store.set_data_dir(library.path.clone());
+    // CRDT store moved to the daemon. The daemon has its own library_path
+    // and reads from {library_path}/notebooks/.../sync/.../*.crdt; library
+    // swap on the Tauri side no longer needs to retarget a Rust-side store.
+    // (Daemon must be restarted or otherwise notified for library swap.)
 
     // Add the new library path to the video server's allowed directories
     {

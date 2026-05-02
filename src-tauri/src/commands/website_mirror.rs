@@ -369,9 +369,8 @@ pub fn import_website_mirror_cmd(
     // Process HTML files and create pages
     let mut pages: Vec<Page> = Vec::new();
 
-    let mut search_index = state.search_index.lock().map_err(|e| CommandError {
-        message: format!("Failed to acquire search index lock: {}", e),
-    })?;
+    // Daemon owns the search index now. Run POST /api/search/rebuild after
+    // a website mirror import to make the imported pages searchable.
 
     for (abs_path, rel_path) in &html_files {
         let abs_path_str = abs_path.to_string_lossy().to_string();
@@ -444,15 +443,8 @@ pub fn import_website_mirror_cmd(
             message: format!("Failed to write page file: {}", e),
         })?;
 
-        // Index page in Tantivy with extracted text
-        if !html_content.is_empty() {
-            let searchable_text = html_to_searchable_text(&html_content);
-            if let Err(e) = search_index.index_page_with_content(&page, &searchable_text) {
-                log::warn!("Failed to index HTML page {}: {}", page.id, e);
-            }
-        } else if let Err(e) = search_index.index_page(&page) {
-            log::warn!("Failed to index HTML page {}: {}", page.id, e);
-        }
+        // Indexing deferred — see comment above the loop. The page on disk
+        // becomes visible to the daemon's next list_pages call.
 
         pages.push(page);
     }
@@ -596,9 +588,9 @@ pub fn rescan_website_mirror_cmd(
         }
     }
 
-    let mut search_index = state.search_index.lock().map_err(|e| CommandError {
-        message: format!("Failed to acquire search index lock: {}", e),
-    })?;
+    // Daemon owns the search index now. The website-mirror rescan still
+    // updates pages on disk; users should call POST /api/search/rebuild
+    // afterwards to pick up adds/updates/deletes in search.
 
     let now = Utc::now();
     let mut added = 0usize;
@@ -642,18 +634,8 @@ pub fn rescan_website_mirror_cmd(
                     continue;
                 }
 
-                // Re-index in search
-                if let Err(e) = search_index.remove_page(page.id) {
-                    log::warn!("Failed to remove page from search index {}: {}", page.id, e);
-                }
-                if !html_content.is_empty() {
-                    let searchable_text = html_to_searchable_text(&html_content);
-                    if let Err(e) = search_index.index_page_with_content(&page, &searchable_text) {
-                        log::warn!("Failed to re-index page {}: {}", page.id, e);
-                    }
-                } else if let Err(e) = search_index.index_page(&page) {
-                    log::warn!("Failed to re-index page {}: {}", page.id, e);
-                }
+                // Search reindex deferred to the daemon's rebuild endpoint.
+                let _ = html_content;
 
                 updated += 1;
             }
@@ -729,15 +711,8 @@ pub fn rescan_website_mirror_cmd(
                 continue;
             }
 
-            // Index in search
-            if !html_content.is_empty() {
-                let searchable_text = html_to_searchable_text(&html_content);
-                if let Err(e) = search_index.index_page_with_content(&page, &searchable_text) {
-                    log::warn!("Failed to index new page {}: {}", page.id, e);
-                }
-            } else if let Err(e) = search_index.index_page(&page) {
-                log::warn!("Failed to index new page {}: {}", page.id, e);
-            }
+            // Search index update deferred — see comment above.
+            let _ = html_content;
 
             added += 1;
         }
@@ -750,9 +725,7 @@ pub fn rescan_website_mirror_cmd(
             log::warn!("Failed to soft-delete page {}: {}", page.id, e);
             continue;
         }
-        if let Err(e) = search_index.remove_page(page.id) {
-            log::warn!("Failed to remove deleted page from search index {}: {}", page.id, e);
-        }
+        // Daemon-side index removal pending a rebuild.
         deleted += 1;
     }
 

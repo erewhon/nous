@@ -279,11 +279,10 @@ pub async fn smart_organize_apply(
 
         match storage.move_page_to_notebook(source_nb_id, page_id, target_nb_id, None) {
             Ok(moved_page) => {
-                // Update search index
-                if let Ok(mut search_index) = state.search_index.lock() {
-                    let _ = search_index.remove_page(page_id);
-                    let _ = search_index.index_page(&moved_page);
-                }
+                // Daemon owns the search index. Bulk reorganize callers
+                // should run POST /api/search/rebuild afterwards to refresh
+                // the index entries' notebook_id.
+                let _ = moved_page;
                 result.moved_count += 1;
             }
             Err(e) => {

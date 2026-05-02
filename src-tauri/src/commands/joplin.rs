@@ -72,20 +72,9 @@ pub fn import_joplin_cmd(
         import_joplin_with_progress(path, &notebooks_dir, notebook_name, progress_callback)
             .map_err(|e| e.to_string())?;
 
-    // Index all pages in search
-    let total_pages = pages.len();
-    let mut search_index = state.search_index.lock().map_err(|e| e.to_string())?;
-    for (i, page) in pages.iter().enumerate() {
-        let _ = app.emit(
-            "import-progress",
-            ImportProgress {
-                current: i + 1,
-                total: total_pages,
-                message: "Indexing pages...".to_string(),
-            },
-        );
-        search_index.index_page(page).map_err(|e| e.to_string())?;
-    }
+    // Search indexing is now the daemon's job. After import, the user
+    // should call POST /api/search/rebuild to make the new pages searchable.
+    let _ = pages;
 
     Ok(notebook)
 }

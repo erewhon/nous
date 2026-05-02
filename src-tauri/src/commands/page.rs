@@ -140,10 +140,8 @@ pub fn create_page(
     // Notify sync manager of the new page
     state.sync_manager.queue_page_update(nb_id, page.id);
 
-    // Index the new page
-    if let Ok(mut search_index) = state.search_index.lock() {
-        let _ = search_index.index_page(&page);
-    }
+    // Search indexing now happens in the daemon when the daemon's create_page
+    // handler runs. Tauri's create_page no longer touches the index.
 
     // Auto-commit if git is enabled for this notebook
     let notebook_path = storage.get_notebook_path(nb_id);
@@ -205,23 +203,12 @@ pub fn update_page(
         page.title = title;
     }
     if let Some(content) = content {
-        // Route through CRDT store if a pane_id is provided
-        let pane = pane_id.as_deref().unwrap_or("default");
-        match state.crdt_store.apply_save(pg_id, pane, &content) {
-            Ok(Some(canonical)) => {
-                // CRDT produced canonical state (may include other panes' changes)
-                page.content = canonical;
-            }
-            Ok(None) => {
-                // Page not live in CRDT store — use content as-is
-                page.content = content;
-            }
-            Err(e) => {
-                // CRDT error — fall back to direct content (best-effort)
-                log::warn!("CRDT apply_save failed for page {}: {}", pg_id, e);
-                page.content = content;
-            }
-        }
+        // CRDT routing moved to the daemon's update_page handler. This Tauri
+        // command no longer participates in multi-pane merge — the frontend
+        // calls daemonPut() instead. Kept registered for invoke compatibility
+        // until Phase 3 cleanup.
+        let _ = pane_id;
+        page.content = content;
     }
     if let Some(tags) = tags {
         page.tags = tags;
@@ -335,10 +322,7 @@ pub fn update_page(
         .sync_manager
         .trigger_onsave_sync_if_needed(nb_id, &state.storage);
 
-    // Update the search index
-    if let Ok(mut search_index) = state.search_index.lock() {
-        let _ = search_index.index_page(&page);
-    }
+    // Search reindex now lives in the daemon's update_page handler.
 
     // Only commit if explicitly requested (not on every auto-save)
     let should_commit = commit.unwrap_or(false);
@@ -393,10 +377,7 @@ pub fn delete_page(
     // Notify sync manager of the deletion
     state.sync_manager.queue_page_delete(nb_id, pg_id);
 
-    // Remove from search index (page is in trash)
-    if let Ok(mut search_index) = state.search_index.lock() {
-        let _ = search_index.remove_page(pg_id);
-    }
+    // Search index removal now lives in the daemon's delete_page handler.
 
     // Auto-commit if git is enabled for this notebook
     let notebook_path = storage.get_notebook_path(nb_id);
@@ -445,10 +426,8 @@ pub fn permanent_delete_page(
 
     storage.permanent_delete_page(nb_id, pg_id)?;
 
-    // Remove from search index
-    if let Ok(mut search_index) = state.search_index.lock() {
-        let _ = search_index.remove_page(pg_id);
-    }
+    // Search index removal happens via the daemon — clients should hit
+    // POST /api/search/rebuild after bulk permanent deletes for now.
 
     // Auto-commit if git is enabled for this notebook
     let notebook_path = storage.get_notebook_path(nb_id);
@@ -479,10 +458,8 @@ pub fn restore_page(
 
     let page = storage.restore_page(nb_id, pg_id)?;
 
-    // Re-add to search index
-    if let Ok(mut search_index) = state.search_index.lock() {
-        let _ = search_index.index_page(&page);
-    }
+    // Search reindex on restore is no longer done by Tauri; the page will be
+    // picked up on its next daemon-side write or via a manual rebuild.
 
     // Auto-commit if git is enabled for this notebook
     let notebook_path = storage.get_notebook_path(nb_id);
@@ -562,11 +539,9 @@ pub fn move_page_to_notebook(
     let moved_page =
         storage.move_page_to_notebook(source_nb_id, pg_id, target_nb_id, target_folder)?;
 
-    // Update search index - remove from old, add to new
-    if let Ok(mut search_index) = state.search_index.lock() {
-        let _ = search_index.remove_page(pg_id);
-        let _ = search_index.index_page(&moved_page);
-    }
+    // Daemon now owns the search index. Cross-notebook moves currently rely
+    // on the next daemon-side write to refresh the index entry's notebook_id;
+    // call POST /api/search/rebuild after bulk moves if needed.
 
     // Auto-commit in both notebooks if git is enabled
     let source_path = storage.get_notebook_path(source_nb_id);
@@ -773,47 +748,28 @@ pub fn restore_page_snapshot(
 }
 
 /// Register an editor pane as having opened a page (starts CRDT tracking).
+/// STUB — CRDT lives in the daemon. Frontend uses `pane_open` over the
+/// daemon WS instead. Kept registered for invoke compatibility.
 #[tauri::command(rename_all = "camelCase")]
 pub fn open_page_in_pane_crdt(
-    state: State<AppState>,
+    _state: State<AppState>,
     notebook_id: String,
     page_id: String,
     pane_id: String,
 ) -> CommandResult<()> {
-    let storage = state.storage.lock().unwrap();
-    let nb_id = Uuid::parse_str(&notebook_id).map_err(|e| CommandError {
-        message: format!("Invalid notebook ID: {}", e),
-    })?;
-    let pg_id = Uuid::parse_str(&page_id).map_err(|e| CommandError {
-        message: format!("Invalid page ID: {}", e),
-    })?;
-
-    let page = storage.get_page(nb_id, pg_id)?;
-    drop(storage); // Release lock before CRDT operations
-
-    state
-        .crdt_store
-        .open_page(nb_id, pg_id, &pane_id, &page.content)
-        .map_err(|e| CommandError {
-            message: format!("Failed to open page in CRDT store: {}", e),
-        })?;
-
+    let _ = (notebook_id, page_id, pane_id);
     Ok(())
 }
 
 /// Unregister an editor pane from a page (stops CRDT tracking for that pane).
+/// STUB — see `open_page_in_pane_crdt` above.
 #[tauri::command(rename_all = "camelCase")]
 pub fn close_pane_for_page(
-    state: State<AppState>,
+    _state: State<AppState>,
     page_id: String,
     pane_id: String,
 ) -> CommandResult<()> {
-    let pg_id = Uuid::parse_str(&page_id).map_err(|e| CommandError {
-        message: format!("Invalid page ID: {}", e),
-    })?;
-
-    state.crdt_store.close_pane(pg_id, &pane_id);
-
+    let _ = (page_id, pane_id);
     Ok(())
 }
 

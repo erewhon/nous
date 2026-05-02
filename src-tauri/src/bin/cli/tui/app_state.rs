@@ -328,17 +328,11 @@ impl TuiState {
     }
 
     pub fn perform_search(&mut self) {
-        if self.search_input.is_empty() {
-            self.search_results.clear();
-            return;
-        }
-
-        if let Some(ref index) = self.app.search_index {
-            if let Ok(results) = index.search(&self.search_input, 20) {
-                self.search_results = results;
-                self.search_selected = 0;
-            }
-        }
+        // TUI search was backed by the local Tantivy reader. After the daemon
+        // took ownership of the writer lock, the read-only path was removed
+        // from the CLI App. To re-enable TUI search, plumb a daemon HTTP
+        // client (or revive ReadOnlySearchIndex on a non-conflicting path).
+        self.search_results.clear();
     }
 
     pub fn navigate_to_search_result(&mut self) {

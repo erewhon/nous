@@ -190,12 +190,7 @@ pub fn sync_from_external_editor(
     // Mark as synced
     editor_manager.mark_as_synced(page_uuid)?;
 
-    // Update search index
-    if let Ok(mut index) = state.search_index.lock() {
-        if let Ok(page) = storage.get_page(notebook_uuid, page_uuid) {
-            let _ = index.index_page(&page);
-        }
-    }
+    // Daemon owns search indexing; pages picked up on next daemon write.
 
     log::info!("Synced external changes for page {}", page_id);
     Ok(())

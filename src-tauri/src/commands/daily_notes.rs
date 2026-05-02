@@ -154,10 +154,7 @@ pub fn create_daily_note(
     // Notify sync manager
     state.sync_manager.queue_page_update(nb_id, page.id);
 
-    // Index the new page
-    if let Ok(mut search_index) = state.search_index.lock() {
-        let _ = search_index.index_page(&page);
-    }
+    // Search indexing now happens in the daemon's create_page/update_page paths.
 
     // Auto-commit if git is enabled
     let notebook_path = storage.get_notebook_path(nb_id);
@@ -252,10 +249,7 @@ pub fn mark_as_daily_note(
     // Notify sync manager
     state.sync_manager.queue_page_update(nb_id, pg_id);
 
-    // Update search index
-    if let Ok(mut search_index) = state.search_index.lock() {
-        let _ = search_index.index_page(&page);
-    }
+    // Search reindex now happens in the daemon's update_page handler.
 
     log::info!("Marked page {} as daily note for {}", page.title, date);
     Ok(page)
@@ -285,10 +279,7 @@ pub fn unmark_daily_note(
     // Notify sync manager
     state.sync_manager.queue_page_update(nb_id, pg_id);
 
-    // Update search index
-    if let Ok(mut search_index) = state.search_index.lock() {
-        let _ = search_index.index_page(&page);
-    }
+    // Search reindex now happens in the daemon's update_page handler.
 
     log::info!("Unmarked page {} as daily note", page.title);
     Ok(page)

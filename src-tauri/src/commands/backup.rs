@@ -94,17 +94,8 @@ pub fn import_notebook_zip(
         import_notebook_from_zip(std::path::Path::new(&zip_path), &notebooks_dir, &existing_ids)
             .map_err(|e| e.to_string())?;
 
-    // Index the new pages in search
-    drop(storage);
-
-    let storage = state.storage.lock().map_err(|e| e.to_string())?;
-    let mut search_index = state.search_index.lock().map_err(|e| e.to_string())?;
-
-    if let Ok(pages) = storage.list_pages(notebook.id) {
-        for page in pages {
-            let _ = search_index.index_page(&page);
-        }
-    }
+    // Daemon owns the search index now. After a backup restore, run
+    // POST /api/search/rebuild to reindex the restored notebook's pages.
 
     Ok(notebook)
 }

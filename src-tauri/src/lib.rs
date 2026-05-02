@@ -17,7 +17,7 @@ mod evernote;
 mod external_editor;
 pub mod external_sources;
 mod flashcards;
-mod git;
+pub mod git;
 pub mod goals;
 pub mod inbox;
 mod joplin;
@@ -55,9 +55,8 @@ use library::LibraryStorage;
 use monitor::MonitorStorage;
 use python_bridge::PythonAI;
 use rag::VectorIndex;
-use search::SearchIndex;
 use storage::FileStorage;
-use sync::{CrdtStore, SyncManager, SyncScheduler};
+use sync::{SyncManager, SyncScheduler};
 use collab::storage::CollabStorage;
 use share::storage::ShareStorage;
 use video_server::VideoServer;
@@ -65,7 +64,9 @@ use video_server::VideoServer;
 pub struct AppState {
     pub library_storage: Arc<Mutex<LibraryStorage>>,
     pub storage: Arc<Mutex<FileStorage>>,
-    pub search_index: Arc<Mutex<SearchIndex>>,
+    // CRDT store now lives in the daemon. Frontend pane lifecycle goes
+    // through the daemon's /api/events WS; updatePage routes through the
+    // daemon's update_page handler which calls apply_save.
     pub vector_index: Mutex<VectorIndex>,
     pub python_ai: Arc<Mutex<PythonAI>>,
     pub action_storage: Arc<Mutex<ActionStorage>>,
@@ -77,7 +78,6 @@ pub struct AppState {
     pub energy_storage: Arc<Mutex<EnergyStorage>>,
     pub contacts_storage: Arc<Mutex<ContactsStorage>>,
     pub sync_manager: Arc<SyncManager>,
-    pub crdt_store: Arc<CrdtStore>,
     pub external_editor: Mutex<ExternalEditorManager>,
     pub external_sources_storage: Arc<Mutex<ExternalSourcesStorage>>,
     pub backup_scheduler: Arc<tokio::sync::Mutex<Option<BackupScheduler>>>,
@@ -174,9 +174,9 @@ pub fn run() {
     let storage = FileStorage::new(library_path.clone());
     storage.init().expect("Failed to initialize storage");
 
-    // Initialize search index at the library path
-    let search_dir = current_library.search_index_path();
-    let search_index = SearchIndex::new(search_dir).expect("Failed to initialize search index");
+    // Search index now lives in the daemon (single-writer; daemon owns the
+    // Tantivy lock). Tauri-side commands that touched the index have been
+    // stubbed; frontend queries go through daemon HTTP.
 
     // Initialize vector index for RAG at the library path
     let vector_db_path = current_library.path.join(".nous").join("vectors.db");
@@ -258,9 +258,8 @@ pub fn run() {
     let sync_manager = SyncManager::new(data_dir.clone());
     let sync_manager_arc = Arc::new(sync_manager);
 
-    // Initialize CRDT store for live page editing (library-scoped)
-    let crdt_store = CrdtStore::new(library_path.clone());
-    let crdt_store_arc = Arc::new(crdt_store);
+    // CRDT store moved to the daemon (Daemon API migration). Tauri no
+    // longer constructs one — multi-pane merge happens via daemon HTTP/WS.
 
     // Initialize share storage (library-scoped)
     let share_storage = ShareStorage::new(library_path.clone());
@@ -298,9 +297,6 @@ pub fn run() {
     action_executor.set_energy_storage(Arc::clone(&energy_storage_arc));
     action_executor.set_inbox_storage(Arc::clone(&inbox_storage_arc));
 
-    // Wrap search index in Arc for sharing with plugin system
-    let search_index_arc = Arc::new(Mutex::new(search_index));
-
     // Initialize plugin host (optional, behind "plugins" feature)
     #[cfg(feature = "plugins")]
     let plugin_host = {
@@ -309,7 +305,9 @@ pub fn run() {
             Arc::clone(&goals_storage_arc),
             Arc::clone(&inbox_storage_arc),
         );
-        api.set_search_index(Arc::clone(&search_index_arc));
+        // search_index is no longer set on the plugin API — plugins that need
+        // search must go through the daemon HTTP API. The setter remains so the
+        // type compiles, but it's a no-op in this build.
         api.set_energy_storage(Arc::clone(&energy_storage_arc));
         api.set_python_ai(Arc::clone(&python_ai_arc));
         let api = Arc::new(api);
@@ -373,7 +371,6 @@ pub fn run() {
     let state = AppState {
         library_storage: library_storage_arc,
         storage: storage_arc,
-        search_index: search_index_arc,
         vector_index: Mutex::new(vector_index),
         python_ai: python_ai_arc,
         action_storage: action_storage_arc,
@@ -385,7 +382,6 @@ pub fn run() {
         energy_storage: energy_storage_arc,
         contacts_storage: contacts_storage_arc,
         sync_manager: sync_manager_arc,
-        crdt_store: crdt_store_arc,
         external_editor: Mutex::new(external_editor),
         external_sources_storage: external_sources_storage_arc,
         chat_session_storage: chat_session_storage_arc,
@@ -486,8 +482,9 @@ pub fn run() {
                 sync::TauriEmitter::new(app.handle().clone()),
             ));
 
-            // Give the sync manager the CRDT store so it can use live page state
-            state.sync_manager.set_crdt_store(Arc::clone(&state.crdt_store));
+            // CRDT store ownership moved to the daemon — sync_manager.set_crdt_store
+            // is now a no-op on the Tauri side. Sync manager that needs CRDT-aware
+            // skip semantics should run in the daemon process going forward.
 
             // Give the sync manager the collab storage so it can skip pages with active sessions
             state.sync_manager.set_collab_storage(Arc::clone(&state.collab_storage));

@@ -57,14 +57,9 @@ pub fn import_scrivener_project_cmd(
     let (notebook, pages) =
         import_scrivener_project(path, &notebooks_dir, notebook_name).map_err(|e| e.to_string())?;
 
-    // Index all pages in search (errors here shouldn't fail the import)
-    if let Ok(mut search_index) = state.search_index.lock() {
-        for page in &pages {
-            if let Err(e) = search_index.index_page(page) {
-                log::warn!("Failed to index page '{}': {}", page.title, e);
-            }
-        }
-    }
+    // Daemon owns the search index now; run POST /api/search/rebuild after
+    // a Scrivener import to make the imported pages searchable.
+    let _ = pages;
 
     Ok(notebook)
 }

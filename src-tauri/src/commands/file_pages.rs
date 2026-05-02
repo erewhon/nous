@@ -90,64 +90,10 @@ pub fn import_file_as_page(
 
     let file_type = format!("{:?}", page.page_type).to_lowercase();
 
-    // Index the page in search with file content for text-based pages
-    if let Ok(mut search_index) = state.search_index.lock() {
-        let index_result = match page.page_type {
-            PageType::Jupyter | PageType::Markdown | PageType::Calendar | PageType::Html => {
-                // Read file content for indexing
-                match storage.read_native_file_content(&page) {
-                    Ok(raw_content) => {
-                        let content = if page.page_type == PageType::Html {
-                            crate::storage::html_utils::html_to_searchable_text(&raw_content)
-                        } else {
-                            raw_content
-                        };
-                        search_index.index_page_with_content(&page, &content)
-                    }
-                    Err(e) => {
-                        log::warn!("Failed to read file content for indexing: {}", e);
-                        search_index.index_page(&page) // Fallback to basic indexing
-                    }
-                }
-            }
-            PageType::Pdf | PageType::Epub => {
-                // Extract PDF/EPUB text using Python bridge (markitdown)
-                let file_path = storage.get_file_path(&page);
-                let file_type = format!("{:?}", page.page_type);
-                match file_path {
-                    Ok(path) => {
-                        if let Ok(python_ai) = state.python_ai.lock() {
-                            match python_ai.convert_document(path.to_string_lossy().to_string()) {
-                                Ok(result) => {
-                                    if result.error.is_none() {
-                                        search_index.index_page_with_content(&page, &result.content)
-                                    } else {
-                                        log::warn!("{} text extraction error: {:?}", file_type, result.error);
-                                        search_index.index_page(&page)
-                                    }
-                                }
-                                Err(e) => {
-                                    log::warn!("Failed to extract {} text for indexing: {}", file_type, e);
-                                    search_index.index_page(&page)
-                                }
-                            }
-                        } else {
-                            log::warn!("Failed to acquire Python bridge lock for {} indexing", file_type);
-                            search_index.index_page(&page)
-                        }
-                    }
-                    Err(e) => {
-                        log::warn!("Failed to get {} file path for indexing: {}", file_type, e);
-                        search_index.index_page(&page)
-                    }
-                }
-            }
-            _ => search_index.index_page(&page),
-        };
-        if let Err(e) = index_result {
-            log::warn!("Failed to index imported page: {}", e);
-        }
-    }
+    // Search index belongs to the daemon. File-based imports (PDF, EPUB,
+    // Jupyter, etc.) need richer text extraction than the daemon's basic
+    // index_page does today; until the daemon grows that path, run
+    // POST /api/search/rebuild after large imports to pick up file content.
 
     Ok(ImportFileResult { page, file_type })
 }
@@ -261,12 +207,10 @@ pub fn update_file_content(
     // Notify sync manager of the change
     state.sync_manager.queue_page_update(notebook_uuid, page_uuid);
 
-    // Update search index with file content
-    if let Ok(mut search_index) = state.search_index.lock() {
-        if let Err(e) = search_index.index_page_with_content(&page, &content) {
-            log::warn!("Failed to re-index page: {}", e);
-        }
-    }
+    // Search reindex now happens in the daemon. File-content indexing
+    // (the index_page_with_content path) hasn't been ported to the daemon
+    // yet — call POST /api/search/rebuild after editing file-backed pages.
+    let _ = content;
 
     // Dispatch database row events to plugins
     #[cfg(feature = "plugins")]
@@ -493,12 +437,8 @@ pub fn delete_file_page(
         message: format!("Invalid page ID: {}", e),
     })?;
 
-    // Remove from search index first
-    if let Ok(mut search_index) = state.search_index.lock() {
-        if let Err(e) = search_index.remove_page(page_uuid) {
-            log::warn!("Failed to remove page from search index: {}", e);
-        }
-    }
+    // Search index removal happens via the daemon's delete_page handler.
+    // Tauri's delete_file_page no longer reaches into the index directly.
 
     storage
         .delete_file_page(notebook_uuid, page_uuid)
@@ -739,10 +679,8 @@ pub fn duplicate_database_page(
     // 6. Notify sync
     state.sync_manager.queue_page_update(nb_uuid, new_page.id);
 
-    // 7. Index the new page
-    if let Ok(mut search_index) = state.search_index.lock() {
-        let _ = search_index.index_page(&new_page);
-    }
+    // Daemon handles search indexing now; the duplicated page becomes
+    // searchable on its next daemon-side write or via manual rebuild.
 
     log::info!(
         "Duplicated database page '{}' -> '{}' (include_rows={})",
