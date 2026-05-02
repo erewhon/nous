@@ -24,7 +24,7 @@ if [[ "${DEBUG_ONLY}" == "true" ]]; then
     BINARY="${SCRIPT_DIR}/src-tauri/target/debug/nous-cli"
     if [[ ! -f "${BINARY}" ]]; then
         echo "Error: Debug binary not found at ${BINARY}"
-        echo "Build it first: bash run-daemon.sh (or cargo build --bin nous-cli)"
+        echo "Build it first: just daemon (or cargo build --bin nous-cli)"
         exit 1
     fi
     echo "Installing debug build..."

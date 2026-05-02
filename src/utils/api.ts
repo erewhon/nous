@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { daemonGet } from "./daemon";
+import { daemonGet, daemonPost, daemonPut, daemonDelete } from "./daemon";
 import type { Notebook, NotebookType } from "../types/notebook";
 import type {
   Page,
@@ -97,6 +97,9 @@ export async function getPage(
   return daemonGet<Page>(`/api/notebooks/${notebookId}/pages/${pageId}`);
 }
 
+// Stays on Tauri until "Move CRDT, search index, and plugins into the daemon"
+// ships — daemon createPage doesn't support templates, parent pages, plugin
+// page types, or plugin event dispatch.
 export async function createPage(
   notebookId: string,
   title: string,
@@ -119,6 +122,10 @@ export async function createPage(
   });
 }
 
+// Stays on Tauri until "Move CRDT, search index, and plugins into the daemon"
+// ships — daemon updatePage doesn't go through the CRDT store (multi-pane
+// merge), update the Tantivy search index, or dispatch plugin OnPageUpdated
+// hooks. Migrating now would silently break those.
 export async function updatePage(
   notebookId: string,
   pageId: string,
@@ -196,7 +203,7 @@ export async function deletePage(
   notebookId: string,
   pageId: string
 ): Promise<void> {
-  return invoke("delete_page", { notebookId, pageId });
+  await daemonDelete(`/api/notebooks/${notebookId}/pages/${pageId}`);
 }
 
 export async function permanentDeletePage(
@@ -289,11 +296,10 @@ export async function createFolder(
   parentId?: string,
   sectionId?: string
 ): Promise<Folder> {
-  return invoke<Folder>("create_folder", {
-    notebookId,
+  return daemonPost<Folder>(`/api/notebooks/${notebookId}/folders`, {
     name,
-    parentId,
-    sectionId,
+    parent_id: parentId,
+    section_id: sectionId,
   });
 }
 
@@ -307,14 +313,18 @@ export async function updateFolder(
     sectionId?: string | null;
   }
 ): Promise<Folder> {
-  return invoke<Folder>("update_folder", {
-    notebookId,
-    folderId,
-    name: updates.name,
-    parentId: updates.parentId !== undefined ? updates.parentId : undefined,
-    color: updates.color !== undefined ? updates.color : undefined,
-    sectionId: updates.sectionId !== undefined ? updates.sectionId : undefined,
-  });
+  // Triple-state: omit field for "no change", set null for "clear",
+  // string for "set". Daemon's UpdateFolderRequest uses
+  // `deserialize_optional_field` so a present null clears.
+  const body: Record<string, unknown> = {};
+  if (updates.name !== undefined) body.name = updates.name;
+  if (updates.parentId !== undefined) body.parent_id = updates.parentId;
+  if (updates.color !== undefined) body.color = updates.color;
+  if (updates.sectionId !== undefined) body.section_id = updates.sectionId;
+  return daemonPut<Folder>(
+    `/api/notebooks/${notebookId}/folders/${folderId}`,
+    body
+  );
 }
 
 export async function deleteFolder(
@@ -322,7 +332,12 @@ export async function deleteFolder(
   folderId: string,
   movePagesTo?: string
 ): Promise<void> {
-  return invoke("delete_folder", { notebookId, folderId, movePagesTo });
+  const qs = movePagesTo
+    ? `?move_pages_to=${encodeURIComponent(movePagesTo)}`
+    : "";
+  await daemonDelete(
+    `/api/notebooks/${notebookId}/folders/${folderId}${qs}`
+  );
 }
 
 export async function movePageToFolder(
@@ -331,19 +346,30 @@ export async function movePageToFolder(
   folderId?: string,
   position?: number
 ): Promise<Page> {
-  return invoke<Page>("move_page_to_folder", {
-    notebookId,
-    pageId,
-    folderId,
-    position,
-  });
+  // Daemon's move endpoint doesn't support `position` — for that case,
+  // callers should follow up with reorderPages. Fall back to Tauri only when
+  // position is explicitly set.
+  if (position !== undefined) {
+    return invoke<Page>("move_page_to_folder", {
+      notebookId,
+      pageId,
+      folderId,
+      position,
+    });
+  }
+  return daemonPost<Page>(
+    `/api/notebooks/${notebookId}/pages/${pageId}/move`,
+    { folder_id: folderId ?? "" }
+  );
 }
 
 export async function archivePage(
   notebookId: string,
   pageId: string
 ): Promise<Page> {
-  return invoke<Page>("archive_page", { notebookId, pageId });
+  return daemonPost<Page>(
+    `/api/notebooks/${notebookId}/pages/${pageId}/archive`
+  );
 }
 
 export async function unarchivePage(
@@ -351,11 +377,10 @@ export async function unarchivePage(
   pageId: string,
   targetFolderId?: string
 ): Promise<Page> {
-  return invoke<Page>("unarchive_page", {
-    notebookId,
-    pageId,
-    targetFolderId,
-  });
+  return daemonPost<Page>(
+    `/api/notebooks/${notebookId}/pages/${pageId}/unarchive`,
+    { target_folder_id: targetFolderId ?? null }
+  );
 }
 
 export async function reorderFolders(
@@ -363,7 +388,10 @@ export async function reorderFolders(
   parentId: string | null,
   folderIds: string[]
 ): Promise<void> {
-  return invoke("reorder_folders", { notebookId, parentId, folderIds });
+  await daemonPost(`/api/notebooks/${notebookId}/folders/reorder`, {
+    parent_id: parentId,
+    folder_ids: folderIds,
+  });
 }
 
 export async function reorderPages(
@@ -371,7 +399,10 @@ export async function reorderPages(
   folderId: string | null,
   pageIds: string[]
 ): Promise<void> {
-  return invoke("reorder_pages", { notebookId, folderId, pageIds });
+  await daemonPost(`/api/notebooks/${notebookId}/pages/reorder`, {
+    folder_id: folderId,
+    page_ids: pageIds,
+  });
 }
 
 export async function ensureArchiveFolder(notebookId: string): Promise<Folder> {
@@ -382,14 +413,18 @@ export async function archiveFolder(
   notebookId: string,
   folderId: string
 ): Promise<Folder> {
-  return invoke<Folder>("archive_folder", { notebookId, folderId });
+  return daemonPost<Folder>(
+    `/api/notebooks/${notebookId}/folders/${folderId}/archive`
+  );
 }
 
 export async function unarchiveFolder(
   notebookId: string,
   folderId: string
 ): Promise<Folder> {
-  return invoke<Folder>("unarchive_folder", { notebookId, folderId });
+  return daemonPost<Folder>(
+    `/api/notebooks/${notebookId}/folders/${folderId}/unarchive`
+  );
 }
 
 // ===== Search API =====
@@ -644,11 +679,11 @@ export interface TagInfo {
 }
 
 export async function getAllTags(): Promise<TagInfo[]> {
-  return invoke<TagInfo[]>("get_all_tags");
+  return daemonGet<TagInfo[]>("/api/tags");
 }
 
 export async function getNotebookTags(notebookId: string): Promise<TagInfo[]> {
-  return invoke<TagInfo[]>("get_notebook_tags", { notebookId });
+  return daemonGet<TagInfo[]>(`/api/notebooks/${notebookId}/tags`);
 }
 
 export async function renameTag(
@@ -656,7 +691,11 @@ export async function renameTag(
   oldTag: string,
   newTag: string
 ): Promise<number> {
-  return invoke<number>("rename_tag", { notebookId, oldTag, newTag });
+  const resp = await daemonPost<{ pagesUpdated: number }>(
+    `/api/notebooks/${notebookId}/tags/${encodeURIComponent(oldTag)}/rename`,
+    { new_name: newTag }
+  );
+  return resp.pagesUpdated;
 }
 
 export async function mergeTags(
@@ -664,14 +703,21 @@ export async function mergeTags(
   tagsToMerge: string[],
   targetTag: string
 ): Promise<number> {
-  return invoke<number>("merge_tags", { notebookId, tagsToMerge, targetTag });
+  const resp = await daemonPost<{ pagesUpdated: number }>(
+    `/api/notebooks/${notebookId}/tags/merge`,
+    { from: tagsToMerge, into: targetTag }
+  );
+  return resp.pagesUpdated;
 }
 
 export async function deleteTag(
   notebookId: string,
   tag: string
 ): Promise<number> {
-  return invoke<number>("delete_tag", { notebookId, tag });
+  const resp = await daemonDelete<{ pagesUpdated: number }>(
+    `/api/notebooks/${notebookId}/tags/${encodeURIComponent(tag)}`
+  );
+  return resp.pagesUpdated;
 }
 
 // ===== Markdown Import/Export API =====
@@ -1337,11 +1383,18 @@ import type {
 export async function inboxCapture(
   request: CaptureRequest
 ): Promise<InboxItem> {
-  return invoke<InboxItem>("inbox_capture", { request });
+  // Note: daemon's capture endpoint forces source = "daemon-api" and doesn't
+  // accept a custom `source` field. Loses some attribution detail vs. the
+  // Tauri command, acceptable for Phase 1.
+  return daemonPost<InboxItem>("/api/inbox", {
+    title: request.title,
+    content: request.content,
+    tags: request.tags,
+  });
 }
 
 export async function inboxList(): Promise<InboxItem[]> {
-  return invoke<InboxItem[]>("inbox_list");
+  return daemonGet<InboxItem[]>("/api/inbox");
 }
 
 export async function inboxListUnprocessed(): Promise<InboxItem[]> {
@@ -1363,7 +1416,7 @@ export async function inboxApplyActions(
 }
 
 export async function inboxDelete(itemId: string): Promise<void> {
-  return invoke("inbox_delete", { itemId });
+  await daemonDelete(`/api/inbox/${itemId}`);
 }
 
 export async function inboxClearProcessed(): Promise<number> {
@@ -1738,7 +1791,10 @@ export async function createSection(
   name: string,
   color?: string
 ): Promise<Section> {
-  return invoke<Section>("create_section", { notebookId, name, color });
+  return daemonPost<Section>(`/api/notebooks/${notebookId}/sections`, {
+    name,
+    color,
+  });
 }
 
 export async function updateSection(
@@ -1753,11 +1809,20 @@ export async function updateSection(
     pageSortBy?: string;
   }
 ): Promise<Section> {
-  return invoke<Section>("update_section", {
-    notebookId,
-    sectionId,
-    ...updates,
-  });
+  // Triple-state for description/color/systemPrompt (null = clear).
+  const body: Record<string, unknown> = {};
+  if (updates.name !== undefined) body.name = updates.name;
+  if (updates.description !== undefined) body.description = updates.description;
+  if (updates.color !== undefined) body.color = updates.color;
+  if (updates.systemPrompt !== undefined)
+    body.system_prompt = updates.systemPrompt;
+  if (updates.systemPromptMode !== undefined)
+    body.system_prompt_mode = updates.systemPromptMode;
+  if (updates.pageSortBy !== undefined) body.page_sort_by = updates.pageSortBy;
+  return daemonPut<Section>(
+    `/api/notebooks/${notebookId}/sections/${sectionId}`,
+    body
+  );
 }
 
 export async function deleteSection(
@@ -1765,14 +1830,21 @@ export async function deleteSection(
   sectionId: string,
   moveItemsTo?: string
 ): Promise<void> {
-  return invoke("delete_section", { notebookId, sectionId, moveItemsTo });
+  const qs = moveItemsTo
+    ? `?move_items_to=${encodeURIComponent(moveItemsTo)}`
+    : "";
+  await daemonDelete(
+    `/api/notebooks/${notebookId}/sections/${sectionId}${qs}`
+  );
 }
 
 export async function reorderSections(
   notebookId: string,
   sectionIds: string[]
 ): Promise<void> {
-  return invoke("reorder_sections", { notebookId, sectionIds });
+  await daemonPost(`/api/notebooks/${notebookId}/sections/reorder`, {
+    section_ids: sectionIds,
+  });
 }
 
 export async function moveSectionToNotebook(
@@ -2380,7 +2452,10 @@ export async function isLibraryWindowOpen(libraryId: string): Promise<boolean> {
  * List all goals (including archived)
  */
 export async function listGoals(): Promise<Goal[]> {
-  return invoke<Goal[]>("list_goals");
+  // Daemon returns [{goal, stats}, ...] (active goals with inline stats);
+  // existing frontend callers want just Goal[].
+  const rows = await daemonGet<Array<{ goal: Goal }>>("/api/goals");
+  return rows.map((r) => r.goal);
 }
 
 /**
@@ -2432,7 +2507,10 @@ export async function deleteGoal(id: string): Promise<void> {
  * Get statistics for a goal
  */
 export async function getGoalStats(id: string): Promise<GoalStats> {
-  return invoke<GoalStats>("get_goal_stats", { id });
+  // Daemon doesn't expose /api/goals/{id}/stats directly; /api/goals/{id}
+  // returns {goal, stats}. Extract stats at the boundary.
+  const resp = await daemonGet<{ stats: GoalStats }>(`/api/goals/${id}`);
+  return resp.stats;
 }
 
 /**
@@ -2443,8 +2521,7 @@ export async function recordGoalProgress(
   date: string,
   completed: boolean
 ): Promise<GoalProgress> {
-  return invoke<GoalProgress>("record_goal_progress", {
-    goalId,
+  return daemonPost<GoalProgress>(`/api/goals/${goalId}/progress`, {
     date,
     completed,
   });
@@ -2458,11 +2535,13 @@ export async function getGoalProgress(
   startDate: string,
   endDate: string
 ): Promise<GoalProgress[]> {
-  return invoke<GoalProgress[]>("get_goal_progress", {
-    goalId,
-    startDate,
-    endDate,
+  const params = new URLSearchParams({
+    start: startDate,
+    end: endDate,
   });
+  return daemonGet<GoalProgress[]>(
+    `/api/goals/${goalId}/progress?${params.toString()}`
+  );
 }
 
 /**
@@ -2476,7 +2555,7 @@ export async function checkAutoGoals(): Promise<GoalProgress[]> {
  * Get goals summary
  */
 export async function getGoalsSummary(): Promise<GoalsSummary> {
-  return invoke<GoalsSummary>("get_goals_summary");
+  return daemonGet<GoalsSummary>("/api/goals/summary");
 }
 
 /**
@@ -2520,10 +2599,10 @@ export async function getEnergyCheckInsRange(
   startDate: string,
   endDate: string
 ): Promise<EnergyCheckIn[]> {
-  return invoke<EnergyCheckIn[]>("get_energy_checkins_range", {
-    startDate,
-    endDate,
-  });
+  const params = new URLSearchParams({ start: startDate, end: endDate });
+  return daemonGet<EnergyCheckIn[]>(
+    `/api/energy/checkins?${params.toString()}`
+  );
 }
 
 /**
@@ -2550,17 +2629,17 @@ export async function getEnergyPatterns(
   startDate: string,
   endDate: string
 ): Promise<EnergyPattern> {
-  return invoke<EnergyPattern>("get_energy_patterns", {
-    startDate,
-    endDate,
-  });
+  const params = new URLSearchParams({ start: startDate, end: endDate });
+  return daemonGet<EnergyPattern>(
+    `/api/energy/patterns?${params.toString()}`
+  );
 }
 
 /**
  * Get the full energy log (all check-ins)
  */
 export async function getEnergyLog(): Promise<EnergyCheckIn[]> {
-  return invoke<EnergyCheckIn[]>("get_energy_log");
+  return daemonGet<EnergyCheckIn[]>("/api/energy/checkins");
 }
 
 // ===== Contacts API =====
@@ -2964,7 +3043,17 @@ export async function getDailyNote(
   notebookId: string,
   date: string // "YYYY-MM-DD" format
 ): Promise<Page | null> {
-  return invoke<Page | null>("get_daily_note", { notebookId, date });
+  try {
+    return await daemonGet<Page>(
+      `/api/notebooks/${notebookId}/daily-notes/${date}`
+    );
+  } catch (err) {
+    // Daemon returns 404 when no daily note exists for this date.
+    if (err instanceof Error && /HTTP 404|No daily note/i.test(err.message)) {
+      return null;
+    }
+    throw err;
+  }
 }
 
 /**
@@ -2975,7 +3064,10 @@ export async function createDailyNote(
   date: string, // "YYYY-MM-DD" format
   templateId?: string
 ): Promise<Page> {
-  return invoke<Page>("create_daily_note", { notebookId, date, templateId });
+  return daemonPost<Page>(
+    `/api/notebooks/${notebookId}/daily-notes/${date}`,
+    templateId !== undefined ? { template_id: templateId } : {}
+  );
 }
 
 /**
@@ -2986,7 +3078,13 @@ export async function listDailyNotes(
   startDate?: string, // "YYYY-MM-DD" format
   endDate?: string // "YYYY-MM-DD" format
 ): Promise<Page[]> {
-  return invoke<Page[]>("list_daily_notes", { notebookId, startDate, endDate });
+  const params = new URLSearchParams();
+  if (startDate) params.set("start_date", startDate);
+  if (endDate) params.set("end_date", endDate);
+  const qs = params.toString();
+  return daemonGet<Page[]>(
+    `/api/notebooks/${notebookId}/daily-notes${qs ? `?${qs}` : ""}`
+  );
 }
 
 /**

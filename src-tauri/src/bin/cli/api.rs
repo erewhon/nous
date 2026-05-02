@@ -21,7 +21,7 @@ use super::auth::{ApiKeySet, Scope};
 use html_escape::decode_html_entities;
 use regex::Regex;
 
-use nous_lib::commands::{create_daily_note_core, find_daily_note};
+use nous_lib::commands::{create_daily_note_core, find_daily_note, list_daily_notes_core};
 use nous_lib::inbox::{CaptureRequest, CaptureSource};
 use nous_lib::markdown::{export_page_to_markdown, parse_markdown_to_blocks};
 use nous_lib::share::storage::ShareStorage;
@@ -150,6 +150,12 @@ struct SearchQuery {
     q: String,
     notebook_id: Option<String>,
     limit: Option<usize>,
+    /// Fuzzy mode flag. Daemon search is already case-insensitive substring;
+    /// this flag is accepted for parity with the frontend `fuzzySearchPages`
+    /// call site but does not currently change matching behavior. A real
+    /// edit-distance backend is a follow-up.
+    #[allow(dead_code)]
+    fuzzy: Option<u8>,
 }
 
 #[derive(Deserialize)]
@@ -228,6 +234,98 @@ struct CreateDatabaseRequest {
 struct DeleteRowsRequest {
     /// Row IDs (UUIDs) to delete
     row_ids: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct UpdateFolderRequest {
+    name: Option<String>,
+    /// Triple-state: missing = no change, null = move to root, string = new parent
+    #[serde(default, deserialize_with = "deserialize_optional_field")]
+    parent_id: Option<Option<String>>,
+    #[serde(default, deserialize_with = "deserialize_optional_field")]
+    color: Option<Option<String>>,
+    #[serde(default, deserialize_with = "deserialize_optional_field")]
+    section_id: Option<Option<String>>,
+}
+
+#[derive(Deserialize)]
+struct DeleteFolderQuery {
+    /// Optional folder ID to move pages into; if omitted, pages are moved to root.
+    move_pages_to: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct CreateSectionRequest {
+    name: String,
+    color: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct UpdateSectionRequest {
+    name: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_field")]
+    description: Option<Option<String>>,
+    #[serde(default, deserialize_with = "deserialize_optional_field")]
+    color: Option<Option<String>>,
+    #[serde(default, deserialize_with = "deserialize_optional_field")]
+    system_prompt: Option<Option<String>>,
+    /// "override" or "concatenate"
+    system_prompt_mode: Option<String>,
+    /// Empty string clears the value.
+    page_sort_by: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct DeleteSectionQuery {
+    /// Optional section ID to move items into; if omitted, items move to no-section.
+    move_items_to: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct UnarchivePageRequest {
+    /// Optional folder to unarchive into; defaults to the original folder.
+    target_folder_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ReorderPagesRequest {
+    /// Optional folder context; null means root pages.
+    folder_id: Option<String>,
+    page_ids: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct ReorderFoldersRequest {
+    /// Optional parent folder context; null means top-level folders.
+    parent_id: Option<String>,
+    folder_ids: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct ReorderSectionsRequest {
+    section_ids: Vec<String>,
+}
+
+#[derive(Deserialize)]
+struct RenameTagRequest {
+    new_name: String,
+}
+
+#[derive(Deserialize)]
+struct MergeTagsRequest {
+    /// Tags to merge into `into`.
+    from: Vec<String>,
+    into: String,
+}
+
+/// Distinguish "field absent" from "field present and null" in JSON bodies.
+/// Lets clients explicitly clear an optional value vs. leave it unchanged.
+fn deserialize_optional_field<'de, D, T>(de: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::Deserialize<'de>,
+{
+    Option::<T>::deserialize(de).map(Some)
 }
 
 // Track daemon start time
@@ -374,6 +472,10 @@ pub fn build_router(state: AppState, auth: AuthState) -> Router {
             post(insert_after_block),
         )
         .route(
+            "/api/notebooks/{notebook_id}/daily-notes",
+            get(list_daily_notes),
+        )
+        .route(
             "/api/notebooks/{notebook_id}/daily-notes/{date}",
             get(get_daily_note),
         )
@@ -447,8 +549,46 @@ pub fn build_router(state: AppState, auth: AuthState) -> Router {
             get(list_folders),
         )
         .route(
+            "/api/notebooks/{notebook_id}/folders/{folder_id}",
+            put(update_folder).delete(delete_folder),
+        )
+        .route(
+            "/api/notebooks/{notebook_id}/folders/reorder",
+            post(reorder_folders),
+        )
+        .route(
+            "/api/notebooks/{notebook_id}/folders/{folder_id}/archive",
+            post(archive_folder),
+        )
+        .route(
+            "/api/notebooks/{notebook_id}/folders/{folder_id}/unarchive",
+            post(unarchive_folder),
+        )
+        .route(
             "/api/notebooks/{notebook_id}/sections",
-            get(list_sections),
+            get(list_sections).post(create_section),
+        )
+        .route(
+            "/api/notebooks/{notebook_id}/sections/{section_id}",
+            put(update_section).delete(delete_section),
+        )
+        .route(
+            "/api/notebooks/{notebook_id}/sections/reorder",
+            post(reorder_sections),
+        )
+        // Page reorder + archive (placed before {page_id} routes — literal wins
+        // over capture in Axum, but explicit ordering avoids surprises)
+        .route(
+            "/api/notebooks/{notebook_id}/pages/reorder",
+            post(reorder_pages),
+        )
+        .route(
+            "/api/notebooks/{notebook_id}/pages/{page_id}/archive",
+            post(archive_page),
+        )
+        .route(
+            "/api/notebooks/{notebook_id}/pages/{page_id}/unarchive",
+            post(unarchive_page),
         )
         // Page delete and tag management
         .route(
@@ -462,6 +602,24 @@ pub fn build_router(state: AppState, auth: AuthState) -> Router {
         .route(
             "/api/notebooks/{notebook_id}/pages/{page_id}/move",
             post(move_page),
+        )
+        // Tag management
+        .route("/api/tags", get(list_all_tags))
+        .route(
+            "/api/notebooks/{notebook_id}/tags",
+            get(list_notebook_tags),
+        )
+        .route(
+            "/api/notebooks/{notebook_id}/tags/merge",
+            post(merge_tags),
+        )
+        .route(
+            "/api/notebooks/{notebook_id}/tags/{tag}",
+            delete(delete_tag),
+        )
+        .route(
+            "/api/notebooks/{notebook_id}/tags/{tag}/rename",
+            post(rename_tag),
         )
         // Inbox delete
         .route("/api/inbox/{item_id}", delete(delete_inbox_item))
@@ -679,12 +837,19 @@ async fn search_pages(
             }
 
             if title_hit || !snippet.is_empty() {
+                // Synthetic score: 1.0 for title hits, 0.5 for content hits.
+                // The frontend SearchResult schema requires a numeric score;
+                // since the daemon backend doesn't compute Tantivy-style
+                // relevance, we approximate with this two-tier signal.
+                let score = if title_hit { 1.0 } else { 0.5 };
                 let entry = serde_json::json!({
                     "pageId": page.id.to_string(),
                     "notebookId": nb_id.to_string(),
                     "notebookName": nb_name,
                     "title": page.title,
                     "snippet": snippet,
+                    "score": score,
+                    "pageType": page.page_type,
                     "tags": page.tags,
                 });
                 if title_hit {
@@ -1049,6 +1214,29 @@ async fn get_daily_note(
         )),
         Err(e) => Err(api_err(StatusCode::INTERNAL_SERVER_ERROR, e.message)),
     }
+}
+
+#[derive(Deserialize)]
+struct ListDailyNotesQuery {
+    start_date: Option<String>,
+    end_date: Option<String>,
+}
+
+async fn list_daily_notes(
+    State(state): State<AppState>,
+    Path(notebook_id): Path<String>,
+    Query(query): Query<ListDailyNotesQuery>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let nb_id = parse_uuid(&notebook_id)?;
+    let storage = state.storage.lock().unwrap();
+    let pages = list_daily_notes_core(
+        &storage,
+        nb_id,
+        query.start_date.as_deref(),
+        query.end_date.as_deref(),
+    )
+    .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.message))?;
+    Ok(Json(ApiResponse { data: pages }))
 }
 
 async fn create_or_get_daily_note(
@@ -1807,6 +1995,13 @@ async fn update_tags(
         .update_page(&page)
         .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
+    drop(storage);
+    emit_event(&state, "page.tags.updated", serde_json::json!({
+        "notebookId": notebook_id,
+        "pageId": page.id.to_string(),
+        "tags": page.tags,
+    }));
+
     Ok(Json(ApiResponse {
         data: serde_json::json!({"tags": page.tags}),
     }))
@@ -1844,9 +2039,15 @@ async fn move_page(
         .update_page(&page)
         .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    Ok(Json(ApiResponse {
-        data: serde_json::json!({"ok": true}),
-    }))
+    drop(storage);
+    emit_event(&state, "page.moved", serde_json::json!({
+        "notebookId": notebook_id,
+        "pageId": page.id.to_string(),
+        "folderId": page.folder_id.map(|u| u.to_string()),
+        "sectionId": page.section_id.map(|u| u.to_string()),
+    }));
+
+    Ok(Json(ApiResponse { data: page }))
 }
 
 // ===== Inbox Delete =====
@@ -1990,7 +2191,7 @@ async fn get_database(
     }))
 }
 
-// ===== Create Folder =====
+// ===== Folders: Create, Update, Delete =====
 
 async fn create_folder(
     State(state): State<AppState>,
@@ -2016,7 +2217,509 @@ async fn create_folder(
         }
     }
 
+    drop(storage);
+    emit_event(&state, "folder.created", serde_json::json!({
+        "notebookId": notebook_id,
+        "folderId": folder.id.to_string(),
+        "name": folder.name,
+        "parentId": folder.parent_id.map(|u| u.to_string()),
+        "sectionId": folder.section_id.map(|u| u.to_string()),
+    }));
+
     Ok((StatusCode::CREATED, Json(ApiResponse { data: folder })))
+}
+
+async fn update_folder(
+    State(state): State<AppState>,
+    Path((notebook_id, folder_id)): Path<(String, String)>,
+    Json(req): Json<UpdateFolderRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let nb_id = parse_uuid(&notebook_id)?;
+    let fld_id = parse_uuid(&folder_id)?;
+    let storage = state.storage.lock().unwrap();
+
+    let mut folder = storage
+        .get_folder(nb_id, fld_id)
+        .map_err(|e| api_err(StatusCode::NOT_FOUND, e.to_string()))?;
+
+    if let Some(name) = req.name {
+        folder.name = name;
+    }
+
+    if let Some(parent_opt) = req.parent_id {
+        folder.parent_id = match parent_opt {
+            None => None,
+            Some(s) => Some(parse_uuid(&s)?),
+        };
+    }
+
+    if let Some(color_opt) = req.color {
+        folder.color = color_opt;
+    }
+
+    if let Some(section_opt) = req.section_id {
+        let new_section_uuid = match section_opt {
+            None => None,
+            Some(s) => Some(parse_uuid(&s)?),
+        };
+
+        // If section is changing, also update all pages in this folder
+        if folder.section_id != new_section_uuid {
+            let pages = storage
+                .list_pages(nb_id)
+                .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+            for mut page in pages {
+                if page.folder_id == Some(fld_id) {
+                    page.section_id = new_section_uuid;
+                    page.updated_at = chrono::Utc::now();
+                    storage
+                        .update_page(&page)
+                        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+                }
+            }
+        }
+
+        folder.section_id = new_section_uuid;
+    }
+
+    folder.updated_at = chrono::Utc::now();
+    storage
+        .update_folder(&folder)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    drop(storage);
+    emit_event(&state, "folder.updated", serde_json::json!({
+        "notebookId": notebook_id,
+        "folderId": folder.id.to_string(),
+        "name": folder.name,
+        "parentId": folder.parent_id.map(|u| u.to_string()),
+        "sectionId": folder.section_id.map(|u| u.to_string()),
+    }));
+
+    Ok(Json(ApiResponse { data: folder }))
+}
+
+async fn delete_folder(
+    State(state): State<AppState>,
+    Path((notebook_id, folder_id)): Path<(String, String)>,
+    Query(query): Query<DeleteFolderQuery>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let nb_id = parse_uuid(&notebook_id)?;
+    let fld_id = parse_uuid(&folder_id)?;
+    let target = match query.move_pages_to.as_deref() {
+        None | Some("") => None,
+        Some(s) => Some(parse_uuid(s)?),
+    };
+    let storage = state.storage.lock().unwrap();
+
+    storage
+        .delete_folder(nb_id, fld_id, target)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    drop(storage);
+    emit_event(&state, "folder.deleted", serde_json::json!({
+        "notebookId": notebook_id,
+        "folderId": folder_id,
+        "movePagesTo": target.map(|u| u.to_string()),
+    }));
+
+    Ok(Json(ApiResponse {
+        data: serde_json::json!({"ok": true}),
+    }))
+}
+
+// ===== Sections: Create, Update, Delete =====
+
+async fn create_section(
+    State(state): State<AppState>,
+    Path(notebook_id): Path<String>,
+    Json(req): Json<CreateSectionRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let nb_id = parse_uuid(&notebook_id)?;
+    let storage = state.storage.lock().unwrap();
+
+    let section = storage
+        .create_section(nb_id, req.name.clone(), req.color)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    drop(storage);
+    emit_event(&state, "section.created", serde_json::json!({
+        "notebookId": notebook_id,
+        "sectionId": section.id.to_string(),
+        "name": section.name,
+    }));
+
+    Ok((StatusCode::CREATED, Json(ApiResponse { data: section })))
+}
+
+async fn update_section(
+    State(state): State<AppState>,
+    Path((notebook_id, section_id)): Path<(String, String)>,
+    Json(req): Json<UpdateSectionRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let nb_id = parse_uuid(&notebook_id)?;
+    let sec_id = parse_uuid(&section_id)?;
+    let storage = state.storage.lock().unwrap();
+
+    let mut section = storage
+        .get_section(nb_id, sec_id)
+        .map_err(|e| api_err(StatusCode::NOT_FOUND, e.to_string()))?;
+
+    if let Some(name) = req.name {
+        section.name = name;
+    }
+    if let Some(desc_opt) = req.description {
+        section.description = desc_opt;
+    }
+    if let Some(color_opt) = req.color {
+        section.color = color_opt;
+    }
+    if let Some(prompt_opt) = req.system_prompt {
+        section.system_prompt = prompt_opt;
+    }
+    if let Some(mode) = req.system_prompt_mode {
+        section.system_prompt_mode = match mode.as_str() {
+            "concatenate" => nous_lib::storage::SystemPromptMode::Concatenate,
+            _ => nous_lib::storage::SystemPromptMode::Override,
+        };
+    }
+    if let Some(sort) = req.page_sort_by {
+        section.page_sort_by = if sort.is_empty() { None } else { Some(sort) };
+    }
+
+    section.updated_at = chrono::Utc::now();
+    storage
+        .update_section(&section)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    drop(storage);
+    emit_event(&state, "section.updated", serde_json::json!({
+        "notebookId": notebook_id,
+        "sectionId": section.id.to_string(),
+        "name": section.name,
+    }));
+
+    Ok(Json(ApiResponse { data: section }))
+}
+
+async fn delete_section(
+    State(state): State<AppState>,
+    Path((notebook_id, section_id)): Path<(String, String)>,
+    Query(query): Query<DeleteSectionQuery>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let nb_id = parse_uuid(&notebook_id)?;
+    let sec_id = parse_uuid(&section_id)?;
+    let target = match query.move_items_to.as_deref() {
+        None | Some("") => None,
+        Some(s) => Some(parse_uuid(s)?),
+    };
+    let storage = state.storage.lock().unwrap();
+
+    storage
+        .delete_section(nb_id, sec_id, target)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    drop(storage);
+    emit_event(&state, "section.deleted", serde_json::json!({
+        "notebookId": notebook_id,
+        "sectionId": section_id,
+        "moveItemsTo": target.map(|u| u.to_string()),
+    }));
+
+    Ok(Json(ApiResponse {
+        data: serde_json::json!({"ok": true}),
+    }))
+}
+
+// ===== Archive / Unarchive =====
+
+async fn archive_page(
+    State(state): State<AppState>,
+    Path((notebook_id, page_id)): Path<(String, String)>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let nb_id = parse_uuid(&notebook_id)?;
+    let pg_id = parse_uuid(&page_id)?;
+    let storage = state.storage.lock().unwrap();
+
+    let page = storage
+        .archive_page(nb_id, pg_id)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    drop(storage);
+    emit_event(&state, "page.archived", serde_json::json!({
+        "notebookId": notebook_id,
+        "pageId": page.id.to_string(),
+        "title": page.title,
+    }));
+
+    Ok(Json(ApiResponse { data: page }))
+}
+
+async fn unarchive_page(
+    State(state): State<AppState>,
+    Path((notebook_id, page_id)): Path<(String, String)>,
+    Json(req): Json<UnarchivePageRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let nb_id = parse_uuid(&notebook_id)?;
+    let pg_id = parse_uuid(&page_id)?;
+    let target_folder_id = match req.target_folder_id.as_deref() {
+        None | Some("") => None,
+        Some(s) => Some(parse_uuid(s)?),
+    };
+    let storage = state.storage.lock().unwrap();
+
+    let page = storage
+        .unarchive_page(nb_id, pg_id, target_folder_id)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    drop(storage);
+    emit_event(&state, "page.unarchived", serde_json::json!({
+        "notebookId": notebook_id,
+        "pageId": page.id.to_string(),
+        "title": page.title,
+        "folderId": page.folder_id.map(|u| u.to_string()),
+    }));
+
+    Ok(Json(ApiResponse { data: page }))
+}
+
+async fn archive_folder(
+    State(state): State<AppState>,
+    Path((notebook_id, folder_id)): Path<(String, String)>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let nb_id = parse_uuid(&notebook_id)?;
+    let fld_id = parse_uuid(&folder_id)?;
+    let storage = state.storage.lock().unwrap();
+
+    let folder = storage
+        .archive_folder(nb_id, fld_id)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    drop(storage);
+    emit_event(&state, "folder.archived", serde_json::json!({
+        "notebookId": notebook_id,
+        "folderId": folder.id.to_string(),
+        "name": folder.name,
+    }));
+
+    Ok(Json(ApiResponse { data: folder }))
+}
+
+async fn unarchive_folder(
+    State(state): State<AppState>,
+    Path((notebook_id, folder_id)): Path<(String, String)>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let nb_id = parse_uuid(&notebook_id)?;
+    let fld_id = parse_uuid(&folder_id)?;
+    let storage = state.storage.lock().unwrap();
+
+    let folder = storage
+        .unarchive_folder(nb_id, fld_id)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    drop(storage);
+    emit_event(&state, "folder.unarchived", serde_json::json!({
+        "notebookId": notebook_id,
+        "folderId": folder.id.to_string(),
+        "name": folder.name,
+    }));
+
+    Ok(Json(ApiResponse { data: folder }))
+}
+
+// ===== Reorder =====
+
+async fn reorder_pages(
+    State(state): State<AppState>,
+    Path(notebook_id): Path<String>,
+    Json(req): Json<ReorderPagesRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let nb_id = parse_uuid(&notebook_id)?;
+    let folder_id = match req.folder_id.as_deref() {
+        None | Some("") => None,
+        Some(s) => Some(parse_uuid(s)?),
+    };
+    let mut page_uuids: Vec<Uuid> = Vec::with_capacity(req.page_ids.len());
+    for s in &req.page_ids {
+        page_uuids.push(parse_uuid(s)?);
+    }
+
+    let storage = state.storage.lock().unwrap();
+    storage
+        .reorder_pages(nb_id, folder_id, &page_uuids)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    drop(storage);
+    emit_event(&state, "page.reordered", serde_json::json!({
+        "notebookId": notebook_id,
+        "folderId": folder_id.map(|u| u.to_string()),
+        "pageIds": req.page_ids,
+    }));
+
+    Ok(Json(ApiResponse {
+        data: serde_json::json!({"ok": true}),
+    }))
+}
+
+async fn reorder_folders(
+    State(state): State<AppState>,
+    Path(notebook_id): Path<String>,
+    Json(req): Json<ReorderFoldersRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let nb_id = parse_uuid(&notebook_id)?;
+    let parent_id = match req.parent_id.as_deref() {
+        None | Some("") => None,
+        Some(s) => Some(parse_uuid(s)?),
+    };
+    let mut folder_uuids: Vec<Uuid> = Vec::with_capacity(req.folder_ids.len());
+    for s in &req.folder_ids {
+        folder_uuids.push(parse_uuid(s)?);
+    }
+
+    let storage = state.storage.lock().unwrap();
+    storage
+        .reorder_folders(nb_id, parent_id, &folder_uuids)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    drop(storage);
+    emit_event(&state, "folder.reordered", serde_json::json!({
+        "notebookId": notebook_id,
+        "parentId": parent_id.map(|u| u.to_string()),
+        "folderIds": req.folder_ids,
+    }));
+
+    Ok(Json(ApiResponse {
+        data: serde_json::json!({"ok": true}),
+    }))
+}
+
+async fn reorder_sections(
+    State(state): State<AppState>,
+    Path(notebook_id): Path<String>,
+    Json(req): Json<ReorderSectionsRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let nb_id = parse_uuid(&notebook_id)?;
+    let mut section_uuids: Vec<Uuid> = Vec::with_capacity(req.section_ids.len());
+    for s in &req.section_ids {
+        section_uuids.push(parse_uuid(s)?);
+    }
+
+    let storage = state.storage.lock().unwrap();
+    storage
+        .reorder_sections(nb_id, &section_uuids)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    drop(storage);
+    emit_event(&state, "section.reordered", serde_json::json!({
+        "notebookId": notebook_id,
+        "sectionIds": req.section_ids,
+    }));
+
+    Ok(Json(ApiResponse {
+        data: serde_json::json!({"ok": true}),
+    }))
+}
+
+// ===== Tags =====
+
+async fn list_all_tags(
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let storage = state.storage.lock().unwrap();
+    let tags = storage
+        .get_all_tags()
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let result: Vec<serde_json::Value> = tags
+        .into_iter()
+        .map(|(name, count)| serde_json::json!({"name": name, "count": count}))
+        .collect();
+    Ok(Json(ApiResponse { data: result }))
+}
+
+async fn list_notebook_tags(
+    State(state): State<AppState>,
+    Path(notebook_id): Path<String>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let nb_id = parse_uuid(&notebook_id)?;
+    let storage = state.storage.lock().unwrap();
+    let tags = storage
+        .get_notebook_tags(nb_id)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let result: Vec<serde_json::Value> = tags
+        .into_iter()
+        .map(|(name, count)| serde_json::json!({"name": name, "count": count}))
+        .collect();
+    Ok(Json(ApiResponse { data: result }))
+}
+
+async fn rename_tag(
+    State(state): State<AppState>,
+    Path((notebook_id, tag)): Path<(String, String)>,
+    Json(req): Json<RenameTagRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let nb_id = parse_uuid(&notebook_id)?;
+    let storage = state.storage.lock().unwrap();
+    let updated = storage
+        .rename_tag(nb_id, &tag, &req.new_name)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    drop(storage);
+    emit_event(&state, "tag.renamed", serde_json::json!({
+        "notebookId": notebook_id,
+        "from": tag,
+        "to": req.new_name,
+        "pagesUpdated": updated,
+    }));
+
+    Ok(Json(ApiResponse {
+        data: serde_json::json!({"pagesUpdated": updated}),
+    }))
+}
+
+async fn merge_tags(
+    State(state): State<AppState>,
+    Path(notebook_id): Path<String>,
+    Json(req): Json<MergeTagsRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let nb_id = parse_uuid(&notebook_id)?;
+    let storage = state.storage.lock().unwrap();
+    let updated = storage
+        .merge_tags(nb_id, &req.from, &req.into)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    drop(storage);
+    emit_event(&state, "tag.merged", serde_json::json!({
+        "notebookId": notebook_id,
+        "from": req.from,
+        "into": req.into,
+        "pagesUpdated": updated,
+    }));
+
+    Ok(Json(ApiResponse {
+        data: serde_json::json!({"pagesUpdated": updated}),
+    }))
+}
+
+async fn delete_tag(
+    State(state): State<AppState>,
+    Path((notebook_id, tag)): Path<(String, String)>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let nb_id = parse_uuid(&notebook_id)?;
+    let storage = state.storage.lock().unwrap();
+    let updated = storage
+        .delete_tag(nb_id, &tag)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    drop(storage);
+    emit_event(&state, "tag.deleted", serde_json::json!({
+        "notebookId": notebook_id,
+        "tag": tag,
+        "pagesUpdated": updated,
+    }));
+
+    Ok(Json(ApiResponse {
+        data: serde_json::json!({"pagesUpdated": updated}),
+    }))
 }
 
 // ===== Database Rows =====
