@@ -14,22 +14,16 @@ const GIT_AUTO_COMMIT_DELAY = 30_000; // 30 seconds
 
 /** Check whether the page content has actually changed. Avoids unnecessary
  *  editor re-renders (which destroy in-flight edits) when a background fetch
- *  returns the same data that's already in the store. */
+ *  returns the same data that's already in the store.
+ *
+ *  Daemon `updatedAt` is the single source of truth now that the daemon is
+ *  the only writer (Phase 1 + 2). Fresh > current means there's been a write
+ *  we haven't seen yet (from any client: desktop, Emacs, MCP). Equal or
+ *  older means our local state is up to date. */
 function hasContentChanged(current: Page | undefined, fresh: Page): boolean {
   if (!current?.content || !fresh.content) return true;
-
-  // Use page-level updatedAt as authoritative timestamp. The daemon sets this
-  // on every write, so if fresh.updatedAt > current.updatedAt, the fresh data
-  // reflects a write we haven't seen yet (from any client: desktop, Emacs, MCP).
-  if (current.updatedAt && fresh.updatedAt) {
-    if (fresh.updatedAt > current.updatedAt) return true;
-    if (fresh.updatedAt < current.updatedAt) return false;
-  }
-
-  // Timestamps equal or missing — fall back to structural check for safety
-  if (current.content.blocks.length !== fresh.content.blocks.length) return true;
-  if (current.content.time !== fresh.content.time) return true;
-  return false;
+  if (!current.updatedAt || !fresh.updatedAt) return true;
+  return fresh.updatedAt > current.updatedAt;
 }
 
 function scheduleGitAutoCommit(notebookId: string) {
@@ -133,6 +127,10 @@ interface PageActions {
   // Used for optimistic updates when flushing editor on unmount
   setPageContentLocal: (pageId: string, content: EditorData) => void;
   deletePage: (notebookId: string, pageId: string) => Promise<void>;
+  // Remove a page from local state without an API call. Used by daemon
+  // event handlers when an external write deleted the page (e.g. MCP,
+  // Emacs, or another desktop window).
+  removePageLocal: (pageId: string) => void;
   duplicatePage: (notebookId: string, pageId: string) => Promise<void>;
 
   // Folder operations
@@ -455,6 +453,14 @@ export const usePageStore = create<PageStore>()(
             error: err instanceof Error ? err.message : "Failed to delete page",
           });
         }
+      },
+
+      removePageLocal: (pageId) => {
+        set((state) => ({
+          pages: state.pages.filter((p) => p.id !== pageId),
+          selectedPageId:
+            state.selectedPageId === pageId ? null : state.selectedPageId,
+        }));
       },
 
       duplicatePage: async (notebookId, pageId) => {

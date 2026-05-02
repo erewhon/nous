@@ -9,9 +9,89 @@ const DAEMON_WS_URL = "ws://localhost:7667/api/events";
 const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 30000;
 
+// Wire-format event from the daemon. The base shape stays loose so unknown
+// future events still arrive at listeners; specific handlers should
+// narrow via the typed `event` field below.
 export interface DaemonEvent {
   event: string;
   data: Record<string, unknown>;
+}
+
+// Known event names emitted by `src-tauri/src/bin/cli/api.rs` (search for
+// `emit_event`). Keeping this list in sync with the daemon prevents typos
+// in event-handler switches. Adding a new daemon event? Add it here too.
+export type KnownEventName =
+  | "page.created"
+  | "page.updated"
+  | "page.deleted"
+  | "page.archived"
+  | "page.unarchived"
+  | "page.tags.updated"
+  | "page.moved"
+  | "page.reordered"
+  | "folder.created"
+  | "folder.updated"
+  | "folder.deleted"
+  | "folder.archived"
+  | "folder.unarchived"
+  | "folder.reordered"
+  | "section.created"
+  | "section.updated"
+  | "section.deleted"
+  | "section.reordered"
+  | "inbox.captured"
+  | "inbox.deleted"
+  | "tag.renamed"
+  | "tag.merged"
+  | "tag.deleted"
+  | "database.created"
+  | "database.rows_added"
+  | "database.rows_updated"
+  | "database.rows_deleted"
+  | "artwork.imported";
+
+// Payload shapes per event. Optional fields reflect what the daemon
+// actually puts on the wire — see emit_event call sites in api.rs.
+// Listeners should defensively handle missing fields anyway.
+export interface PageEventData {
+  notebookId?: string;
+  pageId?: string;
+  title?: string;
+}
+
+export interface FolderEventData {
+  notebookId?: string;
+  folderId?: string;
+  name?: string;
+  parentId?: string | null;
+  sectionId?: string | null;
+  movePagesTo?: string | null;
+  folderIds?: string[];
+}
+
+export interface SectionEventData {
+  notebookId?: string;
+  sectionId?: string;
+  name?: string;
+  sectionIds?: string[];
+}
+
+export interface InboxEventData {
+  itemId?: string;
+}
+
+export interface TagEventData {
+  notebookId?: string;
+  oldName?: string;
+  newName?: string;
+  from?: string[];
+  into?: string;
+  tag?: string;
+}
+
+export interface DatabaseEventData {
+  notebookId?: string;
+  pageId?: string;
 }
 
 type Listener = (event: DaemonEvent) => void;

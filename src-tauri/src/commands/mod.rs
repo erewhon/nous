@@ -40,7 +40,8 @@ mod publish;
 mod rag;
 mod scrivener;
 mod section;
-mod search;
+// search Tauri commands removed: migrated to daemon HTTP
+// (/api/search, /api/search/rebuild). Frontend calls daemonGet/daemonPost.
 mod share;
 mod study_tools;
 mod sync;
@@ -94,7 +95,6 @@ pub use publish::*;
 pub use rag::*;
 pub use scrivener::*;
 pub use section::*;
-pub use search::*;
 pub use share::*;
 pub use study_tools::*;
 pub use sync::*;

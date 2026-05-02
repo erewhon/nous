@@ -747,31 +747,9 @@ pub fn restore_page_snapshot(
     Ok(current_page)
 }
 
-/// Register an editor pane as having opened a page (starts CRDT tracking).
-/// STUB — CRDT lives in the daemon. Frontend uses `pane_open` over the
-/// daemon WS instead. Kept registered for invoke compatibility.
-#[tauri::command(rename_all = "camelCase")]
-pub fn open_page_in_pane_crdt(
-    _state: State<AppState>,
-    notebook_id: String,
-    page_id: String,
-    pane_id: String,
-) -> CommandResult<()> {
-    let _ = (notebook_id, page_id, pane_id);
-    Ok(())
-}
-
-/// Unregister an editor pane from a page (stops CRDT tracking for that pane).
-/// STUB — see `open_page_in_pane_crdt` above.
-#[tauri::command(rename_all = "camelCase")]
-pub fn close_pane_for_page(
-    _state: State<AppState>,
-    page_id: String,
-    pane_id: String,
-) -> CommandResult<()> {
-    let _ = (page_id, pane_id);
-    Ok(())
-}
+// open_page_in_pane_crdt / close_pane_for_page Tauri commands removed:
+// CRDT lives in the daemon. Frontend pane lifecycle goes through the
+// daemon's /api/events WS (pane_open / pane_close text frames).
 
 /// Get edit counts for all blocks on a page (derived from oplog).
 #[tauri::command(rename_all = "camelCase")]

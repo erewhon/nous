@@ -11,7 +11,6 @@ pub mod commands;
 pub mod contacts;
 pub mod energy;
 mod freeze_watchdog;
-mod mcp_watcher;
 pub mod encryption;
 mod evernote;
 mod external_editor;
@@ -90,7 +89,6 @@ pub struct AppState {
     pub share_storage: Arc<Mutex<ShareStorage>>,
     pub collab_storage: Arc<Mutex<CollabStorage>>,
     /// Keeps the MCP file watcher alive for the app's lifetime.
-    pub _mcp_watcher: Mutex<Option<notify::PollWatcher>>,
     /// Plugin host for Lua/WASM plugins (None when plugins feature is disabled)
     #[cfg(feature = "plugins")]
     pub plugin_host: Option<Arc<Mutex<plugins::PluginHost>>>,
@@ -393,18 +391,15 @@ pub fn run() {
         monitor_scheduler: Mutex::new(None),
         share_storage: share_storage_arc,
         collab_storage: collab_storage_arc,
-        _mcp_watcher: Mutex::new(None),
         #[cfg(feature = "plugins")]
         plugin_host,
     };
 
     let watchdog_state = Arc::new(freeze_watchdog::WatchdogState::new());
-    let write_tracker = mcp_watcher::WriteTracker::default();
 
     tauri::Builder::default()
         .manage(state)
         .manage(Arc::clone(&watchdog_state))
-        .manage(write_tracker)
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(move |app| {
@@ -495,26 +490,12 @@ pub fn run() {
                 Arc::clone(&watchdog_state),
             );
 
-            // Start the MCP file watcher for live UI refresh
-            {
-                let watcher_lib_path = {
-                    let lib_storage = state.library_storage.lock().unwrap();
-                    lib_storage.get_current_library().map(|l| l.path.clone()).ok()
-                };
-                if let Some(lib_path) = watcher_lib_path {
-                    match mcp_watcher::start_library_watcher(app.handle().clone(), lib_path) {
-                        Ok(watcher) => {
-                            if let Ok(mut w) = state._mcp_watcher.lock() {
-                                *w = Some(watcher);
-                            }
-                            log::info!("MCP library watcher started");
-                        }
-                        Err(e) => {
-                            log::warn!("Failed to start MCP library watcher: {}", e);
-                        }
-                    }
-                }
-            }
+            // MCP file watcher removed: the daemon's WS event stream
+            // (page.created/updated/deleted, folder.*, section.*, ...) now
+            // drives live UI refresh. External file edits (git pull, manual
+            // edits, restored backups) are NOT detected by the daemon yet —
+            // users need to refresh after such operations. A daemon-side
+            // file watcher is a possible follow-up.
 
             // Start the video streaming server
             let video_server_handle = state.video_server.clone();
@@ -574,8 +555,6 @@ pub fn run() {
             commands::purge_old_trash,
             commands::move_page_to_parent,
             commands::move_page_to_notebook,
-            commands::open_page_in_pane_crdt,
-            commands::close_pane_for_page,
             commands::get_all_favorite_pages,
             // Page history commands
             commands::get_page_oplog,
@@ -585,10 +564,8 @@ pub fn run() {
             commands::get_block_version_counts,
             commands::get_block_history,
             commands::revert_block,
-            // Search commands
-            commands::search_pages,
-            commands::fuzzy_search_pages,
-            commands::rebuild_search_index,
+            // Search: migrated to daemon HTTP (/api/search, /api/search/rebuild).
+            // CRDT pane lifecycle: migrated to daemon WS (pane_open/pane_close).
             // AI commands
             commands::ai_chat,
             commands::ai_chat_with_context,

@@ -3,6 +3,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useNotebookStore } from "../stores/notebookStore";
 import { usePageStore } from "../stores/pageStore";
 import { useSectionStore } from "../stores/sectionStore";
+import { useFolderStore } from "../stores/folderStore";
 import { useGoalsStore } from "../stores/goalsStore";
 import { useContactStore } from "../stores/contactStore";
 import { useEnergyStore } from "../stores/energyStore";
@@ -10,7 +11,15 @@ import { useInboxStore } from "../stores/inboxStore";
 import { usePluginStore } from "../stores/pluginStore";
 import { useWindowLibrary } from "../contexts/WindowContext";
 import { initDaemonClient } from "../utils/daemon";
-import { daemonEventBus } from "../utils/daemonEvents";
+import {
+  daemonEventBus,
+  type DatabaseEventData,
+  type FolderEventData,
+  type KnownEventName,
+  type PageEventData,
+  type SectionEventData,
+  type TagEventData,
+} from "../utils/daemonEvents";
 
 // Check goals every 15 minutes
 const GOALS_CHECK_INTERVAL = 15 * 60 * 1000;
@@ -51,21 +60,155 @@ export function useAppInit() {
         console.warn("[useAppInit] Daemon client init failed:", err);
       }
       unsubscribe = daemonEventBus.subscribe((evt) => {
-        switch (evt.event) {
-          case "page.updated":
-          case "page.created": {
-            const pageId = evt.data.pageId as string | undefined;
-            if (pageId) {
-              refreshPages([pageId]).catch((err) =>
-                console.warn("[useAppInit] refreshPages failed:", err),
-              );
+        // Note on idempotence: every write through the local frontend also
+        // produces an event we receive here. The handlers below tolerate
+        // refreshing data we already have — refreshPages on a known id is
+        // a no-op visually because the diff is empty. Don't add per-id
+        // filtering against "is it our own write" — the cost is small and
+        // the risk of dropping a real cross-window event is real.
+        const warn = (msg: string) => (err: unknown) =>
+          console.warn(`[useAppInit] ${msg}:`, err);
+
+        switch (evt.event as KnownEventName) {
+          // ---- Page lifecycle ----
+          case "page.created":
+          case "page.updated": {
+            const data = evt.data as PageEventData;
+            if (data.pageId) {
+              refreshPages([data.pageId]).catch(warn("refreshPages"));
             }
             break;
           }
           case "page.deleted": {
-            // Let the file watcher handle deletes for now; refresh is a read.
+            const data = evt.data as PageEventData;
+            if (data.pageId) {
+              usePageStore.getState().removePageLocal(data.pageId);
+            }
             break;
           }
+          case "page.archived":
+          case "page.unarchived":
+          case "page.tags.updated":
+          case "page.moved": {
+            const data = evt.data as PageEventData;
+            if (data.pageId) {
+              refreshPages([data.pageId]).catch(warn("refreshPages"));
+            }
+            break;
+          }
+          case "page.reordered": {
+            // Position-only change for many pages — coarse reload of the
+            // current notebook is the simplest correct response.
+            const data = evt.data as PageEventData;
+            const cur = useNotebookStore.getState().selectedNotebookId;
+            if (data.notebookId && data.notebookId === cur) {
+              usePageStore
+                .getState()
+                .loadPages(data.notebookId)
+                .catch(warn("loadPages"));
+            }
+            break;
+          }
+
+          // ---- Folder lifecycle ----
+          case "folder.created":
+          case "folder.updated":
+          case "folder.deleted":
+          case "folder.archived":
+          case "folder.unarchived":
+          case "folder.reordered": {
+            const data = evt.data as FolderEventData;
+            const cur = useNotebookStore.getState().selectedNotebookId;
+            if (data.notebookId && data.notebookId === cur) {
+              useFolderStore
+                .getState()
+                .loadFolders(data.notebookId)
+                .catch(warn("loadFolders"));
+              // folder.deleted with movePagesTo also moves pages — refresh
+              // the page list so reassigned folder_ids are visible.
+              if (
+                evt.event === "folder.deleted" ||
+                evt.event === "folder.archived" ||
+                evt.event === "folder.unarchived" ||
+                evt.event === "folder.updated"
+              ) {
+                usePageStore
+                  .getState()
+                  .loadPages(data.notebookId)
+                  .catch(warn("loadPages"));
+              }
+            }
+            break;
+          }
+
+          // ---- Section lifecycle ----
+          case "section.created":
+          case "section.updated":
+          case "section.deleted":
+          case "section.reordered": {
+            const data = evt.data as SectionEventData;
+            const cur = useNotebookStore.getState().selectedNotebookId;
+            if (data.notebookId && data.notebookId === cur) {
+              useSectionStore
+                .getState()
+                .loadSections(data.notebookId)
+                .catch(warn("loadSections"));
+              // Updates that change a section's effective scope can move
+              // pages between sections — refresh page list to be safe.
+              if (evt.event !== "section.created") {
+                usePageStore
+                  .getState()
+                  .loadPages(data.notebookId)
+                  .catch(warn("loadPages"));
+              }
+            }
+            break;
+          }
+
+          // ---- Inbox ----
+          case "inbox.captured":
+          case "inbox.deleted": {
+            useInboxStore.getState().refresh().catch(warn("inbox.refresh"));
+            break;
+          }
+
+          // ---- Tags ----
+          case "tag.renamed":
+          case "tag.merged":
+          case "tag.deleted": {
+            const data = evt.data as TagEventData;
+            const cur = useNotebookStore.getState().selectedNotebookId;
+            if (data.notebookId && data.notebookId === cur) {
+              // Tag changes touch many pages; coarse reload keeps the page
+              // list, page.tags arrays, and tag tree consistent.
+              usePageStore
+                .getState()
+                .loadPages(data.notebookId)
+                .catch(warn("loadPages"));
+            }
+            break;
+          }
+
+          // ---- Database ----
+          case "database.created":
+          case "database.rows_added":
+          case "database.rows_updated":
+          case "database.rows_deleted": {
+            // Database content lives on a page; refreshing the page picks
+            // up row/column changes via the standard page-content read.
+            const data = evt.data as DatabaseEventData;
+            if (data.pageId) {
+              refreshPages([data.pageId]).catch(warn("refreshPages"));
+            }
+            break;
+          }
+
+          // ---- Misc ----
+          case "artwork.imported":
+            // page.created already fires for the imported page; no extra
+            // work needed here.
+            break;
+
           default:
             break;
         }
@@ -134,34 +277,11 @@ export function useAppInit() {
     saveNotebookViewState(selectedNotebookId, selectedSectionId, selectedPageId);
   }, [selectedNotebookId, selectedSectionId, selectedPageId, saveNotebookViewState]);
 
-  // Listen for sync-pages-updated events from the backend.
-  // When sync pulls or merges pages from remote, the editor may have stale
-  // in-memory data. Refreshing from disk prevents the editor's auto-save
-  // from overwriting the sync'd content.
-  useEffect(() => {
-    let unlisten: UnlistenFn | null = null;
-
-    const setup = async () => {
-      unlisten = await listen<{ notebookId: string; pageIds: string[] }>(
-        "sync-pages-updated",
-        (event) => {
-          const { pageIds } = event.payload;
-          if (pageIds.length > 0) {
-            console.log(
-              `[sync] Refreshing ${pageIds.length} page(s) updated by sync`
-            );
-            refreshPages(pageIds);
-          }
-        }
-      );
-    };
-
-    setup();
-
-    return () => {
-      if (unlisten) unlisten();
-    };
-  }, [refreshPages]);
+  // sync-pages-updated listener removed: when sync writes pages, the daemon
+  // emits page.updated for each one, and the WS handler above (case
+  // "page.updated") refreshes them. The Tauri-side `sync-pages-updated`
+  // event is still emitted by sync/manager.rs but no longer subscribed
+  // here; it can be retired in a follow-up.
 
   // Listen for sync-goals-updated events from the backend.
   // When sync pulls goal or progress changes from remote, refresh displays.
