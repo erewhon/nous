@@ -69,6 +69,22 @@ pub struct ApiKeySet {
 }
 
 impl ApiKeySet {
+    /// Build an empty key set in memory. Primarily useful for tests; the
+    /// production path is `load(path)` reading from disk.
+    pub fn empty() -> Self {
+        Self { keys: Vec::new() }
+    }
+
+    /// Insert a key with its scope. The full token includes the scope
+    /// prefix (e.g. `rw:abc...`) — this is the format the validator
+    /// expects and that `load` populates.
+    pub fn insert(&mut self, full_token: String, scope: Scope) {
+        self.keys.push(ApiKey {
+            full: full_token,
+            scope,
+        });
+    }
+
     /// Load keys from a file. Returns an empty set if the file doesn't exist.
     pub fn load(path: &Path) -> Result<Self> {
         if !path.exists() {

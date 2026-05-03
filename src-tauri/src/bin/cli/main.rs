@@ -7,6 +7,9 @@ mod render;
 #[cfg(feature = "tui")]
 mod tui;
 
+#[cfg(test)]
+mod test_harness;
+
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
