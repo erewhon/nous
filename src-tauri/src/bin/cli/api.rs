@@ -35,6 +35,47 @@ fn emit_event(state: &DaemonState, event: &str, data: serde_json::Value) {
     let _ = state.event_tx.send(AppEvent::new(event, data));
 }
 
+/// Spawn a background task that asks the RAG backend to (re)index a
+/// page. The HTTP response returns immediately; embedding calls happen
+/// off the request hot path. NotConfigured is silently ignored — the
+/// fast-path cost when RAG is off is one async-trait dispatch + a
+/// config read lock, no network.
+fn spawn_rag_index(state: &Arc<DaemonState>, page: &Page) {
+    let rag = Arc::clone(&state.rag);
+    let page_id = page.id;
+    let page_text = plain_text_for_page(page);
+    let page_clone = page.clone();
+    tokio::spawn(async move {
+        let page_type = format!("{:?}", page_clone.page_type).to_lowercase();
+        let page_ref = nous_lib::search::PageRef {
+            id: page_clone.id,
+            notebook_id: page_clone.notebook_id,
+            title: &page_clone.title,
+            tags: &page_clone.tags,
+            page_type: &page_type,
+            plain_text: page_text,
+        };
+        use nous_lib::search::SearchBackend;
+        match rag.index(page_ref).await {
+            Ok(()) => {}
+            Err(nous_lib::search::BackendError::NotConfigured) => {} // expected when RAG off
+            Err(e) => log::warn!("RAG index failed for page {}: {}", page_id, e),
+        }
+    });
+}
+
+fn spawn_rag_delete(state: &Arc<DaemonState>, page_id: Uuid) {
+    let rag = Arc::clone(&state.rag);
+    tokio::spawn(async move {
+        use nous_lib::search::SearchBackend;
+        match rag.delete(page_id).await {
+            Ok(()) => {}
+            Err(nous_lib::search::BackendError::NotConfigured) => {}
+            Err(e) => log::warn!("RAG delete failed for page {}: {}", page_id, e),
+        }
+    });
+}
+
 // ===== Request/Response types =====
 
 #[derive(Serialize)]
@@ -194,8 +235,13 @@ struct SearchQuery {
     limit: Option<usize>,
     /// When `1`, use Tantivy's FuzzyTermQuery on the title field
     /// (autocomplete-friendly; edit distance 2). Otherwise, use the
-    /// standard QueryParser across title/content/tags.
+    /// standard QueryParser across title/content/tags. Only meaningful
+    /// for `mode=keyword` (the default).
     fuzzy: Option<u8>,
+    /// Search backend: "keyword" (default, Tantivy), "semantic" (RAG
+    /// embeddings — requires RAG configured), "hybrid" (Tantivy
+    /// candidates reranked by RAG embeddings).
+    mode: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -358,6 +404,25 @@ struct MergeTagsRequest {
     into: String,
 }
 
+/// Body for `POST /api/search/rag/configure`. Same shape as the
+/// `[search.rag]` table in `daemon-config.toml` — pass exactly the
+/// fields you want to set; missing fields keep their current values
+/// when the new config is built (we apply over the old one).
+#[derive(Deserialize)]
+struct RagConfigureRequest {
+    enabled: Option<bool>,
+    endpoint: Option<String>,
+    embedding_model: Option<String>,
+    vector_store: Option<String>,
+    vector_endpoint: Option<String>,
+    collection: Option<String>,
+    auth_token: Option<String>,
+    chunk_size: Option<usize>,
+    chunk_overlap: Option<usize>,
+    rerank_candidates: Option<usize>,
+    request_timeout_ms: Option<u64>,
+}
+
 /// Distinguish "field absent" from "field present and null" in JSON bodies.
 /// Lets clients explicitly clear an optional value vs. leave it unchanged.
 fn deserialize_optional_field<'de, D, T>(de: D) -> Result<Option<Option<T>>, D::Error>
@@ -481,6 +546,8 @@ pub fn build_router(state: AppState, auth: AuthState) -> Router {
         .route("/api/status", get(get_status))
         .route("/api/search", get(search_pages))
         .route("/api/search/rebuild", post(rebuild_search_index))
+        .route("/api/search/rag/configure", post(rag_configure))
+        .route("/api/search/rag/reindex", post(rag_reindex))
         .route("/api/notebooks", get(list_notebooks))
         .route("/api/notebooks/{notebook_id}/pages", get(list_pages))
         .route("/api/notebooks/{notebook_id}/pages", post(create_page))
@@ -817,52 +884,106 @@ async fn search_pages(
     let limit = query.limit.unwrap_or(20);
     let fuzzy = query.fuzzy.unwrap_or(0) != 0;
 
-    // If a notebook filter is in play, fetch extra hits and trim post-query
-    // since the schema doesn't index notebook_id for filtering. 4× is enough
-    // headroom in practice — the alternative is to rebuild the index with a
-    // notebook filter clause.
-    let fetch_limit = if query.notebook_id.is_some() {
-        limit.saturating_mul(4).max(limit)
-    } else {
-        limit
+    let nb_filter: Option<Uuid> = match query.notebook_id.as_deref() {
+        Some(s) => Some(parse_uuid(s)?),
+        None => None,
     };
 
-    let nb_filter: Option<String> = query.notebook_id.as_ref().map(|s| s.to_string());
-    if let Some(ref nb_id) = nb_filter {
-        // Validate up front; return 400 on garbage rather than silently dropping.
-        parse_uuid(nb_id)?;
-    }
-
-    let results = {
-        let idx = state.search_index.lock().map_err(|e| {
-            api_err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to acquire search lock: {}", e),
-            )
-        })?;
-        let res = if fuzzy {
-            idx.fuzzy_search(&query.q, fetch_limit)
-        } else {
-            idx.search(&query.q, fetch_limit)
-        };
-        res.map_err(|e| {
-            api_err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Search error: {}", e),
-            )
-        })?
+    // Mode dispatch. The default (no `mode` param) preserves the
+    // pre-RAG behavior — straight Tantivy keyword search.
+    let mode = match query.mode.as_deref().unwrap_or("keyword") {
+        "keyword" => nous_lib::search::SearchMode::Keyword,
+        "semantic" => nous_lib::search::SearchMode::Semantic,
+        "hybrid" => nous_lib::search::SearchMode::Hybrid,
+        other => {
+            return Err(api_err(
+                StatusCode::BAD_REQUEST,
+                format!("Unknown search mode '{}'; expected keyword|semantic|hybrid", other),
+            ));
+        }
     };
 
-    let filtered: Vec<_> = results
-        .into_iter()
-        .filter(|r| match &nb_filter {
-            Some(want) => &r.notebook_id == want,
-            None => true,
-        })
-        .take(limit)
-        .collect();
+    let hits = match mode {
+        nous_lib::search::SearchMode::Keyword => {
+            // Tantivy adapter respects the fuzzy flag.
+            if fuzzy {
+                state.tantivy.fuzzy_query(&query.q, limit, nb_filter).await
+            } else {
+                use nous_lib::search::SearchBackend;
+                state.tantivy.query(&query.q, limit, nb_filter).await
+            }
+        }
+        nous_lib::search::SearchMode::Semantic => {
+            use nous_lib::search::SearchBackend;
+            state.rag.query(&query.q, limit, nb_filter).await
+        }
+        nous_lib::search::SearchMode::Hybrid => {
+            // Pull rerank_candidates from RAG config; fetch that many
+            // Tantivy hits, then ask RAG to rerank. If RAG fails, fall
+            // back to the Tantivy candidates so a flaky embedding
+            // service doesn't kill the search bar.
+            use nous_lib::search::SearchBackend;
+            let candidates_limit = state.rag_config.read().await.rerank_candidates;
+            let candidates = state
+                .tantivy
+                .query(&query.q, candidates_limit, nb_filter)
+                .await;
+            match candidates {
+                Ok(cands) if cands.is_empty() => Ok(cands),
+                Ok(cands) => {
+                    // For now: re-issue a semantic query and return the
+                    // intersection (top `limit`). A proper rerank would
+                    // embed each candidate's title/content and compare
+                    // against the query embedding — left as follow-up.
+                    match state.rag.query(&query.q, limit, nb_filter).await {
+                        Ok(rag_hits) => {
+                            let by_id: std::collections::HashMap<_, _> =
+                                rag_hits.iter().map(|h| (h.page_id.clone(), h.score)).collect();
+                            let mut merged: Vec<_> = cands
+                                .into_iter()
+                                .map(|mut h| {
+                                    if let Some(s) = by_id.get(&h.page_id) {
+                                        // Boost candidates that RAG also liked.
+                                        h.score = (h.score + s) / 2.0;
+                                    }
+                                    h
+                                })
+                                .collect();
+                            merged.sort_by(|a, b| {
+                                b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal)
+                            });
+                            merged.truncate(limit);
+                            Ok(merged)
+                        }
+                        Err(e) => {
+                            log::warn!(
+                                "Hybrid search: RAG rerank failed, falling back to keyword: {}",
+                                e
+                            );
+                            Ok(cands.into_iter().take(limit).collect())
+                        }
+                    }
+                }
+                Err(e) => Err(e),
+            }
+        }
+    };
 
-    Ok(Json(ApiResponse { data: filtered }))
+    let hits = hits.map_err(|e| match e {
+        nous_lib::search::BackendError::NotConfigured => api_err(
+            StatusCode::BAD_REQUEST,
+            "RAG is not configured. POST /api/search/rag/configure first.",
+        ),
+        nous_lib::search::BackendError::Unreachable(msg) => api_err(
+            StatusCode::BAD_GATEWAY,
+            format!("RAG service unreachable: {}", msg),
+        ),
+        nous_lib::search::BackendError::Backend(msg) => {
+            api_err(StatusCode::INTERNAL_SERVER_ERROR, format!("Search error: {}", msg))
+        }
+    })?;
+
+    Ok(Json(ApiResponse { data: hits }))
 }
 
 /// Rebuild the Tantivy index from scratch by reindexing every non-deleted,
@@ -950,6 +1071,173 @@ async fn rebuild_search_index(
             "total": total,
         }),
     }))
+}
+
+/// `POST /api/search/rag/configure` — update the RAG config in memory
+/// and persist to `daemon-config.toml`. Body fields override the
+/// current values; omitted fields keep their existing settings.
+/// Returns the new (sanitized) config.
+async fn rag_configure(
+    State(state): State<AppState>,
+    Json(req): Json<RagConfigureRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    use nous_lib::search::DaemonConfig;
+    let mut current = state.rag_config.write().await;
+    if let Some(v) = req.enabled { current.enabled = v; }
+    if let Some(v) = req.endpoint { current.endpoint = v; }
+    if let Some(v) = req.embedding_model { current.embedding_model = v; }
+    if let Some(v) = req.vector_store { current.vector_store = v; }
+    if let Some(v) = req.vector_endpoint { current.vector_endpoint = v; }
+    if let Some(v) = req.collection { current.collection = v; }
+    if let Some(v) = req.auth_token { current.auth_token = v; }
+    if let Some(v) = req.chunk_size { current.chunk_size = v; }
+    if let Some(v) = req.chunk_overlap { current.chunk_overlap = v; }
+    if let Some(v) = req.rerank_candidates { current.rerank_candidates = v; }
+    if let Some(v) = req.request_timeout_ms { current.request_timeout_ms = v; }
+
+    // Persist to disk so the new config survives restart.
+    let to_persist = DaemonConfig {
+        search: nous_lib::search::SearchSection {
+            rag: current.clone(),
+        },
+    };
+    if let Err(e) = nous_lib::search::save(&state.daemon_config_path, &to_persist) {
+        log::warn!(
+            "Failed to persist daemon config to {}: {}",
+            state.daemon_config_path.display(),
+            e
+        );
+    }
+    let echo = current.sanitized();
+    drop(current);
+
+    Ok(Json(ApiResponse { data: echo }))
+}
+
+/// `POST /api/search/rag/reindex` — walk every non-deleted, non-archived
+/// page and ask the RAG backend to (re)index it. Synchronous from the
+/// HTTP perspective; can take minutes on a large library.
+async fn rag_reindex(
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    // Collect pages first, releasing the storage lock before async embedding work.
+    let pages = {
+        let storage = state.storage.lock().map_err(|e| {
+            api_err(StatusCode::INTERNAL_SERVER_ERROR, format!("storage lock: {}", e))
+        })?;
+        let notebooks = storage
+            .list_notebooks()
+            .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        let mut out = Vec::new();
+        for nb in notebooks {
+            let nb_pages = match storage.list_pages(nb.id) {
+                Ok(p) => p,
+                Err(_) => continue,
+            };
+            for page in nb_pages {
+                if page.deleted_at.is_some() || page.is_archived {
+                    continue;
+                }
+                out.push(page);
+            }
+        }
+        out
+    };
+
+    let total = pages.len();
+    let mut indexed = 0usize;
+    let mut failed = 0usize;
+    for page in &pages {
+        let plain_text = plain_text_for_page(page);
+        let page_ref = nous_lib::search::PageRef {
+            id: page.id,
+            notebook_id: page.notebook_id,
+            title: &page.title,
+            tags: &page.tags,
+            page_type: &format!("{:?}", page.page_type).to_lowercase(),
+            plain_text,
+        };
+        use nous_lib::search::SearchBackend;
+        match state.rag.index(page_ref).await {
+            Ok(()) => indexed += 1,
+            Err(nous_lib::search::BackendError::NotConfigured) => {
+                return Err(api_err(
+                    StatusCode::BAD_REQUEST,
+                    "RAG is not configured. POST /api/search/rag/configure first.",
+                ));
+            }
+            Err(e) => {
+                failed += 1;
+                log::warn!("RAG reindex: page {} failed: {}", page.id, e);
+            }
+        }
+    }
+
+    Ok(Json(ApiResponse {
+        data: serde_json::json!({
+            "ok": failed == 0,
+            "indexed": indexed,
+            "failed": failed,
+            "total": total,
+        }),
+    }))
+}
+
+/// Extract a plain-text body from a page for embedding. Mirrors the
+/// Tantivy `extract_text_from_blocks` shape but lives in api.rs so we
+/// don't drag SearchIndex internals into the RAG backend.
+fn plain_text_for_page(page: &Page) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    parts.push(page.title.clone());
+    for block in &page.content.blocks {
+        match block.block_type.as_str() {
+            "paragraph" | "header" | "quote" => {
+                if let Some(t) = block.data.get("text").and_then(|v| v.as_str()) {
+                    parts.push(strip_html_tags(t));
+                }
+            }
+            "code" => {
+                if let Some(c) = block.data.get("code").and_then(|v| v.as_str()) {
+                    parts.push(c.to_string());
+                }
+            }
+            "list" | "checklist" => {
+                if let Some(items) = block.data.get("items").and_then(|v| v.as_array()) {
+                    for item in items {
+                        let text = item
+                            .as_str()
+                            .map(|s| s.to_string())
+                            .or_else(|| {
+                                item.get("text")
+                                    .or_else(|| item.get("content"))
+                                    .and_then(|v| v.as_str())
+                                    .map(|s| s.to_string())
+                            })
+                            .unwrap_or_default();
+                        if !text.is_empty() {
+                            parts.push(strip_html_tags(&text));
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    parts.join("\n")
+}
+
+fn strip_html_tags(html: &str) -> String {
+    let mut out = String::with_capacity(html.len());
+    let mut in_tag = false;
+    for ch in html.chars() {
+        match ch {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if !in_tag => out.push(ch),
+            _ => {}
+        }
+    }
+    out.trim().to_string()
 }
 
 async fn create_page(
@@ -1063,6 +1351,10 @@ async fn create_page(
             log::warn!("Failed to index newly created page {}: {}", page.id, e);
         }
     }
+
+    // Fire-and-forget RAG indexing if enabled. The HTTP response
+    // returns immediately; embedding calls happen in the background.
+    spawn_rag_index(&state, &page);
 
     emit_event(&state, "page.created", serde_json::json!({
         "notebookId": notebook_id,
@@ -1243,6 +1535,9 @@ async fn update_page(
             log::warn!("Failed to reindex page {}: {}", pg_id, e);
         }
     }
+
+    // Fire-and-forget RAG reindex if enabled.
+    spawn_rag_index(&state, &page);
 
     if req.commit.unwrap_or(false) && git::is_git_repo(&notebook_path) {
         let commit_message = format!("Update page: {}", page.title);
@@ -2107,6 +2402,9 @@ async fn delete_page(
             log::warn!("Failed to remove page {} from search index: {}", page_id, e);
         }
     }
+
+    // Fire-and-forget RAG delete if enabled.
+    spawn_rag_delete(&state, page_id);
 
     emit_event(&state, "page.deleted", serde_json::json!({
         "notebookId": notebook_id,

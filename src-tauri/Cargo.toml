@@ -28,7 +28,7 @@ tauri = { version = "2.9.5", features = ["protocol-asset", "devtools"] }
 tauri-plugin-log = "2"
 tauri-plugin-fs = "2"
 tauri-plugin-dialog = "2"
-uuid = { version = "1.0", features = ["v4", "serde"] }
+uuid = { version = "1.0", features = ["v4", "v5", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 thiserror = "1.0"
 dirs = "5.0"
@@ -114,10 +114,18 @@ env_logger = "0.11"
 ratatui = { version = "0.29", optional = true }
 crossterm = { version = "0.28", optional = true }
 
+# Configuration file parsing (daemon RAG config, plugin manifests).
+# Used unconditionally by the daemon; the plugin feature also depends on it.
+toml = "0.8"
+
+# Async traits — required for the SearchBackend trait used by the daemon
+# to dispatch /api/search across the keyword (Tantivy) and semantic
+# (RAG over external HTTP) backends.
+async-trait = "0.1"
+
 # Plugin system (optional, behind "plugins" feature)
 mlua = { version = "0.10", features = ["lua54", "vendored", "serialize"], optional = true }
 bitflags = { version = "2", optional = true }
-toml = { version = "0.8", optional = true }
 extism = { version = "1.9", optional = true }
 
 # WebKitGTK access (Linux-only) for media permission handling
@@ -127,7 +135,7 @@ webkit2gtk = "2.0"
 [features]
 default = ["tui", "plugins"]
 tui = ["dep:ratatui", "dep:crossterm"]
-plugins = ["dep:mlua", "dep:bitflags", "dep:toml", "dep:extism"]
+plugins = ["dep:mlua", "dep:bitflags", "dep:extism"]
 
 [dev-dependencies]
 tempfile = "3"

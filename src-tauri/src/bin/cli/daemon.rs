@@ -18,9 +18,12 @@ use nous_lib::goals::GoalsStorage;
 use nous_lib::inbox::InboxStorage;
 use nous_lib::library::LibraryStorage;
 use nous_lib::python_bridge::PythonAI;
-use nous_lib::search::SearchIndex;
+use nous_lib::search::{
+    self as search_mod, DaemonConfig, RagBackend, RagConfig, SearchIndex, TantivyBackend,
+};
 use nous_lib::storage::FileStorage;
 use nous_lib::sync::{CrdtStore, LogEmitter, SyncManager};
+use tokio::sync::RwLock;
 
 use super::api;
 use super::auth;
@@ -38,7 +41,23 @@ pub struct DaemonState {
     pub contacts_storage: Arc<Mutex<ContactsStorage>>,
     pub sync_manager: Arc<SyncManager>,
     pub action_scheduler: Mutex<ActionScheduler>,
+    /// Raw Tantivy index. Kept for the few handlers that touch it
+    /// directly (POST /api/search/rebuild) — most search now goes
+    /// through `tantivy` (the backend wrapper).
     pub search_index: Arc<Mutex<SearchIndex>>,
+    /// Tantivy via the SearchBackend trait. Used by the dispatcher in
+    /// /api/search to route ?mode=keyword.
+    pub tantivy: Arc<TantivyBackend>,
+    /// RAG backend wrapping an external embedding endpoint + vector
+    /// store. Always present; checks its config snapshot internally
+    /// and returns NotConfigured when disabled. The Option here is
+    /// reserved for future "RAG completely unavailable" cases.
+    pub rag: Arc<RagBackend>,
+    /// Live RAG config. Reload-able via /api/search/rag/configure.
+    pub rag_config: Arc<RwLock<RagConfig>>,
+    /// Path to the on-disk daemon-config.toml — the configure
+    /// endpoint writes back here when it persists changes.
+    pub daemon_config_path: PathBuf,
     pub crdt_store: Arc<CrdtStore>,
     pub library_path: PathBuf,
     pub event_tx: nous_lib::events::EventSender,
@@ -141,6 +160,33 @@ pub async fn run(library_name: Option<&str>, port: Option<u16>, bind: Option<&st
     let python_ai_arc = Arc::new(Mutex::new(python_ai));
     let search_index_arc = Arc::new(Mutex::new(search_index));
 
+    // Wrap Tantivy in the SearchBackend adapter so /api/search can
+    // dispatch keyword traffic through the same trait the RAG backend
+    // uses. The raw search_index_arc is still kept on DaemonState for
+    // the rebuild endpoint and the legacy index_page calls in handlers.
+    let tantivy_backend = Arc::new(TantivyBackend::new(Arc::clone(&search_index_arc)));
+
+    // Load on-disk RAG config (or default to disabled). Path lives at
+    // {data_dir}/daemon-config.toml — same directory as daemon-api-key.
+    let daemon_config_path = search_mod::config_path(&data_dir);
+    let daemon_config: DaemonConfig = search_mod::load_or_default(&daemon_config_path);
+    if daemon_config.search.rag.enabled {
+        log::info!(
+            "RAG enabled: embedding={}, vector_store={}@{}, collection={}",
+            daemon_config.search.rag.endpoint,
+            daemon_config.search.rag.vector_store,
+            daemon_config.search.rag.vector_endpoint,
+            daemon_config.search.rag.collection,
+        );
+    } else {
+        log::info!(
+            "RAG disabled (no [search.rag] enabled=true in {} — using keyword-only search)",
+            daemon_config_path.display()
+        );
+    }
+    let rag_config = Arc::new(RwLock::new(daemon_config.search.rag.clone()));
+    let rag_backend = Arc::new(RagBackend::new(Arc::clone(&rag_config)));
+
     // Create event broadcast channel (capacity 256 — events are small)
     let (event_tx, _) = tokio::sync::broadcast::channel::<nous_lib::events::AppEvent>(256);
 
@@ -193,6 +239,10 @@ pub async fn run(library_name: Option<&str>, port: Option<u16>, bind: Option<&st
         sync_manager: sync_manager_arc,
         action_scheduler: Mutex::new(action_scheduler),
         search_index: search_index_arc,
+        tantivy: tantivy_backend,
+        rag: rag_backend,
+        rag_config,
+        daemon_config_path,
         crdt_store,
         library_path: library_path.clone(),
         event_tx,

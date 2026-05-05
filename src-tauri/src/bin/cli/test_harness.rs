@@ -59,9 +59,10 @@ use nous_lib::goals::GoalsStorage;
 use nous_lib::inbox::InboxStorage;
 use nous_lib::library::LibraryStorage;
 use nous_lib::python_bridge::PythonAI;
-use nous_lib::search::SearchIndex;
+use nous_lib::search::{RagBackend, RagConfig, SearchIndex, TantivyBackend};
 use nous_lib::storage::{FileStorage, NotebookType};
 use nous_lib::sync::{CrdtStore, LogEmitter, SyncManager};
+use tokio::sync::RwLock;
 
 use super::api;
 use super::auth::{ApiKeySet, Scope};
@@ -82,6 +83,8 @@ pub struct TestEnv {
     /// rw/ro tokens when auth is enabled; None when disabled.
     pub rw_token: Option<String>,
     pub ro_token: Option<String>,
+    /// Live handle to the RAG config — mutate for semantic-mode tests.
+    pub rag_config: Arc<RwLock<RagConfig>>,
 }
 
 impl TestEnv {
@@ -120,6 +123,14 @@ impl TestEnv {
             .expect("search index init");
         let crdt_store = Arc::new(CrdtStore::new(library_path.clone()));
 
+        // Tantivy adapter + RAG (disabled by default — tests opt in by
+        // mutating env.rag_config before sending requests).
+        let search_index_arc = Arc::new(Mutex::new(search_index));
+        let tantivy_backend = Arc::new(TantivyBackend::new(Arc::clone(&search_index_arc)));
+        let rag_config = Arc::new(RwLock::new(RagConfig::disabled()));
+        let rag_backend = Arc::new(RagBackend::new(Arc::clone(&rag_config)));
+        let daemon_config_path = library_path.join("daemon-config.toml");
+
         let storage_arc = Arc::new(Mutex::new(storage));
         let library_storage_arc = Arc::new(Mutex::new(library_storage));
         let inbox_storage_arc = Arc::new(Mutex::new(inbox_storage));
@@ -128,7 +139,6 @@ impl TestEnv {
         let contacts_storage_arc = Arc::new(Mutex::new(contacts_storage));
         let action_storage_arc = Arc::new(Mutex::new(action_storage));
         let python_ai_arc = Arc::new(Mutex::new(python_ai));
-        let search_index_arc = Arc::new(Mutex::new(search_index));
 
         let mut action_executor = ActionExecutor::new(
             Arc::clone(&storage_arc),
@@ -165,6 +175,10 @@ impl TestEnv {
             sync_manager: sync_manager_arc,
             action_scheduler: Mutex::new(action_scheduler),
             search_index: search_index_arc,
+            tantivy: tantivy_backend,
+            rag: rag_backend,
+            rag_config: Arc::clone(&rag_config),
+            daemon_config_path,
             crdt_store,
             library_path: library_path.clone(),
             event_tx,
@@ -190,7 +204,14 @@ impl TestEnv {
             event_rx,
             rw_token,
             ro_token,
+            rag_config,
         }
+    }
+
+    /// Mutate the live RAG config so tests can flip semantic/hybrid on.
+    pub async fn set_rag_config(&self, cfg: RagConfig) {
+        let mut guard = self.rag_config.write().await;
+        *guard = cfg;
     }
 
     /// Create a notebook directly through storage, returning its UUID as
@@ -569,4 +590,157 @@ async fn search_empty_query_returns_empty_list() {
     assert_eq!(status, StatusCode::OK);
     let hits = body["data"].as_array().unwrap();
     assert_eq!(hits.len(), 0);
+}
+
+// ===== RAG mode dispatch =====
+
+#[tokio::test]
+async fn search_keyword_mode_explicit_works() {
+    // Default mode is keyword; explicit ?mode=keyword must work too.
+    let env = TestEnv::new();
+    let (status, body) = env.get_json("/api/search?q=test&mode=keyword").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body["data"].is_array());
+}
+
+#[tokio::test]
+async fn search_unknown_mode_returns_400() {
+    let env = TestEnv::new();
+    let (status, body) = env.get_json("/api/search?q=x&mode=astrology").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(body["error"].as_str().unwrap_or("").contains("Unknown search mode"));
+}
+
+#[tokio::test]
+async fn search_semantic_mode_when_disabled_returns_400() {
+    let env = TestEnv::new(); // RAG disabled by default
+    let (status, body) = env.get_json("/api/search?q=anything&mode=semantic").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(body["error"].as_str().unwrap_or("").contains("RAG is not configured"));
+}
+
+#[tokio::test]
+async fn search_hybrid_mode_when_disabled_falls_back_when_no_candidates() {
+    // No pages indexed → tantivy returns empty → hybrid never asks RAG
+    // → returns empty Ok rather than the NotConfigured error. This is
+    // the "user typed in the search bar but their library is empty" case.
+    let env = TestEnv::new();
+    let (status, body) = env.get_json("/api/search?q=nothing&mode=hybrid").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["data"].as_array().unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn search_hybrid_mode_falls_back_to_keyword_when_rag_fails() {
+    // Index a page so hybrid actually asks RAG to rerank, then point
+    // RAG at a black-holed endpoint. Should return the keyword candidates
+    // rather than failing the request.
+    let env = TestEnv::new();
+    let nb = env.create_notebook("Hybrid");
+    let (_, _) = env
+        .post_json(
+            &format!("/api/notebooks/{}/pages", nb),
+            json!({"title": "hybrid fallback page"}),
+        )
+        .await;
+
+    // Wait for Tantivy to surface the new doc, then enable RAG with
+    // unreachable endpoints.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        let (_, body) = env.get_json("/api/search?q=hybrid").await;
+        if !body["data"].as_array().unwrap().is_empty() {
+            break;
+        }
+        if std::time::Instant::now() >= deadline {
+            panic!("tantivy never surfaced the test page");
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+
+    let mut cfg = nous_lib::search::RagConfig::disabled();
+    cfg.enabled = true;
+    cfg.endpoint = "http://127.0.0.1:1".to_string();
+    cfg.vector_endpoint = "http://127.0.0.1:1".to_string();
+    cfg.request_timeout_ms = 200;
+    env.set_rag_config(cfg).await;
+
+    let (status, body) = env.get_json("/api/search?q=hybrid&mode=hybrid").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        !body["data"].as_array().unwrap().is_empty(),
+        "expected fallback to keyword candidates: {body}"
+    );
+}
+
+#[tokio::test]
+async fn search_semantic_mode_returns_502_when_rag_unreachable() {
+    let env = TestEnv::new();
+    let mut cfg = nous_lib::search::RagConfig::disabled();
+    cfg.enabled = true;
+    cfg.endpoint = "http://127.0.0.1:1".to_string();
+    cfg.vector_endpoint = "http://127.0.0.1:1".to_string();
+    cfg.request_timeout_ms = 200;
+    env.set_rag_config(cfg).await;
+
+    let (status, body) = env.get_json("/api/search?q=anything&mode=semantic").await;
+    assert_eq!(status, StatusCode::BAD_GATEWAY);
+    assert!(body["error"].as_str().unwrap_or("").contains("RAG service unreachable"));
+}
+
+// ===== RAG configure endpoint =====
+
+#[tokio::test]
+async fn rag_configure_persists_changes() {
+    let env = TestEnv::new();
+    // Initially disabled.
+    {
+        let cfg = env.rag_config.read().await;
+        assert!(!cfg.enabled);
+    }
+    let (status, body) = env
+        .post_json(
+            "/api/search/rag/configure",
+            json!({"enabled": true, "collection": "my-pages"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["data"]["enabled"], true);
+    assert_eq!(body["data"]["collection"], "my-pages");
+
+    // Live config reflects the change.
+    let cfg = env.rag_config.read().await;
+    assert!(cfg.enabled);
+    assert_eq!(cfg.collection, "my-pages");
+}
+
+#[tokio::test]
+async fn rag_configure_redacts_auth_token_in_response() {
+    let env = TestEnv::new();
+    let (status, body) = env
+        .post_json(
+            "/api/search/rag/configure",
+            json!({"enabled": true, "auth_token": "super-secret"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    // RagConfig serializes with snake_case keys (matching the toml file
+    // shape) — the API echoes back the same field names.
+    assert_eq!(body["data"]["auth_token"], "***");
+    // But the in-memory value keeps the real token (so the backend can use it).
+    let cfg = env.rag_config.read().await;
+    assert_eq!(cfg.auth_token, "super-secret");
+}
+
+#[tokio::test]
+async fn rag_reindex_returns_400_when_disabled() {
+    let env = TestEnv::new();
+    let nb = env.create_notebook("R");
+    env.post_json(&format!("/api/notebooks/{}/pages", nb), json!({"title": "x"}))
+        .await;
+    let (status, body) = env
+        .post_json("/api/search/rag/reindex", json!({}))
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(body["error"].as_str().unwrap_or("").contains("RAG is not configured"));
 }
