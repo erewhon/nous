@@ -548,6 +548,8 @@ pub fn build_router(state: AppState, auth: AuthState) -> Router {
         .route("/api/search/rebuild", post(rebuild_search_index))
         .route("/api/search/rag/configure", post(rag_configure))
         .route("/api/search/rag/reindex", post(rag_reindex))
+        .route("/api/plugins", get(list_plugins))
+        .route("/api/plugins/{plugin_id}/reload", post(reload_plugin))
         .route("/api/notebooks", get(list_notebooks))
         .route("/api/notebooks/{notebook_id}/pages", get(list_pages))
         .route("/api/notebooks/{notebook_id}/pages", post(create_page))
@@ -1240,6 +1242,80 @@ fn strip_html_tags(html: &str) -> String {
     out.trim().to_string()
 }
 
+// ===== Plugins =====
+
+/// `GET /api/plugins` — list loaded plugins (id, name, capabilities, hooks).
+/// Returns an empty array when the plugin host isn't available (feature off
+/// or build-time disabled). Mirrors the existing Tauri `list_plugins` shape.
+async fn list_plugins(
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    #[cfg(feature = "plugins")]
+    {
+        let Some(ref ph) = state.plugin_host else {
+            return Ok(Json(ApiResponse {
+                data: serde_json::json!([]),
+            }));
+        };
+        let host = ph.lock().map_err(|e| {
+            api_err(StatusCode::INTERNAL_SERVER_ERROR, format!("plugin lock: {e}"))
+        })?;
+        let infos = host.list_plugins();
+        Ok(Json(ApiResponse {
+            data: serde_json::to_value(infos).unwrap_or(serde_json::json!([])),
+        }))
+    }
+    #[cfg(not(feature = "plugins"))]
+    {
+        let _ = state;
+        Ok(Json(ApiResponse {
+            data: serde_json::json!([]),
+        }))
+    }
+}
+
+/// `POST /api/plugins/{plugin_id}/reload` — re-read a plugin from disk.
+/// 404 if the id isn't loaded; 503 if the plugin host isn't available.
+async fn reload_plugin(
+    State(state): State<AppState>,
+    Path(plugin_id): Path<String>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    #[cfg(feature = "plugins")]
+    {
+        let Some(ref ph) = state.plugin_host else {
+            return Err(api_err(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "Plugin host not available (compiled without the 'plugins' feature)",
+            ));
+        };
+        let mut host = ph.lock().map_err(|e| {
+            api_err(StatusCode::INTERNAL_SERVER_ERROR, format!("plugin lock: {e}"))
+        })?;
+        host.reload(&plugin_id).map_err(|e| {
+            // PluginError doesn't expose a NotFound discriminant publicly,
+            // so stringify-match for the common "not found" case to map to
+            // 404. Other failures map to 500.
+            let s = e.to_string();
+            if s.contains("not found") || s.contains("Not found") {
+                api_err(StatusCode::NOT_FOUND, format!("Plugin '{}' not found", plugin_id))
+            } else {
+                api_err(StatusCode::INTERNAL_SERVER_ERROR, format!("Reload failed: {s}"))
+            }
+        })?;
+        Ok(Json(ApiResponse {
+            data: serde_json::json!({"ok": true, "pluginId": plugin_id}),
+        }))
+    }
+    #[cfg(not(feature = "plugins"))]
+    {
+        let _ = (state, plugin_id);
+        Err(api_err(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Plugin host not available (compiled without the 'plugins' feature)",
+        ))
+    }
+}
+
 async fn create_page(
     State(state): State<AppState>,
     Path(notebook_id): Path<String>,
@@ -1355,6 +1431,18 @@ async fn create_page(
     // Fire-and-forget RAG indexing if enabled. The HTTP response
     // returns immediately; embedding calls happen in the background.
     spawn_rag_index(&state, &page);
+
+    // Dispatch plugin OnPageCreated hook (background thread; never blocks).
+    #[cfg(feature = "plugins")]
+    nous_lib::plugins::dispatch_plugin_event_bg(
+        &state.plugin_host,
+        nous_lib::plugins::HookPoint::OnPageCreated,
+        serde_json::json!({
+            "notebook_id": nb_id.to_string(),
+            "page_id": page.id.to_string(),
+            "title": page.title,
+        }),
+    );
 
     emit_event(&state, "page.created", serde_json::json!({
         "notebookId": notebook_id,
@@ -1538,6 +1626,19 @@ async fn update_page(
 
     // Fire-and-forget RAG reindex if enabled.
     spawn_rag_index(&state, &page);
+
+    // Plugin OnPageUpdated hook (background thread).
+    #[cfg(feature = "plugins")]
+    nous_lib::plugins::dispatch_plugin_event_bg(
+        &state.plugin_host,
+        nous_lib::plugins::HookPoint::OnPageUpdated,
+        serde_json::json!({
+            "notebook_id": nb_id.to_string(),
+            "page_id": pg_id.to_string(),
+            "title": page.title,
+            "tags": page.tags,
+        }),
+    );
 
     if req.commit.unwrap_or(false) && git::is_git_repo(&notebook_path) {
         let commit_message = format!("Update page: {}", page.title);
@@ -1814,6 +1915,16 @@ async fn capture_inbox(
 
     match inbox.capture(capture) {
         Ok(item) => {
+            #[cfg(feature = "plugins")]
+            nous_lib::plugins::dispatch_plugin_event_bg(
+                &state.plugin_host,
+                nous_lib::plugins::HookPoint::OnInboxCaptured,
+                serde_json::json!({
+                    "item_id": item.id.to_string(),
+                    "title": item.title,
+                    "tags": item.tags,
+                }),
+            );
             emit_event(&state, "inbox.captured", serde_json::json!({
                 "itemId": item.id.to_string(),
                 "title": item.title,
@@ -1969,6 +2080,20 @@ async fn record_goal_progress(
     let result = goals_storage
         .record_progress(progress)
         .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    drop(goals_storage);
+
+    // Plugin OnGoalProgress hook (background thread).
+    #[cfg(feature = "plugins")]
+    nous_lib::plugins::dispatch_plugin_event_bg(
+        &state.plugin_host,
+        nous_lib::plugins::HookPoint::OnGoalProgress,
+        serde_json::json!({
+            "goal_id": id.to_string(),
+            "date": req.date,
+            "completed": completed,
+        }),
+    );
 
     Ok((StatusCode::CREATED, Json(ApiResponse { data: result })))
 }
@@ -2405,6 +2530,18 @@ async fn delete_page(
 
     // Fire-and-forget RAG delete if enabled.
     spawn_rag_delete(&state, page_id);
+
+    // Plugin OnPageDeleted hook (background thread).
+    #[cfg(feature = "plugins")]
+    nous_lib::plugins::dispatch_plugin_event_bg(
+        &state.plugin_host,
+        nous_lib::plugins::HookPoint::OnPageDeleted,
+        serde_json::json!({
+            "notebook_id": nb_id.to_string(),
+            "page_id": page_id.to_string(),
+            "title": page.title,
+        }),
+    );
 
     emit_event(&state, "page.deleted", serde_json::json!({
         "notebookId": notebook_id,

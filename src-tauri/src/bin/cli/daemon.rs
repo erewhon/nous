@@ -17,6 +17,8 @@ use nous_lib::energy::EnergyStorage;
 use nous_lib::goals::GoalsStorage;
 use nous_lib::inbox::InboxStorage;
 use nous_lib::library::LibraryStorage;
+#[cfg(feature = "plugins")]
+use nous_lib::plugins;
 use nous_lib::python_bridge::PythonAI;
 use nous_lib::search::{
     self as search_mod, DaemonConfig, RagBackend, RagConfig, SearchIndex, TantivyBackend,
@@ -59,6 +61,11 @@ pub struct DaemonState {
     /// endpoint writes back here when it persists changes.
     pub daemon_config_path: PathBuf,
     pub crdt_store: Arc<CrdtStore>,
+    /// Plugin host (Lua VM, capability gating, hook dispatch). Optional
+    /// at the type level so the daemon still compiles with the `plugins`
+    /// feature off; in default builds it's always populated.
+    #[cfg(feature = "plugins")]
+    pub plugin_host: Option<Arc<Mutex<plugins::PluginHost>>>,
     pub library_path: PathBuf,
     pub event_tx: nous_lib::events::EventSender,
 }
@@ -190,6 +197,32 @@ pub async fn run(library_name: Option<&str>, port: Option<u16>, bind: Option<&st
     // Create event broadcast channel (capacity 256 — events are small)
     let (event_tx, _) = tokio::sync::broadcast::channel::<nous_lib::events::AppEvent>(256);
 
+    // Initialize plugin host (Lua VM, capability gating, hook dispatch).
+    // Mirrors the Tauri-side construction in lib.rs so plugins behave the
+    // same on either side during the migration. The Tauri-side host stays
+    // running until UI plugins migrate; both load the same Lua sources and
+    // hold separate VMs (one per process). Daemon writes (Emacs, MCP)
+    // fire hooks here; legacy desktop-only writes fire on the Tauri side.
+    #[cfg(feature = "plugins")]
+    let plugin_host: Option<Arc<Mutex<plugins::PluginHost>>> = {
+        let mut api = plugins::HostApi::new(
+            Arc::clone(&storage_arc),
+            Arc::clone(&goals_storage_arc),
+            Arc::clone(&inbox_storage_arc),
+        );
+        api.set_energy_storage(Arc::clone(&energy_storage_arc));
+        api.set_python_ai(Arc::clone(&python_ai_arc));
+        // Search not wired here for now — plugins that need search go
+        // through host.http_request → daemon /api/search. Same call shape
+        // as the Tauri side for portability.
+        let api = Arc::new(api);
+        let mut host = plugins::PluginHost::new(api, library_path.join("plugins"));
+        if let Err(e) = host.load_all() {
+            log::warn!("Plugin load error: {e}");
+        }
+        Some(Arc::new(Mutex::new(host)))
+    };
+
     // Initialize action executor
     let mut action_executor = ActionExecutor::new(
         Arc::clone(&storage_arc),
@@ -200,6 +233,24 @@ pub async fn run(library_name: Option<&str>, port: Option<u16>, bind: Option<&st
     action_executor.set_energy_storage(Arc::clone(&energy_storage_arc));
     action_executor.set_inbox_storage(Arc::clone(&inbox_storage_arc));
     action_executor.set_event_tx(event_tx.clone());
+    #[cfg(feature = "plugins")]
+    action_executor.set_plugin_host(plugin_host.clone());
+
+    // Refresh built-in actions from Lua plugin definitions (if loaded).
+    #[cfg(feature = "plugins")]
+    if let Some(ref ph) = plugin_host {
+        if let Ok(host) = ph.lock() {
+            let builtins = host.get_builtin_actions();
+            if !builtins.is_empty() {
+                if let Ok(storage) = action_storage_arc.lock() {
+                    if let Err(e) = storage.refresh_builtins(builtins) {
+                        log::warn!("Failed to refresh builtins from plugins: {e}");
+                    }
+                }
+            }
+        }
+    }
+
     let action_executor_arc = Arc::new(Mutex::new(action_executor));
 
     // Initialize action scheduler and start it
@@ -244,6 +295,8 @@ pub async fn run(library_name: Option<&str>, port: Option<u16>, bind: Option<&st
         rag_config,
         daemon_config_path,
         crdt_store,
+        #[cfg(feature = "plugins")]
+        plugin_host,
         library_path: library_path.clone(),
         event_tx,
     });

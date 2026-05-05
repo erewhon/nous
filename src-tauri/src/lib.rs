@@ -348,17 +348,30 @@ pub fn run() {
     let backup_scheduler = commands::start_backup_scheduler(Arc::clone(&storage_arc));
     let backup_scheduler_arc = Arc::new(tokio::sync::Mutex::new(Some(backup_scheduler)));
 
-    // Start sync scheduler for periodic syncs
-    let sync_scheduler = sync::scheduler::start_sync_scheduler(
-        Arc::clone(&sync_manager_arc),
-        Arc::clone(&storage_arc),
-        Arc::clone(&library_storage_arc),
-        Arc::clone(&goals_storage_arc),
-        Arc::clone(&inbox_storage_arc),
-        Arc::clone(&contacts_storage_arc),
-        Arc::clone(&energy_storage_arc),
-    );
-    let sync_scheduler_arc = Arc::new(tokio::sync::Mutex::new(Some(sync_scheduler)));
+    // Start sync scheduler for periodic syncs — but skip if the daemon is
+    // already running one. Both processes hitting WebDAV against the same
+    // library wastes round-trips and opens a small race window when
+    // something has actually changed since the last sync. Mirrors the
+    // action-scheduler PID-file guard below in the setup hook.
+    let daemon_pid_path = data_dir.join(".nous-daemon.pid");
+    let sync_scheduler_arc = if is_daemon_running(&daemon_pid_path) {
+        log::info!(
+            "Daemon detected (PID file {:?}); skipping local sync scheduler — daemon owns sync",
+            daemon_pid_path
+        );
+        Arc::new(tokio::sync::Mutex::new(None))
+    } else {
+        let sync_scheduler = sync::scheduler::start_sync_scheduler(
+            Arc::clone(&sync_manager_arc),
+            Arc::clone(&storage_arc),
+            Arc::clone(&library_storage_arc),
+            Arc::clone(&goals_storage_arc),
+            Arc::clone(&inbox_storage_arc),
+            Arc::clone(&contacts_storage_arc),
+            Arc::clone(&energy_storage_arc),
+        );
+        Arc::new(tokio::sync::Mutex::new(Some(sync_scheduler)))
+    };
 
     // Video server will be started in setup hook
     let video_server_arc = Arc::new(tokio::sync::Mutex::new(None));

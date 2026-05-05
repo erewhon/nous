@@ -180,6 +180,12 @@ impl TestEnv {
             rag_config: Arc::clone(&rag_config),
             daemon_config_path,
             crdt_store,
+            // Plugin host is None in tests by default — keeps construction
+            // fast and avoids loading any user-installed Lua plugins from
+            // disk into the test process. Tests that exercise plugin
+            // routes can swap this out via a future helper.
+            #[cfg(feature = "plugins")]
+            plugin_host: None,
             library_path: library_path.clone(),
             event_tx,
         });
@@ -730,6 +736,28 @@ async fn rag_configure_redacts_auth_token_in_response() {
     // But the in-memory value keeps the real token (so the backend can use it).
     let cfg = env.rag_config.read().await;
     assert_eq!(cfg.auth_token, "super-secret");
+}
+
+// ===== Plugins (daemon-side) =====
+
+#[tokio::test]
+async fn plugins_list_returns_empty_when_host_absent() {
+    // TestEnv constructs DaemonState with plugin_host: None, so the
+    // daemon serves [] regardless of whether the feature is compiled in.
+    let env = TestEnv::new();
+    let (status, body) = env.get_json("/api/plugins").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["data"], serde_json::json!([]));
+}
+
+#[tokio::test]
+async fn plugins_reload_returns_503_when_host_absent() {
+    let env = TestEnv::new();
+    let (status, body) = env
+        .post_json("/api/plugins/anything/reload", json!({}))
+        .await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert!(body["error"].as_str().unwrap_or("").contains("Plugin host"));
 }
 
 #[tokio::test]
