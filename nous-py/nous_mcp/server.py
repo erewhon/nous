@@ -1349,34 +1349,25 @@ def inbox_capture(
         title: Title of the inbox item.
         content: Optional text content (plain text or markdown).
         tags: Optional comma-separated tags.
-        source: Source identifier (default "mcp").
+        source: Source identifier (default "mcp"). Note: the daemon
+            currently overrides this with its own ``daemon-api`` source
+            tag — preserved here for forward compat if that changes.
 
     Returns JSON with id, title, capturedAt of the created item.
     """
-    storage = _get_storage()
-
+    daemon = _get_daemon()
     tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
-    now = datetime.now(UTC).isoformat()
-
-    item = {
-        "id": str(uuid4()),
-        "title": title,
-        "content": content,
-        "tags": tag_list,
-        "capturedAt": now,
-        "updatedAt": now,
-        "source": {"type": "api", "source": source},
-        "classification": None,
-        "isProcessed": False,
-    }
-
-    storage.write_inbox_item(item)
-
+    item = daemon.capture_inbox(
+        title,
+        content=content if content else None,
+        tags=tag_list if tag_list else None,
+    )
+    _ = source  # daemon-side captures stamp source themselves
     return json.dumps(
         {
             "id": item["id"],
-            "title": item["title"],
-            "capturedAt": item["capturedAt"],
+            "title": item.get("title", title),
+            "capturedAt": item.get("capturedAt"),
         },
         indent=2,
     )
@@ -1558,44 +1549,21 @@ def record_goal_progress(
 
     Returns JSON with goalId, date, completed, value.
     """
-    storage = _get_storage()
-
-    # Verify goal exists
-    goals = storage.list_goals(include_archived=True)
-    goal = None
-    for g in goals:
-        if g["id"] == goal_id:
-            goal = g
-            break
-    if goal is None:
-        raise ValueError(f"Goal not found: {goal_id}")
-
-    # Load existing progress
-    entries = storage.get_goal_progress(goal_id)
-
-    # Update or append entry for this date
-    entry_data = {
-        "goalId": goal_id,
-        "date": date,
-        "completed": completed,
-        "autoDetected": False,
-    }
-    if value is not None:
-        entry_data["value"] = int(value)
-
-    updated = False
-    for i, entry in enumerate(entries):
-        if entry.get("date") == date:
-            entries[i] = entry_data
-            updated = True
-            break
-
-    if not updated:
-        entries.append(entry_data)
-
-    storage.write_goal_progress(goal_id, entries)
-
-    return json.dumps(entry_data, indent=2)
+    daemon = _get_daemon()
+    # Daemon's record_goal_progress endpoint does the find-or-append
+    # dedup by date server-side, so the previous read-modify-write loop
+    # is gone. Daemon also validates the goal exists and 404s if not —
+    # surface that as ValueError for caller compatibility.
+    try:
+        result = daemon.record_goal_progress(
+            goal_id,
+            date,
+            completed=completed,
+            value=int(value) if value is not None else None,
+        )
+    except DaemonError as e:
+        raise ValueError(str(e))
+    return json.dumps(result, indent=2)
 
 
 @mcp.tool()
@@ -1713,23 +1681,40 @@ def main() -> None:
     parser.add_argument(
         "--library",
         default=os.environ.get("NOUS_LIBRARY"),
-        help="Library name (default: the default library). Can also set NOUS_LIBRARY env var.",
+        help=(
+            "Library name (default: the default library). Local-only — "
+            "the daemon already chose its library at startup; this is used "
+            "to resolve a backwards-compat library_path attribute on the "
+            "storage object. Can also set NOUS_LIBRARY env var."
+        ),
     )
     args = parser.parse_args()
 
+    # Build the daemon client (env-var-driven for the remote-MCP setup;
+    # falls back to localhost + the local key file for local use), then
+    # verify connectivity before announcing readiness.
     global _storage, _daemon
-    _storage = NousStorage.from_library_name(args.library)
-    logger.info("Using library at: %s", _storage.library_path)
-
-    # Initialize daemon client and verify connectivity
     _daemon = NousDaemonClient()
     try:
         status = _daemon.status()
-        logger.info("Connected to Nous daemon (pid %s)", status.get("pid"))
+        logger.info(
+            "Connected to Nous daemon at %s (pid %s)",
+            _daemon.base_url,
+            status.get("pid"),
+        )
     except DaemonError as e:
-        logger.error("Nous daemon is not running: %s", e)
-        logger.error("Start the daemon with: nous daemon start")
+        logger.error("Nous daemon is not reachable at %s: %s", _daemon.base_url, e)
+        logger.error(
+            "Start the daemon (`nous daemon start`) on the target host, "
+            "or set NOUS_DAEMON_URL / NOUS_API_KEY for a remote daemon."
+        )
         sys.exit(1)
+
+    _storage = NousStorage.from_library_name(args.library)
+    if _storage.library_path is not None:
+        logger.info("Local library path: %s", _storage.library_path)
+    else:
+        logger.info("Running daemon-only (no local library directory found)")
 
     # Register workflow tools (composite tools that orchestrate multiple operations)
     from nous_mcp.workflow import register_workflow_tools

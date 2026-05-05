@@ -1,7 +1,14 @@
-"""Data access for Nous notebooks, sections, folders, pages, inbox, goals, and daily notes.
+"""Daemon-backed data access for Nous notebooks, sections, folders, pages,
+inbox, goals, and daily notes.
 
-Handles library discovery, name resolution, and provides a high-level API
-for the MCP server tools.
+Historical note: this module used to read directly from disk. As of the
+2026-05-04 daemon migration, every read and write goes through the daemon
+HTTP API via :class:`NousDaemonClient`. The class keeps the same method
+names and dict-shape return values so existing call sites work unchanged.
+
+The ``library_path`` attribute is preserved (best-effort) for backwards
+compatibility with ``nous_ai`` which still constructs path-based helpers
+from it. In the remote-MCP case it will be ``None``.
 """
 
 from __future__ import annotations
@@ -14,6 +21,8 @@ from collections import defaultdict
 from datetime import date, timedelta
 from pathlib import Path
 
+from nous_mcp.daemon_client import DaemonError, NousDaemonClient
+
 logger = logging.getLogger(__name__)
 
 UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.I)
@@ -25,120 +34,101 @@ def _default_data_dir() -> Path:
     return Path.home() / ".local" / "share" / "nous"
 
 
+def _libraries_path() -> Path:
+    return _default_data_dir() / "libraries.json"
+
+
+def _try_resolve_local_library(name: str | None) -> Path | None:
+    """Best-effort lookup of the local library directory.
+
+    Returns the on-disk path when the daemon and the MCP server live on
+    the same machine — useful for backwards compatibility with
+    ``nous_ai.chat`` which still constructs disk-backed helpers from it.
+    Returns None when ``libraries.json`` is missing (remote-MCP setup).
+    """
+    path = _libraries_path()
+    if not path.exists():
+        return None
+    try:
+        libraries = json.loads(path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return None
+    if not libraries:
+        return None
+    if name:
+        try:
+            match = _resolve_name(name, libraries, key="name")
+            return Path(match["path"])
+        except ValueError:
+            return None
+    for lib in libraries:
+        if lib.get("isDefault"):
+            return Path(lib["path"])
+    return Path(libraries[0]["path"])
+
+
 class NousStorage:
-    """Read-only access to Nous data on disk."""
+    """Daemon-backed access to Nous data.
 
-    def __init__(self, library_path: Path):
+    Construct with an explicit :class:`NousDaemonClient`, or via
+    :meth:`from_library_name` which honors ``NOUS_DAEMON_URL`` /
+    ``NOUS_API_KEY`` env vars and falls back to the local daemon.
+    """
+
+    def __init__(
+        self,
+        client: NousDaemonClient,
+        library_path: Path | None = None,
+    ) -> None:
+        self.client = client
+        # Preserved for nous_ai.chat compatibility — None when running
+        # against a remote daemon (no local library directory).
         self.library_path = library_path
-
-    # --- Library discovery ---
-
-    @staticmethod
-    def discover_libraries() -> list[dict]:
-        """Read ~/.local/share/nous/libraries.json."""
-        path = _default_data_dir() / "libraries.json"
-        if not path.exists():
-            return []
-        return json.loads(path.read_text())
 
     @classmethod
     def from_library_name(cls, name: str | None = None) -> NousStorage:
-        """Create a NousStorage for a library by name, or the default library."""
-        libraries = cls.discover_libraries()
-        if not libraries:
-            raise RuntimeError("No Nous libraries found. Is Nous installed?")
+        """Create a NousStorage backed by the daemon.
 
-        if name:
-            match = _resolve_name(name, libraries, key="name")
-            return cls(Path(match["path"]))
-
-        # Default library
-        for lib in libraries:
-            if lib.get("isDefault"):
-                return cls(Path(lib["path"]))
-
-        # Fallback to first
-        return cls(Path(libraries[0]["path"]))
+        ``name`` is used to resolve a local library path for backwards
+        compatibility (the daemon already chose its library at startup;
+        the MCP doesn't get to override it from this side). When no
+        local library is found, ``library_path`` is None and
+        ``library_path``-using callers should handle the remote case.
+        """
+        client = NousDaemonClient()
+        library_path = _try_resolve_local_library(name)
+        if library_path is None and name is not None:
+            logger.info(
+                "Library '%s' not resolvable locally — running daemon-only",
+                name,
+            )
+        return cls(client, library_path)
 
     # --- Notebooks ---
 
-    def _notebooks_dir(self) -> Path:
-        return self.library_path / "notebooks"
-
     def list_notebooks(self) -> list[dict]:
-        nb_dir = self._notebooks_dir()
-        if not nb_dir.exists():
-            return []
-
-        results = []
-        for d in sorted(nb_dir.iterdir()):
-            meta_path = d / "notebook.json"
-            if not meta_path.exists():
-                continue
-            try:
-                nb = json.loads(meta_path.read_text())
-            except (json.JSONDecodeError, OSError):
-                continue
-
-            pages_dir = d / "pages"
-            page_count = len(list(pages_dir.glob("*.json"))) if pages_dir.exists() else 0
-
-            results.append(
-                {
-                    "id": nb["id"],
-                    "name": nb.get("name", ""),
-                    "icon": nb.get("icon"),
-                    "sectionsEnabled": nb.get("sectionsEnabled", False),
-                    "archived": nb.get("archived", False),
-                    "pageCount": page_count,
-                }
-            )
-
-        return results
+        return self.client.list_notebooks()
 
     def resolve_notebook(self, name_or_id: str) -> dict:
-        """Resolve a notebook by name prefix or UUID. Returns notebook.json dict."""
         if UUID_RE.match(name_or_id):
-            path = self._notebooks_dir() / name_or_id / "notebook.json"
-            if path.exists():
-                return json.loads(path.read_text())
+            for nb in self.list_notebooks():
+                if nb["id"] == name_or_id:
+                    return nb
             raise ValueError(f"Notebook not found: {name_or_id}")
-
-        notebooks = self.list_notebooks()
-        return _resolve_name(name_or_id, notebooks, key="name")
-
-    def _notebook_dir(self, notebook_id: str) -> Path:
-        return self._notebooks_dir() / notebook_id
+        return _resolve_name(name_or_id, self.list_notebooks(), key="name")
 
     # --- Sections ---
 
     def list_sections(self, notebook_id: str) -> list[dict]:
-        path = self._notebook_dir(notebook_id) / "sections.json"
-        if not path.exists():
-            return []
-        try:
-            sections = json.loads(path.read_text())
-        except (json.JSONDecodeError, OSError):
-            return []
-
-        return [
-            {
-                "id": s["id"],
-                "name": s.get("name", ""),
-                "color": s.get("color"),
-                "position": s.get("position", 0),
-            }
-            for s in sections
-        ]
+        return self.client.list_sections(notebook_id)
 
     def resolve_section(self, notebook_id: str, name_or_id: str) -> dict:
+        sections = self.list_sections(notebook_id)
         if UUID_RE.match(name_or_id):
-            for s in self.list_sections(notebook_id):
+            for s in sections:
                 if s["id"] == name_or_id:
                     return s
             raise ValueError(f"Section not found: {name_or_id}")
-
-        sections = self.list_sections(notebook_id)
         return _resolve_name(name_or_id, sections, key="name")
 
     # --- Folders ---
@@ -149,41 +139,23 @@ class NousStorage:
         section_id: str | None = None,
         include_archived: bool = False,
     ) -> list[dict]:
-        path = self._notebook_dir(notebook_id) / "folders.json"
-        if not path.exists():
-            return []
-        try:
-            folders = json.loads(path.read_text())
-        except (json.JSONDecodeError, OSError):
-            return []
-
+        folders = self.client.list_folders(notebook_id)
         results = []
         for f in folders:
             if not include_archived and f.get("isArchived", False):
                 continue
             if section_id and f.get("sectionId") != section_id:
                 continue
-            results.append(
-                {
-                    "id": f["id"],
-                    "name": f.get("name", ""),
-                    "parentId": f.get("parentId"),
-                    "sectionId": f.get("sectionId"),
-                    "isArchived": f.get("isArchived", False),
-                    "position": f.get("position", 0),
-                }
-            )
-
+            results.append(f)
         return results
 
     def resolve_folder(self, notebook_id: str, name_or_id: str) -> dict:
+        folders = self.list_folders(notebook_id, include_archived=True)
         if UUID_RE.match(name_or_id):
-            for f in self.list_folders(notebook_id, include_archived=True):
+            for f in folders:
                 if f["id"] == name_or_id:
                     return f
             raise ValueError(f"Folder not found: {name_or_id}")
-
-        folders = self.list_folders(notebook_id, include_archived=True)
         return _resolve_name(name_or_id, folders, key="name")
 
     def create_folder(
@@ -193,65 +165,25 @@ class NousStorage:
         parent_id: str | None = None,
         section_id: str | None = None,
     ) -> dict:
-        """Create a new folder. Returns dict with id, name."""
-        from uuid import uuid4
-
-        path = self._notebook_dir(notebook_id) / "folders.json"
-        try:
-            folders = json.loads(path.read_text()) if path.exists() else []
-        except (json.JSONDecodeError, OSError):
-            folders = []
-
-        max_pos = max(
-            (f.get("position", 0) for f in folders if f.get("parentId") == parent_id),
-            default=-1,
+        result = self.client.create_folder(
+            notebook_id,
+            name,
+            parent_id=parent_id,
+            section_id=section_id,
         )
-
-        folder = {
-            "id": str(uuid4()),
-            "notebookId": notebook_id,
-            "name": name,
-            "parentId": parent_id,
-            "sectionId": section_id,
-            "isArchived": False,
-            "position": max_pos + 1,
-            "folderType": "Standard",
-        }
-        folders.append(folder)
-
-        # Atomic write
-        tmp = path.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(folders, indent=2) + "\n")
-        tmp.rename(path)
-
-        return {"id": folder["id"], "name": folder["name"]}
+        return {"id": result["id"], "name": result.get("name", name)}
 
     # --- Files / Databases ---
 
-    def _files_dir(self, notebook_id: str) -> Path:
-        return self._notebook_dir(notebook_id) / "files"
-
-    def _database_path(self, notebook_id: str, page_id: str) -> Path:
-        return self._files_dir(notebook_id) / f"{page_id}.database"
-
     def read_database_content(self, notebook_id: str, page_id: str) -> dict | None:
-        """Read and parse the .database JSON file for a database page."""
-        path = self._database_path(notebook_id, page_id)
-        if not path.exists():
-            return None
         try:
-            return json.loads(path.read_text())
-        except (json.JSONDecodeError, OSError):
+            resp = self.client.get_database(notebook_id, page_id)
+        except DaemonError:
             return None
+        return resp.get("database")
 
     def write_database_content(self, notebook_id: str, page_id: str, content: dict) -> None:
-        """Atomic write of .database file (write .tmp then rename)."""
-        files_dir = self._files_dir(notebook_id)
-        files_dir.mkdir(parents=True, exist_ok=True)
-        db_path = self._database_path(notebook_id, page_id)
-        tmp = db_path.with_suffix(".database.tmp")
-        tmp.write_text(json.dumps(content, indent=2) + "\n")
-        tmp.rename(db_path)
+        self.client.put_database(notebook_id, page_id, content)
 
     def list_database_pages(
         self,
@@ -259,34 +191,20 @@ class NousStorage:
         folder_id: str | None = None,
         section_id: str | None = None,
     ) -> list[dict]:
-        """List pages with pageType == 'database', enriched with property/row counts."""
-        pages = self.list_pages(
-            notebook_id, folder_id=folder_id, section_id=section_id, limit=10000
-        )
+        # `client.list_databases` returns enriched entries already
+        # (id, title, tags, propertyCount, rowCount). Apply local
+        # folder/section filters.
+        databases = self.client.list_databases(notebook_id)
         results = []
-        for p in pages:
-            if p.get("pageType") != "database":
+        for db in databases:
+            if folder_id and db.get("folderId") != folder_id:
                 continue
-            db = self.read_database_content(notebook_id, p["id"])
-            prop_count = len(db.get("properties", [])) if db else 0
-            row_count = len(db.get("rows", [])) if db else 0
-            results.append(
-                {
-                    "id": p["id"],
-                    "title": p["title"],
-                    "tags": p.get("tags", []),
-                    "folderId": p.get("folderId"),
-                    "sectionId": p.get("sectionId"),
-                    "propertyCount": prop_count,
-                    "rowCount": row_count,
-                }
-            )
+            if section_id and db.get("sectionId") != section_id:
+                continue
+            results.append(db)
         return results
 
     # --- Pages ---
-
-    def _pages_dir(self, notebook_id: str) -> Path:
-        return self._notebook_dir(notebook_id) / "pages"
 
     def list_pages(
         self,
@@ -296,17 +214,9 @@ class NousStorage:
         tag: str | None = None,
         limit: int = 50,
     ) -> list[dict]:
-        pages_dir = self._pages_dir(notebook_id)
-        if not pages_dir.exists():
-            return []
-
+        pages = self.client.list_pages(notebook_id)
         results = []
-        for path in pages_dir.glob("*.json"):
-            try:
-                page = json.loads(path.read_text())
-            except (json.JSONDecodeError, OSError):
-                continue
-
+        for page in pages:
             if page.get("isArchived", False):
                 continue
             if page.get("deletedAt") is not None:
@@ -317,200 +227,63 @@ class NousStorage:
                 continue
             if tag and tag.lower() not in [t.lower() for t in page.get("tags", [])]:
                 continue
-
-            results.append(
-                {
-                    "id": page["id"],
-                    "title": page.get("title", ""),
-                    "tags": page.get("tags", []),
-                    "folderId": page.get("folderId"),
-                    "sectionId": page.get("sectionId"),
-                    "pageType": page.get("pageType", "standard"),
-                    "isArchived": page.get("isArchived", False),
-                    "updatedAt": page.get("updatedAt", ""),
-                    "createdAt": page.get("createdAt", ""),
-                }
-            )
-
-        # Sort by updatedAt descending
+            results.append(page)
         results.sort(key=lambda p: p.get("updatedAt", ""), reverse=True)
         return results[:limit]
 
     def read_page(self, notebook_id: str, page_id: str) -> dict | None:
-        path = self._pages_dir(notebook_id) / f"{page_id}.json"
-        if not path.exists():
-            return None
         try:
-            return json.loads(path.read_text())
-        except (json.JSONDecodeError, OSError):
+            return self.client.get_page(notebook_id, page_id)
+        except DaemonError:
             return None
 
     def resolve_page(self, notebook_id: str, title_or_id: str) -> dict:
-        """Resolve a page by title prefix or UUID."""
         if UUID_RE.match(title_or_id):
             page = self.read_page(notebook_id, title_or_id)
-            if page:
-                return page
-            raise ValueError(f"Page not found: {title_or_id}")
-
-        # Load all pages and match by title
-        pages_dir = self._pages_dir(notebook_id)
-        if not pages_dir.exists():
-            raise ValueError(f"No pages in notebook {notebook_id}")
-
-        all_pages = []
-        for path in pages_dir.glob("*.json"):
-            try:
-                page = json.loads(path.read_text())
-                all_pages.append(page)
-            except (json.JSONDecodeError, OSError):
-                continue
-
-        return _resolve_name(title_or_id, all_pages, key="title")
+            if page is None:
+                raise ValueError(f"Page not found: {title_or_id}")
+            return page
+        try:
+            return self.client.resolve_page(notebook_id, title_or_id)
+        except DaemonError as e:
+            # Daemon returns 404 for "not found" — surface as ValueError
+            # for parity with the legacy disk-based behavior.
+            raise ValueError(str(e))
 
     # --- Inbox ---
 
-    def _inbox_dir(self) -> Path:
-        return self.library_path / "inbox"
-
     def list_inbox_items(self, include_processed: bool = False) -> list[dict]:
-        inbox_dir = self._inbox_dir()
-        if not inbox_dir.exists():
-            return []
-
-        results = []
-        for path in inbox_dir.glob("*.json"):
-            try:
-                item = json.loads(path.read_text())
-            except (json.JSONDecodeError, OSError):
-                continue
-
-            if not include_processed and item.get("isProcessed", False):
-                continue
-
-            results.append(item)
-
-        # Sort by capturedAt descending
-        results.sort(key=lambda i: i.get("capturedAt", ""), reverse=True)
-        return results
-
-    def get_inbox_item(self, item_id: str) -> dict | None:
-        path = self._inbox_dir() / f"{item_id}.json"
-        if not path.exists():
-            return None
-        try:
-            return json.loads(path.read_text())
-        except (json.JSONDecodeError, OSError):
-            return None
-
-    def write_inbox_item(self, item: dict) -> None:
-        inbox_dir = self._inbox_dir()
-        inbox_dir.mkdir(parents=True, exist_ok=True)
-        path = inbox_dir / f"{item['id']}.json"
-        tmp = path.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(item, indent=2) + "\n")
-        tmp.rename(path)
+        return self.client.list_inbox(include_processed=include_processed)
 
     def delete_inbox_item(self, item_id: str) -> bool:
-        path = self._inbox_dir() / f"{item_id}.json"
-        if not path.exists():
+        try:
+            self.client.delete_inbox_item(item_id)
+            return True
+        except DaemonError:
             return False
-        path.unlink()
-        return True
 
     # --- Daily Notes ---
 
     def list_daily_notes(self, notebook_id: str, limit: int = 10) -> list[dict]:
-        pages_dir = self._pages_dir(notebook_id)
-        if not pages_dir.exists():
-            return []
-
-        results = []
-        for path in pages_dir.glob("*.json"):
-            try:
-                page = json.loads(path.read_text())
-            except (json.JSONDecodeError, OSError):
-                continue
-
-            if not page.get("isDailyNote", False):
-                continue
-            if page.get("isArchived", False):
-                continue
-            if page.get("deletedAt") is not None:
-                continue
-
-            results.append({
-                "id": page["id"],
-                "title": page.get("title", ""),
-                "dailyNoteDate": page.get("dailyNoteDate", ""),
-                "tags": page.get("tags", []),
-                "folderId": page.get("folderId"),
-                "sectionId": page.get("sectionId"),
-                "updatedAt": page.get("updatedAt", ""),
-                "createdAt": page.get("createdAt", ""),
-            })
-
-        # Sort by dailyNoteDate descending
-        results.sort(key=lambda p: p.get("dailyNoteDate", ""), reverse=True)
-        return results[:limit]
+        return self.client.list_daily_notes(notebook_id, limit=limit)
 
     def get_daily_note(self, notebook_id: str, date: str) -> dict | None:
-        """Find a daily note page matching the given date (YYYY-MM-DD)."""
-        pages_dir = self._pages_dir(notebook_id)
-        if not pages_dir.exists():
-            return None
-
-        for path in pages_dir.glob("*.json"):
-            try:
-                page = json.loads(path.read_text())
-            except (json.JSONDecodeError, OSError):
-                continue
-
-            if page.get("isDailyNote") and page.get("dailyNoteDate") == date:
-                return page
-
-        return None
+        return self.client.get_daily_note(notebook_id, date)
 
     # --- Goals ---
 
-    def _goals_dir(self) -> Path:
-        return self.library_path / "goals"
-
     def list_goals(self, include_archived: bool = False) -> list[dict]:
-        path = self._goals_dir() / "goals.json"
-        if not path.exists():
-            return []
-        try:
-            goals = json.loads(path.read_text())
-        except (json.JSONDecodeError, OSError):
-            return []
-
-        if not include_archived:
-            goals = [g for g in goals if g.get("archivedAt") is None]
-
-        return goals
+        return self.client.list_goals(include_archived=include_archived)
 
     def get_goal_progress(self, goal_id: str) -> list[dict]:
-        path = self._goals_dir() / "progress" / f"{goal_id}.json"
-        if not path.exists():
-            return []
-        try:
-            return json.loads(path.read_text())
-        except (json.JSONDecodeError, OSError):
-            return []
-
-    def write_goal_progress(self, goal_id: str, entries: list[dict]) -> None:
-        progress_dir = self._goals_dir() / "progress"
-        progress_dir.mkdir(parents=True, exist_ok=True)
-        path = progress_dir / f"{goal_id}.json"
-        tmp = path.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(entries, indent=2) + "\n")
-        tmp.rename(path)
+        return self.client.get_goal_progress(goal_id)
 
     def calculate_goal_stats(self, goal_id: str) -> dict:
         """Calculate statistics for a goal: streaks, completion rate, etc.
 
-        Mirrors Rust GoalsStorage::calculate_stats.
+        Mirrors the Rust ``GoalsStorage::calculate_stats`` semantics. The
+        daemon doesn't expose a ``stats`` endpoint per goal yet, so this
+        is computed client-side from list_goals + get_goal_progress.
         """
         goals = self.list_goals(include_archived=True)
         goal = next((g for g in goals if g["id"] == goal_id), None)
@@ -534,16 +307,10 @@ class NousStorage:
         today = date.today()
         frequency = goal.get("frequency", "daily").capitalize()
 
-        # Current streak
         current_streak = _calculate_current_streak(frequency, completed_dates, today)
-
-        # Longest streak
         longest_streak = _calculate_longest_streak(frequency, completed_dates)
-
-        # Total completed
         total_completed = len(completed_dates)
 
-        # Completion rate (last 30 days for daily, 4 for weekly, 1 for monthly)
         thirty_days_ago = today - timedelta(days=30)
         recent_completed = sum(
             1 for d in completed_dates
@@ -562,60 +329,22 @@ class NousStorage:
         }
 
     def get_goals_summary(self) -> dict:
-        """Get summary of all active goals with today's completions and streaks."""
-        goals = self.list_goals(include_archived=False)
-        today = date.today().isoformat()
-
-        active_goals = len(goals)
-        completed_today = 0
-        total_streaks = 0
-        highest_streak = 0
-
-        for goal in goals:
-            entries = self.get_goal_progress(goal["id"])
-            if any(e.get("date") == today and e.get("completed") for e in entries):
-                completed_today += 1
-
-            stats = self.calculate_goal_stats(goal["id"])
-            total_streaks += stats["currentStreak"]
-            highest_streak = max(highest_streak, stats["currentStreak"])
-
-        return {
-            "activeGoals": active_goals,
-            "completedToday": completed_today,
-            "totalStreaks": total_streaks,
-            "highestStreak": highest_streak,
-        }
+        return self.client.get_goals_summary()
 
     # --- Energy ---
 
-    def _energy_dir(self) -> Path:
-        return _default_data_dir() / "energy"
-
     def list_energy_checkins(self) -> list[dict]:
-        """Read all energy check-ins from energy/checkins.json."""
-        path = self._energy_dir() / "checkins.json"
-        if not path.exists():
-            return []
-        try:
-            return json.loads(path.read_text())
-        except (json.JSONDecodeError, OSError):
-            return []
+        return self.client.get_energy_checkins()
 
-    def get_energy_checkins_range(
-        self, start: str, end: str
-    ) -> list[dict]:
-        """Filter energy check-ins by date range (YYYY-MM-DD strings)."""
-        checkins = self.list_energy_checkins()
-        return [
-            c for c in checkins
-            if start <= c.get("date", "") <= end
-        ]
+    def get_energy_checkins_range(self, start: str, end: str) -> list[dict]:
+        return self.client.get_energy_checkins(start=start, end=end)
 
     def calculate_energy_patterns(self, checkins: list[dict]) -> dict:
-        """Calculate energy patterns from check-in data.
+        """Calculate energy patterns from supplied check-in data.
 
-        Mirrors Rust EnergyStorage::calculate_patterns.
+        The daemon also exposes ``GET /api/energy/patterns`` which does the
+        same calculation server-side; kept here for callers that already
+        have checkins in hand and want to avoid the extra round-trip.
         """
         energy_totals: dict[str, list[float]] = defaultdict(list)
         mood_totals: dict[str, list[float]] = defaultdict(list)
@@ -633,7 +362,6 @@ class NousStorage:
 
             if c.get("energyLevel") is not None:
                 energy_totals[day_name].append(float(c["energyLevel"]))
-            # Also check snake_case variant for compatibility
             elif c.get("energy_level") is not None:
                 energy_totals[day_name].append(float(c["energy_level"]))
 
@@ -652,7 +380,6 @@ class NousStorage:
         typical_low_days = [d for d, avg in day_of_week_averages.items() if avg < 2.5]
         typical_high_days = [d for d, avg in day_of_week_averages.items() if avg >= 4.0]
 
-        # Current streak: consecutive days with check-ins ending at today
         current_streak = self._calculate_energy_streak()
 
         return {
@@ -664,22 +391,21 @@ class NousStorage:
         }
 
     def _calculate_energy_streak(self) -> int:
-        """Calculate consecutive days with check-ins ending at today."""
+        """Consecutive days with check-ins ending at today."""
         checkins = self.list_energy_checkins()
         if not checkins:
             return 0
 
         checkin_dates = {c.get("date", "") for c in checkins}
         today = date.today()
-        streak = 0
         check_date = today
 
         if check_date.isoformat() not in checkin_dates:
-            # Try yesterday
             check_date = today - timedelta(days=1)
             if check_date.isoformat() not in checkin_dates:
                 return 0
 
+        streak = 0
         while check_date.isoformat() in checkin_dates:
             streak += 1
             check_date -= timedelta(days=1)
@@ -694,103 +420,18 @@ class NousStorage:
         notebook_id: str | None = None,
         limit: int = 20,
     ) -> list[dict]:
-        """Brute-force case-insensitive substring search across page JSON files."""
-        query_lower = query.lower()
-        notebooks = self.list_notebooks()
+        """Search pages via the daemon's Tantivy backend.
 
-        if notebook_id:
-            notebooks = [nb for nb in notebooks if nb["id"] == notebook_id]
-
-        title_matches: list[dict] = []
-        content_matches: list[dict] = []
-
-        for nb in notebooks:
-            pages_dir = self._pages_dir(nb["id"])
-            if not pages_dir.exists():
-                continue
-
-            for path in pages_dir.glob("*.json"):
-                try:
-                    raw = path.read_text()
-                    page = json.loads(raw)
-                except (json.JSONDecodeError, OSError):
-                    continue
-
-                if page.get("isArchived", False):
-                    continue
-                if page.get("deletedAt") is not None:
-                    continue
-
-                title = page.get("title", "")
-                title_hit = query_lower in title.lower()
-
-                # Search block text content
-                snippet = ""
-                blocks = page.get("content", {}).get("blocks", [])
-                for block in blocks:
-                    text = _extract_block_text(block)
-                    if not text:
-                        continue
-                    pos = text.lower().find(query_lower)
-                    if pos >= 0:
-                        start = max(0, pos - 50)
-                        end = min(len(text), pos + len(query) + 50)
-                        prefix = "..." if start > 0 else ""
-                        suffix = "..." if end < len(text) else ""
-                        snippet = prefix + text[start:end] + suffix
-                        break
-
-                if title_hit or snippet:
-                    entry = {
-                        "pageId": page["id"],
-                        "notebookId": nb["id"],
-                        "notebookName": nb["name"],
-                        "title": title,
-                        "snippet": snippet,
-                        "tags": page.get("tags", []),
-                    }
-                    if title_hit:
-                        title_matches.append(entry)
-                    else:
-                        content_matches.append(entry)
-
-        # Title matches first
-        results = title_matches + content_matches
-        return results[:limit]
+        Returns the daemon's ``SearchHit`` shape: ``pageId``, ``notebookId``,
+        ``title``, ``snippet``, ``score``, ``pageType``. Callers that need
+        ``notebookName`` and ``tags`` (like the legacy disk-based search
+        returned) should look those up separately from list_notebooks /
+        get_page.
+        """
+        return self.client.search_pages(query, notebook_id=notebook_id, limit=limit)
 
 
-# --- Helpers ---
-
-
-def _extract_block_text(block: dict) -> str:
-    """Extract plain text from a block for search."""
-    data = block.get("data", {})
-    block_type = block.get("type", "")
-
-    if block_type in ("paragraph", "header", "quote"):
-        return data.get("text", "")
-    if block_type == "code":
-        return data.get("code", "")
-    if block_type == "list":
-        items = data.get("items", [])
-        parts = []
-        for item in items:
-            if isinstance(item, str):
-                parts.append(item)
-            elif isinstance(item, dict):
-                parts.append(item.get("content", item.get("text", "")))
-        return " ".join(parts)
-    if block_type == "checklist":
-        return " ".join(item.get("text", "") for item in data.get("items", []))
-    if block_type == "callout":
-        return f"{data.get('title', '')} {data.get('content', '')}"
-    if block_type == "table":
-        rows = data.get("content", [])
-        return " ".join(
-            cell for row in rows if isinstance(row, list) for cell in row if isinstance(cell, str)
-        )
-
-    return ""
+# --- Helpers (client-side) ---
 
 
 def _calculate_current_streak(
@@ -815,12 +456,11 @@ def _calculate_current_streak(
         return streak
 
     elif frequency == "Weekly":
-        # Group by ISO week
         completed_weeks = set()
         for d in completed_dates:
             try:
                 parsed = date.fromisoformat(d)
-                completed_weeks.add(parsed.isocalendar()[:2])  # (year, week)
+                completed_weeks.add(parsed.isocalendar()[:2])
             except ValueError:
                 continue
 
@@ -850,7 +490,6 @@ def _calculate_current_streak(
 
         current_month = (today.year, today.month)
         if current_month not in completed_months:
-            # Check previous month
             first = date(today.year, today.month, 1)
             prev = first - timedelta(days=1)
             current_month = (prev.year, prev.month)
@@ -888,7 +527,6 @@ def _calculate_longest_streak(frequency: str, completed_dates: list[str]) -> int
                 elif (curr - prev).days > 1:
                     longest = max(longest, current)
                     current = 1
-                # Skip duplicates
             except ValueError:
                 longest = max(longest, current)
                 current = 1
@@ -905,7 +543,6 @@ def _calculate_longest_streak(frequency: str, completed_dates: list[str]) -> int
         longest = 1
         current = 1
         for i in range(1, len(weeks)):
-            # Check if consecutive weeks
             prev_date = date.fromisocalendar(weeks[i - 1][0], weeks[i - 1][1], 1)
             curr_date = date.fromisocalendar(weeks[i][0], weeks[i][1], 1)
             if (curr_date - prev_date).days == 7:
@@ -953,12 +590,10 @@ def _resolve_name(name: str, items: list[dict], key: str) -> dict:
     """
     name_lower = name.lower()
 
-    # Exact match (case-insensitive)
     exact = [item for item in items if item.get(key, "").lower() == name_lower]
     if len(exact) == 1:
         return exact[0]
 
-    # Prefix match (case-insensitive)
     prefix = [item for item in items if item.get(key, "").lower().startswith(name_lower)]
     if len(prefix) == 1:
         return prefix[0]

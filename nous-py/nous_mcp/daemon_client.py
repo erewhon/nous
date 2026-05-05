@@ -2,11 +2,16 @@
 
 Routes page content reads and writes through the daemon, which handles
 BlockNote ↔ EditorJS format conversion via the Rust serde layer.
+
+The MCP server can run on a different machine than the daemon — set
+``NOUS_DAEMON_URL`` and ``NOUS_API_KEY`` to point at a remote daemon.
+The defaults below are the local-machine fallback.
 """
 
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
@@ -37,15 +42,32 @@ class DaemonError(Exception):
 
 
 class NousDaemonClient:
-    """HTTP client for the Nous daemon API."""
+    """HTTP client for the Nous daemon API.
+
+    Resolution order for connection details:
+
+    1. Explicit ``base_url`` / ``api_key`` constructor args (tests use this).
+    2. ``NOUS_DAEMON_URL`` / ``NOUS_API_KEY`` environment variables (the
+       remote-MCP setup uses this).
+    3. Defaults: ``http://localhost:7667`` and the rw key from
+       ``~/.local/share/nous/daemon-api-key`` (the local-machine setup).
+    """
 
     def __init__(
         self,
-        base_url: str = DAEMON_BASE_URL,
+        base_url: str | None = None,
         api_key: str | None = None,
     ) -> None:
-        self.base_url = base_url
-        self.api_key = api_key or _discover_api_key()
+        self.base_url = (
+            base_url
+            or os.environ.get("NOUS_DAEMON_URL")
+            or DAEMON_BASE_URL
+        ).rstrip("/")
+        self.api_key = (
+            api_key
+            or os.environ.get("NOUS_API_KEY")
+            or _discover_api_key()
+        )
         headers = {}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
@@ -375,4 +397,193 @@ class NousDaemonClient:
             self._url(f"/api/notebooks/{notebook_id}/databases/{db_id}/rows"),
             json={"row_ids": row_ids},
         )
+        return self._unwrap(resp)
+
+    def put_database(
+        self,
+        notebook_id: str,
+        db_id: str,
+        content: dict,
+    ) -> dict:
+        """Replace the whole .database content for a database page atomically.
+        Used by tools that do read-modify-write on properties/views (not just
+        rows). The daemon writes the file with atomic rename + bumps the
+        page's updatedAt."""
+        resp = self.client.put(
+            self._url(f"/api/notebooks/{notebook_id}/databases/{db_id}"),
+            json=content,
+        )
+        return self._unwrap(resp)
+
+    # --- Sections ---
+
+    def list_sections(self, notebook_id: str) -> list[dict]:
+        resp = self.client.get(
+            self._url(f"/api/notebooks/{notebook_id}/sections")
+        )
+        return self._unwrap(resp)
+
+    # --- Folders ---
+
+    def list_folders(self, notebook_id: str) -> list[dict]:
+        resp = self.client.get(
+            self._url(f"/api/notebooks/{notebook_id}/folders")
+        )
+        return self._unwrap(resp)
+
+    def create_folder(
+        self,
+        notebook_id: str,
+        name: str,
+        *,
+        parent_id: str | None = None,
+        section_id: str | None = None,
+    ) -> dict:
+        body: dict[str, Any] = {"name": name}
+        if parent_id is not None:
+            body["parent_id"] = parent_id
+        if section_id is not None:
+            body["section_id"] = section_id
+        resp = self.client.post(
+            self._url(f"/api/notebooks/{notebook_id}/folders"),
+            json=body,
+        )
+        return self._unwrap(resp)
+
+    # --- Daily Notes (list) ---
+
+    def list_daily_notes(
+        self,
+        notebook_id: str,
+        *,
+        limit: int | None = None,
+    ) -> list[dict]:
+        params: dict[str, Any] = {}
+        if limit is not None:
+            params["limit"] = limit
+        resp = self.client.get(
+            self._url(f"/api/notebooks/{notebook_id}/daily-notes"),
+            params=params,
+        )
+        return self._unwrap(resp)
+
+    # --- Inbox ---
+
+    def list_inbox(self, *, include_processed: bool = False) -> list[dict]:
+        params: dict[str, Any] = {}
+        if include_processed:
+            params["include_processed"] = "true"
+        resp = self.client.get(self._url("/api/inbox"), params=params)
+        return self._unwrap(resp)
+
+    def capture_inbox(
+        self,
+        title: str,
+        *,
+        content: str | None = None,
+        tags: list[str] | None = None,
+    ) -> dict:
+        body: dict[str, Any] = {"title": title}
+        if content is not None:
+            body["content"] = content
+        if tags is not None:
+            body["tags"] = tags
+        resp = self.client.post(self._url("/api/inbox"), json=body)
+        return self._unwrap(resp)
+
+    def delete_inbox_item(self, item_id: str) -> dict:
+        resp = self.client.delete(self._url(f"/api/inbox/{item_id}"))
+        return self._unwrap(resp)
+
+    # --- Goals ---
+
+    def list_goals(self, *, include_archived: bool = False) -> list[dict]:
+        params: dict[str, Any] = {}
+        if include_archived:
+            params["include_archived"] = "true"
+        resp = self.client.get(self._url("/api/goals"), params=params)
+        return self._unwrap(resp)
+
+    def get_goal(self, goal_id: str) -> dict:
+        resp = self.client.get(self._url(f"/api/goals/{goal_id}"))
+        return self._unwrap(resp)
+
+    def get_goal_progress(
+        self,
+        goal_id: str,
+        *,
+        start: str | None = None,
+        end: str | None = None,
+        days: int | None = None,
+    ) -> list[dict]:
+        params: dict[str, Any] = {}
+        if start is not None:
+            params["start"] = start
+        if end is not None:
+            params["end"] = end
+        if days is not None:
+            params["days"] = days
+        resp = self.client.get(
+            self._url(f"/api/goals/{goal_id}/progress"),
+            params=params,
+        )
+        return self._unwrap(resp)
+
+    def record_goal_progress(
+        self,
+        goal_id: str,
+        date: str,
+        *,
+        completed: bool | None = None,
+        value: int | None = None,
+    ) -> dict:
+        body: dict[str, Any] = {"date": date}
+        if completed is not None:
+            body["completed"] = completed
+        if value is not None:
+            body["value"] = value
+        resp = self.client.post(
+            self._url(f"/api/goals/{goal_id}/progress"),
+            json=body,
+        )
+        return self._unwrap(resp)
+
+    def get_goals_summary(self) -> dict:
+        resp = self.client.get(self._url("/api/goals/summary"))
+        return self._unwrap(resp)
+
+    # --- Energy ---
+
+    def get_energy_checkins(
+        self,
+        *,
+        start: str | None = None,
+        end: str | None = None,
+        days: int | None = None,
+    ) -> list[dict]:
+        params: dict[str, Any] = {}
+        if start is not None:
+            params["start"] = start
+        if end is not None:
+            params["end"] = end
+        if days is not None:
+            params["days"] = days
+        resp = self.client.get(self._url("/api/energy/checkins"), params=params)
+        return self._unwrap(resp)
+
+    def get_energy_patterns(
+        self,
+        *,
+        start: str | None = None,
+        end: str | None = None,
+        days: int | None = None,
+    ) -> dict:
+        params: dict[str, Any] = {}
+        if start is not None:
+            params["start"] = start
+        if end is not None:
+            params["end"] = end
+        if days is not None:
+            params["days"] = days
+        resp = self.client.get(self._url("/api/energy/patterns"), params=params)
         return self._unwrap(resp)

@@ -613,7 +613,7 @@ pub fn build_router(state: AppState, auth: AuthState) -> Router {
         )
         .route(
             "/api/notebooks/{notebook_id}/databases/{db_id}",
-            get(get_database),
+            get(get_database).put(put_database),
         )
         .route(
             "/api/notebooks/{notebook_id}/databases/{db_id}/rows",
@@ -2879,6 +2879,56 @@ async fn get_database(
             "tags": page.tags,
             "database": db_data,
         }),
+    }))
+}
+
+/// `PUT /api/notebooks/{nb}/databases/{db}` — replace the entire .database
+/// content for a database page atomically. Symmetric with `get_database`.
+/// Body is the raw `{properties, rows, views, ...}` JSON. Used by Python
+/// MCP tools that do read-modify-write on the whole structure (add a
+/// property, migrate cells, etc.); the row-only endpoints don't cover
+/// schema-level changes.
+async fn put_database(
+    State(state): State<AppState>,
+    Path((notebook_id, db_id)): Path<(String, String)>,
+    Json(body): Json<serde_json::Value>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let nb_id = parse_uuid(&notebook_id)?;
+    let pg_id = parse_uuid(&db_id)?;
+    let storage = state.storage.lock().unwrap();
+
+    let mut page = storage
+        .get_page(nb_id, pg_id)
+        .map_err(|e| api_err(StatusCode::NOT_FOUND, e.to_string()))?;
+
+    if page.page_type != PageType::Database {
+        return Err(api_err(StatusCode::BAD_REQUEST, "Not a database page"));
+    }
+
+    // Serialize prettily so the on-disk file stays diffable for git users.
+    let serialized = serde_json::to_string_pretty(&body)
+        .map_err(|e| api_err(StatusCode::BAD_REQUEST, format!("Invalid JSON body: {e}")))?;
+
+    storage
+        .write_native_file_content(&page, &serialized)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    page.updated_at = chrono::Utc::now();
+    storage
+        .update_page_metadata(&page)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    drop(storage);
+
+    state.sync_manager.queue_page_update(nb_id, pg_id);
+
+    emit_event(&state, "database.updated", serde_json::json!({
+        "notebookId": notebook_id,
+        "pageId": db_id,
+    }));
+
+    Ok(Json(ApiResponse {
+        data: serde_json::json!({"ok": true, "id": pg_id.to_string()}),
     }))
 }
 
