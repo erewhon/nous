@@ -41,7 +41,6 @@ pub mod plugins;
 
 use actions::{ActionExecutor, ActionScheduler, ActionStorage};
 use chat_sessions::ChatSessionStorage;
-use commands::BackupScheduler;
 use contacts::ContactsStorage;
 use encryption::EncryptionManager;
 use external_editor::ExternalEditorManager;
@@ -79,7 +78,6 @@ pub struct AppState {
     pub sync_manager: Arc<SyncManager>,
     pub external_editor: Mutex<ExternalEditorManager>,
     pub external_sources_storage: Arc<Mutex<ExternalSourcesStorage>>,
-    pub backup_scheduler: Arc<tokio::sync::Mutex<Option<BackupScheduler>>>,
     pub sync_scheduler: Arc<tokio::sync::Mutex<Option<SyncScheduler>>>,
     pub video_server: Arc<tokio::sync::Mutex<Option<VideoServer>>>,
     pub chat_session_storage: Arc<Mutex<ChatSessionStorage>>,
@@ -344,9 +342,7 @@ pub fn run() {
 
     let library_storage_arc = Arc::new(Mutex::new(library_storage));
 
-    // Start backup scheduler
-    let backup_scheduler = commands::start_backup_scheduler(Arc::clone(&storage_arc));
-    let backup_scheduler_arc = Arc::new(tokio::sync::Mutex::new(Some(backup_scheduler)));
+    // Backup scheduler now lives in the daemon (see `bin/cli/daemon.rs::run`) and settings flow through `POST /api/backup/settings`.
 
     // Start sync scheduler for periodic syncs — but skip if the daemon is
     // already running one. Both processes hitting WebDAV against the same
@@ -396,7 +392,6 @@ pub fn run() {
         external_editor: Mutex::new(external_editor),
         external_sources_storage: external_sources_storage_arc,
         chat_session_storage: chat_session_storage_arc,
-        backup_scheduler: backup_scheduler_arc,
         sync_scheduler: sync_scheduler_arc,
         video_server: video_server_arc,
         encryption_manager,
@@ -632,8 +627,6 @@ pub fn run() {
             commands::create_notebook_backup,
             commands::list_backups,
             commands::delete_backup,
-            commands::get_backup_settings,
-            commands::update_backup_settings,
             commands::run_scheduled_backup,
             // Notion import commands
             commands::preview_notion_export,

@@ -908,13 +908,13 @@ export interface BackupSettings {
 }
 
 export async function getBackupSettings(): Promise<BackupSettings> {
-  return invoke<BackupSettings>("get_backup_settings");
+  return daemonGet<BackupSettings>("/api/backup/settings");
 }
 
 export async function updateBackupSettings(
   settings: BackupSettings
 ): Promise<BackupSettings> {
-  return invoke<BackupSettings>("update_backup_settings", { settings });
+  return daemonPost<BackupSettings>("/api/backup/settings", settings);
 }
 
 export async function runScheduledBackup(): Promise<BackupInfo[]> {

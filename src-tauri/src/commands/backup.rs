@@ -171,37 +171,8 @@ pub fn delete_backup(backup_path: String) -> Result<(), String> {
     std::fs::remove_file(&backup_path).map_err(|e| e.to_string())
 }
 
-// ===== Scheduled Backup Settings =====
-
-/// Get backup settings
-#[tauri::command]
-pub fn get_backup_settings() -> Result<BackupSettings, String> {
-    let data_dir = crate::storage::FileStorage::default_data_dir().map_err(|e| e.to_string())?;
-    load_backup_settings(&data_dir).map_err(|e| e.to_string())
-}
-
-/// Update backup settings
-#[tauri::command]
-pub fn update_backup_settings(
-    state: State<AppState>,
-    settings: BackupSettings,
-) -> Result<BackupSettings, String> {
-    let data_dir = crate::storage::FileStorage::default_data_dir().map_err(|e| e.to_string())?;
-
-    // Calculate next backup time
-    let mut settings = settings;
-    settings.next_backup = calculate_next_backup_time(&settings);
-
-    // Save settings
-    save_backup_settings(&data_dir, &settings).map_err(|e| e.to_string())?;
-
-    // Notify the backup scheduler to reload
-    if let Some(scheduler) = &*state.backup_scheduler.blocking_lock() {
-        scheduler.reload();
-    }
-
-    Ok(settings)
-}
+// Backup-settings get/update moved to the daemon: GET/POST /api/backup/settings.
+// run_scheduled_backup stays here because it streams Tauri progress events.
 
 /// Manually trigger scheduled backup for all configured notebooks.
 /// This command runs asynchronously to allow progress events to be delivered.

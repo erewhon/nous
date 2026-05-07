@@ -548,6 +548,8 @@ pub fn build_router(state: AppState, auth: AuthState) -> Router {
         .route("/api/search/rebuild", post(rebuild_search_index))
         .route("/api/search/rag/configure", post(rag_configure))
         .route("/api/search/rag/reindex", post(rag_reindex))
+        .route("/api/backup/settings", get(get_backup_settings))
+        .route("/api/backup/settings", post(update_backup_settings))
         .route("/api/plugins", get(list_plugins))
         .route("/api/plugins/{plugin_id}/reload", post(reload_plugin))
         .route("/api/notebooks", get(list_notebooks))
@@ -1183,6 +1185,33 @@ async fn rag_reindex(
             "total": total,
         }),
     }))
+}
+
+/// `GET /api/backup/settings` — return the current scheduled-backup settings.
+async fn get_backup_settings(
+    State(_state): State<AppState>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let data_dir = nous_lib::storage::FileStorage::default_data_dir()
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let settings = nous_lib::storage::backup::load_backup_settings(&data_dir)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    Ok(Json(ApiResponse { data: settings }))
+}
+
+/// `POST /api/backup/settings` — replace the scheduled-backup settings.
+/// Recomputes `next_backup`, persists to disk, and reloads the daemon's
+/// in-process `BackupScheduler` so the new schedule takes effect immediately.
+async fn update_backup_settings(
+    State(state): State<AppState>,
+    Json(mut settings): Json<nous_lib::storage::backup::BackupSettings>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let data_dir = nous_lib::storage::FileStorage::default_data_dir()
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    settings.next_backup = nous_lib::storage::backup::calculate_next_backup_time(&settings);
+    nous_lib::storage::backup::save_backup_settings(&data_dir, &settings)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    state.backup_scheduler.reload();
+    Ok(Json(ApiResponse { data: settings }))
 }
 
 /// Extract a plain-text body from a page for embedding. Mirrors the

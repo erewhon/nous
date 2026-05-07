@@ -12,6 +12,7 @@ use anyhow::{bail, Context, Result};
 use tokio::signal;
 
 use nous_lib::actions::{ActionExecutor, ActionScheduler, ActionStorage};
+use nous_lib::commands::{start_backup_scheduler, BackupScheduler};
 use nous_lib::contacts::ContactsStorage;
 use nous_lib::energy::EnergyStorage;
 use nous_lib::goals::GoalsStorage;
@@ -61,6 +62,7 @@ pub struct DaemonState {
     /// endpoint writes back here when it persists changes.
     pub daemon_config_path: PathBuf,
     pub crdt_store: Arc<CrdtStore>,
+    pub backup_scheduler: Arc<BackupScheduler>,
     /// Plugin host (Lua VM, capability gating, hook dispatch). Optional
     /// at the type level so the daemon still compiles with the `plugins`
     /// feature off; in default builds it's always populated.
@@ -279,6 +281,10 @@ pub async fn run(library_name: Option<&str>, port: Option<u16>, bind: Option<&st
     );
     log::info!("Sync scheduler started");
 
+    // Daemon is the sole owner of periodic backups; Tauri no longer constructs one.
+    let backup_scheduler = Arc::new(start_backup_scheduler(Arc::clone(&storage_arc)));
+    log::info!("Backup scheduler started");
+
     // Build shared daemon state
     let state = Arc::new(DaemonState {
         storage: storage_arc,
@@ -295,6 +301,7 @@ pub async fn run(library_name: Option<&str>, port: Option<u16>, bind: Option<&st
         rag_config,
         daemon_config_path,
         crdt_store,
+        backup_scheduler: Arc::clone(&backup_scheduler),
         #[cfg(feature = "plugins")]
         plugin_host,
         library_path: library_path.clone(),
@@ -346,6 +353,7 @@ pub async fn run(library_name: Option<&str>, port: Option<u16>, bind: Option<&st
     // Cleanup
     log::info!("Shutting down...");
     sync_scheduler.shutdown();
+    state.backup_scheduler.shutdown();
     if let Ok(sched) = state.action_scheduler.lock() {
         sched.shutdown();
     }
