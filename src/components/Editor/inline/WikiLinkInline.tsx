@@ -18,22 +18,17 @@ export const WikiLinkInline = createReactInlineContentSpec(
   {
     render: (props) => {
       const { pageTitle, pageId } = props.inlineContent.props;
-      const isBroken = !pageId;
 
+      // Broken-state styling is owned by the "nous.wiki-link" document
+      // processor: it resolves titles against the live page index and injects
+      // a higher-specificity override. The base resolved appearance lives in
+      // blocknote-wiki-link.css so that override can win. When the processor
+      // is disabled, links simply render resolved.
       return (
         <span
           className="bn-wiki-link"
           data-page-title={pageTitle}
           data-page-id={pageId}
-          data-broken={isBroken ? "true" : undefined}
-          style={{
-            color: isBroken
-              ? "var(--bn-colors-editor-text-muted, #999)"
-              : "var(--wiki-link-color, #3b82f6)",
-            textDecoration: isBroken ? "line-through" : "none",
-            cursor: "pointer",
-            borderBottom: "1px dashed currentColor",
-          }}
         >
           {pageTitle || "untitled"}
         </span>

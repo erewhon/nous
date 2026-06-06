@@ -13,6 +13,7 @@
 import "@blocknote/core/fonts/inter.css";
 import "@blocknote/mantine/style.css";
 import "./blocknote-checklist-sort.css";
+import "./blocknote-wiki-link.css";
 
 import { combineByGroup } from "@blocknote/core";
 import { en as defaultDictionary } from "@blocknote/core/locales";
@@ -53,6 +54,7 @@ import { VimExtension } from "./vim";
 import { VimModeIndicator } from "./VimModeIndicator";
 import { useBlockNoteHeaderCollapse } from "./useBlockNoteHeaderCollapse";
 import { useChecklistSort } from "./useChecklistSort";
+import { useDocumentProcessors } from "./useDocumentProcessors";
 import { useBlockAttribution } from "../../hooks/useBlockAttribution";
 import { getCollabProvider } from "../../collab/collabStore";
 import type { EditorData } from "../../types/page";
@@ -114,7 +116,9 @@ export const BlockNoteEditor = memo(
         onBlockRefClick,
         readOnly = false,
         className = "",
+        notebookId,
         pageId,
+        pages,
         collaboration,
         collabSynced,
       },
@@ -286,6 +290,16 @@ export const BlockNoteEditor = memo(
         }
       }, [initialData, editor, collaboration]);
 
+      // ─── Document processors (broken wiki-links, etc.) ─────────────
+      // Non-mutating annotators that decorate the page live. Re-runs on
+      // edit (debounced inside the hook) and whenever the page index changes.
+      const { scheduleRun: scheduleProcessors } = useDocumentProcessors({
+        editor,
+        pageId,
+        notebookId,
+        pages,
+      });
+
       const performSave = useCallback(() => {
         if (!isDirtyRef.current) return;
         isDirtyRef.current = false;
@@ -324,7 +338,10 @@ export const BlockNoteEditor = memo(
         // Notify parent for undo history capture (without data — BlockNote
         // tracks its own state, parent captures on next save)
         onChangeRef.current?.();
-      }, [performSave]);
+
+        // Re-run document processors against the edited content.
+        scheduleProcessors();
+      }, [performSave, scheduleProcessors]);
 
       // ─── Ctrl+S explicit save ───────────────────────────────────────
       useEffect(() => {

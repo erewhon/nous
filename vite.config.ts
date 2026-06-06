@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
@@ -14,5 +15,13 @@ export default defineConfig({
     watch: {
       ignored: ["**/src-tauri/**"],
     },
+  },
+
+  // Vitest. Default to the Node environment — current tests are pure logic
+  // (processors, extraction, resolution, CSS building) with no DOM. Switch to
+  // jsdom + @testing-library/react when component/hook tests are added.
+  test: {
+    environment: "node",
+    include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
   },
 });

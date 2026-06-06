@@ -1,0 +1,14 @@
+/**
+ * Base appearance for BlockNote wiki-links.
+ *
+ * Kept in a class (not inline styles) so the broken-wiki-link document
+ * processor can override color/text-decoration via a higher-specificity
+ * injected rule. Inline styles would win over the processor's stylesheet.
+ * When the processor is disabled, links simply render in this resolved state.
+ */
+.bn-wiki-link {
+  color: var(--wiki-link-color, #3b82f6);
+  text-decoration: none;
+  cursor: pointer;
+  border-bottom: 1px dashed currentColor;
+}

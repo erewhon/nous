@@ -86,8 +86,12 @@ test-rust *ARGS:
 test-py *ARGS:
     cd nous-py && uv run pytest {{ARGS}}
 
-# Run all tests (Rust + Python)
-test: test-rust test-py
+# Run the frontend (Vitest) test suite
+test-frontend *ARGS:
+    pnpm vitest run {{ARGS}}
+
+# Run all tests (Rust + Python + frontend)
+test: test-rust test-py test-frontend
 
 # TypeScript type-check (frontend)
 typecheck:
