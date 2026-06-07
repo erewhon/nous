@@ -15,7 +15,7 @@
     "@blocknote/xl-multi-column": "0.47.0",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
-    "react-router-dom": "^7.6.1",
+    "react-router-dom": "^7.17.0",
     "y-partykit": "^0.0.33",
     "yjs": "^13.6.30",
     "zustand": "^5.0.5"
