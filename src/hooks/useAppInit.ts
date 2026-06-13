@@ -9,6 +9,7 @@ import { useContactStore } from "../stores/contactStore";
 import { useEnergyStore } from "../stores/energyStore";
 import { useInboxStore } from "../stores/inboxStore";
 import { usePluginStore } from "../stores/pluginStore";
+import { useToastStore } from "../stores/toastStore";
 import { useWindowLibrary } from "../contexts/WindowContext";
 import { initDaemonClient } from "../utils/daemon";
 import {
@@ -341,6 +342,45 @@ export function useAppInit() {
       if (unlisten) unlisten();
     };
   }, [loadTodayCheckIn]);
+
+  // Listen for sync-conflict events from the backend.
+  // The destructive-sync guard refused a merge/delete that would have
+  // catastrophically shrunk (or removed) a page. Surface a warning toast so
+  // the user knows sync was paused on that page; local content is preserved
+  // and a conflict copy was written alongside it.
+  useEffect(() => {
+    let unlisten: UnlistenFn | null = null;
+
+    const setup = async () => {
+      unlisten = await listen<{
+        notebookId: string;
+        pageId: string;
+        localBlocks: number;
+        mergedBlocks: number;
+        conflictPath?: string;
+        kind: string;
+      }>("sync-conflict", (event) => {
+        const { pageId, localBlocks, mergedBlocks, kind } = event.payload;
+        console.warn("[sync] Conflict, sync paused for page", event.payload);
+        const detail =
+          kind === "delete"
+            ? `remote tried to delete a page with ${localBlocks} block(s)`
+            : `merge would shrink ${localBlocks}→${mergedBlocks} blocks`;
+        useToastStore
+          .getState()
+          .warning(
+            `Sync paused on page ${pageId}: ${detail}. Local content preserved.`,
+            8000,
+          );
+      });
+    };
+
+    setup();
+
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, []);
 
   // Listen for mcp-inbox-updated events from the file watcher.
   // When the MCP server writes inbox items to disk, refresh the inbox store.

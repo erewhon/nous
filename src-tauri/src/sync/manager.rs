@@ -74,6 +74,19 @@ pub enum SyncError {
     PageNotFound(Uuid),
     #[error("Keyring error: {0}")]
     Keyring(String),
+    #[error(
+        "Sync would shrink page {page_id} from {local_blocks} to {merged_blocks} blocks. \
+         Conflict not auto-resolved. Local content preserved."
+    )]
+    DestructiveMergeBlocked {
+        page_id: Uuid,
+        local_blocks: usize,
+        merged_blocks: usize,
+        /// Local `.json` path that was preserved (not overwritten).
+        local_path: PathBuf,
+        /// Remote ETag at the time the destructive merge was refused.
+        remote_etag: Option<String>,
+    },
     #[error("{0}")]
     Other(String),
 }
@@ -155,6 +168,30 @@ pub struct SyncPagesUpdated {
     pub page_ids: Vec<String>,
 }
 
+/// Event payload emitted when the destructive-sync guard refuses to apply a
+/// merge/delete that would catastrophically shrink (or remove) a page.
+///
+/// The frontend surfaces this as a toast/banner: sync was paused on the
+/// affected page; the user can inspect the preserved conflict copy and merge
+/// manually. See `docs/incident-2026-05-01-webdav-sync-data-loss.md`.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncConflictDetected {
+    pub notebook_id: String,
+    /// Affected page ID
+    pub page_id: String,
+    /// Block count of the local content that was preserved
+    pub local_blocks: usize,
+    /// Block count the merge would have written (0 for a refused delete)
+    pub merged_blocks: usize,
+    /// Path to the preserved would-have-been-merged / local conflict copy,
+    /// if one was written
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub conflict_path: Option<String>,
+    /// What kind of destructive operation was refused: "shrink" or "delete"
+    pub kind: String,
+}
+
 /// Event payload sent after syncing goals from remote.
 /// The frontend uses this to refresh goal displays.
 #[derive(Clone, Serialize)]
@@ -204,6 +241,16 @@ const MAX_NOTEBOOK_CONCURRENCY: usize = 4;
 
 /// Minimum interval between on-save sync triggers for the same notebook
 const ONSAVE_DEBOUNCE_SECS: u64 = 2;
+
+/// Destructive-sync guard: a merge that drops more than this fraction of a
+/// page's blocks is refused (unless `allow_destructive_sync` is set).
+/// The 2026-05-01 incident lost 76% of blocks. See
+/// `docs/incident-2026-05-01-webdav-sync-data-loss.md`.
+const DESTRUCTIVE_SHRINK_RATIO: f32 = 0.5;
+
+/// Destructive-sync guard: a merge that drops more than this many blocks in
+/// absolute terms is refused regardless of ratio (the incident lost 28).
+const DESTRUCTIVE_SHRINK_ABS: usize = 10;
 
 /// Manager for sync operations
 pub struct SyncManager {
@@ -526,6 +573,7 @@ impl SyncManager {
             last_sync: None,
             managed_by_library: None,
             server_type: ServerType::default(),
+            allow_destructive_sync: false,
         };
 
         // Update notebook (lock only during synchronous operation)
@@ -930,6 +978,12 @@ impl SyncManager {
         let mut pages_pushed = 0;
         let mut conflicts_resolved = 0;
         let mut page_errors = 0usize;
+        // Pages where the destructive-sync guard refused a merge. These are
+        // also counted in `page_errors` (the merge returns an Err).
+        let mut blocked_merges = 0usize;
+        // Pages where the guard refused a remote deletion (from apply_pages_meta).
+        // These are NOT counted in `page_errors`.
+        let mut blocked_deletes = 0usize;
         let mut synced_page_ids: Vec<(Uuid, PageSyncResult)> = Vec::new();
 
         // 3. Fetch remote manifest + changelog + pages-meta IN PARALLEL
@@ -1123,9 +1177,30 @@ impl SyncManager {
                     }
                     synced_page_ids.push((outcome.page_id, outcome.result.unwrap()));
                 }
-                Err(_) => {
-                    // Don't abort the entire sync for one page failure.
+                Err(ref e) => {
+                    // Don't abort the entire sync for one page failure — the
+                    // guard fires per-page; other pages keep syncing.
                     // The error was already logged above.
+                    if let SyncError::DestructiveMergeBlocked {
+                        page_id,
+                        local_blocks,
+                        merged_blocks,
+                        local_path,
+                        ..
+                    } = e
+                    {
+                        blocked_merges += 1;
+                        if let Some(ref em) = emitter {
+                            em.emit_sync_conflict(&SyncConflictDetected {
+                                notebook_id: notebook_id.to_string(),
+                                page_id: page_id.to_string(),
+                                local_blocks: *local_blocks,
+                                merged_blocks: *merged_blocks,
+                                conflict_path: Some(local_path.display().to_string()),
+                                kind: "shrink".to_string(),
+                            });
+                        }
+                    }
                     page_errors += 1;
                 }
             }
@@ -1238,7 +1313,8 @@ impl SyncManager {
 
         // 6c. Apply remote page metadata (with per-page locking, not holding lock for entire loop)
         if !remote_pages_meta.is_empty() {
-            self.apply_pages_meta(storage, notebook_id, &remote_pages_meta);
+            blocked_deletes +=
+                self.apply_pages_meta(storage, notebook_id, &remote_pages_meta, &config);
         }
 
         // 6d. Pull and apply notebook metadata (pinned, position, sort order)
@@ -1474,8 +1550,14 @@ impl SyncManager {
             });
         }
 
-        if page_errors > 0 {
-            log::warn!("Sync: completed with {} page error(s)", page_errors);
+        let conflicts_blocked = blocked_merges + blocked_deletes;
+        if page_errors > 0 || conflicts_blocked > 0 {
+            log::warn!(
+                "Sync: completed with {} page error(s); {} page(s) paused by the \
+                 destructive-sync guard (local content preserved)",
+                page_errors,
+                conflicts_blocked,
+            );
         }
 
         let mut result = SyncResult::success(
@@ -1486,8 +1568,21 @@ impl SyncManager {
             asset_result.assets_pushed,
             asset_result.assets_pulled,
         );
-        if page_errors > 0 {
-            result.error = Some(format!("{} page(s) failed to sync", page_errors));
+        if page_errors > 0 || conflicts_blocked > 0 {
+            let mut parts = Vec::new();
+            // Blocked merges are also counted in page_errors; subtract them so
+            // the two messages don't double-count. Blocked deletes are separate.
+            let plain_errors = page_errors.saturating_sub(blocked_merges);
+            if plain_errors > 0 {
+                parts.push(format!("{} page(s) failed to sync", plain_errors));
+            }
+            if conflicts_blocked > 0 {
+                parts.push(format!(
+                    "{} page(s) paused by destructive-sync guard — local content preserved",
+                    conflicts_blocked,
+                ));
+            }
+            result.error = Some(parts.join("; "));
         }
         Ok(result)
     }
@@ -1686,15 +1781,24 @@ impl SyncManager {
 
     /// Apply page metadata from remote pages-meta.json to local pages.
     /// Uses per-page locking instead of holding storage lock for the entire loop.
+    ///
+    /// Returns the number of pages where the destructive-sync guard refused a
+    /// remote deletion (local still had un-deleted content). Such pages are
+    /// left intact and surfaced as conflicts; the rest of the metadata apply
+    /// continues.
     fn apply_pages_meta(
         &self,
         storage: &SharedStorage,
         notebook_id: Uuid,
         pages_meta: &HashMap<Uuid, PageMeta>,
-    ) {
+        config: &SyncConfig,
+    ) -> usize {
         if pages_meta.is_empty() {
-            return;
+            return 0;
         }
+
+        let emitter: Option<Arc<dyn SyncEventEmitter>> = self.emitter.lock().unwrap().clone();
+        let data_dir = self.data_dir.clone();
 
         // Read page list under brief lock
         let local_pages = {
@@ -1703,12 +1807,13 @@ impl SyncManager {
                 Ok(pages) => pages,
                 Err(e) => {
                     log::warn!("Sync: failed to list pages for metadata apply: {}", e);
-                    return;
+                    return 0;
                 }
             }
         };
 
         let mut applied = 0;
+        let mut blocked_deletes = 0usize;
         for page in local_pages {
             if let Some(meta) = pages_meta.get(&page.id) {
                 let is_placeholder = page.title.starts_with("Synced Page ");
@@ -1721,6 +1826,45 @@ impl SyncManager {
                 let storage_guard = storage.lock().unwrap();
                 match storage_guard.get_page(notebook_id, page.id) {
                     Ok(mut page) => {
+                        // Destructive-delete guard: remote wants to delete (or
+                        // tombstone) a page that still has un-deleted local
+                        // content. Treat un-deleted, non-empty local content as
+                        // "uncommitted edits" worth protecting. Refuse, surface
+                        // a conflict, and leave the page intact — the live
+                        // `.json` already preserves the content, so we point the
+                        // UI at it rather than writing a duplicate copy on every
+                        // sync. See docs/incident-2026-05-01-webdav-sync-data-loss.md.
+                        let remote_wants_delete =
+                            meta.deleted_at.is_some() && page.deleted_at.is_none();
+                        let local_has_content = !page.content.blocks.is_empty();
+                        if remote_wants_delete
+                            && local_has_content
+                            && !config.allow_destructive_sync
+                        {
+                            drop(storage_guard);
+                            let local_blocks = page.content.blocks.len();
+                            let live_path =
+                                Self::page_json_path_for(&data_dir, notebook_id, page.id);
+                            log::warn!(
+                                "Sync: blocked remote deletion of page {} — {} local block(s) preserved at {}",
+                                page.id,
+                                local_blocks,
+                                live_path.display(),
+                            );
+                            if let Some(ref em) = emitter {
+                                em.emit_sync_conflict(&SyncConflictDetected {
+                                    notebook_id: notebook_id.to_string(),
+                                    page_id: page.id.to_string(),
+                                    local_blocks,
+                                    merged_blocks: 0,
+                                    conflict_path: Some(live_path.display().to_string()),
+                                    kind: "delete".to_string(),
+                                });
+                            }
+                            blocked_deletes += 1;
+                            continue;
+                        }
+
                         page.title = meta.title.clone();
                         page.tags = meta.tags.clone();
                         page.folder_id = meta.folder_id;
@@ -1753,13 +1897,128 @@ impl SyncManager {
             }
         }
         log::info!(
-            "Sync: applied remote metadata to {} pages (remote has {} entries)",
+            "Sync: applied remote metadata to {} pages (remote has {} entries); \
+             {} deletion(s) blocked by guard",
             applied,
             pages_meta.len(),
+            blocked_deletes,
         );
+        blocked_deletes
     }
 
     // ===== Concurrent page sync (no &mut LocalSyncState needed) =====
+
+    /// Does replacing `old_blocks` worth of content with `new_blocks` worth
+    /// constitute a catastrophic, destructive shrink?
+    ///
+    /// Fires when the merge would drop more than [`DESTRUCTIVE_SHRINK_RATIO`]
+    /// of the blocks OR more than [`DESTRUCTIVE_SHRINK_ABS`] blocks in absolute
+    /// terms. The 2026-05-01 incident was 37 → 9 (76% / 28 blocks lost), which
+    /// trips both conditions. A growing or equal merge is never destructive,
+    /// and a page that started empty has nothing to lose.
+    fn is_destructive_shrink(old_blocks: usize, new_blocks: usize) -> bool {
+        if old_blocks == 0 || new_blocks >= old_blocks {
+            return false;
+        }
+        let lost = old_blocks - new_blocks;
+        let shrink_ratio = lost as f32 / old_blocks as f32;
+        shrink_ratio > DESTRUCTIVE_SHRINK_RATIO || lost > DESTRUCTIVE_SHRINK_ABS
+    }
+
+    /// Whether the destructive-sync guard should block a merge given the
+    /// notebook's config. Combines the threshold check with the opt-out flag.
+    fn guard_blocks_merge(config: &SyncConfig, old_blocks: usize, new_blocks: usize) -> bool {
+        !config.allow_destructive_sync && Self::is_destructive_shrink(old_blocks, new_blocks)
+    }
+
+    /// Path for the live `pages/{id}.json` file of a page.
+    fn page_json_path_for(data_dir: &Path, notebook_id: Uuid, page_id: Uuid) -> PathBuf {
+        data_dir
+            .join("notebooks")
+            .join(notebook_id.to_string())
+            .join("pages")
+            .join(format!("{}.json", page_id))
+    }
+
+    /// Preserve `content` alongside the live page as
+    /// `pages/{id}.json.conflict-{timestamp}` so a refused destructive sync is
+    /// set aside (never lost) and the user can merge it manually later.
+    /// Best-effort: returns the written path, or `None` if it could not be
+    /// written (logged, non-fatal — the live `.json` is left untouched either
+    /// way).
+    fn write_conflict_copy(
+        data_dir: &Path,
+        notebook_id: Uuid,
+        page_id: Uuid,
+        content: &EditorData,
+    ) -> Option<PathBuf> {
+        let timestamp = Utc::now().format("%Y%m%dT%H%M%S%3fZ").to_string();
+        let path = data_dir
+            .join("notebooks")
+            .join(notebook_id.to_string())
+            .join("pages")
+            .join(format!("{}.json.conflict-{}", page_id, timestamp));
+        if let Some(parent) = path.parent() {
+            if let Err(e) = std::fs::create_dir_all(parent) {
+                log::warn!(
+                    "Sync: failed to create dir for conflict file {}: {}",
+                    path.display(),
+                    e,
+                );
+                return None;
+            }
+        }
+        match serde_json::to_vec_pretty(content) {
+            // Crash-atomic write so the preserved conflict copy itself can't be
+            // left torn (reconciles with the Wave 1 storage::atomic primitive).
+            Ok(bytes) => match crate::storage::atomic::write(&path, &bytes) {
+                Ok(()) => Some(path),
+                Err(e) => {
+                    log::warn!("Sync: failed to write conflict file {}: {}", path.display(), e);
+                    None
+                }
+            },
+            Err(e) => {
+                log::warn!(
+                    "Sync: failed to serialize conflict content for page {}: {}",
+                    page_id,
+                    e,
+                );
+                None
+            }
+        }
+    }
+
+    /// Refuse a destructive merge: preserve the rejected merge result on disk
+    /// and build the [`SyncError::DestructiveMergeBlocked`] error. The live
+    /// `.json` is deliberately NOT written, so local content is preserved.
+    fn block_destructive_merge(
+        data_dir: &Path,
+        notebook_id: Uuid,
+        page: &Page,
+        merged_content: &EditorData,
+        remote_etag: Option<String>,
+    ) -> SyncError {
+        let local_blocks = page.content.blocks.len();
+        let merged_blocks = merged_content.blocks.len();
+        let conflict_path =
+            Self::write_conflict_copy(data_dir, notebook_id, page.id, merged_content);
+        log::warn!(
+            "Sync: blocked destructive merge for page {} ({}→{} blocks); \
+             local content preserved, rejected merge at {:?}",
+            page.id,
+            local_blocks,
+            merged_blocks,
+            conflict_path.as_ref().map(|p| p.display().to_string()),
+        );
+        SyncError::DestructiveMergeBlocked {
+            page_id: page.id,
+            local_blocks,
+            merged_blocks,
+            local_path: Self::page_json_path_for(data_dir, notebook_id, page.id),
+            remote_etag,
+        }
+    }
 
     /// Sync a single page concurrently. Returns outcome with sync_mark to apply later.
     async fn sync_page_concurrent(
@@ -1921,6 +2180,27 @@ impl SyncManager {
 
                 local_doc.apply_update(&remote_data)?;
 
+                // Compute the merged content once and apply the destructive-sync
+                // guard BEFORE any write (live CRDT store, .json, .crdt, remote).
+                // If the merge would catastrophically shrink the page, refuse:
+                // preserve the rejected merge as a conflict copy, leave the live
+                // .json untouched, and surface the conflict. See
+                // docs/incident-2026-05-01-webdav-sync-data-loss.md.
+                let merged_content = local_doc.to_editor_data()?;
+                if Self::guard_blocks_merge(
+                    config,
+                    page.content.blocks.len(),
+                    merged_content.blocks.len(),
+                ) {
+                    return Err(Self::block_destructive_merge(
+                        data_dir,
+                        notebook_id,
+                        page,
+                        &merged_content,
+                        remote_etag.clone(),
+                    ));
+                }
+
                 // Push remote changes to live CRDT store so open editors get them
                 if page_is_live {
                     if let Some(cs) = crdt_store {
@@ -1932,7 +2212,6 @@ impl SyncManager {
 
                 if sync_info.needs_sync {
                     // Merge case
-                    let merged_content = local_doc.to_editor_data()?;
                     {
                         let storage_guard = storage.lock().unwrap();
                         let mut updated_page = page.clone();
@@ -1951,7 +2230,6 @@ impl SyncManager {
                     return Ok((PageSyncResult::Merged, Some((result.etag, sv))));
                 } else {
                     // Pull only
-                    let merged_content = local_doc.to_editor_data()?;
                     {
                         let storage_guard = storage.lock().unwrap();
                         let mut updated_page = page.clone();
@@ -1995,8 +2273,26 @@ impl SyncManager {
                 // Try to fetch remote for merge; if the file was deleted (NotFound),
                 // just re-push without ETag.
                 match client.get_with_etag(&remote_path).await {
-                    Ok((remote_data, _)) => {
+                    Ok((remote_data, conflict_etag)) => {
                         local_doc.apply_update(&remote_data)?;
+
+                        // Apply the destructive-sync guard before writing the
+                        // merged result anywhere (live store, .crdt, remote,
+                        // .json). See docs/incident-2026-05-01-webdav-sync-data-loss.md.
+                        let merged_content = local_doc.to_editor_data()?;
+                        if Self::guard_blocks_merge(
+                            config,
+                            page.content.blocks.len(),
+                            merged_content.blocks.len(),
+                        ) {
+                            return Err(Self::block_destructive_merge(
+                                data_dir,
+                                notebook_id,
+                                page,
+                                &merged_content,
+                                conflict_etag,
+                            ));
+                        }
 
                         // Push remote changes to live CRDT store
                         if page_is_live {
@@ -2012,7 +2308,6 @@ impl SyncManager {
 
                         let result = client.put(&remote_path, &merged_state, None).await?;
 
-                        let merged_content = local_doc.to_editor_data()?;
                         {
                             let storage_guard = storage.lock().unwrap();
                             let mut updated_page = page.clone();
@@ -2876,6 +3171,7 @@ impl SyncManager {
             last_sync: None,
             managed_by_library: Some(true),
             server_type: library_config.server_type.clone(),
+            allow_destructive_sync: false,
         };
 
         // Update notebook
@@ -4265,6 +4561,133 @@ mod tests {
             a_block.data.get("text").and_then(|v| v.as_str()),
             Some("new text"),
             "seeded CRDT should carry the modified block content"
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    // ===== Destructive-sync guard =====
+    //
+    // `sync_page_concurrent_inner` needs a live WebDAV client, so the guard is
+    // exercised through the same decision helper (`is_destructive_shrink` /
+    // `guard_blocks_merge`) and side-effect (`block_destructive_merge`) the sync
+    // path uses, rather than a full network round-trip.
+
+    fn page_with_blocks(notebook_id: Uuid, n: usize) -> Page {
+        let mut page = Page::new(notebook_id, "Test Page".to_string());
+        page.content = data((0..n)
+            .map(|i| block(&format!("b{}", i), &format!("v{}", i)))
+            .collect());
+        page
+    }
+
+    /// The headline incident scenario: a 50-block page whose merge yields 5
+    /// blocks is refused (>50% AND >10 blocks). Also covers the actual 37→9.
+    #[test]
+    fn guard_fires_on_catastrophic_shrink() {
+        assert!(SyncManager::is_destructive_shrink(50, 5));
+        assert!(SyncManager::is_destructive_shrink(37, 9));
+    }
+
+    /// A small loss under both thresholds goes through normally.
+    #[test]
+    fn guard_allows_small_loss_under_threshold() {
+        // 50 → 48: 2 blocks / 4%.
+        assert!(!SyncManager::is_destructive_shrink(50, 48));
+        // 50 → 40: exactly 10 blocks lost (20%) — not over either threshold.
+        assert!(!SyncManager::is_destructive_shrink(50, 40));
+    }
+
+    /// Non-shrinking, equal, and from-empty merges always go through.
+    #[test]
+    fn guard_allows_growing_and_equal_merges() {
+        assert!(!SyncManager::is_destructive_shrink(50, 50)); // unchanged count
+        assert!(!SyncManager::is_destructive_shrink(50, 60)); // grew
+        assert!(!SyncManager::is_destructive_shrink(0, 0)); // empty → empty
+        assert!(!SyncManager::is_destructive_shrink(0, 5)); // empty → content
+    }
+
+    /// Boundary behavior of the two thresholds.
+    #[test]
+    fn guard_threshold_boundaries() {
+        // Absolute rule: 11 blocks lost (22%) trips even though ratio is low.
+        assert!(SyncManager::is_destructive_shrink(50, 39));
+        // Ratio rule: 4 → 1 is 75% (only 3 blocks) — ratio alone trips.
+        assert!(SyncManager::is_destructive_shrink(4, 1));
+        // Exactly 50% is NOT "> 50%", and 2 blocks is under the absolute rule.
+        assert!(!SyncManager::is_destructive_shrink(4, 2));
+    }
+
+    /// The opt-out flag lets power users permit destructive merges.
+    #[test]
+    fn opt_out_flag_disables_guard() {
+        let mut config = SyncConfig::default();
+        // Active by default.
+        assert!(SyncManager::guard_blocks_merge(&config, 50, 5));
+        // Under threshold: never blocked, flag or not.
+        assert!(!SyncManager::guard_blocks_merge(&config, 50, 48));
+        // Opt out: even a catastrophic shrink is allowed through.
+        config.allow_destructive_sync = true;
+        assert!(!SyncManager::guard_blocks_merge(&config, 50, 5));
+    }
+
+    /// A blocked merge preserves the local `.json` (never written) and writes
+    /// the rejected merge result as a `.json.conflict-*` copy.
+    #[test]
+    fn block_destructive_merge_preserves_local_and_writes_conflict() {
+        let dir = temp_dir("block_merge");
+        let notebook_id = Uuid::new_v4();
+        let page = page_with_blocks(notebook_id, 50);
+
+        // The merge would collapse the page to 5 blocks.
+        let merged = data((0..5).map(|i| block(&format!("m{}", i), "x")).collect());
+
+        let err = SyncManager::block_destructive_merge(
+            &dir,
+            notebook_id,
+            &page,
+            &merged,
+            Some("etag-123".to_string()),
+        );
+
+        match err {
+            SyncError::DestructiveMergeBlocked {
+                page_id,
+                local_blocks,
+                merged_blocks,
+                remote_etag,
+                ..
+            } => {
+                assert_eq!(page_id, page.id);
+                assert_eq!(local_blocks, 50);
+                assert_eq!(merged_blocks, 5);
+                assert_eq!(remote_etag.as_deref(), Some("etag-123"));
+            }
+            other => panic!("expected DestructiveMergeBlocked, got {:?}", other),
+        }
+
+        // The live .json must NOT have been written — local content preserved.
+        let live = SyncManager::page_json_path_for(&dir, notebook_id, page.id);
+        assert!(!live.exists(), "guard must not write the live page .json");
+
+        // Exactly one conflict copy holding the rejected (5-block) merge.
+        let pages_dir = dir
+            .join("notebooks")
+            .join(notebook_id.to_string())
+            .join("pages");
+        let conflicts: Vec<_> = std::fs::read_dir(&pages_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().contains(".json.conflict-"))
+            .collect();
+        assert_eq!(conflicts.len(), 1, "exactly one conflict copy expected");
+
+        let bytes = std::fs::read(conflicts[0].path()).unwrap();
+        let restored: EditorData = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(
+            restored.blocks.len(),
+            5,
+            "conflict copy should hold the would-have-been-merged content"
         );
 
         let _ = fs::remove_dir_all(&dir);

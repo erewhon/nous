@@ -3,8 +3,8 @@
 //! Decouples sync from Tauri so it can run in the daemon (headless) context.
 
 use super::manager::{
-    SyncContactsUpdated, SyncEnergyUpdated, SyncGoalsUpdated, SyncInboxUpdated, SyncPagesUpdated,
-    SyncProgress,
+    SyncConflictDetected, SyncContactsUpdated, SyncEnergyUpdated, SyncGoalsUpdated,
+    SyncInboxUpdated, SyncPagesUpdated, SyncProgress,
 };
 
 /// Trait for emitting sync events to a frontend or log sink.
@@ -16,6 +16,9 @@ pub trait SyncEventEmitter: Send + Sync {
     fn emit_sync_inbox_updated(&self, payload: &SyncInboxUpdated);
     fn emit_sync_contacts_updated(&self, payload: &SyncContactsUpdated);
     fn emit_sync_energy_updated(&self, payload: &SyncEnergyUpdated);
+    /// Emitted when the destructive-sync guard pauses a page (merge/delete
+    /// refused). The frontend surfaces this as a toast/banner.
+    fn emit_sync_conflict(&self, payload: &SyncConflictDetected);
 }
 
 /// Emitter that sends events via Tauri's `AppHandle` (GUI context).
@@ -66,6 +69,11 @@ impl SyncEventEmitter for TauriEmitter {
     fn emit_sync_energy_updated(&self, payload: &SyncEnergyUpdated) {
         use tauri::Emitter;
         let _ = self.app_handle.emit("sync-energy-updated", payload);
+    }
+
+    fn emit_sync_conflict(&self, payload: &SyncConflictDetected) {
+        use tauri::Emitter;
+        let _ = self.app_handle.emit("sync-conflict", payload);
     }
 }
 
@@ -123,6 +131,18 @@ impl SyncEventEmitter for LogEmitter {
         log::info!(
             "sync-energy-updated: energy_changed={}",
             payload.energy_changed,
+        );
+    }
+
+    fn emit_sync_conflict(&self, payload: &SyncConflictDetected) {
+        log::warn!(
+            "sync-conflict: notebook={} page={} {}→{} blocks kind={} preserved={:?}",
+            payload.notebook_id,
+            payload.page_id,
+            payload.local_blocks,
+            payload.merged_blocks,
+            payload.kind,
+            payload.conflict_path,
         );
     }
 }

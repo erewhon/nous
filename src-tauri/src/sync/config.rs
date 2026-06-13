@@ -62,6 +62,13 @@ pub struct SyncConfig {
     /// Detected server type (for change notification optimization)
     #[serde(default)]
     pub server_type: ServerType,
+    /// Opt-out escape hatch for the destructive-sync guard. When `true`, sync
+    /// will apply merges/deletes that catastrophically shrink a page's block
+    /// count without refusing. Defaults to `false` (guard active) — power
+    /// users who knowingly want lossy merges can flip it on.
+    /// See `docs/incident-2026-05-01-webdav-sync-data-loss.md`.
+    #[serde(default)]
+    pub allow_destructive_sync: bool,
 }
 
 impl Default for SyncConfig {
@@ -76,6 +83,7 @@ impl Default for SyncConfig {
             last_sync: None,
             managed_by_library: None,
             server_type: ServerType::default(),
+            allow_destructive_sync: false,
         }
     }
 }
