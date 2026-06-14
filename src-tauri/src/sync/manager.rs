@@ -2586,23 +2586,40 @@ impl SyncManager {
     fn discover_local_assets(
         assets_dir: &Path,
     ) -> HashMap<String, (PathBuf, u64, Option<DateTime<Utc>>)> {
-        let mut assets = HashMap::new();
-        if !assets_dir.exists() {
-            return assets;
+        Self::discover_files_under(assets_dir, "")
+    }
+
+    /// Walk `root`, returning each file keyed by `<key_prefix><path-relative-to-root>`.
+    /// Skips our own sync artifacts (`.part` downloads, `.conflict-*` copies) so
+    /// they never get pushed. Used for both `assets/` (no prefix) and `files/`
+    /// (prefix `files/`, for DB/markdown source files — DL-12).
+    fn discover_files_under(
+        root: &Path,
+        key_prefix: &str,
+    ) -> HashMap<String, (PathBuf, u64, Option<DateTime<Utc>>)> {
+        let mut out = HashMap::new();
+        if !root.exists() {
+            return out;
         }
 
-        for entry in walkdir::WalkDir::new(assets_dir)
-            .into_iter()
-            .filter_map(|e| e.ok())
-        {
+        for entry in walkdir::WalkDir::new(root).into_iter().filter_map(|e| e.ok()) {
             if !entry.file_type().is_file() {
                 continue;
             }
 
             let abs_path = entry.path().to_path_buf();
-            let relative = match abs_path.strip_prefix(assets_dir) {
+            let relative = match abs_path.strip_prefix(root) {
                 Ok(r) => r.to_string_lossy().replace('\\', "/"),
                 Err(_) => continue,
+            };
+            // Never sync our own transient artifacts.
+            if relative.ends_with(".part") || relative.contains(".conflict-") {
+                continue;
+            }
+            let key = if key_prefix.is_empty() {
+                relative
+            } else {
+                format!("{}{}", key_prefix, relative)
             };
 
             let metadata = match std::fs::metadata(&abs_path) {
@@ -2616,10 +2633,28 @@ impl SyncManager {
                 .ok()
                 .map(|t| DateTime::<Utc>::from(t));
 
-            assets.insert(relative, (abs_path, size, mtime));
+            out.insert(key, (abs_path, size, mtime));
         }
 
-        assets
+        out
+    }
+
+    /// Directory holding a notebook's file-based page source files (DL-12).
+    fn files_dir(&self, notebook_id: Uuid) -> PathBuf {
+        self.data_dir
+            .join("notebooks")
+            .join(notebook_id.to_string())
+            .join("files")
+    }
+
+    /// Resolve a CAS manifest key back to its local path: `files/…` keys live
+    /// under the notebook's `files/` dir, everything else under `assets/`.
+    fn asset_key_to_local_path(files_dir: &Path, assets_dir: &Path, key: &str) -> PathBuf {
+        if let Some(rest) = key.strip_prefix("files/") {
+            files_dir.join(rest)
+        } else {
+            assets_dir.join(key)
+        }
     }
 
     // ===== Legacy asset sync (parallel) =====
@@ -2880,12 +2915,16 @@ impl SyncManager {
         library_base_path: &str,
     ) -> Result<AssetSyncResult, SyncError> {
         let assets_dir = self.assets_dir(notebook_id);
+        let files_dir = self.files_dir(notebook_id);
         let manifest_path = format!("{}/asset-manifest.json", config.remote_path);
 
-        // 1. Discover local assets with hashes
-        let local_assets = Self::discover_local_assets(&assets_dir);
+        // 1. Discover local assets with hashes, PLUS file-based page source files
+        //    under files/ (DL-12: database rows, markdown bodies, etc.), keyed
+        //    with a `files/` prefix so the pull can route them back correctly.
+        let mut local_assets = Self::discover_files_under(&assets_dir, "");
+        local_assets.extend(Self::discover_files_under(&files_dir, "files/"));
         log::info!(
-            "CAS asset sync: discovered {} local assets for notebook {}",
+            "CAS asset sync: discovered {} local assets+files for notebook {}",
             local_assets.len(),
             notebook_id,
         );
@@ -3015,7 +3054,9 @@ impl SyncManager {
 
         // 4. Pull: check remote manifest entries missing locally
         for (relative_path, entry) in &remote_manifest {
-            let local_path = assets_dir.join(relative_path);
+            // Route `files/…` keys back under the notebook's files/ dir (DL-12).
+            let local_path =
+                Self::asset_key_to_local_path(&files_dir, &assets_dir, relative_path);
 
             if local_path.exists() {
                 // Check if local file hash matches
@@ -4586,6 +4627,41 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("sync_manager_test_{}_{}", label, Uuid::new_v4()));
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    /// DL-12: file-based page source files (files/) are discovered with a
+    /// `files/` key prefix and routed back to files/ on pull; sync artifacts
+    /// (`.part`, `.conflict-*`) are never discovered.
+    #[test]
+    fn discover_files_under_prefixes_and_excludes_artifacts() {
+        let dir = temp_dir("discover");
+        let files_dir = dir.join("files");
+        fs::create_dir_all(&files_dir).unwrap();
+        fs::write(files_dir.join("abc.database"), "{}").unwrap();
+        fs::write(files_dir.join("note.md"), "hi").unwrap();
+        // Sync artifacts that must NOT be synced.
+        fs::write(files_dir.join("abc.database.123.0.part"), "partial").unwrap();
+        fs::write(files_dir.join("abc.database.conflict-0"), "conf").unwrap();
+
+        let discovered = SyncManager::discover_files_under(&files_dir, "files/");
+        let mut keys: Vec<String> = discovered.keys().cloned().collect();
+        keys.sort();
+        assert_eq!(keys, vec!["files/abc.database", "files/note.md"]);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn asset_key_routes_files_prefix_to_files_dir() {
+        let assets_dir = Path::new("/nb/assets");
+        let files_dir = Path::new("/nb/files");
+        assert_eq!(
+            SyncManager::asset_key_to_local_path(files_dir, assets_dir, "files/abc.database"),
+            Path::new("/nb/files/abc.database")
+        );
+        assert_eq!(
+            SyncManager::asset_key_to_local_path(files_dir, assets_dir, "images/x.png"),
+            Path::new("/nb/assets/images/x.png")
+        );
     }
 
     /// Regression test for the 2026-05-01 WebDAV sync data-loss incident.
