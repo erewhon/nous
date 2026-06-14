@@ -572,7 +572,14 @@ mod tests {
 
     #[test]
     fn test_apply_block_changes_update_is_valid() {
-        // The returned update should be applicable to another doc
+        // The update returned by apply_block_changes applies cleanly to another
+        // doc that SHARES this doc's CRDT history (the supported contract — e.g.
+        // a replica synced from the same .crdt). Merging docs with INDEPENDENT
+        // histories is intentionally not supported here: blocks live as a Y.Map
+        // value, so an independent-doc apply_update collapses to last-writer-wins
+        // and would drop a side (DL-01). That case is handled at the sync layer
+        // by SyncManager::merge_remote_into_local, which adopts the remote as the
+        // base and seeds local blocks.
         let old = make_data(vec![make_block("a", "paragraph", "hello")]);
         let new = make_data(vec![
             make_block("a", "paragraph", "hello"),
@@ -580,15 +587,14 @@ mod tests {
         ]);
 
         let doc = PageDocument::from_editor_data(&old).unwrap();
+        // A replica that shares doc's history, captured before the change.
+        let doc2 = PageDocument::from_state(&doc.encode_state()).unwrap();
+
         let changes = diff_blocks(&old, &new);
         let update = doc
             .apply_block_changes(&changes, &new.blocks, new.time, new.version.as_deref())
             .unwrap();
 
-        // Create a fresh doc from old state and apply the update
-        let doc2 =
-            PageDocument::from_state(&PageDocument::from_editor_data(&old).unwrap().encode_state())
-                .unwrap();
         doc2.apply_update(&update).unwrap();
         let result = doc2.to_editor_data().unwrap();
         assert_eq!(result.blocks.len(), 2);

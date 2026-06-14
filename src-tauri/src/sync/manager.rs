@@ -17,7 +17,7 @@ use crate::energy::{EnergyCheckIn, EnergyStorage};
 use crate::goals::{Goal, GoalProgress, GoalsStorage};
 use crate::inbox::{InboxItem, InboxStorage};
 use crate::library::LibraryStorage;
-use crate::storage::oplog::diff_blocks;
+use crate::storage::oplog::{diff_blocks, BlockOp};
 use crate::storage::EditorData;
 use crate::storage::Page;
 use crate::storage::FileStorage;
@@ -2067,13 +2067,20 @@ impl SyncManager {
     /// Seeding is skipped for live pages because the CRDT store is the
     /// in-memory authority during editing; out-of-band `.json` writes to a
     /// live page are addressed by the daemon-CRDT integration task.
+    ///
+    /// Returns the document and `has_shared_history`: whether the returned doc
+    /// shares CRDT history with the remote (it came from the live store or an
+    /// on-disk `.crdt`). When false — built fresh from `.json` because no local
+    /// `.crdt` existed — the caller must NOT `apply_update` the remote onto it
+    /// (that would merge two independently-rooted docs and silently drop a side
+    /// via Y.Map LWW; DL-01). See [`Self::merge_remote_into_local`].
     fn prepare_local_doc_for_sync(
         crdt_path: &Path,
         page_id: Uuid,
         page_content: &EditorData,
         page_is_live: bool,
         crdt_store: Option<&Arc<CrdtStore>>,
-    ) -> Result<PageDocument, SyncError> {
+    ) -> Result<(PageDocument, bool), SyncError> {
         let crdt_existed = crdt_path.exists();
         let local_doc = if page_is_live {
             let store = crdt_store.ok_or_else(|| {
@@ -2108,7 +2115,60 @@ impl SyncManager {
             }
         }
 
-        Ok(local_doc)
+        // A live page's store doc and an on-disk .crdt both descend from the
+        // shared CRDT history that the remote also descends from, so a plain
+        // apply_update is a real merge. A fresh-from-.json doc does not.
+        let has_shared_history = page_is_live || crdt_existed;
+        Ok((local_doc, has_shared_history))
+    }
+
+    /// Merge remote CRDT `remote_data` into the local document, preserving local
+    /// content whether or not the two share CRDT history.
+    ///
+    /// When `has_shared_history` is true, a plain `apply_update` is a genuine
+    /// CRDT merge. When it is false — the local doc was built fresh from `.json`
+    /// because no local `.crdt` existed — `apply_update` would merge two
+    /// INDEPENDENTLY-ROOTED docs, and the block list (a Y.Map value, not a shared
+    /// array) would collapse to Y.Map last-writer-wins, silently dropping one
+    /// entire side's blocks (DL-01 / the 2026-05-01 wipe). In that case we adopt
+    /// the REMOTE as the CRDT base and seed the local `.json`-only block
+    /// additions/modifications into it — deliberately SKIPPING deletes so a block
+    /// that exists only remotely is never dropped — so both sides survive.
+    fn merge_remote_into_local(
+        local_doc: PageDocument,
+        remote_data: &[u8],
+        has_shared_history: bool,
+        page_content: &EditorData,
+        page_id: Uuid,
+    ) -> Result<PageDocument, SyncError> {
+        if has_shared_history {
+            local_doc.apply_update(remote_data)?;
+            return Ok(local_doc);
+        }
+
+        // No shared history: build from the remote base, then seed local-only
+        // block changes (inserts/modifies/moves, never deletes) on top.
+        let remote_doc = PageDocument::from_state(remote_data)?;
+        let remote_content = remote_doc.to_editor_data()?;
+        let local_changes: Vec<_> = diff_blocks(&remote_content, page_content)
+            .into_iter()
+            .filter(|c| c.op != BlockOp::Delete)
+            .collect();
+        if !local_changes.is_empty() {
+            log::warn!(
+                "Sync: page {} has no local .crdt; adopting remote as CRDT base and \
+                 seeding {} local .json block change(s) to avoid silent loss (DL-01)",
+                page_id,
+                local_changes.len(),
+            );
+            remote_doc.apply_block_changes(
+                &local_changes,
+                &page_content.blocks,
+                page_content.time,
+                page_content.version.as_deref(),
+            )?;
+        }
+        Ok(remote_doc)
     }
 
     async fn sync_page_concurrent_inner(
@@ -2135,7 +2195,7 @@ impl SyncManager {
         let page_is_live = crdt_store
             .map(|cs| cs.is_live(page.id))
             .unwrap_or(false);
-        let local_doc = Self::prepare_local_doc_for_sync(
+        let (local_doc, has_shared_history) = Self::prepare_local_doc_for_sync(
             &crdt_path,
             page.id,
             &page.content,
@@ -2178,7 +2238,16 @@ impl SyncManager {
                 let (remote_data, fetched_etag) = client.get_with_etag(&remote_path).await?;
                 let remote_etag = fetched_etag.or(remote_etag);
 
-                local_doc.apply_update(&remote_data)?;
+                // DL-01: merge safely. With shared history this is apply_update;
+                // without it (fresh-from-.json, no local .crdt) we adopt the
+                // remote as base and seed local blocks so neither side is lost.
+                let local_doc = Self::merge_remote_into_local(
+                    local_doc,
+                    &remote_data,
+                    has_shared_history,
+                    &page.content,
+                    page.id,
+                )?;
 
                 // Compute the merged content once and apply the destructive-sync
                 // guard BEFORE any write (live CRDT store, .json, .crdt, remote).
@@ -2274,7 +2343,14 @@ impl SyncManager {
                 // just re-push without ETag.
                 match client.get_with_etag(&remote_path).await {
                     Ok((remote_data, conflict_etag)) => {
-                        local_doc.apply_update(&remote_data)?;
+                        // DL-01: safe merge (see merge_remote_into_local).
+                        let local_doc = Self::merge_remote_into_local(
+                            local_doc,
+                            &remote_data,
+                            has_shared_history,
+                            &page.content,
+                            page.id,
+                        )?;
 
                         // Apply the destructive-sync guard before writing the
                         // merged result anywhere (live store, .crdt, remote,
@@ -4434,7 +4510,7 @@ mod tests {
         // Step 3: prepare the local doc the same way sync would. Page is not
         // live (closed in editor), no CRDT store.
         let page_id = Uuid::new_v4();
-        let local_doc = SyncManager::prepare_local_doc_for_sync(
+        let (local_doc, _) = SyncManager::prepare_local_doc_for_sync(
             &crdt_path,
             page_id,
             &json_content,
@@ -4490,7 +4566,7 @@ mod tests {
         let doc = PageDocument::from_editor_data(&content).unwrap();
         fs::write(&crdt_path, doc.encode_state()).unwrap();
 
-        let local_doc = SyncManager::prepare_local_doc_for_sync(
+        let (local_doc, _) = SyncManager::prepare_local_doc_for_sync(
             &crdt_path,
             Uuid::new_v4(),
             &content,
@@ -4516,7 +4592,7 @@ mod tests {
         assert!(!crdt_path.exists());
 
         let content = data(vec![block("a", "alpha")]);
-        let local_doc = SyncManager::prepare_local_doc_for_sync(
+        let (local_doc, _) = SyncManager::prepare_local_doc_for_sync(
             &crdt_path,
             Uuid::new_v4(),
             &content,
@@ -4530,6 +4606,42 @@ mod tests {
         assert_eq!(result.blocks[0].id, "a");
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// DL-01: when there is NO local `.crdt` but a remote `.crdt` exists,
+    /// merging must preserve BOTH the local (`.json`-only) blocks and the remote
+    /// blocks. The old code built an independent doc from `.json` and
+    /// `apply_update`'d the remote onto it, collapsing the block list via Y.Map
+    /// last-writer-wins and silently dropping one whole side (the 2026-05-01
+    /// wipe). `merge_remote_into_local` with `has_shared_history=false` adopts
+    /// the remote as base and seeds local-only blocks instead.
+    #[test]
+    fn no_crdt_merge_preserves_both_local_and_remote_blocks() {
+        // Local page exists only as .json (daemon/MCP/Emacs wrote it; no .crdt).
+        let local_json = data(vec![block("L1", "local one"), block("L2", "local two")]);
+        // Remote .crdt is an INDEPENDENT doc with its own block.
+        let remote_doc =
+            PageDocument::from_editor_data(&data(vec![block("R1", "remote one")])).unwrap();
+        let remote_state = remote_doc.encode_state();
+
+        // Local doc built fresh-from-json → no shared history with remote.
+        let local_doc = PageDocument::from_editor_data(&local_json).unwrap();
+
+        let merged = SyncManager::merge_remote_into_local(
+            local_doc,
+            &remote_state,
+            false, // no shared history — the DL-01 path
+            &local_json,
+            Uuid::new_v4(),
+        )
+        .unwrap();
+
+        let result = merged.to_editor_data().unwrap();
+        let ids: Vec<&str> = result.blocks.iter().map(|b| b.id.as_str()).collect();
+        assert!(ids.contains(&"L1"), "local block L1 must survive; got {:?}", ids);
+        assert!(ids.contains(&"L2"), "local block L2 must survive; got {:?}", ids);
+        assert!(ids.contains(&"R1"), "remote block R1 must survive; got {:?}", ids);
+        assert_eq!(result.blocks.len(), 3, "all three blocks must survive; got {:?}", ids);
     }
 
     /// Modifications to existing blocks in `.json` are propagated into the
@@ -4546,7 +4658,7 @@ mod tests {
         // .json has block "a" with new text — daemon edited an existing block
         let json_content = data(vec![block("a", "new text"), block("b", "untouched")]);
 
-        let local_doc = SyncManager::prepare_local_doc_for_sync(
+        let (local_doc, _) = SyncManager::prepare_local_doc_for_sync(
             &crdt_path,
             Uuid::new_v4(),
             &json_content,
