@@ -2086,6 +2086,17 @@ impl SyncManager {
             let store = crdt_store.ok_or_else(|| {
                 SyncError::Other("page_is_live=true but no CRDT store provided".into())
             })?;
+            // DL-15: fold any out-of-band .json edits (daemon/MCP/plugin/Tauri
+            // update_page) into the live CRDT before using it as the sync source,
+            // so those edits aren't silently dropped. Skips deletes, so in-flight
+            // editor blocks are preserved. No-op when .json already matches.
+            if let Err(e) = store.seed_external_edits(page_id, page_content) {
+                log::warn!(
+                    "Sync: failed to seed out-of-band .json edits into live page {}: {}",
+                    page_id,
+                    e
+                );
+            }
             let state = store.get_encoded_state(page_id).ok_or_else(|| {
                 SyncError::Other("Live page disappeared from CRDT store".into())
             })?;
@@ -2171,6 +2182,29 @@ impl SyncManager {
         Ok(remote_doc)
     }
 
+    /// Push a remote CRDT update into the live store IFF the page is live right
+    /// now. Re-checking `is_live` here (rather than trusting the value captured
+    /// at the start of the sync) narrows the DL-16 TOCTOU window: a page opened
+    /// in an editor *during* the sync round-trip still receives the remote
+    /// update, so the open editor's base doesn't go stale. Best-effort.
+    fn push_remote_to_live_if_live(
+        crdt_store: Option<&Arc<CrdtStore>>,
+        page_id: Uuid,
+        remote_data: &[u8],
+    ) {
+        if let Some(cs) = crdt_store {
+            if cs.is_live(page_id) {
+                if let Err(e) = cs.apply_remote_update(page_id, remote_data) {
+                    log::warn!(
+                        "Failed to push remote update to live CRDT store for page {}: {}",
+                        page_id,
+                        e
+                    );
+                }
+            }
+        }
+    }
+
     async fn sync_page_concurrent_inner(
         data_dir: &Path,
         client: &WebDAVClient,
@@ -2195,7 +2229,7 @@ impl SyncManager {
         let page_is_live = crdt_store
             .map(|cs| cs.is_live(page.id))
             .unwrap_or(false);
-        let (local_doc, has_shared_history) = Self::prepare_local_doc_for_sync(
+        let (mut local_doc, has_shared_history) = Self::prepare_local_doc_for_sync(
             &crdt_path,
             page.id,
             &page.content,
@@ -2270,14 +2304,10 @@ impl SyncManager {
                     ));
                 }
 
-                // Push remote changes to live CRDT store so open editors get them
-                if page_is_live {
-                    if let Some(cs) = crdt_store {
-                        if let Err(e) = cs.apply_remote_update(page.id, &remote_data) {
-                            log::warn!("Failed to push remote update to live CRDT store for page {}: {}", page.id, e);
-                        }
-                    }
-                }
+                // Push remote changes to the live CRDT store so open editors get
+                // them — re-checking liveness now (DL-16) covers a page opened
+                // mid-round-trip.
+                Self::push_remote_to_live_if_live(crdt_store, page.id, &remote_data);
 
                 if sync_info.needs_sync {
                     // Merge case
@@ -2339,72 +2369,85 @@ impl SyncManager {
 
             if result.conflict {
                 // 412 Precondition Failed — remote changed since our last sync.
-                // Try to fetch remote for merge; if the file was deleted (NotFound),
-                // just re-push without ETag.
-                match client.get_with_etag(&remote_path).await {
-                    Ok((remote_data, conflict_etag)) => {
-                        // DL-01: safe merge (see merge_remote_into_local).
-                        let local_doc = Self::merge_remote_into_local(
-                            local_doc,
-                            &remote_data,
-                            has_shared_history,
-                            &page.content,
-                            page.id,
-                        )?;
-
-                        // Apply the destructive-sync guard before writing the
-                        // merged result anywhere (live store, .crdt, remote,
-                        // .json). See docs/incident-2026-05-01-webdav-sync-data-loss.md.
-                        let merged_content = local_doc.to_editor_data()?;
-                        if Self::guard_blocks_merge(
-                            config,
-                            page.content.blocks.len(),
-                            merged_content.blocks.len(),
-                        ) {
-                            return Err(Self::block_destructive_merge(
-                                data_dir,
-                                notebook_id,
-                                page,
-                                &merged_content,
-                                conflict_etag,
-                            ));
+                // Re-fetch, merge, and re-PUT with If-Match, looping on repeated
+                // 412 so a racing third writer's update is merged in rather than
+                // clobbered (DL-43). The merged .crdt is written atomically and
+                // only AFTER the PUT succeeds, so a failed PUT can't leave local
+                // ahead of remote with no recorded etag.
+                const MAX_412_RETRIES: u32 = 5;
+                let mut shared = has_shared_history;
+                let mut attempt = 0u32;
+                loop {
+                    attempt += 1;
+                    let (remote_data, conflict_etag) = match client.get_with_etag(&remote_path).await {
+                        Ok(v) => v,
+                        Err(WebDAVError::NotFound(_)) => {
+                            // Remote file was deleted — push without ETag.
+                            log::info!("Sync: page {} conflict but remote gone, re-pushing", page.id);
+                            let result = client.put(&remote_path, &full_state, None).await?;
+                            let sv = local_doc.state_vector();
+                            return Ok((PageSyncResult::Pushed, Some((result.etag, sv))));
                         }
+                        Err(e) => return Err(e.into()),
+                    };
 
-                        // Push remote changes to live CRDT store
-                        if page_is_live {
-                            if let Some(cs) = crdt_store {
-                                if let Err(e) = cs.apply_remote_update(page.id, &remote_data) {
-                                    log::warn!("Failed to push conflict-merge update to live CRDT store for page {}: {}", page.id, e);
-                                }
-                            }
-                        }
+                    // DL-01: safe merge. After the first merge local_doc shares
+                    // history with remote, so subsequent retries use apply_update.
+                    local_doc = Self::merge_remote_into_local(
+                        local_doc,
+                        &remote_data,
+                        shared,
+                        &page.content,
+                        page.id,
+                    )?;
+                    shared = true;
 
-                        let merged_state = local_doc.encode_state();
-                        std::fs::write(&crdt_path, &merged_state)?;
-
-                        let result = client.put(&remote_path, &merged_state, None).await?;
-
-                        {
-                            let storage_guard = storage.lock().unwrap();
-                            let mut updated_page = page.clone();
-                            updated_page.content = merged_content;
-                            storage_guard.update_page_metadata(&updated_page)?;
-                        }
-
-                        let sv = local_doc.state_vector();
-                        return Ok((PageSyncResult::Merged, Some((result.etag, sv))));
+                    // Destructive-sync guard before any write.
+                    let merged_content = local_doc.to_editor_data()?;
+                    if Self::guard_blocks_merge(
+                        config,
+                        page.content.blocks.len(),
+                        merged_content.blocks.len(),
+                    ) {
+                        return Err(Self::block_destructive_merge(
+                            data_dir,
+                            notebook_id,
+                            page,
+                            &merged_content,
+                            conflict_etag,
+                        ));
                     }
-                    Err(WebDAVError::NotFound(_)) => {
-                        // Remote file was deleted — push without ETag
-                        log::info!(
-                            "Sync: page {} conflict but remote gone, re-pushing",
-                            page.id,
-                        );
-                        let result = client.put(&remote_path, &full_state, None).await?;
-                        let sv = local_doc.state_vector();
-                        return Ok((PageSyncResult::Pushed, Some((result.etag, sv))));
+
+                    // Push remote into the live store if the page is live now (DL-16).
+                    Self::push_remote_to_live_if_live(crdt_store, page.id, &remote_data);
+
+                    let merged_state = local_doc.encode_state();
+                    let put = client
+                        .put(&remote_path, &merged_state, conflict_etag.as_deref())
+                        .await?;
+
+                    if put.conflict {
+                        if attempt >= MAX_412_RETRIES {
+                            return Err(SyncError::Other(format!(
+                                "page {}: remote kept changing during conflict merge after {} attempts",
+                                page.id, attempt
+                            )));
+                        }
+                        // Remote changed again between GET and PUT — re-merge & retry.
+                        continue;
                     }
-                    Err(e) => return Err(e.into()),
+
+                    // Success: persist the merged .crdt atomically AFTER the PUT,
+                    // then the .json, and record the new etag.
+                    crate::storage::atomic::write(&crdt_path, &merged_state)?;
+                    {
+                        let storage_guard = storage.lock().unwrap();
+                        let mut updated_page = page.clone();
+                        updated_page.content = merged_content;
+                        storage_guard.update_page_metadata(&updated_page)?;
+                    }
+                    let sv = local_doc.state_vector();
+                    return Ok((PageSyncResult::Merged, Some((put.etag, sv))));
                 }
             }
 

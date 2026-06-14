@@ -16,7 +16,7 @@ use uuid::Uuid;
 use yrs::{Map, ReadTxn, Transact, WriteTxn};
 
 use super::converter::{CRDTError, PageDocument};
-use crate::storage::oplog::diff_blocks;
+use crate::storage::oplog::{diff_blocks, BlockOp};
 use crate::storage::EditorData;
 
 /// A page that is currently open in at least one editor pane.
@@ -232,6 +232,59 @@ impl CrdtStore {
         Ok(Some(canonical))
     }
 
+    /// Fold out-of-band `.json` edits into a live page's CRDT (DL-15).
+    ///
+    /// When a non-CRDT writer (daemon HTTP, MCP, plugin/action, daily-note
+    /// carry-forward, the Tauri `update_page` command) changes a page's `.json`
+    /// while it is open in an editor, those edits are not in the live CRDT and
+    /// would be silently dropped on the next sync/save. This folds in any blocks
+    /// present in `json_content` but not in the live doc (inserts / modifies /
+    /// moves) — deliberately SKIPPING deletes so the editor's in-flight,
+    /// not-yet-persisted blocks are never removed. Returns the new canonical
+    /// content if anything was seeded, `Ok(None)` if the page isn't live or there
+    /// was nothing to seed.
+    pub fn seed_external_edits(
+        &self,
+        page_id: Uuid,
+        json_content: &EditorData,
+    ) -> Result<Option<EditorData>, CRDTError> {
+        let mut live = self.live.lock().unwrap();
+        let page = match live.get_mut(&page_id) {
+            Some(p) => p,
+            None => return Ok(None),
+        };
+
+        let current = page.doc.to_editor_data()?;
+        let changes: Vec<_> = diff_blocks(&current, json_content)
+            .into_iter()
+            .filter(|c| c.op != BlockOp::Delete)
+            .collect();
+
+        if changes.is_empty() {
+            return Ok(None);
+        }
+
+        let update = page.doc.apply_block_changes(
+            &changes,
+            &json_content.blocks,
+            json_content.time,
+            json_content.version.as_deref(),
+        )?;
+        if !update.is_empty() {
+            let updates_path = self.updates_path(page.notebook_id, page_id);
+            let _ = append_binary_update(&updates_path, &update);
+        }
+        let crdt_path = self.crdt_path(page.notebook_id, page_id);
+        let state = page.doc.encode_state();
+        if let Some(parent) = crdt_path.parent() {
+            let _ = fs::create_dir_all(parent);
+        }
+        let _ = fs::write(&crdt_path, &state);
+
+        let canonical = page.doc.to_editor_data()?;
+        Ok(Some(canonical))
+    }
+
     /// Unregister a pane from a page.  If no panes remain, flush to disk and remove.
     pub fn close_pane(&self, page_id: Uuid, pane_id: &str) {
         let mut live = self.live.lock().unwrap();
@@ -433,6 +486,46 @@ mod tests {
         let ids: Vec<&str> = after_pane2.blocks.iter().map(|b| b.id.as_str()).collect();
         assert!(ids.contains(&"c"), "block C should be preserved");
         assert!(ids.contains(&"d"), "block D should be preserved");
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_seed_external_edits_adds_json_only_blocks_and_skips_deletes() {
+        let dir = std::env::temp_dir().join(format!("crdt_seed_{}", Uuid::new_v4()));
+        let store = CrdtStore::new(dir.clone());
+        let nb_id = Uuid::new_v4();
+        let page_id = Uuid::new_v4();
+
+        let content = make_data(vec![make_block("a", "paragraph", "hello")]);
+        store.open_page(nb_id, page_id, "pane1", &content).unwrap();
+
+        // Out-of-band .json gains an extra block b (e.g. an MCP append while open).
+        let json = make_data(vec![
+            make_block("a", "paragraph", "hello"),
+            make_block("b", "paragraph", "from mcp"),
+        ]);
+        let seeded = store.seed_external_edits(page_id, &json).unwrap().unwrap();
+        let ids: Vec<&str> = seeded.blocks.iter().map(|b| b.id.as_str()).collect();
+        assert!(ids.contains(&"a") && ids.contains(&"b"), "both blocks present; got {:?}", ids);
+
+        // A stale .json missing b must NOT delete the live block b (deletes skipped).
+        let stale = make_data(vec![make_block("a", "paragraph", "hello")]);
+        assert!(
+            store.seed_external_edits(page_id, &stale).unwrap().is_none(),
+            "stale json (only a delete) should be a no-op"
+        );
+        // Re-seeding the full [a,b] is now a no-op — proving b survived the stale seed.
+        assert!(
+            store.seed_external_edits(page_id, &json).unwrap().is_none(),
+            "block b should still be present (a stale json must not drop it)"
+        );
+
+        // Not-live page → None.
+        assert!(store
+            .seed_external_edits(Uuid::new_v4(), &json)
+            .unwrap()
+            .is_none());
 
         let _ = fs::remove_dir_all(&dir);
     }
