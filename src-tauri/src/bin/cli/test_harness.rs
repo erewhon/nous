@@ -186,6 +186,11 @@ impl TestEnv {
             // routes can swap this out via a future helper.
             #[cfg(feature = "plugins")]
             plugin_host: None,
+            // Inert backup scheduler — tests must not spawn the real scheduler
+            // (it runs a background loop against the real user data dir).
+            backup_scheduler: std::sync::Arc::new(
+                nous_lib::commands::BackupScheduler::inert(),
+            ),
             library_path: library_path.clone(),
             event_tx,
         });

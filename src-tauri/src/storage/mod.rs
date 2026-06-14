@@ -1,3 +1,4 @@
+pub mod atomic;
 pub mod backup;
 pub mod content_format;
 mod file_storage;

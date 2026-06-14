@@ -658,11 +658,16 @@ impl SearchIndex {
         Ok(results)
     }
 
-    /// Rebuild the entire index from pages
+    /// Rebuild the entire index from pages.
+    ///
+    /// The clear and the re-index are staged into a SINGLE commit so the index is
+    /// never observably empty: a crash or panic mid-rebuild leaves the previous
+    /// index intact (Tantivy commits are atomic) instead of wiping search until a
+    /// manual rebuild. (The daemon's incremental workaround for the Tantivy bulk
+    /// panic is tracked separately.)
     pub fn rebuild_index(&mut self, pages: &[Page]) -> Result<()> {
-        // Clear the index
+        // Stage the clear; do NOT commit yet — commit once, after re-indexing.
         self.writer.delete_all_documents()?;
-        self.writer.commit()?;
 
         // Re-index all pages
         for page in pages {

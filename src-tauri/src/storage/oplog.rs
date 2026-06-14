@@ -8,7 +8,7 @@
 //! - Block-level changes (insert/modify/delete per block)
 
 use std::fs::{self, OpenOptions};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
@@ -206,18 +206,49 @@ pub fn read_last_hash(path: &Path) -> String {
 }
 
 /// Append an oplog entry to the page's oplog file.
+///
+/// The whole `<json>\n` line is written in a single `write_all` so a normal
+/// append lands as one record. If a *previous* append was interrupted and left a
+/// partial (newline-less) line, we prefix a newline so this entry starts cleanly
+/// and the leftover bytes can't merge with — and silently corrupt — a valid
+/// entry. The entry is fsync'd so an operation that "happened" survives a crash.
 pub fn append_entry(path: &Path, entry: &OplogEntry) -> std::io::Result<()> {
+    let json = serde_json::to_string(entry).map_err(|e| {
+        std::io::Error::new(std::io::ErrorKind::InvalidData, e)
+    })?;
+
+    let needs_leading_nl = match fs::metadata(path) {
+        Ok(m) if m.len() > 0 => last_byte_is_not_newline(path),
+        _ => false,
+    };
+
     let mut file = OpenOptions::new()
         .create(true)
         .append(true)
         .open(path)?;
 
-    let json = serde_json::to_string(entry).map_err(|e| {
-        std::io::Error::new(std::io::ErrorKind::InvalidData, e)
-    })?;
-    writeln!(file, "{}", json)?;
+    let payload = if needs_leading_nl {
+        format!("\n{}\n", json)
+    } else {
+        format!("{}\n", json)
+    };
+    file.write_all(payload.as_bytes())?;
+    file.sync_data()?;
 
     Ok(())
+}
+
+/// True if the file's last byte is not a newline (i.e. a prior append was
+/// interrupted mid-line). Best-effort: returns false on any read error.
+fn last_byte_is_not_newline(path: &Path) -> bool {
+    (|| -> std::io::Result<bool> {
+        let mut f = fs::File::open(path)?;
+        f.seek(SeekFrom::End(-1))?;
+        let mut b = [0u8; 1];
+        f.read_exact(&mut b)?;
+        Ok(b[0] != b'\n')
+    })()
+    .unwrap_or(false)
 }
 
 /// Read all oplog entries for a page. Returns entries in chronological order.
@@ -446,6 +477,40 @@ mod tests {
         assert!(verify_chain(&path).is_ok());
 
         // Clean up
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn append_after_partial_line_does_not_corrupt_next_entry() {
+        // A crash mid-append can leave a newline-less partial line. The next
+        // append must isolate it so the new entry stays parseable and is not
+        // silently dropped (DL-36).
+        let dir = std::env::temp_dir().join(format!("oplog_partial_{}", Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = oplog_path(&dir, Uuid::new_v4());
+
+        // Simulate an interrupted append: valid line, then a partial one.
+        fs::write(&path, "{\"garbage\": tru").unwrap();
+
+        let entry = OplogEntry {
+            ts: Utc::now(),
+            client_id: "test".to_string(),
+            op: OpType::Modify,
+            content_hash: "sha256:good".to_string(),
+            prev_hash: "genesis".to_string(),
+            block_changes: vec![],
+            block_count: 1,
+            git_commit_id: None,
+        };
+        append_entry(&path, &entry).unwrap();
+
+        // The valid entry must be readable; the partial line is skipped, not
+        // merged into the new entry.
+        let entries = read_entries(&path);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].content_hash, "sha256:good");
+        assert_eq!(read_last_hash(&path), "sha256:good");
+
         let _ = fs::remove_dir_all(&dir);
     }
 

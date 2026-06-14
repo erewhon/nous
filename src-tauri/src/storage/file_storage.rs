@@ -87,32 +87,26 @@ impl FileStorage {
         Ok(())
     }
 
-    /// Atomic write: write to a .tmp file then rename.
-    /// rename() is atomic on ext4, APFS, and NTFS, so a crash mid-write
-    /// leaves only the .tmp file — the original is never corrupted.
+    /// Crash-atomic, durable write of string content.
+    ///
+    /// Delegates to [`super::atomic::write_str`]: unique temp file → fsync →
+    /// atomic rename → parent-dir fsync. A crash leaves either the old or the
+    /// new file fully intact, never a truncated one.
     fn atomic_write(path: &std::path::Path, content: &str) -> Result<()> {
-        let tmp_path = path.with_extension("json.tmp");
-        fs::write(&tmp_path, content)?;
-        fs::rename(&tmp_path, path)?;
+        super::atomic::write_str(path, content)?;
         Ok(())
     }
 
-    /// Recover orphaned .tmp files left by a crash during atomic_write.
-    /// If a .tmp exists but the original doesn't, rename it in place.
-    /// If both exist, the original is authoritative — remove the .tmp.
-    fn recover_tmp_file(path: &std::path::Path) {
-        let tmp_path = path.with_extension("json.tmp");
-        if tmp_path.exists() {
-            if !path.exists() {
-                // Crash after write, before rename — recover
-                if let Err(e) = fs::rename(&tmp_path, path) {
-                    eprintln!("[recovery] Failed to recover {:?}: {}", tmp_path, e);
-                } else {
-                    eprintln!("[recovery] Recovered {:?} from .tmp", path);
-                }
-            } else {
-                // Both exist — original is authoritative, remove stale .tmp
-                let _ = fs::remove_file(&tmp_path);
+    /// Keep a one-deep backup (`<name>.bak`) of an existing non-empty file before
+    /// it is overwritten, so a corrupt or semantically-empty write is
+    /// recoverable. atomic_write prevents torn writes; this guards against a bad
+    /// (e.g. accidentally-empty) *valid* write wiping the whole structure.
+    /// Best-effort — never fails the caller.
+    fn backup_before_overwrite(path: &std::path::Path) {
+        if let Ok(content) = fs::read_to_string(path) {
+            if !content.trim().is_empty() {
+                let bak = path.with_extension("json.bak");
+                let _ = super::atomic::write_str(&bak, &content);
             }
         }
     }
@@ -237,7 +231,7 @@ impl FileStorage {
 
         let metadata_path = self.notebook_metadata_path(notebook.id);
         let content = serde_json::to_string_pretty(&notebook)?;
-        fs::write(&metadata_path, content)?;
+        Self::atomic_write(&metadata_path, &content)?;
 
         Ok(notebook)
     }
@@ -253,7 +247,7 @@ impl FileStorage {
 
         let metadata_path = self.notebook_metadata_path(notebook.id);
         let content = serde_json::to_string_pretty(notebook)?;
-        fs::write(&metadata_path, content)?;
+        Self::atomic_write(&metadata_path, &content)?;
 
         Ok(notebook.clone())
     }
@@ -266,7 +260,7 @@ impl FileStorage {
         }
 
         let content = serde_json::to_string_pretty(notebook)?;
-        fs::write(&metadata_path, content)?;
+        Self::atomic_write(&metadata_path, &content)?;
 
         Ok(())
     }
@@ -308,17 +302,10 @@ impl FileStorage {
             return Err(StorageError::NotebookNotFound(notebook_id));
         }
 
-        // Recover any orphaned .tmp files left by a crash during atomic_write
-        if let Ok(entries) = fs::read_dir(&pages_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().map_or(false, |e| e == "tmp") {
-                    // .json.tmp → strip .tmp to get the target .json path
-                    let target = path.with_extension("");
-                    Self::recover_tmp_file(&target);
-                }
-            }
-        }
+        // Clean up orphan temp files left by a crash mid-write. The committed
+        // file is always authoritative (rename is atomic); an orphan temp is an
+        // incomplete write and is deleted, never promoted. See storage::atomic.
+        super::atomic::cleanup_temp_files(&pages_dir);
 
         let mut pages = Vec::new();
 
@@ -365,7 +352,7 @@ impl FileStorage {
 
         let page_path = self.page_path(notebook_id, page.id);
         let content = super::content_format::page_to_disk_json(&page)?;
-        fs::write(&page_path, content)?;
+        Self::atomic_write(&page_path, &content)?;
 
         self.oplog_record_create(&page);
         Ok(page)
@@ -380,7 +367,7 @@ impl FileStorage {
 
         let page_path = self.page_path(page.notebook_id, page.id);
         let content = super::content_format::page_to_disk_json(&page)?;
-        fs::write(&page_path, content)?;
+        Self::atomic_write(&page_path, &content)?;
 
         self.oplog_record_create(&page);
         Ok(page)
@@ -395,7 +382,7 @@ impl FileStorage {
 
         let page_path = self.page_path(notebook_id, page.id);
         let content = super::content_format::page_to_disk_json(page)?;
-        fs::write(&page_path, content)?;
+        Self::atomic_write(&page_path, &content)?;
 
         self.oplog_record_create(page);
         Ok(page.clone())
@@ -434,19 +421,57 @@ impl FileStorage {
             return Err(StorageError::PageNotFound(page.id));
         }
 
-        // Read old content for oplog diffing (best-effort — don't fail the save)
-        let old_content = fs::read_to_string(&page_path)
+        // Read the old page for oplog diffing AND pre-overwrite snapshotting
+        // (best-effort — never fail the save because the old copy is unreadable).
+        let old_page = fs::read_to_string(&page_path)
             .ok()
-            .and_then(|s| serde_json::from_str::<Page>(&s).ok())
-            .map(|p| p.content);
+            .and_then(|s| serde_json::from_str::<Page>(&s).ok());
+        let old_content = old_page.as_ref().map(|p| p.content.clone());
+
+        let pages_dir = self.pages_dir(page.notebook_id);
+        let new_hash = super::oplog::content_hash(&page.content);
+
+        // DL-03: before a DESTRUCTIVE overwrite (a save dropping a large fraction
+        // of the page's blocks), snapshot the OLD content first so the pre-edit
+        // state is always recoverable — periodic snapshots alone can miss a wipe
+        // and only capture post-overwrite content. Deduped against the latest
+        // snapshot so repeated shrinks don't pile up identical copies.
+        if let Some(ref old) = old_page {
+            // Cheap block-count check first; only hash the old content (and dedup)
+            // when an actual destructive shrink is detected, so normal saves stay
+            // cheap.
+            if super::snapshots::is_destructive_shrink(
+                old.content.blocks.len(),
+                page.content.blocks.len(),
+            ) {
+                let old_hash = super::oplog::content_hash(&old.content);
+                let snap_dir = super::snapshots::snapshots_dir(&pages_dir, page.id);
+                if old_hash != new_hash
+                    && super::snapshots::latest_content_hash(&snap_dir).as_deref()
+                        != Some(old_hash.as_str())
+                {
+                    match super::snapshots::take_snapshot(&pages_dir, old) {
+                        Ok(()) => log::warn!(
+                            "Destructive shrink on page {} ({} -> {} blocks); snapshotted pre-edit state",
+                            page.id,
+                            old.content.blocks.len(),
+                            page.content.blocks.len()
+                        ),
+                        Err(e) => log::error!(
+                            "Failed to take pre-overwrite snapshot for page {}: {}",
+                            page.id,
+                            e
+                        ),
+                    }
+                }
+            }
+        }
 
         let content = super::content_format::page_to_disk_json(page)?;
         Self::atomic_write(&page_path, &content)?;
 
         // Append oplog entry (best-effort — never fail the save for oplog issues)
-        let pages_dir = self.pages_dir(page.notebook_id);
         let oplog_file = super::oplog::oplog_path(&pages_dir, page.id);
-        let new_hash = super::oplog::content_hash(&page.content);
         let prev_hash = super::oplog::read_last_hash(&oplog_file);
 
         let block_changes = match &old_content {
@@ -471,14 +496,29 @@ impl FileStorage {
             git_commit_id: None,
         };
 
+        // DL-36: an append failure means a gap in the recovery history — log it
+        // loudly (error, not warn) rather than swallowing it.
         if let Err(e) = super::oplog::append_entry(&oplog_file, &entry) {
-            log::warn!("Failed to append oplog entry for page {}: {}", page.id, e);
+            log::error!(
+                "Failed to append oplog entry for page {} (recovery history degraded): {}",
+                page.id,
+                e
+            );
         }
 
         // Take a periodic snapshot if enough oplog entries have accumulated
         if super::snapshots::should_snapshot(&pages_dir, page.id) {
             if let Err(e) = super::snapshots::take_snapshot(&pages_dir, page) {
                 log::warn!("Failed to take snapshot for page {}: {}", page.id, e);
+            }
+            // DL-19: verify the hash chain on this (infrequent) path so silent
+            // oplog corruption is actually detected in production instead of never.
+            if let Err(idx) = super::oplog::verify_chain(&oplog_file) {
+                log::error!(
+                    "Oplog hash chain broken for page {} at entry {} — recovery history may be unreliable",
+                    page.id,
+                    idx
+                );
             }
         }
 
@@ -631,7 +671,7 @@ impl FileStorage {
         // Save page in target notebook
         let target_page_path = self.page_path(target_notebook_id, page.id);
         let content = super::content_format::page_to_disk_json(&page)?;
-        fs::write(&target_page_path, content)?;
+        Self::atomic_write(&target_page_path, &content)?;
 
         // Delete original page file
         let source_page_path = self.page_path(source_notebook_id, page_id);
@@ -883,8 +923,8 @@ impl FileStorage {
     pub fn list_folders(&self, notebook_id: Uuid) -> Result<Vec<Folder>> {
         let folders_path = self.folders_path(notebook_id);
 
-        // Recover orphaned .tmp if crash happened during atomic write
-        Self::recover_tmp_file(&folders_path);
+        // Clean up orphan temp files left by a crash mid-write (never promoted).
+        super::atomic::cleanup_temp_files(&self.notebook_dir(notebook_id));
 
         // If folders.json doesn't exist, return empty vec (migration case)
         if !folders_path.exists() {
@@ -915,6 +955,7 @@ impl FileStorage {
     /// Save all folders for a notebook
     fn save_folders(&self, notebook_id: Uuid, folders: &[Folder]) -> Result<()> {
         let folders_path = self.folders_path(notebook_id);
+        Self::backup_before_overwrite(&folders_path);
         let content = serde_json::to_string_pretty(folders)?;
         Self::atomic_write(&folders_path, &content)?;
         Ok(())
@@ -1083,8 +1124,8 @@ impl FileStorage {
     pub fn list_sections(&self, notebook_id: Uuid) -> Result<Vec<Section>> {
         let sections_path = self.sections_path(notebook_id);
 
-        // Recover orphaned .tmp if crash happened during atomic write
-        Self::recover_tmp_file(&sections_path);
+        // Clean up orphan temp files left by a crash mid-write (never promoted).
+        super::atomic::cleanup_temp_files(&self.notebook_dir(notebook_id));
 
         // If sections.json doesn't exist, return empty vec
         if !sections_path.exists() {
@@ -1111,6 +1152,7 @@ impl FileStorage {
     /// Save all sections for a notebook
     fn save_sections(&self, notebook_id: Uuid, sections: &[Section]) -> Result<()> {
         let sections_path = self.sections_path(notebook_id);
+        Self::backup_before_overwrite(&sections_path);
         let content = serde_json::to_string_pretty(sections)?;
         Self::atomic_write(&sections_path, &content)?;
         Ok(())
@@ -1610,7 +1652,7 @@ impl FileStorage {
                     let target_meta = self.metadata_path(target_notebook_id, page.id);
                     match super::content_format::page_to_disk_json(&moved) {
                         Ok(content) => {
-                            if let Err(e) = fs::write(&target_meta, content) {
+                            if let Err(e) = super::atomic::write_str(&target_meta, &content) {
                                 log::warn!("Failed to write metadata for page {}: {}", page.id, e);
                                 continue;
                             }
@@ -2004,7 +2046,7 @@ impl FileStorage {
                     let target_meta = self.metadata_path(target_notebook_id, page.id);
                     match super::content_format::page_to_disk_json(&moved) {
                         Ok(content) => {
-                            if let Err(e) = fs::write(&target_meta, content) {
+                            if let Err(e) = super::atomic::write_str(&target_meta, &content) {
                                 log::warn!(
                                     "merge_notebook: failed to write metadata for page {}: {}",
                                     page.id,
@@ -2485,7 +2527,7 @@ impl FileStorage {
         // Save page metadata
         let metadata_path = self.metadata_path(notebook_id, page_id);
         let content = super::content_format::page_to_disk_json(&page)?;
-        fs::write(&metadata_path, content)?;
+        Self::atomic_write(&metadata_path, &content)?;
 
         Ok(page)
     }
@@ -2530,7 +2572,7 @@ impl FileStorage {
             Some(FileStorageMode::Linked) | None => PathBuf::from(source_file),
         };
 
-        fs::write(&file_path, content)?;
+        Self::atomic_write(&file_path, content)?;
         Ok(())
     }
 
@@ -2756,7 +2798,7 @@ impl FileStorage {
             super::content_format::page_to_disk_json(page)?
         };
 
-        fs::write(&page_path, content)?;
+        Self::atomic_write(&page_path, &content)?;
         Ok(())
     }
 
@@ -2782,7 +2824,7 @@ impl FileStorage {
             super::content_format::page_to_disk_json(&page)?
         };
 
-        fs::write(&page_path, content)?;
+        Self::atomic_write(&page_path, &content)?;
         Ok(page)
     }
 
@@ -2875,7 +2917,7 @@ impl FileStorage {
                 let page: Page = serde_json::from_str(&content)?;
                 let container = encrypt_json(&page, key)?;
                 let encrypted = serde_json::to_string_pretty(&container)?;
-                fs::write(&path, encrypted)?;
+                Self::atomic_write(&path, &encrypted)?;
                 encrypted_count += 1;
             }
         }
@@ -2911,7 +2953,7 @@ impl FileStorage {
                 let container: EncryptedContainer = serde_json::from_str(&content)?;
                 let page: Page = decrypt_json(&container, key)?;
                 let decrypted = super::content_format::page_to_disk_json(&page)?;
-                fs::write(&path, decrypted)?;
+                Self::atomic_write(&path, &decrypted)?;
                 decrypted_count += 1;
             }
         }
@@ -2950,7 +2992,7 @@ impl FileStorage {
                     // Re-encrypt with new key
                     let new_container = encrypt_json(&page, new_key)?;
                     let encrypted = serde_json::to_string_pretty(&new_container)?;
-                    fs::write(&path, encrypted)?;
+                    Self::atomic_write(&path, &encrypted)?;
                     reencrypted_count += 1;
                 }
             }
@@ -2991,7 +3033,7 @@ impl FileStorage {
         // Save with .enc extension
         let encrypted_name = format!("{}.enc", asset_name);
         let asset_path = assets_dir.join(&encrypted_name);
-        fs::write(&asset_path, encrypted)?;
+        Self::atomic_write(&asset_path, &encrypted)?;
 
         Ok(asset_path)
     }
@@ -3091,5 +3133,95 @@ mod tests {
             "Asset path should be absolute, got: {:?}",
             assets_dir
         );
+    }
+
+    fn blocks(n: usize) -> EditorData {
+        EditorData {
+            time: Some(1000),
+            version: Some("2.28.0".to_string()),
+            blocks: (0..n)
+                .map(|i| EditorBlock {
+                    id: format!("b{}", i),
+                    block_type: "paragraph".to_string(),
+                    data: serde_json::json!({ "text": format!("line {}", i) }),
+                })
+                .collect(),
+        }
+    }
+
+    /// DL-03: a destructive shrink (dropping most of a page's blocks) must
+    /// snapshot the OLD content BEFORE overwriting, so the pre-edit state is
+    /// recoverable even though periodic snapshots wouldn't have fired yet.
+    #[test]
+    fn destructive_shrink_snapshots_old_content() {
+        let temp_dir = TempDir::new().unwrap();
+        let storage = FileStorage::new(temp_dir.path().to_path_buf());
+        storage.init().unwrap();
+        let nb = storage
+            .create_notebook("N".into(), NotebookType::default())
+            .unwrap();
+
+        // Seed a 6-block page (growth → no pre-overwrite snapshot).
+        let mut page = storage.create_page(nb.id, "P".into()).unwrap();
+        page.content = blocks(6);
+        page.updated_at = Utc::now();
+        storage.update_page(&page).unwrap();
+
+        let pages_dir = storage.pages_dir(nb.id);
+        let snap_dir = crate::storage::snapshots::snapshots_dir(&pages_dir, page.id);
+        assert!(
+            crate::storage::snapshots::list_snapshots(&snap_dir).is_empty(),
+            "growth should not trigger a pre-overwrite snapshot"
+        );
+
+        // Now wipe down to a single block (destructive shrink).
+        page.content = blocks(1);
+        page.updated_at = Utc::now();
+        storage.update_page(&page).unwrap();
+
+        let names = crate::storage::snapshots::list_snapshots(&snap_dir);
+        assert_eq!(names.len(), 1, "destructive shrink must snapshot pre-edit state");
+        let snap = crate::storage::snapshots::read_snapshot(&snap_dir, names.last().unwrap()).unwrap();
+        assert_eq!(
+            snap.content.blocks.len(),
+            6,
+            "snapshot must hold the OLD (pre-shrink) 6-block content"
+        );
+        // The live page is the shrunk version.
+        assert_eq!(storage.get_page(nb.id, page.id).unwrap().content.blocks.len(), 1);
+    }
+
+    /// DL-02: native/file-based page writes go through the atomic path — content
+    /// lands and no temp file is left behind.
+    #[test]
+    fn native_file_write_is_atomic() {
+        let temp_dir = TempDir::new().unwrap();
+        let storage = FileStorage::new(temp_dir.path().to_path_buf());
+        storage.init().unwrap();
+        let nb = storage
+            .create_notebook("N".into(), NotebookType::default())
+            .unwrap();
+
+        let mut page = storage.create_page(nb.id, "DB".into()).unwrap();
+        page.storage_mode = Some(FileStorageMode::Embedded);
+        page.source_file = Some("files/data.database".to_string());
+
+        storage
+            .write_native_file_content(&page, "{\"rows\":[1,2,3]}")
+            .unwrap();
+
+        let file_path = storage.notebook_dir(nb.id).join("files/data.database");
+        assert_eq!(fs::read_to_string(&file_path).unwrap(), "{\"rows\":[1,2,3]}");
+
+        let files_dir = storage.notebook_dir(nb.id).join("files");
+        let leftovers = fs::read_dir(&files_dir)
+            .unwrap()
+            .flatten()
+            .filter(|e| {
+                let n = e.file_name().to_string_lossy().to_string();
+                n.ends_with(".tmp") || n.ends_with(".nous-tmp")
+            })
+            .count();
+        assert_eq!(leftovers, 0, "no temp file should remain after a native write");
     }
 }

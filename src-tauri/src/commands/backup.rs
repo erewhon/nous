@@ -299,6 +299,14 @@ pub struct BackupScheduler {
 }
 
 impl BackupScheduler {
+    /// Create an inert scheduler with no background loop and no disk access, for
+    /// tests and contexts that must not run scheduled backups. Messages sent to
+    /// it are dropped harmlessly (all senders use `try_send` and ignore errors).
+    pub fn inert() -> Self {
+        let (sender, _rx) = tokio::sync::mpsc::channel(1);
+        BackupScheduler { sender }
+    }
+
     pub fn reload(&self) {
         let _ = self.sender.try_send(BackupSchedulerMessage::Reload);
     }

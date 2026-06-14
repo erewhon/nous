@@ -438,8 +438,12 @@ impl HostApi {
         })?;
         let db_json = serde_json::to_string_pretty(&db_content)
             .map_err(|e| PluginError::CallFailed(format!("serialize database: {e}")))?;
-        std::fs::write(files_dir.join(format!("{}.database", page.id)), &db_json)
-            .map_err(|e| PluginError::CallFailed(format!("write database file: {e}")))?;
+        // Crash-atomic write (DL-02): no torn/empty .database file.
+        crate::storage::atomic::write_str(
+            &files_dir.join(format!("{}.database", page.id)),
+            &db_json,
+        )
+        .map_err(|e| PluginError::CallFailed(format!("write database file: {e}")))?;
 
         // Update the page metadata
         storage

@@ -6,6 +6,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -18,6 +19,11 @@ const SNAPSHOT_INTERVAL: usize = 20;
 
 /// Default: keep the last N snapshots
 const MAX_SNAPSHOTS: usize = 50;
+
+/// Process-monotonic counter so two snapshots taken in the same microsecond
+/// (e.g. a pre-overwrite snapshot immediately followed by a periodic one) never
+/// share a filename and overwrite each other.
+static SNAPSHOT_SEQ: AtomicU64 = AtomicU64::new(0);
 
 /// Metadata stored alongside each snapshot
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -48,6 +54,11 @@ pub fn should_snapshot(pages_dir: &Path, page_id: Uuid) -> bool {
 }
 
 /// Take a snapshot of the current page state.
+///
+/// Snapshot files are written crash-atomically (`.json` first, then
+/// `.meta.json`) so a torn write can never produce a corrupt snapshot. The
+/// filename carries microseconds plus a process-monotonic counter so snapshots
+/// taken in quick succession never overwrite each other.
 pub fn take_snapshot(pages_dir: &Path, page: &Page) -> std::io::Result<()> {
     let snap_dir = snapshots_dir(pages_dir, page.id);
     fs::create_dir_all(&snap_dir)?;
@@ -56,15 +67,17 @@ pub fn take_snapshot(pages_dir: &Path, page: &Page) -> std::io::Result<()> {
     let oplog_count = super::oplog::read_entries(&oplog_path).len();
 
     let ts = Utc::now();
-    let filename = ts.format("%Y%m%d_%H%M%S").to_string();
+    let seq = SNAPSHOT_SEQ.fetch_add(1, Ordering::Relaxed) % 1_000_000;
+    // First 15 chars stay "%Y%m%d_%H%M%S" so prefix-based ordering/search works.
+    let filename = format!("{}_{:06}", ts.format("%Y%m%d_%H%M%S_%6f"), seq);
 
-    // Write page JSON snapshot
+    // Write page JSON snapshot (atomic + fsync).
     let page_json = super::content_format::page_to_disk_json(page).map_err(|e| {
         std::io::Error::new(std::io::ErrorKind::InvalidData, e)
     })?;
-    fs::write(snap_dir.join(format!("{}.json", filename)), &page_json)?;
+    super::atomic::write_str(&snap_dir.join(format!("{}.json", filename)), &page_json)?;
 
-    // Write metadata
+    // Write metadata (atomic + fsync).
     let meta = SnapshotMeta {
         ts,
         content_hash: super::oplog::content_hash(&page.content),
@@ -74,12 +87,30 @@ pub fn take_snapshot(pages_dir: &Path, page: &Page) -> std::io::Result<()> {
     let meta_json = serde_json::to_string_pretty(&meta).map_err(|e| {
         std::io::Error::new(std::io::ErrorKind::InvalidData, e)
     })?;
-    fs::write(snap_dir.join(format!("{}.meta.json", filename)), &meta_json)?;
+    super::atomic::write_str(&snap_dir.join(format!("{}.meta.json", filename)), &meta_json)?;
 
     // Prune old snapshots if over limit
     prune_snapshots(&snap_dir, MAX_SNAPSHOTS)?;
 
     Ok(())
+}
+
+/// Content hash of the most recent snapshot, if any. Used to avoid writing a
+/// duplicate snapshot of a state we already captured.
+pub fn latest_content_hash(snap_dir: &Path) -> Option<String> {
+    read_latest_meta(snap_dir).map(|m| m.content_hash)
+}
+
+/// Whether a block-count change is a "destructive shrink" worth a snapshot of
+/// the pre-edit state before overwriting. Catches the silent-wipe class of bug:
+/// a save that drops a large fraction of the page's blocks.
+pub fn is_destructive_shrink(old_count: usize, new_count: usize) -> bool {
+    if new_count >= old_count {
+        return false;
+    }
+    let lost = old_count - new_count;
+    // Losing >= 3 blocks, or more than half the page (covers a full wipe).
+    lost >= 3 || new_count * 2 < old_count
 }
 
 /// List snapshot timestamps in chronological order.
@@ -143,7 +174,10 @@ pub fn find_nearest_snapshot(snap_dir: &Path, ts: &chrono::DateTime<chrono::Utc>
     let target = ts.format("%Y%m%d_%H%M%S").to_string();
     let mut best: Option<String> = None;
     for name in &names {
-        if name.as_str() <= target.as_str() {
+        // Snapshot names are "%Y%m%d_%H%M%S_<micros>_<seq>"; compare on the
+        // 15-char datetime prefix so the sub-second suffix doesn't skew ordering.
+        let name_prefix = name.get(0..target.len()).unwrap_or(name.as_str());
+        if name_prefix <= target.as_str() {
             best = Some(name.clone());
         } else {
             break;
@@ -162,15 +196,22 @@ fn read_latest_meta(snap_dir: &Path) -> Option<SnapshotMeta> {
     serde_json::from_str(&content).ok()
 }
 
-/// Remove oldest snapshots until we're within the limit.
+/// Prune snapshots down to `max`, but ALWAYS keep the single oldest snapshot as
+/// a baseline. Pruning purely by recency could otherwise delete the last full
+/// copy of content that was silently lost long ago; keeping the oldest preserves
+/// the earliest recoverable state. We therefore retain the oldest snapshot plus
+/// the newest `max - 1`, removing only those in between.
 fn prune_snapshots(snap_dir: &Path, max: usize) -> std::io::Result<()> {
     let names = list_snapshots(snap_dir);
-    if names.len() <= max {
+    if names.len() <= max || max < 2 {
         return Ok(());
     }
 
-    let to_remove = names.len() - max;
-    for name in names.iter().take(to_remove) {
+    // Keep names[0] (oldest baseline) and the last `max - 1` (most recent).
+    let keep_oldest = 1usize;
+    let remove_start = keep_oldest;
+    let remove_end = names.len() - (max - keep_oldest);
+    for name in &names[remove_start..remove_end] {
         let _ = fs::remove_file(snap_dir.join(format!("{}.json", name)));
         let _ = fs::remove_file(snap_dir.join(format!("{}.meta.json", name)));
     }
@@ -273,10 +314,25 @@ mod tests {
         prune_snapshots(&snap_dir, 3).unwrap();
         let remaining = list_snapshots(&snap_dir);
         assert_eq!(remaining.len(), 3);
-        // Should keep the newest 3
-        assert_eq!(remaining[0], "20260101_000002");
+        // Keeps the oldest baseline (000000) plus the newest 2 (000003, 000004),
+        // dropping the middle ones — so the earliest recoverable state survives.
+        assert_eq!(remaining[0], "20260101_000000");
+        assert_eq!(remaining[1], "20260101_000003");
         assert_eq!(remaining[2], "20260101_000004");
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_destructive_shrink_detection() {
+        // Full wipe and large drops are destructive.
+        assert!(is_destructive_shrink(1, 0));
+        assert!(is_destructive_shrink(10, 0));
+        assert!(is_destructive_shrink(10, 4)); // lost 6
+        assert!(is_destructive_shrink(4, 1)); // lost >half
+        // Small or non-shrinking edits are not.
+        assert!(!is_destructive_shrink(4, 3)); // lost 1
+        assert!(!is_destructive_shrink(5, 5));
+        assert!(!is_destructive_shrink(3, 10)); // grew
     }
 }

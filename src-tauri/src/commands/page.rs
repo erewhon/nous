@@ -740,6 +740,14 @@ pub fn restore_page_snapshot(
     // Write the snapshot content as the current page (preserving the current page's metadata
     // but restoring the content from the snapshot)
     let mut current_page = storage.get_page(nb_id, pg_id)?;
+    // DL-18: snapshot the CURRENT state before overwriting it so a bad restore
+    // can itself be undone.
+    if let Err(e) = crate::storage::snapshots::take_snapshot(&pages_dir, &current_page) {
+        log::warn!(
+            "restore_page_snapshot: failed to snapshot current state before restore: {}",
+            e
+        );
+    }
     current_page.content = snapshot_page.content;
     current_page.updated_at = chrono::Utc::now();
     storage.update_page(&current_page)?;
@@ -883,6 +891,14 @@ pub fn revert_block(
 
     // Load current page and replace the block
     let mut current_page = storage.get_page(nb_id, pg_id)?;
+    // DL-18: snapshot the CURRENT state before overwriting it so a bad revert
+    // can itself be undone.
+    if let Err(e) = crate::storage::snapshots::take_snapshot(&pages_dir, &current_page) {
+        log::warn!(
+            "revert_block: failed to snapshot current state before revert: {}",
+            e
+        );
+    }
     let mut found = false;
     for block in &mut current_page.content.blocks {
         if block.id == block_id {
