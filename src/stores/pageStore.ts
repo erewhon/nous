@@ -83,6 +83,10 @@ interface PageState {
   selectedPageId: string | null;
   isLoading: boolean;
   error: string | null;
+  // Last content-save failure message, surfaced as a persistent banner so a
+  // failed/timed-out save is never silent (DL-22/24/25). Null when the most
+  // recent content save succeeded.
+  saveError: string | null;
   // Incremented when page data is fetched fresh, to force memo recomputation
   pageDataVersion: number;
   // Recent pages tracking
@@ -116,13 +120,18 @@ interface PageActions {
     pageId: string,
     updates: Partial<Page>
   ) => Promise<void>;
+  // Returns true if the content was persisted, false if the save failed (the
+  // failure is also recorded in `saveError`). Callers that drive the editor's
+  // dirty state should check the result; fire-and-forget callers may ignore it.
   updatePageContent: (
     notebookId: string,
     pageId: string,
     content: EditorData,
     commit?: boolean, // Whether to create a git commit (default: false)
     paneId?: string // Editor pane ID for CRDT multi-pane merge
-  ) => Promise<void>;
+  ) => Promise<boolean>;
+  // Clear the persistent save-error banner.
+  clearSaveError: () => void;
   // Update page content in local store only (no backend call)
   // Used for optimistic updates when flushing editor on unmount
   setPageContentLocal: (pageId: string, content: EditorData) => void;
@@ -224,6 +233,7 @@ export const usePageStore = create<PageStore>()(
       selectedPageId: null,
       isLoading: false,
       error: null,
+      saveError: null,
       pageDataVersion: 0,
       recentPages: [],
       allFavoritePages: [],
@@ -391,12 +401,16 @@ export const usePageStore = create<PageStore>()(
       },
 
       updatePageContent: async (notebookId, pageId, content, commit, paneId) => {
-        // Don't set error state here - it causes re-renders
+        // Avoid setting state on the success path — it causes editor re-renders.
         try {
           // Save to backend but don't update local store during editing
           // Updating the store causes re-renders that steal focus from the editor
           // Fresh content is fetched when switching pages via selectPage
           await api.updatePage(notebookId, pageId, { content }, commit, paneId);
+
+          // Clear a prior save-error banner only if one is set (guarded to avoid
+          // a needless re-render on the common success path).
+          if (get().saveError) set({ saveError: null });
 
           // Trigger RAG re-indexing in background (non-blocking)
           // Only index on explicit commits to avoid excessive indexing during typing
@@ -410,15 +424,19 @@ export const usePageStore = create<PageStore>()(
             // git-versioned notebooks don't stay in a perpetually dirty state
             scheduleGitAutoCommit(notebookId);
           }
+          return true;
         } catch (err) {
-          // Only update state on error
-          set({
-            error:
-              err instanceof Error
-                ? err.message
-                : "Failed to update page content",
-          });
+          // Surface the failure so callers keep the edit dirty and the user is
+          // warned (DL-22/24/25) — never swallow it into a silent success.
+          const message =
+            err instanceof Error ? err.message : "Failed to save changes";
+          if (get().saveError !== message) set({ saveError: message });
+          return false;
         }
+      },
+
+      clearSaveError: () => {
+        if (get().saveError) set({ saveError: null });
       },
 
       setPageContentLocal: (pageId, content) => {

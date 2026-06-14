@@ -494,8 +494,18 @@ export function EditorPaneContent({
       // (via onUnmountSave in BlockEditor) and on explicit save (Ctrl+S).
 
       crumb("pane:updatePageContent:start");
-      await updatePageContent(notebookId, pane.pageId, editorData, false, pane.id);
+      const ok = await updatePageContent(
+        notebookId,
+        pane.pageId,
+        editorData,
+        false,
+        pane.id
+      );
       crumb("pane:updatePageContent:done");
+
+      // DL-24: surface a failed auto-save to the editor (which keeps the edit
+      // dirty and retries) instead of reporting a silent success.
+      if (!ok) throw new Error("auto-save failed");
 
       // NOTE: We intentionally do NOT call updatePageLinks or setLastSaved here.
       // ANY React state update during auto-save triggers re-renders near the
@@ -582,10 +592,22 @@ export function EditorPaneContent({
           }),
         };
 
-        // Update local store immediately (optimistic update)
+        // DL-25: persist FIRST. Only stamp the local store / "Saved" indicator
+        // after the server confirms — otherwise a failed save still shows
+        // "Saved" and the optimistic local updatedAt masks the loss on restart.
+        const ok = await updatePageContent(
+          notebookId,
+          pane.pageId,
+          editorData,
+          true,
+          pane.id
+        );
+        if (!ok) {
+          // The save-error banner is shown via pageStore.saveError; rethrow so
+          // the editor keeps the edit dirty.
+          throw new Error("save failed");
+        }
         setPageContentLocal(pane.pageId, editorData);
-
-        await updatePageContent(notebookId, pane.pageId, editorData, true, pane.id);
         updatePageLinks({
           ...selectedPage,
           content: editorData,

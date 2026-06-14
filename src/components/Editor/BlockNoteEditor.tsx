@@ -88,6 +88,9 @@ export interface BlockNoteEditorRef {
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
+/** Delay before retrying a content save that failed (e.g. daemon restarting). */
+const SAVE_RETRY_MS = 5000;
+
 function filterItems(
   items: DefaultReactSuggestionItem[],
   query: string,
@@ -223,6 +226,8 @@ export const BlockNoteEditor = memo(
       // ─── Auto-save timer ────────────────────────────────────────────
       const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
       const isDirtyRef = useRef(false);
+      // Latest performSave, for self-rescheduling retries after a failed save.
+      const performSaveRef = useRef<() => void>(() => {});
       // Set true while applying an external update so onChange doesn't
       // mark the editor dirty (which would schedule a redundant auto-save
       // that in turn triggers the file watcher → feedback loop).
@@ -306,8 +311,21 @@ export const BlockNoteEditor = memo(
 
         const doc = editor.document;
         const editorJsData = blockNoteToEditorJs(doc);
-        onSaveRef.current?.(editorJsData);
+        const result = onSaveRef.current?.(editorJsData);
+
+        // DL-24: if the save fails (daemon down/restarting/timeout), DON'T leave
+        // the editor believing it's clean — restore the dirty flag and retry, so
+        // the edit isn't silently dropped on the next navigation/quit.
+        Promise.resolve(result).catch(() => {
+          isDirtyRef.current = true;
+          if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+          saveTimerRef.current = setTimeout(
+            () => performSaveRef.current(),
+            SAVE_RETRY_MS
+          );
+        });
       }, [editor]);
+      performSaveRef.current = performSave;
 
       // Safety-net save on unmount
       useEffect(() => {
@@ -316,7 +334,10 @@ export const BlockNoteEditor = memo(
           if (isDirtyRef.current) {
             const doc = editor.document;
             const editorJsData = blockNoteToEditorJs(doc);
-            onSaveRef.current?.(editorJsData);
+            // Swallow a rejected save here so it isn't an unhandled rejection;
+            // the failure is recorded in pageStore.saveError, and durable
+            // flush-on-navigate/quit is handled in Wave 4 slice 2.
+            Promise.resolve(onSaveRef.current?.(editorJsData)).catch(() => {});
           }
         };
       }, [editor]);
@@ -353,7 +374,13 @@ export const BlockNoteEditor = memo(
 
             const doc = editor.document;
             const editorJsData = blockNoteToEditorJs(doc);
-            onExplicitSaveRef.current?.(editorJsData);
+            const result = onExplicitSaveRef.current?.(editorJsData);
+            // DL-25: a failed Ctrl+S must not leave the editor "clean" — keep it
+            // dirty so the edit isn't lost on the next navigation/quit (the
+            // failure is also shown via the save-error banner).
+            Promise.resolve(result).catch(() => {
+              isDirtyRef.current = true;
+            });
           }
         };
         document.addEventListener("keydown", handler);

@@ -11,6 +11,7 @@ import { useDrawingStore } from "../../stores/drawingStore";
 import { useThemeStore } from "../../stores/themeStore";
 import { FolderTree } from "./FolderTree";
 import { EditorPaneContent } from "./EditorPaneContent";
+import { SaveErrorBanner } from "./SaveErrorBanner";
 import { PDFFullScreen } from "../PDF";
 import { CoverPage } from "../CoverPage";
 import { SectionList } from "../Sections";
@@ -416,6 +417,8 @@ export function EditorArea() {
 
   return (
     <div className="flex h-full">
+      {/* Save-failure banner (fixed overlay) — never let a failed save be silent */}
+      <SaveErrorBanner />
       {/* Sections panel - shown when sections are enabled, hidden in zen mode and rail mode */}
       {showInlinePanels && selectedNotebook.sectionsEnabled && !zenMode && (
         <>
