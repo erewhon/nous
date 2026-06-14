@@ -33,6 +33,8 @@ import { useMainThreadWatchdog, getWatchdogLog, clearWatchdogLog } from "./hooks
 import { readCrumbs } from "./utils/breadcrumbs";
 import { classifyFile, ALL_SUPPORTED_EXTENSIONS } from "./utils/fileImport";
 import * as api from "./utils/api";
+import { flushOutbox } from "./utils/saveOutbox";
+import { flushAllSaves } from "./utils/saveCoordinator";
 import { useNotebookStore } from "./stores/notebookStore";
 import { usePageStore } from "./stores/pageStore";
 import { useThemeStore } from "./stores/themeStore";
@@ -53,6 +55,44 @@ function App() {
   useAppInit();
   useMainThreadWatchdog({ thresholdMs: 500 });
   useCloudAutoSync();
+
+  // DL-22/26: flush pending editor saves before the window closes, and replay
+  // any saves that failed in a previous session (queued in the outbox). On a
+  // graceful quit, dirty editors are flushed and awaited; if the daemon is
+  // unreachable, the failed save stays in the persistent outbox and is replayed
+  // on the next startup.
+  useEffect(() => {
+    const replay = () => {
+      void flushOutbox().then((remaining) => {
+        if (remaining === 0) usePageStore.getState().clearSaveError();
+      });
+    };
+    replay(); // startup
+    const interval = setInterval(replay, 15000); // periodic retry while running
+
+    const appWindow = getCurrentWindow();
+    let unlisten: (() => void) | undefined;
+    appWindow
+      .onCloseRequested(async (event) => {
+        event.preventDefault();
+        try {
+          await flushAllSaves();
+          await flushOutbox();
+        } finally {
+          // destroy() (not close()) so this handler doesn't re-fire in a loop.
+          void appWindow.destroy();
+        }
+      })
+      .then((u) => {
+        unlisten = u;
+      })
+      .catch(() => {});
+
+    return () => {
+      clearInterval(interval);
+      unlisten?.();
+    };
+  }, []);
 
   // On startup, dump diagnostics from the previous session
   useEffect(() => {

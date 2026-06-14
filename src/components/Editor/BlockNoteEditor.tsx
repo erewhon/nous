@@ -56,6 +56,7 @@ import { useBlockNoteHeaderCollapse } from "./useBlockNoteHeaderCollapse";
 import { useChecklistSort } from "./useChecklistSort";
 import { useDocumentProcessors } from "./useDocumentProcessors";
 import { useBlockAttribution } from "../../hooks/useBlockAttribution";
+import { registerSaveFlusher } from "../../utils/saveCoordinator";
 import { getCollabProvider } from "../../collab/collabStore";
 import type { EditorData } from "../../types/page";
 import { usePluginStore } from "../../stores/pluginStore";
@@ -335,10 +336,38 @@ export const BlockNoteEditor = memo(
             const doc = editor.document;
             const editorJsData = blockNoteToEditorJs(doc);
             // Swallow a rejected save here so it isn't an unhandled rejection;
-            // the failure is recorded in pageStore.saveError, and durable
-            // flush-on-navigate/quit is handled in Wave 4 slice 2.
+            // the failure is recorded in pageStore.saveError + the save outbox.
             Promise.resolve(onSaveRef.current?.(editorJsData)).catch(() => {});
           }
+        };
+      }, [editor]);
+
+      // DL-26: flush a dirty editor before the app/window closes or is hidden,
+      // and register the flush so the window-close handler can await it. The
+      // legacy Editor.js editor already does this; mirror it here for BlockNote.
+      useEffect(() => {
+        const flush = async () => {
+          if (!isDirtyRef.current) return;
+          isDirtyRef.current = false;
+          const editorJsData = blockNoteToEditorJs(editor.document);
+          try {
+            await Promise.resolve(onSaveRef.current?.(editorJsData));
+          } catch {
+            // Keep dirty so the outbox / next flush retries.
+            isDirtyRef.current = true;
+          }
+        };
+        const unregister = registerSaveFlusher(flush);
+        const onVisibility = () => {
+          if (document.visibilityState === "hidden") void flush();
+        };
+        const onBeforeUnload = () => void flush();
+        document.addEventListener("visibilitychange", onVisibility);
+        window.addEventListener("beforeunload", onBeforeUnload);
+        return () => {
+          unregister();
+          document.removeEventListener("visibilitychange", onVisibility);
+          window.removeEventListener("beforeunload", onBeforeUnload);
         };
       }, [editor]);
 

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { Page } from "../../types/page";
-import { usePageStore } from "../../stores/pageStore";
+import { usePageStore, setPendingSavePromise } from "../../stores/pageStore";
 import type {
   DatabaseContentV2,
   DatabaseView,
@@ -68,6 +68,8 @@ export function DatabaseEditor({
   const [isSaving, setIsSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Latest debounced-but-not-yet-saved content, so unmount can flush it (DL-38).
+  const pendingContentRef = useRef<DatabaseContentV2 | null>(null);
 
   // Undo/redo stacks
   const MAX_UNDO = 30;
@@ -136,6 +138,8 @@ export function DatabaseEditor({
       if (saveTimeoutRef.current) {
         clearTimeout(saveTimeoutRef.current);
       }
+      // Mark this as the latest pending content so unmount can flush it (DL-38).
+      pendingContentRef.current = newContent;
       saveTimeoutRef.current = setTimeout(async () => {
         setIsSaving(true);
         try {
@@ -144,6 +148,7 @@ export function DatabaseEditor({
             page.id,
             JSON.stringify(newContent, null, 2)
           );
+          pendingContentRef.current = null; // saved
           setLastSaved(new Date());
         } catch (err) {
           console.error("Failed to save database:", err);
@@ -155,10 +160,29 @@ export function DatabaseEditor({
     [isInlineMode, onContentChange, notebookId, page]
   );
 
+  // DL-38: flush a pending debounced save on unmount/navigation instead of
+  // dropping it. Kept in a ref so the once-only cleanup sees the latest content
+  // and page without stale closures, and registered with the save-before-
+  // navigate mechanism so selectPage can await it.
+  const flushPendingSaveRef = useRef<() => void>(() => {});
+  flushPendingSaveRef.current = () => {
+    const pending = pendingContentRef.current;
+    if (!pending || !notebookId || !page) return;
+    pendingContentRef.current = null;
+    const p = api
+      .updateFileContent(notebookId, page.id, JSON.stringify(pending, null, 2))
+      .then(() => {})
+      .catch((err) =>
+        console.error("Failed to flush database save on unmount:", err)
+      );
+    setPendingSavePromise(p);
+  };
+
   useEffect(() => {
     return () => {
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
       if (snapshotTimerRef.current) clearTimeout(snapshotTimerRef.current);
+      flushPendingSaveRef.current();
     };
   }, []);
 

@@ -57,6 +57,28 @@ async function authHeaders(): Promise<Record<string, string>> {
   return key ? { Authorization: `Bearer ${key}` } : {};
 }
 
+/** Bound write requests so a down/hung daemon can't block a save forever (DL-22). */
+const WRITE_TIMEOUT_MS = 20000;
+
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit,
+  timeoutMs: number
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new DaemonError(`Request timed out after ${timeoutMs}ms`, 0);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function unwrap<T>(resp: Response): Promise<T> {
   if (!resp.ok) {
     let msg = `HTTP ${resp.status}`;
@@ -101,23 +123,31 @@ export async function daemonGetText(path: string): Promise<string> {
 export async function daemonPost<T>(path: string, body?: unknown): Promise<T> {
   const headers: Record<string, string> = await authHeaders();
   if (body !== undefined) headers["Content-Type"] = "application/json";
-  const resp = await fetch(`${DAEMON_BASE_URL}${path}`, {
-    method: "POST",
-    headers,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
+  const resp = await fetchWithTimeout(
+    `${DAEMON_BASE_URL}${path}`,
+    {
+      method: "POST",
+      headers,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    },
+    WRITE_TIMEOUT_MS
+  );
   return unwrap<T>(resp);
 }
 
 export async function daemonPut<T>(path: string, body: unknown): Promise<T> {
-  const resp = await fetch(`${DAEMON_BASE_URL}${path}`, {
-    method: "PUT",
-    headers: {
-      ...(await authHeaders()),
-      "Content-Type": "application/json",
+  const resp = await fetchWithTimeout(
+    `${DAEMON_BASE_URL}${path}`,
+    {
+      method: "PUT",
+      headers: {
+        ...(await authHeaders()),
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
     },
-    body: JSON.stringify(body),
-  });
+    WRITE_TIMEOUT_MS
+  );
   return unwrap<T>(resp);
 }
 

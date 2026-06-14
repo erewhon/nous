@@ -3,6 +3,7 @@ import { persist } from "zustand/middleware";
 import type { Page, EditorData, FavoritePageEntry } from "../types/page";
 import * as api from "../utils/api";
 import { crumb, resetCrumbs } from "../utils/breadcrumbs";
+import { enqueueFailedSave, dequeueSave } from "../utils/saveOutbox";
 import { useRAGStore } from "./ragStore";
 
 // Debounced auto-commit for git-versioned notebooks.
@@ -411,6 +412,8 @@ export const usePageStore = create<PageStore>()(
           // Clear a prior save-error banner only if one is set (guarded to avoid
           // a needless re-render on the common success path).
           if (get().saveError) set({ saveError: null });
+          // Drop any earlier queued save for this page — this newer save won.
+          dequeueSave(pageId);
 
           // Trigger RAG re-indexing in background (non-blocking)
           // Only index on explicit commits to avoid excessive indexing during typing
@@ -431,6 +434,15 @@ export const usePageStore = create<PageStore>()(
           const message =
             err instanceof Error ? err.message : "Failed to save changes";
           if (get().saveError !== message) set({ saveError: message });
+          // Persist the failed save so it survives a quit/crash and is replayed
+          // on the next startup (DL-22) — the daemon stays the only writer.
+          enqueueFailedSave({
+            notebookId,
+            pageId,
+            content,
+            commit: commit ?? false,
+            paneId,
+          });
           return false;
         }
       },
