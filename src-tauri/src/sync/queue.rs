@@ -148,7 +148,8 @@ impl SyncQueue {
             std::fs::create_dir_all(parent)?;
         }
         let data = serde_json::to_string_pretty(self)?;
-        std::fs::write(path, data)
+        // Atomic write so a crash mid-save can't truncate the queue (DL-14).
+        crate::storage::atomic::write(path, data.as_bytes())
     }
 }
 

@@ -391,13 +391,10 @@ impl SyncManager {
             return state.clone();
         }
 
-        // Try to load from disk
+        // Load from disk, recovering from a backup rather than silently resetting
+        // to empty on corruption (DL-14).
         let path = self.local_state_path(notebook_id);
-        let state = if path.exists() {
-            LocalSyncState::load(&path).unwrap_or_else(|_| LocalSyncState::new(notebook_id))
-        } else {
-            LocalSyncState::new(notebook_id)
-        };
+        let state = LocalSyncState::load_resilient(&path, notebook_id);
 
         states.insert(notebook_id, state.clone());
         state
@@ -894,6 +891,21 @@ impl SyncManager {
         Ok(format!("{:x}", hasher.finalize()))
     }
 
+    /// Sibling path for a conflict copy of a locally-modified asset (DL-29):
+    /// `<name>.conflict-<seq>`.
+    fn asset_conflict_path(local_path: &Path) -> PathBuf {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static SEQ: AtomicU64 = AtomicU64::new(0);
+        let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+        let name = local_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("asset");
+        let mut p = local_path.to_path_buf();
+        p.set_file_name(format!("{}.conflict-{}", name, seq));
+        p
+    }
+
     /// Get CAS path for a content hash: cas/{prefix_2}/{hash}.{ext}
     fn cas_remote_path(library_base_path: &str, hash: &str, ext: &str) -> String {
         let prefix = &hash[..2.min(hash.len())];
@@ -994,20 +1006,24 @@ impl SyncManager {
         let remote_path_c = config.remote_path.clone();
         let remote_path_pm = config.remote_path.clone();
 
-        let (manifest_result, changelog, remote_pages_meta) = tokio::join!(
+        let (manifest_result, changelog_result, remote_pages_meta) = tokio::join!(
             Self::fetch_manifest_static(&client_m, &remote_path_m),
             Self::fetch_changelog_static(&client_c, &remote_path_c, notebook_id),
             Self::fetch_pages_meta_static(&client_pm, &remote_path_pm),
         );
 
-        let mut changelog = changelog;
+        // DL-13: abort the sync on a transient/parse error rather than treating
+        // the remote manifest/changelog as empty (which would overwrite them and
+        // drop every page's state vector). A genuine 404 → None/empty is fine.
+        let manifest_opt = manifest_result?;
+        let mut changelog = changelog_result?;
 
-        match &manifest_result {
-            Ok(m) => log::info!("Sync: remote manifest has {} pages", m.pages.len()),
-            Err(e) => log::debug!("Sync: no remote manifest (first sync?): {}", e),
+        match &manifest_opt {
+            Some(m) => log::info!("Sync: remote manifest has {} pages", m.pages.len()),
+            None => log::debug!("Sync: no remote manifest (first sync?)"),
         }
-        let manifest_existed = manifest_result.is_ok();
-        let mut manifest = manifest_result.unwrap_or_else(|_| {
+        let manifest_existed = manifest_opt.is_some();
+        let mut manifest = manifest_opt.unwrap_or_else(|| {
             SyncManifest::new(notebook_id, local_state.client_id.clone())
         });
 
@@ -1589,25 +1605,42 @@ impl SyncManager {
 
     // ===== Manifest, changelog, pages-meta fetch (static for tokio::join!) =====
 
+    /// Fetch the remote manifest.
+    ///
+    /// DL-13: distinguish a genuine 404 (first sync — `Ok(None)`) from a
+    /// transient/server/parse error (`Err` — abort the sync). The old code mapped
+    /// ALL failures to "no manifest", then pushed a fresh empty manifest over the
+    /// real one, dropping every page's state vector. A parse error here can also
+    /// be a remote PUT in progress (remote PUTs aren't atomic), so we must not
+    /// treat it as empty.
     async fn fetch_manifest_static(
         client: &WebDAVClient,
         remote_path: &str,
-    ) -> Result<SyncManifest, SyncError> {
+    ) -> Result<Option<SyncManifest>, SyncError> {
         let manifest_path = format!("{}/.sync-manifest.json", remote_path);
-        let data = client.get(&manifest_path).await?;
-        let manifest: SyncManifest = serde_json::from_slice(&data)?;
-        Ok(manifest)
+        match client.get(&manifest_path).await {
+            Ok(data) => {
+                let manifest: SyncManifest = serde_json::from_slice(&data)?;
+                Ok(Some(manifest))
+            }
+            Err(WebDAVError::NotFound(_)) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
     }
 
+    /// Fetch the remote changelog. DL-13: a genuine 404 → empty changelog is fine
+    /// (first sync), but a transient/server/parse error aborts the sync rather
+    /// than silently dropping the remote change history.
     async fn fetch_changelog_static(
         client: &WebDAVClient,
         remote_path: &str,
         notebook_id: Uuid,
-    ) -> Changelog {
+    ) -> Result<Changelog, SyncError> {
         let changelog_path = format!("{}/.changelog.json", remote_path);
         match client.get(&changelog_path).await {
-            Ok(data) => serde_json::from_slice(&data).unwrap_or_else(|_| Changelog::new(notebook_id)),
-            Err(_) => Changelog::new(notebook_id),
+            Ok(data) => Ok(serde_json::from_slice(&data)?),
+            Err(WebDAVError::NotFound(_)) => Ok(Changelog::new(notebook_id)),
+            Err(e) => Err(e.into()),
         }
     }
 
@@ -2322,7 +2355,7 @@ impl SyncManager {
 
                     let merged_state = local_doc.encode_state();
                     std::fs::create_dir_all(crdt_path.parent().unwrap())?;
-                    std::fs::write(&crdt_path, &merged_state)?;
+                    crate::storage::atomic::write(&crdt_path, &merged_state)?;
 
                     let result = client.put(&remote_path, &merged_state, None).await?;
                     let sv = local_doc.state_vector();
@@ -2340,7 +2373,7 @@ impl SyncManager {
 
                     let state = local_doc.encode_state();
                     std::fs::create_dir_all(crdt_path.parent().unwrap())?;
-                    std::fs::write(&crdt_path, &state)?;
+                    crate::storage::atomic::write(&crdt_path, &state)?;
 
                     let sv = local_doc.state_vector();
                     return Ok((PageSyncResult::Pulled, Some((remote_etag, sv))));
@@ -2352,7 +2385,7 @@ impl SyncManager {
         if sync_info.needs_sync {
             let full_state = local_doc.encode_state();
             std::fs::create_dir_all(crdt_path.parent().unwrap())?;
-            std::fs::write(&crdt_path, &full_state)?;
+            crate::storage::atomic::write(&crdt_path, &full_state)?;
 
             // Only use If-Match ETag if the remote file actually exists;
             // a stale ETag from a previous sync against a now-empty remote
@@ -2541,7 +2574,7 @@ impl SyncManager {
         // Save CRDT
         let crdt_path = Self::crdt_path_for(data_dir, notebook_id, page_id);
         std::fs::create_dir_all(crdt_path.parent().unwrap())?;
-        std::fs::write(&crdt_path, &data)?;
+        crate::storage::atomic::write(&crdt_path, &data)?;
 
         let sv = doc.state_vector();
         Ok((etag, sv))
@@ -3009,6 +3042,43 @@ impl SyncManager {
                             }
                         }
                     }
+                }
+            }
+
+            // DL-29: don't clobber a locally-modified asset. We only reach here
+            // when the local file differs from the remote hash; if it ALSO
+            // differs from the last-synced hash, it has unsynced local edits —
+            // treat it as a conflict: keep local, and save the remote version as
+            // a sibling `.conflict` copy instead of overwriting.
+            if local_path.exists() {
+                let current_local = Self::compute_file_hash(&local_path).ok();
+                let last_synced = local_state
+                    .assets
+                    .get(relative_path)
+                    .and_then(|s| s.content_hash.clone());
+                let locally_modified = match (&current_local, &last_synced) {
+                    (Some(cur), Some(synced)) => cur != synced,
+                    (Some(_), None) => true, // never recorded a synced hash
+                    _ => false,
+                };
+                if locally_modified && current_local.as_deref() != Some(entry.hash.as_str()) {
+                    let conflict_path = Self::asset_conflict_path(&local_path);
+                    let cas_path =
+                        Self::cas_remote_path(library_base_path, &entry.hash, &entry.ext);
+                    let _permit = self.webdav_semaphore.acquire().await.unwrap();
+                    match client.get_to_file(&cas_path, &conflict_path).await {
+                        Ok(_) => log::warn!(
+                            "CAS: {} has unsynced local changes; kept local copy and saved remote to {:?}",
+                            relative_path,
+                            conflict_path
+                        ),
+                        Err(e) => log::error!(
+                            "CAS: failed to save conflict copy for {}: {}",
+                            relative_path,
+                            e
+                        ),
+                    }
+                    continue;
                 }
             }
 

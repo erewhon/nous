@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use futures_util::StreamExt;
 use reqwest::{Client, Method, StatusCode};
@@ -36,6 +36,21 @@ pub enum WebDAVError {
     InvalidUrl(String),
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
+}
+
+/// A unique sibling temp path (`<name>.<pid>.<seq>.part`) for streaming a
+/// download before atomically renaming it over the destination.
+fn download_temp_path(path: &Path) -> PathBuf {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+    let name = path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("download");
+    let mut tmp = path.to_path_buf();
+    tmp.set_file_name(format!("{}.{}.{}.part", name, std::process::id(), seq));
+    tmp
 }
 
 /// Response from a HEAD operation
@@ -450,16 +465,60 @@ impl WebDAVClient {
             tokio::fs::create_dir_all(parent).await?;
         }
 
-        // Stream response body to file
-        let mut file = tokio::fs::File::create(local_path).await?;
-        let mut stream = response.bytes_stream();
+        let expected_len = response
+            .headers()
+            .get(reqwest::header::CONTENT_LENGTH)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.parse::<u64>().ok());
 
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk.map_err(WebDAVError::Http)?;
-            file.write_all(&chunk).await?;
+        // DL-06/DL-42: stream to a sibling temp file, fsync it, then atomically
+        // rename over the destination. An interrupted download (dropped
+        // connection, TLS error, timeout) must never truncate or destroy the
+        // existing local file — on any error we delete the temp and leave the
+        // original intact.
+        let tmp_path = download_temp_path(local_path);
+        let mut written: u64 = 0;
+        let mut stream = response.bytes_stream();
+        let stream_result: Result<(), WebDAVError> = async {
+            let mut file = tokio::fs::File::create(&tmp_path).await?;
+            while let Some(chunk) = stream.next().await {
+                let chunk = chunk.map_err(WebDAVError::Http)?;
+                file.write_all(&chunk).await?;
+                written += chunk.len() as u64;
+            }
+            file.flush().await?;
+            file.sync_all().await?; // durable before rename
+            Ok(())
+        }
+        .await;
+
+        if let Err(e) = stream_result {
+            let _ = tokio::fs::remove_file(&tmp_path).await;
+            return Err(e);
         }
 
-        file.flush().await?;
+        // Verify completeness when the server advertised a length.
+        if let Some(expected) = expected_len {
+            if written != expected {
+                let _ = tokio::fs::remove_file(&tmp_path).await;
+                return Err(WebDAVError::Server {
+                    status: 0,
+                    message: format!(
+                        "incomplete download for {}: {} of {} bytes",
+                        remote_path, written, expected
+                    ),
+                });
+            }
+        }
+
+        tokio::fs::rename(&tmp_path, local_path).await?;
+
+        // fsync the parent directory so the rename itself survives a crash.
+        if let Some(parent) = local_path.parent() {
+            if let Ok(dir) = tokio::fs::File::open(parent).await {
+                let _ = dir.sync_all().await;
+            }
+        }
 
         Ok(etag)
     }

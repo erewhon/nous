@@ -89,13 +89,53 @@ impl LocalSyncState {
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
     }
 
-    /// Save to file
+    /// Load resilient to corruption (DL-14).
+    ///
+    /// A torn or corrupt `local_state.json` must NOT silently reset to empty —
+    /// that discards every page's remote ETag / synced state vector and forces a
+    /// destructive full re-merge (the path behind the 2026-05-01 wipe). A
+    /// genuinely-missing file (first sync) returns a fresh empty state; a corrupt
+    /// file is recovered from the `.bak`, or quarantined and started fresh (with
+    /// the destructive-sync guard backstopping the re-merge) only if no backup is
+    /// usable.
+    pub fn load_resilient(path: &Path, notebook_id: Uuid) -> Self {
+        match Self::load(path) {
+            Ok(state) => state,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Self::new(notebook_id),
+            Err(e) => {
+                let bak = path.with_extension("json.bak");
+                if let Ok(state) = Self::load(&bak) {
+                    log::warn!(
+                        "Sync: local_state.json for {} was corrupt; recovered last-good state from backup ({})",
+                        notebook_id,
+                        e
+                    );
+                    return state;
+                }
+                let corrupt = path.with_extension("json.corrupt");
+                let _ = std::fs::rename(path, &corrupt);
+                log::error!(
+                    "Sync: local_state.json for {} corrupt and no usable backup ({}); quarantined and starting fresh — pages will be re-checked against remote",
+                    notebook_id,
+                    e
+                );
+                Self::new(notebook_id)
+            }
+        }
+    }
+
+    /// Save to file atomically, keeping a one-deep `.bak` of the last-good state.
     pub fn save(&self, path: &Path) -> Result<(), std::io::Error> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
+        // Back up the last-good state before overwriting so a corrupt load can
+        // recover without a destructive reset-to-empty (DL-14).
+        if path.exists() {
+            let _ = std::fs::copy(path, path.with_extension("json.bak"));
+        }
         let data = serde_json::to_string_pretty(self)?;
-        std::fs::write(path, data)
+        crate::storage::atomic::write(path, data.as_bytes())
     }
 
     /// Update page state after local modification
@@ -223,5 +263,88 @@ mod rand {
             .as_nanos() as u64;
         let count = COUNTER.fetch_add(1, Ordering::Relaxed);
         T::from(time.wrapping_mul(count.wrapping_add(1)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tmp() -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("nous_lss_{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn load_resilient_returns_fresh_when_missing() {
+        let dir = tmp();
+        let nb = Uuid::new_v4();
+        let s = LocalSyncState::load_resilient(&dir.join("local_state.json"), nb);
+        assert_eq!(s.notebook_id, nb);
+        assert_eq!(s.last_changelog_seq, 0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_resilient_recovers_from_backup_when_corrupt() {
+        let dir = tmp();
+        let nb = Uuid::new_v4();
+        let path = dir.join("local_state.json");
+
+        let mut good = LocalSyncState::new(nb);
+        good.last_changelog_seq = 42;
+        std::fs::write(
+            path.with_extension("json.bak"),
+            serde_json::to_string(&good).unwrap(),
+        )
+        .unwrap();
+        std::fs::write(&path, "{ not valid json").unwrap();
+
+        let s = LocalSyncState::load_resilient(&path, nb);
+        assert_eq!(
+            s.last_changelog_seq, 42,
+            "must recover the backup, not silently reset to empty"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_resilient_quarantines_corrupt_without_backup() {
+        let dir = tmp();
+        let nb = Uuid::new_v4();
+        let path = dir.join("local_state.json");
+        std::fs::write(&path, "{ corrupt").unwrap();
+
+        let s = LocalSyncState::load_resilient(&path, nb);
+        assert_eq!(s.last_changelog_seq, 0);
+        assert!(!path.exists(), "corrupt file should be quarantined (renamed away)");
+        assert!(path.with_extension("json.corrupt").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn save_is_atomic_and_keeps_a_backup() {
+        let dir = tmp();
+        let nb = Uuid::new_v4();
+        let path = dir.join("local_state.json");
+
+        let mut s = LocalSyncState::new(nb);
+        s.last_changelog_seq = 7;
+        s.save(&path).unwrap(); // first save: no prior → no backup yet
+        s.last_changelog_seq = 8;
+        s.save(&path).unwrap(); // backs up the seq=7 version
+
+        assert_eq!(LocalSyncState::load(&path).unwrap().last_changelog_seq, 8);
+        let bak = LocalSyncState::load(&path.with_extension("json.bak")).unwrap();
+        assert_eq!(bak.last_changelog_seq, 7);
+        // No temp file leaked.
+        let leftovers = std::fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".nous-tmp"))
+            .count();
+        assert_eq!(leftovers, 0);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
