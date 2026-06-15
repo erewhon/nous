@@ -145,6 +145,7 @@ export async function updatePage(
     isDailyNote?: boolean;
     dailyNoteDate?: string | null; // "YYYY-MM-DD" format, null to clear
     color?: string | null; // CSS color string, null to clear
+    pluginData?: unknown; // plugin-defined page state; null to clear, omit for no change
   },
   commit?: boolean, // Whether to create a git commit (default: false, use true for explicit saves)
   paneId?: string // Editor pane ID for CRDT multi-pane merge
@@ -170,6 +171,9 @@ export async function updatePage(
   if (updates.dailyNoteDate !== undefined)
     body.daily_note_date = updates.dailyNoteDate;
   if (updates.color !== undefined) body.color = updates.color;
+  // Daemon treats plugin_data as triple-state (omitted=no change, null=clear,
+  // value=set), matching the absent-field omission above.
+  if (updates.pluginData !== undefined) body.plugin_data = updates.pluginData;
   if (commit !== undefined) body.commit = commit;
   if (paneId !== undefined) body.pane_id = paneId;
 

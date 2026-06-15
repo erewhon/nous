@@ -3,7 +3,7 @@
  * Follows the same pattern as PluginSidebarPanel and PluginDatabaseView.
  */
 import { useState, useEffect, useRef, useCallback } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { updatePage } from "../../utils/api";
 import {
   usePluginStore,
   type PluginPageType,
@@ -88,11 +88,10 @@ export function PluginPageView({
             plugin_data?: unknown;
           } | null;
 
-          // If plugin returns updated data, persist it
+          // If plugin returns updated data, persist it through the daemon
+          // (single-writer) rather than the in-process Tauri command.
           if (result?.plugin_data !== undefined) {
-            await invoke("update_page", {
-              notebookId,
-              pageId: page.id,
+            await updatePage(notebookId, page.id, {
               pluginData: result.plugin_data,
             }).catch((err: unknown) =>
               console.error("Failed to persist plugin page data:", err)
@@ -112,13 +111,9 @@ export function PluginPageView({
           console.error("Plugin page action failed:", err);
         }
       } else if (msg.type === "plugin-page-update-data") {
-        // Direct data update from iframe
+        // Direct data update from iframe — route through the daemon (single-writer).
         try {
-          await invoke("update_page", {
-            notebookId,
-            pageId: page.id,
-            pluginData: msg.data,
-          });
+          await updatePage(notebookId, page.id, { pluginData: msg.data });
         } catch (err) {
           console.error("Failed to save plugin page data:", err);
         }

@@ -238,6 +238,62 @@ pub fn append_entry(path: &Path, entry: &OplogEntry) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Append an oplog entry whose `prev_hash` is read under a cross-process lock
+/// (DL-37). The Tauri app and the daemon each own a `FileStorage` over the same
+/// data dir; without a shared lock, both can `read_last_hash()` the same value
+/// and `append_entry()` two entries that claim the same parent — forking the
+/// hash chain — and two large interleaved O_APPEND writes can tear a JSONL line.
+/// This holds an exclusive advisory lock on a sibling `.oplog.lock` file across
+/// the read-hash + append so the chain stays linear and lines stay whole.
+///
+/// `build` receives the prev_hash read under the lock and returns the entry.
+/// Acquisition is blocking — a save must serialize behind a concurrent writer,
+/// never be dropped — but the critical section is only a read + append + fsync
+/// (no awaits, no network), so it cannot wedge, and `flock` is released
+/// automatically if the holder process dies. If the lock file can't be opened or
+/// locked, it degrades to an unlocked append (the oplog is a best-effort recovery
+/// log; a missed lock must not drop the entry).
+pub fn append_chained(
+    oplog_path: &Path,
+    build: impl FnOnce(String) -> OplogEntry,
+) -> std::io::Result<()> {
+    let mut lock_os = oplog_path.as_os_str().to_os_string();
+    lock_os.push(".lock");
+    let lock_path = PathBuf::from(lock_os);
+
+    // `lock_holder` (the RwLock<File>) must outlive `_guard` (which borrows it),
+    // so it is declared first; both drop at end of fn → flock released, fd closed.
+    let mut lock_holder = OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .truncate(false)
+        .open(&lock_path)
+        .map_err(|e| {
+            log::warn!(
+                "oplog: could not open lock {:?}: {} — appending without cross-process lock",
+                lock_path, e
+            )
+        })
+        .ok()
+        .map(fd_lock::RwLock::new);
+
+    let _guard = lock_holder.as_mut().and_then(|rw| {
+        rw.write()
+            .map_err(|e| {
+                log::warn!(
+                    "oplog: lock {:?} failed: {} — appending without cross-process lock",
+                    lock_path, e
+                )
+            })
+            .ok()
+    });
+
+    let prev_hash = read_last_hash(oplog_path);
+    let entry = build(prev_hash);
+    append_entry(oplog_path, &entry)
+}
+
 /// True if the file's last byte is not a newline (i.e. a prior append was
 /// interrupted mid-line). Best-effort: returns false on any read error.
 fn last_byte_is_not_newline(path: &Path) -> bool {
@@ -271,8 +327,17 @@ pub fn read_entries(path: &Path) -> Vec<OplogEntry> {
             if trimmed.is_empty() {
                 continue;
             }
-            if let Ok(entry) = serde_json::from_str::<OplogEntry>(trimmed) {
-                entries.push(entry);
+            match serde_json::from_str::<OplogEntry>(trimmed) {
+                Ok(entry) => entries.push(entry),
+                // DL-37: a non-empty line that won't parse is a torn/corrupt
+                // record. Flag it (don't silently drop) so corruption in the
+                // recovery log is visible instead of masquerading as a clean read.
+                Err(e) => log::warn!(
+                    "oplog: skipping unparseable entry in {:?}: {} ({} bytes)",
+                    path,
+                    e,
+                    trimmed.len()
+                ),
             }
         }
     }
@@ -563,6 +628,75 @@ mod tests {
         append_entry(&path, &entry3).unwrap();
 
         assert_eq!(verify_chain(&path), Err(2));
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// DL-37: two writers (Tauri app + daemon — modeled here as two threads with
+    /// independent lock open-descriptions, which `flock` treats like two
+    /// processes) appending to the same oplog concurrently must not fork the hash
+    /// chain or tear a line. Entries are deliberately large (>PIPE_BUF) to stress
+    /// torn O_APPEND writes.
+    #[test]
+    fn concurrent_appends_keep_chain_linear_and_lines_whole() {
+        let dir = std::env::temp_dir().join(format!("oplog_concurrent_{}", Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = std::sync::Arc::new(oplog_path(&dir, Uuid::new_v4()));
+
+        const THREADS: usize = 4;
+        const PER_THREAD: usize = 40;
+
+        let handles: Vec<_> = (0..THREADS)
+            .map(|t| {
+                let p = std::sync::Arc::clone(&path);
+                std::thread::spawn(move || {
+                    for i in 0..PER_THREAD {
+                        append_chained(&p, |prev_hash| OplogEntry {
+                            ts: Utc::now(),
+                            client_id: format!("writer-{}", t),
+                            op: OpType::Modify,
+                            // Unique per (thread, iteration) so entries are distinct.
+                            content_hash: format!("sha256:t{}-i{}", t, i),
+                            prev_hash,
+                            // ~40 sizeable changes → the JSONL line far exceeds
+                            // PIPE_BUF (4KB), the torn-write danger zone.
+                            block_changes: (0..40)
+                                .map(|b| BlockChange {
+                                    block_id: format!("block-{}-{}-{}", t, i, b),
+                                    op: BlockOp::Modify,
+                                    block_type: Some(
+                                        "paragraph-with-a-deliberately-longish-type".to_string(),
+                                    ),
+                                    after_block_id: Some(format!("after-{}-{}-{}", t, i, b)),
+                                })
+                                .collect(),
+                            block_count: 40,
+                            git_commit_id: None,
+                        })
+                        .expect("locked append should succeed");
+                    }
+                })
+            })
+            .collect();
+
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        // No line lost or torn: every append produced exactly one parseable entry.
+        let entries = read_entries(&path);
+        assert_eq!(
+            entries.len(),
+            THREADS * PER_THREAD,
+            "an append was lost or torn under concurrency"
+        );
+        // Linear chain: each prev_hash links to the prior content_hash from
+        // genesis. Without the lock the writers would read the same prev_hash and
+        // fork the chain (verify_chain would return Err at the fork).
+        assert!(
+            verify_chain(&path).is_ok(),
+            "hash chain forked under concurrent appends"
+        );
 
         let _ = fs::remove_dir_all(&dir);
     }

@@ -405,12 +405,17 @@ export function useRelationContext(
         rows: updatedRows,
       };
 
-      // Save the source DB
+      // Save the source DB through the row-merge path (DL-04): this is a
+      // whole-content write built from a snapshot of the source DB, so passing
+      // the rows we read as the baseline lets the daemon re-attach any rows
+      // another writer (the source DB's own editor, MCP) added concurrently
+      // instead of this back-prop silently deleting them.
       try {
-        await api.updateFileContent(
+        await api.putDatabase(
           notebookId,
           sourcePageId,
-          JSON.stringify(updatedSourceContent, null, 2)
+          updatedSourceContent as unknown as Record<string, unknown>,
+          sourceContent.rows.map((r) => r.id)
         );
         // Invalidate cache so next render picks up changes
         cacheRef.current.delete(sourcePageId);

@@ -361,10 +361,15 @@ export function DatabaseEditor({
                 },
               ],
             };
-            await api.updateFileContent(
+            // Row-merge write (DL-04): we only change the target's properties,
+            // but this is a whole-content write from a snapshot — pass the rows
+            // we read as the baseline so a concurrent writer's added rows are
+            // re-attached, not clobbered.
+            await api.putDatabase(
               notebookId,
               relationConfig.databasePageId,
-              JSON.stringify(updatedTarget, null, 2)
+              updatedTarget as unknown as Record<string, unknown>,
+              targetContent.rows.map((r) => r.id)
             );
           }
         } catch (err) {
@@ -448,10 +453,13 @@ export function DatabaseEditor({
                 (p) => p.id !== backPropId
               ),
             };
-            await api.updateFileContent(
+            // Row-merge write (DL-04): whole-content write from a snapshot, so
+            // baseline the rows we read to preserve concurrently-added rows.
+            await api.putDatabase(
               notebookId,
               targetPageId,
-              JSON.stringify(updatedTarget, null, 2)
+              updatedTarget as unknown as Record<string, unknown>,
+              targetContent.rows.map((r) => r.id)
             );
           }
         } catch (err) {

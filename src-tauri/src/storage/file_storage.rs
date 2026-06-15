@@ -392,24 +392,29 @@ impl FileStorage {
     fn oplog_record_create(&self, page: &Page) {
         let pages_dir = self.pages_dir(page.notebook_id);
         let oplog_file = super::oplog::oplog_path(&pages_dir, page.id);
-        let entry = super::oplog::OplogEntry {
-            ts: chrono::Utc::now(),
-            client_id: super::oplog::get_client_id(),
-            op: super::oplog::OpType::Create,
-            content_hash: super::oplog::content_hash(&page.content),
-            prev_hash: "genesis".to_string(),
-            block_changes: page.content.blocks.iter().enumerate().map(|(i, b)| {
-                super::oplog::BlockChange {
-                    block_id: b.id.clone(),
-                    op: super::oplog::BlockOp::Insert,
-                    block_type: Some(b.block_type.clone()),
-                    after_block_id: if i > 0 { Some(page.content.blocks[i - 1].id.clone()) } else { None },
-                }
-            }).collect(),
-            block_count: page.content.blocks.len(),
-            git_commit_id: None,
-        };
-        if let Err(e) = super::oplog::append_entry(&oplog_file, &entry) {
+        // DL-37: chain off whatever the oplog currently ends with under the
+        // cross-process lock (normally "genesis" for a fresh page; chains
+        // correctly if an oplog already exists, e.g. a same-id recreate).
+        let result = super::oplog::append_chained(&oplog_file, |prev_hash| {
+            super::oplog::OplogEntry {
+                ts: chrono::Utc::now(),
+                client_id: super::oplog::get_client_id(),
+                op: super::oplog::OpType::Create,
+                content_hash: super::oplog::content_hash(&page.content),
+                prev_hash,
+                block_changes: page.content.blocks.iter().enumerate().map(|(i, b)| {
+                    super::oplog::BlockChange {
+                        block_id: b.id.clone(),
+                        op: super::oplog::BlockOp::Insert,
+                        block_type: Some(b.block_type.clone()),
+                        after_block_id: if i > 0 { Some(page.content.blocks[i - 1].id.clone()) } else { None },
+                    }
+                }).collect(),
+                block_count: page.content.blocks.len(),
+                git_commit_id: None,
+            }
+        });
+        if let Err(e) = result {
             log::warn!("Failed to write create oplog for page {}: {}", page.id, e);
         }
     }
@@ -470,9 +475,11 @@ impl FileStorage {
         let content = super::content_format::page_to_disk_json(page)?;
         Self::atomic_write(&page_path, &content)?;
 
-        // Append oplog entry (best-effort — never fail the save for oplog issues)
+        // Append oplog entry (best-effort — never fail the save for oplog issues).
+        // DL-37: read_last_hash + append run under a cross-process lock inside
+        // append_chained so the Tauri app and the daemon can't fork the hash
+        // chain or tear a line when they write the same page concurrently.
         let oplog_file = super::oplog::oplog_path(&pages_dir, page.id);
-        let prev_hash = super::oplog::read_last_hash(&oplog_file);
 
         let block_changes = match &old_content {
             Some(old) => super::oplog::diff_blocks(old, &page.content),
@@ -485,20 +492,22 @@ impl FileStorage {
             super::oplog::OpType::Modify
         };
 
-        let entry = super::oplog::OplogEntry {
-            ts: chrono::Utc::now(),
-            client_id: super::oplog::get_client_id(),
-            op,
-            content_hash: new_hash,
-            prev_hash,
-            block_changes,
-            block_count: page.content.blocks.len(),
-            git_commit_id: None,
-        };
+        let append_result = super::oplog::append_chained(&oplog_file, |prev_hash| {
+            super::oplog::OplogEntry {
+                ts: chrono::Utc::now(),
+                client_id: super::oplog::get_client_id(),
+                op,
+                content_hash: new_hash,
+                prev_hash,
+                block_changes,
+                block_count: page.content.blocks.len(),
+                git_commit_id: None,
+            }
+        });
 
         // DL-36: an append failure means a gap in the recovery history — log it
         // loudly (error, not warn) rather than swallowing it.
-        if let Err(e) = super::oplog::append_entry(&oplog_file, &entry) {
+        if let Err(e) = append_result {
             log::error!(
                 "Failed to append oplog entry for page {} (recovery history degraded): {}",
                 page.id,
