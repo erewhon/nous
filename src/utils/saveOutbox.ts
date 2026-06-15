@@ -1,23 +1,31 @@
-// Persistent outbox for page-content saves that failed to reach the daemon
+// Persistent outbox for content saves that failed to reach the daemon
 // (down/restarting/timeout). Failed saves are queued to localStorage so they
 // survive a quit/crash and are replayed on the next startup — the daemon stays
-// the single writer; we just don't lose the edit while it's unreachable (DL-22).
+// the single writer; we just don't lose the edit while it's unreachable
+// (DL-22, and DL-04: file-based page writes route through the daemon too).
+//
+// Replays go straight to the daemon (no import of ./api) so this module has no
+// import cycle with api.ts, which enqueues file-content failures here.
 
-import * as api from "./api";
+import { daemonPut } from "./daemon";
 import type { EditorData } from "../types/page";
 
 const STORAGE_KEY = "nous-save-outbox";
 
+/** A standard-page content save (CRDT blocks) or a file-based page save (raw string). */
 export interface OutboxEntry {
+  kind: "page" | "file";
   notebookId: string;
   pageId: string;
-  content: EditorData;
-  commit: boolean;
+  /** EditorData for `kind:"page"`, a string for `kind:"file"`. */
+  content: EditorData | string;
+  commit?: boolean;
   paneId?: string;
   queuedAt: number;
 }
 
-// Keyed by pageId — one (latest) pending save per page.
+// Keyed by pageId — one (latest) pending save per page (a page is either
+// standard or file-based, never both, so the key never collides across kinds).
 type OutboxMap = Record<string, OutboxEntry>;
 
 function load(): OutboxMap {
@@ -37,10 +45,27 @@ function persist(map: OutboxMap): void {
   }
 }
 
-/** Queue (or replace) a failed content save for a page. */
-export function enqueueFailedSave(entry: Omit<OutboxEntry, "queuedAt">): void {
+/** Queue (or replace) a failed standard-page content save. */
+export function enqueueFailedSave(entry: {
+  notebookId: string;
+  pageId: string;
+  content: EditorData;
+  commit?: boolean;
+  paneId?: string;
+}): void {
   const map = load();
-  map[entry.pageId] = { ...entry, queuedAt: Date.now() };
+  map[entry.pageId] = { kind: "page", ...entry, queuedAt: Date.now() };
+  persist(map);
+}
+
+/** Queue (or replace) a failed file-based page content save (DL-04). */
+export function enqueueFailedFileSave(entry: {
+  notebookId: string;
+  pageId: string;
+  content: string;
+}): void {
+  const map = load();
+  map[entry.pageId] = { kind: "file", ...entry, queuedAt: Date.now() };
   persist(map);
 }
 
@@ -57,6 +82,20 @@ export function outboxSize(): number {
   return Object.keys(load()).length;
 }
 
+async function replay(entry: OutboxEntry): Promise<void> {
+  const base = `/api/notebooks/${entry.notebookId}/pages/${entry.pageId}`;
+  if (entry.kind === "file") {
+    await daemonPut(`${base}/file-content`, { content: entry.content });
+    return;
+  }
+  // Standard page: mirror api.updatePage's content-save body (snake_case).
+  const data = entry.content as EditorData;
+  const body: Record<string, unknown> = { blocks: data.blocks };
+  if (entry.commit !== undefined) body.commit = entry.commit;
+  if (entry.paneId !== undefined) body.pane_id = entry.paneId;
+  await daemonPut(base, body);
+}
+
 /**
  * Attempt to flush all queued saves to the daemon. Successful entries are
  * removed; failed ones stay queued for the next attempt. Returns the number
@@ -66,13 +105,7 @@ export async function flushOutbox(): Promise<number> {
   const entries = Object.values(load());
   for (const entry of entries) {
     try {
-      await api.updatePage(
-        entry.notebookId,
-        entry.pageId,
-        { content: entry.content },
-        entry.commit,
-        entry.paneId
-      );
+      await replay(entry);
       dequeueSave(entry.pageId);
     } catch {
       // Leave queued; a later flush (or startup replay) will retry.

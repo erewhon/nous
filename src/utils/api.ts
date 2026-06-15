@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { daemonGet, daemonPost, daemonPut, daemonDelete } from "./daemon";
+import { enqueueFailedFileSave } from "./saveOutbox";
 import { daemonEventBus } from "./daemonEvents";
 import type { Notebook, NotebookType } from "../types/notebook";
 import type {
@@ -2158,10 +2159,11 @@ export async function getFileContent(
   notebookId: string,
   pageId: string
 ): Promise<FileContentResponse> {
-  return invoke<FileContentResponse>("get_file_content", {
-    notebookId,
-    pageId,
-  });
+  // Single-writer (DL-04): read file-based page content through the daemon, not
+  // the in-process Tauri command, so the daemon owns these files.
+  return daemonGet<FileContentResponse>(
+    `/api/notebooks/${notebookId}/pages/${pageId}/file-content`
+  );
 }
 
 /**
@@ -2171,8 +2173,21 @@ export async function updateFileContent(
   notebookId: string,
   pageId: string,
   content: string
-): Promise<Page> {
-  return invoke<Page>("update_file_content", { notebookId, pageId, content });
+): Promise<void> {
+  // Single-writer (DL-04): write file-based page content through the daemon so
+  // it can't clobber a concurrent MCP/daemon write across separate processes.
+  try {
+    await daemonPut(
+      `/api/notebooks/${notebookId}/pages/${pageId}/file-content`,
+      { content }
+    );
+  } catch (err) {
+    // Routing through the daemon introduced a daemon dependency for these
+    // writes; queue the edit so a transient daemon outage can't lose it (it's
+    // replayed on reconnect/startup), then rethrow so the caller can react.
+    enqueueFailedFileSave({ notebookId, pageId, content });
+    throw err;
+  }
 }
 
 /**

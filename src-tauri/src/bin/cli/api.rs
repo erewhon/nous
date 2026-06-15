@@ -621,6 +621,13 @@ pub fn build_router(state: AppState, auth: AuthState) -> Router {
             "/api/notebooks/{notebook_id}/databases/{db_id}/rows",
             post(add_database_rows).put(update_database_rows).delete(delete_database_rows),
         )
+        // File-based page content (markdown/calendar/jupyter/chat/canvas/database)
+        // — single-writer migration (DL-04): desktop file editors read/write here
+        // instead of the in-process Tauri command.
+        .route(
+            "/api/notebooks/{notebook_id}/pages/{page_id}/file-content",
+            get(get_file_content).put(put_file_content),
+        )
         // Folder creation
         .route(
             "/api/notebooks/{notebook_id}/folders",
@@ -2958,6 +2965,104 @@ async fn put_database(
 
     Ok(Json(ApiResponse {
         data: serde_json::json!({"ok": true, "id": pg_id.to_string()}),
+    }))
+}
+
+// ===== File-based page content (DL-04 single-writer) =====
+
+#[derive(serde::Deserialize)]
+struct FileContentBody {
+    content: String,
+}
+
+/// `GET /api/notebooks/{nb}/pages/{id}/file-content` — read a file-based page's
+/// source content (markdown/calendar/jupyter/chat/canvas/database). Mirrors the
+/// Tauri `get_file_content` command so the daemon is the single owner of these
+/// files (DL-04).
+async fn get_file_content(
+    State(state): State<AppState>,
+    Path((notebook_id, page_id)): Path<(String, String)>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let nb_id = parse_uuid(&notebook_id)?;
+    let pg_id = parse_uuid(&page_id)?;
+    let storage = state.storage.lock().unwrap();
+
+    let page = storage
+        .get_page_any_type(nb_id, pg_id)
+        .map_err(|e| api_err(StatusCode::NOT_FOUND, e.to_string()))?;
+
+    let content = storage
+        .read_native_file_content(&page)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(Json(ApiResponse {
+        data: serde_json::json!({
+            "content": content,
+            "pageType": format!("{:?}", page.page_type).to_lowercase(),
+            "fileExtension": page.file_extension,
+        }),
+    }))
+}
+
+/// `PUT /api/notebooks/{nb}/pages/{id}/file-content` — write a file-based page's
+/// source content. Body `{ "content": "..." }`. Mirrors the Tauri
+/// `update_file_content` command (DL-04): the daemon becomes the single writer of
+/// these files, eliminating the cross-process clobber with MCP/daemon writers.
+async fn put_file_content(
+    State(state): State<AppState>,
+    Path((notebook_id, page_id)): Path<(String, String)>,
+    Json(body): Json<FileContentBody>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let nb_id = parse_uuid(&notebook_id)?;
+    let pg_id = parse_uuid(&page_id)?;
+    let storage = state.storage.lock().unwrap();
+
+    let mut page = storage
+        .get_page_any_type(nb_id, pg_id)
+        .map_err(|e| api_err(StatusCode::NOT_FOUND, e.to_string()))?;
+
+    match page.page_type {
+        PageType::Markdown
+        | PageType::Calendar
+        | PageType::Jupyter
+        | PageType::Chat
+        | PageType::Canvas
+        | PageType::Database => {}
+        other => {
+            return Err(api_err(
+                StatusCode::BAD_REQUEST,
+                format!("Cannot write file content for page type: {other:?}"),
+            ));
+        }
+    }
+
+    storage
+        .write_native_file_content(&page, &body.content)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    page.updated_at = chrono::Utc::now();
+    page.last_file_sync = Some(chrono::Utc::now());
+    storage
+        .update_page_metadata(&page)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    drop(storage);
+
+    state.sync_manager.queue_page_update(nb_id, pg_id);
+
+    let event = if page.page_type == PageType::Database {
+        "database.updated"
+    } else {
+        "page.updated"
+    };
+    emit_event(
+        &state,
+        event,
+        serde_json::json!({ "notebookId": notebook_id, "pageId": page_id }),
+    );
+
+    Ok(Json(ApiResponse {
+        data: serde_json::json!({ "ok": true, "id": pg_id.to_string() }),
     }))
 }
 

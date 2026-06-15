@@ -137,6 +137,21 @@ pub fn export_notebook_to_zip(
             .map_err(|_| StorageError::Io(std::io::Error::other("Failed to get relative path")))?;
 
         if path.is_file() {
+            // DL-32: never archive in-flight write artifacts — a .tmp/.part/.bak
+            // can be mid-write or partial, which would bake a corrupt file into
+            // the "good" backup.
+            let fname = path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            if fname.ends_with(".tmp")
+                || fname.ends_with(".nous-tmp")
+                || fname.ends_with(".part")
+                || fname.ends_with(".bak")
+            {
+                continue;
+            }
+
             // Count pages and assets
             let path_str = relative_path.to_string_lossy();
             if path_str.starts_with("pages/") && path_str.ends_with(".json") {
