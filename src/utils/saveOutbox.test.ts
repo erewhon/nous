@@ -19,6 +19,7 @@ import { daemonPut } from "./daemon";
 import {
   enqueueFailedSave,
   enqueueFailedFileSave,
+  enqueueFailedDatabaseSave,
   dequeueSave,
   outboxSize,
   flushOutbox,
@@ -76,6 +77,22 @@ describe("saveOutbox (DL-22 / DL-04)", () => {
       (c[0] as string).endsWith("/file-content")
     );
     expect((fileCall![1] as { content: string }).content).toBe("{\"rows\":[]}");
+  });
+
+  it("replays a database entry to the databases endpoint with its row baseline (DL-04)", async () => {
+    enqueueFailedDatabaseSave({
+      notebookId: "n",
+      pageId: "db1",
+      content: { rows: [{ id: "r1" }] },
+      baselineRowIds: ["r1", "r2"],
+    });
+    mockPut.mockResolvedValue({});
+    const remaining = await flushOutbox();
+    expect(remaining).toBe(0);
+    expect(mockPut).toHaveBeenCalledWith("/api/notebooks/n/databases/db1", {
+      database: { rows: [{ id: "r1" }] },
+      baselineRowIds: ["r1", "r2"],
+    });
   });
 
   it("keeps entries queued while the daemon is unreachable", async () => {

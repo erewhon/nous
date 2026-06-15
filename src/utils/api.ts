@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { daemonGet, daemonPost, daemonPut, daemonDelete } from "./daemon";
-import { enqueueFailedFileSave } from "./saveOutbox";
+import { enqueueFailedFileSave, enqueueFailedDatabaseSave } from "./saveOutbox";
 import { daemonEventBus } from "./daemonEvents";
 import type { Notebook, NotebookType } from "../types/notebook";
 import type {
@@ -2186,6 +2186,46 @@ export async function updateFileContent(
     // writes; queue the edit so a transient daemon outage can't lose it (it's
     // replayed on reconnect/startup), then rethrow so the caller can react.
     enqueueFailedFileSave({ notebookId, pageId, content });
+    throw err;
+  }
+}
+
+export interface DatabaseResponse {
+  id: string;
+  title: string;
+  tags: string[];
+  database: unknown;
+}
+
+/** Read a database page's structured content through the daemon (DL-04). */
+export async function getDatabase(
+  notebookId: string,
+  pageId: string
+): Promise<DatabaseResponse> {
+  return daemonGet<DatabaseResponse>(
+    `/api/notebooks/${notebookId}/databases/${pageId}`
+  );
+}
+
+/**
+ * Write a database page's content through the daemon with a server-side row
+ * merge (DL-04): `baselineRowIds` are the row ids the editor had loaded, so the
+ * daemon re-attaches any rows another writer added concurrently rather than
+ * letting this whole-content save delete them. Queues to the outbox on failure.
+ */
+export async function putDatabase(
+  notebookId: string,
+  pageId: string,
+  database: Record<string, unknown>,
+  baselineRowIds: string[]
+): Promise<void> {
+  try {
+    await daemonPut(`/api/notebooks/${notebookId}/databases/${pageId}`, {
+      database,
+      baselineRowIds,
+    });
+  } catch (err) {
+    enqueueFailedDatabaseSave({ notebookId, pageId, content: database, baselineRowIds });
     throw err;
   }
 }

@@ -2918,12 +2918,60 @@ async fn get_database(
     }))
 }
 
-/// `PUT /api/notebooks/{nb}/databases/{db}` — replace the entire .database
-/// content for a database page atomically. Symmetric with `get_database`.
-/// Body is the raw `{properties, rows, views, ...}` JSON. Used by Python
-/// MCP tools that do read-modify-write on the whole structure (add a
-/// property, migrate cells, etc.); the row-only endpoints don't cover
-/// schema-level changes.
+/// DL-04 row merge: append to `db.rows` every row in `current.rows` whose id is
+/// neither in `baseline` (what the editor had loaded) nor already in `db.rows` —
+/// i.e. rows added concurrently since the editor loaded. Rows the editor knew
+/// (in `baseline`) but intentionally dropped are NOT re-attached, so deletes
+/// still apply. Returns how many rows were re-attached.
+fn reattach_concurrent_rows(
+    db: &mut serde_json::Value,
+    current: &serde_json::Value,
+    baseline: &std::collections::HashSet<String>,
+) -> usize {
+    let incoming_ids: std::collections::HashSet<String> = db
+        .get("rows")
+        .and_then(|r| r.as_array())
+        .map(|rows| {
+            rows.iter()
+                .filter_map(|r| r.get("id").and_then(|v| v.as_str()).map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let concurrent: Vec<serde_json::Value> = current
+        .get("rows")
+        .and_then(|r| r.as_array())
+        .map(|rows| {
+            rows.iter()
+                .filter(|r| match r.get("id").and_then(|v| v.as_str()) {
+                    Some(id) => !baseline.contains(id) && !incoming_ids.contains(id),
+                    None => false,
+                })
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let n = concurrent.len();
+    if n > 0 {
+        if let Some(rows) = db.get_mut("rows").and_then(|r| r.as_array_mut()) {
+            rows.extend(concurrent);
+        }
+    }
+    n
+}
+
+/// `PUT /api/notebooks/{nb}/databases/{db}` — replace the .database content.
+/// Symmetric with `get_database`.
+///
+/// Two body shapes:
+/// - Raw `{properties, rows, views, ...}` — blind replace (Python MCP tools that
+///   read-modify-write the whole structure).
+/// - `{ "database": {...}, "baselineRowIds": [...] }` — DL-04 row-merge: the
+///   desktop editor sends the row ids it had loaded; any row present on disk but
+///   unknown to the editor (i.e. added concurrently by MCP/daemon since it
+///   loaded) is re-attached, so the editor's whole-content save can't silently
+///   delete a concurrently-added row.
 async fn put_database(
     State(state): State<AppState>,
     Path((notebook_id, db_id)): Path<(String, String)>,
@@ -2941,8 +2989,43 @@ async fn put_database(
         return Err(api_err(StatusCode::BAD_REQUEST, "Not a database page"));
     }
 
+    // Unwrap the row-merge envelope if present, else treat the body as the raw db.
+    let (mut db, baseline): (serde_json::Value, Option<std::collections::HashSet<String>>) =
+        match (body.get("baselineRowIds"), body.get("database")) {
+            (Some(ids), Some(database)) => {
+                let set = ids
+                    .as_array()
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                (database.clone(), Some(set))
+            }
+            _ => (body, None),
+        };
+
+    // DL-04 row merge: re-attach rows added on disk since the editor loaded.
+    if let Some(baseline) = baseline {
+        if let Some(current) = storage
+            .read_native_file_content(&page)
+            .ok()
+            .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
+        {
+            let n = reattach_concurrent_rows(&mut db, &current, &baseline);
+            if n > 0 {
+                log::warn!(
+                    "DB merge for page {}: re-attached {} concurrently-added row(s) the editor hadn't loaded",
+                    pg_id,
+                    n
+                );
+            }
+        }
+    }
+
     // Serialize prettily so the on-disk file stays diffable for git users.
-    let serialized = serde_json::to_string_pretty(&body)
+    let serialized = serde_json::to_string_pretty(&db)
         .map_err(|e| api_err(StatusCode::BAD_REQUEST, format!("Invalid JSON body: {e}")))?;
 
     storage
@@ -4277,4 +4360,57 @@ async fn agile_daily_note(
         .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, format!("Invalid output: {e}")))?;
 
     Ok((StatusCode::CREATED, Json(ApiResponse { data: result })))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::reattach_concurrent_rows;
+    use std::collections::HashSet;
+
+    fn row(id: &str) -> serde_json::Value {
+        serde_json::json!({ "id": id, "cells": {} })
+    }
+    fn ids(db: &serde_json::Value) -> Vec<String> {
+        db["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r["id"].as_str().unwrap().to_string())
+            .collect()
+    }
+    fn baseline(items: &[&str]) -> HashSet<String> {
+        items.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn keeps_a_concurrently_added_row() {
+        // Editor loaded [A,B], saves [A,B] (edited B); disk is [A,B,C] (MCP added C).
+        let mut incoming = serde_json::json!({ "rows": [row("A"), row("B")] });
+        let current = serde_json::json!({ "rows": [row("A"), row("B"), row("C")] });
+        let n = reattach_concurrent_rows(&mut incoming, &current, &baseline(&["A", "B"]));
+        assert_eq!(n, 1);
+        let got = ids(&incoming);
+        assert!(got.contains(&"C".to_string()), "C must survive; got {got:?}");
+        assert_eq!(got.len(), 3);
+    }
+
+    #[test]
+    fn honors_an_intentional_delete() {
+        // Editor loaded [A,B], deletes B → saves [A]; disk still [A,B].
+        // B is in the baseline (known) so it is NOT resurrected.
+        let mut incoming = serde_json::json!({ "rows": [row("A")] });
+        let current = serde_json::json!({ "rows": [row("A"), row("B")] });
+        let n = reattach_concurrent_rows(&mut incoming, &current, &baseline(&["A", "B"]));
+        assert_eq!(n, 0);
+        assert_eq!(ids(&incoming), vec!["A".to_string()]);
+    }
+
+    #[test]
+    fn no_op_when_in_sync() {
+        let mut incoming = serde_json::json!({ "rows": [row("A"), row("B")] });
+        let current = serde_json::json!({ "rows": [row("A"), row("B")] });
+        let n = reattach_concurrent_rows(&mut incoming, &current, &baseline(&["A", "B"]));
+        assert_eq!(n, 0);
+        assert_eq!(ids(&incoming).len(), 2);
+    }
 }

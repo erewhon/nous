@@ -12,15 +12,21 @@ import type { EditorData } from "../types/page";
 
 const STORAGE_KEY = "nous-save-outbox";
 
-/** A standard-page content save (CRDT blocks) or a file-based page save (raw string). */
+/**
+ * A queued content save:
+ * - `page`: standard-page CRDT blocks (EditorData)
+ * - `file`: file-based page raw string body
+ * - `database`: structured database content (object) with the editor's loaded
+ *   row-id baseline for the server-side row merge (DL-04)
+ */
 export interface OutboxEntry {
-  kind: "page" | "file";
+  kind: "page" | "file" | "database";
   notebookId: string;
   pageId: string;
-  /** EditorData for `kind:"page"`, a string for `kind:"file"`. */
-  content: EditorData | string;
+  content: EditorData | string | Record<string, unknown>;
   commit?: boolean;
   paneId?: string;
+  baselineRowIds?: string[];
   queuedAt: number;
 }
 
@@ -69,6 +75,19 @@ export function enqueueFailedFileSave(entry: {
   persist(map);
 }
 
+/** Queue (or replace) a failed database content save, with the loaded row-id
+ *  baseline so the replay still does the server-side row merge (DL-04). */
+export function enqueueFailedDatabaseSave(entry: {
+  notebookId: string;
+  pageId: string;
+  content: Record<string, unknown>;
+  baselineRowIds: string[];
+}): void {
+  const map = load();
+  map[entry.pageId] = { kind: "database", ...entry, queuedAt: Date.now() };
+  persist(map);
+}
+
 /** Drop a page's queued save (e.g. once a later save for it succeeded). */
 export function dequeueSave(pageId: string): void {
   const map = load();
@@ -84,6 +103,13 @@ export function outboxSize(): number {
 
 async function replay(entry: OutboxEntry): Promise<void> {
   const base = `/api/notebooks/${entry.notebookId}/pages/${entry.pageId}`;
+  if (entry.kind === "database") {
+    await daemonPut(
+      `/api/notebooks/${entry.notebookId}/databases/${entry.pageId}`,
+      { database: entry.content, baselineRowIds: entry.baselineRowIds ?? [] }
+    );
+    return;
+  }
   if (entry.kind === "file") {
     await daemonPut(`${base}/file-content`, { content: entry.content });
     return;

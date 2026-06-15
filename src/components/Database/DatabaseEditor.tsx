@@ -70,6 +70,10 @@ export function DatabaseEditor({
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Latest debounced-but-not-yet-saved content, so unmount can flush it (DL-38).
   const pendingContentRef = useRef<DatabaseContentV2 | null>(null);
+  // Row ids this editor has loaded — sent with each save so the daemon can
+  // re-attach rows another writer added concurrently rather than letting a
+  // stale whole-content save delete them (DL-04 row merge).
+  const baselineRowIdsRef = useRef<string[]>([]);
 
   // Undo/redo stacks
   const MAX_UNDO = 30;
@@ -95,16 +99,11 @@ export function DatabaseEditor({
       setIsLoading(true);
       setError(null);
       try {
-        const result = await api.getFileContent(notebookId, page.id);
-        if (result.content) {
-          const parsed = migrateDatabaseContent(JSON.parse(result.content));
-          setContent(parsed);
-          setActiveViewId(parsed.views[0]?.id ?? null);
-        } else {
-          const defaultContent = createDefaultDatabaseContent();
-          setContent(defaultContent);
-          setActiveViewId(defaultContent.views[0]?.id ?? null);
-        }
+        const result = await api.getDatabase(notebookId, page.id);
+        const parsed = migrateDatabaseContent(result.database);
+        setContent(parsed);
+        setActiveViewId(parsed.views[0]?.id ?? null);
+        baselineRowIdsRef.current = parsed.rows.map((r) => r.id);
       } catch (err) {
         if (
           String(err).includes("not found") ||
@@ -143,12 +142,16 @@ export function DatabaseEditor({
       saveTimeoutRef.current = setTimeout(async () => {
         setIsSaving(true);
         try {
-          await api.updateFileContent(
+          // DL-04: send the loaded row-id baseline so the daemon re-attaches any
+          // concurrently-added rows instead of this snapshot deleting them.
+          await api.putDatabase(
             notebookId,
             page.id,
-            JSON.stringify(newContent, null, 2)
+            newContent as unknown as Record<string, unknown>,
+            baselineRowIdsRef.current
           );
           pendingContentRef.current = null; // saved
+          baselineRowIdsRef.current = newContent.rows.map((r) => r.id);
           setLastSaved(new Date());
         } catch (err) {
           console.error("Failed to save database:", err);
@@ -170,7 +173,12 @@ export function DatabaseEditor({
     if (!pending || !notebookId || !page) return;
     pendingContentRef.current = null;
     const p = api
-      .updateFileContent(notebookId, page.id, JSON.stringify(pending, null, 2))
+      .putDatabase(
+        notebookId,
+        page.id,
+        pending as unknown as Record<string, unknown>,
+        baselineRowIdsRef.current
+      )
       .then(() => {})
       .catch((err) =>
         console.error("Failed to flush database save on unmount:", err)
@@ -196,11 +204,10 @@ export function DatabaseEditor({
       saveTimeoutRef.current = null;
     }
     try {
-      const result = await api.getFileContent(notebookId, page.id);
-      if (result.content) {
-        const parsed = migrateDatabaseContent(JSON.parse(result.content));
-        setContent(parsed);
-      }
+      const result = await api.getDatabase(notebookId, page.id);
+      const parsed = migrateDatabaseContent(result.database);
+      setContent(parsed);
+      baselineRowIdsRef.current = parsed.rows.map((r) => r.id);
     } catch (err) {
       console.error("Failed to refresh database from disk:", err);
     }
