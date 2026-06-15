@@ -562,7 +562,6 @@ pub fn run() {
             commands::get_page,
             commands::get_page_content,
             commands::create_page,
-            commands::update_page,
             commands::delete_page,
             commands::permanent_delete_page,
             commands::restore_page,
@@ -862,8 +861,6 @@ pub fn run() {
             commands::delete_pdf_annotations,
             // File-based page commands
             commands::import_file_as_page,
-            commands::get_file_content,
-            commands::update_file_content,
             commands::duplicate_database_page,
             commands::get_file_path,
             commands::get_readable_html,
