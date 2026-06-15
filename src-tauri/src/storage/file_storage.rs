@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use chrono::Utc;
 use thiserror::Error;
@@ -677,19 +677,103 @@ impl FileStorage {
         page.section_id = None; // Clear section since it won't exist in new notebook
         page.updated_at = chrono::Utc::now();
 
-        // Save page in target notebook
+        // Save page in target notebook (atomic — the target is fully written or
+        // not at all, so a failure here returns early with the source intact).
         let target_page_path = self.page_path(target_notebook_id, page.id);
         let content = super::content_format::page_to_disk_json(&page)?;
         Self::atomic_write(&target_page_path, &content)?;
 
-        // Delete original page file
+        // DL-34: carry the page's recovery history (oplog + snapshots) to the
+        // target notebook. Without this the moved page starts with empty history
+        // and the old .oplog/.snapshots are orphaned in the source pages dir.
+        // Best-effort: a history-carry failure must not fail a move whose content
+        // already landed safely in the target.
+        Self::move_page_history(
+            &self.pages_dir(source_notebook_id),
+            &self.pages_dir(target_notebook_id),
+            page_id,
+        );
+
+        // Remove the original page file only after the target copy and history
+        // are in place. Best-effort: the move has effectively succeeded, so a
+        // failed source cleanup is logged rather than aborting (and losing the
+        // already-carried history to a retry).
         let source_page_path = self.page_path(source_notebook_id, page_id);
-        fs::remove_file(&source_page_path)?;
+        if let Err(e) = fs::remove_file(&source_page_path) {
+            log::warn!(
+                "move_page: target written but failed to remove source page {}: {}",
+                page_id, e
+            );
+        }
 
         // Optionally clean up original assets (only if no other pages reference them)
         // For now, we leave them - they'll be cleaned up by any future garbage collection
 
         Ok(page)
+    }
+
+    /// Move a page's recovery history (its `.oplog` and `.snapshots/` dir) from
+    /// one notebook's pages dir to another, so a cross-notebook move keeps the
+    /// page's version history and recoverable snapshots (DL-34). Best-effort per
+    /// artifact — logged, never fatal.
+    fn move_page_history(source_pages_dir: &Path, target_pages_dir: &Path, page_id: Uuid) {
+        let src_oplog = super::oplog::oplog_path(source_pages_dir, page_id);
+        let dst_oplog = super::oplog::oplog_path(target_pages_dir, page_id);
+        if src_oplog.exists() {
+            if let Err(e) = Self::move_path(&src_oplog, &dst_oplog) {
+                log::warn!("move_page: failed to carry oplog for {}: {}", page_id, e);
+            }
+        }
+
+        let src_snaps = super::snapshots::snapshots_dir(source_pages_dir, page_id);
+        let dst_snaps = super::snapshots::snapshots_dir(target_pages_dir, page_id);
+        if src_snaps.exists() {
+            if let Err(e) = Self::move_path(&src_snaps, &dst_snaps) {
+                log::warn!("move_page: failed to carry snapshots for {}: {}", page_id, e);
+            }
+        }
+
+        // The oplog lock is transient (recreated on the next append); drop the
+        // orphan in the source rather than carrying it.
+        let mut src_lock = src_oplog.into_os_string();
+        src_lock.push(".lock");
+        let _ = fs::remove_file(PathBuf::from(src_lock));
+    }
+
+    /// Move a file or directory, preferring an atomic same-filesystem rename and
+    /// falling back to copy-then-delete across filesystems.
+    fn move_path(src: &Path, dst: &Path) -> std::io::Result<()> {
+        if let Some(parent) = dst.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        if fs::rename(src, dst).is_ok() {
+            return Ok(());
+        }
+        // Cross-device (or other rename failure): copy then remove the source.
+        if src.is_dir() {
+            Self::copy_dir_recursive(src, dst)?;
+            fs::remove_dir_all(src)?;
+        } else {
+            fs::copy(src, dst)?;
+            fs::remove_file(src)?;
+        }
+        Ok(())
+    }
+
+    /// Recursively copy a directory tree (cross-filesystem fallback for move_path).
+    fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
+        fs::create_dir_all(dst)?;
+        for entry in fs::read_dir(src)? {
+            let entry = entry?;
+            let from = entry.path();
+            let to = dst.join(entry.file_name());
+            if entry.file_type()?.is_dir() {
+                Self::copy_dir_recursive(&from, &to)?;
+            } else {
+                fs::copy(&from, &to)?;
+            }
+        }
+        Ok(())
     }
 
     /// Extract asset file references from page content
@@ -3198,6 +3282,82 @@ mod tests {
         );
         // The live page is the shrunk version.
         assert_eq!(storage.get_page(nb.id, page.id).unwrap().content.blocks.len(), 1);
+    }
+
+    /// DL-34: a cross-notebook move must carry the page's recovery history
+    /// (oplog + snapshots) into the target instead of orphaning it in the source,
+    /// so the moved page keeps its version history.
+    #[test]
+    fn cross_notebook_move_carries_oplog_and_snapshots() {
+        let temp_dir = TempDir::new().unwrap();
+        let storage = FileStorage::new(temp_dir.path().to_path_buf());
+        storage.init().unwrap();
+        let src = storage
+            .create_notebook("Src".into(), NotebookType::default())
+            .unwrap();
+        let dst = storage
+            .create_notebook("Dst".into(), NotebookType::default())
+            .unwrap();
+
+        // Create a page, generate oplog entries, and force a snapshot via a
+        // destructive shrink.
+        let mut page = storage.create_page(src.id, "P".into()).unwrap();
+        page.content = blocks(6);
+        page.updated_at = Utc::now();
+        storage.update_page(&page).unwrap();
+        page.content = blocks(1);
+        page.updated_at = Utc::now();
+        storage.update_page(&page).unwrap();
+
+        let src_pages = storage.pages_dir(src.id);
+        let src_oplog = crate::storage::oplog::oplog_path(&src_pages, page.id);
+        let src_snaps = crate::storage::snapshots::snapshots_dir(&src_pages, page.id);
+        assert!(src_oplog.exists(), "precondition: source has an oplog");
+        assert!(
+            !crate::storage::snapshots::list_snapshots(&src_snaps).is_empty(),
+            "precondition: source has a snapshot"
+        );
+
+        storage
+            .move_page_to_notebook(src.id, page.id, dst.id, None)
+            .unwrap();
+
+        let dst_pages = storage.pages_dir(dst.id);
+        let dst_oplog = crate::storage::oplog::oplog_path(&dst_pages, page.id);
+        let dst_snaps = crate::storage::snapshots::snapshots_dir(&dst_pages, page.id);
+
+        // History carried to the target...
+        assert!(dst_oplog.exists(), "oplog must be carried to the target");
+        let dst_snap_names = crate::storage::snapshots::list_snapshots(&dst_snaps);
+        assert!(
+            !dst_snap_names.is_empty(),
+            "snapshots must be carried to the target"
+        );
+        // ...and not left orphaned in the source.
+        assert!(!src_oplog.exists(), "source oplog must not be orphaned");
+        assert!(!src_snaps.exists(), "source snapshots dir must not be orphaned");
+
+        // The carried snapshot still holds the OLD pre-shrink content.
+        let snap = crate::storage::snapshots::read_snapshot(
+            &dst_snaps,
+            dst_snap_names.last().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            snap.content.blocks.len(),
+            6,
+            "carried snapshot must retain the pre-shrink content"
+        );
+
+        // The page lives in the target, gone from the source.
+        assert_eq!(
+            storage.get_page(dst.id, page.id).unwrap().content.blocks.len(),
+            1
+        );
+        assert!(
+            storage.get_page(src.id, page.id).is_err(),
+            "page must be gone from the source notebook"
+        );
     }
 
     /// DL-02: native/file-based page writes go through the atomic path — content

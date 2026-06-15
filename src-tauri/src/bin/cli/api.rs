@@ -438,6 +438,24 @@ static START_TIME: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock
 
 type AppState = Arc<DaemonState>;
 
+/// Acquire the search-index lock, recovering from a poisoned mutex (DL-46).
+/// A Tantivy panic while indexing poisons the mutex; without recovery every
+/// later `lock()` returns Err and indexing silently no-ops for the rest of the
+/// daemon's lifetime (content is still saved, but never indexed → search results
+/// go permanently stale until restart). Recovering the inner guard keeps
+/// indexing working and lets POST /api/search/rebuild rebuild the writer.
+fn lock_search_index(
+    lock: &std::sync::Mutex<nous_lib::search::SearchIndex>,
+) -> std::sync::MutexGuard<'_, nous_lib::search::SearchIndex> {
+    lock.lock().unwrap_or_else(|poisoned| {
+        log::warn!(
+            "search index mutex was poisoned by a prior panic — recovering; \
+             POST /api/search/rebuild if results look stale"
+        );
+        poisoned.into_inner()
+    })
+}
+
 fn api_err(status: StatusCode, msg: impl Into<String>) -> (StatusCode, Json<ApiError>) {
     (status, Json(ApiError { error: msg.into() }))
 }
@@ -1036,12 +1054,9 @@ async fn rebuild_search_index(
     let mut indexed = 0usize;
     let mut failed = 0usize;
     {
-        let mut idx = state.search_index.lock().map_err(|e| {
-            api_err(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to acquire search lock: {}", e),
-            )
-        })?;
+        // DL-46: recover a poisoned lock so a rebuild can actually run — rebuild
+        // is the recovery path, so it must not be blocked by a poisoned mutex.
+        let mut idx = lock_search_index(&state.search_index);
 
         // Workaround for Tantivy 0.22.1 fastfield panic on batched commits
         // (writer.rs:137 "index out of bounds"). `rebuild_index(&pages)` does
@@ -1458,7 +1473,8 @@ async fn create_page(
     state.sync_manager.queue_page_update(nb_id, page.id);
 
     // Index the new page (best-effort — log on failure, don't fail the request).
-    if let Ok(mut idx) = state.search_index.lock() {
+    {
+        let mut idx = lock_search_index(&state.search_index);
         if let Err(e) = idx.index_page(&page) {
             log::warn!("Failed to index newly created page {}: {}", page.id, e);
         }
@@ -1654,7 +1670,8 @@ async fn update_page(
     state.sync_manager.queue_page_update(nb_id, pg_id);
 
     // Reindex (best-effort).
-    if let Ok(mut idx) = state.search_index.lock() {
+    {
+        let mut idx = lock_search_index(&state.search_index);
         if let Err(e) = idx.index_page(&page) {
             log::warn!("Failed to reindex page {}: {}", pg_id, e);
         }
@@ -2558,7 +2575,8 @@ async fn delete_page(
     drop(storage);
 
     // Drop from search index — best-effort.
-    if let Ok(mut idx) = state.search_index.lock() {
+    {
+        let mut idx = lock_search_index(&state.search_index);
         if let Err(e) = idx.remove_page(page_id) {
             log::warn!("Failed to remove page {} from search index: {}", page_id, e);
         }
@@ -4412,5 +4430,38 @@ mod tests {
         let n = reattach_concurrent_rows(&mut incoming, &current, &baseline(&["A", "B"]));
         assert_eq!(n, 0);
         assert_eq!(ids(&incoming).len(), 2);
+    }
+
+    /// DL-46: a Tantivy panic poisons the search-index mutex. The old
+    /// `if let Ok(idx) = lock()` then silently skipped indexing forever.
+    /// `lock_search_index` must recover the inner guard instead of panicking or
+    /// no-opping, so indexing (and the rebuild recovery path) keep working.
+    #[test]
+    fn lock_search_index_recovers_from_poison() {
+        use super::lock_search_index;
+        use std::sync::{Arc, Mutex};
+
+        let dir = std::env::temp_dir().join(format!("dl46_search_{}", uuid::Uuid::new_v4()));
+        let idx = nous_lib::search::SearchIndex::new(dir.clone())
+            .expect("create search index");
+        let lock = Arc::new(Mutex::new(idx));
+
+        // Poison the mutex by panicking while holding the guard.
+        let l2 = Arc::clone(&lock);
+        let _ = std::thread::spawn(move || {
+            let _g = l2.lock().unwrap();
+            panic!("simulated Tantivy panic while indexing");
+        })
+        .join();
+
+        // A naive lock() now errors (the failure mode the old code hit forever)...
+        assert!(lock.lock().is_err(), "precondition: mutex is poisoned");
+        // ...but the helper recovers and returns a usable guard (no panic).
+        let _recovered = lock_search_index(&lock);
+        drop(_recovered);
+        // And it keeps working on subsequent calls.
+        let _again = lock_search_index(&lock);
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
