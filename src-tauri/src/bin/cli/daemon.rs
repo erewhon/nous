@@ -269,7 +269,8 @@ pub async fn run(library_name: Option<&str>, port: Option<u16>, bind: Option<&st
     sync_manager_arc.set_emitter(Arc::new(LogEmitter));
     sync_manager_arc.set_crdt_store(Arc::clone(&crdt_store));
 
-    // Start sync scheduler
+    // Start sync scheduler. The daemon is the sync owner, so it never yields
+    // (DL-21) — `None` predicate.
     let sync_scheduler = nous_lib::sync::scheduler::start_sync_scheduler(
         Arc::clone(&sync_manager_arc),
         Arc::clone(&storage_arc),
@@ -278,6 +279,7 @@ pub async fn run(library_name: Option<&str>, port: Option<u16>, bind: Option<&st
         Arc::clone(&inbox_storage_arc),
         Arc::clone(&contacts_storage_arc),
         Arc::clone(&energy_storage_arc),
+        None,
     );
     log::info!("Sync scheduler started");
 

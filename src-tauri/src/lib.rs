@@ -357,6 +357,12 @@ pub fn run() {
         );
         Arc::new(tokio::sync::Mutex::new(None))
     } else {
+        // DL-21: the app may have launched before the daemon. If the daemon
+        // starts later, this predicate makes the app's scheduler yield periodic
+        // sync to it (re-checked every tick, not just at startup).
+        let yield_pid_path = daemon_pid_path.clone();
+        let should_yield: sync::scheduler::ShouldYield =
+            Arc::new(move || is_daemon_running(&yield_pid_path));
         let sync_scheduler = sync::scheduler::start_sync_scheduler(
             Arc::clone(&sync_manager_arc),
             Arc::clone(&storage_arc),
@@ -365,6 +371,7 @@ pub fn run() {
             Arc::clone(&inbox_storage_arc),
             Arc::clone(&contacts_storage_arc),
             Arc::clone(&energy_storage_arc),
+            Some(should_yield),
         );
         Arc::new(tokio::sync::Mutex::new(Some(sync_scheduler)))
     };

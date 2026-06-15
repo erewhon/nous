@@ -358,6 +358,14 @@ impl SyncManager {
         self.sync_dir(notebook_id).join("local_state.json")
     }
 
+    /// Path to the cross-process advisory sync lock for a notebook (DL-21).
+    /// Lives in the notebook's local-only `sync/` dir (never pushed to the
+    /// remote), so the Tauri app and the daemon — which share one data_dir —
+    /// contend on the same lock file.
+    fn sync_lock_path(&self, notebook_id: Uuid) -> PathBuf {
+        self.sync_dir(notebook_id).join(".sync.lock")
+    }
+
     /// Get the assets directory for a notebook
     fn assets_dir(&self, notebook_id: Uuid) -> PathBuf {
         self.data_dir
@@ -924,15 +932,70 @@ impl SyncManager {
         notebook_id: Uuid,
         storage: &SharedStorage,
     ) -> Result<SyncResult, SyncError> {
-        // Prevent concurrent sync of the same notebook
+        // Prevent concurrent sync of the same notebook within this process.
         if !self.try_acquire_notebook_guard(notebook_id) {
-            log::info!("Sync: notebook {} already syncing, skipping", notebook_id);
+            log::info!("Sync: notebook {} already syncing in-process, skipping", notebook_id);
             return Ok(SyncResult::success(0, 0, 0, 0, 0, 0));
         }
 
-        let result = self
-            .sync_notebook_inner(notebook_id, storage)
-            .await;
+        // DL-21: also prevent concurrent sync ACROSS processes. The Tauri app
+        // and the daemon share one data_dir and each owns a SyncManager whose
+        // in-process guard above is invisible to the other. Without a shared
+        // lock both can sync the same notebook at once; each builds its merge
+        // from a page snapshot taken before the other's pull, then writes
+        // .json/.crdt/local_state.json — and one silently overwrites the other
+        // (the mechanism of the 2026-05-01 stale-content wipe). A cross-process
+        // advisory file lock on the notebook's sync dir serializes them; the
+        // loser skips immediately, before any WebDAV round-trip.
+        let lock_path = self.sync_lock_path(notebook_id);
+        if let Some(parent) = lock_path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        // The guard borrows the RwLock, so both must outlive the sync and live
+        // in this scope (RwLock declared first so it outlives the guard).
+        // Dropping the guard releases the flock; dropping the RwLock closes the
+        // fd. We keep the lock file itself in place (empty, harmless).
+        let mut xproc_lock = match std::fs::OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .truncate(false)
+            .open(&lock_path)
+        {
+            Ok(file) => fd_lock::RwLock::new(file),
+            Err(e) => {
+                // Couldn't open the lock file (permissions/disk). Don't refuse
+                // to sync forever over a lock-file quirk — fall back to the
+                // in-process guard only.
+                log::warn!(
+                    "Sync: could not open cross-process lock {:?}: {} — proceeding with in-process guard only",
+                    lock_path, e,
+                );
+                let result = self.sync_notebook_inner(notebook_id, storage).await;
+                self.release_notebook_guard(notebook_id);
+                return result;
+            }
+        };
+
+        let result = match xproc_lock.try_write() {
+            // Hold `_xproc_guard` across the whole sync (released at arm end).
+            Ok(_xproc_guard) => self.sync_notebook_inner(notebook_id, storage).await,
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                log::info!(
+                    "Sync: notebook {} is being synced by another process, skipping",
+                    notebook_id,
+                );
+                Ok(SyncResult::success(0, 0, 0, 0, 0, 0))
+            }
+            Err(e) => {
+                // Unexpected lock error — proceed rather than wedge sync.
+                log::warn!(
+                    "Sync: cross-process lock error for {:?}: {} — proceeding with in-process guard only",
+                    lock_path, e,
+                );
+                self.sync_notebook_inner(notebook_id, storage).await
+            }
+        };
 
         self.release_notebook_guard(notebook_id);
         result
@@ -4662,6 +4725,56 @@ mod tests {
             SyncManager::asset_key_to_local_path(files_dir, assets_dir, "images/x.png"),
             Path::new("/nb/assets/images/x.png")
         );
+    }
+
+    /// DL-21: two SyncManager instances sharing one data_dir (the Tauri app +
+    /// the daemon) must not sync the same notebook concurrently. Exercises the
+    /// exact lock file `sync_notebook()` contends on: while one holds the
+    /// cross-process advisory lock, the other's acquisition gets `WouldBlock`;
+    /// once released, the other succeeds.
+    #[test]
+    fn sync_lock_is_exclusive_across_managers_sharing_data_dir() {
+        let dir = temp_dir("xproc_lock");
+        let notebook_id = Uuid::new_v4();
+
+        let app = SyncManager::new(dir.clone());
+        let daemon = SyncManager::new(dir.clone());
+
+        // Both processes must resolve to the SAME lock file under data_dir.
+        let lock_path = app.sync_lock_path(notebook_id);
+        assert_eq!(lock_path, daemon.sync_lock_path(notebook_id));
+        fs::create_dir_all(lock_path.parent().unwrap()).unwrap();
+
+        let open = || {
+            std::fs::OpenOptions::new()
+                .create(true)
+                .read(true)
+                .write(true)
+                .truncate(false)
+                .open(&lock_path)
+                .unwrap()
+        };
+
+        // App acquires the lock.
+        let mut app_lock = fd_lock::RwLock::new(open());
+        let app_guard = app_lock.try_write().expect("app acquires the sync lock");
+
+        // Daemon cannot acquire it concurrently.
+        let mut daemon_lock = fd_lock::RwLock::new(open());
+        let err = daemon_lock
+            .try_write()
+            .err()
+            .expect("daemon must be blocked while the app holds the lock");
+        assert_eq!(err.kind(), std::io::ErrorKind::WouldBlock);
+
+        // After the app releases, the daemon can take it.
+        drop(app_guard);
+        drop(app_lock);
+        let _daemon_guard = daemon_lock
+            .try_write()
+            .expect("daemon acquires the lock after the app releases it");
+
+        let _ = fs::remove_dir_all(&dir);
     }
 
     /// Regression test for the 2026-05-01 WebDAV sync data-loss incident.

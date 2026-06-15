@@ -3928,6 +3928,7 @@ dependencies = [
  "dirs 5.0.1",
  "env_logger",
  "extism",
+ "fd-lock",
  "futures-util",
  "git2",
  "glob",

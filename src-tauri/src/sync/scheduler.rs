@@ -66,10 +66,23 @@ const MIN_INTERVAL_SECS: u64 = 60;
 /// Fallback poll interval when no periodic items are configured
 const FALLBACK_POLL_SECS: u64 = 60;
 
+/// A predicate that returns `true` when this process should yield periodic sync
+/// to another owner (the daemon). The Tauri app passes one that checks the
+/// daemon PID file; the daemon passes `None` (it is the owner).
+pub type ShouldYield = Arc<dyn Fn() -> bool + Send + Sync>;
+
 /// Start the periodic sync scheduler.
 ///
 /// Spawns an async loop that monitors notebooks and libraries with periodic sync
 /// enabled, and triggers syncs when their intervals elapse.
+///
+/// `should_yield` is checked before each scheduled sync. When it returns true
+/// (the daemon is running and owns sync), the tick is skipped. This closes the
+/// DL-21 startup TOCTOU: the app only checks daemon liveness once at startup, so
+/// an app that launched before the daemon would otherwise keep polling forever.
+/// The cross-process flock in `sync_notebook` is the hard data-safety backstop;
+/// this predicate just keeps the daemon the single sync owner and avoids
+/// redundant WebDAV round-trips.
 pub fn start_sync_scheduler(
     sync_manager: Arc<SyncManager>,
     storage: SharedStorage,
@@ -78,11 +91,12 @@ pub fn start_sync_scheduler(
     inbox_storage: SharedInboxStorage,
     contacts_storage: SharedContactsStorage,
     energy_storage: SharedEnergyStorage,
+    should_yield: Option<ShouldYield>,
 ) -> SyncScheduler {
     let (tx, rx) = mpsc::channel(32);
 
     tauri::async_runtime::spawn(async move {
-        sync_scheduler_loop(sync_manager, storage, library_storage, goals_storage, inbox_storage, contacts_storage, energy_storage, rx).await;
+        sync_scheduler_loop(sync_manager, storage, library_storage, goals_storage, inbox_storage, contacts_storage, energy_storage, should_yield, rx).await;
     });
 
     // Trigger initial scan
@@ -235,12 +249,16 @@ async fn sync_scheduler_loop(
     inbox_storage: SharedInboxStorage,
     contacts_storage: SharedContactsStorage,
     energy_storage: SharedEnergyStorage,
+    should_yield: Option<ShouldYield>,
     mut receiver: mpsc::Receiver<SyncSchedulerMessage>,
 ) {
     use std::collections::HashMap;
     use std::time::Duration;
 
     log::info!("Sync scheduler started");
+
+    // DL-21: true when another process (the daemon) now owns sync.
+    let yielding = || should_yield.as_ref().map(|y| y()).unwrap_or(false);
 
     // Track when each item was last checked (sentinel or full sync).
     // This prevents the scheduler from spinning when the sentinel says
@@ -353,6 +371,19 @@ async fn sync_scheduler_loop(
                         continue;
                     }
 
+                    // DL-21: yield periodic sync to the daemon if it is now
+                    // running. Advance last_checked so this item waits a full
+                    // interval before re-checking (avoids a 0-wait busy loop
+                    // while overdue items stay overdue).
+                    if yielding() {
+                        log::debug!(
+                            "Sync scheduler: daemon owns sync — yielding scheduled sync for {}",
+                            id,
+                        );
+                        last_checked.insert(id, Utc::now());
+                        continue;
+                    }
+
                     if is_library {
                         // Check sentinel before running full sync
                         if !should_sync_library(&sync_manager, id, &library_storage).await {
@@ -419,6 +450,15 @@ async fn sync_scheduler_loop(
                         continue;
                     }
                     Some(SyncSchedulerMessage::RemoteChanged { library_id }) => {
+                        // DL-21: when the daemon owns sync, let it handle the
+                        // remote-change trigger rather than racing it.
+                        if yielding() {
+                            log::debug!(
+                                "Sync scheduler: daemon owns sync — ignoring remote-change trigger for library {}",
+                                library_id,
+                            );
+                            continue;
+                        }
                         log::info!("Sync scheduler: remote change detected for library {}, triggering sync", library_id);
                         match sync_manager
                             .sync_library(library_id, &library_storage, &storage, &goals_storage, &inbox_storage, &contacts_storage, &energy_storage)
