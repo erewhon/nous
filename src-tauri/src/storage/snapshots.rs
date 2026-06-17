@@ -8,7 +8,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, NaiveDateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -196,27 +196,116 @@ fn read_latest_meta(snap_dir: &Path) -> Option<SnapshotMeta> {
     serde_json::from_str(&content).ok()
 }
 
-/// Prune snapshots down to `max`, but ALWAYS keep the single oldest snapshot as
-/// a baseline. Pruning purely by recency could otherwise delete the last full
-/// copy of content that was silently lost long ago; keeping the oldest preserves
-/// the earliest recoverable state. We therefore retain the oldest snapshot plus
-/// the newest `max - 1`, removing only those in between.
+/// Prune snapshots down to `max` using time-based exponential thinning.
+///
+/// A purely recency-based policy (keep the newest N) — or even "oldest baseline
+/// plus newest N-1" — leaves a large, permanently unrecoverable GAP in the
+/// middle of a heavily-edited page's history: content added after the baseline
+/// and deleted before the recent window is gone, and the oplog stores only diffs
+/// (no content), so snapshots are the only full copies. Instead we keep the
+/// oldest and newest plus an exponentially-thinned spread of the middle (dense
+/// recent, sparse old) so *some* recoverable copy survives across the whole
+/// timeline. See [`snapshots_to_keep`]. (DL-35)
 fn prune_snapshots(snap_dir: &Path, max: usize) -> std::io::Result<()> {
     let names = list_snapshots(snap_dir);
-    if names.len() <= max || max < 2 {
+    let n = names.len();
+    if n <= max || max < 2 {
         return Ok(());
     }
 
-    // Keep names[0] (oldest baseline) and the last `max - 1` (most recent).
-    let keep_oldest = 1usize;
-    let remove_start = keep_oldest;
-    let remove_end = names.len() - (max - keep_oldest);
-    for name in &names[remove_start..remove_end] {
-        let _ = fs::remove_file(snap_dir.join(format!("{}.json", name)));
-        let _ = fs::remove_file(snap_dir.join(format!("{}.meta.json", name)));
+    // Parse a timestamp from each snapshot name (prefix "%Y%m%d_%H%M%S"). If any
+    // name is unparseable, fall back to the conservative oldest + newest-window
+    // policy rather than risk deleting a snapshot we can't reason about.
+    let times: Option<Vec<DateTime<Utc>>> = names
+        .iter()
+        .map(|name| {
+            name.get(0..15)
+                .and_then(|p| NaiveDateTime::parse_from_str(p, "%Y%m%d_%H%M%S").ok())
+                .map(|ndt| ndt.and_utc())
+        })
+        .collect();
+
+    let keep: std::collections::BTreeSet<usize> = match times {
+        Some(times) => snapshots_to_keep(&times, max),
+        None => {
+            let mut k = std::collections::BTreeSet::new();
+            k.insert(0);
+            k.extend((n - (max - 1))..n);
+            k
+        }
+    };
+
+    for (i, name) in names.iter().enumerate() {
+        if !keep.contains(&i) {
+            let _ = fs::remove_file(snap_dir.join(format!("{}.json", name)));
+            let _ = fs::remove_file(snap_dir.join(format!("{}.meta.json", name)));
+        }
     }
 
     Ok(())
+}
+
+/// Select which snapshots (by index into a chronological, oldest-first list) to
+/// retain when the count exceeds `max`.
+///
+/// We always keep the newest (latest state) and oldest (earliest baseline), then
+/// fill the budget by greedily even-spreading the rest in **log-age space**:
+/// each snapshot is positioned at `ln(age + 1)` and we repeatedly drop the
+/// interior snapshot whose removal opens the smallest log-age gap (the most
+/// redundant one). Even spacing in log-age is geometric spacing in real time —
+/// dense for recent history, sparse for old — which is the exponential thinning
+/// the audit asks for, without leaving an unrecoverable middle gap.
+///
+/// This formulation is STABLE under repeated pruning (append-newest then prune,
+/// over and over): even-spreading in a fixed coordinate is a self-correcting
+/// process, so the middle of the history never erodes away — unlike a sliding
+/// recent-window policy, where snapshots die at the window edge before they can
+/// age into the sparse tail.
+fn snapshots_to_keep(times: &[DateTime<Utc>], max: usize) -> std::collections::BTreeSet<usize> {
+    use std::collections::BTreeSet;
+
+    let n = times.len();
+    let mut keep = BTreeSet::new();
+    if n == 0 {
+        return keep;
+    }
+    if n <= max {
+        keep.extend(0..n);
+        return keep;
+    }
+    if max < 2 {
+        // Degenerate budget: keep just the newest (latest state).
+        keep.insert(n - 1);
+        return keep;
+    }
+
+    let newest = times[n - 1];
+    // Log-age coordinate. `times` is oldest-first, so lage is descending:
+    // lage[0] (oldest) is largest, lage[n-1] (newest) is 0.
+    let lage: Vec<f64> = times
+        .iter()
+        .map(|t| ((newest - *t).num_seconds().max(0) as f64 + 1.0).ln())
+        .collect();
+
+    // Greedily drop the most-redundant interior snapshot until at budget. The
+    // endpoints (indices 0 and n-1) are never interior, so they always survive.
+    let mut alive: Vec<usize> = (0..n).collect();
+    while alive.len() > max {
+        let mut best_pos = 1usize;
+        let mut best_gap = f64::INFINITY;
+        for p in 1..alive.len() - 1 {
+            // Log-age span that would be merged if alive[p] were removed.
+            let gap = lage[alive[p - 1]] - lage[alive[p + 1]];
+            if gap < best_gap {
+                best_gap = gap;
+                best_pos = p;
+            }
+        }
+        alive.remove(best_pos);
+    }
+
+    keep.extend(alive);
+    keep
 }
 
 #[cfg(test)]
@@ -321,6 +410,83 @@ mod tests {
         assert_eq!(remaining[2], "20260101_000004");
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn snapshots_to_keep_retains_all_when_under_budget() {
+        use chrono::TimeZone;
+        let base = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+        let times: Vec<_> = (0..10i64).map(|h| base + chrono::Duration::hours(h)).collect();
+        let keep = snapshots_to_keep(&times, 50);
+        assert_eq!(keep.len(), 10);
+    }
+
+    #[test]
+    fn snapshots_to_keep_thins_exponentially_recent_dense() {
+        use chrono::TimeZone;
+        let base = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+        let times: Vec<_> = (0..500i64).map(|h| base + chrono::Duration::hours(h)).collect();
+        let max = 50;
+        let keep = snapshots_to_keep(&times, max);
+
+        // Endpoints always retained.
+        assert!(keep.contains(&0), "oldest baseline must be kept");
+        assert!(keep.contains(&499), "newest must be kept");
+        assert!(keep.len() <= max, "must respect the budget");
+
+        // Recency bias: the recent half is kept more densely than the old half.
+        let recent = keep.iter().filter(|&&i| i >= 250).count();
+        let old = keep.iter().filter(|&&i| i < 250).count();
+        assert!(recent > old, "recent {recent} should be denser than old {old}");
+
+        // No catastrophic middle gap: every quarter of the timeline has coverage.
+        for q in 0..4 {
+            let lo = q * 125;
+            let hi = lo + 125;
+            assert!(
+                keep.iter().any(|&i| (lo..hi).contains(&i)),
+                "quarter {q} ({lo}..{hi}) has no retained snapshot"
+            );
+        }
+    }
+
+    #[test]
+    fn snapshots_to_keep_preserves_history_depth_under_iteration() {
+        use chrono::TimeZone;
+        // Simulate steady-state operation: append one snapshot per "day" and
+        // prune each round, for far more rounds than the budget. The middle of
+        // the history must NOT erode away to just the two endpoints.
+        let base = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+        let max = 50;
+        let mut alive: Vec<DateTime<Utc>> = Vec::new();
+        for day in 0..400i64 {
+            alive.push(base + chrono::Duration::days(day));
+            let keep = snapshots_to_keep(&alive, max);
+            // BTreeSet yields ascending indices and `alive` is ascending by time,
+            // so the survivors stay chronologically sorted.
+            alive = keep.iter().map(|&i| alive[i]).collect();
+        }
+
+        assert_eq!(alive.first().copied(), Some(base), "oldest baseline lost");
+        assert_eq!(
+            alive.last().copied(),
+            Some(base + chrono::Duration::days(399)),
+            "newest lost"
+        );
+        assert!(alive.len() <= max, "budget exceeded: {}", alive.len());
+        assert!(
+            alive.len() >= 20,
+            "history depth collapsed under iteration: only {} kept",
+            alive.len()
+        );
+
+        // A genuinely mid-aged snapshot survived (not just recent + endpoints).
+        let newest = *alive.last().unwrap();
+        let has_mid = alive.iter().any(|t| {
+            let age_days = (newest - *t).num_days();
+            (100..300).contains(&age_days)
+        });
+        assert!(has_mid, "no mid-history snapshot retained across iterations");
     }
 
     #[test]
