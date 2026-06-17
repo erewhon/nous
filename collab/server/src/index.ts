@@ -119,20 +119,35 @@ function validateRoomAccess(payload: TokenPayload, roomId: string): boolean {
 
 interface Env {
   COLLAB_HMAC_SECRET: string;
-  CollabServer: DurableObjectNamespace;
+  CollabServer: DurableObjectNamespace<CollabServer>;
   /** KV namespace for manifest storage */
   COLLAB_MANIFESTS?: KVNamespace;
 }
 
 const STORAGE_KEY = "yjs-state";
 
-/** Map of connection ID → permissions for enforcing read-only */
-const connectionPermissions = new Map<string, string>();
+/**
+ * How often to durably flush the Yjs doc while a session is active (DL-11).
+ * A Durable Object alarm survives hibernation, unlike y-partyserver's debounced
+ * setTimeout, so this guarantees a flush cadence even if the JS instance is
+ * evicted between debounced saves.
+ */
+const ALARM_FLUSH_INTERVAL_MS = 15_000;
+
+/** Per-connection state persisted in the WebSocket attachment (survives hibernation). */
+interface ConnectionState {
+  permissions: string;
+}
 
 export class CollabServer extends YServer {
   static options = {
     hibernate: true,
   };
+
+  /** Durable Object storage handle (typed accessor for the protected ctx). */
+  private get storage(): DurableObjectStorage {
+    return (this as unknown as { ctx: DurableObjectState }).ctx.storage;
+  }
 
   /**
    * Restore Yjs document from Durable Object storage on wake.
@@ -140,8 +155,7 @@ export class CollabServer extends YServer {
    * after hibernation eviction).
    */
   async onLoad(): Promise<Doc | void> {
-    const ctx = (this as unknown as { ctx: DurableObjectState }).ctx;
-    const stored = await ctx.storage.get<ArrayBuffer>(STORAGE_KEY);
+    const stored = await this.storage.get<ArrayBuffer>(STORAGE_KEY);
     if (stored) {
       const doc = new Doc();
       applyUpdate(doc, new Uint8Array(stored));
@@ -151,16 +165,34 @@ export class CollabServer extends YServer {
 
   /**
    * Persist Yjs document to Durable Object storage.
-   * Called by YServer on a debounced schedule after document updates.
+   * Called by YServer on a debounced schedule after document updates, and by
+   * our DL-11 durability backstops (onClose flush + onAlarm).
    */
   async onSave(): Promise<void> {
-    const ctx = (this as unknown as { ctx: DurableObjectState }).ctx;
     const state = encodeStateAsUpdate(this.document);
-    await ctx.storage.put(STORAGE_KEY, state.buffer);
+    await this.storage.put(STORAGE_KEY, state.buffer);
   }
 
   /**
-   * Validate HMAC token on connect, check scope authorization, and store permissions.
+   * Read-only enforcement (DL-10). y-partyserver consults this hook inside
+   * handleMessage for every sync message and drops BOTH SyncStep2 (sub-type 1)
+   * and Update (sub-type 2) when it returns true. Permissions are read from the
+   * connection's WebSocket attachment, which survives Durable Object
+   * hibernation — so a read-only guest stays read-only even after the JS
+   * instance is evicted and onConnect is never re-invoked. (The previous
+   * module-global Map was lost on eviction, silently re-granting write access.)
+   */
+  isReadOnly(connection: Connection): boolean {
+    const state = connection.state as ConnectionState | null;
+    // Fail closed: only an explicit "rw" grant permits writes. A missing or
+    // unrecognized attachment (the DL-10 hibernation gap) is treated as
+    // read-only rather than silently granting write access.
+    return state?.permissions !== "rw";
+  }
+
+  /**
+   * Validate HMAC token on connect, check scope authorization, and persist the
+   * connection's permissions to its (hibernation-safe) attachment state.
    * If invalid, close the connection immediately.
    */
   async onConnect(connection: Connection, ctx: ConnectionContext) {
@@ -198,48 +230,75 @@ export class CollabServer extends YServer {
       return;
     }
 
-    // Store permissions for this connection
-    connectionPermissions.set(connection.id, payload.permissions);
+    // Persist permissions in the connection's attachment so read-only
+    // enforcement (isReadOnly) survives hibernation (DL-10).
+    connection.setState({ permissions: payload.permissions } satisfies ConnectionState);
 
     // Token valid — proceed with Yjs sync
     await super.onConnect(connection, ctx);
+
+    // Ensure a durable periodic flush is scheduled while a session is active (DL-11).
+    await this.ensureFlushAlarm();
   }
 
   /**
-   * Intercept messages to enforce read-only permissions.
-   * Read-only connections can receive sync/awareness but cannot send document updates.
-   */
-  async onMessage(connection: Connection, message: string | ArrayBuffer | ArrayBufferView) {
-    const permissions = connectionPermissions.get(connection.id);
-
-    // For read-only connections, filter out document update messages
-    // Yjs protocol: message type 0 = sync, 1 = awareness
-    // Sync sub-messages: 0 = step1 (request), 1 = step2 (response), 2 = update
-    // Read-only should be allowed to receive sync responses and awareness,
-    // but NOT allowed to send document updates (sync type 2)
-    if (permissions === "r" && message instanceof ArrayBuffer) {
-      const data = new Uint8Array(message);
-      // Check if this is a sync message (type 0) with an update sub-type (2)
-      if (data.length >= 2 && data[0] === 0 && data[1] === 2) {
-        // Drop document update messages from read-only connections
-        return;
-      }
-    } else if (permissions === "r" && ArrayBuffer.isView(message)) {
-      const data = new Uint8Array(message.buffer, message.byteOffset, message.byteLength);
-      if (data.length >= 2 && data[0] === 0 && data[1] === 2) {
-        return;
-      }
-    }
-
-    await super.onMessage(connection, message);
-  }
-
-  /**
-   * Clean up permissions on disconnect.
+   * Flush durable state as soon as the last client leaves, while the Yjs doc is
+   * still in memory (DL-11). The debounce-only path could otherwise lose the
+   * trailing edit window if the client disconnected before the 2s debounce
+   * fired — and for guest-only pages (no host-side editor writing local .json,
+   * skipped by SyncManager) this DO's storage is the ONLY durable copy.
    */
   async onClose(connection: Connection, code: number, reason: string, wasClean: boolean) {
-    connectionPermissions.delete(connection.id);
     await super.onClose(connection, code, reason, wasClean);
+
+    // The closing connection may or may not still be listed depending on
+    // teardown ordering, so exclude it explicitly when checking for emptiness.
+    const remaining = [...this.getConnections()].filter((c) => c.id !== connection.id);
+    if (remaining.length === 0) {
+      try {
+        await this.onSave();
+      } catch (err) {
+        console.error("Flush on last disconnect failed:", err);
+      }
+      // No active session — cancel the periodic flush alarm.
+      try {
+        await this.storage.deleteAlarm();
+      } catch (err) {
+        console.error("Failed to cancel flush alarm:", err);
+      }
+    }
+  }
+
+  /**
+   * Durable backstop flush (DL-11). Unlike y-partyserver's debounced setTimeout,
+   * a Durable Object alarm survives hibernation, so trailing edits are persisted
+   * on a fixed cadence even if the debounce timer is evicted before it fires.
+   * partyserver runs onStart (→ onLoad) before onAlarm, so this.document always
+   * holds the restored state — never a fresh-empty doc. Reschedules itself while
+   * a session remains active.
+   */
+  async onAlarm(): Promise<void> {
+    try {
+      await this.onSave();
+    } catch (err) {
+      console.error("Alarm flush failed:", err);
+    }
+    const hasConnections = [...this.getConnections()].length > 0;
+    if (hasConnections) {
+      await this.storage.setAlarm(Date.now() + ALARM_FLUSH_INTERVAL_MS);
+    }
+  }
+
+  /** Schedule the periodic flush alarm if one is not already pending. */
+  private async ensureFlushAlarm(): Promise<void> {
+    try {
+      const existing = await this.storage.getAlarm();
+      if (existing === null) {
+        await this.storage.setAlarm(Date.now() + ALARM_FLUSH_INTERVAL_MS);
+      }
+    } catch (err) {
+      console.error("Failed to schedule flush alarm:", err);
+    }
   }
 }
 
