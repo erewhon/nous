@@ -4285,16 +4285,16 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
 name = "onenote_parser"
-version = "1.1.0"
+version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e27a589c9014cf1c6f0f4e030d563bbe059d80f00ac7ab877fe3183d8640caa7"
+checksum = "ec8c03e23e2dff7a559bcb91adb17468fb9376b132e17a2789fba19efea34984"
 dependencies = [
  "bytes",
  "encoding_rs",
  "enum-primitive-derive",
  "itertools 0.14.0",
  "num-traits",
- "pastey",
+ "sanitise-file-name",
  "thiserror 2.0.17",
  "uuid",
  "widestring",
@@ -4456,12 +4456,6 @@ name = "paste"
 version = "1.0.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "57c0d7b74b563b49d38dae00a0c37d4d6de9b432382b2892f0574ddcae73fd0a"
-
-[[package]]
-name = "pastey"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b867cad97c0791bbd3aaa6472142568c6c9e8f71937e98379f584cfb0cf35bec"
 
 [[package]]
 name = "pbkdf2"
@@ -5723,6 +5717,12 @@ checksum = "93fc1dc3aaa9bfed95e02e6eadabb4baf7e3078b0bd1b4d7b6b0b68378900502"
 dependencies = [
  "winapi-util",
 ]
+
+[[package]]
+name = "sanitise-file-name"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "19d36299972b96b8ae7e8f04ecbf75fb41a27bf3781af00abcf57609774cb911"
 
 [[package]]
 name = "schannel"
