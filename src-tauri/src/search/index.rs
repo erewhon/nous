@@ -1,10 +1,10 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use tantivy::collector::TopDocs;
 use tantivy::query::{FuzzyTermQuery, QueryParser};
-use tantivy::schema::{Field, Schema, Value, STORED, TEXT};
+use tantivy::schema::{Field, FieldEntry, Schema, Value, STORED, STRING, TEXT};
 use tantivy::{doc, Index, IndexReader, IndexWriter, ReloadPolicy, TantivyDocument, Term};
 use thiserror::Error;
 use uuid::Uuid;
@@ -79,7 +79,11 @@ impl SearchIndex {
         // Build schema
         let mut schema_builder = Schema::builder();
 
-        let page_id = schema_builder.add_text_field("page_id", STORED);
+        // page_id is STRING (indexed as a single exact-match token) + STORED so
+        // `delete_term(page_id, ...)` can find and remove the prior document on
+        // re-index. With STORED-only (un-indexed) it was a silent no-op, leaving
+        // a duplicate in the index on every re-save.
+        let page_id = schema_builder.add_text_field("page_id", STRING | STORED);
         let notebook_id = schema_builder.add_text_field("notebook_id", STORED);
         let title = schema_builder.add_text_field("title", TEXT | STORED);
         let content = schema_builder.add_text_field("content", TEXT);
@@ -88,9 +92,13 @@ impl SearchIndex {
 
         let schema = schema_builder.build();
 
-        // Create or open index
-        let index = Index::create_in_dir(&index_path, schema.clone())
-            .or_else(|_| Index::open_in_dir(&index_path))?;
+        // Open an existing index only if its stored schema matches; otherwise
+        // rebuild from scratch. A schema change (e.g. a new field) otherwise
+        // leaves the on-disk index with fewer fields than the code expects, and
+        // adding a document whose field id is now out of range panics in
+        // Tantivy's fastfield writer on commit (`fastfield/writer.rs:137`,
+        // `index out of bounds` — the 2026-05-01 incident).
+        let index = Self::open_or_recreate(&index_path, &schema)?;
 
         let reader = index
             .reader_builder()
@@ -116,6 +124,69 @@ impl SearchIndex {
             fields,
             schema,
         })
+    }
+
+    /// Open the index at `index_path`, reusing it only if its stored schema
+    /// matches `schema`. If the schemas differ (a schema migration) — or no
+    /// usable index exists — the directory is cleared and a fresh index is
+    /// created.
+    ///
+    /// This is the root-cause fix for the Tantivy fastfield commit panic: it
+    /// guarantees the writer's schema always matches the documents' field ids,
+    /// so `fast_field_names[field_id]` can never go out of bounds.
+    fn open_or_recreate(index_path: &Path, schema: &Schema) -> Result<Index> {
+        if let Ok(existing) = Index::open_in_dir(index_path) {
+            if Self::schema_matches(&existing.schema(), schema) {
+                return Ok(existing);
+            }
+            log::warn!(
+                "Search index schema at {:?} differs from the current schema; \
+                 rebuilding it (avoids the Tantivy fastfield field-id panic)",
+                index_path
+            );
+        }
+        // Fresh index: `create_in_dir` requires an empty directory, so clear any
+        // remnants of a previous (stale or corrupt) index first.
+        Self::clear_index_dir(index_path)?;
+        Ok(Index::create_in_dir(index_path, schema.clone())?)
+    }
+
+    /// Two schemas are compatible for reuse iff their field entries match exactly
+    /// (name, type, and options, in field-id order). A field-set change keeps
+    /// document field ids in range — the panic case — while an options change
+    /// (e.g. making `page_id` indexed so deletes work) also requires a rebuild,
+    /// since the on-disk index was built without that capability. `FieldEntry`
+    /// compares all of this via `PartialEq`.
+    fn schema_matches(existing: &Schema, desired: &Schema) -> bool {
+        let existing_fields: Vec<&FieldEntry> = existing.fields().map(|(_, e)| e).collect();
+        let desired_fields: Vec<&FieldEntry> = desired.fields().map(|(_, e)| e).collect();
+        existing_fields == desired_fields
+    }
+
+    /// Remove everything in the index directory (creating it if absent) so a
+    /// fresh index can be created in its place.
+    fn clear_index_dir(index_path: &Path) -> Result<()> {
+        if index_path.exists() {
+            for entry in std::fs::read_dir(index_path)? {
+                let entry = entry?;
+                let path = entry.path();
+                let _ = if entry.file_type()?.is_dir() {
+                    std::fs::remove_dir_all(&path)
+                } else {
+                    std::fs::remove_file(&path)
+                };
+            }
+        } else {
+            std::fs::create_dir_all(index_path)?;
+        }
+        Ok(())
+    }
+
+    /// Number of (non-deleted) documents currently visible to the reader. Used
+    /// at startup to detect an empty index (fresh install, or one just rebuilt
+    /// after a schema migration) that needs repopulating.
+    pub fn num_docs(&self) -> u64 {
+        self.reader.searcher().num_docs()
     }
 
     /// Extract plain text from Editor.js blocks
@@ -307,8 +378,12 @@ impl SearchIndex {
 
     /// Index a page (for standard Editor.js pages)
     pub fn index_page(&mut self, page: &Page) -> Result<()> {
-        // First, remove any existing document with this page_id
-        self.remove_page(page.id)?;
+        // Upsert in a SINGLE commit: stage the delete of any existing document
+        // for this page id, then the add, then commit once. (Deleting via a
+        // separately-committed call and then committing the add doubled the
+        // segment/commit churn for no benefit.)
+        let term = Term::from_field_text(self.fields.page_id, &page.id.to_string());
+        self.writer.delete_term(term);
 
         let content = Self::extract_text_from_blocks(&page.content.blocks);
         let tags = page.tags.join(" ");
@@ -330,8 +405,10 @@ impl SearchIndex {
 
     /// Index a page with file content (for Jupyter, Markdown, etc.)
     pub fn index_page_with_content(&mut self, page: &Page, file_content: &str) -> Result<()> {
-        // First, remove any existing document with this page_id
-        self.remove_page(page.id)?;
+        // Upsert in a single commit (see `index_page`): stage the delete, then
+        // the add, then commit once.
+        let term = Term::from_field_text(self.fields.page_id, &page.id.to_string());
+        self.writer.delete_term(term);
 
         let content = match page.page_type {
             PageType::Jupyter => Self::extract_text_from_jupyter(file_content),
@@ -704,7 +781,8 @@ impl ReadOnlySearchIndex {
     pub fn open(index_path: PathBuf) -> Result<Self> {
         let mut schema_builder = Schema::builder();
 
-        let page_id = schema_builder.add_text_field("page_id", STORED);
+        // Must mirror SearchIndex::new's schema (page_id is STRING | STORED).
+        let page_id = schema_builder.add_text_field("page_id", STRING | STORED);
         let notebook_id = schema_builder.add_text_field("notebook_id", STORED);
         let title = schema_builder.add_text_field("title", TEXT | STORED);
         let content = schema_builder.add_text_field("content", TEXT);
@@ -861,5 +939,153 @@ impl ReadOnlySearchIndex {
         }
 
         Ok(results)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::{EditorData, SystemPromptMode};
+    use chrono::Utc;
+    use serde_json::json;
+
+    fn temp_dir() -> PathBuf {
+        std::env::temp_dir().join(format!("search_idx_test_{}", Uuid::new_v4()))
+    }
+
+    fn make_page(notebook_id: Uuid, title: &str, body: &str) -> Page {
+        Page {
+            id: Uuid::new_v4(),
+            notebook_id,
+            title: title.to_string(),
+            content: EditorData {
+                time: Some(1000),
+                version: Some("2.28.0".to_string()),
+                blocks: vec![EditorBlock {
+                    id: "b1".to_string(),
+                    block_type: "paragraph".to_string(),
+                    data: json!({ "text": body }),
+                }],
+            },
+            tags: vec![],
+            folder_id: None,
+            parent_page_id: None,
+            section_id: None,
+            is_archived: false,
+            is_cover: false,
+            position: 0,
+            system_prompt: None,
+            system_prompt_mode: SystemPromptMode::default(),
+            ai_model: None,
+            page_type: PageType::default(),
+            source_file: None,
+            storage_mode: None,
+            file_extension: None,
+            last_file_sync: None,
+            template_id: None,
+            deleted_at: None,
+            color: None,
+            is_favorite: false,
+            is_daily_note: false,
+            daily_note_date: None,
+            plugin_page_type: None,
+            plugin_data: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }
+    }
+
+    /// The 2026-05-01 incident: an on-disk index built with an older (smaller)
+    /// schema is reopened, then adding a document with a now-out-of-range field
+    /// id panics in Tantivy's fastfield writer on commit. `open_or_recreate`
+    /// must rebuild the stale index instead of reusing it, so indexing works.
+    #[test]
+    fn new_rebuilds_on_schema_change_without_panicking() {
+        let dir = temp_dir();
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // Simulate an index created by an older build with FEWER fields.
+        {
+            let mut sb = Schema::builder();
+            sb.add_text_field("page_id", STORED);
+            sb.add_text_field("title", TEXT | STORED);
+            let old_schema = sb.build();
+            Index::create_in_dir(&dir, old_schema).unwrap();
+        }
+
+        // Opening with the current (6-field) schema must rebuild, not panic.
+        let mut idx = SearchIndex::new(dir.clone()).unwrap();
+        let page = make_page(Uuid::new_v4(), "Hello", "searchable body text");
+        idx.index_page(&page).unwrap();
+
+        // Reader uses OnCommitWithDelay; force a reload so the just-committed doc
+        // is visible to this same-instance search.
+        idx.reader.reload().unwrap();
+        let results = idx.search("searchable", 10).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].title, "Hello");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A matching-schema index reuses the on-disk data (no surprise wipe).
+    #[test]
+    fn new_reuses_matching_schema_index() {
+        let dir = temp_dir();
+        let nb = Uuid::new_v4();
+        let page = make_page(nb, "Persisted", "keepme content");
+        {
+            let mut idx = SearchIndex::new(dir.clone()).unwrap();
+            idx.index_page(&page).unwrap();
+        }
+        // Reopen: same schema → existing documents are still searchable.
+        let idx = SearchIndex::new(dir.clone()).unwrap();
+        let results = idx.search("keepme", 10).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].title, "Persisted");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Bulk `rebuild_index` (delete_all + many adds + a single commit) must NOT
+    /// panic with a correct schema — proving the old per-page "batched commit"
+    /// workaround is no longer needed.
+    #[test]
+    fn bulk_rebuild_indexes_all_pages() {
+        let dir = temp_dir();
+        let nb = Uuid::new_v4();
+        let pages: Vec<Page> = (0..40)
+            .map(|i| make_page(nb, &format!("Doc {i}"), &format!("alpha bravo body {i}")))
+            .collect();
+
+        let mut idx = SearchIndex::new(dir.clone()).unwrap();
+        idx.rebuild_index(&pages).unwrap();
+
+        idx.reader.reload().unwrap();
+        let results = idx.search("bravo", 100).unwrap();
+        assert_eq!(results.len(), 40);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Re-indexing the same page id replaces the prior document (single-commit
+    /// upsert), rather than leaving a stale duplicate.
+    #[test]
+    fn index_page_upsert_replaces_existing() {
+        let dir = temp_dir();
+        let nb = Uuid::new_v4();
+        let mut page = make_page(nb, "Original Title", "zebra content");
+        let mut idx = SearchIndex::new(dir.clone()).unwrap();
+        idx.index_page(&page).unwrap();
+
+        page.title = "Updated Title".to_string();
+        idx.index_page(&page).unwrap();
+
+        idx.reader.reload().unwrap();
+        let results = idx.search("zebra", 10).unwrap();
+        assert_eq!(results.len(), 1, "upsert must not leave a duplicate");
+        assert_eq!(results[0].title, "Updated Title");
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

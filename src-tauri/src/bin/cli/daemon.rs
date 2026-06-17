@@ -131,11 +131,37 @@ pub async fn run(library_name: Option<&str>, port: Option<u16>, bind: Option<&st
     // Initialize Tantivy search index. The daemon owns the writer lock —
     // a collision here means another process (likely a stale daemon or the
     // desktop app from before the migration) is still holding it.
-    let search_index = SearchIndex::new(library_path.join("search_index"))
+    let mut search_index = SearchIndex::new(library_path.join("search_index"))
         .context(
             "Failed to initialize search index — another process is holding the Tantivy writer lock. \
              Stop any running desktop app or stale daemon and retry.",
         )?;
+
+    // If the index came up empty — a fresh install, or one just rebuilt after a
+    // schema migration (SearchIndex::open_or_recreate) — repopulate it from all
+    // pages so search works immediately instead of staying blank until each page
+    // is next edited.
+    if search_index.num_docs() == 0 {
+        let mut pages = Vec::new();
+        if let Ok(notebooks) = storage.list_notebooks() {
+            for nb in notebooks {
+                match storage.list_pages(nb.id) {
+                    Ok(nb_pages) => pages.extend(
+                        nb_pages
+                            .into_iter()
+                            .filter(|p| p.deleted_at.is_none() && !p.is_archived),
+                    ),
+                    Err(e) => log::warn!("Startup index: failed to list pages for {}: {}", nb.id, e),
+                }
+            }
+        }
+        if !pages.is_empty() {
+            match search_index.rebuild_index(&pages) {
+                Ok(()) => log::info!("Populated empty search index with {} pages", pages.len()),
+                Err(e) => log::warn!("Startup search index population failed: {}", e),
+            }
+        }
+    }
 
     // Initialize CRDT store (in-memory; persists per-page Yjs state under
     // {library_path}/notebooks/{nb_id}/sync/pages/{page_id}.crdt).

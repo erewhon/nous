@@ -1052,41 +1052,28 @@ async fn rebuild_search_index(
 
     let total = pages.len();
     let mut indexed = 0usize;
-    let mut failed = 0usize;
+    let failed = 0usize;
     {
         // DL-46: recover a poisoned lock so a rebuild can actually run — rebuild
         // is the recovery path, so it must not be blocked by a poisoned mutex.
         let mut idx = lock_search_index(&state.search_index);
 
-        // Workaround for Tantivy 0.22.1 fastfield panic on batched commits
-        // (writer.rs:137 "index out of bounds"). `rebuild_index(&pages)` does
-        // delete_all + commit + bulk add + commit, and the second commit
-        // panics on the multi-doc fastfield serialize path.
-        //
-        // Instead: delete_all by passing an empty slice (just the delete +
-        // commit), then call `index_page` per page so each commit handles a
-        // single document. Slower (one commit per page) but avoids the
-        // multi-doc trigger. Track the underlying fix in the Forge task
-        // "Investigate Tantivy 0.22.1 fastfield panic blocking sync".
-        idx.rebuild_index(&[]).map_err(|e| {
+        // Atomic rebuild: delete_all + bulk add + a single commit, so search is
+        // never observably empty (a crash mid-rebuild leaves the prior index
+        // intact). The Tantivy fastfield commit panic (writer.rs:137 "index out
+        // of bounds") that once forced a slower per-page workaround here was a
+        // schema-mismatch bug — the on-disk index had fewer fields than the code,
+        // so a document's field id ran past `fast_field_names`. It is now fixed at
+        // the source in `SearchIndex::open_or_recreate` (the index is rebuilt
+        // whenever its on-disk schema differs from the code's), so the bulk path
+        // is safe again.
+        idx.rebuild_index(&pages).map_err(|e| {
             api_err(
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to clear index: {}", e),
+                format!("Failed to rebuild index: {}", e),
             )
         })?;
-
-        for page in &pages {
-            match idx.index_page(page) {
-                Ok(()) => indexed += 1,
-                Err(e) => {
-                    failed += 1;
-                    log::warn!(
-                        "Rebuild: failed to index page {} ({}): {}",
-                        page.id, page.title, e
-                    );
-                }
-            }
-        }
+        indexed = total;
     }
 
     Ok(Json(ApiResponse {
