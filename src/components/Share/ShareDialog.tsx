@@ -156,6 +156,11 @@ export function ShareDialog({
           uploadExternal,
           siteTitle || undefined
         );
+      } else if (!effectiveNotebookId) {
+        // Every non-notebook share below needs a notebook id. The guard above
+        // already returns when both ids are absent; this narrows the type for
+        // the remaining branches (notebookShareId is falsy here).
+        return;
       } else if (folderId) {
         response = await shareFolder(
           effectiveNotebookId,
