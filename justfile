@@ -127,15 +127,18 @@ cloud-db-migrate:
 cloud-db-migrate-local:
     cd cloud && npm run db:migrate:local
 
-# === Collab (PartyKit, party.nous.page) ===
+# === Collab (Cloudflare Workers, party.nous.page) ===
 
-# Collab server: dev
+# Collab server: dev (local worker via wrangler + miniflare)
 collab-dev:
     cd collab/server && npm run dev
 
-# Collab server: deploy
+# Collab server: deploy (wrangler). Auth via the Cloudflare deploy token from `ho`.
+# That token has Workers Scripts:Edit but NOT Workers Routes:Edit, so the route
+# re-assertion step warns — harmless: the party.nous.page custom-domain route is
+# already configured and never changes.
 collab-deploy:
-    cd collab/server && npm run deploy
+    cd collab/server && CLOUDFLARE_API_TOKEN="$(ho secret get cloudflare/deploy-token)" npm run deploy
 
 # === Guest editor (collab.nous.page) ===
 
