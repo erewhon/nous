@@ -602,6 +602,18 @@ pub fn build_router(state: AppState, auth: AuthState) -> Router {
             post(insert_after_block),
         )
         .route(
+            "/api/notebooks/{notebook_id}/pages/{page_id}/versions",
+            get(list_page_versions),
+        )
+        .route(
+            "/api/notebooks/{notebook_id}/pages/{page_id}/versions/{version_name}",
+            get(get_page_version),
+        )
+        .route(
+            "/api/notebooks/{notebook_id}/pages/{page_id}/versions/{version_name}/restore",
+            post(restore_page_version),
+        )
+        .route(
             "/api/notebooks/{notebook_id}/daily-notes",
             get(list_daily_notes),
         )
@@ -1692,6 +1704,235 @@ async fn update_page(
         "pageId": page_id,
         "title": page.title,
     }));
+
+    Ok(Json(ApiResponse { data: page }))
+}
+
+// ===== Version history (snapshots + oplog) =====
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct VersionEntry {
+    /// Snapshot name (also its id for fetch/restore), e.g. "20260616_120000_123456_000001".
+    name: String,
+    ts: chrono::DateTime<chrono::Utc>,
+    block_count: usize,
+    content_hash: String,
+    oplog_entry_count: usize,
+    /// Oplog entries recorded AFTER this snapshot — up to the next snapshot, or to
+    /// the current head for the most recent one (edits not yet captured in a newer
+    /// snapshot). This is the "hybrid" oplog view: structure-only change counts.
+    changes_since: usize,
+    /// Short plaintext preview of the snapshot's content.
+    preview: String,
+}
+
+/// Pure: given each snapshot's `oplog_entry_count` (chronological, oldest first)
+/// and the current total oplog length, return how many oplog entries fall in the
+/// interval AFTER each snapshot (to the next snapshot, or to head for the last).
+fn changes_in_intervals(snapshot_oplog_counts: &[usize], total_oplog: usize) -> Vec<usize> {
+    let n = snapshot_oplog_counts.len();
+    (0..n)
+        .map(|i| {
+            let next = if i + 1 < n {
+                snapshot_oplog_counts[i + 1]
+            } else {
+                total_oplog
+            };
+            next.saturating_sub(snapshot_oplog_counts[i])
+        })
+        .collect()
+}
+
+/// A snapshot name is generated as `%Y%m%d_%H%M%S_%6f_%06d` — digits and
+/// underscores only. Validating against that shape also blocks path traversal
+/// (no `/`, `\`, or `..`) before the name is used to build a file path.
+fn valid_snapshot_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && name.chars().all(|c| c.is_ascii_digit() || c == '_')
+}
+
+/// Single-line, truncated plaintext preview of a page's content.
+fn snapshot_preview(page: &Page, max_chars: usize) -> String {
+    let collapsed: String = plain_text_for_page(page)
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    if collapsed.chars().count() <= max_chars {
+        collapsed
+    } else {
+        let truncated: String = collapsed.chars().take(max_chars).collect();
+        format!("{}…", truncated.trim_end())
+    }
+}
+
+/// `GET /api/notebooks/{nb}/pages/{pg}/versions` — timeline of restorable
+/// snapshots (newest first) plus oplog change-counts between them.
+async fn list_page_versions(
+    State(state): State<AppState>,
+    Path((notebook_id, page_id)): Path<(String, String)>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    use nous_lib::storage::{oplog, snapshots};
+
+    let nb_id = parse_uuid(&notebook_id)?;
+    let pg_id = parse_uuid(&page_id)?;
+
+    // Snapshots/oplog are immutable historical files; grab the paths under the
+    // lock then read them lock-free so we don't block writers during disk I/O.
+    let pages_dir = {
+        let storage = state.storage.lock().unwrap();
+        storage.get_notebook_path(nb_id).join("pages")
+    };
+
+    let snap_dir = snapshots::snapshots_dir(&pages_dir, pg_id);
+    let names = snapshots::list_snapshots(&snap_dir); // chronological, oldest first
+    let total_oplog = oplog::read_entries(&oplog::oplog_path(&pages_dir, pg_id)).len();
+
+    let metas: Vec<Option<snapshots::SnapshotMeta>> = names
+        .iter()
+        .map(|n| snapshots::read_snapshot_meta(&snap_dir, n))
+        .collect();
+    let oplog_counts: Vec<usize> = metas
+        .iter()
+        .map(|m| m.as_ref().map(|m| m.oplog_entry_count).unwrap_or(0))
+        .collect();
+    let intervals = changes_in_intervals(&oplog_counts, total_oplog);
+
+    let mut entries: Vec<VersionEntry> = Vec::with_capacity(names.len());
+    for (i, name) in names.iter().enumerate() {
+        let page = snapshots::read_snapshot(&snap_dir, name);
+        let preview = page.as_ref().map(|p| snapshot_preview(p, 140)).unwrap_or_default();
+        let (ts, content_hash, block_count, oplog_entry_count) = match &metas[i] {
+            Some(m) => (m.ts, m.content_hash.clone(), m.block_count, m.oplog_entry_count),
+            None => (
+                chrono::Utc::now(),
+                String::new(),
+                page.as_ref().map(|p| p.content.blocks.len()).unwrap_or(0),
+                0,
+            ),
+        };
+        entries.push(VersionEntry {
+            name: name.clone(),
+            ts,
+            block_count,
+            content_hash,
+            oplog_entry_count,
+            changes_since: intervals.get(i).copied().unwrap_or(0),
+            preview,
+        });
+    }
+    entries.reverse(); // newest first for display
+
+    Ok(Json(ApiResponse { data: entries }))
+}
+
+/// `GET /api/notebooks/{nb}/pages/{pg}/versions/{name}` — full page content of a
+/// specific snapshot, for preview / diff against current.
+async fn get_page_version(
+    State(state): State<AppState>,
+    Path((notebook_id, page_id, version_name)): Path<(String, String, String)>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let nb_id = parse_uuid(&notebook_id)?;
+    let pg_id = parse_uuid(&page_id)?;
+    if !valid_snapshot_name(&version_name) {
+        return Err(api_err(StatusCode::BAD_REQUEST, "Invalid snapshot name"));
+    }
+
+    let pages_dir = {
+        let storage = state.storage.lock().unwrap();
+        storage.get_notebook_path(nb_id).join("pages")
+    };
+    let snap_dir = nous_lib::storage::snapshots::snapshots_dir(&pages_dir, pg_id);
+
+    match nous_lib::storage::snapshots::read_snapshot(&snap_dir, &version_name) {
+        Some(page) => Ok(Json(ApiResponse { data: page })),
+        None => Err(api_err(
+            StatusCode::NOT_FOUND,
+            format!("Snapshot '{}' not found", version_name),
+        )),
+    }
+}
+
+/// `POST /api/notebooks/{nb}/pages/{pg}/versions/{name}/restore` — restore a
+/// snapshot's content as the current page. Snapshots the pre-restore state first
+/// (DL-18) so the restore is itself undoable, routes through the CRDT store so a
+/// live editor pane adopts it, then takes the same sync/index/event treatment as
+/// a normal page update.
+async fn restore_page_version(
+    State(state): State<AppState>,
+    Path((notebook_id, page_id, version_name)): Path<(String, String, String)>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let nb_id = parse_uuid(&notebook_id)?;
+    let pg_id = parse_uuid(&page_id)?;
+    if !valid_snapshot_name(&version_name) {
+        return Err(api_err(StatusCode::BAD_REQUEST, "Invalid snapshot name"));
+    }
+
+    let storage = state.storage.lock().unwrap();
+    let pages_dir = storage.get_notebook_path(nb_id).join("pages");
+    let snap_dir = nous_lib::storage::snapshots::snapshots_dir(&pages_dir, pg_id);
+
+    let snapshot_page = match nous_lib::storage::snapshots::read_snapshot(&snap_dir, &version_name) {
+        Some(p) => p,
+        None => {
+            return Err(api_err(
+                StatusCode::NOT_FOUND,
+                format!("Snapshot '{}' not found", version_name),
+            ))
+        }
+    };
+
+    let mut page = match storage.get_page(nb_id, pg_id) {
+        Ok(p) => p,
+        Err(e) => return Err(api_err(StatusCode::NOT_FOUND, e.to_string())),
+    };
+
+    // DL-18: snapshot the CURRENT state before overwriting so a bad restore can
+    // itself be undone.
+    if let Err(e) = nous_lib::storage::snapshots::take_snapshot(&pages_dir, &page) {
+        log::warn!("restore_page_version: pre-restore snapshot failed: {}", e);
+    }
+
+    // Route through the CRDT store so a live editor pane adopts the restored
+    // content (otherwise the open editor would clobber the restore on its next
+    // save). apply_save returns the canonical post-merge state when live.
+    let restored_content = snapshot_page.content;
+    match state.crdt_store.apply_save(pg_id, "default", &restored_content) {
+        Ok(Some(canonical)) => page.content = canonical,
+        Ok(None) => page.content = restored_content,
+        Err(e) => {
+            log::warn!("CRDT apply_save failed during restore for page {}: {}", pg_id, e);
+            page.content = restored_content;
+        }
+    }
+    page.updated_at = chrono::Utc::now();
+
+    if let Err(e) = storage.update_page(&page) {
+        return Err(api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()));
+    }
+    drop(storage);
+
+    state.sync_manager.queue_page_update(nb_id, pg_id);
+
+    {
+        let mut idx = lock_search_index(&state.search_index);
+        if let Err(e) = idx.index_page(&page) {
+            log::warn!("Failed to reindex page {} after restore: {}", pg_id, e);
+        }
+    }
+    spawn_rag_index(&state, &page);
+
+    emit_event(
+        &state,
+        "page.updated",
+        serde_json::json!({
+            "notebookId": notebook_id,
+            "pageId": page_id,
+            "title": page.title,
+            "restoredFrom": version_name,
+        }),
+    );
 
     Ok(Json(ApiResponse { data: page }))
 }
@@ -4369,8 +4610,33 @@ async fn agile_daily_note(
 
 #[cfg(test)]
 mod tests {
-    use super::reattach_concurrent_rows;
+    use super::{changes_in_intervals, reattach_concurrent_rows, valid_snapshot_name};
     use std::collections::HashSet;
+
+    #[test]
+    fn changes_in_intervals_counts_oplog_between_snapshots() {
+        // Snapshots taken when the oplog had 0, 20, 40 entries; head is at 47.
+        let counts = [0usize, 20, 40];
+        let total = 47;
+        // interval after each snapshot: [0..20)=20, [20..40)=20, [40..47)=7 (uncaptured)
+        assert_eq!(changes_in_intervals(&counts, total), vec![20, 20, 7]);
+        // No snapshots → empty.
+        assert_eq!(changes_in_intervals(&[], 5), Vec::<usize>::new());
+        // Single snapshot at head → zero uncaptured changes.
+        assert_eq!(changes_in_intervals(&[10], 10), vec![0]);
+        // total < last count (shouldn't happen, but must not underflow/panic).
+        assert_eq!(changes_in_intervals(&[10], 3), vec![0]);
+    }
+
+    #[test]
+    fn valid_snapshot_name_rejects_path_traversal() {
+        assert!(valid_snapshot_name("20260616_120000_123456_000001"));
+        assert!(!valid_snapshot_name("")); // empty
+        assert!(!valid_snapshot_name("../../etc/passwd")); // traversal
+        assert!(!valid_snapshot_name("foo/bar")); // separator
+        assert!(!valid_snapshot_name("a.json")); // dot/letters
+        assert!(!valid_snapshot_name(&"1".repeat(65))); // too long
+    }
 
     fn row(id: &str) -> serde_json::Value {
         serde_json::json!({ "id": id, "cells": {} })

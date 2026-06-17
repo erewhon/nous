@@ -22,6 +22,7 @@ import { TagEditor } from "../Tags";
 import { SaveAsTemplateDialog } from "../TemplateDialog";
 import { PageSettingsDialog } from "../PageSettings";
 import { PageHistoryDialog } from "../PageHistory";
+import { VersionHistoryDialog } from "../VersionHistory";
 import { WritingAssistancePanel } from "./WritingAssistancePanel";
 import { AudioGenerateDialog } from "../Audio";
 import { PresentationDialog } from "../Presentation";
@@ -78,6 +79,7 @@ export function PageHeader({
   const [showSaveAsTemplate, setShowSaveAsTemplate] = useState(false);
   const [showPageSettings, setShowPageSettings] = useState(false);
   const [showPageHistory, setShowPageHistory] = useState(false);
+  const [showVersionHistory, setShowVersionHistory] = useState(false);
   const [showWritingAssistance, setShowWritingAssistance] = useState(false);
   const [showAudioGenerate, setShowAudioGenerate] = useState(false);
   const [showPresentation, setShowPresentation] = useState(false);
@@ -284,6 +286,11 @@ export function PageHeader({
   const handleOpenPageHistory = () => {
     setIsMenuOpen(false);
     setShowPageHistory(true);
+  };
+
+  const handleOpenVersionHistory = () => {
+    setIsMenuOpen(false);
+    setShowVersionHistory(true);
   };
 
   const handleArchive = async () => {
@@ -1059,6 +1066,28 @@ export function PageHeader({
                 View History
               </button>
               <button
+                onClick={handleOpenVersionHistory}
+                className="flex w-full items-center gap-3 px-4 py-2 text-left text-sm transition-colors hover:opacity-80"
+                style={{ color: "var(--color-text-secondary)" }}
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M21 8v13H3V8" />
+                  <path d="M1 3h22v5H1z" />
+                  <path d="M10 12h4" />
+                </svg>
+                Version History
+              </button>
+              <button
                 onClick={() => {
                   setIsMenuOpen(false);
                   setShowWritingAssistance(true);
@@ -1642,11 +1671,18 @@ export function PageHeader({
         onClose={() => setShowPageSettings(false)}
       />
 
-      {/* Page History Dialog */}
+      {/* Page History Dialog (Git commits) */}
       <PageHistoryDialog
         isOpen={showPageHistory}
         page={page}
         onClose={() => setShowPageHistory(false)}
+      />
+
+      {/* Version History Dialog (local snapshots + oplog) */}
+      <VersionHistoryDialog
+        isOpen={showVersionHistory}
+        page={page}
+        onClose={() => setShowVersionHistory(false)}
       />
 
       {/* Writing Assistance Panel */}

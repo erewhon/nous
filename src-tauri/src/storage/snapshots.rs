@@ -187,13 +187,19 @@ pub fn find_nearest_snapshot(snap_dir: &Path, ts: &chrono::DateTime<chrono::Utc>
     best.or_else(|| names.first().cloned())
 }
 
+/// Read the metadata for a specific snapshot by name. Returns None if the
+/// `.meta.json` sidecar is missing or unparseable.
+pub fn read_snapshot_meta(snap_dir: &Path, name: &str) -> Option<SnapshotMeta> {
+    let meta_path = snap_dir.join(format!("{}.meta.json", name));
+    let content = fs::read_to_string(&meta_path).ok()?;
+    serde_json::from_str(&content).ok()
+}
+
 /// Read the metadata for the most recent snapshot.
 fn read_latest_meta(snap_dir: &Path) -> Option<SnapshotMeta> {
     let names = list_snapshots(snap_dir);
     let latest = names.last()?;
-    let meta_path = snap_dir.join(format!("{}.meta.json", latest));
-    let content = fs::read_to_string(&meta_path).ok()?;
-    serde_json::from_str(&content).ok()
+    read_snapshot_meta(snap_dir, latest)
 }
 
 /// Prune snapshots down to `max` using time-based exponential thinning.
@@ -375,6 +381,26 @@ mod tests {
         assert_eq!(restored.id, page_id);
         assert_eq!(restored.title, "Test Page");
         assert_eq!(restored.content.blocks.len(), 1);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn read_snapshot_meta_returns_fields_for_named_snapshot() {
+        let dir = std::env::temp_dir().join(format!("snap_meta_{}", Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let page_id = Uuid::new_v4();
+        let page = make_test_page(Uuid::new_v4(), page_id);
+
+        take_snapshot(&dir, &page).unwrap();
+        let snap_dir = snapshots_dir(&dir, page_id);
+        let name = list_snapshots(&snap_dir).pop().unwrap();
+
+        let meta = read_snapshot_meta(&snap_dir, &name).expect("meta should parse");
+        assert_eq!(meta.block_count, page.content.blocks.len());
+        assert!(!meta.content_hash.is_empty());
+        // Unknown snapshot name → None (not a panic).
+        assert!(read_snapshot_meta(&snap_dir, "20990101_000000_000000_000000").is_none());
 
         let _ = fs::remove_dir_all(&dir);
     }

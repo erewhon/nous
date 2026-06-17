@@ -498,6 +498,117 @@ async fn pages_get_returns_404_for_unknown_page() {
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
 
+// ===== Version history (snapshots + oplog) =====
+
+#[tokio::test]
+async fn versions_list_get_and_restore_round_trip() {
+    let mut env = TestEnv::new();
+    let nb = env.create_notebook("History");
+
+    // Create a page with 5 blocks (v1).
+    let v1_blocks: Vec<Value> = (0..5)
+        .map(|i| json!({"id": format!("b{i}"), "type": "paragraph", "data": {"text": format!("original line {i} ZEBRA")}}))
+        .collect();
+    let (_, created) = env
+        .post_json(
+            &format!("/api/notebooks/{}/pages", nb),
+            json!({"title": "doc", "blocks": v1_blocks}),
+        )
+        .await;
+    let pg = created["data"]["id"].as_str().unwrap().to_string();
+
+    // Update to a single block. The 5→1 shrink is "destructive", so update_page
+    // takes a pre-overwrite snapshot of the 5-block v1 content (DL-03/DL-18).
+    let (status, _) = env
+        .put_json(
+            &format!("/api/notebooks/{}/pages/{}", nb, pg),
+            json!({"blocks": [{"id": "b0", "type": "paragraph", "data": {"text": "shrunk"}}]}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    env.drain_events();
+
+    // List versions → exactly the one pre-shrink snapshot, carrying v1's content.
+    let (status, body) = env
+        .get_json(&format!("/api/notebooks/{}/pages/{}/versions", nb, pg))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let versions = body["data"].as_array().expect("versions array");
+    assert_eq!(versions.len(), 1, "one destructive-shrink snapshot expected");
+    let v = &versions[0];
+    assert_eq!(v["blockCount"], 5);
+    assert!(v["preview"].as_str().unwrap().contains("ZEBRA"));
+    assert!(v["changesSince"].as_u64().unwrap() >= 1, "edits recorded after snapshot");
+    let version_name = v["name"].as_str().unwrap().to_string();
+
+    // Fetch that snapshot's full content.
+    let (status, body) = env
+        .get_json(&format!(
+            "/api/notebooks/{}/pages/{}/versions/{}",
+            nb, pg, version_name
+        ))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["data"]["content"]["blocks"].as_array().unwrap().len(), 5);
+
+    // Restore it → page goes back to 5 blocks and a page.updated event fires.
+    let (status, body) = env
+        .post_json(
+            &format!(
+                "/api/notebooks/{}/pages/{}/versions/{}/restore",
+                nb, pg, version_name
+            ),
+            json!({}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["data"]["content"]["blocks"].as_array().unwrap().len(), 5);
+    let evt = env.try_recv_event().expect("page.updated after restore");
+    assert_eq!(evt.event, "page.updated");
+    assert_eq!(evt.data["restoredFrom"], version_name);
+
+    // The page on disk now holds the restored 5-block content.
+    let (_, page) = env
+        .get_json(&format!("/api/notebooks/{}/pages/{}", nb, pg))
+        .await;
+    assert_eq!(page["data"]["content"]["blocks"].as_array().unwrap().len(), 5);
+}
+
+#[tokio::test]
+async fn versions_restore_rejects_invalid_name() {
+    let env = TestEnv::new();
+    let nb = env.create_notebook("History");
+    let (_, created) = env
+        .post_json(&format!("/api/notebooks/{}/pages", nb), json!({"title": "doc"}))
+        .await;
+    let pg = created["data"]["id"].as_str().unwrap().to_string();
+
+    // Letters aren't a valid snapshot name (digits/underscores only) → 400.
+    let (status, _) = env
+        .post_json(
+            &format!("/api/notebooks/{}/pages/{}/versions/notavalidname/restore", nb, pg),
+            json!({}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn versions_list_empty_for_fresh_page() {
+    let env = TestEnv::new();
+    let nb = env.create_notebook("History");
+    let (_, created) = env
+        .post_json(&format!("/api/notebooks/{}/pages", nb), json!({"title": "fresh"}))
+        .await;
+    let pg = created["data"]["id"].as_str().unwrap().to_string();
+
+    let (status, body) = env
+        .get_json(&format!("/api/notebooks/{}/pages/{}/versions", nb, pg))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["data"].as_array().unwrap().len(), 0);
+}
+
 #[tokio::test]
 async fn pages_create_with_bad_notebook_id_returns_400() {
     let env = TestEnv::new();

@@ -99,6 +99,54 @@ export async function getPage(
   return daemonGet<Page>(`/api/notebooks/${notebookId}/pages/${pageId}`);
 }
 
+/** One restorable point-in-time snapshot of a page (from local snapshots/oplog). */
+export interface PageVersion {
+  /** Snapshot name; also its id for fetch/restore. */
+  name: string;
+  /** ISO timestamp the snapshot was taken. */
+  ts: string;
+  blockCount: number;
+  contentHash: string;
+  oplogEntryCount: number;
+  /** Oplog edits recorded after this snapshot (uncaptured by a newer one). */
+  changesSince: number;
+  /** Short plaintext preview of the snapshot's content. */
+  preview: string;
+}
+
+/** List a page's restorable snapshots, newest first. */
+export async function getPageVersions(
+  notebookId: string,
+  pageId: string
+): Promise<PageVersion[]> {
+  return daemonGet<PageVersion[]>(
+    `/api/notebooks/${notebookId}/pages/${pageId}/versions`
+  );
+}
+
+/** Fetch the full page content of a specific snapshot (for preview / diff). */
+export async function getPageVersion(
+  notebookId: string,
+  pageId: string,
+  versionName: string
+): Promise<Page> {
+  return daemonGet<Page>(
+    `/api/notebooks/${notebookId}/pages/${pageId}/versions/${versionName}`
+  );
+}
+
+/** Restore a snapshot as the page's current content; returns the restored page. */
+export async function restorePageVersion(
+  notebookId: string,
+  pageId: string,
+  versionName: string
+): Promise<Page> {
+  return daemonPost<Page>(
+    `/api/notebooks/${notebookId}/pages/${pageId}/versions/${versionName}/restore`,
+    {}
+  );
+}
+
 export async function createPage(
   notebookId: string,
   title: string,
