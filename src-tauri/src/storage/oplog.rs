@@ -93,6 +93,16 @@ pub fn content_hash(content: &EditorData) -> String {
     format!("sha256:{:x}", hasher.finalize())
 }
 
+/// Compute SHA-256 hash of a raw content string. Used for file-based ("native")
+/// pages — database JSON, markdown, ics, etc. — which store text rather than
+/// `EditorData` blocks. Same `sha256:` format as [`content_hash`] so entries
+/// from both kinds of writes are comparable in one chain.
+pub fn content_hash_str(content: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(content.as_bytes());
+    format!("sha256:{:x}", hasher.finalize())
+}
+
 /// Diff two EditorData snapshots to produce block-level changes.
 /// Both old and new blocks are expected to have stable UUIDs as IDs.
 pub fn diff_blocks(old: &EditorData, new: &EditorData) -> Vec<BlockChange> {

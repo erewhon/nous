@@ -2666,7 +2666,59 @@ impl FileStorage {
         };
 
         Self::atomic_write(&file_path, content)?;
+
+        // Record an oplog entry so writes to file-based pages — database rows,
+        // put_database, markdown/calendar/jupyter/etc. that flow through the
+        // daemon API — get the same recovery history + hash chain as standard
+        // page saves (see update_page). Best-effort: an oplog problem must never
+        // fail the content write.
+        self.oplog_record_native_write(page, content);
+
         Ok(())
+    }
+
+    /// Best-effort oplog append for a file-based ("native") page write.
+    ///
+    /// Native content is a raw string (database JSON, markdown, ics, …) rather
+    /// than `EditorData`, so there is no block model: we hash the bytes and
+    /// record no block-level changes. Like update_page it appends via
+    /// `append_chained`, which serializes the read-hash + append under a
+    /// cross-process lock (DL-37) so the daemon and the Tauri app can't fork the
+    /// chain when they write the same page concurrently.
+    fn oplog_record_native_write(&self, page: &Page, content: &str) {
+        let pages_dir = self.pages_dir(page.notebook_id);
+        let oplog_file = super::oplog::oplog_path(&pages_dir, page.id);
+
+        // First write for a page with no oplog yet is a Create; otherwise Modify.
+        let op = if oplog_file.exists() {
+            super::oplog::OpType::Modify
+        } else {
+            super::oplog::OpType::Create
+        };
+        let new_hash = super::oplog::content_hash_str(content);
+
+        let result = super::oplog::append_chained(&oplog_file, |prev_hash| {
+            super::oplog::OplogEntry {
+                ts: chrono::Utc::now(),
+                client_id: super::oplog::get_client_id(),
+                op,
+                content_hash: new_hash,
+                prev_hash,
+                block_changes: Vec::new(),
+                block_count: 0,
+                git_commit_id: None,
+            }
+        });
+
+        // DL-36: a missed append is a gap in recovery history — log loudly
+        // rather than swallow it.
+        if let Err(e) = result {
+            log::error!(
+                "Failed to append oplog entry for file-based page {} (recovery history degraded): {}",
+                page.id,
+                e
+            );
+        }
     }
 
     /// Get the absolute path to a file-based page's content
@@ -3392,5 +3444,88 @@ mod tests {
             })
             .count();
         assert_eq!(leftovers, 0, "no temp file should remain after a native write");
+    }
+
+    /// Oplog gap fix: a file-based (native) write — database rows, put_database,
+    /// markdown/etc. through the daemon — must append a chained oplog entry so
+    /// the write has recovery history, just like update_page. The hash is over
+    /// the raw bytes (native pages have no block model).
+    #[test]
+    fn native_write_appends_chained_oplog_entry() {
+        let temp_dir = TempDir::new().unwrap();
+        let storage = FileStorage::new(temp_dir.path().to_path_buf());
+        storage.init().unwrap();
+        let nb = storage
+            .create_notebook("N".into(), NotebookType::default())
+            .unwrap();
+
+        let mut page = storage.create_page(nb.id, "DB".into()).unwrap();
+        page.storage_mode = Some(FileStorageMode::Embedded);
+        page.source_file = Some("files/data.database".to_string());
+
+        let oplog_file =
+            super::super::oplog::oplog_path(&storage.pages_dir(nb.id), page.id);
+        let before = super::super::oplog::read_entries(&oplog_file).len();
+
+        storage
+            .write_native_file_content(&page, "{\"rows\":[1]}")
+            .unwrap();
+        storage
+            .write_native_file_content(&page, "{\"rows\":[1,2]}")
+            .unwrap();
+
+        let entries = super::super::oplog::read_entries(&oplog_file);
+        assert_eq!(
+            entries.len(),
+            before + 2,
+            "each native write should append exactly one oplog entry"
+        );
+        let last = entries.last().unwrap();
+        // Hash is over the raw native content, not EditorData.
+        assert_eq!(
+            last.content_hash,
+            super::super::oplog::content_hash_str("{\"rows\":[1,2]}")
+        );
+        assert!(
+            last.block_changes.is_empty(),
+            "native writes record no block diffs"
+        );
+        // The create entry + both native writes form one linear chain.
+        assert!(
+            super::super::oplog::verify_chain(&oplog_file).is_ok(),
+            "native writes must not fork the hash chain"
+        );
+    }
+
+    /// The first native write on a page whose oplog doesn't exist yet records a
+    /// Create rooted at genesis.
+    #[test]
+    fn first_native_write_without_oplog_is_create() {
+        let temp_dir = TempDir::new().unwrap();
+        let storage = FileStorage::new(temp_dir.path().to_path_buf());
+        storage.init().unwrap();
+        let nb = storage
+            .create_notebook("N".into(), NotebookType::default())
+            .unwrap();
+
+        let mut page = storage.create_page(nb.id, "DB".into()).unwrap();
+        page.storage_mode = Some(FileStorageMode::Embedded);
+        page.source_file = Some("files/data.database".to_string());
+
+        // create_page writes a Create entry; drop it so this models a file-based
+        // page whose oplog doesn't exist yet.
+        let oplog_file =
+            super::super::oplog::oplog_path(&storage.pages_dir(nb.id), page.id);
+        let _ = fs::remove_file(&oplog_file);
+
+        storage
+            .write_native_file_content(&page, "{\"rows\":[]}")
+            .unwrap();
+
+        let entries = super::super::oplog::read_entries(&oplog_file);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].op, super::super::oplog::OpType::Create);
+        assert_eq!(entries[0].prev_hash, "genesis");
+        assert!(super::super::oplog::verify_chain(&oplog_file).is_ok());
     }
 }
