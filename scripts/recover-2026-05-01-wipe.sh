@@ -6,9 +6,21 @@
 #   --apply              — actually restore. Pages where snapshot has more
 #                          blocks than live are restored from snapshot.
 #   --diff               — for each affected page, show a unified diff of
-#                          live vs latest snapshot. No changes made.
+#                          live vs the chosen snapshot. No changes made.
 #   --page <id-or-name>  — limit to one page. Accepts UUID prefix (8+ chars)
 #                          OR a substring of the page title (case-insensitive).
+#   --before <ts>        — only consider snapshots taken BEFORE this time, and
+#                          use the latest such one. ts is ISO-8601 (e.g.
+#                          2026-05-01T14:28:00Z) or a YYYYMMDD_HHMMSS prefix.
+#                          IMPORTANT: without this the script uses the NEWEST
+#                          snapshot on disk — which, for a wipe discovered days
+#                          later, is often a post-wipe snapshot of the already-
+#                          wiped content, making the page wrongly look
+#                          "unaffected" (live >= snapshot). This is exactly how
+#                          the 2026-05-02 triage missed two daily notes. When
+#                          triaging an old wipe, always pass the wipe time here.
+#                          scripts/audit-sync-wipes.sh picks the pre-cluster
+#                          snapshot automatically.
 #
 # Combine: --diff --page weekly  → diff just the page whose title contains "weekly"
 #          --apply --page c1ec    → restore just the page whose UUID starts with c1ec
@@ -30,17 +42,35 @@ NB_DIR="${NB_DIR:-/home/erewhon/.local/share/nous/notebooks/b67b98ae-d5d2-4947-b
 DRY_RUN=true
 DIFF_MODE=false
 ONLY_PAGE=""
+BEFORE=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --apply) DRY_RUN=false; shift ;;
-    --diff)  DIFF_MODE=true; shift ;;
-    --page)  ONLY_PAGE="$2"; shift 2 ;;
+    --apply)  DRY_RUN=false; shift ;;
+    --diff)   DIFF_MODE=true; shift ;;
+    --page)   ONLY_PAGE="$2"; shift 2 ;;
+    --before) BEFORE="$2"; shift 2 ;;
     --help|-h)
       grep '^#' "$0" | sed 's/^# //'; exit 0 ;;
     *) echo "Unknown arg: $1" >&2; exit 1 ;;
   esac
 done
+
+# Convert --before to a 14-digit YYYYMMDDHHMMSS comparison key, if set. Snapshot
+# filenames are YYYYMMDD_HHMMSS[_...], so the same key derived from a name sorts
+# chronologically and is directly comparable.
+BEFORE_KEY=""
+if [[ -n "$BEFORE" ]]; then
+  if [[ "$BEFORE" =~ ^[0-9]{8}_[0-9]{6} ]]; then
+    BEFORE_KEY="${BEFORE:0:8}${BEFORE:9:6}"
+  else
+    BEFORE_KEY="$(date -u -d "$BEFORE" +%Y%m%d%H%M%S 2>/dev/null || true)"
+  fi
+  if [[ ! "$BEFORE_KEY" =~ ^[0-9]{14}$ ]]; then
+    echo "Invalid --before value: $BEFORE (use ISO-8601 or YYYYMMDD_HHMMSS)" >&2
+    exit 1
+  fi
+fi
 
 # The 23 pages logged as "Merged" by the sync at 2026-05-01T14:28:07.
 PAGES=(
@@ -168,10 +198,24 @@ for entry in "${PAGES[@]}"; do
 
   LIVE_BLOCKS=$(jq '.content.blocks | length' "$PAGE_FILE" 2>/dev/null)
 
-  # Find latest snapshot (skip .meta.json files)
+  # Pick the snapshot to compare/restore from (skip .meta.json files). Default:
+  # newest on disk. With --before: newest snapshot taken before the cutoff — the
+  # correct choice for an old wipe, so we don't compare against a post-wipe
+  # snapshot of the already-wiped content (see header).
   LATEST_SNAP=""
   if [[ -d "$SNAP_DIR" ]]; then
-    LATEST_SNAP=$(find "$SNAP_DIR" -maxdepth 1 -name '*.json' ! -name '*.meta.json' 2>/dev/null | sort | tail -1)
+    if [[ -n "$BEFORE_KEY" ]]; then
+      LATEST_SNAP=$(
+        find "$SNAP_DIR" -maxdepth 1 -name '*.json' ! -name '*.meta.json' 2>/dev/null \
+        | while read -r f; do
+            bn=$(basename "$f" .json); key="${bn:0:8}${bn:9:6}"
+            [[ "$key" =~ ^[0-9]{14}$ ]] || continue
+            (( 10#$key < 10#$BEFORE_KEY )) && printf '%s %s\n' "$key" "$f"
+          done | sort | tail -1 | cut -d' ' -f2-
+      )
+    else
+      LATEST_SNAP=$(find "$SNAP_DIR" -maxdepth 1 -name '*.json' ! -name '*.meta.json' 2>/dev/null | sort | tail -1)
+    fi
   fi
 
   if [[ -z "$LATEST_SNAP" ]]; then

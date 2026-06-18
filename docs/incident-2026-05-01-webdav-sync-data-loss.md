@@ -254,3 +254,16 @@ To be created in Forge:
 - `~/.local/share/nous/notebooks/b67b98ae-.../sync/pages/c1ec38bd-....updates` — CRDT update log (untouched — confirms wipe bypassed CRDT path)
 - `~/.local/share/nous/notebooks/b67b98ae-.../notebook.json` — `syncConfig` with `lastSync` timestamp aligning to wipe
 - `~/.local/share/nous/notebooks/b67b98ae-.../.git/` — git history shows last commit on 2026-04-26
+
+## Postscript — 2026-06-18 audit & two missed pages
+
+The prophylactic audit (Forge "Audit all notebooks for past sync wipes") was implemented as `scripts/audit-sync-wipes.sh` and run across all 21 sync-capable notebooks. Findings:
+
+- **No hidden wipes on any other notebook.** Only Agile Results shows the wipe signature (the 2026-05-01 14:28 cluster); Forge shows one benign aligned sync with zero loss. Everything else is import/bulk-edit noise.
+- **Two Agile daily notes were never recovered in the May-2 pass** — `April 23, 2026` (`3edcf934`) and `April 21, 2026` (`671c2062`). They genuinely lost content in the wipe (April 23 lost ~14 blocks of real journal writing — the 1PB/RAIDZ2 NAS plan, the AT&T-fiber discovery, personal notes).
+
+**Why the original triage missed them:** `recover-2026-05-01-wipe.sh` selected the *latest* snapshot on disk (`find … | tail -1`). By 2026-05-02 the latest snapshot for these pages was a *post-wipe* snapshot of the already-wiped 42-block content, so the diff read "live ≥ snapshot → skip / unaffected." The page truly had a richer *pre-wipe* snapshot (04-24, 56 blocks), but the script never looked at it. The new audit script avoids this by selecting the latest snapshot taken *before* the write cluster; `recover-2026-05-01-wipe.sh` gained a `--before <ts>` flag (default still newest) to force the correct pre-wipe comparison.
+
+**Recovery (2026-06-18):** both pages restored via a zero-loss union (every block from both the pre-wipe snapshot and the live/CRDT version kept; non-base blocks appended under a `⤵ Recovered…` divider for manual dedupe). April 23: 42→60 blocks; April 21: 51→56 blocks. Originals backed up under `<NB>/.recovery-backup-20260618T202232Z/`. Sync remains disabled on Agile — the `.crdt` files are still the stale diverged copies, so re-enabling before the merge fix would re-wipe.
+
+**Lesson:** "latest snapshot" is the wrong reference point once a wipe has aged — always compare against the newest snapshot *before* the suspected wipe time.
