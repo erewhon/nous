@@ -428,6 +428,20 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
       return true;
     }
 
+    // Ctrl+w → delete word backward
+    if (event.ctrlKey && event.key === "w") {
+      event.preventDefault();
+      cmd.deleteWordBackwardInsert(view);
+      return true;
+    }
+
+    // Ctrl+u → delete to line start
+    if (event.ctrlKey && event.key === "u") {
+      event.preventDefault();
+      cmd.deleteToLineStartInsert(view);
+      return true;
+    }
+
     // jj → normal (quick escape)
     if (event.key === "j") {
       const now = Date.now();
@@ -784,6 +798,7 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
     }
     if (key === "l") {
       cmd.moveRight(view, bnEditor, vim);
+      cmd.clampCursorToContent(view, view.state);
       resetPending();
       return true;
     }
@@ -839,6 +854,7 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
     }
     if (key === "$") {
       cmd.moveLineEnd(view);
+      cmd.clampCursorToContent(view, view.state);
       resetPending();
       return true;
     }
@@ -923,6 +939,7 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
     // ── Editing commands ────────────────────────────────────────────
     if (key === "x") {
       cmd.deleteCharForward(view, vim);
+      cmd.clampCursorToContent(view, view.state);
       recordEdit({
         type: "simple",
         command: "x",
@@ -966,6 +983,7 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
     }
     if (key === "D") {
       cmd.deleteToLineEnd(view);
+      cmd.clampCursorToContent(view, view.state);
       recordEdit({
         type: "simple",
         command: "D",

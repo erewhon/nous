@@ -688,6 +688,29 @@ export function changeToLineEnd(view: EditorView): boolean {
   return true;
 }
 
+/** Insert-mode Ctrl-w: delete the word before the cursor. */
+export function deleteWordBackwardInsert(view: EditorView): boolean {
+  const { from } = view.state.selection;
+  const start = view.state.doc.resolve(from).start();
+  if (from <= start) return true;
+  const before = view.state.doc.textBetween(start, from);
+  let i = before.length;
+  // Skip whitespace immediately before the cursor, then the preceding word.
+  while (i > 0 && /\s/.test(before[i - 1])) i--;
+  while (i > 0 && !/\s/.test(before[i - 1])) i--;
+  const deleteFrom = start + i;
+  if (deleteFrom < from) view.dispatch(view.state.tr.delete(deleteFrom, from));
+  return true;
+}
+
+/** Insert-mode Ctrl-u: delete from the cursor back to the line/block start. */
+export function deleteToLineStartInsert(view: EditorView): boolean {
+  const { from } = view.state.selection;
+  const start = view.state.doc.resolve(from).start();
+  if (from > start) view.dispatch(view.state.tr.delete(start, from));
+  return true;
+}
+
 export function changeLine(view: EditorView): boolean {
   const { from } = view.state.selection;
   const $pos = view.state.doc.resolve(from);

@@ -34,9 +34,7 @@ describe("vim harness smoke", () => {
     h = mountVim([{ type: "paragraph", content: "abcde" }]);
     h.setCursor(0, 0);
     h.press("$");
-    // KNOWN GAP (Tier 3): vim should clamp $ to the last char (offset 4) in
-    // normal mode; the current impl lets the cursor sit one past EOL (5).
-    expect(h.cursorOffset()).toBe(5);
+    expect(h.cursorOffset()).toBe(4); // last char (normal-mode clamp)
     h.press("0");
     expect(h.cursorOffset()).toBe(0);
   });
