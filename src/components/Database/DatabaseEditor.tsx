@@ -78,6 +78,11 @@ export function DatabaseEditor({
   // re-attach rows another writer added concurrently rather than letting a
   // stale whole-content save delete them (DL-04 row merge).
   const baselineRowIdsRef = useRef<string[]>([]);
+  // Full content this editor last loaded/saved — sent as the merge `base` so the
+  // daemon can 3-way merge concurrent cell/schema/view edits instead of letting
+  // a stale whole-content save clobber them. Tracks "what we believe is on disk":
+  // updated on load, on refresh-from-disk, and after each successful save.
+  const baselineContentRef = useRef<DatabaseContentV2 | null>(null);
   // Set when an external (MCP/daemon) write lands while we have an unsaved
   // local edit. We don't overwrite the in-progress edit immediately; instead
   // we let the pending save flush (the DL-04 merge reconciles it with the
@@ -116,6 +121,7 @@ export function DatabaseEditor({
         setContent(parsed);
         setActiveViewId(parsed.views[0]?.id ?? null);
         baselineRowIdsRef.current = parsed.rows.map((r) => r.id);
+        baselineContentRef.current = parsed;
       } catch (err) {
         if (
           String(err).includes("not found") ||
@@ -154,16 +160,20 @@ export function DatabaseEditor({
       saveTimeoutRef.current = setTimeout(async () => {
         setIsSaving(true);
         try {
-          // DL-04: send the loaded row-id baseline so the daemon re-attaches any
-          // concurrently-added rows instead of this snapshot deleting them.
+          // Send the loaded row-id baseline AND full content baseline so the
+          // daemon 3-way merges concurrent cell/schema/view edits (and re-attaches
+          // concurrently-added rows) instead of this snapshot clobbering them.
           await api.putDatabase(
             notebookId,
             page.id,
             newContent as unknown as Record<string, unknown>,
-            baselineRowIdsRef.current
+            baselineRowIdsRef.current,
+            baselineContentRef.current as unknown as Record<string, unknown> | undefined
           );
           pendingContentRef.current = null; // saved
           baselineRowIdsRef.current = newContent.rows.map((r) => r.id);
+          // What we just wrote is now (our view of) disk → next save's merge base.
+          baselineContentRef.current = newContent;
           setLastSaved(new Date());
           // An external write arrived mid-edit; now that our edit is saved
           // (and merged server-side), pull the merged result onto screen.
@@ -195,7 +205,8 @@ export function DatabaseEditor({
         notebookId,
         page.id,
         pending as unknown as Record<string, unknown>,
-        baselineRowIdsRef.current
+        baselineRowIdsRef.current,
+        baselineContentRef.current as unknown as Record<string, unknown> | undefined
       )
       .then(() => {})
       .catch((err) =>
@@ -226,6 +237,7 @@ export function DatabaseEditor({
       const parsed = migrateDatabaseContent(result.database);
       setContent(parsed);
       baselineRowIdsRef.current = parsed.rows.map((r) => r.id);
+      baselineContentRef.current = parsed;
     } catch (err) {
       console.error("Failed to refresh database from disk:", err);
     }

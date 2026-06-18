@@ -27,6 +27,9 @@ export interface OutboxEntry {
   commit?: boolean;
   paneId?: string;
   baselineRowIds?: string[];
+  /** Full database content the editor had loaded, for the server-side 3-way
+   *  merge (cells/schema/views). Database kind only. */
+  baseline?: Record<string, unknown>;
   queuedAt: number;
 }
 
@@ -82,6 +85,7 @@ export function enqueueFailedDatabaseSave(entry: {
   pageId: string;
   content: Record<string, unknown>;
   baselineRowIds: string[];
+  baseline?: Record<string, unknown>;
 }): void {
   const map = load();
   map[entry.pageId] = { kind: "database", ...entry, queuedAt: Date.now() };
@@ -104,9 +108,14 @@ export function outboxSize(): number {
 async function replay(entry: OutboxEntry): Promise<void> {
   const base = `/api/notebooks/${entry.notebookId}/pages/${entry.pageId}`;
   if (entry.kind === "database") {
+    const body: Record<string, unknown> = {
+      database: entry.content,
+      baselineRowIds: entry.baselineRowIds ?? [],
+    };
+    if (entry.baseline) body.baseline = entry.baseline;
     await daemonPut(
       `/api/notebooks/${entry.notebookId}/databases/${entry.pageId}`,
-      { database: entry.content, baselineRowIds: entry.baselineRowIds ?? [] }
+      body
     );
     return;
   }

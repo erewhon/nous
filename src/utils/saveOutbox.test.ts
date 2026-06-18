@@ -95,6 +95,24 @@ describe("saveOutbox (DL-22 / DL-04)", () => {
     });
   });
 
+  it("replays a database entry carrying the full baseline for the 3-way merge", async () => {
+    enqueueFailedDatabaseSave({
+      notebookId: "n",
+      pageId: "db1",
+      content: { rows: [{ id: "r1" }], properties: [{ id: "p1" }] },
+      baselineRowIds: ["r1"],
+      baseline: { rows: [{ id: "r1" }], properties: [{ id: "p1" }] },
+    });
+    mockPut.mockResolvedValue({});
+    const remaining = await flushOutbox();
+    expect(remaining).toBe(0);
+    expect(mockPut).toHaveBeenCalledWith("/api/notebooks/n/databases/db1", {
+      database: { rows: [{ id: "r1" }], properties: [{ id: "p1" }] },
+      baselineRowIds: ["r1"],
+      baseline: { rows: [{ id: "r1" }], properties: [{ id: "p1" }] },
+    });
+  });
+
   it("keeps entries queued while the daemon is unreachable", async () => {
     enqueueFailedFileSave({ notebookId: "n", pageId: "p1", content: "x" });
     mockPut.mockRejectedValue(new Error("ECONNREFUSED"));

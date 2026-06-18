@@ -2260,24 +2260,30 @@ export async function getDatabase(
 }
 
 /**
- * Write a database page's content through the daemon with a server-side row
- * merge (DL-04): `baselineRowIds` are the row ids the editor had loaded, so the
- * daemon re-attaches any rows another writer added concurrently rather than
- * letting this whole-content save delete them. Queues to the outbox on failure.
+ * Write a database page's content through the daemon with a server-side merge.
+ *
+ * - `baselineRowIds` — the row ids the editor had loaded; the daemon re-attaches
+ *   rows another writer added concurrently rather than letting this whole-content
+ *   save delete them (DL-04).
+ * - `baseline` — the full database content the editor had loaded. When provided,
+ *   the daemon runs a 3-way merge (rows cell-level, properties/views object-level)
+ *   so concurrent cell/schema/view edits aren't clobbered by this stale save.
+ *
+ * Queues to the outbox on failure (preserving the baseline for the retry merge).
  */
 export async function putDatabase(
   notebookId: string,
   pageId: string,
   database: Record<string, unknown>,
-  baselineRowIds: string[]
+  baselineRowIds: string[],
+  baseline?: Record<string, unknown>
 ): Promise<void> {
+  const body: Record<string, unknown> = { database, baselineRowIds };
+  if (baseline) body.baseline = baseline;
   try {
-    await daemonPut(`/api/notebooks/${notebookId}/databases/${pageId}`, {
-      database,
-      baselineRowIds,
-    });
+    await daemonPut(`/api/notebooks/${notebookId}/databases/${pageId}`, body);
   } catch (err) {
-    enqueueFailedDatabaseSave({ notebookId, pageId, content: database, baselineRowIds });
+    enqueueFailedDatabaseSave({ notebookId, pageId, content: database, baselineRowIds, baseline });
     throw err;
   }
 }
