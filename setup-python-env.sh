@@ -38,8 +38,12 @@ esac
 mkdir -p "${SCRIPT_DIR}/src-tauri/python-bundle"
 
 # ---- Create / sync nous-py venv ----
+# Include the `mcp-server` extra: this venv is shared with the Nous MCP server
+# (launched via `uv run --directory nous-py nous-mcp`). A bare `uv sync` makes
+# the env exactly match base deps and PRUNES the extra, which breaks the MCP
+# server's `import mcp` until the next sync-with-extra.
 echo "Syncing nous-py dependencies..."
-uv sync --directory "${SCRIPT_DIR}/nous-py"
+uv sync --directory "${SCRIPT_DIR}/nous-py" --extra mcp-server
 
 # ---- Export PYTHONPATH for nous-py source ----
 export PYTHONPATH="${SCRIPT_DIR}/nous-py${PYTHONPATH:+:$PYTHONPATH}"

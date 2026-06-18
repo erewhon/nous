@@ -3216,6 +3216,259 @@ fn reattach_concurrent_rows(
     n
 }
 
+/// Outcome of a 3-way database merge, for logging.
+#[derive(Debug, Default)]
+struct DbMergeStats {
+    rows_reattached: usize,  // rows present on disk but not in the editor's save
+    rows_cell_merged: usize, // rows where a concurrent cell change was folded in
+    props_merged: usize,     // properties present on disk but not in the save
+    views_merged: usize,     // views present on disk but not in the save
+    conflicts: usize,        // a field both sides changed; the editor's value won
+}
+
+impl DbMergeStats {
+    fn touched(&self) -> bool {
+        self.rows_reattached
+            + self.rows_cell_merged
+            + self.props_merged
+            + self.views_merged
+            + self.conflicts
+            > 0
+    }
+}
+
+fn array_of(v: &serde_json::Value, key: &str) -> Vec<serde_json::Value> {
+    v.get(key)
+        .and_then(|x| x.as_array())
+        .cloned()
+        .unwrap_or_default()
+}
+
+fn id_str(v: &serde_json::Value) -> Option<String> {
+    v.get("id").and_then(|i| i.as_str()).map(String::from)
+}
+
+fn index_by_id(arr: &[serde_json::Value]) -> std::collections::HashMap<String, &serde_json::Value> {
+    arr.iter()
+        .filter_map(|v| id_str(v).map(|id| (id, v)))
+        .collect()
+}
+
+/// 3-way merge of a row's `cells` map. Per cell: if only one side changed from
+/// `base`, take that side; if both changed, prefer `ours` (the active save) and
+/// count a conflict. A cell deleted on the winning side is dropped. Returns
+/// `ours` with its `cells` replaced by the merged map (other fields kept).
+fn merge_row_cells(
+    base: Option<&serde_json::Value>,
+    ours: &serde_json::Value,
+    theirs: &serde_json::Value,
+    conflicts: &mut usize,
+) -> serde_json::Value {
+    let empty = serde_json::Map::new();
+    let ours_cells = ours.get("cells").and_then(|c| c.as_object()).unwrap_or(&empty);
+    let theirs_cells = theirs.get("cells").and_then(|c| c.as_object()).unwrap_or(&empty);
+    let base_cells = base.and_then(|b| b.get("cells")).and_then(|c| c.as_object());
+
+    let mut keys: std::collections::HashSet<&String> = std::collections::HashSet::new();
+    keys.extend(ours_cells.keys());
+    keys.extend(theirs_cells.keys());
+
+    let mut merged = serde_json::Map::new();
+    for k in keys {
+        let o = ours_cells.get(k);
+        let t = theirs_cells.get(k);
+        let b = base_cells.and_then(|m| m.get(k));
+        // 3-way per cell. `None` means the cell is absent (deleted).
+        let chosen: Option<&serde_json::Value> = if o == t {
+            o // both sides agree
+        } else if o == b {
+            t // ours unchanged from base → take theirs' change
+        } else if t == b {
+            o // theirs unchanged from base → take ours' change
+        } else {
+            *conflicts += 1;
+            o // both changed → prefer the active save
+        };
+        if let Some(val) = chosen {
+            merged.insert(k.clone(), val.clone());
+        }
+    }
+
+    let mut row = ours.clone();
+    if let Some(obj) = row.as_object_mut() {
+        obj.insert("cells".to_string(), serde_json::Value::Object(merged));
+    }
+    row
+}
+
+/// Merge the `rows` array 3-way (cell-level for rows present on both sides).
+fn merge_rows_3way(
+    db: &mut serde_json::Value,
+    base: &serde_json::Value,
+    current: &serde_json::Value,
+    stats: &mut DbMergeStats,
+) {
+    let ours = array_of(db, "rows");
+    let theirs = array_of(current, "rows");
+    let base_rows = array_of(base, "rows");
+    let base_map = index_by_id(&base_rows);
+    let theirs_map = index_by_id(&theirs);
+
+    let mut result: Vec<serde_json::Value> = Vec::with_capacity(ours.len());
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    for o in &ours {
+        let id = match id_str(o) {
+            Some(i) => i,
+            None => {
+                result.push(o.clone());
+                continue;
+            }
+        };
+        seen.insert(id.clone());
+        let b = base_map.get(&id).copied();
+        match theirs_map.get(&id).copied() {
+            Some(t) => {
+                // In ours and theirs → reconcile cells.
+                let merged = merge_row_cells(b, o, t, &mut stats.conflicts);
+                if &merged != o {
+                    stats.rows_cell_merged += 1;
+                }
+                result.push(merged);
+            }
+            None => match b {
+                // theirs deleted it; resurrect only if ours edited it since base.
+                Some(b) if o == b => {}
+                _ => result.push(o.clone()),
+            },
+        }
+    }
+
+    // Rows on disk the editor's save doesn't mention.
+    for t in &theirs {
+        let id = match id_str(t) {
+            Some(i) => i,
+            None => continue,
+        };
+        if seen.contains(&id) {
+            continue;
+        }
+        match base_map.get(&id) {
+            None => {
+                // Added concurrently on disk → keep (DL-04 behavior).
+                result.push(t.clone());
+                stats.rows_reattached += 1;
+            }
+            Some(b) => {
+                // ours deleted it; keep only if theirs edited it since base.
+                if t != *b {
+                    result.push(t.clone());
+                    stats.rows_reattached += 1;
+                }
+            }
+        }
+    }
+
+    if let Some(obj) = db.as_object_mut() {
+        obj.insert("rows".to_string(), serde_json::Value::Array(result));
+    }
+}
+
+/// Merge a keyed array field (`properties` or `views`) 3-way at the whole-object
+/// level: take the side that changed from `base`; on a both-changed conflict
+/// prefer `ours`. Concurrently-added entries on disk are kept; entries the
+/// editor deleted stay deleted unless disk edited them.
+fn merge_keyed_field_3way(
+    db: &mut serde_json::Value,
+    base: &serde_json::Value,
+    current: &serde_json::Value,
+    field: &str,
+    merged_count: &mut usize,
+    conflicts: &mut usize,
+) {
+    let ours = array_of(db, field);
+    let theirs = array_of(current, field);
+    if ours.is_empty() && theirs.is_empty() {
+        return;
+    }
+    let base_arr = array_of(base, field);
+    let base_map = index_by_id(&base_arr);
+    let theirs_map = index_by_id(&theirs);
+
+    let mut result: Vec<serde_json::Value> = Vec::with_capacity(ours.len());
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    for o in &ours {
+        let id = match id_str(o) {
+            Some(i) => i,
+            None => {
+                result.push(o.clone());
+                continue;
+            }
+        };
+        seen.insert(id.clone());
+        let b = base_map.get(&id).copied();
+        match theirs_map.get(&id).copied() {
+            None => match b {
+                Some(b) if o == b => {}            // theirs deleted, ours unchanged → drop
+                _ => result.push(o.clone()),       // ours edited or no base → keep ours
+            },
+            Some(t) => match b {
+                Some(b) if o == b => result.push(t.clone()), // ours unchanged → theirs
+                Some(b) if t == b => result.push(o.clone()), // theirs unchanged → ours
+                Some(_) => {
+                    *conflicts += 1;
+                    result.push(o.clone()); // both changed → ours
+                }
+                None => result.push(o.clone()), // both added same id → ours
+            },
+        }
+    }
+
+    for t in &theirs {
+        let id = match id_str(t) {
+            Some(i) => i,
+            None => continue,
+        };
+        if seen.contains(&id) {
+            continue;
+        }
+        match base_map.get(&id) {
+            None => {
+                result.push(t.clone());
+                *merged_count += 1;
+            }
+            Some(b) => {
+                if t != *b {
+                    result.push(t.clone());
+                    *merged_count += 1;
+                }
+            }
+        }
+    }
+
+    if let Some(obj) = db.as_object_mut() {
+        obj.insert(field.to_string(), serde_json::Value::Array(result));
+    }
+}
+
+/// 3-way merge the editor's whole-content save (`db` = ours) against the current
+/// on-disk content (`current` = theirs) using the content the editor loaded
+/// (`base`). Extends DL-04 beyond row-adds: reconciles concurrent cell edits and
+/// `properties`/`views` changes so a stale whole-content save can't silently
+/// clobber another writer's field-level changes. `db` is mutated in place.
+fn merge_database_3way(
+    db: &mut serde_json::Value,
+    base: &serde_json::Value,
+    current: &serde_json::Value,
+) -> DbMergeStats {
+    let mut stats = DbMergeStats::default();
+    merge_rows_3way(db, base, current, &mut stats);
+    merge_keyed_field_3way(db, base, current, "properties", &mut stats.props_merged, &mut stats.conflicts);
+    merge_keyed_field_3way(db, base, current, "views", &mut stats.views_merged, &mut stats.conflicts);
+    stats
+}
+
 /// `PUT /api/notebooks/{nb}/databases/{db}` — replace the .database content.
 /// Symmetric with `get_database`.
 ///
@@ -3244,37 +3497,49 @@ async fn put_database(
         return Err(api_err(StatusCode::BAD_REQUEST, "Not a database page"));
     }
 
-    // Unwrap the row-merge envelope if present, else treat the body as the raw db.
-    let (mut db, baseline): (serde_json::Value, Option<std::collections::HashSet<String>>) =
-        match (body.get("baselineRowIds"), body.get("database")) {
-            (Some(ids), Some(database)) => {
-                let set = ids
-                    .as_array()
-                    .map(|a| {
-                        a.iter()
-                            .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                            .collect()
-                    })
-                    .unwrap_or_default();
-                (database.clone(), Some(set))
-            }
-            _ => (body, None),
-        };
+    // Unwrap the merge envelope if present, else treat the whole body as the raw
+    // db (blind replace — Python MCP tools that read-modify-write the structure).
+    //   - `baseline`        full DatabaseContentV2 the editor loaded → 3-way merge
+    //                       (rows cell-level, properties/views object-level).
+    //   - `baselineRowIds`  ids the editor loaded → DL-04 row-add reattach only
+    //                       (older clients that don't send a full baseline).
+    let mut db = body
+        .get("database")
+        .cloned()
+        .unwrap_or_else(|| body.clone());
+    let baseline_full = body.get("baseline");
+    let baseline_ids: Option<std::collections::HashSet<String>> = body
+        .get("baselineRowIds")
+        .and_then(|ids| ids.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        });
 
-    // DL-04 row merge: re-attach rows added on disk since the editor loaded.
-    if let Some(baseline) = baseline {
+    if baseline_full.is_some() || baseline_ids.is_some() {
         if let Some(current) = storage
             .read_native_file_content(&page)
             .ok()
             .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
         {
-            let n = reattach_concurrent_rows(&mut db, &current, &baseline);
-            if n > 0 {
-                log::warn!(
-                    "DB merge for page {}: re-attached {} concurrently-added row(s) the editor hadn't loaded",
-                    pg_id,
-                    n
-                );
+            if let Some(base) = baseline_full {
+                let stats = merge_database_3way(&mut db, base, &current);
+                if stats.touched() {
+                    log::warn!(
+                        "DB 3-way merge for page {}: {:?}",
+                        pg_id, stats
+                    );
+                }
+            } else if let Some(baseline) = &baseline_ids {
+                let n = reattach_concurrent_rows(&mut db, &current, baseline);
+                if n > 0 {
+                    log::warn!(
+                        "DB merge for page {}: re-attached {} concurrently-added row(s) the editor hadn't loaded",
+                        pg_id,
+                        n
+                    );
+                }
             }
         }
     }
@@ -4619,7 +4884,9 @@ async fn agile_daily_note(
 
 #[cfg(test)]
 mod tests {
-    use super::{changes_in_intervals, reattach_concurrent_rows, valid_snapshot_name};
+    use super::{
+        changes_in_intervals, merge_database_3way, reattach_concurrent_rows, valid_snapshot_name,
+    };
     use std::collections::HashSet;
 
     #[test]
@@ -4692,6 +4959,103 @@ mod tests {
         let n = reattach_concurrent_rows(&mut incoming, &current, &baseline(&["A", "B"]));
         assert_eq!(n, 0);
         assert_eq!(ids(&incoming).len(), 2);
+    }
+
+    // ---- 3-way merge (cells, schema, views) ----
+
+    fn rowc(id: &str, cells: serde_json::Value) -> serde_json::Value {
+        serde_json::json!({ "id": id, "cells": cells })
+    }
+    /// Cells of a row by id, as a JSON object (for assertions).
+    fn cells_of<'a>(db: &'a serde_json::Value, id: &str) -> &'a serde_json::Value {
+        db["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["id"] == id)
+            .map(|r| &r["cells"])
+            .unwrap()
+    }
+
+    #[test]
+    fn merge_folds_in_concurrent_cell_edit_on_same_row() {
+        // base X={a:1,b:1}. Editor edits b→2; MCP edits a→9 on disk. Both win.
+        let base = serde_json::json!({ "rows": [rowc("X", serde_json::json!({"a":1,"b":1}))] });
+        let mut ours = serde_json::json!({ "rows": [rowc("X", serde_json::json!({"a":1,"b":2}))] });
+        let theirs = serde_json::json!({ "rows": [rowc("X", serde_json::json!({"a":9,"b":1}))] });
+
+        let stats = merge_database_3way(&mut ours, &base, &theirs);
+        assert_eq!(cells_of(&ours, "X"), &serde_json::json!({"a":9,"b":2}));
+        assert_eq!(stats.rows_cell_merged, 1);
+        assert_eq!(stats.conflicts, 0);
+    }
+
+    #[test]
+    fn merge_same_cell_conflict_prefers_ours() {
+        let base = serde_json::json!({ "rows": [rowc("X", serde_json::json!({"s":"old"}))] });
+        let mut ours = serde_json::json!({ "rows": [rowc("X", serde_json::json!({"s":"mine"}))] });
+        let theirs = serde_json::json!({ "rows": [rowc("X", serde_json::json!({"s":"theirs"}))] });
+
+        let stats = merge_database_3way(&mut ours, &base, &theirs);
+        assert_eq!(cells_of(&ours, "X"), &serde_json::json!({"s":"mine"}));
+        assert_eq!(stats.conflicts, 1);
+    }
+
+    #[test]
+    fn merge_keeps_concurrently_added_property() {
+        // Editor's schema is unchanged from base [P1]; MCP added P2 on disk.
+        let base = serde_json::json!({ "rows": [], "properties": [{"id":"P1","name":"Name"}] });
+        let mut ours = serde_json::json!({ "rows": [], "properties": [{"id":"P1","name":"Name"}] });
+        let theirs = serde_json::json!({
+            "rows": [], "properties": [{"id":"P1","name":"Name"}, {"id":"P2","name":"Status"}]
+        });
+
+        let stats = merge_database_3way(&mut ours, &base, &theirs);
+        let prop_ids: Vec<&str> = ours["properties"].as_array().unwrap().iter()
+            .map(|p| p["id"].as_str().unwrap()).collect();
+        assert_eq!(prop_ids, vec!["P1", "P2"], "concurrently-added property must survive");
+        assert_eq!(stats.props_merged, 1);
+    }
+
+    #[test]
+    fn merge_keeps_concurrently_renamed_property() {
+        // Editor unchanged from base; MCP renamed P1 on disk → take theirs.
+        let base = serde_json::json!({ "rows": [], "properties": [{"id":"P1","name":"Name"}] });
+        let mut ours = serde_json::json!({ "rows": [], "properties": [{"id":"P1","name":"Name"}] });
+        let theirs = serde_json::json!({ "rows": [], "properties": [{"id":"P1","name":"Title"}] });
+        merge_database_3way(&mut ours, &base, &theirs);
+        assert_eq!(ours["properties"][0]["name"], "Title");
+    }
+
+    #[test]
+    fn merge_still_reattaches_concurrently_added_row() {
+        // Don't regress DL-04: disk row C (not in base/ours) survives.
+        let base = serde_json::json!({ "rows": [row("A"), row("B")] });
+        let mut ours = serde_json::json!({ "rows": [row("A"), row("B")] });
+        let theirs = serde_json::json!({ "rows": [row("A"), row("B"), row("C")] });
+        let stats = merge_database_3way(&mut ours, &base, &theirs);
+        assert!(ids(&ours).contains(&"C".to_string()));
+        assert_eq!(stats.rows_reattached, 1);
+    }
+
+    #[test]
+    fn merge_honors_intentional_row_delete() {
+        // Editor deleted B (unchanged on disk) → B stays gone.
+        let base = serde_json::json!({ "rows": [row("A"), row("B")] });
+        let mut ours = serde_json::json!({ "rows": [row("A")] });
+        let theirs = serde_json::json!({ "rows": [row("A"), row("B")] });
+        let stats = merge_database_3way(&mut ours, &base, &theirs);
+        assert_eq!(ids(&ours), vec!["A".to_string()]);
+        assert_eq!(stats.rows_reattached, 0);
+    }
+
+    #[test]
+    fn merge_noop_when_in_sync() {
+        let base = serde_json::json!({ "rows": [rowc("A", serde_json::json!({"a":1}))] });
+        let mut ours = serde_json::json!({ "rows": [rowc("A", serde_json::json!({"a":1}))] });
+        let theirs = serde_json::json!({ "rows": [rowc("A", serde_json::json!({"a":1}))] });
+        let stats = merge_database_3way(&mut ours, &base, &theirs);
+        assert!(!stats.touched(), "identical sides must not report a merge");
     }
 
     /// DL-46: a Tantivy panic poisons the search-index mutex. The old

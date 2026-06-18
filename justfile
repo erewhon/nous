@@ -152,9 +152,10 @@ guest-editor-deploy:
 
 # === Python SDK / MCP server ===
 
-# Sync nous-py dependencies via uv
+# Sync nous-py dependencies via uv (incl. the mcp-server extra the MCP server
+# needs — a bare `uv sync` prunes it and breaks `nous-mcp`).
 mcp-deps:
-    cd nous-py && uv sync
+    cd nous-py && uv sync --extra mcp-server
 
 # === Release ===
 
