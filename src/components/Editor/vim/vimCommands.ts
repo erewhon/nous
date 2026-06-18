@@ -425,6 +425,75 @@ export function moveDocEnd(bnEditor: BlockNoteEditor<any, any, any>): boolean {
   return true;
 }
 
+function isEmptyBlock(b: any): boolean {
+  const content = b?.content;
+  if (Array.isArray(content)) {
+    return content.every((c: any) => !(c.text ?? "").length);
+  }
+  return false;
+}
+
+/**
+ * `}` — move to the next paragraph boundary. In a block editor the closest
+ * analogue is the next empty block; if there is none, the last block.
+ */
+export function moveParagraphForward(
+  view: EditorView,
+  bnEditor: BlockNoteEditor<any, any, any>,
+  state: VimState
+): boolean {
+  const count = Math.max(state.count, 1);
+  for (let i = 0; i < count; i++) {
+    const cursor = bnEditor.getTextCursorPosition();
+    if (!cursor) break;
+    let block = bnEditor.getNextBlock(cursor.block);
+    let landed: any = null;
+    let last = cursor.block;
+    while (block) {
+      last = block;
+      if (isEmptyBlock(block)) {
+        landed = block;
+        break;
+      }
+      block = bnEditor.getNextBlock(block);
+    }
+    const target = landed ?? (last.id !== cursor.block.id ? last : null);
+    if (!target) break;
+    bnEditor.setTextCursorPosition(target.id, "start");
+  }
+  view.dispatch(view.state.tr.scrollIntoView());
+  return true;
+}
+
+/** `{` — move to the previous paragraph boundary (previous empty block / first). */
+export function moveParagraphBackward(
+  view: EditorView,
+  bnEditor: BlockNoteEditor<any, any, any>,
+  state: VimState
+): boolean {
+  const count = Math.max(state.count, 1);
+  for (let i = 0; i < count; i++) {
+    const cursor = bnEditor.getTextCursorPosition();
+    if (!cursor) break;
+    let block = bnEditor.getPrevBlock(cursor.block);
+    let landed: any = null;
+    let first = cursor.block;
+    while (block) {
+      first = block;
+      if (isEmptyBlock(block)) {
+        landed = block;
+        break;
+      }
+      block = bnEditor.getPrevBlock(block);
+    }
+    const target = landed ?? (first.id !== cursor.block.id ? first : null);
+    if (!target) break;
+    bnEditor.setTextCursorPosition(target.id, "start");
+  }
+  view.dispatch(view.state.tr.scrollIntoView());
+  return true;
+}
+
 // ─── Block-level operations (BlockNote API) ─────────────────────────────────
 
 /** Result of a linewise yank/delete: plain text + structured blocks. */

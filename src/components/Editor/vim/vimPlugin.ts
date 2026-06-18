@@ -69,6 +69,41 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
   // start where the previous one ended; any other motion invalidates it).
   let verticalGoal: cmd.VerticalGoal = { column: null, pos: -1 };
 
+  // Marks (m{a} / `{a} / '{a}) — stored as block id + offset so they survive
+  // edits to other blocks. Per editor instance.
+  const marks = new Map<string, { blockId: string; offset: number }>();
+
+  function setMark(view: EditorView, char: string) {
+    const cursor = bnEditor.getTextCursorPosition();
+    if (!cursor) return;
+    const { from } = view.state.selection;
+    const offset = from - view.state.doc.resolve(from).start();
+    marks.set(char, { blockId: cursor.block.id, offset });
+  }
+
+  function jumpToMark(view: EditorView, char: string, lineStart: boolean) {
+    const mark = marks.get(char);
+    if (!mark) return;
+    try {
+      bnEditor.setTextCursorPosition(mark.blockId, "start");
+    } catch {
+      marks.delete(char); // block was deleted
+      return;
+    }
+    if (lineStart) {
+      cmd.moveFirstNonWhitespace(view);
+      return;
+    }
+    const start = view.state.doc.resolve(view.state.selection.from).start();
+    const $s = view.state.doc.resolve(start);
+    const target = Math.min(start + mark.offset, $s.end());
+    view.dispatch(
+      view.state.tr
+        .setSelection(TextSelection.create(view.state.doc, target))
+        .scrollIntoView()
+    );
+  }
+
   function isVisual(mode: VimMode): boolean {
     return mode === "visual" || mode === "visual-line";
   }
@@ -453,6 +488,20 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
       return true;
     }
 
+    // ── Pending: m{char} — set mark ──────────────────────────────────
+    if (pending === "m") {
+      if (key.length === 1) setMark(view, key);
+      resetPending();
+      return true;
+    }
+
+    // ── Pending: `{char} / '{char} — jump to mark ────────────────────
+    if (pending === "`" || pending === "'") {
+      if (key.length === 1) jumpToMark(view, key, pending === "'");
+      resetPending();
+      return true;
+    }
+
     // ── Pending: r{char} — replace character ─────────────────────────
     if (pending === "r") {
       if (key.length === 1) {
@@ -793,6 +842,16 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
       resetPending();
       return true;
     }
+    if (key === "}") {
+      cmd.moveParagraphForward(view, bnEditor, vim);
+      resetPending();
+      return true;
+    }
+    if (key === "{") {
+      cmd.moveParagraphBackward(view, bnEditor, vim);
+      resetPending();
+      return true;
+    }
     if (key === "G") {
       if (vim.count > 0) {
         // {count}G — go to block number (1-indexed)
@@ -850,6 +909,14 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
     }
     if (key === "T") {
       setPendingKeys("T");
+      return true;
+    }
+    if (key === "m") {
+      setPendingKeys("m");
+      return true;
+    }
+    if (key === "`" || key === "'") {
+      setPendingKeys(key);
       return true;
     }
 
