@@ -89,52 +89,130 @@ export function moveRight(
   return true;
 }
 
+/**
+ * Sticky goal column for vertical motion. `column` is the target x-pixel; `pos`
+ * is the doc position it was measured at, so consecutive j/k keep the column
+ * while any other movement (which changes the cursor position) invalidates it.
+ */
+export interface VerticalGoal {
+  column: number | null;
+  pos: number;
+}
+
+/** Block-level vertical fallback: move `n` blocks in `dir` (used w/o layout). */
+function blockLevelVertical(
+  view: EditorView,
+  bnEditor: BlockNoteEditor<any, any, any>,
+  dir: 1 | -1,
+  n: number
+): void {
+  let movedAny = false;
+  for (let i = 0; i < n; i++) {
+    const cursor = bnEditor.getTextCursorPosition();
+    if (!cursor) break;
+    const target =
+      dir > 0
+        ? bnEditor.getNextBlock(cursor.block)
+        : bnEditor.getPrevBlock(cursor.block);
+    if (!target) break;
+    bnEditor.setTextCursorPosition(target.id, "start");
+    movedAny = true;
+  }
+  if (movedAny) view.dispatch(view.state.tr.scrollIntoView());
+}
+
+/**
+ * Vertical (visual-line) motion for j/k, batched for performance.
+ *
+ * The slow pattern is dispatching a selection + scrollIntoView on *every*
+ * step of a counted motion: each dispatch dirties layout, so the next
+ * `coordsAtPos` forces a synchronous reflow — N reflows + N scrolls for Nj.
+ * Here we probe geometry for all N steps first (no DOM mutation between probes,
+ * so only the first read reflows), then apply ONE transaction and scroll once.
+ *
+ * `goal` carries a sticky goal column across consecutive calls (vim keeps the
+ * desired column when moving through shorter lines). Returns the goal to persist.
+ */
+export function moveVertical(
+  view: EditorView,
+  bnEditor: BlockNoteEditor<any, any, any>,
+  state: VimState,
+  dir: 1 | -1,
+  goal?: VerticalGoal
+): VerticalGoal {
+  const count = Math.max(state.count, 1);
+  const startFrom = view.state.selection.from;
+
+  let startCoords: { top: number; bottom: number; left: number } | null = null;
+  try {
+    startCoords = view.coordsAtPos(startFrom);
+  } catch {
+    startCoords = null;
+  }
+
+  if (!startCoords) {
+    // No layout (e.g. jsdom) — fall back to block-level for the whole count.
+    blockLevelVertical(view, bnEditor, dir, count);
+    return { column: null, pos: view.state.selection.from };
+  }
+
+  // Reuse the sticky goal column only if we're still where the last j/k left us.
+  const goalColumn =
+    goal && goal.column !== null && goal.pos === startFrom
+      ? goal.column
+      : startCoords.left;
+
+  const lineHeight = startCoords.bottom - startCoords.top || 16;
+  const halfLine = Math.max(lineHeight * 0.5, 4);
+  let curTop = startCoords.top;
+  let curBottom = startCoords.bottom;
+  let targetPos = startFrom;
+  let steps = 0;
+
+  for (let i = 0; i < count; i++) {
+    const probeY = dir > 0 ? curBottom + halfLine : curTop - halfLine;
+    let pos: { pos: number } | null = null;
+    try {
+      pos = view.posAtCoords({ left: goalColumn, top: probeY });
+    } catch {
+      pos = null;
+    }
+    if (!pos || pos.pos === targetPos) break;
+    targetPos = pos.pos;
+    steps++;
+    try {
+      const c = view.coordsAtPos(targetPos);
+      curTop = c.top;
+      curBottom = c.bottom;
+    } catch {
+      break;
+    }
+  }
+
+  // Single transaction for all the geometry steps.
+  if (targetPos !== startFrom) {
+    view.dispatch(
+      view.state.tr
+        .setSelection(TextSelection.create(view.state.doc, targetPos))
+        .scrollIntoView()
+    );
+  }
+
+  // If geometry couldn't cover the full count (document edge), finish with
+  // block-level movement for the remainder.
+  if (steps < count) {
+    blockLevelVertical(view, bnEditor, dir, count - steps);
+  }
+
+  return { column: goalColumn, pos: view.state.selection.from };
+}
+
 export function moveDown(
   view: EditorView,
   bnEditor: BlockNoteEditor<any, any, any>,
   state: VimState
 ): boolean {
-  const count = Math.max(state.count, 1);
-
-  for (let i = 0; i < count; i++) {
-    const { from } = view.state.selection;
-    let moved = false;
-
-    // Visual-line movement via geometry. `coordsAtPos` needs a laid-out DOM
-    // and throws without one (e.g. jsdom) — fall back to block-level then.
-    try {
-      const coords = view.coordsAtPos(from);
-      if (coords) {
-        // Offset by half a line height to land solidly on the next visual line
-        // (just +1 lands at the boundary and snaps to end of current line).
-        const lineHeight = coords.bottom - coords.top;
-        const pos = view.posAtCoords({
-          left: coords.left,
-          top: coords.bottom + Math.max(lineHeight * 0.5, 4),
-        });
-        if (pos && pos.pos !== from) {
-          view.dispatch(
-            view.state.tr
-              .setSelection(TextSelection.create(view.state.doc, pos.pos))
-              .scrollIntoView()
-          );
-          moved = true;
-        }
-      }
-    } catch {
-      // no layout — handled by the block-level fallback below
-    }
-
-    if (!moved) {
-      // At the bottom of the visible document — fall back to block-level.
-      const cursor = bnEditor.getTextCursorPosition();
-      if (!cursor) break;
-      const next = bnEditor.getNextBlock(cursor.block);
-      if (!next) break;
-      bnEditor.setTextCursorPosition(next.id, "start");
-      view.dispatch(view.state.tr.scrollIntoView());
-    }
-  }
+  moveVertical(view, bnEditor, state, 1);
   return true;
 }
 
@@ -143,43 +221,7 @@ export function moveUp(
   bnEditor: BlockNoteEditor<any, any, any>,
   state: VimState
 ): boolean {
-  const count = Math.max(state.count, 1);
-
-  for (let i = 0; i < count; i++) {
-    const { from } = view.state.selection;
-    let moved = false;
-
-    try {
-      const coords = view.coordsAtPos(from);
-      if (coords) {
-        const lineHeight = coords.bottom - coords.top;
-        const pos = view.posAtCoords({
-          left: coords.left,
-          top: coords.top - Math.max(lineHeight * 0.5, 4),
-        });
-        if (pos && pos.pos !== from) {
-          view.dispatch(
-            view.state.tr
-              .setSelection(TextSelection.create(view.state.doc, pos.pos))
-              .scrollIntoView()
-          );
-          moved = true;
-        }
-      }
-    } catch {
-      // no layout — handled by the block-level fallback below
-    }
-
-    if (!moved) {
-      // At the top of the visible document — fall back to block-level.
-      const cursor = bnEditor.getTextCursorPosition();
-      if (!cursor) break;
-      const prev = bnEditor.getPrevBlock(cursor.block);
-      if (!prev) break;
-      bnEditor.setTextCursorPosition(prev.id, "start");
-      view.dispatch(view.state.tr.scrollIntoView());
-    }
-  }
+  moveVertical(view, bnEditor, state, -1);
   return true;
 }
 

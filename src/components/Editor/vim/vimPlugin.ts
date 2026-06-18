@@ -65,6 +65,10 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
   // end (anchor) lives in vim.visualAnchor. -1 when not in visual mode.
   let visualHead = -1;
 
+  // Sticky goal column for j/k (persists while consecutive vertical motions
+  // start where the previous one ended; any other motion invalidates it).
+  let verticalGoal: cmd.VerticalGoal = { column: null, pos: -1 };
+
   function isVisual(mode: VimMode): boolean {
     return mode === "visual" || mode === "visual-line";
   }
@@ -735,12 +739,12 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
       return true;
     }
     if (key === "j") {
-      cmd.moveDown(view, bnEditor, vim);
+      verticalGoal = cmd.moveVertical(view, bnEditor, vim, 1, verticalGoal);
       resetPending();
       return true;
     }
     if (key === "k") {
-      cmd.moveUp(view, bnEditor, vim);
+      verticalGoal = cmd.moveVertical(view, bnEditor, vim, -1, verticalGoal);
       resetPending();
       return true;
     }
