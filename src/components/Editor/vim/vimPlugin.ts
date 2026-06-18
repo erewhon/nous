@@ -11,10 +11,17 @@ import type { BlockNoteEditor } from "@blocknote/core";
 import {
   DEFAULT_VIM_STATE,
   type EditRecord,
+  type PartialBlockSnapshot,
   type VimMode,
   type VimState,
 } from "./vimTypes";
 import * as cmd from "./vimCommands";
+
+interface RegisterContent {
+  text: string;
+  blocks: PartialBlockSnapshot[] | null;
+  type: "charwise" | "linewise";
+}
 
 export const VIM_PLUGIN_KEY = new PluginKey<VimState>("vim");
 
@@ -104,6 +111,135 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
     );
   }
 
+  // Named registers ("a–"z, "0–"9). The unnamed register lives in vim.register
+  // /registerBlocks/registerType. activeRegister is set by a `"{c}` prefix and
+  // consumed by the next yank/delete/paste. "+" and "*" map to the OS clipboard.
+  const registers = new Map<string, RegisterContent>();
+  let activeRegister: string | null = null;
+
+  // Insert-mode Ctrl-r waits for a register char to insert.
+  let insertRegisterPending = false;
+
+  function isNamedRegister(c: string | null): boolean {
+    return c !== null && /^[a-zA-Z0-9]$/.test(c);
+  }
+
+  async function writeClipboard(text: string) {
+    try {
+      await navigator.clipboard?.writeText(text);
+    } catch {
+      // clipboard unavailable / denied — ignore
+    }
+  }
+
+  async function readClipboard(): Promise<string> {
+    try {
+      return (await navigator.clipboard?.readText()) ?? "";
+    } catch {
+      return "";
+    }
+  }
+
+  /**
+   * Store a yank/delete into the unnamed register, plus the active named
+   * register if one was given, and the OS clipboard (by default, or for "+/"*).
+   * Consumes the active register.
+   */
+  function writeRegister(
+    text: string,
+    blocks: PartialBlockSnapshot[] | null,
+    type: "charwise" | "linewise"
+  ) {
+    vim = {
+      ...vim,
+      register: text,
+      registerBlocks: blocks,
+      registerType: type,
+    };
+    if (isNamedRegister(activeRegister)) {
+      registers.set((activeRegister as string).toLowerCase(), {
+        text,
+        blocks,
+        type,
+      });
+    }
+    if (
+      activeRegister === null ||
+      activeRegister === "+" ||
+      activeRegister === "*"
+    ) {
+      void writeClipboard(text);
+    }
+    activeRegister = null;
+  }
+
+  /** Paste from the active register (named / clipboard) or the unnamed one. */
+  function pasteFrom(view: EditorView, placement: "before" | "after") {
+    // OS clipboard registers — read is async; paste charwise-inline when ready.
+    if (activeRegister === "+" || activeRegister === "*") {
+      activeRegister = null;
+      void readClipboard().then((text) => {
+        if (text) cmd.pasteInline(view, text, placement === "after");
+      });
+      return;
+    }
+
+    let content: RegisterContent = {
+      text: vim.register,
+      blocks: vim.registerBlocks,
+      type: vim.registerType,
+    };
+    if (isNamedRegister(activeRegister)) {
+      const r = registers.get((activeRegister as string).toLowerCase());
+      if (r) content = r;
+    }
+    activeRegister = null;
+
+    if (content.type === "charwise") {
+      cmd.pasteInline(view, content.text, placement === "after");
+      return;
+    }
+    // Linewise: pasteBlock reads from vim state — swap in the chosen register,
+    // paste, then restore the unnamed register (pasting "a must not clobber it).
+    const saved: RegisterContent = {
+      text: vim.register,
+      blocks: vim.registerBlocks,
+      type: vim.registerType,
+    };
+    vim = {
+      ...vim,
+      register: content.text,
+      registerBlocks: content.blocks,
+      registerType: content.type,
+    };
+    cmd.pasteBlock(bnEditor, vim, placement);
+    vim = {
+      ...vim,
+      register: saved.text,
+      registerBlocks: saved.blocks,
+      registerType: saved.type,
+    };
+  }
+
+  /** Insert a register's text inline (insert-mode Ctrl-r). */
+  function insertRegister(view: EditorView, char: string) {
+    if (char === "+" || char === "*") {
+      void readClipboard().then((text) => {
+        if (text)
+          view.dispatch(
+            view.state.tr.insertText(text, view.state.selection.from)
+          );
+      });
+      return;
+    }
+    let text = vim.register;
+    if (isNamedRegister(char)) {
+      const r = registers.get(char.toLowerCase());
+      if (r) text = r.text;
+    }
+    if (text) view.dispatch(view.state.tr.insertText(text));
+  }
+
   function isVisual(mode: VimMode): boolean {
     return mode === "visual" || mode === "visual-line";
   }
@@ -188,12 +324,7 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
         result.from,
         result.to
       );
-      vim = {
-        ...vim,
-        register: text,
-        registerBlocks: blocks,
-        registerType: "linewise",
-      };
+      writeRegister(text, blocks, "linewise");
     } else {
       // Check if charwise motion crossed block boundaries
       const $from = view.state.doc.resolve(Math.min(result.from, result.to));
@@ -207,12 +338,7 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
           result.from,
           result.to
         );
-        vim = {
-          ...vim,
-          register: text,
-          registerBlocks: blocks,
-          registerType: "linewise",
-        };
+        writeRegister(text, blocks, "linewise");
       } else {
         const yanked = cmd.applyOperatorCharwise(
           view,
@@ -220,12 +346,7 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
           result.from,
           result.to
         );
-        vim = {
-          ...vim,
-          register: yanked,
-          registerBlocks: null,
-          registerType: "charwise",
-        };
+        writeRegister(yanked, null, "charwise");
       }
     }
 
@@ -259,23 +380,13 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
       case "operator-line":
         if (record.operator === "d") {
           const { text, blocks } = cmd.deleteBlock(bnEditor, vim);
-          vim = {
-            ...vim,
-            register: text,
-            registerBlocks: blocks,
-            registerType: "linewise",
-          };
+          writeRegister(text, blocks, "linewise");
         } else if (record.operator === "c") {
           cmd.changeLine(view);
           setMode(view, "insert");
         } else if (record.operator === "y") {
           const { text, blocks } = cmd.yankBlock(bnEditor, vim);
-          vim = {
-            ...vim,
-            register: text,
-            registerBlocks: blocks,
-            registerType: "linewise",
-          };
+          writeRegister(text, blocks, "linewise");
         }
         break;
       case "simple":
@@ -414,6 +525,15 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
   // ─── Insert mode handler ──────────────────────────────────────────────
 
   function handleInsertMode(view: EditorView, event: KeyboardEvent): boolean {
+    // Ctrl+r{reg} → insert a register's contents (consumes the next key first,
+    // so it must run before Escape/jj handling).
+    if (insertRegisterPending) {
+      event.preventDefault();
+      insertRegisterPending = false;
+      if (event.key.length === 1) insertRegister(view, event.key);
+      return true;
+    }
+
     // Escape → normal
     if (event.key === "Escape") {
       event.preventDefault();
@@ -425,6 +545,12 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
     if (event.ctrlKey && event.key === "[") {
       event.preventDefault();
       setMode(view, "normal");
+      return true;
+    }
+
+    if (event.ctrlKey && event.key === "r") {
+      event.preventDefault();
+      insertRegisterPending = true;
       return true;
     }
 
@@ -516,6 +642,13 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
       return true;
     }
 
+    // ── Pending: "{char} — select register for the next op ───────────
+    if (pending === '"') {
+      if (key.length === 1) activeRegister = key;
+      resetPending();
+      return true;
+    }
+
     // ── Pending: r{char} — replace character ─────────────────────────
     if (pending === "r") {
       if (key.length === 1) {
@@ -585,13 +718,8 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
         const opState = { ...vim, count: effCount };
         if (op === "d") {
           const { text, blocks } = cmd.deleteBlock(bnEditor, opState);
-          vim = {
-            ...vim,
-            register: text,
-            registerBlocks: blocks,
-            registerType: "linewise",
-            lastCommand: op + op,
-          };
+          writeRegister(text, blocks, "linewise");
+          vim = { ...vim, lastCommand: op + op };
         } else if (op === "c") {
           cmd.changeLine(view);
           vim = { ...vim, registerType: "linewise", lastCommand: "cc" };
@@ -601,13 +729,8 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
           return true;
         } else {
           const { text, blocks } = cmd.yankBlock(bnEditor, opState);
-          vim = {
-            ...vim,
-            register: text,
-            registerBlocks: blocks,
-            registerType: "linewise",
-            lastCommand: "yy",
-          };
+          writeRegister(text, blocks, "linewise");
+          vim = { ...vim, lastCommand: "yy" };
         }
         recordEdit({ type: "operator-line", operator: op, count: effCount });
         resetPending();
@@ -935,6 +1058,10 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
       setPendingKeys(key);
       return true;
     }
+    if (key === '"') {
+      setPendingKeys('"');
+      return true;
+    }
 
     // ── Editing commands ────────────────────────────────────────────
     if (key === "x") {
@@ -1011,13 +1138,8 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
     if (key === "Y") {
       // Y — yank line (alias for yy)
       const { text, blocks } = cmd.yankBlock(bnEditor, vim);
-      vim = {
-        ...vim,
-        register: text,
-        registerBlocks: blocks,
-        registerType: "linewise",
-        lastCommand: "Y",
-      };
+      writeRegister(text, blocks, "linewise");
+      vim = { ...vim, lastCommand: "Y" };
       resetPending();
       return true;
     }
@@ -1032,22 +1154,14 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
       return true;
     }
 
-    // ── Paste (check registerType for inline vs block) ──────────────
+    // ── Paste (register-aware: named / clipboard / unnamed) ─────────
     if (key === "p") {
-      if (vim.registerType === "charwise") {
-        cmd.pasteInline(view, vim.register, true);
-      } else {
-        cmd.pasteBlock(bnEditor, vim, "after");
-      }
+      pasteFrom(view, "after");
       resetPending();
       return true;
     }
     if (key === "P") {
-      if (vim.registerType === "charwise") {
-        cmd.pasteInline(view, vim.register, false);
-      } else {
-        cmd.pasteBlock(bnEditor, vim, "before");
-      }
+      pasteFrom(view, "before");
       resetPending();
       return true;
     }
@@ -1215,21 +1329,11 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
         lo,
         hi
       );
-      vim = {
-        ...vim,
-        register: text,
-        registerBlocks: blocks,
-        registerType: "linewise",
-      };
+      writeRegister(text, blocks, "linewise");
     } else {
       const end = Math.min(hi + 1, $hi.end());
       const yanked = cmd.applyOperatorCharwise(view, op, lo, end);
-      vim = {
-        ...vim,
-        register: yanked,
-        registerBlocks: null,
-        registerType: "charwise",
-      };
+      writeRegister(yanked, null, "charwise");
     }
   }
 

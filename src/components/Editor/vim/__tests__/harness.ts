@@ -29,6 +29,10 @@ import type { EditorView } from "@tiptap/pm/view";
 import { VimExtension } from "../vimExtension";
 import type { VimMode } from "../vimTypes";
 
+// In-memory stand-in for navigator.clipboard (jsdom has none). Shared across
+// mounts; reset per mountVim and exposed via harness.clipboard.
+const clipboardStore = { data: "" };
+
 // jsdom lacks a few globals BlockNote/ProseMirror touch during construction.
 function installPolyfills() {
   const g = globalThis as Record<string, unknown>;
@@ -49,6 +53,17 @@ function installPolyfills() {
       removeListener() {},
     });
   }
+  // Force our deterministic clipboard mock (configurable so it can be redefined).
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: {
+      writeText: (t: string) => {
+        clipboardStore.data = t;
+        return Promise.resolve();
+      },
+      readText: () => Promise.resolve(clipboardStore.data),
+    },
+  });
 }
 
 export interface VimHarness {
@@ -84,6 +99,8 @@ export interface VimHarness {
   mode: () => VimMode;
   /** Current pending-keys string (e.g. "d", "ci"). */
   pending: () => string;
+  /** Read/write the mock OS clipboard (navigator.clipboard). */
+  clipboard: { get: () => string; set: (text: string) => void };
   destroy: () => void;
 }
 
@@ -140,6 +157,7 @@ export function mountVim(
   initialContent: PartialBlock<any, any, any>[]
 ): VimHarness {
   installPolyfills();
+  clipboardStore.data = "";
 
   let mode: VimMode = "normal";
   let pending = "";
@@ -282,6 +300,12 @@ export function mountVim(
     cursorBlockIndex,
     mode: () => mode,
     pending: () => pending,
+    clipboard: {
+      get: () => clipboardStore.data,
+      set: (text: string) => {
+        clipboardStore.data = text;
+      },
+    },
     destroy,
   };
 }
