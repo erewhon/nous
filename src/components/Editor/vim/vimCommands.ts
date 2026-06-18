@@ -8,14 +8,35 @@ import type { EditorView } from "@tiptap/pm/view";
 import { TextSelection, type EditorState } from "@tiptap/pm/state";
 import { undo as pmUndo, redo as pmRedo } from "@tiptap/pm/history";
 import type { BlockNoteEditor } from "@blocknote/core";
-import type { VimState } from "./vimTypes";
+import type { PartialBlockSnapshot, VimState } from "./vimTypes";
+
+// ─── Small helpers ──────────────────────────────────────────────────────────
+
+/** Move the cursor (collapsed selection) to an absolute document position. */
+function setSel(view: EditorView, pos: number): void {
+  view.dispatch(
+    view.state.tr.setSelection(TextSelection.create(view.state.doc, pos))
+  );
+}
+
+/**
+ * Vim character class for word motions:
+ *   0 = whitespace, 1 = keyword char (\w), 2 = other punctuation.
+ * With `bigWord` (W/B/E), every non-blank char is class 1 so only
+ * whitespace separates WORDs.
+ */
+function charClass(ch: string | undefined, bigWord: boolean): 0 | 1 | 2 {
+  if (ch === undefined || /\s/.test(ch)) return 0;
+  if (bigWord) return 1;
+  return /[A-Za-z0-9_]/.test(ch) ? 1 : 2;
+}
 
 // ─── Character / word motions (ProseMirror level) ───────────────────────────
 
 export function moveLeft(
   view: EditorView,
   bnEditor: BlockNoteEditor<any, any, any>,
-  state: VimState,
+  state: VimState
 ): boolean {
   let remaining = Math.max(state.count, 1);
 
@@ -25,8 +46,8 @@ export function moveLeft(
     if (from > $pos.start()) {
       view.dispatch(
         view.state.tr.setSelection(
-          TextSelection.create(view.state.doc, from - 1),
-        ),
+          TextSelection.create(view.state.doc, from - 1)
+        )
       );
     } else {
       // At start of block — wrap to end of previous block
@@ -43,7 +64,7 @@ export function moveLeft(
 export function moveRight(
   view: EditorView,
   bnEditor: BlockNoteEditor<any, any, any>,
-  state: VimState,
+  state: VimState
 ): boolean {
   let remaining = Math.max(state.count, 1);
 
@@ -53,8 +74,8 @@ export function moveRight(
     if (from < $pos.end()) {
       view.dispatch(
         view.state.tr.setSelection(
-          TextSelection.create(view.state.doc, from + 1),
-        ),
+          TextSelection.create(view.state.doc, from + 1)
+        )
       );
     } else {
       // At end of block — wrap to start of next block
@@ -71,7 +92,7 @@ export function moveRight(
 export function moveDown(
   view: EditorView,
   bnEditor: BlockNoteEditor<any, any, any>,
-  state: VimState,
+  state: VimState
 ): boolean {
   const count = Math.max(state.count, 1);
 
@@ -83,14 +104,17 @@ export function moveDown(
     // Offset by half a line height to land solidly on the next visual line
     // (using just +1 lands at the boundary and snaps to end of current line)
     const lineHeight = coords.bottom - coords.top;
-    const targetCoords = { left: coords.left, top: coords.bottom + Math.max(lineHeight * 0.5, 4) };
+    const targetCoords = {
+      left: coords.left,
+      top: coords.bottom + Math.max(lineHeight * 0.5, 4),
+    };
     const pos = view.posAtCoords(targetCoords);
 
     if (pos && pos.pos !== from) {
       view.dispatch(
         view.state.tr
           .setSelection(TextSelection.create(view.state.doc, pos.pos))
-          .scrollIntoView(),
+          .scrollIntoView()
       );
     } else {
       // At the bottom of the visible document — fall back to block-level
@@ -109,7 +133,7 @@ export function moveDown(
 export function moveUp(
   view: EditorView,
   bnEditor: BlockNoteEditor<any, any, any>,
-  state: VimState,
+  state: VimState
 ): boolean {
   const count = Math.max(state.count, 1);
 
@@ -119,14 +143,17 @@ export function moveUp(
     if (!coords) break;
 
     const lineHeight = coords.bottom - coords.top;
-    const targetCoords = { left: coords.left, top: coords.top - Math.max(lineHeight * 0.5, 4) };
+    const targetCoords = {
+      left: coords.left,
+      top: coords.top - Math.max(lineHeight * 0.5, 4),
+    };
     const pos = view.posAtCoords(targetCoords);
 
     if (pos && pos.pos !== from) {
       view.dispatch(
         view.state.tr
           .setSelection(TextSelection.create(view.state.doc, pos.pos))
-          .scrollIntoView(),
+          .scrollIntoView()
       );
     } else {
       // At the top of the visible document — fall back to block-level
@@ -141,134 +168,143 @@ export function moveUp(
   return true;
 }
 
+/**
+ * `w` / `W` — move to the start of the next word (or WORD with bigWord).
+ * A word is a maximal run of keyword chars OR of punctuation; whitespace
+ * separates. Wraps to the next block when no further word remains.
+ */
 export function moveWordForward(
   view: EditorView,
   bnEditor: BlockNoteEditor<any, any, any>,
   state: VimState,
+  bigWord = false
 ): boolean {
   let remaining = Math.max(state.count, 1);
+  let guard = 0;
 
-  for (let step = 0; step < remaining; step++) {
+  while (remaining > 0 && guard++ < 100000) {
     const { from } = view.state.selection;
     const $pos = view.state.doc.resolve(from);
-    const textAfter = view.state.doc.textBetween(from, $pos.end());
+    const blockStart = $pos.start();
+    const text = view.state.doc.textBetween(blockStart, $pos.end());
+    const len = text.length;
+    let i = from - blockStart;
 
-    // Try to find a word boundary in the current block
-    const match = textAfter.match(/^(\S*\s+|\S+)/);
-    if (match && match[0].length < textAfter.length) {
-      // Found a word boundary within this block
-      const target = from + match[0].length;
-      view.dispatch(
-        view.state.tr.setSelection(
-          TextSelection.create(view.state.doc, target),
-        ),
-      );
-    } else {
-      // At end of block text — jump to start of next block
-      const cursor = bnEditor.getTextCursorPosition();
-      if (!cursor) break;
-      const next = bnEditor.getNextBlock(cursor.block);
-      if (!next) break;
-      bnEditor.setTextCursorPosition(next.id, "start");
+    // Skip the rest of the current word (run of same non-space class).
+    const startClass = charClass(text[i], bigWord);
+    if (startClass !== 0) {
+      while (i < len && charClass(text[i], bigWord) === startClass) i++;
     }
+    // Skip whitespace to the start of the next word.
+    while (i < len && charClass(text[i], bigWord) === 0) i++;
+
+    if (i >= len) {
+      // No further word in this block — wrap to the next block.
+      const cursor = bnEditor.getTextCursorPosition();
+      const next = cursor ? bnEditor.getNextBlock(cursor.block) : null;
+      if (!next) {
+        if (len > 0 && from - blockStart < len) setSel(view, blockStart + len);
+        break;
+      }
+      bnEditor.setTextCursorPosition(next.id, "start");
+      remaining--;
+      continue;
+    }
+
+    setSel(view, blockStart + i);
+    remaining--;
   }
   return true;
 }
 
+/**
+ * `b` / `B` — move to the start of the current/previous word.
+ */
 export function moveWordBackward(
   view: EditorView,
   bnEditor: BlockNoteEditor<any, any, any>,
   state: VimState,
+  bigWord = false
 ): boolean {
   let remaining = Math.max(state.count, 1);
+  let guard = 0;
 
-  for (let step = 0; step < remaining; step++) {
+  while (remaining > 0 && guard++ < 100000) {
     const { from } = view.state.selection;
     const $pos = view.state.doc.resolve(from);
-    const textBefore = view.state.doc.textBetween($pos.start(), from);
+    const blockStart = $pos.start();
+    const text = view.state.doc.textBetween(blockStart, $pos.end());
+    let i = from - blockStart - 1;
 
-    if (textBefore.length > 0) {
-      // Find previous word start within this block
-      const match = textBefore.match(/(\s+\S*|\S+)$/);
-      if (match) {
-        const target = $pos.start() + textBefore.length - match[0].length;
-        view.dispatch(
-          view.state.tr.setSelection(
-            TextSelection.create(view.state.doc, target),
-          ),
-        );
-      } else {
-        // Move to block start
-        view.dispatch(
-          view.state.tr.setSelection(
-            TextSelection.create(view.state.doc, $pos.start()),
-          ),
-        );
-      }
-    } else {
-      // Already at start of block — jump to end of previous block
+    // Skip whitespace immediately before the cursor.
+    while (i >= 0 && charClass(text[i], bigWord) === 0) i--;
+
+    if (i < 0) {
+      // At block start — wrap to the end of the previous block.
       const cursor = bnEditor.getTextCursorPosition();
-      if (!cursor) break;
-      const prev = bnEditor.getPrevBlock(cursor.block);
+      const prev = cursor ? bnEditor.getPrevBlock(cursor.block) : null;
       if (!prev) break;
       bnEditor.setTextCursorPosition(prev.id, "end");
-      // After landing at end of prev block, continue the loop to find
-      // the actual word start (b should land on word start, not end)
+      continue; // retry: land on the word start in the previous block
     }
+
+    // Walk back to the start of this word (run of same class).
+    const cls = charClass(text[i], bigWord);
+    while (i - 1 >= 0 && charClass(text[i - 1], bigWord) === cls) i--;
+
+    setSel(view, blockStart + i);
+    remaining--;
   }
   return true;
 }
 
+/**
+ * `e` / `E` — move to the end of the current/next word (inclusive: lands
+ * on the last char of the word).
+ */
 export function moveWordEnd(
   view: EditorView,
   bnEditor: BlockNoteEditor<any, any, any>,
   state: VimState,
+  bigWord = false
 ): boolean {
   let remaining = Math.max(state.count, 1);
+  let guard = 0;
+  let justWrapped = false;
 
-  for (let step = 0; step < remaining; step++) {
+  while (remaining > 0 && guard++ < 100000) {
     const { from } = view.state.selection;
     const $pos = view.state.doc.resolve(from);
-    const textAfter = view.state.doc.textBetween(from, $pos.end());
+    const blockStart = $pos.start();
+    const text = view.state.doc.textBetween(blockStart, $pos.end());
+    const len = text.length;
+    // Start scanning after the cursor, except right after a block wrap where
+    // we want to consider the very first char of the new block.
+    let i = justWrapped ? from - blockStart : from - blockStart + 1;
+    justWrapped = false;
 
-    if (textAfter.length > 1) {
-      // Skip current char, then find end of word
-      const remaining2 = textAfter.slice(1);
-      const match = remaining2.match(/^\s*\S*/);
-      if (match && match[0].length > 0) {
-        const target = from + 1 + match[0].length;
-        view.dispatch(
-          view.state.tr.setSelection(
-            TextSelection.create(view.state.doc, Math.min(target, $pos.end())),
-          ),
-        );
-        continue;
+    // Skip whitespace to the next word.
+    while (i < len && charClass(text[i], bigWord) === 0) i++;
+
+    if (i >= len) {
+      // Wrap to the next block and find its first word end.
+      const cursor = bnEditor.getTextCursorPosition();
+      const next = cursor ? bnEditor.getNextBlock(cursor.block) : null;
+      if (!next) {
+        if (len > 0) setSel(view, blockStart + len - 1);
+        break;
       }
+      bnEditor.setTextCursorPosition(next.id, "start");
+      justWrapped = true;
+      continue;
     }
 
-    // At or near end of block — jump to next block and find first word end
-    const cursor = bnEditor.getTextCursorPosition();
-    if (!cursor) break;
-    const next = bnEditor.getNextBlock(cursor.block);
-    if (!next) break;
-    bnEditor.setTextCursorPosition(next.id, "start");
+    // Extend to the end of this word (run of same class).
+    const cls = charClass(text[i], bigWord);
+    while (i + 1 < len && charClass(text[i + 1], bigWord) === cls) i++;
 
-    // Now find the end of the first word in the new block
-    const newFrom = view.state.selection.from;
-    const new$pos = view.state.doc.resolve(newFrom);
-    const newText = view.state.doc.textBetween(newFrom, new$pos.end());
-    const wordMatch = newText.match(/^\s*\S*/);
-    if (wordMatch && wordMatch[0].length > 0) {
-      const target = newFrom + wordMatch[0].length;
-      view.dispatch(
-        view.state.tr.setSelection(
-          TextSelection.create(
-            view.state.doc,
-            Math.min(target, new$pos.end()),
-          ),
-        ),
-      );
-    }
+    setSel(view, blockStart + i);
+    remaining--;
   }
   return true;
 }
@@ -279,7 +315,7 @@ export function moveLineStart(view: EditorView): boolean {
   const target = $pos.start();
   if (target !== from) {
     view.dispatch(
-      view.state.tr.setSelection(TextSelection.create(view.state.doc, target)),
+      view.state.tr.setSelection(TextSelection.create(view.state.doc, target))
     );
   }
   return true;
@@ -296,7 +332,7 @@ export function moveFirstNonWhitespace(view: EditorView): boolean {
   const target = lineStart + offset;
   if (target !== from) {
     view.dispatch(
-      view.state.tr.setSelection(TextSelection.create(view.state.doc, target)),
+      view.state.tr.setSelection(TextSelection.create(view.state.doc, target))
     );
   }
   return true;
@@ -308,14 +344,14 @@ export function moveLineEnd(view: EditorView): boolean {
   const target = $pos.end();
   if (target !== from) {
     view.dispatch(
-      view.state.tr.setSelection(TextSelection.create(view.state.doc, target)),
+      view.state.tr.setSelection(TextSelection.create(view.state.doc, target))
     );
   }
   return true;
 }
 
 export function moveDocStart(
-  bnEditor: BlockNoteEditor<any, any, any>,
+  bnEditor: BlockNoteEditor<any, any, any>
 ): boolean {
   const doc = bnEditor.document;
   if (doc.length > 0) {
@@ -324,9 +360,7 @@ export function moveDocStart(
   return true;
 }
 
-export function moveDocEnd(
-  bnEditor: BlockNoteEditor<any, any, any>,
-): boolean {
+export function moveDocEnd(bnEditor: BlockNoteEditor<any, any, any>): boolean {
   const doc = bnEditor.document;
   if (doc.length > 0) {
     bnEditor.setTextCursorPosition(doc[doc.length - 1].id, "start");
@@ -336,14 +370,37 @@ export function moveDocEnd(
 
 // ─── Block-level operations (BlockNote API) ─────────────────────────────────
 
-export function deleteBlock(
-  bnEditor: BlockNoteEditor<any, any, any>,
-  state: VimState,
-): string {
-  const cursor = bnEditor.getTextCursorPosition();
-  if (!cursor) return state.register;
+/** Result of a linewise yank/delete: plain text + structured blocks. */
+export interface LinewiseYank {
+  text: string;
+  blocks: PartialBlockSnapshot[];
+}
 
-  const count = Math.max(state.count, 1);
+function blockPlainText(b: any): string {
+  const content = b?.content;
+  if (Array.isArray(content)) {
+    return content.map((c: any) => c.text ?? "").join("");
+  }
+  return "";
+}
+
+/** Snapshot blocks for the register so a paste can restore type + content. */
+function snapshotBlocks(blocks: any[]): PartialBlockSnapshot[] {
+  return blocks.map((b) => ({
+    type: b.type,
+    props: { ...(b.props ?? {}) },
+    content: b.content,
+    children: b.children ?? [],
+  }));
+}
+
+/** Collect `count` blocks starting at the cursor block. */
+function blocksFromCursor(
+  bnEditor: BlockNoteEditor<any, any, any>,
+  count: number
+): any[] | null {
+  const cursor = bnEditor.getTextCursorPosition();
+  if (!cursor) return null;
   const blocks = [cursor.block];
   let block = cursor.block;
   for (let i = 1; i < count; i++) {
@@ -352,16 +409,19 @@ export function deleteBlock(
     blocks.push(next);
     block = next;
   }
+  return blocks;
+}
 
-  const yanked = blocks
-    .map((b) => {
-      const content = b.content;
-      if (Array.isArray(content)) {
-        return content.map((c: any) => c.text ?? "").join("");
-      }
-      return "";
-    })
-    .join("\n");
+export function deleteBlock(
+  bnEditor: BlockNoteEditor<any, any, any>,
+  state: VimState
+): LinewiseYank {
+  const blocks = blocksFromCursor(bnEditor, Math.max(state.count, 1));
+  if (!blocks)
+    return { text: state.register, blocks: state.registerBlocks ?? [] };
+
+  const text = blocks.map(blockPlainText).join("\n");
+  const snapshot = snapshotBlocks(blocks);
 
   const nextBlock = bnEditor.getNextBlock(blocks[blocks.length - 1]);
   const prevBlock = bnEditor.getPrevBlock(blocks[0]);
@@ -374,54 +434,50 @@ export function deleteBlock(
     bnEditor.setTextCursorPosition(prevBlock.id, "start");
   }
 
-  return yanked;
+  return { text, blocks: snapshot };
 }
 
 export function yankBlock(
   bnEditor: BlockNoteEditor<any, any, any>,
-  state: VimState,
-): string {
-  const cursor = bnEditor.getTextCursorPosition();
-  if (!cursor) return state.register;
-
-  const count = Math.max(state.count, 1);
-  const blocks = [cursor.block];
-  let block = cursor.block;
-  for (let i = 1; i < count; i++) {
-    const next = bnEditor.getNextBlock(block);
-    if (!next) break;
-    blocks.push(next);
-    block = next;
-  }
-
-  return blocks
-    .map((b) => {
-      const content = b.content;
-      if (Array.isArray(content)) {
-        return content.map((c: any) => c.text ?? "").join("");
-      }
-      return "";
-    })
-    .join("\n");
+  state: VimState
+): LinewiseYank {
+  const blocks = blocksFromCursor(bnEditor, Math.max(state.count, 1));
+  if (!blocks)
+    return { text: state.register, blocks: state.registerBlocks ?? [] };
+  return {
+    text: blocks.map(blockPlainText).join("\n"),
+    blocks: snapshotBlocks(blocks),
+  };
 }
 
 export function pasteBlock(
   bnEditor: BlockNoteEditor<any, any, any>,
   state: VimState,
-  placement: "before" | "after",
+  placement: "before" | "after"
 ): boolean {
-  if (!state.register) return true;
-
   const cursor = bnEditor.getTextCursorPosition();
   if (!cursor) return true;
 
-  const lines = state.register.split("\n");
-  const newBlocks = lines.map((line) => ({
-    type: "paragraph" as const,
-    content: line,
-  }));
+  // Prefer the structured snapshot (preserves heading/list/etc.); fall back
+  // to splitting the plain-text register into paragraphs.
+  const newBlocks =
+    state.registerBlocks && state.registerBlocks.length > 0
+      ? state.registerBlocks.map((b) => ({
+          type: b.type,
+          props: b.props,
+          content: b.content,
+          children: b.children,
+        }))
+      : state.register
+        ? state.register.split("\n").map((line) => ({
+            type: "paragraph" as const,
+            content: line,
+          }))
+        : null;
 
-  bnEditor.insertBlocks(newBlocks, cursor.block.id, placement);
+  if (!newBlocks) return true;
+
+  bnEditor.insertBlocks(newBlocks as any, cursor.block.id, placement);
 
   const doc = bnEditor.document;
   const curIdx = doc.findIndex((b) => b.id === cursor.block.id);
@@ -437,7 +493,7 @@ export function pasteBlock(
 
 export function openLine(
   bnEditor: BlockNoteEditor<any, any, any>,
-  placement: "before" | "after",
+  placement: "before" | "after"
 ): boolean {
   const cursor = bnEditor.getTextCursorPosition();
   if (!cursor) return false;
@@ -459,10 +515,7 @@ export function openLine(
 
 // ─── Editing commands ───────────────────────────────────────────────────────
 
-export function deleteCharForward(
-  view: EditorView,
-  state: VimState,
-): boolean {
+export function deleteCharForward(view: EditorView, state: VimState): boolean {
   const count = Math.max(state.count, 1);
   const { from } = view.state.selection;
   const $pos = view.state.doc.resolve(from);
@@ -473,10 +526,7 @@ export function deleteCharForward(
   return true;
 }
 
-export function deleteCharBackward(
-  view: EditorView,
-  state: VimState,
-): boolean {
+export function deleteCharBackward(view: EditorView, state: VimState): boolean {
   const count = Math.max(state.count, 1);
   const { from } = view.state.selection;
   const $pos = view.state.doc.resolve(from);
@@ -521,15 +571,13 @@ export function changeLine(view: EditorView): boolean {
     view.dispatch(view.state.tr.delete(start, end));
   } else {
     view.dispatch(
-      view.state.tr.setSelection(TextSelection.create(view.state.doc, start)),
+      view.state.tr.setSelection(TextSelection.create(view.state.doc, start))
     );
   }
   return true;
 }
 
-export function joinLines(
-  bnEditor: BlockNoteEditor<any, any, any>,
-): boolean {
+export function joinLines(bnEditor: BlockNoteEditor<any, any, any>): boolean {
   const cursor = bnEditor.getTextCursorPosition();
   if (!cursor) return false;
 
@@ -560,13 +608,37 @@ export function joinLines(
   return true;
 }
 
+/**
+ * `~` — toggle the case of `count` chars under the cursor and advance.
+ */
+export function toggleCase(view: EditorView, state: VimState): boolean {
+  const count = Math.max(state.count, 1);
+  const { from } = view.state.selection;
+  const $pos = view.state.doc.resolve(from);
+  const end = Math.min(from + count, $pos.end());
+  if (from >= end) return true;
+
+  const text = view.state.doc.textBetween(from, end);
+  const toggled = text
+    .split("")
+    .map((c) => (c === c.toLowerCase() ? c.toUpperCase() : c.toLowerCase()))
+    .join("");
+
+  let tr = view.state.tr.insertText(toggled, from, end);
+  // Advance cursor past the toggled chars (clamped to the block end).
+  const newEnd = view.state.doc.resolve(from).end();
+  tr = tr.setSelection(TextSelection.create(tr.doc, Math.min(end, newEnd)));
+  view.dispatch(tr);
+  return true;
+}
+
 // ─── Find character motions (f/F/t/T) ───────────────────────────────────────
 
 export function findCharForward(
   view: EditorView,
   char: string,
   state: VimState,
-  toMode: boolean,
+  toMode: boolean
 ): boolean {
   const count = Math.max(state.count, 1);
   const { from } = view.state.selection;
@@ -592,9 +664,7 @@ export function findCharForward(
     if (toMode) target--;
     if (target !== from) {
       view.dispatch(
-        view.state.tr.setSelection(
-          TextSelection.create(view.state.doc, target),
-        ),
+        view.state.tr.setSelection(TextSelection.create(view.state.doc, target))
       );
     }
   }
@@ -605,7 +675,7 @@ export function findCharBackward(
   view: EditorView,
   char: string,
   state: VimState,
-  toMode: boolean,
+  toMode: boolean
 ): boolean {
   const count = Math.max(state.count, 1);
   const { from } = view.state.selection;
@@ -631,9 +701,7 @@ export function findCharBackward(
     if (toMode) target++;
     if (target !== from) {
       view.dispatch(
-        view.state.tr.setSelection(
-          TextSelection.create(view.state.doc, target),
-        ),
+        view.state.tr.setSelection(TextSelection.create(view.state.doc, target))
       );
     }
   }
@@ -672,7 +740,7 @@ export function redo(view: EditorView): boolean {
 
 export function clampCursorToContent(
   view: EditorView,
-  _state: EditorState,
+  _state: EditorState
 ): void {
   const { from } = view.state.selection;
   const $pos = view.state.doc.resolve(from);
@@ -680,9 +748,7 @@ export function clampCursorToContent(
   // In normal mode the cursor should not sit past the last character
   if (from > $pos.start() && from >= end && end > $pos.start()) {
     view.dispatch(
-      view.state.tr.setSelection(
-        TextSelection.create(view.state.doc, end - 1),
-      ),
+      view.state.tr.setSelection(TextSelection.create(view.state.doc, end - 1))
     );
   }
 }
@@ -700,6 +766,9 @@ const CHARWISE_MOTIONS = new Set([
   "w",
   "b",
   "e",
+  "W",
+  "B",
+  "E",
   "h",
   "l",
   "0",
@@ -720,7 +789,7 @@ export function executeMotion(
   bnEditor: BlockNoteEditor<any, any, any>,
   state: VimState,
   motionKey: string,
-  motionArg?: string,
+  motionArg?: string
 ): MotionResult | null {
   const before = view.state.selection.from;
 
@@ -734,6 +803,15 @@ export function executeMotion(
       break;
     case "e":
       moveWordEnd(view, bnEditor, state);
+      break;
+    case "W":
+      moveWordForward(view, bnEditor, state, true);
+      break;
+    case "B":
+      moveWordBackward(view, bnEditor, state, true);
+      break;
+    case "E":
+      moveWordEnd(view, bnEditor, state, true);
       break;
     case "h":
       moveLeft(view, bnEditor, state);
@@ -791,9 +869,15 @@ export function executeMotion(
 
   const linewise = !CHARWISE_MOTIONS.has(motionKey);
 
-  // For 'e' motion (inclusive): extend to include the character at cursor
+  // For 'e'/'E' motions (inclusive): extend to include the char at the cursor.
+  // Find motions f/t are also inclusive in vim.
   let to = after;
-  if (motionKey === "e" && after > before) {
+  const inclusive =
+    motionKey === "e" ||
+    motionKey === "E" ||
+    motionKey === "f" ||
+    motionKey === "t";
+  if (inclusive && after > before) {
     to = after + 1;
     // Clamp to block end
     const $pos = view.state.doc.resolve(after);
@@ -813,7 +897,7 @@ export function applyOperatorCharwise(
   view: EditorView,
   operator: "d" | "c" | "y",
   from: number,
-  to: number,
+  to: number
 ): string {
   const lo = Math.min(from, to);
   const hi = Math.max(from, to);
@@ -834,9 +918,7 @@ export function applyOperatorCharwise(
   } else {
     // yank — restore cursor to original position
     view.dispatch(
-      view.state.tr.setSelection(
-        TextSelection.create(view.state.doc, from),
-      ),
+      view.state.tr.setSelection(TextSelection.create(view.state.doc, from))
     );
   }
 
@@ -853,64 +935,53 @@ export function applyOperatorLinewise(
   bnEditor: BlockNoteEditor<any, any, any>,
   operator: "d" | "c" | "y",
   fromPos: number,
-  toPos: number,
-): string {
+  toPos: number
+): LinewiseYank {
   // Find the blocks that span from fromPos to toPos
   const doc = bnEditor.document;
 
   // Find block containing fromPos and block containing toPos
   const fromBlock = bnEditor.getTextCursorPosition()?.block;
-  if (!fromBlock) return "";
+  if (!fromBlock) return { text: "", blocks: [] };
 
   // For linewise, we need to figure out which blocks are in range
   // Move cursor back to fromPos to find the original block
   try {
     view.dispatch(
-      view.state.tr.setSelection(
-        TextSelection.create(view.state.doc, fromPos),
-      ),
+      view.state.tr.setSelection(TextSelection.create(view.state.doc, fromPos))
     );
   } catch {
     // Position may be invalid after motion
   }
 
   const startCursor = bnEditor.getTextCursorPosition();
-  if (!startCursor) return "";
+  if (!startCursor) return { text: "", blocks: [] };
   const startBlock = startCursor.block;
 
   // Move to toPos to find end block
   try {
     view.dispatch(
-      view.state.tr.setSelection(
-        TextSelection.create(view.state.doc, toPos),
-      ),
+      view.state.tr.setSelection(TextSelection.create(view.state.doc, toPos))
     );
   } catch {
     // Position may be invalid
   }
 
   const endCursor = bnEditor.getTextCursorPosition();
-  if (!endCursor) return "";
+  if (!endCursor) return { text: "", blocks: [] };
   const endBlock = endCursor.block;
 
   // Collect blocks from start to end
   const startIdx = doc.findIndex((b) => b.id === startBlock.id);
   const endIdx = doc.findIndex((b) => b.id === endBlock.id);
-  if (startIdx < 0 || endIdx < 0) return "";
+  if (startIdx < 0 || endIdx < 0) return { text: "", blocks: [] };
 
   const lo = Math.min(startIdx, endIdx);
   const hi = Math.max(startIdx, endIdx);
   const blocks = doc.slice(lo, hi + 1);
 
-  const yanked = blocks
-    .map((b) => {
-      const content = b.content;
-      if (Array.isArray(content)) {
-        return content.map((c: any) => c.text ?? "").join("");
-      }
-      return "";
-    })
-    .join("\n");
+  const snapshot = snapshotBlocks(blocks);
+  const yanked = blocks.map(blockPlainText).join("\n");
 
   if (operator === "d") {
     const nextBlock = hi + 1 < doc.length ? doc[hi + 1] : null;
@@ -933,7 +1004,7 @@ export function applyOperatorLinewise(
     bnEditor.setTextCursorPosition(startBlock.id, "start");
   }
 
-  return yanked;
+  return { text: yanked, blocks: snapshot };
 }
 
 // ─── Inline paste (charwise) ─────────────────────────────────────────────────
@@ -941,7 +1012,7 @@ export function applyOperatorLinewise(
 export function pasteInline(
   view: EditorView,
   register: string,
-  after: boolean,
+  after: boolean
 ): boolean {
   if (!register) return true;
 
@@ -954,8 +1025,8 @@ export function pasteInline(
   const endPos = insertPos + register.length - 1;
   view.dispatch(
     view.state.tr.setSelection(
-      TextSelection.create(view.state.doc, Math.max(insertPos, endPos)),
-    ),
+      TextSelection.create(view.state.doc, Math.max(insertPos, endPos))
+    )
   );
 
   return true;
@@ -996,8 +1067,8 @@ export function matchBracket(view: EditorView): boolean {
       if (depth === 0) {
         view.dispatch(
           view.state.tr.setSelection(
-            TextSelection.create(view.state.doc, blockStart + i),
-          ),
+            TextSelection.create(view.state.doc, blockStart + i)
+          )
         );
         return true;
       }
@@ -1011,8 +1082,8 @@ export function matchBracket(view: EditorView): boolean {
       if (depth === 0) {
         view.dispatch(
           view.state.tr.setSelection(
-            TextSelection.create(view.state.doc, blockStart + i),
-          ),
+            TextSelection.create(view.state.doc, blockStart + i)
+          )
         );
         return true;
       }
@@ -1027,7 +1098,7 @@ export function matchBracket(view: EditorView): boolean {
 export function scrollHalfPageDown(
   view: EditorView,
   bnEditor: BlockNoteEditor<any, any, any>,
-  count: number = 15,
+  count: number = 15
 ): boolean {
   const cursor = bnEditor.getTextCursorPosition();
   if (!cursor) return false;
@@ -1049,7 +1120,7 @@ export function scrollHalfPageDown(
 export function scrollHalfPageUp(
   view: EditorView,
   bnEditor: BlockNoteEditor<any, any, any>,
-  count: number = 15,
+  count: number = 15
 ): boolean {
   const cursor = bnEditor.getTextCursorPosition();
   if (!cursor) return false;
@@ -1082,7 +1153,7 @@ function isWordChar(ch: string): boolean {
 export function textObjectRange(
   view: EditorView,
   kind: "i" | "a",
-  object: string,
+  object: string
 ): MotionResult | null {
   const { from } = view.state.selection;
   const $pos = view.state.doc.resolve(from);
@@ -1100,10 +1171,10 @@ export function textObjectRange(
   const bracketPairs: Record<string, [string, string]> = {
     "(": ["(", ")"],
     ")": ["(", ")"],
-    "b": ["(", ")"],
+    b: ["(", ")"],
     "{": ["{", "}"],
     "}": ["{", "}"],
-    "B": ["{", "}"],
+    B: ["{", "}"],
     "[": ["[", "]"],
     "]": ["[", "]"],
     "<": ["<", ">"],
@@ -1126,7 +1197,7 @@ function wordTextObject(
   text: string,
   offset: number,
   blockStart: number,
-  kind: "i" | "a",
+  kind: "i" | "a"
 ): MotionResult | null {
   if (text.length === 0) return null;
   const clamped = Math.min(offset, text.length - 1);
@@ -1139,19 +1210,31 @@ function wordTextObject(
 
   if (cursorOnWord) {
     while (wordStart > 0 && isWordChar(text[wordStart - 1])) wordStart--;
-    while (wordEnd < text.length - 1 && isWordChar(text[wordEnd + 1])) wordEnd++;
+    while (wordEnd < text.length - 1 && isWordChar(text[wordEnd + 1]))
+      wordEnd++;
     wordEnd++; // exclusive end
   } else {
     // Cursor on whitespace/punctuation — select the whitespace run
     const cursorIsSpace = /\s/.test(text[clamped]);
     if (cursorIsSpace) {
       while (wordStart > 0 && /\s/.test(text[wordStart - 1])) wordStart--;
-      while (wordEnd < text.length - 1 && /\s/.test(text[wordEnd + 1])) wordEnd++;
+      while (wordEnd < text.length - 1 && /\s/.test(text[wordEnd + 1]))
+        wordEnd++;
       wordEnd++;
     } else {
       // Non-word, non-space (punctuation)
-      while (wordStart > 0 && !isWordChar(text[wordStart - 1]) && !/\s/.test(text[wordStart - 1])) wordStart--;
-      while (wordEnd < text.length - 1 && !isWordChar(text[wordEnd + 1]) && !/\s/.test(text[wordEnd + 1])) wordEnd++;
+      while (
+        wordStart > 0 &&
+        !isWordChar(text[wordStart - 1]) &&
+        !/\s/.test(text[wordStart - 1])
+      )
+        wordStart--;
+      while (
+        wordEnd < text.length - 1 &&
+        !isWordChar(text[wordEnd + 1]) &&
+        !/\s/.test(text[wordEnd + 1])
+      )
+        wordEnd++;
       wordEnd++;
     }
   }
@@ -1178,7 +1261,7 @@ function bracketTextObject(
   blockStart: number,
   kind: "i" | "a",
   open: string,
-  close: string,
+  close: string
 ): MotionResult | null {
   // Find matching brackets around cursor
   let openPos = -1;
@@ -1233,7 +1316,7 @@ function quoteTextObject(
   offset: number,
   blockStart: number,
   kind: "i" | "a",
-  quote: string,
+  quote: string
 ): MotionResult | null {
   // Find quote boundaries — collect all quote positions and find the pair around cursor
   const positions: number[] = [];

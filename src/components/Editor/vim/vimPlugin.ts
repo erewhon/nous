@@ -30,6 +30,9 @@ const MOTION_KEYS = new Set([
   "w",
   "b",
   "e",
+  "W",
+  "B",
+  "E",
   "h",
   "l",
   "0",
@@ -113,28 +116,30 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
     operator: "d" | "c" | "y",
     motionKey: string,
     motionArg?: string,
+    count?: number
   ): boolean {
+    const effCount = Math.max(count ?? vim.count, 1);
     const result = cmd.executeMotion(
       view,
       bnEditor,
-      { ...vim, count: Math.max(vim.count, 1) },
+      { ...vim, count: effCount },
       motionKey,
-      motionArg,
+      motionArg
     );
     if (!result) return false;
 
-    let yanked: string;
     if (result.linewise) {
-      yanked = cmd.applyOperatorLinewise(
+      const { text, blocks } = cmd.applyOperatorLinewise(
         view,
         bnEditor,
         operator,
         result.from,
-        result.to,
+        result.to
       );
       vim = {
         ...vim,
-        register: yanked,
+        register: text,
+        registerBlocks: blocks,
         registerType: "linewise",
       };
     } else {
@@ -143,22 +148,32 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
       const $to = view.state.doc.resolve(Math.max(result.from, result.to));
       if ($from.parent !== $to.parent) {
         // Cross-block: fall back to linewise
-        yanked = cmd.applyOperatorLinewise(
+        const { text, blocks } = cmd.applyOperatorLinewise(
           view,
           bnEditor,
           operator,
           result.from,
-          result.to,
+          result.to
         );
-        vim = { ...vim, register: yanked, registerType: "linewise" };
+        vim = {
+          ...vim,
+          register: text,
+          registerBlocks: blocks,
+          registerType: "linewise",
+        };
       } else {
-        yanked = cmd.applyOperatorCharwise(
+        const yanked = cmd.applyOperatorCharwise(
           view,
           operator,
           result.from,
-          result.to,
+          result.to
         );
-        vim = { ...vim, register: yanked, registerType: "charwise" };
+        vim = {
+          ...vim,
+          register: yanked,
+          registerBlocks: null,
+          registerType: "charwise",
+        };
       }
     }
 
@@ -167,7 +182,7 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
       operator,
       motionKey,
       motionArg,
-      count: Math.max(vim.count, 1),
+      count: effCount,
     });
 
     return true;
@@ -185,20 +200,30 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
             view,
             record.operator,
             record.motionKey,
-            record.motionArg,
+            record.motionArg
           );
         }
         break;
       case "operator-line":
         if (record.operator === "d") {
-          const yanked = cmd.deleteBlock(bnEditor, vim);
-          vim = { ...vim, register: yanked, registerType: "linewise" };
+          const { text, blocks } = cmd.deleteBlock(bnEditor, vim);
+          vim = {
+            ...vim,
+            register: text,
+            registerBlocks: blocks,
+            registerType: "linewise",
+          };
         } else if (record.operator === "c") {
           cmd.changeLine(view);
           setMode(view, "insert");
         } else if (record.operator === "y") {
-          const yanked = cmd.yankBlock(bnEditor, vim);
-          vim = { ...vim, register: yanked, registerType: "linewise" };
+          const { text, blocks } = cmd.yankBlock(bnEditor, vim);
+          vim = {
+            ...vim,
+            register: text,
+            registerBlocks: blocks,
+            registerType: "linewise",
+          };
         }
         break;
       case "simple":
@@ -217,6 +242,9 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
             break;
           case "r":
             if (record.arg) cmd.replaceChar(view, record.arg);
+            break;
+          case "~":
+            cmd.toggleCase(view, vim);
             break;
           case "s":
             cmd.deleteCharForward(view, { ...vim, count: 1 });
@@ -243,7 +271,7 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
           key: "s",
           ctrlKey: true,
           bubbles: true,
-        }),
+        })
       );
     }
     // Future: other ex commands can be added here
@@ -272,10 +300,7 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
         }
 
         // Let Ctrl/Cmd shortcuts through (except vim-specific ones)
-        if (
-          (event.ctrlKey || event.metaKey) &&
-          vim.mode !== "insert"
-        ) {
+        if ((event.ctrlKey || event.metaKey) && vim.mode !== "insert") {
           // Vim-specific Ctrl combos
           if (event.key === "r") {
             // Ctrl+R = redo
@@ -327,7 +352,7 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
         _view: EditorView,
         _from: number,
         _to: number,
-        _text: string,
+        _text: string
       ): boolean {
         if (!enabled()) return false;
         return vim.mode === "normal" || vim.mode === "visual";
@@ -337,10 +362,7 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
 
   // ─── Insert mode handler ──────────────────────────────────────────────
 
-  function handleInsertMode(
-    view: EditorView,
-    event: KeyboardEvent,
-  ): boolean {
+  function handleInsertMode(view: EditorView, event: KeyboardEvent): boolean {
     // Escape → normal
     if (event.key === "Escape") {
       event.preventDefault();
@@ -379,10 +401,7 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
 
   // ─── Normal mode handler ──────────────────────────────────────────────
 
-  function handleNormalMode(
-    view: EditorView,
-    event: KeyboardEvent,
-  ): boolean {
+  function handleNormalMode(view: EditorView, event: KeyboardEvent): boolean {
     event.preventDefault();
     const key = event.key;
     const pending = vim.pendingKeys;
@@ -461,40 +480,63 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
       return true;
     }
 
-    // ── Pending: operator (d/c/y) + motion ──────────────────────────
-    if (pending === "d" || pending === "c" || pending === "y") {
-      const op = pending as "d" | "c" | "y";
+    // ── Pending: operator (d/c/y) [+ motion-count] + motion ─────────
+    // `pending` is the operator optionally followed by a motion count,
+    // e.g. "d", "d2", "c12". The effective count is (pre-operator count)
+    // × (motion count) so vim sequences like 2d3w (= 6) work.
+    const opMatch = /^([dcy])(\d*)$/.exec(pending);
+    if (opMatch) {
+      const op = opMatch[1] as "d" | "c" | "y";
+      const motionCountStr = opMatch[2];
+      const effCount =
+        Math.max(vim.count, 1) *
+        Math.max(parseInt(motionCountStr || "1", 10), 1);
+
+      // Accumulate motion-count digits (0 only continues an existing count).
+      if (
+        (key >= "1" && key <= "9") ||
+        (key === "0" && motionCountStr.length > 0)
+      ) {
+        setPendingKeys(pending + key);
+        return true;
+      }
 
       // Doubled operator: dd/cc/yy (linewise)
       if (key === op) {
+        const opState = { ...vim, count: effCount };
         if (op === "d") {
-          const yanked = cmd.deleteBlock(bnEditor, vim);
-          vim = { ...vim, register: yanked, registerType: "linewise", lastCommand: op + op };
+          const { text, blocks } = cmd.deleteBlock(bnEditor, opState);
+          vim = {
+            ...vim,
+            register: text,
+            registerBlocks: blocks,
+            registerType: "linewise",
+            lastCommand: op + op,
+          };
         } else if (op === "c") {
           cmd.changeLine(view);
           vim = { ...vim, registerType: "linewise", lastCommand: "cc" };
-          recordEdit({
-            type: "operator-line",
-            operator: op,
-            count: Math.max(vim.count, 1),
-          });
+          recordEdit({ type: "operator-line", operator: op, count: effCount });
           resetPending();
           setMode(view, "insert");
           return true;
         } else {
-          const yanked = cmd.yankBlock(bnEditor, vim);
-          vim = { ...vim, register: yanked, registerType: "linewise", lastCommand: "yy" };
+          const { text, blocks } = cmd.yankBlock(bnEditor, opState);
+          vim = {
+            ...vim,
+            register: text,
+            registerBlocks: blocks,
+            registerType: "linewise",
+            lastCommand: "yy",
+          };
         }
-        recordEdit({
-          type: "operator-line",
-          operator: op,
-          count: Math.max(vim.count, 1),
-        });
+        recordEdit({ type: "operator-line", operator: op, count: effCount });
         resetPending();
         return true;
       }
 
       // Operator + find motion key (df, dt, dF, dT, cf, ct, etc.)
+      // (motion count before find is uncommon and dropped here.)
       if (FIND_MOTION_KEYS.has(key)) {
         setPendingKeys(op + key);
         return true;
@@ -512,9 +554,9 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
         return true;
       }
 
-      // Operator + direct motion
+      // Operator + direct motion (honors the effective count, e.g. d2w)
       if (MOTION_KEYS.has(key)) {
-        applyOperatorMotion(view, op, key);
+        applyOperatorMotion(view, op, key, undefined, effCount);
         if (op === "c") {
           resetPending();
           setMode(view, "insert");
@@ -564,7 +606,7 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
             view,
             op,
             range.from,
-            range.to,
+            range.to
           );
           vim = { ...vim, register: yanked, registerType: "charwise" };
           recordEdit({
@@ -702,6 +744,21 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
     }
     if (key === "e") {
       cmd.moveWordEnd(view, bnEditor, vim);
+      resetPending();
+      return true;
+    }
+    if (key === "W") {
+      cmd.moveWordForward(view, bnEditor, vim, true);
+      resetPending();
+      return true;
+    }
+    if (key === "B") {
+      cmd.moveWordBackward(view, bnEditor, vim, true);
+      resetPending();
+      return true;
+    }
+    if (key === "E") {
+      cmd.moveWordEnd(view, bnEditor, vim, true);
       resetPending();
       return true;
     }
@@ -850,6 +907,29 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
       resetPending();
       return true;
     }
+    if (key === "Y") {
+      // Y — yank line (alias for yy)
+      const { text, blocks } = cmd.yankBlock(bnEditor, vim);
+      vim = {
+        ...vim,
+        register: text,
+        registerBlocks: blocks,
+        registerType: "linewise",
+        lastCommand: "Y",
+      };
+      resetPending();
+      return true;
+    }
+    if (key === "~") {
+      cmd.toggleCase(view, vim);
+      recordEdit({
+        type: "simple",
+        command: "~",
+        count: Math.max(vim.count, 1),
+      });
+      resetPending();
+      return true;
+    }
 
     // ── Paste (check registerType for inline vs block) ──────────────
     if (key === "p") {
@@ -884,21 +964,21 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
     // ── Search (/nN) ────────────────────────────────────────────────
     if (key === "/") {
       view.dom.dispatchEvent(
-        new CustomEvent("vim:open-search", { bubbles: true }),
+        new CustomEvent("vim:open-search", { bubbles: true })
       );
       resetPending();
       return true;
     }
     if (key === "n") {
       view.dom.dispatchEvent(
-        new CustomEvent("vim:search-next", { bubbles: true }),
+        new CustomEvent("vim:search-next", { bubbles: true })
       );
       resetPending();
       return true;
     }
     if (key === "N") {
       view.dom.dispatchEvent(
-        new CustomEvent("vim:search-prev", { bubbles: true }),
+        new CustomEvent("vim:search-prev", { bubbles: true })
       );
       resetPending();
       return true;

@@ -1,5 +1,13 @@
 export type VimMode = "normal" | "insert" | "visual";
 
+/** A minimal snapshot of a block for the linewise register (type + content). */
+export interface PartialBlockSnapshot {
+  type: string;
+  props: Record<string, unknown>;
+  content: unknown;
+  children: unknown[];
+}
+
 export interface EditRecord {
   type: "operator-motion" | "operator-line" | "simple";
   operator?: "d" | "c" | "y";
@@ -16,6 +24,12 @@ export interface VimState {
   count: number;
   register: string;
   registerType: "charwise" | "linewise";
+  /**
+   * Structured blocks captured by a linewise yank/delete, so a linewise
+   * paste can reconstruct the original block types (heading, list, …)
+   * instead of flattening to paragraphs. Null for charwise registers.
+   */
+  registerBlocks: PartialBlockSnapshot[] | null;
   lastCommand: string;
   lastFindChar: string;
   lastFindDirection: "forward" | "backward";
@@ -30,6 +44,7 @@ export const DEFAULT_VIM_STATE: VimState = {
   count: 0,
   register: "",
   registerType: "linewise",
+  registerBlocks: null,
   lastCommand: "",
   lastFindChar: "",
   lastFindDirection: "forward",
