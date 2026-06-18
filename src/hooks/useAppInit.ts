@@ -22,9 +22,6 @@ import {
   type TagEventData,
 } from "../utils/daemonEvents";
 
-// Check goals every 15 minutes
-const GOALS_CHECK_INTERVAL = 15 * 60 * 1000;
-
 export function useAppInit() {
   const { loadNotebooks, notebooks, selectedNotebookId, selectNotebook, getNotebookViewState, saveNotebookViewState } = useNotebookStore();
   const loadPages = usePageStore((s) => s.loadPages);
@@ -39,7 +36,6 @@ export function useAppInit() {
   const { loadContacts: loadContactsFromStore } = useContactStore();
   const loadTodayCheckIn = useEnergyStore((s) => s.loadTodayCheckIn);
   const { library } = useWindowLibrary();
-  const goalsIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const restoredForNotebookRef = useRef<string | null>(null);
 
   const loadAllFavorites = usePageStore((s) => s.loadAllFavorites);
@@ -201,6 +197,18 @@ export function useAppInit() {
             if (data.pageId) {
               refreshPages([data.pageId]).catch(warn("refreshPages"));
             }
+            break;
+          }
+
+          // ---- Goals ----
+          case "goal.created":
+          case "goal.updated":
+          case "goal.archived":
+          case "goal.progress.recorded": {
+            // A goal or its progress changed (e.g. via MCP/daemon). Reload the
+            // goal store so open displays update within ~1s — this replaces the
+            // old 15-minute poll. loadGoals cascades to loadSummary.
+            useGoalsStore.getState().loadGoals().catch(warn("goal.loadGoals"));
             break;
           }
 
@@ -425,20 +433,16 @@ export function useAppInit() {
     };
   }, [loadNotebooks, loadSections]);
 
-  // Load goals and check auto-detected goals on app init and periodically
+  // Load goals on app init, then refresh on window focus. Live updates now
+  // arrive via daemon `goal.*` WS events (see the event handler above), so the
+  // old 15-minute setInterval poll is gone. The focus listener stays as a
+  // cheap, user-initiated catch-up that also re-runs auto-goal detection
+  // (checkAutoGoals scans local activity, which no WS event covers).
   useEffect(() => {
-    // Initial load
     loadGoals();
     loadSummary();
     checkAutoGoals();
 
-    // Set up periodic checking
-    goalsIntervalRef.current = setInterval(() => {
-      checkAutoGoals();
-      loadSummary();
-    }, GOALS_CHECK_INTERVAL);
-
-    // Also check on window focus
     const handleFocus = () => {
       checkAutoGoals();
       loadSummary();
@@ -446,9 +450,6 @@ export function useAppInit() {
     window.addEventListener("focus", handleFocus);
 
     return () => {
-      if (goalsIntervalRef.current) {
-        clearInterval(goalsIntervalRef.current);
-      }
       window.removeEventListener("focus", handleFocus);
     };
   }, [loadGoals, loadSummary, checkAutoGoals]);

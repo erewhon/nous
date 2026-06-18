@@ -2364,6 +2364,15 @@ async fn record_goal_progress(
 
     drop(goals_storage);
 
+    // Notify WS subscribers so open goal displays refresh without polling.
+    // Goals are not notebook-scoped on the daemon, so no notebookId here.
+    emit_event(&state, "goal.progress.recorded", serde_json::json!({
+        "goalId": id.to_string(),
+        "date": req.date.clone(),
+        "completed": completed,
+        "value": req.value,
+    }));
+
     // Plugin OnGoalProgress hook (background thread).
     #[cfg(feature = "plugins")]
     nous_lib::plugins::dispatch_plugin_event_bg(

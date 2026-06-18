@@ -48,6 +48,13 @@ export type KnownEventName =
   | "database.rows_added"
   | "database.rows_updated"
   | "database.rows_deleted"
+  // Goals: only `goal.progress.recorded` is currently emitted by the daemon
+  // (record_goal_progress). The created/updated/archived names are reserved
+  // for when those write endpoints land on the daemon.
+  | "goal.created"
+  | "goal.updated"
+  | "goal.archived"
+  | "goal.progress.recorded"
   | "artwork.imported";
 
 // Payload shapes per event. Optional fields reflect what the daemon
@@ -92,6 +99,13 @@ export interface TagEventData {
 export interface DatabaseEventData {
   notebookId?: string;
   pageId?: string;
+}
+
+export interface GoalEventData {
+  goalId?: string;
+  date?: string;
+  completed?: boolean;
+  value?: number;
 }
 
 type Listener = (event: DaemonEvent) => void;
