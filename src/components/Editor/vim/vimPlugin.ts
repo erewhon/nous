@@ -5,7 +5,7 @@
  * and key dispatch to command handlers. Always registered but checks an
  * `enabled` callback to allow runtime toggling without editor recreation.
  */
-import { Plugin, PluginKey } from "@tiptap/pm/state";
+import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
 import type { EditorView } from "@tiptap/pm/view";
 import type { BlockNoteEditor } from "@blocknote/core";
 import {
@@ -61,17 +61,30 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
   // Ex command buffer for `:` mode
   let exBuffer = "";
 
+  // Visual mode: the moving end (head) as an absolute doc position. The fixed
+  // end (anchor) lives in vim.visualAnchor. -1 when not in visual mode.
+  let visualHead = -1;
+
+  function isVisual(mode: VimMode): boolean {
+    return mode === "visual" || mode === "visual-line";
+  }
+
   function setMode(view: EditorView, mode: VimMode) {
     if (vim.mode === mode) return;
     const prev = vim.mode;
     vim = { ...vim, mode, pendingKeys: "", count: 0 };
+    // Leaving visual mode for normal/insert clears the visual range.
+    if (mode === "normal" || mode === "insert") {
+      vim = { ...vim, visualAnchor: null };
+      visualHead = -1;
+    }
     onModeChange(mode);
     onPendingKeysChange("");
 
     // Toggle CSS class on the wrapper for caret hiding
     const wrapper = view.dom.closest(".bn-editor-wrapper");
     if (wrapper) {
-      if (mode === "normal" || mode === "visual") {
+      if (mode === "normal" || isVisual(mode)) {
         wrapper.classList.add("vim-normal-mode");
       } else {
         wrapper.classList.remove("vim-normal-mode");
@@ -339,9 +352,8 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
         if (vim.mode === "normal") {
           return handleNormalMode(view, event);
         }
-        // visual mode: treat like normal for now
-        if (vim.mode === "visual") {
-          return handleNormalMode(view, event);
+        if (isVisual(vim.mode)) {
+          return handleVisualMode(view, event);
         }
 
         return false;
@@ -355,7 +367,7 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
         _text: string
       ): boolean {
         if (!enabled()) return false;
-        return vim.mode === "normal" || vim.mode === "visual";
+        return vim.mode === "normal" || isVisual(vim.mode);
       },
     },
   });
@@ -1010,15 +1022,315 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
       return true;
     }
 
-    // ── Visual mode (basic) ─────────────────────────────────────────
+    // ── Visual mode ─────────────────────────────────────────────────
     if (key === "v") {
       resetPending();
-      setMode(view, "visual");
+      enterVisual(view, false);
+      return true;
+    }
+    if (key === "V") {
+      resetPending();
+      enterVisual(view, true);
       return true;
     }
 
     // Unknown key — consume it to prevent text insertion in normal mode
     resetPending();
+    return true;
+  }
+
+  // ─── Visual mode handler ──────────────────────────────────────────────
+
+  /** Enter (or switch) visual mode, anchoring at the current cursor. */
+  function enterVisual(view: EditorView, linewise: boolean) {
+    const target: VimMode = linewise ? "visual-line" : "visual";
+    if (vim.mode === target) {
+      // Toggling the same visual mode exits to normal.
+      setMode(view, "normal");
+      return;
+    }
+    if (!isVisual(vim.mode)) {
+      // Fresh entry from normal: anchor at the cursor.
+      const from = view.state.selection.from;
+      vim = { ...vim, visualAnchor: from };
+      visualHead = from;
+    }
+    setMode(view, target); // preserves visualAnchor (target is a visual mode)
+    renderVisualSelection(view);
+  }
+
+  /** Clamp a position to the end of its block's text content. */
+  function clampToBlockEnd(view: EditorView, pos: number): number {
+    const size = view.state.doc.content.size;
+    const safe = Math.max(0, Math.min(pos, size));
+    return Math.min(safe, view.state.doc.resolve(safe).end());
+  }
+
+  /** Re-render the visual selection (inclusive of both ends) as a PM range. */
+  function renderVisualSelection(view: EditorView) {
+    const doc = view.state.doc;
+    const anchor = vim.visualAnchor;
+    if (anchor === null || visualHead < 0) return;
+
+    if (vim.mode === "visual-line") {
+      const $a = doc.resolve(Math.min(anchor, doc.content.size));
+      const $h = doc.resolve(Math.min(visualHead, doc.content.size));
+      const lo = Math.min($a.start(), $h.start());
+      const hi = Math.max($a.end(), $h.end());
+      view.dispatch(
+        view.state.tr
+          .setSelection(TextSelection.create(doc, lo, hi))
+          .scrollIntoView()
+      );
+      return;
+    }
+
+    const lo = Math.min(anchor, visualHead);
+    const hi = Math.max(anchor, visualHead);
+    const end = clampToBlockEnd(view, hi + 1); // inclusive of the char at hi
+    view.dispatch(
+      view.state.tr
+        .setSelection(TextSelection.create(doc, lo, Math.max(lo, end)))
+        .scrollIntoView()
+    );
+  }
+
+  /** Run a motion, then re-extend the visual selection to the new head. */
+  function visualMotionExtend(view: EditorView, runMotion: () => void) {
+    // Collapse to the head so the motion computes from the moving end.
+    view.dispatch(
+      view.state.tr.setSelection(
+        TextSelection.create(view.state.doc, clampToBlockEnd(view, visualHead))
+      )
+    );
+    runMotion();
+    visualHead = view.state.selection.head;
+    renderVisualSelection(view);
+  }
+
+  /** Apply d/c/y to the current visual selection. */
+  function applyVisualOperator(view: EditorView, op: "d" | "c" | "y") {
+    const doc = view.state.doc;
+    const anchor = vim.visualAnchor;
+    if (anchor === null) return;
+    const lo = Math.min(anchor, visualHead);
+    const hi = Math.max(anchor, visualHead);
+    const $lo = doc.resolve(lo);
+    const $hi = doc.resolve(hi);
+
+    if (vim.mode === "visual-line" || $lo.parent !== $hi.parent) {
+      const { text, blocks } = cmd.applyOperatorLinewise(
+        view,
+        bnEditor,
+        op,
+        lo,
+        hi
+      );
+      vim = {
+        ...vim,
+        register: text,
+        registerBlocks: blocks,
+        registerType: "linewise",
+      };
+    } else {
+      const end = Math.min(hi + 1, $hi.end());
+      const yanked = cmd.applyOperatorCharwise(view, op, lo, end);
+      vim = {
+        ...vim,
+        register: yanked,
+        registerBlocks: null,
+        registerType: "charwise",
+      };
+    }
+  }
+
+  /** Apply ~ / u / U case change to the visual selection (single block). */
+  function applyVisualCase(
+    view: EditorView,
+    kind: "toggle" | "lower" | "upper"
+  ) {
+    const doc = view.state.doc;
+    const anchor = vim.visualAnchor;
+    if (anchor === null) return;
+    const lo = Math.min(anchor, visualHead);
+    const hi = Math.max(anchor, visualHead);
+    const $lo = doc.resolve(lo);
+    const $hi = doc.resolve(hi);
+    if ($lo.parent !== $hi.parent) return; // multi-block case ops not supported
+    const end = Math.min(hi + 1, $hi.end());
+    if (lo >= end) return;
+
+    const text = doc.textBetween(lo, end);
+    const transformed = text
+      .split("")
+      .map((c) =>
+        kind === "upper"
+          ? c.toUpperCase()
+          : kind === "lower"
+            ? c.toLowerCase()
+            : c === c.toLowerCase()
+              ? c.toUpperCase()
+              : c.toLowerCase()
+      )
+      .join("");
+    let tr = view.state.tr.insertText(transformed, lo, end);
+    tr = tr.setSelection(TextSelection.create(tr.doc, lo));
+    view.dispatch(tr);
+  }
+
+  function handleVisualMode(view: EditorView, event: KeyboardEvent): boolean {
+    event.preventDefault();
+    const key = event.key;
+    const pending = vim.pendingKeys;
+
+    // ── Pending: f/F/t/T{char} — find char (extends selection) ──────
+    if (
+      pending === "f" ||
+      pending === "F" ||
+      pending === "t" ||
+      pending === "T"
+    ) {
+      if (key.length === 1) {
+        const isForward = pending === "f" || pending === "t";
+        const isTo = pending === "t" || pending === "T";
+        visualMotionExtend(view, () => {
+          if (isForward) cmd.findCharForward(view, key, vim, isTo);
+          else cmd.findCharBackward(view, key, vim, isTo);
+        });
+      }
+      setPendingKeys("");
+      vim = { ...vim, count: 0 };
+      return true;
+    }
+
+    // ── Pending: i/a{object} — text object selection (viw, vi(, …) ──
+    if (pending === "i" || pending === "a") {
+      if (key.length === 1) {
+        const range = cmd.textObjectRange(view, pending, key);
+        if (range) {
+          vim = { ...vim, visualAnchor: range.from };
+          visualHead = Math.max(range.from, range.to - 1);
+          renderVisualSelection(view);
+        }
+      }
+      setPendingKeys("");
+      return true;
+    }
+
+    // ── Pending: g{motion} ──────────────────────────────────────────
+    if (pending === "g") {
+      if (key === "g")
+        visualMotionExtend(view, () => cmd.moveDocStart(bnEditor));
+      setPendingKeys("");
+      vim = { ...vim, count: 0 };
+      return true;
+    }
+
+    // ── Exit / switch mode ──────────────────────────────────────────
+    if (key === "Escape") {
+      setMode(view, "normal");
+      return true;
+    }
+    if (key === "v") {
+      enterVisual(view, false);
+      return true;
+    }
+    if (key === "V") {
+      enterVisual(view, true);
+      return true;
+    }
+
+    // ── Count prefix ────────────────────────────────────────────────
+    if (key >= "1" && key <= "9") {
+      vim = { ...vim, count: vim.count * 10 + parseInt(key, 10) };
+      setPendingKeys((vim.pendingKeys || "") + key);
+      return true;
+    }
+    if (key === "0" && vim.count > 0) {
+      vim = { ...vim, count: vim.count * 10 };
+      return true;
+    }
+
+    // ── o — swap the active end ─────────────────────────────────────
+    if (key === "o") {
+      const anchor = vim.visualAnchor;
+      if (anchor !== null) {
+        vim = { ...vim, visualAnchor: visualHead };
+        visualHead = anchor;
+        renderVisualSelection(view);
+      }
+      return true;
+    }
+
+    // ── Motions (extend the selection) ──────────────────────────────
+    const motions: Record<string, (() => void) | undefined> = {
+      h: () => cmd.moveLeft(view, bnEditor, vim),
+      l: () => cmd.moveRight(view, bnEditor, vim),
+      j: () => cmd.moveDown(view, bnEditor, vim),
+      k: () => cmd.moveUp(view, bnEditor, vim),
+      w: () => cmd.moveWordForward(view, bnEditor, vim),
+      b: () => cmd.moveWordBackward(view, bnEditor, vim),
+      e: () => cmd.moveWordEnd(view, bnEditor, vim),
+      W: () => cmd.moveWordForward(view, bnEditor, vim, true),
+      B: () => cmd.moveWordBackward(view, bnEditor, vim, true),
+      E: () => cmd.moveWordEnd(view, bnEditor, vim, true),
+      "0": () => cmd.moveLineStart(view),
+      "^": () => cmd.moveFirstNonWhitespace(view),
+      $: () => cmd.moveLineEnd(view),
+      G: () => cmd.moveDocEnd(bnEditor),
+    };
+    const motion = motions[key];
+    if (motion) {
+      visualMotionExtend(view, motion);
+      vim = { ...vim, count: 0, pendingKeys: "" };
+      return true;
+    }
+    if (key === "g") {
+      setPendingKeys("g");
+      return true;
+    }
+    if (FIND_MOTION_KEYS.has(key)) {
+      setPendingKeys(key);
+      return true;
+    }
+    if (key === "i" || key === "a") {
+      setPendingKeys(key);
+      return true;
+    }
+
+    // ── Operators on the selection ──────────────────────────────────
+    if (key === "d" || key === "x") {
+      applyVisualOperator(view, "d");
+      setMode(view, "normal");
+      return true;
+    }
+    if (key === "y") {
+      applyVisualOperator(view, "y");
+      setMode(view, "normal");
+      return true;
+    }
+    if (key === "c" || key === "s") {
+      applyVisualOperator(view, "c");
+      setMode(view, "insert");
+      return true;
+    }
+    if (key === "~") {
+      applyVisualCase(view, "toggle");
+      setMode(view, "normal");
+      return true;
+    }
+    if (key === "u") {
+      applyVisualCase(view, "lower");
+      setMode(view, "normal");
+      return true;
+    }
+    if (key === "U") {
+      applyVisualCase(view, "upper");
+      setMode(view, "normal");
+      return true;
+    }
+
+    // Unknown key — consume it.
     return true;
   }
 }

@@ -17,10 +17,13 @@ export function createVimCursorPlugin(): Plugin {
 
     props: {
       decorations(state) {
-        const vimState = VIM_PLUGIN_KEY.getState(state) as
-          | VimState
-          | undefined;
+        const vimState = VIM_PLUGIN_KEY.getState(state) as VimState | undefined;
         if (!vimState || vimState.mode === "insert") {
+          return DecorationSet.empty;
+        }
+        // In visual mode a non-empty selection is shown via the native
+        // selection highlight — don't also draw the block cursor.
+        if (!state.selection.empty) {
           return DecorationSet.empty;
         }
 

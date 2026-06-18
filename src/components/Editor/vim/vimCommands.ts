@@ -98,32 +98,40 @@ export function moveDown(
 
   for (let i = 0; i < count; i++) {
     const { from } = view.state.selection;
-    const coords = view.coordsAtPos(from);
-    if (!coords) break;
+    let moved = false;
 
-    // Offset by half a line height to land solidly on the next visual line
-    // (using just +1 lands at the boundary and snaps to end of current line)
-    const lineHeight = coords.bottom - coords.top;
-    const targetCoords = {
-      left: coords.left,
-      top: coords.bottom + Math.max(lineHeight * 0.5, 4),
-    };
-    const pos = view.posAtCoords(targetCoords);
+    // Visual-line movement via geometry. `coordsAtPos` needs a laid-out DOM
+    // and throws without one (e.g. jsdom) — fall back to block-level then.
+    try {
+      const coords = view.coordsAtPos(from);
+      if (coords) {
+        // Offset by half a line height to land solidly on the next visual line
+        // (just +1 lands at the boundary and snaps to end of current line).
+        const lineHeight = coords.bottom - coords.top;
+        const pos = view.posAtCoords({
+          left: coords.left,
+          top: coords.bottom + Math.max(lineHeight * 0.5, 4),
+        });
+        if (pos && pos.pos !== from) {
+          view.dispatch(
+            view.state.tr
+              .setSelection(TextSelection.create(view.state.doc, pos.pos))
+              .scrollIntoView()
+          );
+          moved = true;
+        }
+      }
+    } catch {
+      // no layout — handled by the block-level fallback below
+    }
 
-    if (pos && pos.pos !== from) {
-      view.dispatch(
-        view.state.tr
-          .setSelection(TextSelection.create(view.state.doc, pos.pos))
-          .scrollIntoView()
-      );
-    } else {
-      // At the bottom of the visible document — fall back to block-level
+    if (!moved) {
+      // At the bottom of the visible document — fall back to block-level.
       const cursor = bnEditor.getTextCursorPosition();
       if (!cursor) break;
       const next = bnEditor.getNextBlock(cursor.block);
       if (!next) break;
       bnEditor.setTextCursorPosition(next.id, "start");
-      // Scroll the newly focused block into view
       view.dispatch(view.state.tr.scrollIntoView());
     }
   }
@@ -139,24 +147,31 @@ export function moveUp(
 
   for (let i = 0; i < count; i++) {
     const { from } = view.state.selection;
-    const coords = view.coordsAtPos(from);
-    if (!coords) break;
+    let moved = false;
 
-    const lineHeight = coords.bottom - coords.top;
-    const targetCoords = {
-      left: coords.left,
-      top: coords.top - Math.max(lineHeight * 0.5, 4),
-    };
-    const pos = view.posAtCoords(targetCoords);
+    try {
+      const coords = view.coordsAtPos(from);
+      if (coords) {
+        const lineHeight = coords.bottom - coords.top;
+        const pos = view.posAtCoords({
+          left: coords.left,
+          top: coords.top - Math.max(lineHeight * 0.5, 4),
+        });
+        if (pos && pos.pos !== from) {
+          view.dispatch(
+            view.state.tr
+              .setSelection(TextSelection.create(view.state.doc, pos.pos))
+              .scrollIntoView()
+          );
+          moved = true;
+        }
+      }
+    } catch {
+      // no layout — handled by the block-level fallback below
+    }
 
-    if (pos && pos.pos !== from) {
-      view.dispatch(
-        view.state.tr
-          .setSelection(TextSelection.create(view.state.doc, pos.pos))
-          .scrollIntoView()
-      );
-    } else {
-      // At the top of the visible document — fall back to block-level
+    if (!moved) {
+      // At the top of the visible document — fall back to block-level.
       const cursor = bnEditor.getTextCursorPosition();
       if (!cursor) break;
       const prev = bnEditor.getPrevBlock(cursor.block);

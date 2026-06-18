@@ -10,6 +10,7 @@ const MODE_LABELS: Record<VimMode, string> = {
   normal: "NORMAL",
   insert: "INSERT",
   visual: "VISUAL",
+  "visual-line": "VISUAL LINE",
 };
 
 const MODE_COLORS: Record<VimMode, { bg: string; text: string }> = {
@@ -22,6 +23,10 @@ const MODE_COLORS: Record<VimMode, { bg: string; text: string }> = {
     text: "#000000",
   },
   visual: {
+    bg: "var(--color-warning)",
+    text: "#000000",
+  },
+  "visual-line": {
     bg: "var(--color-warning)",
     text: "#000000",
   },

@@ -1,4 +1,4 @@
-export type VimMode = "normal" | "insert" | "visual";
+export type VimMode = "normal" | "insert" | "visual" | "visual-line";
 
 /** A minimal snapshot of a block for the linewise register (type + content). */
 export interface PartialBlockSnapshot {
