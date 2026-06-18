@@ -1,6 +1,10 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { Page } from "../../types/page";
+import {
+  daemonEventBus,
+  type DaemonEvent,
+  type DatabaseEventData,
+} from "../../utils/daemonEvents";
 import { usePageStore, setPendingSavePromise } from "../../stores/pageStore";
 import type {
   DatabaseContentV2,
@@ -74,6 +78,14 @@ export function DatabaseEditor({
   // re-attach rows another writer added concurrently rather than letting a
   // stale whole-content save delete them (DL-04 row merge).
   const baselineRowIdsRef = useRef<string[]>([]);
+  // Set when an external (MCP/daemon) write lands while we have an unsaved
+  // local edit. We don't overwrite the in-progress edit immediately; instead
+  // we let the pending save flush (the DL-04 merge reconciles it with the
+  // external rows) and then refresh from disk to show the merged result.
+  const pendingExternalRefreshRef = useRef(false);
+  // Latest `refreshFromDisk` impl, so the debounced save's success branch can
+  // call it without a forward reference (it's defined further down).
+  const refreshFromDiskRef = useRef<() => void>(() => {});
 
   // Undo/redo stacks
   const MAX_UNDO = 30;
@@ -153,6 +165,12 @@ export function DatabaseEditor({
           pendingContentRef.current = null; // saved
           baselineRowIdsRef.current = newContent.rows.map((r) => r.id);
           setLastSaved(new Date());
+          // An external write arrived mid-edit; now that our edit is saved
+          // (and merged server-side), pull the merged result onto screen.
+          if (pendingExternalRefreshRef.current) {
+            pendingExternalRefreshRef.current = false;
+            refreshFromDiskRef.current();
+          }
         } catch (err) {
           console.error("Failed to save database:", err);
         } finally {
@@ -213,30 +231,40 @@ export function DatabaseEditor({
     }
   }, [isInlineMode, notebookId, page]);
 
-  // Listen for external database updates (MCP server, daemon API) and refresh from disk.
+  // Keep the ref the debounced save reads pointed at the latest impl.
+  refreshFromDiskRef.current = refreshFromDisk;
+
+  // Live-refresh on external database writes (MCP/daemon row add/update/delete).
+  // The daemon broadcasts these on its event bus; the previous code listened for
+  // a Tauri `mcp-database-updated` event that nothing ever emitted, so an open
+  // table stayed stale until you navigated away and back (Bug 2).
+  //
+  // We subscribe to the row events specifically — `database.updated` is skipped
+  // because the editor emits it for its *own* saves, which would cause a refresh
+  // loop. If the user has an unsaved edit in flight we don't clobber it: we mark
+  // a pending refresh and let the debounced save flush first, so the DL-04 merge
+  // reconciles both sides before we reload.
   useEffect(() => {
     if (isInlineMode || !page) return;
-    let unlisten: UnlistenFn | null = null;
+    const unsubscribe = daemonEventBus.subscribe((evt: DaemonEvent) => {
+      if (
+        evt.event !== "database.rows_added" &&
+        evt.event !== "database.rows_updated" &&
+        evt.event !== "database.rows_deleted"
+      ) {
+        return;
+      }
+      const data = evt.data as DatabaseEventData;
+      if (data.pageId !== page.id) return;
 
-    const setup = async () => {
-      unlisten = await listen<{ notebookId: string; pageIds: string[] }>(
-        "mcp-database-updated",
-        (event) => {
-          const { pageIds } = event.payload;
-          if (pageIds.includes(page.id)) {
-            console.log(
-              `[database] External update detected for ${page.title}, refreshing from disk`
-            );
-            refreshFromDisk();
-          }
-        }
-      );
-    };
-
-    setup();
-    return () => {
-      if (unlisten) unlisten();
-    };
+      if (pendingContentRef.current) {
+        // Unsaved local edit pending — defer so we don't discard it.
+        pendingExternalRefreshRef.current = true;
+      } else {
+        refreshFromDisk();
+      }
+    });
+    return unsubscribe;
   }, [isInlineMode, page, refreshFromDisk]);
 
   // Flush pending baseline into undo stack
