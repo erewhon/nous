@@ -1087,6 +1087,7 @@ export function EditorPaneContent({
                             onExplicitSave={handleExplicitSave as (data: EditorData) => void}
                             onLinkClick={handleLinkClick}
                             onBlockRefClick={handleBlockRefClick}
+                            onCreatePage={handleLinkClick}
                             notebookId={notebookId}
                             pageId={selectedPage.id}
                             paneId={pane.id}

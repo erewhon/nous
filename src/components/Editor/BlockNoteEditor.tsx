@@ -52,6 +52,7 @@ import { useThemeStore } from "../../stores/themeStore";
 import { useVimStore } from "../../stores/vimStore";
 import { VimExtension } from "./vim";
 import { VimModeIndicator } from "./VimModeIndicator";
+import { DocumentProcessorIssues } from "./DocumentProcessorIssues";
 import { useBlockNoteHeaderCollapse } from "./useBlockNoteHeaderCollapse";
 import { useChecklistSort } from "./useChecklistSort";
 import { useDocumentProcessors } from "./useDocumentProcessors";
@@ -70,6 +71,8 @@ interface BlockNoteEditorProps {
   onExplicitSave?: (data: EditorData) => void;
   onLinkClick?: (pageTitle: string) => void;
   onBlockRefClick?: (blockId: string, pageId: string) => void;
+  /** Create a page by title (for the broken-wiki-link "Create page" quick-fix). */
+  onCreatePage?: (title: string) => void | Promise<void>;
   readOnly?: boolean;
   className?: string;
   notebookId?: string;
@@ -118,6 +121,7 @@ export const BlockNoteEditor = memo(
         onExplicitSave,
         onLinkClick,
         onBlockRefClick,
+        onCreatePage,
         readOnly = false,
         className = "",
         notebookId,
@@ -299,12 +303,14 @@ export const BlockNoteEditor = memo(
       // ─── Document processors (broken wiki-links, etc.) ─────────────
       // Non-mutating annotators that decorate the page live. Re-runs on
       // edit (debounced inside the hook) and whenever the page index changes.
-      const { scheduleRun: scheduleProcessors } = useDocumentProcessors({
-        editor,
-        pageId,
-        notebookId,
-        pages,
-      });
+      const { scheduleRun: scheduleProcessors, results: processorResults } =
+        useDocumentProcessors({
+          editor,
+          pageId,
+          notebookId,
+          pages,
+          onCreatePage,
+        });
 
       const performSave = useCallback(() => {
         if (!isDirtyRef.current) return;
@@ -610,7 +616,7 @@ export const BlockNoteEditor = memo(
       return (
         <div
           ref={wrapperRef}
-          className={`bn-editor-wrapper ${className}`}
+          className={`bn-editor-wrapper relative ${className}`}
           data-page-id={pageId}
         >
           <BlockNoteView
@@ -634,6 +640,7 @@ export const BlockNoteEditor = memo(
               />
             </div>
           )}
+          {!readOnly && <DocumentProcessorIssues results={processorResults} />}
         </div>
       );
     },
