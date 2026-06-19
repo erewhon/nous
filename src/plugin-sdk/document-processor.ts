@@ -57,7 +57,71 @@ export type Decoration =
       range: DocRange;
       /** CSS class applied to the range (requires the range applier). */
       className: string;
+    }
+  | {
+      /**
+       * Block-level highlight (background tint + optional left border). This is
+       * the shape daemon (Lua) processors emit; a frontend processor can emit it
+       * too. Applied by the host's CSS builder, scoped to the block by id.
+       */
+      kind: "block-highlight";
+      blockId: string;
+      backgroundColor?: string;
+      borderColor?: string;
+      borderWidth?: number;
+    }
+  | {
+      /** A small corner label badge on a block (e.g. a reading-level tag). */
+      kind: "block-badge";
+      blockId: string;
+      label: string;
+      color?: string;
+      backgroundColor?: string;
+      position?: "top-left" | "top-right";
     };
+
+/**
+ * Raw decoration shape a daemon (Lua) processor emits on the wire — snake_case,
+ * block-scoped. `fromDaemonDecoration` normalizes it into the shared
+ * `Decoration` union, so daemon and frontend processors share one result model.
+ * See src-tauri/src/plugins/builtins/writing_analysis.lua and the daemon
+ * decoration path (usePluginDecorations).
+ */
+export interface DaemonDecoration {
+  block_id: string;
+  type: "highlight" | "badge";
+  background_color?: string;
+  border_color?: string;
+  border_width?: number;
+  label?: string;
+  badge_color?: string;
+  badge_bg?: string;
+  position?: "top-left" | "top-right";
+}
+
+/** Normalize a daemon decoration into the shared `Decoration` union. */
+export function fromDaemonDecoration(d: DaemonDecoration): Decoration | null {
+  if (d.type === "highlight") {
+    return {
+      kind: "block-highlight",
+      blockId: d.block_id,
+      backgroundColor: d.background_color,
+      borderColor: d.border_color,
+      borderWidth: d.border_width,
+    };
+  }
+  if (d.type === "badge" && d.label) {
+    return {
+      kind: "block-badge",
+      blockId: d.block_id,
+      label: d.label,
+      color: d.badge_color,
+      backgroundColor: d.badge_bg,
+      position: d.position,
+    };
+  }
+  return null;
+}
 
 export type Severity = "error" | "warning" | "info" | "hint";
 

@@ -19,6 +19,7 @@ vi.hoisted(() => {
 
 import {
   DISABLED_STORAGE_KEY,
+  fromDaemonDecoration,
   isProcessorEnabled,
   useProcessorSettings,
   type DocumentProcessor,
@@ -67,5 +68,51 @@ describe("useProcessorSettings persistence", () => {
     const { disabled } = useProcessorSettings.getState();
     expect(isProcessorEnabled(proc("a"), disabled)).toBe(false);
     expect(isProcessorEnabled(proc("b"), disabled)).toBe(true);
+  });
+});
+
+describe("fromDaemonDecoration (shared daemon↔frontend result type)", () => {
+  it("maps a daemon highlight to a block-highlight", () => {
+    expect(
+      fromDaemonDecoration({
+        block_id: "b1",
+        type: "highlight",
+        background_color: "#eee",
+        border_color: "#f00",
+        border_width: 2,
+      })
+    ).toEqual({
+      kind: "block-highlight",
+      blockId: "b1",
+      backgroundColor: "#eee",
+      borderColor: "#f00",
+      borderWidth: 2,
+    });
+  });
+
+  it("maps a daemon badge to a block-badge", () => {
+    expect(
+      fromDaemonDecoration({
+        block_id: "b1",
+        type: "badge",
+        label: "Hard",
+        badge_color: "#fff",
+        badge_bg: "#333",
+        position: "top-left",
+      })
+    ).toEqual({
+      kind: "block-badge",
+      blockId: "b1",
+      label: "Hard",
+      color: "#fff",
+      backgroundColor: "#333",
+      position: "top-left",
+    });
+  });
+
+  it("returns null for a badge with no label", () => {
+    expect(
+      fromDaemonDecoration({ block_id: "b1", type: "badge" })
+    ).toBeNull();
   });
 });

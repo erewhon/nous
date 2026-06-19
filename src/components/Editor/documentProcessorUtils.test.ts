@@ -157,4 +157,33 @@ describe("buildDecorationCss", () => {
     };
     expect(buildDecorationCss([tricky], "p")).toContain('[data-page-title="a\\"b"]');
   });
+
+  it("renders a block-highlight (bg + left border) scoped to the block", () => {
+    const d: Decoration = {
+      kind: "block-highlight",
+      blockId: "blk1",
+      backgroundColor: "rgba(0,0,0,0.05)",
+      borderColor: "#ef4444",
+      borderWidth: 2,
+    };
+    const css = buildDecorationCss([d], "p");
+    expect(css).toContain(
+      '.bn-editor-wrapper[data-page-id="p"] [data-node-type="blockContainer"][data-id="blk1"] > .bn-block-content{',
+    );
+    expect(css).toContain("background:rgba(0,0,0,0.05)");
+    expect(css).toContain("border-left:2px solid #ef4444");
+  });
+
+  it("renders a block-badge via ::after with the label", () => {
+    const d: Decoration = {
+      kind: "block-badge",
+      blockId: "blk1",
+      label: "Hard · 42w",
+      position: "top-right",
+    };
+    const css = buildDecorationCss([d], "p");
+    expect(css).toContain('[data-id="blk1"]{position:relative}');
+    expect(css).toContain('::after{content:"Hard · 42w"');
+    expect(css).toContain("right:4px;left:auto");
+  });
 });

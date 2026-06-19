@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
+import type { DaemonDecoration } from "../plugin-sdk/document-processor";
 
 export interface PluginManifest {
   id: string;
@@ -116,7 +117,7 @@ interface PluginStore {
   togglePanel: (pluginId: string, panelId: string) => void;
   isPanelOpen: (pluginId: string, panelId: string) => boolean;
   fetchDecorationTypes: () => Promise<void>;
-  computeDecorations: (pluginId: string, decorationId: string, blocks: unknown) => Promise<unknown>;
+  computeDecorations: (pluginId: string, decorationId: string, blocks: unknown) => Promise<{ decorations?: DaemonDecoration[] } | null>;
   fetchPageTypes: () => Promise<void>;
   renderPage: (pluginId: string, pageTypeId: string, pageData: unknown) => Promise<unknown>;
   handlePageAction: (pluginId: string, action: unknown) => Promise<unknown>;
@@ -316,7 +317,10 @@ export const usePluginStore = create<PluginStore>((set) => ({
   },
 
   computeDecorations: async (pluginId: string, decorationId: string, blocks: unknown) => {
-    return invoke("compute_plugin_decorations", { pluginId, decorationId, blocks });
+    return invoke<{ decorations?: DaemonDecoration[] } | null>(
+      "compute_plugin_decorations",
+      { pluginId, decorationId, blocks },
+    );
   },
 
   fetchPageTypes: async () => {

@@ -7,20 +7,9 @@
  */
 import { useEffect, useRef, useCallback } from "react";
 import { usePluginStore } from "../../stores/pluginStore";
-
-interface Decoration {
-  block_id: string;
-  type: "highlight" | "badge";
-  // highlight fields
-  background_color?: string;
-  border_color?: string;
-  border_width?: number;
-  // badge fields
-  label?: string;
-  badge_color?: string;
-  badge_bg?: string;
-  position?: "top-right" | "top-left";
-}
+// Shared wire type for daemon (Lua) decorations — same model the frontend
+// document-processor contract normalizes via fromDaemonDecoration.
+import type { DaemonDecoration as Decoration } from "../../plugin-sdk/document-processor";
 
 interface BlockInput {
   id: string;

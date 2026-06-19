@@ -94,9 +94,12 @@ export function styleBody(style: Record<string, string>): string {
 }
 
 /**
- * Build the full CSS text for `inline-attr` decorations, scoped to one editor
- * instance (by its wrapper's data-page-id). `range` decorations are ignored
- * here — they need a ProseMirror applier, which is future work.
+ * Build the full CSS text for the decorations the host can apply via injected
+ * CSS — `inline-attr` (style spans by attribute), `block-highlight`, and
+ * `block-badge` — scoped to one editor instance (by its wrapper's data-page-id).
+ * The block kinds mirror what daemon (Lua) processors emit, so a processor's
+ * results render the same whether it runs frontend or daemon. `range` is ignored
+ * here — it needs a ProseMirror applier, which is future work.
  */
 export function buildDecorationCss(
   decorations: ReadonlyArray<Decoration>,
@@ -105,11 +108,36 @@ export function buildDecorationCss(
   const scope = pageId
     ? `.bn-editor-wrapper[data-page-id="${cssAttrValue(pageId)}"] `
     : ".bn-editor-wrapper ";
+  const blockSel = (blockId: string) =>
+    `${scope}[data-node-type="blockContainer"][data-id="${cssAttrValue(blockId)}"]`;
   const rules: string[] = [];
   for (const d of decorations) {
-    if (d.kind !== "inline-attr") continue;
-    const selector = `${scope}[${d.attr}="${cssAttrValue(d.value)}"]`;
-    rules.push(`${selector}{${styleBody(d.style)}}`);
+    if (d.kind === "inline-attr") {
+      rules.push(
+        `${scope}[${d.attr}="${cssAttrValue(d.value)}"]{${styleBody(d.style)}}`,
+      );
+    } else if (d.kind === "block-highlight") {
+      const decls: string[] = [];
+      if (d.backgroundColor) decls.push(`background:${d.backgroundColor}`);
+      if (d.borderColor)
+        decls.push(`border-left:${d.borderWidth ?? 3}px solid ${d.borderColor}`);
+      decls.push("border-radius:2px");
+      rules.push(`${blockSel(d.blockId)} > .bn-block-content{${decls.join(";")}}`);
+    } else if (d.kind === "block-badge") {
+      const base = blockSel(d.blockId);
+      const pos =
+        d.position === "top-left" ? "left:4px;right:auto" : "right:4px;left:auto";
+      const color = d.color ?? "#888";
+      const bg = d.backgroundColor ?? "rgba(255,255,255,0.06)";
+      const label = d.label.replace(/"/g, '\\"');
+      rules.push(`${base}{position:relative}`);
+      rules.push(
+        `${base}::after{content:"${label}";position:absolute;top:2px;${pos};` +
+          `font-size:9px;padding:1px 5px;border-radius:3px;background:${bg};` +
+          `color:${color};pointer-events:none;z-index:1;line-height:1.4}`,
+      );
+    }
+    // "range" needs a ProseMirror decoration applier — future work.
   }
   return rules.join("\n");
 }
