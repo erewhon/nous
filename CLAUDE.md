@@ -86,6 +86,7 @@ The MCP exposes both low-level primitives (`update_database_rows`, `update_page`
 | Toggle / add a checklist item | `toggle_checklist_item`, `add_checklist_item` | hand-rolled block edits |
 | Create a new task | `create_task(project, title, content, priority, ...)` | `create_page` + `add_database_rows` |
 | Create a new project | `create_project(name)` | `create_folder` + manual `Project` select wiring |
+| File a bug / feature request you hit while working | `report_issue(kind, title, details, project=...)` | dropping it in chat where it's lost |
 | Find what to work on next | `get_next_task(project, feature=...)` | `query_tasks` + manual sort |
 | Verify dependency state before starting | `check_dependencies(task)` | parsing `Depends On` cells yourself |
 
