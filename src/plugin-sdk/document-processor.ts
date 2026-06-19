@@ -163,8 +163,33 @@ export function getDocumentProcessors(): DocumentProcessor[] {
 // ─── Enabled state ──────────────────────────────────────────────────────────
 //
 // Reactive so a settings toggle takes effect on the next run without an editor
-// remount. Persisting this to user settings + a Settings UI row is a follow-up;
-// for now it lives in memory and defaults from each processor's defaultEnabled.
+// remount. The set of user-disabled ids is persisted to localStorage so a
+// toggle survives a restart; everything else defaults from each processor's
+// `defaultEnabled`.
+
+export const DISABLED_STORAGE_KEY = "nous-document-processors-disabled";
+
+function loadDisabled(): Set<string> {
+  try {
+    const raw =
+      typeof localStorage !== "undefined"
+        ? localStorage.getItem(DISABLED_STORAGE_KEY)
+        : null;
+    return new Set(raw ? (JSON.parse(raw) as string[]) : []);
+  } catch {
+    return new Set<string>();
+  }
+}
+
+function saveDisabled(disabled: ReadonlySet<string>): void {
+  try {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(DISABLED_STORAGE_KEY, JSON.stringify([...disabled]));
+    }
+  } catch {
+    // best-effort; an unavailable/full localStorage just loses persistence
+  }
+}
 
 interface ProcessorSettingsStore {
   /** Ids the user has explicitly disabled. */
@@ -173,12 +198,13 @@ interface ProcessorSettingsStore {
 }
 
 export const useProcessorSettings = create<ProcessorSettingsStore>((set) => ({
-  disabled: new Set<string>(),
+  disabled: loadDisabled(),
   setEnabled: (id, enabled) =>
     set((state) => {
       const next = new Set(state.disabled);
       if (enabled) next.delete(id);
       else next.add(id);
+      saveDisabled(next);
       return { disabled: next };
     }),
 }));

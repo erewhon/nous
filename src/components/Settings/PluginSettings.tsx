@@ -1,6 +1,16 @@
 import { useState, useEffect } from "react";
 import { usePluginStore } from "../../stores/pluginStore";
 import type { PluginManifest } from "../../stores/pluginStore";
+import {
+  getDocumentProcessors,
+  isProcessorEnabled,
+  useProcessorSettings,
+} from "../../plugin-sdk/document-processor";
+import { registerBuiltinProcessors } from "../../plugin-sdk/processors";
+
+// Ensure built-in processors are registered even if the editor hasn't mounted
+// yet, so this panel can list them. Idempotent (registry is keyed by id).
+registerBuiltinProcessors();
 
 // Capability flag names (matches Rust bitflags)
 const CAPABILITY_NAMES: Record<number, string> = {
@@ -178,6 +188,88 @@ export function PluginSettings() {
           </div>
         )}
       </div>
+
+      <DocumentProcessorSettings />
+    </div>
+  );
+}
+
+/**
+ * Toggle list for frontend document processors (the LSP-style contribution
+ * point). Reads the in-editor registry and the persisted disabled set; toggling
+ * one off stops its decorations on the next run without an editor remount.
+ */
+function DocumentProcessorSettings() {
+  const disabled = useProcessorSettings((s) => s.disabled);
+  const setEnabled = useProcessorSettings((s) => s.setEnabled);
+  const processors = getDocumentProcessors();
+
+  return (
+    <div>
+      <h4
+        className="text-sm font-medium mb-1"
+        style={{ color: "var(--color-text-secondary)" }}
+      >
+        Document Processors ({processors.length})
+      </h4>
+      <p className="text-xs mb-2" style={{ color: "var(--color-text-muted)" }}>
+        Annotators that decorate pages live (e.g. broken wiki-link marking).
+        Turning one off stops its decorations on the next edit.
+      </p>
+      {processors.length === 0 ? (
+        <p className="text-sm italic" style={{ color: "var(--color-text-muted)" }}>
+          No document processors registered.
+        </p>
+      ) : (
+        <div className="space-y-2">
+          {processors.map((p) => {
+            const on = isProcessorEnabled(p, disabled);
+            return (
+              <div
+                key={p.id}
+                className="rounded-lg border p-3 flex items-center justify-between"
+                style={{
+                  backgroundColor: "var(--color-bg-secondary)",
+                  borderColor: "var(--color-border)",
+                  opacity: on ? 1 : 0.6,
+                }}
+              >
+                <div className="min-w-0">
+                  <div
+                    className="text-sm font-medium truncate"
+                    style={{ color: "var(--color-text-primary)" }}
+                  >
+                    {p.title}
+                  </div>
+                  <div
+                    className="text-xs truncate"
+                    style={{ color: "var(--color-text-muted)" }}
+                  >
+                    {p.id}
+                    {p.runtime ? ` · ${p.runtime}` : ""}
+                  </div>
+                </div>
+                <button
+                  onClick={() => setEnabled(p.id, !on)}
+                  className="relative w-8 h-[18px] rounded-full transition-colors shrink-0"
+                  style={{
+                    backgroundColor: on
+                      ? "var(--color-accent, #3b82f6)"
+                      : "var(--color-bg-tertiary, #555)",
+                  }}
+                  title={on ? "Disable processor" : "Enable processor"}
+                  aria-pressed={on}
+                >
+                  <span
+                    className="absolute top-[2px] w-[14px] h-[14px] rounded-full transition-transform"
+                    style={{ backgroundColor: "#fff", left: on ? "16px" : "2px" }}
+                  />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
