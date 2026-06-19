@@ -4234,6 +4234,9 @@ async fn add_database_rows(
         .ok_or_else(|| api_err(StatusCode::INTERNAL_SERVER_ERROR, "database has no rows array"))?;
 
     let added = req.rows.len();
+    // Collect the ids we generate so callers (e.g. the MCP create_task) can learn
+    // the new row's id instead of getting null back.
+    let mut new_ids: Vec<String> = Vec::with_capacity(added);
     for input_row in req.rows {
         let mut cells = serde_json::Map::new();
         for (key, value) in input_row {
@@ -4241,8 +4244,10 @@ async fn add_database_rows(
             let value = HostApi::resolve_select_value(value, &prop_id, &select_map);
             cells.insert(prop_id, value);
         }
+        let id = Uuid::new_v4().to_string();
+        new_ids.push(id.clone());
         rows_arr.push(serde_json::json!({
-            "id": Uuid::new_v4().to_string(),
+            "id": id,
             "cells": cells,
             "createdAt": now,
             "updatedAt": now,
@@ -4269,6 +4274,7 @@ async fn add_database_rows(
             "databaseId": db_id,
             "rowsAdded": added,
             "totalRows": total,
+            "rowIds": new_ids,
         }),
     })))
 }

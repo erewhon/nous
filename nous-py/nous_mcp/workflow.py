@@ -1243,6 +1243,83 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
         )
 
     @mcp.tool()
+    def report_issue(
+        kind: str,
+        title: str,
+        details: str,
+        project: str | None = None,
+        priority: int = 6,
+        reported_by: str | None = None,
+        notebook: str = "Forge",
+        database: str = "Project Tasks",
+    ) -> str:
+        """File a bug report or feature request from an agent into Nous.
+
+        Use this when, while working, you hit a bug in a tool/app or think of an
+        improvement worth keeping — instead of only mentioning it in chat, where
+        it's lost when the session ends. Creates a "Spec Needed" task in a
+        dedicated "Agent Feedback" project (auto-created) so reports flow into the
+        normal Forge triage without polluting real project backlogs. Triage later
+        with query_tasks(project="Agent Feedback") / task_summary.
+
+        Args:
+            kind: "bug" or "feature".
+            title: Short summary. A "[bug]"/"[feature]" prefix is added if absent.
+            details: Full description in markdown — what happened or what's wanted,
+                repro steps, expected vs actual, and why it matters.
+            project: The project the report is ABOUT (e.g. "Nous"), for triage.
+                Recorded in the body and as a tag; the task itself always lands in
+                the "Agent Feedback" project.
+            priority: 1-10 (default 6 — these are untriaged).
+            reported_by: Optional identifier for the reporting agent/session.
+            notebook: Notebook name or UUID (default: "Forge").
+            database: Task database title (default: "Project Tasks").
+
+        Returns the created task JSON (page_id, row_id, project, status, warnings).
+        """
+        feedback_project = "Agent Feedback"
+
+        kind_norm = kind.strip().lower()
+        if kind_norm in ("bug", "bug-fix", "bugfix"):
+            label, task_type_value, phase = "bug", "bug-fix", "Bugfix"
+        elif kind_norm in ("feature", "feature-request", "enhancement"):
+            label, task_type_value, phase = "feature", "feature", "Feature"
+        else:
+            raise ValueError(f"kind must be 'bug' or 'feature', got '{kind}'")
+
+        # Ensure the feedback project exists (idempotent).
+        create_project(feedback_project, notebook, database)
+
+        prefixed_title = (
+            title if title.lstrip().startswith("[") else f"[{label}] {title}"
+        )
+
+        meta_lines = []
+        if project:
+            meta_lines.append(f"**About:** {project}")
+        if reported_by:
+            meta_lines.append(f"**Reported by:** {reported_by}")
+        meta_lines.append(f"**Kind:** {label}")
+        body = "\n".join(meta_lines) + "\n\n" + details
+
+        tag_list = ["agent-report", label]
+        if project:
+            tag_list.append(project.strip().lower().replace(" ", "-"))
+
+        return create_task(
+            project=feedback_project,
+            title=prefixed_title,
+            content=body,
+            priority=priority,
+            phase=phase,
+            status="Spec Needed",
+            task_type=task_type_value,
+            tags=",".join(tag_list),
+            notebook=notebook,
+            database=database,
+        )
+
+    @mcp.tool()
     def update_task_status(
         task: str,
         status: str,
