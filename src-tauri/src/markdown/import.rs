@@ -121,9 +121,13 @@ fn parse_datetime(s: &str) -> Option<DateTime<Utc>> {
 
 /// Parse markdown body into Editor.js blocks
 pub fn parse_markdown_to_blocks(markdown: &str) -> Vec<EditorBlock> {
-    // Enable tables extension
+    // Enable tables + GFM task lists. Without ENABLE_TASKLISTS, `- [ ]` items
+    // are parsed as plain bullets with literal "[ ]" text, and "loose" task
+    // lists (blank lines between items) get split into a paragraph per item
+    // plus an empty bullet. With it, each task item emits a TaskListMarker.
     let mut options = Options::empty();
     options.insert(Options::ENABLE_TABLES);
+    options.insert(Options::ENABLE_TASKLISTS);
     let parser = Parser::new_ext(markdown, options);
     let mut blocks: Vec<EditorBlock> = Vec::new();
     let mut current_text = String::new();
@@ -133,6 +137,10 @@ pub fn parse_markdown_to_blocks(markdown: &str) -> Vec<EditorBlock> {
     let mut list_items: Vec<String> = Vec::new();
     let mut checklist_items: Vec<(String, bool)> = Vec::new();
     let mut is_ordered_list = false;
+    // List-item state: whether we're inside an <li>, and (for GFM task items)
+    // the checkbox state set by a TaskListMarker event before the item's text.
+    let mut in_item = false;
+    let mut item_checked: Option<bool> = None;
     let mut in_quote = false;
     let mut quote_text = String::new();
     let mut current_heading_level = 0;
@@ -169,7 +177,11 @@ pub fn parse_markdown_to_blocks(markdown: &str) -> Vec<EditorBlock> {
                 // Paragraph start
             }
             Event::End(TagEnd::Paragraph) => {
-                if in_quote {
+                if in_item {
+                    // Loose list item: pulldown wraps item content in a paragraph.
+                    // Leave the text in `current_text` for End(Item) to classify;
+                    // don't flush it as a top-level paragraph.
+                } else if in_quote {
                     quote_text.push_str(&current_text);
                     current_text.clear();
                 } else if !current_text.trim().is_empty() {
@@ -211,6 +223,9 @@ pub fn parse_markdown_to_blocks(markdown: &str) -> Vec<EditorBlock> {
                 is_ordered_list = first_item.is_some();
             }
             Event::End(TagEnd::List(_)) => {
+                // A list may contain task items, plain items, or a mix. Emit a
+                // checklist block for the task items and/or a list block for the
+                // plain ones (checklist first), so a mixed list loses neither.
                 if !checklist_items.is_empty() {
                     blocks.push(EditorBlock {
                         id: generate_block_id(),
@@ -225,7 +240,8 @@ pub fn parse_markdown_to_blocks(markdown: &str) -> Vec<EditorBlock> {
                         }),
                     });
                     checklist_items.clear();
-                } else if !list_items.is_empty() {
+                }
+                if !list_items.is_empty() {
                     blocks.push(EditorBlock {
                         id: generate_block_id(),
                         block_type: "list".to_string(),
@@ -237,13 +253,23 @@ pub fn parse_markdown_to_blocks(markdown: &str) -> Vec<EditorBlock> {
                     list_items.clear();
                 }
             }
+            Event::TaskListMarker(checked) => {
+                // GFM task-list checkbox; precedes the item's text.
+                item_checked = Some(checked);
+            }
             Event::Start(Tag::Item) => {
+                in_item = true;
+                item_checked = None;
                 current_text.clear();
             }
             Event::End(TagEnd::Item) => {
+                in_item = false;
                 let text = current_text.trim().to_string();
-                // Check if this is a checklist item
-                if let Some((content, checked)) = parse_checklist_item(&text) {
+                if let Some(checked) = item_checked.take() {
+                    // GFM task item (`- [ ]` / `- [x]`).
+                    checklist_items.push((text, checked));
+                } else if let Some((content, checked)) = parse_checklist_item(&text) {
+                    // Fallback: a literal "[ ] text" item without a GFM marker.
                     checklist_items.push((content, checked));
                 } else {
                     list_items.push(text);
@@ -602,6 +628,49 @@ This is a paragraph.
         assert!(checklist.is_some());
         let items = checklist.unwrap().data.get("items").unwrap().as_array().unwrap();
         assert_eq!(items.len(), 2);
+    }
+
+    #[test]
+    fn test_import_loose_checklist() {
+        // "Loose" task list: blank lines between items. pulldown-cmark wraps each
+        // item's content in a Paragraph, which previously caused each item to be
+        // split into a plain "[ ] text" paragraph plus an empty bullet.
+        let markdown = "- [ ] Task 1\n\n- [x] Task 2\n\n- [ ] Task 3\n";
+        let page = import_markdown_to_page(markdown, Uuid::new_v4(), "Untitled");
+
+        // No stray empty bullets, and no literal "[ ] ..." paragraphs.
+        for b in &page.content.blocks {
+            assert_ne!(b.block_type, "list", "loose task list leaked an empty bullet block");
+            if b.block_type == "paragraph" {
+                let t = b.data.get("text").and_then(|t| t.as_str()).unwrap_or("");
+                assert!(!t.starts_with("[ ]") && !t.starts_with("[x]"),
+                    "checklist item leaked into a paragraph: {t:?}");
+            }
+        }
+
+        let checklist = page.content.blocks.iter().find(|b| b.block_type == "checklist")
+            .expect("expected a checklist block");
+        let items = checklist.data.get("items").unwrap().as_array().unwrap();
+        assert_eq!(items.len(), 3, "all three loose items should be one checklist");
+        assert_eq!(items[1].get("checked").unwrap(), true);
+        assert_eq!(items[0].get("text").unwrap(), "Task 1");
+    }
+
+    #[test]
+    fn test_import_mixed_task_and_plain_list() {
+        // A single list with both a task item and a plain bullet must keep both.
+        let markdown = "- [ ] do this\n- just a bullet\n";
+        let page = import_markdown_to_page(markdown, Uuid::new_v4(), "Untitled");
+
+        let checklist = page.content.blocks.iter().find(|b| b.block_type == "checklist")
+            .expect("expected a checklist block");
+        assert_eq!(checklist.data["items"].as_array().unwrap().len(), 1);
+
+        let list = page.content.blocks.iter().find(|b| b.block_type == "list")
+            .expect("plain bullet should survive as a list block");
+        let items = list.data["items"].as_array().unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0], "just a bullet");
     }
 
     #[test]
