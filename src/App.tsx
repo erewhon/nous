@@ -163,6 +163,14 @@ function App() {
   // Live sessions dialog
   const [showLiveSessions, setShowLiveSessions] = useState(false);
 
+  // Listen for custom event to open the command palette (e.g. vim <leader>)
+  useEffect(() => {
+    const handleOpenPalette = () => setShowCommandPalette(true);
+    window.addEventListener("open-command-palette", handleOpenPalette);
+    return () =>
+      window.removeEventListener("open-command-palette", handleOpenPalette);
+  }, []);
+
   // Listen for custom event to open backup dialog
   useEffect(() => {
     const handleOpenBackup = () => setShowBackup(true);

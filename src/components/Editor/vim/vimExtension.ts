@@ -9,6 +9,7 @@ import { createVimPlugin } from "./vimPlugin";
 import { createVimCursorPlugin, VIM_CURSOR_CSS } from "./vimCursor";
 import type { VimMode } from "./vimTypes";
 import type { VimCommandLineState } from "./vimExCommands";
+import type { VimLeaderState } from "./vimLeader";
 
 interface VimExtensionOptions {
   enabled: () => boolean;
@@ -20,6 +21,10 @@ interface VimExtensionOptions {
   setMessage: (msg: string) => void;
   /** Update the `:` command-line UI state (null = closed). */
   onCommandLineChange: (state: VimCommandLineState | null) => void;
+  /** Update the `<leader>` which-key menu state (null = closed). */
+  onLeaderChange: (state: VimLeaderState | null) => void;
+  /** Open the app command palette (invoked by `<leader><leader>`). */
+  onOpenCommandPalette: () => void;
 }
 
 export const VimExtension = createExtension(
@@ -41,6 +46,8 @@ export const VimExtension = createExtension(
         requestSave: options.requestSave,
         setMessage: options.setMessage,
         onCommandLineChange: options.onCommandLineChange,
+        onLeaderChange: options.onLeaderChange,
+        onOpenCommandPalette: options.onOpenCommandPalette,
       }),
       createVimCursorPlugin(),
     ],

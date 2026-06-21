@@ -53,6 +53,7 @@ import { useVimStore } from "../../stores/vimStore";
 import { VimExtension } from "./vim";
 import { VimModeIndicator } from "./VimModeIndicator";
 import { VimCommandLine } from "./VimCommandLine";
+import { VimLeaderMenu } from "./VimLeaderMenu";
 import { DocumentProcessorIssues } from "./DocumentProcessorIssues";
 import { useBlockNoteHeaderCollapse } from "./useBlockNoteHeaderCollapse";
 import { useChecklistSort } from "./useChecklistSort";
@@ -187,6 +188,7 @@ export const BlockNoteEditor = memo(
       const vimSetPendingKeys = useVimStore((s) => s.setPendingKeys);
       const vimSetMessage = useVimStore((s) => s.setMessage);
       const vimSetCommandLine = useVimStore((s) => s.setCommandLine);
+      const vimSetLeaderMenu = useVimStore((s) => s.setLeaderMenu);
 
       // `:w` calls the real save path. Threaded via a ref because the extension
       // is created before `editor` (and thus doExplicitSave) exists.
@@ -204,6 +206,9 @@ export const BlockNoteEditor = memo(
             requestSave: () => vimRequestSaveRef.current(),
             setMessage: vimSetMessage,
             onCommandLineChange: vimSetCommandLine,
+            onLeaderChange: vimSetLeaderMenu,
+            onOpenCommandPalette: () =>
+              window.dispatchEvent(new CustomEvent("open-command-palette")),
           }),
         // eslint-disable-next-line react-hooks/exhaustive-deps -- stable refs, create once
         [],
@@ -634,6 +639,7 @@ export const BlockNoteEditor = memo(
       const vimPendingKeys = useVimStore((s) => s.pendingKeys);
       const vimMessage = useVimStore((s) => s.message);
       const vimCommandLine = useVimStore((s) => s.commandLine);
+      const vimLeaderMenu = useVimStore((s) => s.leaderMenu);
       const isVimEnabled = editorKeymap === "vim" && !readOnly;
 
       return (
@@ -665,6 +671,7 @@ export const BlockNoteEditor = memo(
             </div>
           )}
           {isVimEnabled && <VimCommandLine state={vimCommandLine} />}
+          {isVimEnabled && <VimLeaderMenu state={vimLeaderMenu} />}
           {!readOnly && <DocumentProcessorIssues results={processorResults} />}
         </div>
       );

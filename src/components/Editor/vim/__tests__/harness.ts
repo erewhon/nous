@@ -29,6 +29,7 @@ import type { EditorView } from "@tiptap/pm/view";
 import { VimExtension } from "../vimExtension";
 import type { VimMode } from "../vimTypes";
 import type { VimCommandLineState } from "../vimExCommands";
+import type { VimLeaderState } from "../vimLeader";
 
 // In-memory stand-in for navigator.clipboard (jsdom has none). Shared across
 // mounts; reset per mountVim and exposed via harness.clipboard.
@@ -108,6 +109,10 @@ export interface VimHarness {
   failNextSave: () => void;
   /** Current `:` command-line state, or null when closed. */
   commandLine: () => VimCommandLineState | null;
+  /** Current `<leader>` which-key menu state, or null when closed. */
+  leaderMenu: () => VimLeaderState | null;
+  /** Number of times the command palette was asked to open. */
+  commandPaletteOpens: () => number;
   /** Read/write the mock OS clipboard (navigator.clipboard). */
   clipboard: { get: () => string; set: (text: string) => void };
   destroy: () => void;
@@ -174,6 +179,8 @@ export function mountVim(
   let saveCount = 0;
   let saveResult: Promise<void> = Promise.resolve();
   let commandLine: VimCommandLineState | null = null;
+  let leaderMenu: VimLeaderState | null = null;
+  let commandPaletteOpens = 0;
 
   const editor = BlockNoteEditor.create({
     initialContent,
@@ -195,6 +202,12 @@ export function mountVim(
         },
         onCommandLineChange: (cl) => {
           commandLine = cl;
+        },
+        onLeaderChange: (lm) => {
+          leaderMenu = lm;
+        },
+        onOpenCommandPalette: () => {
+          commandPaletteOpens++;
         },
       }),
     ],
@@ -331,6 +344,10 @@ export function mountVim(
     },
     /** Current `:` command-line state, or null when closed. */
     commandLine: () => commandLine,
+    /** Current `<leader>` which-key menu state, or null when closed. */
+    leaderMenu: () => leaderMenu,
+    /** Number of times the command palette was asked to open. */
+    commandPaletteOpens: () => commandPaletteOpens,
     clipboard: {
       get: () => clipboardStore.data,
       set: (text: string) => {

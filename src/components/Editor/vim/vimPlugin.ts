@@ -21,6 +21,13 @@ import {
   parseExCommand,
   type VimCommandLineState,
 } from "./vimExCommands";
+import {
+  leaderBindingFor,
+  LEADER_BINDINGS,
+  LEADER_KEY,
+  type LeaderActionId,
+  type VimLeaderState,
+} from "./vimLeader";
 
 interface RegisterContent {
   text: string;
@@ -41,6 +48,10 @@ interface VimPluginOptions {
   setMessage: (msg: string) => void;
   /** Update the `:` command-line UI state (null = closed). */
   onCommandLineChange: (state: VimCommandLineState | null) => void;
+  /** Update the `<leader>` which-key menu state (null = closed). */
+  onLeaderChange: (state: VimLeaderState | null) => void;
+  /** Open the app command palette (invoked by `<leader><leader>`). */
+  onOpenCommandPalette: () => void;
 }
 
 /** Keys that start a motion (used to detect operator+motion). */
@@ -73,6 +84,8 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
     requestSave,
     setMessage,
     onCommandLineChange,
+    onLeaderChange,
+    onOpenCommandPalette,
   } = options;
 
   // Transient ex-command message (cleared after a short delay), e.g. `:w` → "written".
@@ -134,6 +147,52 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
     exHistoryIndex = -1;
     onCommandLineChange(null);
     resetPending();
+  }
+
+  // ── Leader (`<leader>` / Space) which-key menu state ──────────────────
+  let leaderActive = false;
+
+  function openLeaderMenu() {
+    leaderActive = true;
+    setMessage("");
+    onLeaderChange({ bindings: LEADER_BINDINGS });
+  }
+
+  function closeLeaderMenu() {
+    leaderActive = false;
+    onLeaderChange(null);
+  }
+
+  /** Save + echo the result (shared by `:w` and `<leader>w`). */
+  function doSave() {
+    flashMessage("saving…");
+    Promise.resolve(requestSave())
+      .then(() => flashMessage("written"))
+      .catch(() => flashMessage("E212: save failed"));
+  }
+
+  function runLeaderAction(action: LeaderActionId) {
+    switch (action) {
+      case "commandPalette":
+        onOpenCommandPalette();
+        break;
+      case "save":
+        doSave();
+        break;
+    }
+  }
+
+  /** Handle one key while the leader menu is open. Always consumes the key. */
+  function handleLeaderKey(event: KeyboardEvent): boolean {
+    const key = event.key;
+    if (key === "Escape") {
+      closeLeaderMenu();
+      return true;
+    }
+    const binding = leaderBindingFor(key);
+    closeLeaderMenu(); // any key dismisses the menu (which-key style)
+    if (binding) runLeaderAction(binding.action);
+    return true;
   }
 
   // Visual mode: the moving end (head) as an absolute doc position. The fixed
@@ -514,10 +573,7 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
         // Call the real save path directly (not a synthetic Ctrl+S keystroke,
         // which silently no-ops if the keydown listener isn't mounted) and echo
         // the result like vim does.
-        flashMessage("saving…");
-        Promise.resolve(requestSave())
-          .then(() => flashMessage("written"))
-          .catch(() => flashMessage("E212: save failed"));
+        doSave();
         break;
       case "quit":
         // No buffer to close in a single-page editor — quit is a no-op for now.
@@ -627,7 +683,7 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
     // intercept at the capture phase — before any keymap — and stop the event.
     view(editorView: EditorView) {
       const onKeydownCapture = (event: KeyboardEvent) => {
-        if (!enabled() || !exActive) return;
+        if (!enabled()) return;
         if (
           event.key === "Shift" ||
           event.key === "Control" ||
@@ -636,7 +692,22 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
         ) {
           return;
         }
-        handleExKey(editorView, event);
+        if (exActive) {
+          handleExKey(editorView, event);
+        } else if (leaderActive) {
+          handleLeaderKey(event);
+        } else if (
+          vim.mode === "normal" &&
+          event.key === LEADER_KEY &&
+          vim.pendingKeys === "" &&
+          vim.count === 0
+        ) {
+          // Open the leader menu on <Space> in clean normal mode. Capture so
+          // block keymaps (e.g. on list items) can't claim the key first.
+          openLeaderMenu();
+        } else {
+          return; // not ours — let ProseMirror handle it normally
+        }
         event.preventDefault();
         event.stopImmediatePropagation();
       };
@@ -803,6 +874,17 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
     // handleKeyDown directly — and serves as a fallback.
     if (exActive) {
       return handleExKey(view, event);
+    }
+
+    // ── Leader (<leader> / Space) which-key menu ─────────────────────
+    // Like the command line, the running app handles these earlier via the
+    // capture-phase listener; this path serves the test harness.
+    if (leaderActive) {
+      return handleLeaderKey(event);
+    }
+    if (key === LEADER_KEY && pending === "" && vim.count === 0) {
+      openLeaderMenu();
+      return true;
     }
 
     // ── Pending: m{char} — set mark ──────────────────────────────────
