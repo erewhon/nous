@@ -52,6 +52,7 @@ import { useThemeStore } from "../../stores/themeStore";
 import { useVimStore } from "../../stores/vimStore";
 import { VimExtension } from "./vim";
 import { VimModeIndicator } from "./VimModeIndicator";
+import { VimCommandLine } from "./VimCommandLine";
 import { DocumentProcessorIssues } from "./DocumentProcessorIssues";
 import { useBlockNoteHeaderCollapse } from "./useBlockNoteHeaderCollapse";
 import { useChecklistSort } from "./useChecklistSort";
@@ -185,6 +186,7 @@ export const BlockNoteEditor = memo(
       const vimSetMode = useVimStore((s) => s.setMode);
       const vimSetPendingKeys = useVimStore((s) => s.setPendingKeys);
       const vimSetMessage = useVimStore((s) => s.setMessage);
+      const vimSetCommandLine = useVimStore((s) => s.setCommandLine);
 
       // `:w` calls the real save path. Threaded via a ref because the extension
       // is created before `editor` (and thus doExplicitSave) exists.
@@ -201,6 +203,7 @@ export const BlockNoteEditor = memo(
             onPendingKeysChange: vimSetPendingKeys,
             requestSave: () => vimRequestSaveRef.current(),
             setMessage: vimSetMessage,
+            onCommandLineChange: vimSetCommandLine,
           }),
         // eslint-disable-next-line react-hooks/exhaustive-deps -- stable refs, create once
         [],
@@ -630,6 +633,7 @@ export const BlockNoteEditor = memo(
       const vimMode = useVimStore((s) => s.mode);
       const vimPendingKeys = useVimStore((s) => s.pendingKeys);
       const vimMessage = useVimStore((s) => s.message);
+      const vimCommandLine = useVimStore((s) => s.commandLine);
       const isVimEnabled = editorKeymap === "vim" && !readOnly;
 
       return (
@@ -660,6 +664,7 @@ export const BlockNoteEditor = memo(
               />
             </div>
           )}
+          {isVimEnabled && <VimCommandLine state={vimCommandLine} />}
           {!readOnly && <DocumentProcessorIssues results={processorResults} />}
         </div>
       );

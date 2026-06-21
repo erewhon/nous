@@ -16,6 +16,11 @@ import {
   type VimState,
 } from "./vimTypes";
 import * as cmd from "./vimCommands";
+import {
+  completionsFor,
+  parseExCommand,
+  type VimCommandLineState,
+} from "./vimExCommands";
 
 interface RegisterContent {
   text: string;
@@ -34,6 +39,8 @@ interface VimPluginOptions {
   requestSave: () => Promise<void> | void;
   /** Show a transient ex-command message (e.g. "written"). */
   setMessage: (msg: string) => void;
+  /** Update the `:` command-line UI state (null = closed). */
+  onCommandLineChange: (state: VimCommandLineState | null) => void;
 }
 
 /** Keys that start a motion (used to detect operator+motion). */
@@ -58,8 +65,15 @@ const MOTION_KEYS = new Set([
 const FIND_MOTION_KEYS = new Set(["f", "F", "t", "T"]);
 
 export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
-  const { bnEditor, enabled, onModeChange, onPendingKeysChange, requestSave, setMessage } =
-    options;
+  const {
+    bnEditor,
+    enabled,
+    onModeChange,
+    onPendingKeysChange,
+    requestSave,
+    setMessage,
+    onCommandLineChange,
+  } = options;
 
   // Transient ex-command message (cleared after a short delay), e.g. `:w` → "written".
   let messageTimer: ReturnType<typeof setTimeout> | null = null;
@@ -78,8 +92,49 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
   // Track `jj` escape sequence timing
   let lastJTime = 0;
 
-  // Ex command buffer for `:` mode
+  // ── Ex command line (`:`) state ──────────────────────────────────────
+  // `exActive` is the source of truth for "command line is open" (mode stays
+  // "normal"). `exBuffer` is the text after the prompt. Completion cycling
+  // freezes the typed prefix in `exStem` so the dropdown stays stable while
+  // Tab walks the matches. History persists for the editor's lifetime.
+  let exActive = false;
   let exBuffer = "";
+  let exCompletionIndex = -1;
+  let exStem: string | null = null;
+  const exHistory: string[] = [];
+  let exHistoryIndex = -1;
+
+  /** Push the current command-line state to the UI. */
+  function emitCommandLine() {
+    const stem = exStem ?? exBuffer;
+    onCommandLineChange({
+      buffer: exBuffer,
+      completions: completionsFor(stem),
+      completionIndex: exCompletionIndex,
+    });
+  }
+
+  /** Open the command line (`:` pressed). */
+  function openCommandLine() {
+    exActive = true;
+    exBuffer = "";
+    exCompletionIndex = -1;
+    exStem = null;
+    exHistoryIndex = -1;
+    setMessage("");
+    emitCommandLine();
+  }
+
+  /** Close the command line and return to normal-mode key handling. */
+  function closeCommandLine() {
+    exActive = false;
+    exBuffer = "";
+    exCompletionIndex = -1;
+    exStem = null;
+    exHistoryIndex = -1;
+    onCommandLineChange(null);
+    resetPending();
+  }
 
   // Visual mode: the moving end (head) as an absolute doc position. The fixed
   // end (anchor) lives in vim.visualAnchor. -1 when not in visual mode.
@@ -437,25 +492,125 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
     vim = { ...vim, count: savedCount };
   }
 
-  /** Execute an ex command (`:w`, `:wq`, etc.). */
-  function executeExCommand(_view: EditorView, command: string) {
-    const trimmed = command.trim();
-    // `:w` / `:wq` / `:x` → save. Call the real save path directly (not a
-    // synthetic Ctrl+S keystroke, which silently no-ops if the editor's
-    // keydown listener isn't mounted) and echo the result like vim does.
-    if (trimmed === "w" || trimmed === "wq" || trimmed === "x") {
-      flashMessage("saving…");
-      Promise.resolve(requestSave())
-        .then(() => flashMessage("written"))
-        .catch(() => flashMessage("E212: save failed"));
-      return;
+  /** Move the cursor to the start of a 1-based block index, clamping to range. */
+  function gotoBlock(view: EditorView, oneBased: number) {
+    const doc = bnEditor.document;
+    if (doc.length === 0) return;
+    const clamped = Math.min(Math.max(oneBased, 1), doc.length);
+    bnEditor.setTextCursorPosition(doc[clamped - 1].id, "start");
+    view.dispatch(view.state.tr.scrollIntoView());
+    if (oneBased > doc.length) {
+      flashMessage(`E16: Invalid range (clamped to ${doc.length})`);
     }
-    if (trimmed === "" || trimmed === "q" || trimmed === "q!") {
-      // No buffer to close in a single-page editor — quit is a no-op for now.
-      // (A fuller command-line lives in the `:` command palette task.)
-      return;
+  }
+
+  /** Execute an ex command (`:w`, `:42`, `:$`, …). */
+  function executeExCommand(view: EditorView, command: string) {
+    const action = parseExCommand(command);
+    switch (action.kind) {
+      case "noop":
+        break;
+      case "save":
+        // Call the real save path directly (not a synthetic Ctrl+S keystroke,
+        // which silently no-ops if the keydown listener isn't mounted) and echo
+        // the result like vim does.
+        flashMessage("saving…");
+        Promise.resolve(requestSave())
+          .then(() => flashMessage("written"))
+          .catch(() => flashMessage("E212: save failed"));
+        break;
+      case "quit":
+        // No buffer to close in a single-page editor — quit is a no-op for now.
+        break;
+      case "goto":
+        gotoBlock(view, action.line);
+        break;
+      case "gotoLast":
+        cmd.moveDocEnd(bnEditor);
+        view.dispatch(view.state.tr.scrollIntoView());
+        break;
+      case "unknown":
+        flashMessage(`E492: Not an editor command: ${action.input}`);
+        break;
     }
-    flashMessage(`E492: Not an editor command: ${trimmed}`);
+  }
+
+  /**
+   * Handle one key while the `:` command line is open. Returns true if the key
+   * was consumed (always true here — the command line owns the keyboard while
+   * open). Shared by the capture-phase listener (real app) and handleNormalMode
+   * (test harness).
+   */
+  function handleExKey(view: EditorView, event: KeyboardEvent): boolean {
+    const key = event.key;
+    if (key === "Escape") {
+      closeCommandLine();
+      return true;
+    }
+    if (key === "Enter") {
+      const entry = exBuffer.trim();
+      if (entry !== "" && exHistory[exHistory.length - 1] !== entry) {
+        exHistory.push(entry);
+      }
+      executeExCommand(view, exBuffer);
+      closeCommandLine();
+      return true;
+    }
+    if (key === "Backspace") {
+      if (exBuffer.length > 0) {
+        exBuffer = exBuffer.slice(0, -1);
+        exStem = null;
+        exCompletionIndex = -1;
+        emitCommandLine();
+      } else {
+        closeCommandLine();
+      }
+      return true;
+    }
+    if (key === "Tab") {
+      // Freeze the typed prefix the first time Tab is pressed, then cycle
+      // through its matches (Shift+Tab backwards), filling the buffer.
+      if (exStem === null) exStem = exBuffer;
+      const comps = completionsFor(exStem);
+      if (comps.length > 0) {
+        const dir = event.shiftKey ? -1 : 1;
+        exCompletionIndex =
+          (exCompletionIndex + dir + comps.length) % comps.length;
+        exBuffer = comps[exCompletionIndex].name;
+      }
+      emitCommandLine();
+      return true;
+    }
+    if (key === "ArrowUp" || key === "ArrowDown") {
+      if (exHistory.length > 0) {
+        if (key === "ArrowUp") {
+          exHistoryIndex =
+            exHistoryIndex < 0
+              ? exHistory.length - 1
+              : Math.max(0, exHistoryIndex - 1);
+        } else if (exHistoryIndex >= 0) {
+          exHistoryIndex = exHistoryIndex + 1;
+        }
+        exBuffer =
+          exHistoryIndex >= 0 && exHistoryIndex < exHistory.length
+            ? exHistory[exHistoryIndex]
+            : "";
+        if (exHistoryIndex >= exHistory.length) exHistoryIndex = -1;
+        exStem = null;
+        exCompletionIndex = -1;
+        emitCommandLine();
+      }
+      return true;
+    }
+    if (key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      exBuffer += key;
+      exStem = null;
+      exCompletionIndex = -1;
+      exHistoryIndex = -1;
+      emitCommandLine();
+      return true;
+    }
+    return true; // swallow other keys while the command line is open
   }
 
   return new Plugin<VimState>({
@@ -464,6 +619,33 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
     state: {
       init: () => ({ ...DEFAULT_VIM_STATE }),
       apply: () => vim,
+    },
+
+    // While the `:` command line is open it must own the keyboard. ProseMirror
+    // keymaps (e.g. BlockNote's Enter handler that splits list/checkbox items)
+    // run via handleKeyDown in plugin order and can pre-empt this plugin, so we
+    // intercept at the capture phase — before any keymap — and stop the event.
+    view(editorView: EditorView) {
+      const onKeydownCapture = (event: KeyboardEvent) => {
+        if (!enabled() || !exActive) return;
+        if (
+          event.key === "Shift" ||
+          event.key === "Control" ||
+          event.key === "Alt" ||
+          event.key === "Meta"
+        ) {
+          return;
+        }
+        handleExKey(editorView, event);
+        event.preventDefault();
+        event.stopImmediatePropagation();
+      };
+      editorView.dom.addEventListener("keydown", onKeydownCapture, true);
+      return {
+        destroy() {
+          editorView.dom.removeEventListener("keydown", onKeydownCapture, true);
+        },
+      };
     },
 
     props: {
@@ -615,35 +797,12 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
     const key = event.key;
     const pending = vim.pendingKeys;
 
-    // ── Ex command mode (:) ──────────────────────────────────────────
-    if (pending.startsWith(":")) {
-      if (key === "Escape") {
-        exBuffer = "";
-        resetPending();
-        return true;
-      }
-      if (key === "Enter") {
-        executeExCommand(view, exBuffer);
-        exBuffer = "";
-        resetPending();
-        return true;
-      }
-      if (key === "Backspace") {
-        if (exBuffer.length > 0) {
-          exBuffer = exBuffer.slice(0, -1);
-          setPendingKeys(":" + exBuffer);
-        } else {
-          exBuffer = "";
-          resetPending();
-        }
-        return true;
-      }
-      if (key.length === 1) {
-        exBuffer += key;
-        setPendingKeys(":" + exBuffer);
-        return true;
-      }
-      return true;
+    // ── Ex command line (:) ──────────────────────────────────────────
+    // In the running app this is handled earlier by a capture-phase listener
+    // (see the plugin `view`); this path keeps the test harness — which drives
+    // handleKeyDown directly — and serves as a fallback.
+    if (exActive) {
+      return handleExKey(view, event);
     }
 
     // ── Pending: m{char} — set mark ──────────────────────────────────
@@ -1217,10 +1376,9 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
       return true;
     }
 
-    // ── Ex command mode (:) ─────────────────────────────────────────
+    // ── Ex command line (:) ─────────────────────────────────────────
     if (key === ":") {
-      exBuffer = "";
-      setPendingKeys(":");
+      openCommandLine();
       return true;
     }
 

@@ -8,6 +8,7 @@ import { createExtension } from "@blocknote/core";
 import { createVimPlugin } from "./vimPlugin";
 import { createVimCursorPlugin, VIM_CURSOR_CSS } from "./vimCursor";
 import type { VimMode } from "./vimTypes";
+import type { VimCommandLineState } from "./vimExCommands";
 
 interface VimExtensionOptions {
   enabled: () => boolean;
@@ -17,6 +18,8 @@ interface VimExtensionOptions {
   requestSave: () => Promise<void> | void;
   /** Show a transient ex-command message (e.g. "written"). */
   setMessage: (msg: string) => void;
+  /** Update the `:` command-line UI state (null = closed). */
+  onCommandLineChange: (state: VimCommandLineState | null) => void;
 }
 
 export const VimExtension = createExtension(
@@ -37,6 +40,7 @@ export const VimExtension = createExtension(
         onPendingKeysChange: options.onPendingKeysChange,
         requestSave: options.requestSave,
         setMessage: options.setMessage,
+        onCommandLineChange: options.onCommandLineChange,
       }),
       createVimCursorPlugin(),
     ],

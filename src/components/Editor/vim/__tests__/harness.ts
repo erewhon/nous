@@ -28,6 +28,7 @@ import { TextSelection } from "@tiptap/pm/state";
 import type { EditorView } from "@tiptap/pm/view";
 import { VimExtension } from "../vimExtension";
 import type { VimMode } from "../vimTypes";
+import type { VimCommandLineState } from "../vimExCommands";
 
 // In-memory stand-in for navigator.clipboard (jsdom has none). Shared across
 // mounts; reset per mountVim and exposed via harness.clipboard.
@@ -105,6 +106,8 @@ export interface VimHarness {
   saveCount: () => number;
   /** Make the next `requestSave()` reject, to test `:w` failure handling. */
   failNextSave: () => void;
+  /** Current `:` command-line state, or null when closed. */
+  commandLine: () => VimCommandLineState | null;
   /** Read/write the mock OS clipboard (navigator.clipboard). */
   clipboard: { get: () => string; set: (text: string) => void };
   destroy: () => void;
@@ -170,6 +173,7 @@ export function mountVim(
   let message = "";
   let saveCount = 0;
   let saveResult: Promise<void> = Promise.resolve();
+  let commandLine: VimCommandLineState | null = null;
 
   const editor = BlockNoteEditor.create({
     initialContent,
@@ -188,6 +192,9 @@ export function mountVim(
         },
         setMessage: (m) => {
           message = m;
+        },
+        onCommandLineChange: (cl) => {
+          commandLine = cl;
         },
       }),
     ],
@@ -322,6 +329,8 @@ export function mountVim(
     failNextSave: () => {
       saveResult = Promise.reject(new Error("save failed"));
     },
+    /** Current `:` command-line state, or null when closed. */
+    commandLine: () => commandLine,
     clipboard: {
       get: () => clipboardStore.data,
       set: (text: string) => {
