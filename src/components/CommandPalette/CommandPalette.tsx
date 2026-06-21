@@ -18,7 +18,13 @@ import { useToastStore } from "../../stores/toastStore";
 import { searchPages, exportPageToFile, importMarkdownFile, convertDocument, importMarkdown } from "../../utils/api";
 import { save, open } from "@tauri-apps/plugin-dialog";
 import { highlightText } from "../../utils/highlightText";
+import { rankCommands, rankSearchResults } from "./rankCommands";
 import type { SearchResult, PageType } from "../../types/page";
+
+// Backend search scores are coarse (daemon: 1.0 title hit / 0.5 content-only;
+// RAG: 0–1). Keep the floor low so it only trims a near-zero semantic tail and
+// never hides legitimate keyword body matches (which are always ≥ 0.5).
+const MIN_SEARCH_SCORE = 0.2;
 
 interface Command {
   id: string;
@@ -930,7 +936,11 @@ export function CommandPalette({
     // Get notebook names for display
     const notebookMap = new Map(notebooks.map((n) => [n.id, n.name]));
 
-    return searchResults.map((result) => ({
+    // Re-rank by title relevance (title hits lead generic body matches), drop
+    // the near-zero tail, and de-duplicate the same page appearing twice.
+    const ranked = rankSearchResults(searchResults, query, MIN_SEARCH_SCORE);
+
+    return ranked.map((result) => ({
       id: `search-${result.pageId}`,
       title: result.title || "Untitled",
       subtitle: notebookMap.get(result.notebookId) || "Unknown notebook",
@@ -947,7 +957,7 @@ export function CommandPalette({
         onClose();
       },
     }));
-  }, [searchResults, notebooks, selectedNotebookId, selectNotebook, selectPage, onClose]);
+  }, [searchResults, query, notebooks, selectedNotebookId, selectNotebook, selectPage, onClose]);
 
   // Recent searches as commands
   const recentCommands = useMemo<Command[]>(() => {
@@ -988,23 +998,11 @@ export function CommandPalette({
     });
   }, [query, getRecentPages, notebooks, selectedNotebookId, selectNotebook, selectPage, onClose]);
 
-  // Filter commands based on query and expert mode
+  // Rank commands by query relevance (fuzzy: title ≫ keywords ≫ subtitle),
+  // dropping non-matches and ordering best-first. Empty query → unchanged.
   const filteredCommands = useMemo(() => {
     const visible = expertMode ? commands : commands.filter((c) => !c.expert);
-
-    if (!query.trim()) {
-      return visible;
-    }
-
-    const lowerQuery = query.toLowerCase();
-    return visible.filter((cmd) => {
-      const titleMatch = cmd.title.toLowerCase().includes(lowerQuery);
-      const subtitleMatch = cmd.subtitle?.toLowerCase().includes(lowerQuery);
-      const keywordMatch = cmd.keywords?.some((k) =>
-        k.toLowerCase().includes(lowerQuery)
-      );
-      return titleMatch || subtitleMatch || keywordMatch;
-    });
+    return rankCommands(visible, query);
   }, [commands, query, expertMode]);
 
   // Combine filtered commands with search results and recent searches
