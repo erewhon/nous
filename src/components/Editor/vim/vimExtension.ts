@@ -13,6 +13,10 @@ interface VimExtensionOptions {
   enabled: () => boolean;
   onModeChange: (mode: VimMode) => void;
   onPendingKeysChange: (keys: string) => void;
+  /** Persist the buffer (invoked by `:w`/`:wq`/`:x`). Resolves on success. */
+  requestSave: () => Promise<void> | void;
+  /** Show a transient ex-command message (e.g. "written"). */
+  setMessage: (msg: string) => void;
 }
 
 export const VimExtension = createExtension(
@@ -31,6 +35,8 @@ export const VimExtension = createExtension(
         enabled: options.enabled,
         onModeChange: options.onModeChange,
         onPendingKeysChange: options.onPendingKeysChange,
+        requestSave: options.requestSave,
+        setMessage: options.setMessage,
       }),
       createVimCursorPlugin(),
     ],

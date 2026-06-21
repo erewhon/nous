@@ -184,6 +184,13 @@ export const BlockNoteEditor = memo(
 
       const vimSetMode = useVimStore((s) => s.setMode);
       const vimSetPendingKeys = useVimStore((s) => s.setPendingKeys);
+      const vimSetMessage = useVimStore((s) => s.setMessage);
+
+      // `:w` calls the real save path. Threaded via a ref because the extension
+      // is created before `editor` (and thus doExplicitSave) exists.
+      const vimRequestSaveRef = useRef<() => Promise<void>>(() =>
+        Promise.resolve(),
+      );
 
       const vimExtension = useMemo(
         () =>
@@ -192,6 +199,8 @@ export const BlockNoteEditor = memo(
               editorKeymapRef.current === "vim" && !readOnly,
             onModeChange: vimSetMode,
             onPendingKeysChange: vimSetPendingKeys,
+            requestSave: () => vimRequestSaveRef.current(),
+            setMessage: vimSetMessage,
           }),
         // eslint-disable-next-line react-hooks/exhaustive-deps -- stable refs, create once
         [],
@@ -399,28 +408,37 @@ export const BlockNoteEditor = memo(
         scheduleProcessors();
       }, [performSave, scheduleProcessors]);
 
-      // ─── Ctrl+S explicit save ───────────────────────────────────────
+      // ─── Explicit save (Ctrl+S and vim `:w`) ────────────────────────
+      // Shared so `:w` behaves identically to Ctrl+S. Resolves on success and
+      // rejects on failure so callers (vim) can echo a result.
+      const doExplicitSave = useCallback((): Promise<void> => {
+        isDirtyRef.current = false;
+        if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+        const editorJsData = blockNoteToEditorJs(editor.document);
+        return Promise.resolve(
+          onExplicitSaveRef.current?.(editorJsData),
+        ).catch((err) => {
+          // DL-25: a failed save must not leave the editor "clean" — keep it
+          // dirty so the edit isn't lost on the next navigation/quit (the
+          // failure is also shown via the save-error banner).
+          isDirtyRef.current = true;
+          throw err;
+        });
+      }, [editor]);
+
+      // Let vim `:w` reach the same save path.
+      vimRequestSaveRef.current = doExplicitSave;
+
       useEffect(() => {
         const handler = (e: KeyboardEvent) => {
           if ((e.ctrlKey || e.metaKey) && e.key === "s") {
             e.preventDefault();
-            isDirtyRef.current = false;
-            if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-
-            const doc = editor.document;
-            const editorJsData = blockNoteToEditorJs(doc);
-            const result = onExplicitSaveRef.current?.(editorJsData);
-            // DL-25: a failed Ctrl+S must not leave the editor "clean" — keep it
-            // dirty so the edit isn't lost on the next navigation/quit (the
-            // failure is also shown via the save-error banner).
-            Promise.resolve(result).catch(() => {
-              isDirtyRef.current = true;
-            });
+            void doExplicitSave().catch(() => {});
           }
         };
         document.addEventListener("keydown", handler);
         return () => document.removeEventListener("keydown", handler);
-      }, [editor]);
+      }, [doExplicitSave]);
 
       // ─── Click handler for wiki-links and block-refs ────────────────
       useEffect(() => {
@@ -611,6 +629,7 @@ export const BlockNoteEditor = memo(
       // ─── Vim mode indicator state ──────────────────────────────────
       const vimMode = useVimStore((s) => s.mode);
       const vimPendingKeys = useVimStore((s) => s.pendingKeys);
+      const vimMessage = useVimStore((s) => s.message);
       const isVimEnabled = editorKeymap === "vim" && !readOnly;
 
       return (
@@ -637,6 +656,7 @@ export const BlockNoteEditor = memo(
               <VimModeIndicator
                 mode={vimMode}
                 pendingKeys={vimPendingKeys}
+                message={vimMessage}
               />
             </div>
           )}

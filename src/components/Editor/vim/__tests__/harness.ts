@@ -99,6 +99,12 @@ export interface VimHarness {
   mode: () => VimMode;
   /** Current pending-keys string (e.g. "d", "ci"). */
   pending: () => string;
+  /** Current transient ex-command message (e.g. "written"). */
+  message: () => string;
+  /** Number of times `:w`/`:wq`/`:x` triggered a save. */
+  saveCount: () => number;
+  /** Make the next `requestSave()` reject, to test `:w` failure handling. */
+  failNextSave: () => void;
   /** Read/write the mock OS clipboard (navigator.clipboard). */
   clipboard: { get: () => string; set: (text: string) => void };
   destroy: () => void;
@@ -161,6 +167,9 @@ export function mountVim(
 
   let mode: VimMode = "normal";
   let pending = "";
+  let message = "";
+  let saveCount = 0;
+  let saveResult: Promise<void> = Promise.resolve();
 
   const editor = BlockNoteEditor.create({
     initialContent,
@@ -172,6 +181,13 @@ export function mountVim(
         },
         onPendingKeysChange: (k) => {
           pending = k;
+        },
+        requestSave: () => {
+          saveCount++;
+          return saveResult;
+        },
+        setMessage: (m) => {
+          message = m;
         },
       }),
     ],
@@ -300,6 +316,12 @@ export function mountVim(
     cursorBlockIndex,
     mode: () => mode,
     pending: () => pending,
+    message: () => message,
+    saveCount: () => saveCount,
+    /** Make the next `requestSave()` reject, to test `:w` failure handling. */
+    failNextSave: () => {
+      saveResult = Promise.reject(new Error("save failed"));
+    },
     clipboard: {
       get: () => clipboardStore.data,
       set: (text: string) => {

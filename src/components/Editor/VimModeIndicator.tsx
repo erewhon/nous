@@ -3,6 +3,8 @@ import type { VimMode } from "./vim/vimTypes";
 interface VimModeIndicatorProps {
   mode: VimMode;
   pendingKeys?: string;
+  /** Transient ex-command message (e.g. "written") shown after the mode. */
+  message?: string;
   className?: string;
 }
 
@@ -39,27 +41,41 @@ const MODE_COLORS: Record<VimMode, { bg: string; text: string }> = {
 export function VimModeIndicator({
   mode,
   pendingKeys,
+  message,
   className = "",
 }: VimModeIndicatorProps) {
   const colors = MODE_COLORS[mode];
 
   return (
-    <div
-      className={`flex items-center gap-2 rounded px-2 py-1 font-mono text-xs font-bold ${className}`}
-      style={{
-        backgroundColor: colors.bg,
-        color: colors.text,
-      }}
-    >
-      <span>-- {MODE_LABELS[mode]} --</span>
-      {pendingKeys && (
+    <div className={`flex items-center gap-2 ${className}`}>
+      <div
+        className="flex items-center gap-2 rounded px-2 py-1 font-mono text-xs font-bold"
+        style={{
+          backgroundColor: colors.bg,
+          color: colors.text,
+        }}
+      >
+        <span>-- {MODE_LABELS[mode]} --</span>
+        {pendingKeys && (
+          <span
+            className="rounded px-1"
+            style={{
+              backgroundColor: "rgba(0, 0, 0, 0.2)",
+            }}
+          >
+            {pendingKeys}
+          </span>
+        )}
+      </div>
+      {message && (
         <span
-          className="rounded px-1"
+          className="rounded px-2 py-1 font-mono text-xs"
           style={{
-            backgroundColor: "rgba(0, 0, 0, 0.2)",
+            backgroundColor: "var(--color-bg-tertiary)",
+            color: "var(--color-text-secondary)",
           }}
         >
-          {pendingKeys}
+          {message}
         </span>
       )}
     </div>

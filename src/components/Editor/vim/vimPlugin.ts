@@ -30,6 +30,10 @@ interface VimPluginOptions {
   enabled: () => boolean;
   onModeChange: (mode: VimMode) => void;
   onPendingKeysChange: (keys: string) => void;
+  /** Persist the buffer (invoked by `:w`/`:wq`/`:x`). Resolves on success. */
+  requestSave: () => Promise<void> | void;
+  /** Show a transient ex-command message (e.g. "written"). */
+  setMessage: (msg: string) => void;
 }
 
 /** Keys that start a motion (used to detect operator+motion). */
@@ -54,7 +58,16 @@ const MOTION_KEYS = new Set([
 const FIND_MOTION_KEYS = new Set(["f", "F", "t", "T"]);
 
 export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
-  const { bnEditor, enabled, onModeChange, onPendingKeysChange } = options;
+  const { bnEditor, enabled, onModeChange, onPendingKeysChange, requestSave, setMessage } =
+    options;
+
+  // Transient ex-command message (cleared after a short delay), e.g. `:w` → "written".
+  let messageTimer: ReturnType<typeof setTimeout> | null = null;
+  function flashMessage(msg: string) {
+    setMessage(msg);
+    if (messageTimer) clearTimeout(messageTimer);
+    messageTimer = setTimeout(() => setMessage(""), 2500);
+  }
 
   // Mutable state — ProseMirror plugin state is immutable by convention,
   // but for vim we need high-frequency mutation (pending keys, count) without
@@ -427,17 +440,22 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
   /** Execute an ex command (`:w`, `:wq`, etc.). */
   function executeExCommand(_view: EditorView, command: string) {
     const trimmed = command.trim();
-    if (trimmed === "w" || trimmed === "wq") {
-      // Dispatch Ctrl+S to save
-      document.dispatchEvent(
-        new KeyboardEvent("keydown", {
-          key: "s",
-          ctrlKey: true,
-          bubbles: true,
-        })
-      );
+    // `:w` / `:wq` / `:x` → save. Call the real save path directly (not a
+    // synthetic Ctrl+S keystroke, which silently no-ops if the editor's
+    // keydown listener isn't mounted) and echo the result like vim does.
+    if (trimmed === "w" || trimmed === "wq" || trimmed === "x") {
+      flashMessage("saving…");
+      Promise.resolve(requestSave())
+        .then(() => flashMessage("written"))
+        .catch(() => flashMessage("E212: save failed"));
+      return;
     }
-    // Future: other ex commands can be added here
+    if (trimmed === "" || trimmed === "q" || trimmed === "q!") {
+      // No buffer to close in a single-page editor — quit is a no-op for now.
+      // (A fuller command-line lives in the `:` command palette task.)
+      return;
+    }
+    flashMessage(`E492: Not an editor command: ${trimmed}`);
   }
 
   return new Plugin<VimState>({
