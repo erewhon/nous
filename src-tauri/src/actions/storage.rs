@@ -327,9 +327,16 @@ mod tests {
     use crate::actions::models::{ActionCategory, ActionStep, ActionTrigger, NotebookTarget};
     use tempfile::TempDir;
 
+    /// A storage with an EMPTY store — unlike `ActionStorage::new`, this skips
+    /// seeding the built-in actions, so list/find/CRUD assertions see only what
+    /// the test creates. (Built-in seeding is covered by `test_new_seeds_builtins`.)
     fn create_test_storage() -> (ActionStorage, TempDir) {
         let temp_dir = TempDir::new().unwrap();
-        let storage = ActionStorage::new(temp_dir.path().to_path_buf()).unwrap();
+        let actions_path = temp_dir.path().join("actions");
+        fs::create_dir_all(&actions_path).unwrap();
+        let storage = ActionStorage {
+            base_path: actions_path,
+        };
         (storage, temp_dir)
     }
 
@@ -364,6 +371,27 @@ mod tests {
 
         let actions = storage.list_actions().unwrap();
         assert_eq!(actions.len(), 3);
+    }
+
+    #[test]
+    fn test_new_seeds_builtins() {
+        // The real constructor seeds the built-in actions; the empty-store
+        // fixture above intentionally does not. Lock in the seeding behavior so
+        // it stays covered even though the other tests bypass it.
+        let temp_dir = TempDir::new().unwrap();
+        let storage = ActionStorage::new(temp_dir.path().to_path_buf()).unwrap();
+
+        let builtins = storage.list_actions().unwrap();
+        assert!(
+            !builtins.is_empty(),
+            "ActionStorage::new should seed built-in actions"
+        );
+
+        // A user action lands on top of the built-ins.
+        storage
+            .create_action(Action::new("Mine".to_string(), "desc".to_string()))
+            .unwrap();
+        assert_eq!(storage.list_actions().unwrap().len(), builtins.len() + 1);
     }
 
     #[test]
