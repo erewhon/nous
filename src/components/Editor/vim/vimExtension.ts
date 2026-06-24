@@ -25,6 +25,10 @@ interface VimExtensionOptions {
   onLeaderChange: (state: VimLeaderState | null) => void;
   /** Open the app command palette (invoked by `<leader><leader>`). */
   onOpenCommandPalette: () => void;
+  /** Create a new page in the current notebook (invoked by `<leader>n`). */
+  onNewPage: () => void;
+  /** Share the current page (invoked by `<leader>s`). */
+  onShare: () => void;
 }
 
 export const VimExtension = createExtension(
@@ -48,6 +52,8 @@ export const VimExtension = createExtension(
         onCommandLineChange: options.onCommandLineChange,
         onLeaderChange: options.onLeaderChange,
         onOpenCommandPalette: options.onOpenCommandPalette,
+        onNewPage: options.onNewPage,
+        onShare: options.onShare,
       }),
       createVimCursorPlugin(),
     ],

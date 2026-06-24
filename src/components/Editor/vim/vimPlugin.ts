@@ -52,6 +52,10 @@ interface VimPluginOptions {
   onLeaderChange: (state: VimLeaderState | null) => void;
   /** Open the app command palette (invoked by `<leader><leader>`). */
   onOpenCommandPalette: () => void;
+  /** Create a new page in the current notebook (invoked by `<leader>n`). */
+  onNewPage: () => void;
+  /** Share the current page (invoked by `<leader>s`). */
+  onShare: () => void;
 }
 
 /** Keys that start a motion (used to detect operator+motion). */
@@ -86,6 +90,8 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
     onCommandLineChange,
     onLeaderChange,
     onOpenCommandPalette,
+    onNewPage,
+    onShare,
   } = options;
 
   // Transient ex-command message (cleared after a short delay), e.g. `:w` → "written".
@@ -171,7 +177,7 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
       .catch(() => flashMessage("E212: save failed"));
   }
 
-  function runLeaderAction(action: LeaderActionId) {
+  function runLeaderAction(view: EditorView, action: LeaderActionId) {
     switch (action) {
       case "commandPalette":
         onOpenCommandPalette();
@@ -179,11 +185,23 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
       case "save":
         doSave();
         break;
+      case "search":
+        // Same path `/` uses: bubbles up to the editor container's listener.
+        view.dom.dispatchEvent(
+          new CustomEvent("vim:open-search", { bubbles: true })
+        );
+        break;
+      case "newPage":
+        onNewPage();
+        break;
+      case "share":
+        onShare();
+        break;
     }
   }
 
   /** Handle one key while the leader menu is open. Always consumes the key. */
-  function handleLeaderKey(event: KeyboardEvent): boolean {
+  function handleLeaderKey(view: EditorView, event: KeyboardEvent): boolean {
     const key = event.key;
     if (key === "Escape") {
       closeLeaderMenu();
@@ -191,7 +209,7 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
     }
     const binding = leaderBindingFor(key);
     closeLeaderMenu(); // any key dismisses the menu (which-key style)
-    if (binding) runLeaderAction(binding.action);
+    if (binding) runLeaderAction(view, binding.action);
     return true;
   }
 
@@ -695,7 +713,7 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
         if (exActive) {
           handleExKey(editorView, event);
         } else if (leaderActive) {
-          handleLeaderKey(event);
+          handleLeaderKey(editorView, event);
         } else if (
           vim.mode === "normal" &&
           event.key === LEADER_KEY &&
@@ -880,7 +898,7 @@ export function createVimPlugin(options: VimPluginOptions): Plugin<VimState> {
     // Like the command line, the running app handles these earlier via the
     // capture-phase listener; this path serves the test harness.
     if (leaderActive) {
-      return handleLeaderKey(event);
+      return handleLeaderKey(view, event);
     }
     if (key === LEADER_KEY && pending === "" && vim.count === 0) {
       openLeaderMenu();

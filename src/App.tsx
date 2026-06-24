@@ -307,6 +307,13 @@ function App() {
     }
   }, [selectedNotebookId]);
 
+  // Listen for custom event to create a new page (e.g. vim <leader>n)
+  useEffect(() => {
+    const onNewPage = () => handleNewPage();
+    window.addEventListener("new-page", onNewPage);
+    return () => window.removeEventListener("new-page", onNewPage);
+  }, [handleNewPage]);
+
   const handleNewNotebook = useCallback(() => {
     createNotebook("New Notebook");
   }, [createNotebook]);

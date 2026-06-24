@@ -113,6 +113,12 @@ export interface VimHarness {
   leaderMenu: () => VimLeaderState | null;
   /** Number of times the command palette was asked to open. */
   commandPaletteOpens: () => number;
+  /** Number of times `<leader>n` asked to create a new page. */
+  newPageOpens: () => number;
+  /** Number of times `<leader>s` asked to share the page. */
+  shareOpens: () => number;
+  /** Number of times `<leader>/` (or `/`) asked to open in-page search. */
+  searchOpens: () => number;
   /** Read/write the mock OS clipboard (navigator.clipboard). */
   clipboard: { get: () => string; set: (text: string) => void };
   destroy: () => void;
@@ -181,6 +187,9 @@ export function mountVim(
   let commandLine: VimCommandLineState | null = null;
   let leaderMenu: VimLeaderState | null = null;
   let commandPaletteOpens = 0;
+  let newPageOpens = 0;
+  let shareOpens = 0;
+  let searchOpens = 0;
 
   const editor = BlockNoteEditor.create({
     initialContent,
@@ -209,6 +218,12 @@ export function mountVim(
         onOpenCommandPalette: () => {
           commandPaletteOpens++;
         },
+        onNewPage: () => {
+          newPageOpens++;
+        },
+        onShare: () => {
+          shareOpens++;
+        },
       }),
     ],
   });
@@ -218,6 +233,12 @@ export function mountVim(
   editor.mount(container);
 
   const view = editor.prosemirrorView as EditorView;
+
+  // `/` and `<leader>/` dispatch a bubbling "vim:open-search" on view.dom
+  // (the real listener lives on the editor container in EditorPaneContent).
+  view.dom.addEventListener("vim:open-search", () => {
+    searchOpens++;
+  });
 
   function blockStartPos(): number {
     return view.state.doc.resolve(view.state.selection.from).start();
@@ -348,6 +369,12 @@ export function mountVim(
     leaderMenu: () => leaderMenu,
     /** Number of times the command palette was asked to open. */
     commandPaletteOpens: () => commandPaletteOpens,
+    /** Number of times `<leader>n` asked to create a new page. */
+    newPageOpens: () => newPageOpens,
+    /** Number of times `<leader>s` asked to share the page. */
+    shareOpens: () => shareOpens,
+    /** Number of times `<leader>/` (or `/`) asked to open in-page search. */
+    searchOpens: () => searchOpens,
     clipboard: {
       get: () => clipboardStore.data,
       set: (text: string) => {

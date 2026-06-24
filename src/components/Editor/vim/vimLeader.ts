@@ -10,7 +10,12 @@
 export const LEADER_KEY = " ";
 
 /** Actions a leader binding can trigger. */
-export type LeaderActionId = "commandPalette" | "save";
+export type LeaderActionId =
+  | "commandPalette"
+  | "save"
+  | "search"
+  | "newPage"
+  | "share";
 
 export interface LeaderBinding {
   /** Key pressed after `<leader>`. */
@@ -24,6 +29,9 @@ export interface LeaderBinding {
 export const LEADER_BINDINGS: LeaderBinding[] = [
   { key: " ", label: "Command palette", action: "commandPalette" },
   { key: "w", label: "Write (save)", action: "save" },
+  { key: "/", label: "Search in page", action: "search" },
+  { key: "n", label: "New page", action: "newPage" },
+  { key: "s", label: "Share", action: "share" },
 ];
 
 /** Find the binding for a key pressed after the leader, if any. */

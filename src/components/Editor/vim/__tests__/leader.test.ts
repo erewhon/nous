@@ -12,6 +12,9 @@ describe("vimLeader registry", () => {
   it("maps the leader keys to actions", () => {
     expect(leaderBindingFor(" ")?.action).toBe("commandPalette");
     expect(leaderBindingFor("w")?.action).toBe("save");
+    expect(leaderBindingFor("/")?.action).toBe("search");
+    expect(leaderBindingFor("n")?.action).toBe("newPage");
+    expect(leaderBindingFor("s")?.action).toBe("share");
     expect(leaderBindingFor("z")).toBeUndefined();
   });
 
@@ -44,6 +47,27 @@ describe("leader menu (which-key)", () => {
     expect(h.leaderMenu()).toBeNull();
     await flush();
     expect(h.message()).toBe("written");
+  });
+
+  it("<leader>/ opens in-page search and closes the menu", () => {
+    h = mountVim([{ type: "paragraph", content: "hello" }]);
+    h.press(" ", "/");
+    expect(h.searchOpens()).toBe(1);
+    expect(h.leaderMenu()).toBeNull();
+  });
+
+  it("<leader>n requests a new page and closes the menu", () => {
+    h = mountVim([{ type: "paragraph", content: "hello" }]);
+    h.press(" ", "n");
+    expect(h.newPageOpens()).toBe(1);
+    expect(h.leaderMenu()).toBeNull();
+  });
+
+  it("<leader>s requests sharing and closes the menu", () => {
+    h = mountVim([{ type: "paragraph", content: "hello" }]);
+    h.press(" ", "s");
+    expect(h.shareOpens()).toBe(1);
+    expect(h.leaderMenu()).toBeNull();
   });
 
   it("Escape closes the menu without running an action", () => {

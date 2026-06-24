@@ -196,6 +196,13 @@ export const BlockNoteEditor = memo(
         Promise.resolve(),
       );
 
+      // Current page identity, read via refs so the vim extension (created once)
+      // sees fresh values for `<leader>s` (share) without being recreated.
+      const notebookIdRef = useRef(notebookId);
+      notebookIdRef.current = notebookId;
+      const pageIdRef = useRef(pageId);
+      pageIdRef.current = pageId;
+
       const vimExtension = useMemo(
         () =>
           VimExtension({
@@ -209,6 +216,17 @@ export const BlockNoteEditor = memo(
             onLeaderChange: vimSetLeaderMenu,
             onOpenCommandPalette: () =>
               window.dispatchEvent(new CustomEvent("open-command-palette")),
+            onNewPage: () =>
+              window.dispatchEvent(new CustomEvent("new-page")),
+            onShare: () =>
+              window.dispatchEvent(
+                new CustomEvent("open-share-dialog", {
+                  detail: {
+                    pageId: pageIdRef.current,
+                    notebookId: notebookIdRef.current,
+                  },
+                }),
+              ),
           }),
         // eslint-disable-next-line react-hooks/exhaustive-deps -- stable refs, create once
         [],
