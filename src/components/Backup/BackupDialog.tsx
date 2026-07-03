@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
-import { save, open } from "@tauri-apps/plugin-dialog";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { save, open } from "../../platform/dialog";
+import { listen, type UnlistenFn } from "../../platform/event";
 import {
   exportNotebookZip,
   importNotebookZip,

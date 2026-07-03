@@ -1,4 +1,5 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../platform/core";
+import { isTauri } from "./platform";
 import { daemonGet, daemonPost, daemonPut, daemonDelete } from "./daemon";
 import { enqueueFailedFileSave, enqueueFailedDatabaseSave } from "./saveOutbox";
 import { daemonEventBus } from "./daemonEvents";
@@ -2093,9 +2094,25 @@ export async function getLibrary(libraryId: string): Promise<Library> {
 }
 
 /**
+ * Stable stand-in for the daemon's library in the browser build, where
+ * library management is a shell concept. The fixed id keeps library-scoped
+ * store keys (aiStore, themeStore) consistent across browser sessions.
+ * Replace with a daemon /api/library endpoint when one lands.
+ */
+const BROWSER_DAEMON_LIBRARY: Library = {
+  id: "00000000-0000-4000-8000-000000000001",
+  name: "Nous",
+  path: "(daemon library)",
+  isDefault: true,
+  createdAt: new Date(0).toISOString(),
+  updatedAt: new Date(0).toISOString(),
+};
+
+/**
  * Get the current active library
  */
 export async function getCurrentLibrary(): Promise<Library> {
+  if (!isTauri()) return BROWSER_DAEMON_LIBRARY;
   return invoke<Library>("get_current_library");
 }
 

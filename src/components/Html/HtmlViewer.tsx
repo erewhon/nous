@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { convertFileSrc } from "@tauri-apps/api/core";
+import { convertFileSrc } from "../../platform/core";
 import type { Page } from "../../types/page";
 import * as api from "../../utils/api";
 

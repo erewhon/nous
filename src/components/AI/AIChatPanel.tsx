@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { listen, type UnlistenFn } from "../../platform/event";
 import { useAIStore, AI_PANEL_CONSTRAINTS } from "../../stores/aiStore";
 import { usePageStore } from "../../stores/pageStore";
 import { useNotebookStore } from "../../stores/notebookStore";
@@ -21,7 +21,7 @@ import {
 } from "../../utils/api";
 import { transcribeAudio, synthesizeText, saveAudioRecording } from "../../utils/audioApi";
 import { useAudioStore } from "../../stores/audioStore";
-import { convertFileSrc } from "@tauri-apps/api/core";
+import { convertFileSrc } from "../../platform/core";
 import type { ChatMessage, PageContext, AIAction, CreateNotebookArgs, CreatePageArgs, StreamEvent } from "../../types/ai";
 import type { EditorData } from "../../types/page";
 

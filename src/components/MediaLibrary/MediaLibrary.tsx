@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
-import { convertFileSrc } from "@tauri-apps/api/core";
-import { save } from "@tauri-apps/plugin-dialog";
-import { copyFile } from "@tauri-apps/plugin-fs";
+import { convertFileSrc } from "../../platform/core";
+import { save } from "../../platform/dialog";
+import { copyFile } from "../../platform/fs";
 import * as api from "../../utils/api";
 import type { MediaAssetInfo } from "../../utils/api";
 import { useToastStore } from "../../stores/toastStore";

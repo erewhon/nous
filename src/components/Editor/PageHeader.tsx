@@ -17,7 +17,7 @@ import {
   type EditorConfig,
   type EditSession,
 } from "../../utils/api";
-import { save, open } from "@tauri-apps/plugin-dialog";
+import { save, open } from "../../platform/dialog";
 import { TagEditor } from "../Tags";
 import { SaveAsTemplateDialog } from "../TemplateDialog";
 import { PageSettingsDialog } from "../PageSettings";

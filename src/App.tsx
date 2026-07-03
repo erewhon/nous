@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from "react";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWindow } from "./platform/window";
 import { Layout } from "./components/Layout/Layout";
 import { CommandPalette } from "./components/CommandPalette/CommandPalette";
 import { GraphView } from "./components/Graph/GraphView";
@@ -49,7 +49,7 @@ import { useToastStore } from "./stores/toastStore";
 import { useWindowLibrary } from "./contexts/WindowContext";
 import { useCloudAutoSync } from "./cloud";
 import { exportPageToFile } from "./utils/api";
-import { save } from "@tauri-apps/plugin-dialog";
+import { save } from "./platform/dialog";
 
 function App() {
   useAppInit();

@@ -6,7 +6,7 @@
  */
 
 import { create } from "zustand";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../platform/core";
 import type {
   EncryptionConfig,
   EncryptionStats,

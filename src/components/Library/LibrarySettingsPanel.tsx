@@ -5,7 +5,7 @@
  */
 
 import { useState, useEffect } from "react";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { listen, type UnlistenFn } from "../../platform/event";
 import { useLibraryStore } from "../../stores/libraryStore";
 import { useSyncStore } from "../../stores/syncStore";
 import type { LibraryStats } from "../../types/library";

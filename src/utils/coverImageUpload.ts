@@ -1,5 +1,5 @@
-import { invoke, convertFileSrc } from "@tauri-apps/api/core";
-import { writeFile, mkdir, exists } from "@tauri-apps/plugin-fs";
+import { invoke, convertFileSrc } from "../platform/core";
+import { writeFile, mkdir, exists } from "../platform/fs";
 
 /**
  * Upload a cover image for a notebook and return a convertFileSrc URL.

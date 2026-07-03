@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { InfographicResult } from "../../types/infographic";
-import { save } from "@tauri-apps/plugin-dialog";
-import { copyFile, writeFile } from "@tauri-apps/plugin-fs";
+import { save } from "../../platform/dialog";
+import { copyFile, writeFile } from "../../platform/fs";
 
 interface InfographicPreviewProps {
   result: InfographicResult;

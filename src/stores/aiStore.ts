@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../platform/core";
 import type { ChatMessage, ProviderType, ProviderConfig, ModelConfig } from "../types/ai";
 import { createDefaultProviderConfig, DEFAULT_MODELS } from "../types/ai";
 import { libraryScopedKey } from "../utils/libraryStorage";

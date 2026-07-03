@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../platform/core";
 import type { TTSConfig, AudioGenerationResult } from "../types/audio";
 import type { TranscriptionResult } from "../types/audio";
 

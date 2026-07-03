@@ -1,5 +1,5 @@
-import { invoke } from "@tauri-apps/api/core";
-import { writeFile, mkdir, exists } from "@tauri-apps/plugin-fs";
+import { invoke } from "../../platform/core";
+import { writeFile, mkdir, exists } from "../../platform/fs";
 import type { VideoUploadResponse } from "../../types/video";
 import {
   SUPPORTED_VIDEO_MIMETYPES,

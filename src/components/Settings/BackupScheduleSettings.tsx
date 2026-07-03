@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { listen, type UnlistenFn } from "../../platform/event";
 import {
   getBackupSettings,
   updateBackupSettings,

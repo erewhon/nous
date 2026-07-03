@@ -3,7 +3,7 @@ import type {
   BlockToolConstructorOptions,
   ToolConfig,
 } from "@editorjs/editorjs";
-import { convertFileSrc } from "@tauri-apps/api/core";
+import { convertFileSrc } from "../../platform/core";
 import { saveAudioRecording, transcribeAudio } from "../../utils/audioApi";
 import type { AudioBlockData } from "../../types/audio";
 

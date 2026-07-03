@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
-import { convertFileSrc } from "@tauri-apps/api/core";
+import { convertFileSrc } from "../../platform/core";
 import type { Page as PageType } from "../../types/page";
 import type { PDFHighlight } from "../../types/pdf";
 import { HIGHLIGHT_COLORS } from "../../types/pdf";

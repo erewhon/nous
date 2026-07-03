@@ -16,8 +16,8 @@
  */
 
 import { readCrumbs } from "./breadcrumbs";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { invoke } from "@tauri-apps/api/core";
+import { listen, type UnlistenFn } from "../platform/event";
+import { invoke } from "../platform/core";
 
 const FREEZE_THRESHOLD_MS = 3000; // 3 seconds without a frame = frozen
 

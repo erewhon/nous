@@ -13,7 +13,7 @@ import {
   type DragOverEvent,
 } from "@dnd-kit/core";
 import { arrayMove } from "@dnd-kit/sortable";
-import { open } from "@tauri-apps/plugin-dialog";
+import { open } from "../../platform/dialog";
 import type { Folder, Page, Section } from "../../types/page";
 import type { Notebook, PageSortOption } from "../../types/notebook";
 import type { ObjectType } from "../../types/database";

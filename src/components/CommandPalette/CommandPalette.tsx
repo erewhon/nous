@@ -17,7 +17,7 @@ import { useThemeStore } from "../../stores/themeStore";
 import { useToastStore } from "../../stores/toastStore";
 import { searchPages, exportPageToFile, importMarkdownFile, convertDocument, importMarkdown } from "../../utils/api";
 import { DAEMON_BASE_URL, daemonPost } from "../../utils/daemon";
-import { save, open } from "@tauri-apps/plugin-dialog";
+import { save, open } from "../../platform/dialog";
 import { highlightText } from "../../utils/highlightText";
 import { rankCommands, rankSearchResults } from "./rankCommands";
 import type { SearchResult, PageType } from "../../types/page";

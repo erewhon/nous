@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import ePub, { type Book, type Rendition, type NavItem, type Location } from "epubjs";
-import { convertFileSrc } from "@tauri-apps/api/core";
+import { convertFileSrc } from "../../platform/core";
 import type { Page } from "../../types/page";
 import { useLinkedFileSync } from "../../hooks/useLinkedFileSync";
 import { LinkedFileChangedBanner } from "../LinkedFile";

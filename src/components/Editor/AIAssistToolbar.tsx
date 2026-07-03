@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { aiChatStream } from "../../utils/api";
-import { listen } from "@tauri-apps/api/event";
+import { listen } from "../../platform/event";
 import { useAIStore } from "../../stores/aiStore";
 import type { StreamEvent } from "../../types/ai";
 

@@ -3,9 +3,9 @@ import { useAudioStore } from "../../stores/audioStore";
 import { useAIStore } from "../../stores/aiStore";
 import { useToastStore } from "../../stores/toastStore";
 import { generatePageAudio } from "../../utils/api";
-import { convertFileSrc } from "@tauri-apps/api/core";
-import { save } from "@tauri-apps/plugin-dialog";
-import { copyFile } from "@tauri-apps/plugin-fs";
+import { convertFileSrc } from "../../platform/core";
+import { save } from "../../platform/dialog";
+import { copyFile } from "../../platform/fs";
 import type { AudioMode, PodcastLength } from "../../types/audio";
 import type { AudioGenerationResult } from "../../types/audio";
 

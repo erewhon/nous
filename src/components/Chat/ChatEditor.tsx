@@ -5,9 +5,9 @@ import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import rehypeRaw from "rehype-raw";
 import "katex/dist/katex.min.css";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { save } from "@tauri-apps/plugin-dialog";
-import { writeTextFile } from "@tauri-apps/plugin-fs";
+import { listen, type UnlistenFn } from "../../platform/event";
+import { save } from "../../platform/dialog";
+import { writeTextFile } from "../../platform/fs";
 import {
   DndContext,
   closestCenter,

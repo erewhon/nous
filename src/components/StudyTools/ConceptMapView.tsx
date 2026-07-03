@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import * as d3 from "d3";
-import { save } from "@tauri-apps/plugin-dialog";
-import { writeTextFile } from "@tauri-apps/plugin-fs";
+import { save } from "../../platform/dialog";
+import { writeTextFile } from "../../platform/fs";
 import type { ConceptGraph, ConceptNode } from "../../types/studyTools";
 import { useToastStore } from "../../stores/toastStore";
 

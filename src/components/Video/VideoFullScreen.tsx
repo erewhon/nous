@@ -1,5 +1,5 @@
 import { useEffect, useRef, useCallback, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../../platform/core";
 import { useVideoStore } from "../../stores/videoStore";
 import { useAIStore } from "../../stores/aiStore";
 import { TranscriptPanel } from "./TranscriptPanel";

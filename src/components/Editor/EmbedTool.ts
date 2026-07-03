@@ -3,7 +3,7 @@ import type {
   BlockToolConstructorOptions,
   API,
 } from "@editorjs/editorjs";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../../platform/core";
 
 type EmbedType = "page" | "url";
 

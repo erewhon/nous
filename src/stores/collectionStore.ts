@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { listen, type UnlistenFn } from "../platform/event";
 import { aiChatStream } from "../utils/api";
 import { usePageStore } from "./pageStore";
 import type { StreamEvent } from "../types/ai";

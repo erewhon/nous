@@ -1,6 +1,6 @@
-import { invoke } from "@tauri-apps/api/core";
-import { convertFileSrc } from "@tauri-apps/api/core";
-import { writeFile, mkdir, exists } from "@tauri-apps/plugin-fs";
+import { invoke } from "../../platform/core";
+import { convertFileSrc } from "../../platform/core";
+import { writeFile, mkdir, exists } from "../../platform/fs";
 
 interface ImageUploaderConfig {
   notebookId: string;

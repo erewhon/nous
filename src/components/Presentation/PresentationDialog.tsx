@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
-import { save } from "@tauri-apps/plugin-dialog";
-import { writeTextFile } from "@tauri-apps/plugin-fs";
+import { save } from "../../platform/dialog";
+import { writeTextFile } from "../../platform/fs";
 import { useToastStore } from "../../stores/toastStore";
 import type { Page } from "../../types/page";
 import { generatePresentation } from "./api";

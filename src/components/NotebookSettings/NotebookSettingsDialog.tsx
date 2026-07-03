@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { listen, type UnlistenFn } from "../../platform/event";
 import type { Notebook, AIProviderType } from "../../types/notebook";
 import type { SystemPromptMode } from "../../types/page";
 import type { SyncMode, AuthType } from "../../types/sync";

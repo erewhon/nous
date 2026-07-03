@@ -2,7 +2,7 @@
  * Tauri invoke wrappers for collab commands.
  */
 
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../platform/core";
 
 export interface CollabSession {
   id: string;

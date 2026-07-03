@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../platform/core";
 
 /** In-memory cache: file path → video stream URL */
 const cache = new Map<string, string>();

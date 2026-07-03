@@ -3,7 +3,7 @@ import { useDrawingStore } from "../../stores/drawingStore";
 import { FabricCanvas, type FabricCanvasRef } from "./FabricCanvas";
 import { DrawingToolbar } from "./DrawingToolbar";
 import type { FabricCanvasData, PageAnnotation } from "../../types/drawing";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../../platform/core";
 
 interface PageAnnotationOverlayProps {
   pageId: string;

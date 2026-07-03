@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { listen } from "@tauri-apps/api/event";
+import { listen } from "../platform/event";
 import type {
   MonitorTarget,
   CaptureEvent,
