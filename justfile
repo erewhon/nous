@@ -40,6 +40,21 @@ build:
 preview:
     pnpm preview
 
+# === Web (browser) build — desktop frontend without the Tauri shell ===
+
+# Build the browser bundle into dist-web/ (served by the daemon at /app)
+web-build:
+    pnpm typecheck
+    pnpm exec vite build --config vite.web.config.ts
+
+# Run the Vite dev server for the browser build against a local daemon
+web-dev:
+    pnpm exec vite --config vite.web.config.ts
+
+# Preview the built browser bundle from dist-web/
+web-preview:
+    pnpm exec vite preview --config vite.web.config.ts
+
 # === Daemon / CLI ===
 
 # Run the nous daemon (debug build) with PyO3 env set up

@@ -387,3 +387,37 @@ The Rust backend embeds a Python interpreter via PyO3, enabling direct function 
 - Python venv bundled with app distribution
 - Async operations use `pyo3-asyncio` to bridge tokio and asyncio
 - GIL management handled by PyO3 (use `Python::allow_threads` for CPU-bound Rust)
+
+## Web (Browser) Build
+
+The desktop React frontend also builds as a plain browser bundle — same app,
+no Tauri shell — speaking the daemon HTTP/WS API. This is the web-parity
+path (Forge: "Feature: Web Frontend Parity"); the `web/` SPA is the frozen
+E2E cloud viewer and is unrelated.
+
+**Recipes**
+
+- `just web-build` — typecheck + build into `dist-web/` (base path `/app/`,
+  intended to be served by the daemon)
+- `just web-dev` — Vite dev server at `http://localhost:5180/app/` against a
+  local daemon
+- `just web-preview` — serve the built `dist-web/`
+
+**Daemon URL resolution** (`src/utils/daemonConfig.ts`), highest priority
+first:
+
+1. `localStorage["nous-daemon-url"]` — runtime override
+2. `VITE_NOUS_DAEMON_URL` — baked in at build time
+3. Same-origin — production browser bundles only (the daemon serves `/app`)
+4. `http://localhost:7667` — default (desktop, and browser dev)
+
+**API key**: in the Tauri shell it comes from the daemon key file via
+`get_daemon_api_key`; in a browser set
+`localStorage["nous-daemon-api-key"]` (see `~/.local/share/nous/daemon-api-key`;
+use the `rw:` or `ro:` key as appropriate). No key means the daemon runs
+authless on localhost.
+
+**Platform layer**: all `@tauri-apps/*` usage goes through `src/platform/`
+(invoke/dialog/fs/event/window). In a browser, shell-only calls reject with
+`PlatformUnavailableError` — catch it to degrade, never let it crash the
+shell. Do not import `@tauri-apps/*` directly outside `src/platform/`.
