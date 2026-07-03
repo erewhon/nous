@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { DAEMON_BASE_URL } from "../../utils/daemon";
 import { useNotebookStore } from "../../stores/notebookStore";
 import { usePageStore } from "../../stores/pageStore";
 import { useToastStore } from "../../stores/toastStore";
@@ -370,7 +371,8 @@ export function ShareDialog({
                       <div key={share.id} className="share-existing-item">
                         <div className="share-existing-info">
                           <span className="share-existing-url">
-                            {share.externalUrl || `localhost:7667/share/${share.id}`}
+                            {share.externalUrl ||
+                              `${DAEMON_BASE_URL.replace(/^https?:\/\//, "")}/share/${share.id}`}
                           </span>
                           <span className="share-existing-meta">
                             {share.expiresAt

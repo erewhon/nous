@@ -16,6 +16,7 @@ import { useSectionStore } from "../../stores/sectionStore";
 import { useThemeStore } from "../../stores/themeStore";
 import { useToastStore } from "../../stores/toastStore";
 import { searchPages, exportPageToFile, importMarkdownFile, convertDocument, importMarkdown } from "../../utils/api";
+import { DAEMON_BASE_URL, daemonPost } from "../../utils/daemon";
 import { save, open } from "@tauri-apps/plugin-dialog";
 import { highlightText } from "../../utils/highlightText";
 import { rankCommands, rankSearchResults } from "./rankCommands";
@@ -203,7 +204,7 @@ export function CommandPalette({
       category: "action",
       action: () => {
         if (selectedNotebookId) {
-          window.open(`http://127.0.0.1:7667/finance/${selectedNotebookId}`, "_blank");
+          window.open(`${DAEMON_BASE_URL}/finance/${selectedNotebookId}`, "_blank");
           onClose();
         }
       },
@@ -219,7 +220,7 @@ export function CommandPalette({
       category: "action",
       action: () => {
         if (selectedNotebookId) {
-          window.open(`http://127.0.0.1:7667/gallery/${selectedNotebookId}`, "_blank");
+          window.open(`${DAEMON_BASE_URL}/gallery/${selectedNotebookId}`, "_blank");
           onClose();
         }
       },
@@ -236,14 +237,11 @@ export function CommandPalette({
       action: () => {
         onClose();
         if (selectedNotebookId) {
-          fetch(`http://127.0.0.1:7667/api/notebooks/${selectedNotebookId}/agile-daily`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ date: "tomorrow" }),
-          })
-            .then((res) => res.json())
-            .then((data) => {
-              const result = data.data || data;
+          daemonPost<{ pageId?: string }>(
+            `/api/notebooks/${selectedNotebookId}/agile-daily`,
+            { date: "tomorrow" }
+          )
+            .then((result) => {
               if (result.pageId) selectPage(result.pageId);
             })
             .catch((err) => console.error("Plan tomorrow failed:", err));
@@ -264,19 +262,14 @@ export function CommandPalette({
         const url = window.prompt("Paste artwork URL:");
         if (url && selectedNotebookId) {
           // Show a notification and trigger the import via daemon API
-          fetch(`http://127.0.0.1:7667/api/notebooks/${selectedNotebookId}/import/artwork`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ url }),
-          })
-            .then((res) => res.json())
-            .then((data) => {
-              const result = data.data || data;
-              if (result.title) {
+          daemonPost<{ title?: string; pageId?: string }>(
+            `/api/notebooks/${selectedNotebookId}/import/artwork`,
+            { url }
+          )
+            .then((result) => {
+              if (result.title && result.pageId) {
                 // Select the new page
-                if (result.pageId) {
-                  selectPage(result.pageId);
-                }
+                selectPage(result.pageId);
               }
             })
             .catch((err) => console.error("Artwork import failed:", err));

@@ -1,37 +1,34 @@
-// HTTP client for the Nous daemon API (localhost:7667).
+// HTTP client for the Nous daemon API.
 //
 // All reads/writes for notebook/page/folder/etc. data should go through this
 // module rather than Tauri commands. The daemon is the single writer; events
 // are broadcast via WebSocket to all connected clients.
+//
+// Base URL and API key resolution live in daemonConfig.ts — on desktop this
+// is localhost:7667 + the shell-provided key; in the web-parity build both
+// are configurable (localStorage / build env / same-origin).
 
-import { invoke } from "@tauri-apps/api/core";
+import { getDaemonBaseUrl, loadDaemonApiKey } from "./daemonConfig";
 
-const DAEMON_BASE_URL = "http://localhost:7667";
+const DAEMON_BASE_URL = getDaemonBaseUrl();
 
 let cachedApiKey: string | null | undefined = undefined;
 let keyLoadPromise: Promise<string | null> | null = null;
 
 /**
- * Load the daemon API key from the key file.
- * Cached after first successful load. Returns null if auth is disabled
- * (no key file — daemon is on localhost without auth).
+ * Load the daemon API key (shell key file on desktop, localStorage in the
+ * browser). Cached after first load. Returns null if auth is disabled
+ * (no key — daemon is on localhost without auth).
  */
 async function loadApiKey(): Promise<string | null> {
   if (cachedApiKey !== undefined) return cachedApiKey;
   if (keyLoadPromise) return keyLoadPromise;
 
-  keyLoadPromise = invoke<string | null>("get_daemon_api_key")
-    .then((key) => {
-      cachedApiKey = key;
-      keyLoadPromise = null;
-      return key;
-    })
-    .catch((err) => {
-      console.warn("[daemon] Failed to load API key:", err);
-      cachedApiKey = null;
-      keyLoadPromise = null;
-      return null;
-    });
+  keyLoadPromise = loadDaemonApiKey().then((key) => {
+    cachedApiKey = key;
+    keyLoadPromise = null;
+    return key;
+  });
 
   return keyLoadPromise;
 }

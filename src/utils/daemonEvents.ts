@@ -1,11 +1,12 @@
 // WebSocket client for daemon event stream.
 //
-// Connects to ws://localhost:7667/api/events and dispatches events to registered
-// listeners. Handles reconnection with exponential backoff.
+// Connects to the daemon's /api/events endpoint (ws:// or wss:// derived
+// from the resolved base URL — see daemonConfig.ts) and dispatches events to
+// registered listeners. Handles reconnection with exponential backoff.
 
-import { invoke } from "@tauri-apps/api/core";
+import { getDaemonBaseUrl, loadDaemonApiKey, toDaemonWsUrl } from "./daemonConfig";
 
-const DAEMON_WS_URL = "ws://localhost:7667/api/events";
+const DAEMON_WS_URL = `${toDaemonWsUrl(getDaemonBaseUrl())}/api/events`;
 const RECONNECT_BASE_MS = 1000;
 const RECONNECT_MAX_MS = 30000;
 
@@ -133,11 +134,7 @@ class DaemonEventBus {
 
     // Load API key if we haven't yet
     if (this.apiKey === undefined) {
-      try {
-        this.apiKey = await invoke<string | null>("get_daemon_api_key");
-      } catch {
-        this.apiKey = null;
-      }
+      this.apiKey = await loadDaemonApiKey();
     }
 
     this.connect();
