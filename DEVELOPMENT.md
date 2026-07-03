@@ -421,3 +421,11 @@ authless on localhost.
 (invoke/dialog/fs/event/window). In a browser, shell-only calls reject with
 `PlatformUnavailableError` — catch it to degrade, never let it crash the
 shell. Do not import `@tauri-apps/*` directly outside `src/platform/`.
+
+**Serving from the daemon**: `just web-deploy` builds and rsyncs `dist-web/`
+to `~/.local/share/nous/web-app` (override with `NOUS_WEB_APP_DIR` — the
+daemon reads the same variable), where the daemon serves it at
+`http://localhost:7667/app`. `/app` is a public route (static UI only); the
+API stays key-gated. Hashed `assets/` get immutable cache headers;
+`index.html` is `no-cache`. Restart the daemon after installing a new
+binary: `systemctl --user restart nous-daemon`.

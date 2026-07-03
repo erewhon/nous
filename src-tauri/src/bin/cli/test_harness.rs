@@ -192,6 +192,8 @@ impl TestEnv {
                 nous_lib::commands::BackupScheduler::inert(),
             ),
             library_path: library_path.clone(),
+            // No web bundle in the harness — /app routes 404 gracefully.
+            web_app_dir: library_path.join("web-app"),
             event_tx,
         });
 

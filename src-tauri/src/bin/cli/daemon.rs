@@ -69,6 +69,10 @@ pub struct DaemonState {
     #[cfg(feature = "plugins")]
     pub plugin_host: Option<Arc<Mutex<plugins::PluginHost>>>,
     pub library_path: PathBuf,
+    /// Directory holding the built web frontend (dist-web contents), served
+    /// at /app. `NOUS_WEB_APP_DIR` overrides; defaults to {data_dir}/web-app.
+    /// Serving 404s gracefully when the directory doesn't exist.
+    pub web_app_dir: PathBuf,
     pub event_tx: nous_lib::events::EventSender,
 }
 
@@ -313,6 +317,19 @@ pub async fn run(library_name: Option<&str>, port: Option<u16>, bind: Option<&st
     let backup_scheduler = Arc::new(start_backup_scheduler(Arc::clone(&storage_arc)));
     log::info!("Backup scheduler started");
 
+    // Web bundle directory for /app (see `just web-deploy`)
+    let web_app_dir = std::env::var_os("NOUS_WEB_APP_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| data_dir.join("web-app"));
+    if web_app_dir.join("index.html").exists() {
+        log::info!("Web app bundle found, serving at /app from {}", web_app_dir.display());
+    } else {
+        log::info!(
+            "No web app bundle at {} — /app will 404 (deploy with `just web-deploy`)",
+            web_app_dir.display()
+        );
+    }
+
     // Build shared daemon state
     let state = Arc::new(DaemonState {
         storage: storage_arc,
@@ -333,6 +350,7 @@ pub async fn run(library_name: Option<&str>, port: Option<u16>, bind: Option<&st
         #[cfg(feature = "plugins")]
         plugin_host,
         library_path: library_path.clone(),
+        web_app_dir,
         event_tx,
     });
 

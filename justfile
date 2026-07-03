@@ -55,6 +55,16 @@ web-dev:
 web-preview:
     pnpm exec vite preview --config vite.web.config.ts
 
+# Build and deploy the browser bundle where the daemon serves it (/app).
+# Override the target with NOUS_WEB_APP_DIR (daemon reads the same variable).
+web-deploy: web-build
+    #!/usr/bin/env bash
+    set -e
+    TARGET="${NOUS_WEB_APP_DIR:-${HOME}/.local/share/nous/web-app}"
+    mkdir -p "${TARGET}"
+    rsync -a --delete dist-web/ "${TARGET}/"
+    echo "Deployed dist-web/ -> ${TARGET} (served at /app)"
+
 # === Daemon / CLI ===
 
 # Run the nous daemon (debug build) with PyO3 env set up

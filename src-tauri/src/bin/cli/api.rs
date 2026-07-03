@@ -473,6 +473,10 @@ fn is_public_route(path: &str) -> bool {
         || path.starts_with("/gallery/")
         || path.starts_with("/finance/")
         || path.starts_with("/api/image-cache/")
+        // The web bundle is static UI, not data; /api/* stays key-gated and
+        // the homelab front door adds SSO on top.
+        || path == "/app"
+        || path.starts_with("/app/")
 }
 
 /// Auth state: None means auth is disabled (localhost, no key file).
@@ -690,6 +694,10 @@ pub fn build_router(state: AppState, auth: AuthState) -> Router {
         .route("/share/{share_id}", get(serve_share))
         .route("/share/{share_id}/", get(serve_share))
         .route("/share/{share_id}/{*path}", get(serve_share_file))
+        // Web frontend bundle (dist-web) — see `just web-deploy`
+        .route("/app", get(serve_web_app_root))
+        .route("/app/", get(serve_web_app_root))
+        .route("/app/{*path}", get(serve_web_app_file))
         .route("/api/shares", get(list_shares))
         .route("/api/shares/{share_id}", delete(delete_share))
         // Folders and sections
@@ -2574,8 +2582,116 @@ fn mime_for_path(path: &str) -> &'static str {
         "ico" => "image/x-icon",
         "woff" => "font/woff",
         "woff2" => "font/woff2",
+        "ttf" => "font/ttf",
+        "otf" => "font/otf",
         _ => "application/octet-stream",
     }
+}
+
+// ===== Web app bundle (/app) =====
+//
+// Serves the built browser frontend (dist-web contents, base path /app/)
+// from state.web_app_dir. Single origin with the API, so no CORS. See
+// Forge "Feature: Web Frontend Parity" and `just web-deploy`.
+
+/// Resolve a request path inside the web-app bundle directory.
+///
+/// Returns the file to serve and whether it's the SPA index fallback.
+/// `None` means 404. Traversal is rejected structurally: only `Normal`
+/// (and harmless `CurDir`) path components are allowed, so `..`, absolute
+/// paths, and drive prefixes can never escape `base`.
+fn resolve_web_app_path(
+    base: &std::path::Path,
+    req_path: &str,
+) -> Option<(std::path::PathBuf, bool)> {
+    let trimmed = req_path.trim_start_matches('/');
+    let rel = std::path::Path::new(trimmed);
+    if rel
+        .components()
+        .any(|c| !matches!(c, std::path::Component::Normal(_) | std::path::Component::CurDir))
+    {
+        return None;
+    }
+
+    if !trimmed.is_empty() {
+        let candidate = base.join(rel);
+        if candidate.is_file() {
+            return Some((candidate, false));
+        }
+        // Paths that look like files (an extension in the last segment) get a
+        // real 404 — falling back to index.html for a missing .js chunk would
+        // serve HTML where the browser expects a script.
+        let last = trimmed.rsplit('/').next().unwrap_or(trimmed);
+        if last.contains('.') {
+            return None;
+        }
+    }
+
+    // Root, or an extension-less deep link: SPA fallback to index.html.
+    let index = base.join("index.html");
+    if index.is_file() {
+        Some((index, true))
+    } else {
+        None
+    }
+}
+
+/// Cache policy: hashed files under assets/ are immutable; everything else
+/// (index.html in particular) must revalidate so deploys take effect.
+fn web_app_cache_control(file: &std::path::Path, is_index_fallback: bool) -> &'static str {
+    let in_assets = !is_index_fallback
+        && file
+            .parent()
+            .and_then(|p| p.file_name())
+            .is_some_and(|n| n == "assets");
+    if in_assets {
+        "public, max-age=31536000, immutable"
+    } else {
+        "no-cache"
+    }
+}
+
+async fn serve_web_app(
+    state: AppState,
+    req_path: &str,
+) -> Result<axum::response::Response, (StatusCode, Json<ApiError>)> {
+    use axum::http::header;
+
+    let (file, is_fallback) = resolve_web_app_path(&state.web_app_dir, req_path)
+        .ok_or_else(|| {
+            api_err(
+                StatusCode::NOT_FOUND,
+                "Not found. If the web bundle isn't deployed yet, run `just web-deploy`.",
+            )
+        })?;
+
+    let bytes = tokio::fs::read(&file)
+        .await
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, format!("Read failed: {}", e)))?;
+
+    let content_type = mime_for_path(&file.to_string_lossy());
+    let cache_control = web_app_cache_control(&file, is_fallback);
+    Ok((
+        [
+            (header::CONTENT_TYPE, content_type),
+            (header::CACHE_CONTROL, cache_control),
+        ],
+        bytes,
+    )
+        .into_response())
+}
+
+async fn serve_web_app_root(
+    State(state): State<AppState>,
+) -> Result<axum::response::Response, (StatusCode, Json<ApiError>)> {
+    serve_web_app(state, "").await
+}
+
+async fn serve_web_app_file(
+    State(state): State<AppState>,
+    Path(path): Path<String>,
+) -> Result<axum::response::Response, (StatusCode, Json<ApiError>)> {
+    serve_web_app(state, &path).await
 }
 
 async fn list_shares(
@@ -4891,9 +5007,106 @@ async fn agile_daily_note(
 #[cfg(test)]
 mod tests {
     use super::{
-        changes_in_intervals, merge_database_3way, reattach_concurrent_rows, valid_snapshot_name,
+        changes_in_intervals, is_public_route, merge_database_3way, reattach_concurrent_rows,
+        resolve_web_app_path, valid_snapshot_name, web_app_cache_control,
     };
     use std::collections::HashSet;
+
+    // ----- Web app bundle serving (/app) -----
+
+    /// Build a throwaway bundle dir: index.html + assets/app-HASH.js.
+    fn make_bundle() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("index.html"), "<html>app</html>").unwrap();
+        std::fs::create_dir(dir.path().join("assets")).unwrap();
+        std::fs::write(dir.path().join("assets/app-abc123.js"), "js").unwrap();
+        dir
+    }
+
+    #[test]
+    fn web_app_serves_index_and_assets() {
+        let dir = make_bundle();
+        let base = dir.path();
+
+        // Root and /app/ → index.html (fallback flag set)
+        let (f, fb) = resolve_web_app_path(base, "").unwrap();
+        assert!(f.ends_with("index.html"));
+        assert!(fb);
+
+        // Existing asset → the file itself, not a fallback
+        let (f, fb) = resolve_web_app_path(base, "assets/app-abc123.js").unwrap();
+        assert!(f.ends_with("assets/app-abc123.js"));
+        assert!(!fb);
+
+        // index.html requested explicitly
+        let (f, fb) = resolve_web_app_path(base, "index.html").unwrap();
+        assert!(f.ends_with("index.html"));
+        assert!(!fb);
+    }
+
+    #[test]
+    fn web_app_spa_fallback_only_for_extensionless_paths() {
+        let dir = make_bundle();
+        let base = dir.path();
+
+        // Extension-less deep link → index.html (SPA fallback)
+        let (f, fb) = resolve_web_app_path(base, "some/deep/link").unwrap();
+        assert!(f.ends_with("index.html"));
+        assert!(fb);
+
+        // Missing file with an extension → hard 404, not HTML-as-JS
+        assert!(resolve_web_app_path(base, "assets/missing-chunk.js").is_none());
+        assert!(resolve_web_app_path(base, "favicon.ico").is_none());
+    }
+
+    #[test]
+    fn web_app_rejects_traversal() {
+        let dir = make_bundle();
+        let base = dir.path();
+
+        assert!(resolve_web_app_path(base, "../secrets.txt").is_none());
+        assert!(resolve_web_app_path(base, "assets/../../etc/passwd").is_none());
+        assert!(resolve_web_app_path(base, "..").is_none());
+
+        // Leading slashes are trimmed, so "/etc/passwd" is just a missing
+        // relative path — it must resolve inside the bundle (SPA fallback),
+        // never to the real /etc/passwd.
+        let (f, fb) = resolve_web_app_path(base, "/etc/passwd").unwrap();
+        assert!(f.starts_with(base) && f.ends_with("index.html"));
+        assert!(fb);
+    }
+
+    #[test]
+    fn web_app_404s_without_bundle() {
+        let dir = tempfile::tempdir().unwrap(); // no index.html
+        assert!(resolve_web_app_path(dir.path(), "").is_none());
+        assert!(resolve_web_app_path(dir.path(), "anything").is_none());
+    }
+
+    #[test]
+    fn web_app_cache_policy() {
+        let dir = make_bundle();
+        let base = dir.path();
+
+        let (asset, fb) = resolve_web_app_path(base, "assets/app-abc123.js").unwrap();
+        assert_eq!(
+            web_app_cache_control(&asset, fb),
+            "public, max-age=31536000, immutable"
+        );
+
+        let (index, fb) = resolve_web_app_path(base, "").unwrap();
+        assert_eq!(web_app_cache_control(&index, fb), "no-cache");
+    }
+
+    #[test]
+    fn web_app_routes_are_public() {
+        assert!(is_public_route("/app"));
+        assert!(is_public_route("/app/"));
+        assert!(is_public_route("/app/assets/app-abc123.js"));
+        // But the API stays gated
+        assert!(!is_public_route("/api/notebooks"));
+        assert!(!is_public_route("/apple")); // no prefix confusion
+    }
 
     #[test]
     fn changes_in_intervals_counts_oplog_between_snapshots() {
