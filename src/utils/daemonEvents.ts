@@ -100,6 +100,11 @@ export interface TagEventData {
 export interface DatabaseEventData {
   notebookId?: string;
   pageId?: string;
+  // What the daemon actually emits for database.rows_* (see api.rs
+  // emit_event call sites). A database is a file-backed page, so
+  // databaseId IS the database page's id — match on either.
+  databaseId?: string;
+  rowsUpdated?: number;
 }
 
 export interface GoalEventData {

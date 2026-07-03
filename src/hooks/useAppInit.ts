@@ -193,9 +193,12 @@ export function useAppInit() {
           case "database.rows_deleted": {
             // Database content lives on a page; refreshing the page picks
             // up row/column changes via the standard page-content read.
+            // The daemon emits `databaseId` (== the database page's id)
+            // for rows_* events; `pageId` is kept for compatibility.
             const data = evt.data as DatabaseEventData;
-            if (data.pageId) {
-              refreshPages([data.pageId]).catch(warn("refreshPages"));
+            const dbPageId = data.pageId ?? data.databaseId;
+            if (dbPageId) {
+              refreshPages([dbPageId]).catch(warn("refreshPages"));
             }
             break;
           }

@@ -267,7 +267,10 @@ export function DatabaseEditor({
         return;
       }
       const data = evt.data as DatabaseEventData;
-      if (data.pageId !== page.id) return;
+      // The daemon emits `databaseId` (== the database page's id); older
+      // assumptions used `pageId`. Accept both so the match survives either
+      // payload shape.
+      if ((data.pageId ?? data.databaseId) !== page.id) return;
 
       if (pendingContentRef.current) {
         // Unsaved local edit pending — defer so we don't discard it.

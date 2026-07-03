@@ -101,7 +101,15 @@ describe("DatabaseEditor live refresh (Bug 2)", () => {
     render(<DatabaseEditor page={makePage()} notebookId={NB} />);
     await waitFor(() => expect(getDatabase).toHaveBeenCalledTimes(1));
 
-    emitDaemon("database.rows_added", { notebookId: NB, pageId: PG });
+    // Real daemon payload shape: rows_* events carry `databaseId` (== the
+    // database page's id), NOT `pageId` — see api.rs emit_event call sites.
+    // Asserting the wire shape here is the point: an earlier version of this
+    // test emitted `pageId` and passed while live refresh was broken in prod.
+    emitDaemon("database.rows_added", {
+      notebookId: NB,
+      databaseId: PG,
+      rowsUpdated: 1,
+    });
 
     await waitFor(() => expect(getDatabase).toHaveBeenCalledTimes(2));
   });
@@ -110,11 +118,19 @@ describe("DatabaseEditor live refresh (Bug 2)", () => {
     render(<DatabaseEditor page={makePage()} notebookId={NB} />);
     await waitFor(() => expect(getDatabase).toHaveBeenCalledTimes(1));
 
-    emitDaemon("database.rows_updated", { notebookId: NB, pageId: PG });
+    emitDaemon("database.rows_updated", { notebookId: NB, databaseId: PG });
     await waitFor(() => expect(getDatabase).toHaveBeenCalledTimes(2));
 
-    emitDaemon("database.rows_deleted", { notebookId: NB, pageId: PG });
+    emitDaemon("database.rows_deleted", { notebookId: NB, databaseId: PG });
     await waitFor(() => expect(getDatabase).toHaveBeenCalledTimes(3));
+  });
+
+  it("still matches legacy pageId payloads", async () => {
+    render(<DatabaseEditor page={makePage()} notebookId={NB} />);
+    await waitFor(() => expect(getDatabase).toHaveBeenCalledTimes(1));
+
+    emitDaemon("database.rows_updated", { notebookId: NB, pageId: PG });
+    await waitFor(() => expect(getDatabase).toHaveBeenCalledTimes(2));
   });
 
   it("ignores database events for a different page", async () => {
@@ -123,7 +139,7 @@ describe("DatabaseEditor live refresh (Bug 2)", () => {
 
     emitDaemon("database.rows_updated", {
       notebookId: NB,
-      pageId: "some-other-page",
+      databaseId: "some-other-page",
     });
 
     // Give an erroneous refresh time to fire, then assert it didn't.
