@@ -1,9 +1,9 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { listen, type UnlistenFn } from "../platform/event";
+import { type UnlistenFn } from "../platform/event";
+import { listenAiStream } from "../utils/aiStream";
 import { aiChatStream } from "../utils/api";
 import { usePageStore } from "./pageStore";
-import type { StreamEvent } from "../types/ai";
 
 export interface SmartCollection {
   id: string;
@@ -71,8 +71,7 @@ Rules:
         let unlisten: UnlistenFn | null = null;
 
         try {
-          unlisten = await listen<StreamEvent>("ai-stream", (event) => {
-            const data = event.payload;
+          unlisten = await listenAiStream((data) => {
             if (data.type === "chunk") {
               accumulated += data.content;
             } else if (data.type === "done") {

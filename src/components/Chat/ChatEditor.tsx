@@ -5,7 +5,8 @@ import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import rehypeRaw from "rehype-raw";
 import "katex/dist/katex.min.css";
-import { listen, type UnlistenFn } from "../../platform/event";
+import { type UnlistenFn } from "../../platform/event";
+import { listenAiStream } from "../../utils/aiStream";
 import { save } from "../../platform/dialog";
 import { writeTextFile } from "../../platform/fs";
 import {
@@ -26,7 +27,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import type { Page, EditorData } from "../../types/page";
-import type { StreamEvent, ChatMessage, AIAction, CreateNotebookArgs, CreatePageArgs } from "../../types/ai";
+import type { ChatMessage, AIAction, CreateNotebookArgs, CreatePageArgs } from "../../types/ai";
 import {
   type ChatCell,
   type ChatPageContent,
@@ -458,9 +459,7 @@ export function ChatEditor({ page, notebookId, className = "" }: ChatEditorProps
 
       try {
         // Set up event listener for streaming
-        unlisten = await listen<StreamEvent>("ai-stream", (event) => {
-          const data = event.payload;
-
+        unlisten = await listenAiStream((data) => {
           switch (data.type) {
             case "chunk":
               accumulatedContent += data.content;

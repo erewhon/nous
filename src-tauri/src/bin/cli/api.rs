@@ -22,6 +22,10 @@ use super::auth::{ApiKeySet, Scope};
 use nous_lib::commands::{create_daily_note_core, find_daily_note, list_daily_notes_core};
 use nous_lib::inbox::{CaptureRequest, CaptureSource};
 use nous_lib::markdown::{export_page_to_markdown, import_markdown_to_page, parse_markdown_to_blocks};
+use nous_lib::python_bridge::{
+    AIConfig, ChatMessage, NotebookInfo, PageContext, PageInfo, PageSummaryInput, PythonAI,
+    StreamEvent,
+};
 use nous_lib::share::storage::ShareStorage;
 use nous_lib::plugins::api::HostApi;
 use nous_lib::git;
@@ -678,6 +682,18 @@ pub fn build_router(state: AppState, auth: AuthState) -> Router {
             "/api/notebooks/{notebook_id}/import/markdown",
             post(import_markdown_page),
         )
+        // AI endpoints (browser parity) — same PyO3 bridge as the desktop
+        // invoke commands; request bodies mirror the invoke arg shapes.
+        // Streaming goes over per-request SSE (see ai_chat_stream_sse).
+        .route("/api/ai/chat", post(ai_chat))
+        .route("/api/ai/chat-context", post(ai_chat_context))
+        .route("/api/ai/chat-tools", post(ai_chat_tools))
+        .route("/api/ai/chat-stream", post(ai_chat_stream_sse))
+        .route("/api/ai/summarize-page", post(ai_summarize_page))
+        .route("/api/ai/summarize-pages", post(ai_summarize_pages))
+        .route("/api/ai/suggest-tags", post(ai_suggest_tags))
+        .route("/api/ai/suggest-related", post(ai_suggest_related))
+        .route("/api/ai/models/discover", post(ai_discover_models))
         // Agile Results daily note
         .route(
             "/api/notebooks/{notebook_id}/agile-daily",
@@ -2751,6 +2767,323 @@ async fn serve_web_app_file(
     Path(path): Path<String>,
 ) -> Result<axum::response::Response, (StatusCode, Json<ApiError>)> {
     serve_web_app(state, &path).await
+}
+
+// ===== AI (browser parity) =====
+//
+// HTTP mirrors of the desktop AI invoke commands (commands/ai.rs), backed
+// by the same PyO3 bridge. Every call locks python_ai and holds the GIL
+// for its duration, so all handlers run the bridge work on spawn_blocking.
+// Request bodies use the exact camelCase field names of the invoke args,
+// so the frontend browser branches pass their existing arg objects through.
+
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct AiConfigFields {
+    provider_type: Option<String>,
+    api_key: Option<String>,
+    base_url: Option<String>,
+    model: Option<String>,
+    temperature: Option<f64>,
+    max_tokens: Option<i64>,
+}
+
+impl AiConfigFields {
+    fn into_config(self) -> AIConfig {
+        AIConfig {
+            provider_type: self.provider_type.unwrap_or_else(|| "openai".to_string()),
+            api_key: self.api_key,
+            base_url: self.base_url,
+            model: self.model,
+            temperature: self.temperature,
+            max_tokens: self.max_tokens,
+        }
+    }
+}
+
+/// Run a PythonAI operation on the blocking pool and map failures into the
+/// standard error envelope. The lock is taken inside the blocking task
+/// because a concurrent AI call may hold it for many seconds.
+async fn ai_blocking<T, F>(
+    python_ai: Arc<std::sync::Mutex<PythonAI>>,
+    op: &'static str,
+    f: F,
+) -> Result<T, (StatusCode, Json<ApiError>)>
+where
+    T: Send + 'static,
+    F: FnOnce(&PythonAI) -> std::result::Result<T, String> + Send + 'static,
+{
+    tokio::task::spawn_blocking(move || {
+        let ai = python_ai
+            .lock()
+            .map_err(|e| format!("Python AI lock: {}", e))?;
+        f(&ai)
+    })
+    .await
+    .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, format!("Task join: {}", e)))?
+    .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, format!("{}: {}", op, e)))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AiChatRequest {
+    messages: Vec<ChatMessage>,
+    #[serde(flatten)]
+    config: AiConfigFields,
+}
+
+async fn ai_chat(
+    State(state): State<AppState>,
+    Json(req): Json<AiChatRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let config = req.config.into_config();
+    let messages = req.messages;
+    let resp = ai_blocking(Arc::clone(&state.python_ai), "AI chat", move |ai| {
+        ai.chat(messages, config).map_err(|e| e.to_string())
+    })
+    .await?;
+    Ok(Json(ApiResponse { data: resp }))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AiChatContextRequest {
+    user_message: String,
+    page_context: Option<PageContext>,
+    conversation_history: Option<Vec<ChatMessage>>,
+    #[serde(flatten)]
+    config: AiConfigFields,
+}
+
+async fn ai_chat_context(
+    State(state): State<AppState>,
+    Json(req): Json<AiChatContextRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let config = req.config.into_config();
+    let (msg, ctx, hist) = (req.user_message, req.page_context, req.conversation_history);
+    let resp = ai_blocking(Arc::clone(&state.python_ai), "AI chat", move |ai| {
+        ai.chat_with_context(msg, ctx, hist, config)
+            .map_err(|e| e.to_string())
+    })
+    .await?;
+    Ok(Json(ApiResponse { data: resp }))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AiChatToolsRequest {
+    user_message: String,
+    page_context: Option<PageContext>,
+    conversation_history: Option<Vec<ChatMessage>>,
+    available_notebooks: Option<Vec<NotebookInfo>>,
+    current_notebook_id: Option<String>,
+    system_prompt: Option<String>,
+    #[serde(flatten)]
+    config: AiConfigFields,
+}
+
+async fn ai_chat_tools(
+    State(state): State<AppState>,
+    Json(req): Json<AiChatToolsRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let config = req.config.into_config();
+    let (msg, ctx, hist, nbs, nb_id) = (
+        req.user_message,
+        req.page_context,
+        req.conversation_history,
+        req.available_notebooks,
+        req.current_notebook_id,
+    );
+    let resp = ai_blocking(Arc::clone(&state.python_ai), "AI chat with tools", move |ai| {
+        ai.chat_with_tools(msg, ctx, hist, nbs, nb_id, config)
+            .map_err(|e| e.to_string())
+    })
+    .await?;
+    Ok(Json(ApiResponse { data: resp }))
+}
+
+/// Streaming chat over per-request SSE. Each event's data is a StreamEvent
+/// JSON object (`chunk` / `thinking` / `action` / `done` / `error` — same
+/// wire shape the desktop "ai-stream" Tauri event carries); the connection
+/// closes after `done` or `error`.
+async fn ai_chat_stream_sse(
+    State(state): State<AppState>,
+    Json(req): Json<AiChatToolsRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    use axum::response::sse::{Event, KeepAlive, Sse};
+
+    let config = req.config.into_config();
+    let (msg, ctx, hist, nbs, nb_id, sys) = (
+        req.user_message,
+        req.page_context,
+        req.conversation_history,
+        req.available_notebooks,
+        req.current_notebook_id,
+        req.system_prompt,
+    );
+    let library_path = Some(state.library_path.to_string_lossy().to_string());
+
+    // chat_with_tools_stream itself returns quickly (it spawns the Python
+    // thread), but acquiring the bridge lock can block behind a long
+    // non-streaming call — so take it on the blocking pool too.
+    let rx = ai_blocking(Arc::clone(&state.python_ai), "AI stream", move |ai| {
+        ai.chat_with_tools_stream(msg, ctx, hist, nbs, nb_id, config, sys, library_path)
+            .map_err(|e| e.to_string())
+    })
+    .await?;
+
+    // Pump the std::sync::mpsc receiver into an async channel.
+    let (tx, mut rx_async) = tokio::sync::mpsc::channel::<StreamEvent>(64);
+    tokio::task::spawn_blocking(move || {
+        while let Ok(event) = rx.recv() {
+            let terminal =
+                matches!(event, StreamEvent::Done { .. } | StreamEvent::Error { .. });
+            if tx.blocking_send(event).is_err() {
+                break; // client disconnected
+            }
+            if terminal {
+                break;
+            }
+        }
+    });
+
+    let stream = async_stream::stream! {
+        while let Some(event) = rx_async.recv().await {
+            let sse_event = Event::default().json_data(&event).unwrap_or_else(|e| {
+                Event::default().data(format!(
+                    "{{\"type\":\"error\",\"message\":\"serialize: {}\"}}",
+                    e
+                ))
+            });
+            yield Ok::<_, std::convert::Infallible>(sse_event);
+        }
+    };
+
+    Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AiSummarizePageRequest {
+    content: String,
+    title: Option<String>,
+    max_length: Option<i64>,
+    #[serde(flatten)]
+    config: AiConfigFields,
+}
+
+async fn ai_summarize_page(
+    State(state): State<AppState>,
+    Json(req): Json<AiSummarizePageRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let config = req.config.into_config();
+    let (content, title, max_len) = (req.content, req.title, req.max_length);
+    let summary = ai_blocking(Arc::clone(&state.python_ai), "AI summarize", move |ai| {
+        ai.summarize_page(content, title, max_len, config)
+            .map_err(|e| e.to_string())
+    })
+    .await?;
+    Ok(Json(ApiResponse { data: summary }))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AiSummarizePagesRequest {
+    pages: Vec<PageSummaryInput>,
+    custom_prompt: Option<String>,
+    summary_style: Option<String>,
+    #[serde(flatten)]
+    config: AiConfigFields,
+}
+
+async fn ai_summarize_pages(
+    State(state): State<AppState>,
+    Json(req): Json<AiSummarizePagesRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let config = req.config.into_config();
+    let (pages, prompt, style) = (req.pages, req.custom_prompt, req.summary_style);
+    let result = ai_blocking(Arc::clone(&state.python_ai), "AI summarize pages", move |ai| {
+        ai.summarize_pages(pages, prompt, style, config)
+            .map_err(|e| e.to_string())
+    })
+    .await?;
+    Ok(Json(ApiResponse { data: result }))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AiSuggestTagsRequest {
+    content: String,
+    existing_tags: Option<Vec<String>>,
+    #[serde(flatten)]
+    config: AiConfigFields,
+}
+
+async fn ai_suggest_tags(
+    State(state): State<AppState>,
+    Json(req): Json<AiSuggestTagsRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let config = req.config.into_config();
+    let (content, existing) = (req.content, req.existing_tags);
+    let tags = ai_blocking(Arc::clone(&state.python_ai), "AI suggest tags", move |ai| {
+        ai.suggest_tags(content, existing, config)
+            .map_err(|e| e.to_string())
+    })
+    .await?;
+    Ok(Json(ApiResponse { data: tags }))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AiSuggestRelatedRequest {
+    content: String,
+    title: String,
+    available_pages: Vec<PageInfo>,
+    existing_links: Option<Vec<String>>,
+    max_suggestions: Option<i64>,
+    #[serde(flatten)]
+    config: AiConfigFields,
+}
+
+async fn ai_suggest_related(
+    State(state): State<AppState>,
+    Json(req): Json<AiSuggestRelatedRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let config = req.config.into_config();
+    let (content, title, pages, links, max) = (
+        req.content,
+        req.title,
+        req.available_pages,
+        req.existing_links,
+        req.max_suggestions,
+    );
+    let suggestions =
+        ai_blocking(Arc::clone(&state.python_ai), "AI suggest related", move |ai| {
+            ai.suggest_related_pages(content, title, pages, links, max, config)
+                .map_err(|e| e.to_string())
+        })
+        .await?;
+    Ok(Json(ApiResponse { data: suggestions }))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AiDiscoverModelsRequest {
+    provider: String,
+    base_url: String,
+    api_key: Option<String>,
+}
+
+async fn ai_discover_models(
+    State(state): State<AppState>,
+    Json(req): Json<AiDiscoverModelsRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let models = ai_blocking(Arc::clone(&state.python_ai), "AI model discovery", move |ai| {
+        ai.discover_chat_models(&req.provider, &req.base_url, req.api_key.as_deref())
+            .map_err(|e| e.to_string())
+    })
+    .await?;
+    Ok(Json(ApiResponse { data: models }))
 }
 
 // ===== Notebook assets =====

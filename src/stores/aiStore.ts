@@ -1,6 +1,8 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { invoke } from "../platform/core";
+import { isTauri } from "../utils/platform";
+import { daemonPost } from "../utils/daemon";
 import type { ChatMessage, ProviderType, ProviderConfig, ModelConfig } from "../types/ai";
 import { createDefaultProviderConfig, DEFAULT_MODELS } from "../types/ai";
 import { libraryScopedKey } from "../utils/libraryStorage";
@@ -542,11 +544,16 @@ export const useAIStore = create<AIState>()(
           const providerConfig = get().settings.providers.find((p) => p.type === providerType);
           const baseUrl = providerConfig?.baseUrl || (providerType === "ollama" ? "http://localhost:11434" : "http://localhost:1234");
           const apiKey = providerConfig?.apiKey || undefined;
-          const models = await invoke<Array<{ id: string; name: string; contextLength?: number }>>("discover_ai_models", {
-            provider: providerType,
-            baseUrl,
-            apiKey,
-          });
+          const discoverArgs = { provider: providerType, baseUrl, apiKey };
+          const models = isTauri()
+            ? await invoke<Array<{ id: string; name: string; contextLength?: number }>>(
+                "discover_ai_models",
+                discoverArgs
+              )
+            : await daemonPost<Array<{ id: string; name: string; contextLength?: number }>>(
+                "/api/ai/models/discover",
+                discoverArgs
+              );
           const existingIds = new Set(providerConfig?.models.map((m) => m.id) || []);
           let added = 0;
           for (const model of models) {

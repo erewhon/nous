@@ -69,6 +69,10 @@ pub struct DaemonState {
     #[cfg(feature = "plugins")]
     pub plugin_host: Option<Arc<Mutex<plugins::PluginHost>>>,
     pub library_path: PathBuf,
+    /// PyO3 bridge for AI operations (chat, summarize, suggest). Shared
+    /// with the ActionExecutor/plugins; the /api/ai/* routes lock it from
+    /// spawn_blocking because calls hold the GIL for their duration.
+    pub python_ai: Arc<Mutex<PythonAI>>,
     /// Directory holding the built web frontend (dist-web contents), served
     /// at /app. `NOUS_WEB_APP_DIR` overrides; defaults to {data_dir}/web-app.
     /// Serving 404s gracefully when the directory doesn't exist.
@@ -350,6 +354,7 @@ pub async fn run(library_name: Option<&str>, port: Option<u16>, bind: Option<&st
         #[cfg(feature = "plugins")]
         plugin_host,
         library_path: library_path.clone(),
+        python_ai: Arc::clone(&python_ai_arc),
         web_app_dir,
         event_tx,
     });
@@ -481,6 +486,28 @@ pub fn uninstall() -> Result<()> {
 // ===== Helpers =====
 
 fn find_nous_py_path() -> PathBuf {
+    // Explicit override for daemons launched outside the repo (systemd).
+    if let Ok(p) = std::env::var("NOUS_PY_PATH") {
+        let p = PathBuf::from(p);
+        if p.exists() {
+            return p;
+        }
+        log::warn!("NOUS_PY_PATH set but does not exist: {}", p.display());
+    }
+
+    // A PYTHONPATH entry that contains the nous_ai package is a nous-py
+    // checkout — the user systemd unit already sets this, and resolving it
+    // here (not just relying on the env var at import time) lets
+    // configure_python_path also add the checkout's .venv site-packages,
+    // where the bridge's dependencies (pydantic, openai, ...) live.
+    if let Ok(pp) = std::env::var("PYTHONPATH") {
+        for entry in std::env::split_paths(&pp) {
+            if entry.join("nous_ai").exists() {
+                return entry;
+            }
+        }
+    }
+
     // Check bundled Python first
     if let Ok(exe) = std::env::current_exe() {
         if let Some(exe_dir) = exe.parent() {

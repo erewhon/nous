@@ -530,14 +530,16 @@ export async function aiChat(
     maxTokens?: number;
   }
 ): Promise<ChatResponse> {
-  return invoke<ChatResponse>("ai_chat", {
+  const args = {
     messages,
     providerType: options?.providerType,
     apiKey: options?.apiKey,
     model: options?.model,
     temperature: options?.temperature,
     maxTokens: options?.maxTokens,
-  });
+  };
+  if (!isTauri()) return daemonPost<ChatResponse>("/api/ai/chat", args);
+  return invoke<ChatResponse>("ai_chat", args);
 }
 
 export async function aiChatWithContext(
@@ -552,7 +554,7 @@ export async function aiChatWithContext(
     maxTokens?: number;
   }
 ): Promise<ChatResponse> {
-  return invoke<ChatResponse>("ai_chat_with_context", {
+  const args = {
     userMessage,
     pageContext: options?.pageContext,
     conversationHistory: options?.conversationHistory,
@@ -561,7 +563,9 @@ export async function aiChatWithContext(
     model: options?.model,
     temperature: options?.temperature,
     maxTokens: options?.maxTokens,
-  });
+  };
+  if (!isTauri()) return daemonPost<ChatResponse>("/api/ai/chat-context", args);
+  return invoke<ChatResponse>("ai_chat_with_context", args);
 }
 
 export async function aiSummarizePage(
@@ -574,14 +578,16 @@ export async function aiSummarizePage(
     model?: string;
   }
 ): Promise<string> {
-  return invoke<string>("ai_summarize_page", {
+  const args = {
     content,
     title: options?.title,
     maxLength: options?.maxLength,
     providerType: options?.providerType,
     apiKey: options?.apiKey,
     model: options?.model,
-  });
+  };
+  if (!isTauri()) return daemonPost<string>("/api/ai/summarize-page", args);
+  return invoke<string>("ai_summarize_page", args);
 }
 
 export async function aiSuggestTags(
@@ -593,13 +599,15 @@ export async function aiSuggestTags(
     model?: string;
   }
 ): Promise<string[]> {
-  return invoke<string[]>("ai_suggest_tags", {
+  const args = {
     content,
     existingTags: options?.existingTags,
     providerType: options?.providerType,
     apiKey: options?.apiKey,
     model: options?.model,
-  });
+  };
+  if (!isTauri()) return daemonPost<string[]>("/api/ai/suggest-tags", args);
+  return invoke<string[]>("ai_suggest_tags", args);
 }
 
 export interface PageInfo {
@@ -626,7 +634,7 @@ export async function aiSuggestRelatedPages(
     model?: string;
   }
 ): Promise<RelatedPageSuggestion[]> {
-  return invoke<RelatedPageSuggestion[]>("ai_suggest_related_pages", {
+  const args = {
     content,
     title,
     availablePages,
@@ -635,7 +643,11 @@ export async function aiSuggestRelatedPages(
     providerType: options?.providerType,
     apiKey: options?.apiKey,
     model: options?.model,
-  });
+  };
+  if (!isTauri()) {
+    return daemonPost<RelatedPageSuggestion[]>("/api/ai/suggest-related", args);
+  }
+  return invoke<RelatedPageSuggestion[]>("ai_suggest_related_pages", args);
 }
 
 export interface PageSummaryInput {
@@ -664,14 +676,18 @@ export async function aiSummarizePages(
     model?: string;
   }
 ): Promise<PagesSummaryResult> {
-  return invoke<PagesSummaryResult>("ai_summarize_pages", {
+  const args = {
     pages,
     customPrompt: options?.customPrompt,
     summaryStyle: options?.summaryStyle,
     providerType: options?.providerType,
     apiKey: options?.apiKey,
     model: options?.model,
-  });
+  };
+  if (!isTauri()) {
+    return daemonPost<PagesSummaryResult>("/api/ai/summarize-pages", args);
+  }
+  return invoke<PagesSummaryResult>("ai_summarize_pages", args);
 }
 
 export async function aiChatWithTools(
@@ -688,7 +704,7 @@ export async function aiChatWithTools(
     maxTokens?: number;
   }
 ): Promise<ChatResponseWithActions> {
-  return invoke<ChatResponseWithActions>("ai_chat_with_tools", {
+  const args = {
     userMessage,
     pageContext: options?.pageContext,
     conversationHistory: options?.conversationHistory,
@@ -699,7 +715,11 @@ export async function aiChatWithTools(
     model: options?.model,
     temperature: options?.temperature,
     maxTokens: options?.maxTokens,
-  });
+  };
+  if (!isTauri()) {
+    return daemonPost<ChatResponseWithActions>("/api/ai/chat-tools", args);
+  }
+  return invoke<ChatResponseWithActions>("ai_chat_with_tools", args);
 }
 
 export async function aiChatStream(
@@ -718,7 +738,7 @@ export async function aiChatStream(
     systemPrompt?: string;
   }
 ): Promise<void> {
-  return invoke("ai_chat_stream", {
+  const args = {
     userMessage,
     pageContext: options?.pageContext,
     conversationHistory: options?.conversationHistory,
@@ -731,7 +751,14 @@ export async function aiChatStream(
     temperature: options?.temperature,
     maxTokens: options?.maxTokens,
     systemPrompt: options?.systemPrompt,
-  });
+  };
+  if (!isTauri()) {
+    // SSE via the daemon; events reach listenAiStream subscribers and this
+    // resolves at stream end — same contract as the blocking invoke.
+    const { runBrowserAiStream } = await import("./aiStream");
+    return runBrowserAiStream(args);
+  }
+  return invoke("ai_chat_stream", args);
 }
 
 // ===== Tag Management API =====

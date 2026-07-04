@@ -192,6 +192,9 @@ impl TestEnv {
                 nous_lib::commands::BackupScheduler::inert(),
             ),
             library_path: library_path.clone(),
+            // Placeholder-path bridge (see note above) — /api/ai routes
+            // exercised in tests return clean 500s instead of results.
+            python_ai: Arc::clone(&python_ai_arc),
             // No web bundle in the harness — /app routes 404 gracefully.
             web_app_dir: library_path.join("web-app"),
             event_tx,
@@ -1105,4 +1108,104 @@ async fn markdown_import_falls_back_to_filename_title() {
         )
         .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+// ===== AI endpoints =====
+//
+// The harness bridge points at a placeholder Python path, so AI calls fail
+// inside PyO3 — these tests pin down that failures surface as clean 500
+// error envelopes (never panics/hangs) and that auth scoping applies.
+
+#[tokio::test]
+async fn ai_chat_returns_clean_error_without_python() {
+    let env = TestEnv::new();
+    let (status, body) = env
+        .post_json(
+            "/api/ai/chat",
+            json!({"messages": [{"role": "user", "content": "hi"}], "providerType": "openai"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "body: {body}");
+    assert!(body["error"].as_str().unwrap_or("").contains("AI chat"));
+}
+
+#[tokio::test]
+async fn ai_suggest_tags_returns_clean_error_without_python() {
+    let env = TestEnv::new();
+    let (status, body) = env
+        .post_json("/api/ai/suggest-tags", json!({"content": "some text"}))
+        .await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR, "body: {body}");
+    assert!(body["error"].as_str().unwrap_or("").contains("AI suggest tags"));
+}
+
+#[tokio::test]
+async fn ai_chat_stream_errors_before_stream_without_python() {
+    // chat_with_tools_stream spawns its Python thread and streams failures
+    // as error events, OR fails fast at setup — either way the request must
+    // terminate (no hang) and not panic.
+    let env = TestEnv::new();
+    let req = Request::builder()
+        .method(Method::POST)
+        .uri("/api/ai/chat-stream")
+        .header("Content-Type", "application/json")
+        .body(Body::from(
+            serde_json::to_vec(&json!({"userMessage": "hi"})).unwrap(),
+        ))
+        .unwrap();
+    let resp = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        env.router.clone().oneshot(req),
+    )
+    .await
+    .expect("stream request must not hang")
+    .unwrap();
+
+    if resp.status() == StatusCode::OK {
+        // SSE stream — must contain an error event and then end.
+        assert_eq!(
+            resp.headers()["content-type"].to_str().unwrap(),
+            "text/event-stream"
+        );
+        let bytes = to_bytes(resp.into_body(), 1024 * 1024).await.unwrap();
+        let text = String::from_utf8_lossy(&bytes);
+        assert!(text.contains("\"error\""), "stream body: {text}");
+    } else {
+        assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+}
+
+#[tokio::test]
+async fn ai_routes_require_write_scope() {
+    let env = TestEnv::with_auth();
+    let ro = env.ro_token.clone().unwrap();
+    let rw = env.rw_token.clone().unwrap();
+
+    // No token → 401
+    let (status, _) = env
+        .request_with_token(Method::POST, "/api/ai/chat", Some(json!({"messages": []})), None)
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    // Read-only token → 403 (POST is a write method)
+    let (status, _) = env
+        .request_with_token(
+            Method::POST,
+            "/api/ai/chat",
+            Some(json!({"messages": []})),
+            Some(&ro),
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // RW token passes auth (then fails in the bridge → 500, not 401/403)
+    let (status, _) = env
+        .request_with_token(
+            Method::POST,
+            "/api/ai/chat",
+            Some(json!({"messages": []})),
+            Some(&rw),
+        )
+        .await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
 }

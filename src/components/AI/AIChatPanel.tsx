@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
-import { listen, type UnlistenFn } from "../../platform/event";
+import { type UnlistenFn } from "../../platform/event";
+import { listenAiStream } from "../../utils/aiStream";
 import { useAIStore, AI_PANEL_CONSTRAINTS } from "../../stores/aiStore";
 import { usePageStore } from "../../stores/pageStore";
 import { useNotebookStore } from "../../stores/notebookStore";
@@ -22,7 +23,7 @@ import {
 import { transcribeAudio, synthesizeText, saveAudioRecording } from "../../utils/audioApi";
 import { useAudioStore } from "../../stores/audioStore";
 import { convertFileSrc } from "../../platform/core";
-import type { ChatMessage, PageContext, AIAction, CreateNotebookArgs, CreatePageArgs, StreamEvent } from "../../types/ai";
+import type { ChatMessage, PageContext, AIAction, CreateNotebookArgs, CreatePageArgs } from "../../types/ai";
 import type { EditorData } from "../../types/page";
 
 interface AIChatPanelProps {
@@ -1056,8 +1057,7 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
 
     try {
       // Set up event listener for streaming events
-      unlisten = await listen<StreamEvent>("ai-stream", (event) => {
-        const data = event.payload;
+      unlisten = await listenAiStream((data) => {
         console.log("[AI Stream] Received event:", data.type, data);
 
         switch (data.type) {

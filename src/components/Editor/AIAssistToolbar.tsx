@@ -1,8 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { aiChatStream } from "../../utils/api";
-import { listen } from "../../platform/event";
+import { listenAiStream } from "../../utils/aiStream";
 import { useAIStore } from "../../stores/aiStore";
-import type { StreamEvent } from "../../types/ai";
 
 interface AIAssistToolbarProps {
   containerRef: React.RefObject<HTMLElement | null>;
@@ -177,8 +176,7 @@ export function AIAssistToolbar({ containerRef }: AIAssistToolbarProps) {
       let accumulated = "";
 
       // Listen for stream events
-      const unlisten = await listen<StreamEvent>("ai-stream", (event) => {
-        const data = event.payload;
+      const unlisten = await listenAiStream((data) => {
         if (data.type === "chunk") {
           accumulated += data.content;
           setStreamingText(accumulated);
