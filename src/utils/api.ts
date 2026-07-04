@@ -1,7 +1,7 @@
 import { invoke } from "../platform/core";
 import { isTauri } from "./platform";
 import { localToday } from "./dateLocal";
-import { daemonGet, daemonPost, daemonPut, daemonDelete } from "./daemon";
+import { daemonGet, daemonGetText, daemonPost, daemonPut, daemonDelete } from "./daemon";
 import { enqueueFailedFileSave, enqueueFailedDatabaseSave } from "./saveOutbox";
 import { daemonEventBus } from "./daemonEvents";
 import type { Notebook, NotebookType } from "../types/notebook";
@@ -789,6 +789,11 @@ export async function exportPageToMarkdown(
   notebookId: string,
   pageId: string
 ): Promise<string> {
+  if (!isTauri()) {
+    return daemonGetText(
+      `/api/notebooks/${notebookId}/pages/${pageId}?format=markdown`
+    );
+  }
   return invoke<string>("export_page_markdown", { notebookId, pageId });
 }
 
@@ -799,6 +804,14 @@ export async function importMarkdown(
   folderId?: string,
   sectionId?: string
 ): Promise<Page> {
+  if (!isTauri()) {
+    return daemonPost<Page>(`/api/notebooks/${notebookId}/import/markdown`, {
+      markdown,
+      filename,
+      folderId: folderId || null,
+      sectionId: sectionId || null,
+    });
+  }
   return invoke<Page>("import_markdown", {
     notebookId,
     markdown,

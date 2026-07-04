@@ -1052,3 +1052,57 @@ async fn notebook_asset_rejects_bad_requests() {
     let resp = env.router.clone().oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }
+
+// ===== Markdown import (browser file-import fallback) =====
+
+#[tokio::test]
+async fn markdown_import_creates_page_and_round_trips() {
+    let mut env = TestEnv::new();
+    let nb = env.create_notebook("Import");
+    env.drain_events();
+
+    let md = "---\ntitle: Imported Note\ntags:\n  - alpha\n---\n\n# Heading\n\nBody text here.";
+    let (status, body) = env
+        .post_json(
+            &format!("/api/notebooks/{}/import/markdown", nb),
+            json!({"markdown": md, "filename": "note.md"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "body: {body}");
+    let page_id = body["data"]["id"].as_str().unwrap().to_string();
+    // Front-matter title wins over the filename stem
+    assert_eq!(body["data"]["title"], "Imported Note");
+
+    let evt = env.try_recv_event().expect("page.created event");
+    assert_eq!(evt.event, "page.created");
+
+    // Round-trip: the imported page exports back as markdown
+    let (status, _) = env
+        .get_json(&format!("/api/notebooks/{}/pages/{}", nb, page_id))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn markdown_import_falls_back_to_filename_title() {
+    let env = TestEnv::new();
+    let nb = env.create_notebook("Import2");
+
+    let (status, body) = env
+        .post_json(
+            &format!("/api/notebooks/{}/import/markdown", nb),
+            json!({"markdown": "just a paragraph", "filename": "Meeting Notes.md"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "body: {body}");
+    assert_eq!(body["data"]["title"], "Meeting Notes");
+
+    // Bad folder id → 400
+    let (status, _) = env
+        .post_json(
+            &format!("/api/notebooks/{}/import/markdown", nb),
+            json!({"markdown": "x", "filename": "a.md", "folderId": "nope"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}

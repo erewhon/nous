@@ -9,6 +9,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const daemonPut = vi.fn();
 vi.mock("./daemon", () => ({
   daemonGet: vi.fn(),
+  daemonGetText: vi.fn(),
   daemonPost: vi.fn(),
   daemonPut: (...a: unknown[]) => daemonPut(...a),
   daemonDelete: vi.fn(),

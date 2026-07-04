@@ -5,6 +5,8 @@ import { useTemplateStore } from "../../stores/templateStore";
 import { useThemeStore } from "../../stores/themeStore";
 import {
   exportPageToFile,
+  exportPageToMarkdown,
+  importMarkdown,
   importMarkdownFile,
   getExternalEditors,
   openPageInEditor,
@@ -17,6 +19,9 @@ import {
   type EditorConfig,
   type EditSession,
 } from "../../utils/api";
+import { isTauri } from "../../utils/platform";
+import { downloadTextFile } from "../../utils/download";
+import { pickFiles } from "../../utils/pickFiles";
 import { save, open } from "../../platform/dialog";
 import { TagEditor } from "../Tags";
 import { SaveAsTemplateDialog } from "../TemplateDialog";
@@ -251,6 +256,16 @@ export function PageHeader({
 
   const handleExport = async () => {
     const suggestedName = page.title?.replace(/[/\\?%*:|"<>]/g, "-") || "page";
+    if (!isTauri()) {
+      const markdown = await exportPageToMarkdown(page.notebookId, page.id);
+      downloadTextFile(
+        `${suggestedName}.md`,
+        markdown,
+        "text/markdown;charset=utf-8"
+      );
+      setIsMenuOpen(false);
+      return;
+    }
     const path = await save({
       defaultPath: `${suggestedName}.md`,
       filters: [{ name: "Markdown", extensions: ["md"] }],
@@ -262,6 +277,19 @@ export function PageHeader({
   };
 
   const handleImport = async () => {
+    if (!isTauri()) {
+      const [file] = await pickFiles({ accept: ".md,.markdown,.txt" });
+      if (file) {
+        const newPage = await importMarkdown(
+          page.notebookId,
+          await file.text(),
+          file.name
+        );
+        selectPage(newPage.id);
+      }
+      setIsMenuOpen(false);
+      return;
+    }
     const selected = await open({
       multiple: false,
       filters: [{ name: "Markdown", extensions: ["md", "markdown"] }],

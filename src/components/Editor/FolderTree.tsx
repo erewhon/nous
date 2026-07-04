@@ -14,6 +14,8 @@ import {
 } from "@dnd-kit/core";
 import { arrayMove } from "@dnd-kit/sortable";
 import { open } from "../../platform/dialog";
+import { isTauri } from "../../utils/platform";
+import { pickFiles } from "../../utils/pickFiles";
 import type { Folder, Page, Section } from "../../types/page";
 import type { Notebook, PageSortOption } from "../../types/notebook";
 import type { ObjectType } from "../../types/database";
@@ -566,6 +568,23 @@ END:VCALENDAR`;
 
   // Handle opening file picker for import
   const handleImportFile = useCallback(async () => {
+    // Browser build: no native dialog or path-based import pipeline.
+    // Markdown/text files import through the daemon; other formats need
+    // the desktop converters (see the web-parity non-parity ledger).
+    if (!isTauri()) {
+      try {
+        const files = await pickFiles({
+          accept: ".md,.markdown,.txt",
+          multiple: true,
+        });
+        for (const file of files) {
+          await api.importMarkdown(notebookId, await file.text(), file.name);
+        }
+      } catch (err) {
+        console.error("Failed to import files:", err);
+      }
+      return;
+    }
     try {
       const selected = await open({
         multiple: true,
@@ -594,7 +613,7 @@ END:VCALENDAR`;
     } catch (err) {
       console.error("Failed to open file picker:", err);
     }
-  }, []);
+  }, [notebookId]);
 
   // Handle creating a subpage
   const handleCreateSubpage = useCallback(

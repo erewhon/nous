@@ -21,7 +21,7 @@ use super::auth::{ApiKeySet, Scope};
 
 use nous_lib::commands::{create_daily_note_core, find_daily_note, list_daily_notes_core};
 use nous_lib::inbox::{CaptureRequest, CaptureSource};
-use nous_lib::markdown::{export_page_to_markdown, parse_markdown_to_blocks};
+use nous_lib::markdown::{export_page_to_markdown, import_markdown_to_page, parse_markdown_to_blocks};
 use nous_lib::share::storage::ShareStorage;
 use nous_lib::plugins::api::HostApi;
 use nous_lib::git;
@@ -671,6 +671,12 @@ pub fn build_router(state: AppState, auth: AuthState) -> Router {
         .route(
             "/api/notebooks/{notebook_id}/import/artwork",
             post(import_artwork),
+        )
+        // Markdown import (browser file-import fallback; mirrors the
+        // import_markdown Tauri command incl. front-matter handling)
+        .route(
+            "/api/notebooks/{notebook_id}/import/markdown",
+            post(import_markdown_page),
         )
         // Agile Results daily note
         .route(
@@ -4814,6 +4820,87 @@ async fn delete_database_rows(
 }
 
 // ===== Artwork Import =====
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ImportMarkdownRequest {
+    markdown: String,
+    /// Original filename — stem becomes the fallback title when the
+    /// markdown has no front-matter title.
+    filename: String,
+    folder_id: Option<String>,
+    section_id: Option<String>,
+}
+
+/// Import a markdown document as a new page. Same front-matter handling
+/// as the desktop import_markdown command (shared import_markdown_to_page),
+/// plus the standard daemon-side indexing and page.created event.
+async fn import_markdown_page(
+    State(state): State<AppState>,
+    Path(notebook_id): Path<String>,
+    Json(req): Json<ImportMarkdownRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let nb_id = parse_uuid(&notebook_id)?;
+
+    let folder_id = req
+        .folder_id
+        .as_deref()
+        .map(Uuid::parse_str)
+        .transpose()
+        .map_err(|e| api_err(StatusCode::BAD_REQUEST, format!("Invalid folder ID: {}", e)))?;
+    let section_id = req
+        .section_id
+        .as_deref()
+        .map(Uuid::parse_str)
+        .transpose()
+        .map_err(|e| api_err(StatusCode::BAD_REQUEST, format!("Invalid section ID: {}", e)))?;
+
+    let fallback_title = std::path::Path::new(&req.filename)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("Imported")
+        .to_string();
+
+    let mut page = import_markdown_to_page(&req.markdown, nb_id, &fallback_title);
+    page.folder_id = folder_id;
+    page.section_id = section_id;
+
+    {
+        let storage = state.storage.lock().unwrap();
+        storage
+            .create_page_from(page.clone())
+            .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    }
+
+    state.sync_manager.queue_page_update(nb_id, page.id);
+
+    {
+        let mut idx = lock_search_index(&state.search_index);
+        if let Err(e) = idx.index_page(&page) {
+            log::warn!("Failed to index imported page {}: {}", page.id, e);
+        }
+    }
+    spawn_rag_index(&state, &page);
+
+    #[cfg(feature = "plugins")]
+    nous_lib::plugins::dispatch_plugin_event_bg(
+        &state.plugin_host,
+        nous_lib::plugins::HookPoint::OnPageCreated,
+        serde_json::json!({
+            "notebook_id": nb_id.to_string(),
+            "page_id": page.id.to_string(),
+            "title": page.title,
+        }),
+    );
+
+    emit_event(&state, "page.created", serde_json::json!({
+        "notebookId": notebook_id,
+        "pageId": page.id.to_string(),
+        "title": page.title,
+    }));
+
+    Ok((StatusCode::CREATED, Json(ApiResponse { data: page })))
+}
 
 async fn import_artwork(
     State(state): State<AppState>,
