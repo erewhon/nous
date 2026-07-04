@@ -9,6 +9,7 @@
  */
 
 import type { EditorData, EditorBlock } from "../types/page";
+import { resolveAssetUrl, unresolveAssetUrl } from "./assetUrl";
 
 // ─── BlockNote types (simplified for the converter) ─────────────────────────
 // We use `any` for the actual BlockNote document type since it depends on the
@@ -368,7 +369,9 @@ function convertImage(block: EditorBlock): BNBlock {
     id: block.id,
     type: "image",
     props: {
-      url: (file?.url as string) ?? (data.url as string) ?? "",
+      // Stored references (asset:// forms, absolute paths) become
+      // renderable URLs; unresolveAssetUrl reverses this on save.
+      url: resolveAssetUrl((file?.url as string) ?? (data.url as string) ?? ""),
       caption: (data.caption as string) ?? "",
       previewWidth: (data.width as number) ?? undefined,
     },
@@ -706,7 +709,9 @@ function convertBlockToEditorJs(
             id: block.id ?? generateId(),
             type: "image",
             data: {
-              file: { url: block.props?.url ?? "" },
+              // Never persist resolved daemon URLs (they embed the auth
+              // token and host) — store the stable asset:// form.
+              file: { url: unresolveAssetUrl(block.props?.url ?? "") },
               caption: block.props?.caption ?? "",
               width: block.props?.previewWidth,
             },

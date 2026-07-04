@@ -691,6 +691,15 @@ pub fn build_router(state: AppState, auth: AuthState) -> Router {
             "/api/image-cache/{hash}",
             get(serve_cached_image),
         )
+        // Notebook asset files (page images, PDFs, audio). Auth-gated like the
+        // rest of /api — browser <img> tags authenticate via the ?token= query
+        // fallback in auth_middleware.
+        .route(
+            "/api/notebooks/{notebook_id}/assets/{*path}",
+            get(get_notebook_asset)
+                .put(put_notebook_asset)
+                .layer(axum::extract::DefaultBodyLimit::max(NOTEBOOK_ASSET_BODY_LIMIT)),
+        )
         .route("/share/{share_id}", get(serve_share))
         .route("/share/{share_id}/", get(serve_share))
         .route("/share/{share_id}/{*path}", get(serve_share_file))
@@ -2618,6 +2627,16 @@ fn mime_for_path(path: &str) -> &'static str {
         "woff2" => "font/woff2",
         "ttf" => "font/ttf",
         "otf" => "font/otf",
+        "pdf" => "application/pdf",
+        "mp4" | "m4v" => "video/mp4",
+        "webm" => "video/webm",
+        "mov" => "video/quicktime",
+        "mp3" => "audio/mpeg",
+        "wav" => "audio/wav",
+        "m4a" => "audio/mp4",
+        "ogg" => "audio/ogg",
+        "flac" => "audio/flac",
+        "epub" => "application/epub+zip",
         _ => "application/octet-stream",
     }
 }
@@ -2726,6 +2745,98 @@ async fn serve_web_app_file(
     Path(path): Path<String>,
 ) -> Result<axum::response::Response, (StatusCode, Json<ApiError>)> {
     serve_web_app(state, &path).await
+}
+
+// ===== Notebook assets =====
+//
+// Serves page media (images, PDFs, audio) from {notebook}/assets/ over
+// authenticated HTTP. The browser build maps stored asset references
+// (asset:// URLs, absolute library paths) to these URLs — see
+// src/utils/assetUrl.ts. Upload mirrors the desktop save_notebook_asset
+// command but writes atomically.
+
+const NOTEBOOK_ASSET_BODY_LIMIT: usize = 50 * 1024 * 1024;
+
+/// Resolve a request path inside a notebook's assets directory.
+///
+/// Same structural traversal rejection as resolve_web_app_path — only
+/// `Normal` components allowed, so `..` and absolute paths can never
+/// escape `base` — but with no SPA fallback: empty or invalid is None.
+fn resolve_notebook_asset_path(
+    base: &std::path::Path,
+    req_path: &str,
+) -> Option<std::path::PathBuf> {
+    let trimmed = req_path.trim_start_matches('/');
+    if trimmed.is_empty() {
+        return None;
+    }
+    let rel = std::path::Path::new(trimmed);
+    if rel
+        .components()
+        .any(|c| !matches!(c, std::path::Component::Normal(_)))
+    {
+        return None;
+    }
+    Some(base.join(rel))
+}
+
+async fn get_notebook_asset(
+    State(state): State<AppState>,
+    Path((notebook_id, asset_path)): Path<(String, String)>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    use axum::http::header;
+
+    let nb_id = parse_uuid(&notebook_id)?;
+    let assets_dir = {
+        let storage = state.storage.lock().unwrap();
+        storage.notebook_assets_dir(nb_id)
+    };
+    let file = resolve_notebook_asset_path(&assets_dir, &asset_path)
+        .ok_or_else(|| api_err(StatusCode::BAD_REQUEST, "Invalid asset path"))?;
+    let bytes = tokio::fs::read(&file)
+        .await
+        .map_err(|_| api_err(StatusCode::NOT_FOUND, "Asset not found"))?;
+
+    Ok((
+        [
+            (header::CONTENT_TYPE, mime_for_path(&asset_path)),
+            // Uploaded filenames are unique (timestamp-random) so long
+            // client caching is safe; private because content is per-user.
+            (header::CACHE_CONTROL, "private, max-age=86400"),
+        ],
+        bytes,
+    ))
+}
+
+async fn put_notebook_asset(
+    State(state): State<AppState>,
+    Path((notebook_id, asset_path)): Path<(String, String)>,
+    body: axum::body::Bytes,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let nb_id = parse_uuid(&notebook_id)?;
+    if body.is_empty() {
+        return Err(api_err(StatusCode::BAD_REQUEST, "Empty request body"));
+    }
+    let assets_dir = {
+        let storage = state.storage.lock().unwrap();
+        storage.notebook_assets_dir(nb_id)
+    };
+    let file = resolve_notebook_asset_path(&assets_dir, &asset_path)
+        .ok_or_else(|| api_err(StatusCode::BAD_REQUEST, "Invalid asset path"))?;
+
+    if let Some(parent) = file.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, format!("Create dir failed: {}", e)))?;
+    }
+    nous_lib::storage::atomic::write(&file, &body)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, format!("Write failed: {}", e)))?;
+
+    Ok(Json(ApiResponse {
+        data: serde_json::json!({
+            "path": file.to_string_lossy(),
+            "url": format!("/api/notebooks/{}/assets/{}", nb_id, asset_path),
+        }),
+    }))
 }
 
 async fn list_shares(
@@ -5041,8 +5152,9 @@ async fn agile_daily_note(
 #[cfg(test)]
 mod tests {
     use super::{
-        changes_in_intervals, is_public_route, merge_database_3way, reattach_concurrent_rows,
-        resolve_web_app_path, valid_snapshot_name, web_app_cache_control,
+        changes_in_intervals, is_public_route, merge_database_3way, mime_for_path,
+        reattach_concurrent_rows, resolve_notebook_asset_path, resolve_web_app_path,
+        valid_snapshot_name, web_app_cache_control,
     };
     use std::collections::HashSet;
 
@@ -5140,6 +5252,53 @@ mod tests {
         // But the API stays gated
         assert!(!is_public_route("/api/notebooks"));
         assert!(!is_public_route("/apple")); // no prefix confusion
+    }
+
+    // ----- Notebook asset serving (/api/notebooks/{nb}/assets/*) -----
+
+    #[test]
+    fn notebook_asset_path_resolves_flat_and_nested() {
+        let base = std::path::Path::new("/lib/notebooks/nb-1/assets");
+        assert_eq!(
+            resolve_notebook_asset_path(base, "photo.png").unwrap(),
+            base.join("photo.png")
+        );
+        assert_eq!(
+            resolve_notebook_asset_path(base, "audio/clip.mp3").unwrap(),
+            base.join("audio/clip.mp3")
+        );
+        // Leading slashes trimmed like the web-app resolver
+        assert_eq!(
+            resolve_notebook_asset_path(base, "/photo.png").unwrap(),
+            base.join("photo.png")
+        );
+    }
+
+    #[test]
+    fn notebook_asset_path_rejects_traversal_and_empty() {
+        let base = std::path::Path::new("/lib/notebooks/nb-1/assets");
+        assert!(resolve_notebook_asset_path(base, "").is_none());
+        assert!(resolve_notebook_asset_path(base, "..").is_none());
+        assert!(resolve_notebook_asset_path(base, "../pages/secret.json").is_none());
+        assert!(resolve_notebook_asset_path(base, "audio/../../pages/x.json").is_none());
+        // No CurDir allowance here (unlike the SPA resolver): "." is invalid
+        assert!(resolve_notebook_asset_path(base, "./photo.png").is_none());
+    }
+
+    #[test]
+    fn notebook_asset_routes_stay_gated() {
+        assert!(!is_public_route(
+            "/api/notebooks/00000000-0000-4000-8000-000000000001/assets/photo.png"
+        ));
+    }
+
+    #[test]
+    fn mime_covers_page_media_types() {
+        assert_eq!(mime_for_path("a.png"), "image/png");
+        assert_eq!(mime_for_path("a.pdf"), "application/pdf");
+        assert_eq!(mime_for_path("clip.mp4"), "video/mp4");
+        assert_eq!(mime_for_path("clip.mp3"), "audio/mpeg");
+        assert_eq!(mime_for_path("noext"), "application/octet-stream");
     }
 
     #[test]

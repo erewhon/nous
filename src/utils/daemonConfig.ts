@@ -77,6 +77,14 @@ export function getDaemonBaseUrl(): string {
 }
 
 /**
+ * Synchronous browser-side key read (localStorage). For sync call sites
+ * like asset URL building; Tauri callers use loadDaemonApiKey instead.
+ */
+export function getStoredDaemonApiKey(): string | null {
+  return safeStorageGet(DAEMON_API_KEY_STORAGE_KEY);
+}
+
+/**
  * Load the daemon API key. Tauri asks the shell (key file on disk);
  * browsers use the localStorage knob. Null means no auth (daemon on
  * localhost with auth disabled).

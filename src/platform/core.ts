@@ -4,14 +4,15 @@
 // @tauri-apps directly (see "Feature: Web Frontend Parity" in Forge). In the
 // Tauri shell these pass straight through; in a browser, invoke rejects with
 // a typed PlatformUnavailableError that callers can catch to degrade, and
-// convertFileSrc passes the path through unchanged (daemon-served asset
-// mapping is a follow-up task).
+// convertFileSrc maps paths under a notebook assets/ dir to daemon asset
+// URLs (other paths pass through unchanged).
 
 import {
   invoke as tauriInvoke,
   convertFileSrc as tauriConvertFileSrc,
 } from "@tauri-apps/api/core";
 import { isTauri } from "../utils/platform";
+import { resolveAssetUrl } from "../utils/assetUrl";
 import { PlatformUnavailableError } from "./errors";
 
 export { PlatformUnavailableError };
@@ -28,7 +29,7 @@ export const convertFileSrc: typeof tauriConvertFileSrc = (
   protocol
 ) => {
   if (!isTauri()) {
-    return filePath;
+    return resolveAssetUrl(filePath);
   }
   return tauriConvertFileSrc(filePath, protocol);
 };

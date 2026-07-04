@@ -148,6 +148,27 @@ export async function daemonPut<T>(path: string, body: unknown): Promise<T> {
   return unwrap<T>(resp);
 }
 
+/** PUT a raw binary body (asset uploads) rather than JSON. */
+export async function daemonPutBytes<T>(
+  path: string,
+  body: Blob | ArrayBuffer | Uint8Array,
+  contentType = "application/octet-stream"
+): Promise<T> {
+  const resp = await fetchWithTimeout(
+    `${DAEMON_BASE_URL}${path}`,
+    {
+      method: "PUT",
+      headers: {
+        ...(await authHeaders()),
+        "Content-Type": contentType,
+      },
+      body: body as BodyInit,
+    },
+    WRITE_TIMEOUT_MS
+  );
+  return unwrap<T>(resp);
+}
+
 export async function daemonDelete<T = void>(path: string): Promise<T> {
   const resp = await fetch(`${DAEMON_BASE_URL}${path}`, {
     method: "DELETE",

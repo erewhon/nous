@@ -969,3 +969,86 @@ async fn rag_reindex_returns_400_when_disabled() {
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert!(body["error"].as_str().unwrap_or("").contains("RAG is not configured"));
 }
+
+// ===== Notebook assets =====
+
+#[tokio::test]
+async fn notebook_asset_upload_and_serve_roundtrip() {
+    let env = TestEnv::new();
+    let nb = env.create_notebook("Assets");
+    let png: &[u8] = &[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3];
+
+    // Upload raw bytes (nested path, like the audio/ subdir on desktop)
+    let req = Request::builder()
+        .method(Method::PUT)
+        .uri(format!("/api/notebooks/{}/assets/pics/photo.png", nb))
+        .header("Content-Type", "image/png")
+        .body(Body::from(png.to_vec()))
+        .unwrap();
+    let resp = env.router.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = to_bytes(resp.into_body(), 1024 * 1024).await.unwrap();
+    let v: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(
+        v["data"]["url"],
+        format!("/api/notebooks/{}/assets/pics/photo.png", nb)
+    );
+
+    // Serve it back with the right content type and caching
+    let req = Request::builder()
+        .method(Method::GET)
+        .uri(format!("/api/notebooks/{}/assets/pics/photo.png", nb))
+        .body(Body::empty())
+        .unwrap();
+    let resp = env.router.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(resp.headers()["content-type"], "image/png");
+    assert!(resp.headers()["cache-control"]
+        .to_str()
+        .unwrap()
+        .contains("max-age"));
+    let body = to_bytes(resp.into_body(), 1024 * 1024).await.unwrap();
+    assert_eq!(&body[..], png);
+}
+
+#[tokio::test]
+async fn notebook_asset_rejects_bad_requests() {
+    let env = TestEnv::new();
+    let nb = env.create_notebook("Assets");
+
+    // Missing file → 404
+    let req = Request::builder()
+        .method(Method::GET)
+        .uri(format!("/api/notebooks/{}/assets/nope.png", nb))
+        .body(Body::empty())
+        .unwrap();
+    let resp = env.router.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+
+    // Traversal → 400
+    let req = Request::builder()
+        .method(Method::GET)
+        .uri(format!("/api/notebooks/{}/assets/a/../../pages/x.json", nb))
+        .body(Body::empty())
+        .unwrap();
+    let resp = env.router.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+
+    // Empty upload body → 400
+    let req = Request::builder()
+        .method(Method::PUT)
+        .uri(format!("/api/notebooks/{}/assets/empty.png", nb))
+        .body(Body::empty())
+        .unwrap();
+    let resp = env.router.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+
+    // Bad notebook id → 400
+    let req = Request::builder()
+        .method(Method::GET)
+        .uri("/api/notebooks/not-a-uuid/assets/x.png")
+        .body(Body::empty())
+        .unwrap();
+    let resp = env.router.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}

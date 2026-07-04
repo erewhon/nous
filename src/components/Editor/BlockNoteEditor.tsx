@@ -56,6 +56,7 @@ import { VimCommandLine } from "./VimCommandLine";
 import { VimLeaderMenu } from "./VimLeaderMenu";
 import { DocumentProcessorIssues } from "./DocumentProcessorIssues";
 import { useBlockNoteHeaderCollapse } from "./useBlockNoteHeaderCollapse";
+import { createBlockNoteUploadFile } from "./imageUploader";
 import { useChecklistSort } from "./useChecklistSort";
 import { useDocumentProcessors } from "./useDocumentProcessors";
 import { useBlockAttribution } from "../../hooks/useBlockAttribution";
@@ -232,6 +233,14 @@ export const BlockNoteEditor = memo(
         [],
       );
 
+      // Image upload (drag-drop, paste, file panel). Reads notebookId via
+      // ref so the stable editor instance always targets the current page's
+      // notebook.
+      const uploadFile = useMemo(
+        () => createBlockNoteUploadFile(() => notebookIdRef.current),
+        [],
+      );
+
       // Create BlockNote editor
       // When collaboration is active, don't pass initialContent — Yjs doc is the source of truth
       const editor = useCreateBlockNote({
@@ -241,6 +250,7 @@ export const BlockNoteEditor = memo(
         dropCursor: multiColumnDropCursor,
         dictionary,
         extensions: [vimExtension],
+        uploadFile,
       });
 
       // ─── Seed Yjs fragment with page content after initial sync ─────
