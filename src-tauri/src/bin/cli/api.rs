@@ -1945,6 +1945,32 @@ async fn restore_page_version(
     Ok(Json(ApiResponse { data: page }))
 }
 
+/// Post-write bookkeeping shared by the block-level edit handlers
+/// (append/delete-block/replace-block/insert-after-block): keep the search
+/// index fresh and tell live clients. These handlers used to skip both, so
+/// external block edits (the MCP write path) were invisible to open editors
+/// and stale in search until the next full-page save.
+fn after_block_level_write(
+    state: &AppState,
+    page: &Page,
+    notebook_id: &str,
+    page_id: &str,
+) {
+    {
+        let mut idx = lock_search_index(&state.search_index);
+        if let Err(e) = idx.index_page(page) {
+            log::warn!("Failed to reindex page {} after block edit: {}", page_id, e);
+        }
+    }
+    spawn_rag_index(state, page);
+
+    emit_event(state, "page.updated", serde_json::json!({
+        "notebookId": notebook_id,
+        "pageId": page_id,
+        "title": page.title,
+    }));
+}
+
 async fn append_to_page(
     State(state): State<AppState>,
     Path((notebook_id, page_id)): Path<(String, String)>,
@@ -1974,7 +2000,9 @@ async fn append_to_page(
         return Err(api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()));
     }
 
+    drop(storage);
     state.sync_manager.queue_page_update(nb_id, pg_id);
+    after_block_level_write(&state, &page, &notebook_id, &page_id);
 
     Ok(Json(ApiResponse { data: page }))
 }
@@ -2009,7 +2037,9 @@ async fn delete_block(
         return Err(api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()));
     }
 
+    drop(storage);
     state.sync_manager.queue_page_update(nb_id, pg_id);
+    after_block_level_write(&state, &page, &notebook_id, &page_id);
 
     Ok(Json(ApiResponse { data: page }))
 }
@@ -2061,7 +2091,9 @@ async fn replace_block(
         return Err(api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()));
     }
 
+    drop(storage);
     state.sync_manager.queue_page_update(nb_id, pg_id);
+    after_block_level_write(&state, &page, &notebook_id, &page_id);
 
     Ok(Json(ApiResponse { data: page }))
 }
@@ -2114,7 +2146,9 @@ async fn insert_after_block(
         return Err(api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()));
     }
 
+    drop(storage);
     state.sync_manager.queue_page_update(nb_id, pg_id);
+    after_block_level_write(&state, &page, &notebook_id, &page_id);
 
     Ok(Json(ApiResponse { data: page }))
 }

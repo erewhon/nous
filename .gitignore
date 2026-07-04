@@ -39,3 +39,4 @@ __pycache__
 !.env.example
 dist-web/
 .playwright-mcp/
+.claude/scheduled_tasks.lock

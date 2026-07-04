@@ -469,6 +469,85 @@ async fn pages_update_emits_page_updated() {
     assert_eq!(evt.data["pageId"], pg);
 }
 
+/// Block-level edits (the MCP write path) must emit page.updated too —
+/// they used to skip the event (and search reindex), so open editors never
+/// saw external appends/edits until a full-page save.
+#[tokio::test]
+async fn block_level_edits_emit_page_updated() {
+    let mut env = TestEnv::new();
+    let nb = env.create_notebook("Pages");
+    let (_, created) = env
+        .post_json(&format!("/api/notebooks/{}/pages", nb), json!({"title": "blocky"}))
+        .await;
+    let pg = created["data"]["id"].as_str().unwrap();
+    env.drain_events();
+
+    // append
+    let (status, body) = env
+        .post_json(
+            &format!("/api/notebooks/{}/pages/{}/append", nb, pg),
+            json!({"content": "first line"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let block_id = body["data"]["content"]["blocks"]
+        .as_array()
+        .and_then(|blocks| blocks.last())
+        .and_then(|b| b["id"].as_str())
+        .expect("appended block has an id")
+        .to_string();
+    let evt = env.try_recv_event().expect("append emits page.updated");
+    assert_eq!(evt.event, "page.updated");
+    assert_eq!(evt.data["pageId"], pg);
+    env.drain_events();
+
+    // replace-block gives the block a new id — re-capture from each response.
+    let last_block_id = |body: &serde_json::Value| -> String {
+        body["data"]["content"]["blocks"]
+            .as_array()
+            .and_then(|blocks| blocks.last())
+            .and_then(|b| b["id"].as_str())
+            .expect("response page has blocks with ids")
+            .to_string()
+    };
+
+    let (status, body) = env
+        .post_json(
+            &format!("/api/notebooks/{}/pages/{}/replace-block", nb, pg),
+            json!({"block_id": block_id, "content": "edited"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let block_id = last_block_id(&body);
+    let evt = env.try_recv_event().expect("replace-block emits page.updated");
+    assert_eq!(evt.event, "page.updated");
+    env.drain_events();
+
+    // insert-after-block
+    let (status, body) = env
+        .post_json(
+            &format!("/api/notebooks/{}/pages/{}/insert-after-block", nb, pg),
+            json!({"block_id": block_id, "content": "after"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let block_id = last_block_id(&body);
+    let evt = env.try_recv_event().expect("insert-after emits page.updated");
+    assert_eq!(evt.event, "page.updated");
+    env.drain_events();
+
+    // delete-block
+    let (status, _) = env
+        .post_json(
+            &format!("/api/notebooks/{}/pages/{}/delete-block", nb, pg),
+            json!({"block_id": block_id}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let evt = env.try_recv_event().expect("delete-block emits page.updated");
+    assert_eq!(evt.event, "page.updated");
+}
+
 #[tokio::test]
 async fn pages_delete_emits_page_deleted() {
     let mut env = TestEnv::new();
