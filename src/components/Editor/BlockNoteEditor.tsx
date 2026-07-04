@@ -663,6 +663,9 @@ export const BlockNoteEditor = memo(
       return (
         <div
           ref={wrapperRef}
+          // The id is how in-page search (usePageSearch) scopes its text walk —
+          // EditorPaneContent derives holderId from this element.
+          id={`bn-editor-${pageId}`}
           className={`bn-editor-wrapper relative ${className}`}
           data-page-id={pageId}
         >

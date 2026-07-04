@@ -74,9 +74,10 @@ export function usePageSearch({
         NodeFilter.SHOW_TEXT,
         {
           acceptNode(node) {
-            // Skip text nodes in hidden blocks (collapsed headers)
+            // Skip text nodes in hidden blocks (collapsed headers).
+            // .ce-block = legacy Editor.js, .bn-block-outer = BlockNote.
             const block = (node.parentElement as HTMLElement | null)?.closest(
-              ".ce-block"
+              ".ce-block, .bn-block-outer"
             ) as HTMLElement | null;
             if (block && block.offsetParent === null) {
               return NodeFilter.FILTER_REJECT;
@@ -96,9 +97,14 @@ export function usePageSearch({
           const idx = lowerText.indexOf(lowerQuery, startIdx);
           if (idx === -1) break;
 
+          // Any block wrapper works as the scroll target; matches used to be
+          // silently dropped in BlockNote pages because only .ce-block (the
+          // Editor.js wrapper) was recognized. The data-block-id CSS fallback
+          // below remains Editor.js-only — BlockNote relies on the CSS Custom
+          // Highlight API path.
           const blockEl = (
             textNode.parentElement as HTMLElement | null
-          )?.closest(".ce-block") as HTMLElement | null;
+          )?.closest(".ce-block, .bn-block-outer") as HTMLElement | null;
 
           if (blockEl) {
             matches.push({

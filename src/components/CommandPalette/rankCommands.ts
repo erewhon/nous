@@ -130,3 +130,23 @@ export function rankSearchResults<T extends RankableResult>(
       return true;
     });
 }
+
+/** Visibility flags a command may carry. */
+export interface CommandVisibilityFlags {
+  /** Hidden in beginner mode. */
+  expert?: boolean;
+  /** Hidden in the browser build — the action needs the Tauri shell
+   * (native dialogs, invoke-backed share/collab/AI). Remove the flag as
+   * these gain daemon HTTP paths or browser fallbacks. */
+  desktopOnly?: boolean;
+}
+
+/** Single predicate for palette visibility (expert mode + platform). */
+export function isCommandVisible(
+  cmd: CommandVisibilityFlags,
+  opts: { expertMode: boolean; inShell: boolean }
+): boolean {
+  if (cmd.expert && !opts.expertMode) return false;
+  if (cmd.desktopOnly && !opts.inShell) return false;
+  return true;
+}

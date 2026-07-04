@@ -4,6 +4,7 @@ import {
   scoreCommand,
   rankCommands,
   rankSearchResults,
+  isCommandVisible,
   type RankableCommand,
 } from "./rankCommands";
 
@@ -139,5 +140,28 @@ describe("rankSearchResults", () => {
     ];
     const ids = rankSearchResults(results, "dupe").map((r) => r.pageId);
     expect(ids).toEqual(["a", "b"]);
+  });
+});
+
+describe("isCommandVisible", () => {
+  const opts = (expertMode: boolean, inShell: boolean) => ({ expertMode, inShell });
+
+  it("hides expert commands in beginner mode", () => {
+    expect(isCommandVisible({ expert: true }, opts(false, true))).toBe(false);
+    expect(isCommandVisible({ expert: true }, opts(true, true))).toBe(true);
+  });
+
+  it("hides desktopOnly commands in the browser build", () => {
+    expect(isCommandVisible({ desktopOnly: true }, opts(true, false))).toBe(false);
+    expect(isCommandVisible({ desktopOnly: true }, opts(true, true))).toBe(true);
+  });
+
+  it("applies both gates independently", () => {
+    // expert + desktopOnly in browser beginner mode: doubly hidden
+    expect(isCommandVisible({ expert: true, desktopOnly: true }, opts(false, false))).toBe(false);
+    // expert visible in shell expert mode even when desktopOnly
+    expect(isCommandVisible({ expert: true, desktopOnly: true }, opts(true, true))).toBe(true);
+    // plain commands always visible
+    expect(isCommandVisible({}, opts(false, false))).toBe(true);
   });
 });

@@ -19,7 +19,8 @@ import { searchPages, exportPageToFile, importMarkdownFile, convertDocument, imp
 import { DAEMON_BASE_URL, daemonPost } from "../../utils/daemon";
 import { save, open } from "../../platform/dialog";
 import { highlightText } from "../../utils/highlightText";
-import { rankCommands, rankSearchResults } from "./rankCommands";
+import { isTauri } from "../../utils/platform";
+import { rankCommands, rankSearchResults, isCommandVisible } from "./rankCommands";
 import type { SearchResult, PageType } from "../../types/page";
 
 // Backend search scores are coarse (daemon: 1.0 title hit / 0.5 content-only;
@@ -38,6 +39,7 @@ interface Command {
   keywords?: string[];
   score?: number;
   expert?: boolean; // Hidden in beginner mode
+  desktopOnly?: boolean; // Hidden in the browser build (needs the Tauri shell)
 }
 
 interface CommandPaletteProps {
@@ -304,6 +306,7 @@ export function CommandPalette({
 
     cmds.push({
       id: "action-export-markdown",
+      desktopOnly: true,
       title: "Export Page to Markdown",
       subtitle: "Save current page as .md file",
       icon: <IconExport />,
@@ -328,6 +331,7 @@ export function CommandPalette({
 
     cmds.push({
       id: "action-publish-web",
+      desktopOnly: true,
       title: "Publish to Web",
       subtitle: "Export notebook as a static HTML site",
       icon: <IconPublish />,
@@ -342,6 +346,7 @@ export function CommandPalette({
 
     cmds.push({
       id: "action-share-link",
+      desktopOnly: true,
       title: "Share as Link",
       subtitle: "Generate a shareable link for this page",
       icon: (
@@ -366,6 +371,7 @@ export function CommandPalette({
 
     cmds.push({
       id: "action-collab",
+      desktopOnly: true,
       title: "Collaborate in Real-Time",
       subtitle: "Start a live collaboration session on this page",
       icon: (
@@ -400,6 +406,7 @@ export function CommandPalette({
 
     cmds.push({
       id: "action-collab-section",
+      desktopOnly: true,
       title: "Collaborate on Section",
       subtitle: "Share all pages in this section for real-time editing",
       icon: (
@@ -433,6 +440,7 @@ export function CommandPalette({
 
     cmds.push({
       id: "action-collab-notebook",
+      desktopOnly: true,
       title: "Collaborate on Notebook",
       subtitle: "Share all pages in this notebook for real-time editing",
       icon: (
@@ -462,6 +470,7 @@ export function CommandPalette({
 
     cmds.push({
       id: "action-live-sessions",
+      desktopOnly: true,
       title: "View Live Sessions",
       subtitle: "See all active collaboration sessions",
       icon: (
@@ -484,6 +493,7 @@ export function CommandPalette({
 
     cmds.push({
       id: "action-share-notebook",
+      desktopOnly: true,
       title: "Share Notebook as Website",
       subtitle: "Share all pages in this notebook as a navigable website",
       icon: (
@@ -513,6 +523,7 @@ export function CommandPalette({
 
     cmds.push({
       id: "action-import-markdown",
+      desktopOnly: true,
       title: "Import Markdown File",
       subtitle: "Create page from .md file",
       icon: <IconImport />,
@@ -535,6 +546,7 @@ export function CommandPalette({
 
     cmds.push({
       id: "action-import-document",
+      desktopOnly: true,
       title: "Import Document",
       subtitle: "Import PDF, Word, Excel, PowerPoint, and more",
       icon: <IconDocument />,
@@ -583,6 +595,7 @@ export function CommandPalette({
 
     cmds.push({
       id: "action-backup",
+      desktopOnly: true,
       title: "Backup & Restore",
       subtitle: "Export or import notebook backups",
       icon: <IconArchive />,
@@ -634,6 +647,7 @@ export function CommandPalette({
     if (selectedNotebookId) {
       cmds.push({
         id: "action-smart-organize",
+      desktopOnly: true,
         title: "Smart Organize",
         subtitle: "AI suggests where pages should go",
         icon: <IconWand />,
@@ -651,6 +665,7 @@ export function CommandPalette({
     if (selectedNotebookId) {
       cmds.push({
         id: "action-smart-collections",
+      desktopOnly: true,
         title: "Smart Collections",
         subtitle: "AI groups related pages into collections",
         icon: <IconWand />,
@@ -994,7 +1009,9 @@ export function CommandPalette({
   // Rank commands by query relevance (fuzzy: title ≫ keywords ≫ subtitle),
   // dropping non-matches and ordering best-first. Empty query → unchanged.
   const filteredCommands = useMemo(() => {
-    const visible = expertMode ? commands : commands.filter((c) => !c.expert);
+    const visible = commands.filter((c) =>
+      isCommandVisible(c, { expertMode, inShell: isTauri() })
+    );
     return rankCommands(visible, query);
   }, [commands, query, expertMode]);
 

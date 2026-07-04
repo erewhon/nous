@@ -178,10 +178,14 @@ export function EditorPaneContent({
   // Editor keymap for Ctrl+F pass-through in emacs mode
   const editorKeymap = useThemeStore((state) => state.settings.editorKeymap);
 
-  // Derive holderId from DOM — the BlockEditor creates a div with id="editor-{useId()}"
+  // Derive holderId from DOM — the legacy BlockEditor creates a div with
+  // id="editor-{useId()}" (class .block-editor); the BlockNote editor's
+  // wrapper carries id="bn-editor-{pageId}" (class .bn-editor-wrapper).
   const editorHolderId = useMemo(() => {
     if (!showSearch) return "";
-    return editorScrollRef.current?.querySelector(".block-editor")?.id || "";
+    return (
+      editorScrollRef.current?.querySelector(".block-editor, .bn-editor-wrapper")?.id || ""
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showSearch, selectedPage?.id]);
 
