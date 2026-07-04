@@ -1,5 +1,6 @@
 import { invoke } from "../platform/core";
 import { isTauri } from "./platform";
+import { localToday } from "./dateLocal";
 import { daemonGet, daemonPost, daemonPut, daemonDelete } from "./daemon";
 import { enqueueFailedFileSave, enqueueFailedDatabaseSave } from "./saveOutbox";
 import { daemonEventBus } from "./daemonEvents";
@@ -1460,10 +1461,31 @@ export async function inboxList(): Promise<InboxItem[]> {
 }
 
 export async function inboxListUnprocessed(): Promise<InboxItem[]> {
+  if (!isTauri()) {
+    const items = await daemonGet<InboxItem[]>("/api/inbox");
+    return items.filter((i) => !i.is_processed);
+  }
   return invoke<InboxItem[]>("inbox_list_unprocessed");
 }
 
 export async function inboxSummary(): Promise<InboxSummary> {
+  if (!isTauri()) {
+    // No summary endpoint on the daemon — derive from the list, using the
+    // field names the UI consumes. (The Tauri command's wire shape uses
+    // total_items/processed_count and never had unprocessed_count — see
+    // Agent Feedback: InboxSummary field mismatch.)
+    const items = await daemonGet<InboxItem[]>("/api/inbox");
+    const processed = items.filter((i) => i.is_processed).length;
+    const classified = items.filter(
+      (i) => !i.is_processed && i.classification != null
+    ).length;
+    return {
+      total_count: items.length,
+      unprocessed_count: items.length - processed,
+      classified_count: classified,
+      unclassified_count: items.length - processed - classified,
+    };
+  }
   return invoke<InboxSummary>("inbox_summary");
 }
 
@@ -3232,6 +3254,12 @@ export async function getOrCreateTodayDailyNote(
   notebookId: string,
   templateId?: string
 ): Promise<Page> {
+  if (!isTauri()) {
+    // The daemon's POST daily-notes/{date} is create-or-get; "today" is
+    // computed browser-side in local time (same host/tz as the daemon in
+    // the current single-user setup).
+    return createDailyNote(notebookId, localToday(), templateId);
+  }
   return invoke<Page>("get_or_create_today_daily_note", { notebookId, templateId });
 }
 
