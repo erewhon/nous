@@ -57,6 +57,9 @@ import { VimLeaderMenu } from "./VimLeaderMenu";
 import { DocumentProcessorIssues } from "./DocumentProcessorIssues";
 import { useBlockNoteHeaderCollapse } from "./useBlockNoteHeaderCollapse";
 import { createBlockNoteUploadFile } from "./imageUploader";
+import { MobileEditorToolbar, type ToolbarEditor } from "./MobileEditorToolbar";
+import { useIsPhone } from "../../hooks/useIsPhone";
+import { isCoarsePointer } from "../../utils/pointer";
 import { useChecklistSort } from "./useChecklistSort";
 import { useDocumentProcessors } from "./useDocumentProcessors";
 import { useBlockAttribution } from "../../hooks/useBlockAttribution";
@@ -207,8 +210,12 @@ export const BlockNoteEditor = memo(
       const vimExtension = useMemo(
         () =>
           VimExtension({
+            // Vim needs a hardware keyboard — off when the primary pointer
+            // is touch (mobile spec decision C, 2026-07-06).
             enabled: () =>
-              editorKeymapRef.current === "vim" && !readOnly,
+              editorKeymapRef.current === "vim" &&
+              !readOnly &&
+              !isCoarsePointer(),
             onModeChange: vimSetMode,
             onPendingKeysChange: vimSetPendingKeys,
             requestSave: () => vimRequestSaveRef.current(),
@@ -668,7 +675,8 @@ export const BlockNoteEditor = memo(
       const vimMessage = useVimStore((s) => s.message);
       const vimCommandLine = useVimStore((s) => s.commandLine);
       const vimLeaderMenu = useVimStore((s) => s.leaderMenu);
-      const isVimEnabled = editorKeymap === "vim" && !readOnly;
+      const isPhone = useIsPhone();
+      const isVimEnabled = editorKeymap === "vim" && !readOnly && !isCoarsePointer();
 
       return (
         <div
@@ -703,6 +711,12 @@ export const BlockNoteEditor = memo(
           )}
           {isVimEnabled && <VimCommandLine state={vimCommandLine} />}
           {isVimEnabled && <VimLeaderMenu state={vimLeaderMenu} />}
+          {isPhone && !readOnly && (
+            <MobileEditorToolbar
+              editor={editor as unknown as ToolbarEditor}
+              containerId={`bn-editor-${pageId}`}
+            />
+          )}
           {!readOnly && <DocumentProcessorIssues results={processorResults} />}
         </div>
       );
