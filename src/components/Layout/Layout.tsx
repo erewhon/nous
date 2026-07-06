@@ -7,8 +7,28 @@ import { OverviewLayout } from "./OverviewLayout";
 import { ResizeHandle } from "./ResizeHandle";
 import { useThemeStore } from "../../stores/themeStore";
 import { useNotebookStore } from "../../stores/notebookStore";
+import { useIsPhone } from "../../hooks/useIsPhone";
+import { useMobileBackStack } from "../../hooks/useMobileBackStack";
+import { MobileNav, MobileDrawer } from "../Mobile";
+
+// Phone shell: single full-screen pane + bottom nav + navigation drawer.
+// Split out so the desktop Layout's hooks don't run on phones and vice
+// versa (see Forge "Spec: Nous Mobile Web Experience").
+function MobileLayout() {
+  useMobileBackStack();
+  return (
+    <div className="flex h-dvh w-screen flex-col overflow-hidden relative">
+      <main className="flex-1 overflow-hidden">
+        <EditorArea />
+      </main>
+      <MobileNav />
+      <MobileDrawer />
+    </div>
+  );
+}
 
 export function Layout() {
+  const isPhone = useIsPhone();
   const uiMode = useThemeStore((state) => state.uiMode);
   const sidebarMode = useThemeStore((state) => state.sidebarMode);
   const panelWidths = useThemeStore((state) => state.panelWidths);
@@ -98,6 +118,11 @@ export function Layout() {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [autoHidePanels, panelsHovered, setPanelsHovered]);
+
+  // Phone breakpoint: single-pane shell with drawer + bottom nav.
+  if (isPhone) {
+    return <MobileLayout />;
+  }
 
   // Overview mode: full-width layout without sidebar
   if (uiMode === "overview") {

@@ -2659,6 +2659,7 @@ fn mime_for_path(path: &str) -> &'static str {
         "ogg" => "audio/ogg",
         "flac" => "audio/flac",
         "epub" => "application/epub+zip",
+        "webmanifest" => "application/manifest+json",
         _ => "application/octet-stream",
     }
 }

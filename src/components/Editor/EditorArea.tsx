@@ -24,9 +24,11 @@ import { SmartOrganizeDialog } from "../SmartOrganize/SmartOrganizeDialog";
 import type { EditorData, Page } from "../../types/page";
 import * as api from "../../utils/api";
 import { downloadTranscript } from "../../utils/videoApi";
+import { useIsPhone } from "../../hooks/useIsPhone";
 import "./editor-styles.css";
 
 export function EditorArea() {
+  const isPhone = useIsPhone();
   const { selectedNotebookId, notebooks } = useNotebookStore();
   const {
     pages,
@@ -412,8 +414,9 @@ export function EditorArea() {
     );
   }
 
-  // In rail mode, sections and folder tree are rendered in the accordion panel
-  const showInlinePanels = sidebarMode !== "rail";
+  // In rail mode, sections and folder tree are rendered in the accordion
+  // panel; on phones they live in the navigation drawer instead.
+  const showInlinePanels = sidebarMode !== "rail" && !isPhone;
 
   return (
     <div className="flex h-full">

@@ -1120,15 +1120,15 @@ export function CommandPalette({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center pt-[15vh]"
+      className="fixed inset-0 z-50 flex items-start justify-center pt-[15vh] max-md:pt-0"
       onClick={onClose}
     >
       {/* Backdrop */}
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
 
-      {/* Palette */}
+      {/* Palette — full-screen sheet below the phone breakpoint */}
       <div
-        className="relative w-full max-w-xl overflow-hidden rounded-xl border shadow-2xl"
+        className="relative w-full max-w-xl overflow-hidden rounded-xl border shadow-2xl max-md:h-full max-md:max-w-none max-md:rounded-none max-md:flex max-md:flex-col"
         style={{
           backgroundColor: "var(--color-bg-primary)",
           borderColor: "var(--color-border)",
@@ -1148,7 +1148,7 @@ export function CommandPalette({
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Search pages, notebooks, or actions..."
-            className="flex-1 bg-transparent outline-none"
+            className="flex-1 bg-transparent outline-none max-md:text-base"
             style={{
               color: "var(--color-text-primary)",
             }}
@@ -1257,7 +1257,7 @@ export function CommandPalette({
         {/* Results */}
         <div
           ref={listRef}
-          className="max-h-[50vh] overflow-y-auto p-2"
+          className="max-h-[50vh] overflow-y-auto p-2 max-md:max-h-none max-md:flex-1"
         >
           {allCommands.length === 0 ? (
             <div

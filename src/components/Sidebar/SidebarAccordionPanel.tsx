@@ -15,11 +15,13 @@ import type { RailSection } from "./SidebarRail";
 
 interface SidebarAccordionPanelProps {
   activeSection: RailSection;
+  /** Override the store-driven width (the phone drawer sizes it to fill). */
+  widthOverride?: number | "100%";
 }
 
 type AccordionSection = "recent" | "favorites" | "notebooks" | "sections" | "pages";
 
-export function SidebarAccordionPanel({ activeSection }: SidebarAccordionPanelProps) {
+export function SidebarAccordionPanel({ activeSection, widthOverride }: SidebarAccordionPanelProps) {
   const panelWidths = useThemeStore((s) => s.panelWidths);
   const setPanelWidth = useThemeStore((s) => s.setPanelWidth);
   const showRecentPages = useThemeStore((s) => s.showRecentPages);
@@ -173,14 +175,14 @@ export function SidebarAccordionPanel({ activeSection }: SidebarAccordionPanelPr
     [panelWidths.sidebar, setPanelWidth]
   );
 
-  const width = panelWidths.sidebar;
+  const width = widthOverride ?? panelWidths.sidebar;
 
   return (
     <>
       <div
         className="flex h-full flex-shrink-0 flex-col border-r"
         style={{
-          width: `${width}px`,
+          width: typeof width === "number" ? `${width}px` : width,
           backgroundColor: "var(--color-bg-sidebar)",
           borderColor: "var(--color-border)",
         }}
@@ -428,7 +430,10 @@ export function SidebarAccordionPanel({ activeSection }: SidebarAccordionPanelPr
         </div>
       </div>
 
-      <ResizeHandle direction="horizontal" onResize={handlePanelResize} />
+      {/* No resize affordance when the host fixes the width (phone drawer) */}
+      {widthOverride === undefined && (
+        <ResizeHandle direction="horizontal" onResize={handlePanelResize} />
+      )}
 
       {/* Dialogs */}
       {selectedNotebook && movePageTarget && (
