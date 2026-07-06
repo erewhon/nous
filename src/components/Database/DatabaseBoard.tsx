@@ -24,6 +24,7 @@ import type { RelationContext } from "./useRelationContext";
 import { DatabaseBoardCard } from "./DatabaseBoardCard";
 import { DatabaseRowDetail } from "./DatabaseRowDetail";
 import { compareCellValues, applyFilter } from "./DatabaseTable";
+import { useIsPhone } from "../../hooks/useIsPhone";
 
 interface DatabaseBoardProps {
   content: DatabaseContentV2;
@@ -50,15 +51,21 @@ export function DatabaseBoard({
 }: DatabaseBoardProps) {
   const [selectedRowId, setSelectedRowId] = useState<string | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
+  const isPhone = useIsPhone();
 
   const config = view.config as BoardViewConfig;
   const groupProp = content.properties.find(
     (p) => p.id === config.groupByPropertyId
   );
 
-  const sensors = useSensors(
+  const pointerSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
   );
+  // Phone: no drag — columns are swiped one at a time (CSS scroll-snap)
+  // and moving a card = changing the group property in the detail sheet
+  // (mobile spec decision D). Empty sensors keep DndContext mounted for
+  // the useDraggable/useDroppable hooks without ever activating a drag.
+  const sensors = isPhone ? [] : pointerSensors;
 
   // Filter and sort rows
   const displayRows = useMemo(() => {

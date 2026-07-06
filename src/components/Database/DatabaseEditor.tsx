@@ -30,6 +30,8 @@ import { DatabaseChart } from "./DatabaseChart";
 import { DatabaseTimeline } from "./DatabaseTimeline";
 import { PluginDatabaseView } from "./PluginDatabaseView";
 import { useRelationContext } from "./useRelationContext";
+import { toPhoneListView } from "./mobileListView";
+import { useIsPhone } from "../../hooks/useIsPhone";
 import * as api from "../../utils/api";
 import "./database-styles.css";
 
@@ -609,6 +611,7 @@ export function DatabaseEditor({
 
   // Hooks must be called before any conditional returns
   const relationContext = useRelationContext(notebookId, page?.id, content);
+  const isPhone = useIsPhone();
 
   // Get list of database pages for relation property picker
   const allPages = usePageStore((s) => s.pages);
@@ -652,6 +655,21 @@ export function DatabaseEditor({
   const renderActiveView = () => {
     switch (activeView.type) {
       case "table":
+        // Phones render tables as the card list — same filters/sorts,
+        // row editing via the full-screen detail sheet (mobile spec §4).
+        if (isPhone) {
+          return (
+            <DatabaseList
+              content={content}
+              view={toPhoneListView(activeView, content.properties)}
+              onUpdateContent={handleUpdateContent}
+              onUpdateView={handleUpdateView}
+              relationContext={relationContext}
+              pageLinkPages={pageLinkPages}
+              onNavigatePageLink={onNavigatePageLink}
+            />
+          );
+        }
         return (
           <DatabaseTable
             content={content}

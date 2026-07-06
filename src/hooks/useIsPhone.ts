@@ -6,12 +6,15 @@ import { useSyncExternalStore } from "react";
 export const PHONE_MEDIA_QUERY = "(max-width: 767px)";
 
 function subscribe(callback: () => void): () => void {
+  // jsdom (component tests) has no matchMedia — behave as desktop.
+  if (typeof window.matchMedia !== "function") return () => {};
   const mq = window.matchMedia(PHONE_MEDIA_QUERY);
   mq.addEventListener("change", callback);
   return () => mq.removeEventListener("change", callback);
 }
 
 function getSnapshot(): boolean {
+  if (typeof window.matchMedia !== "function") return false;
   return window.matchMedia(PHONE_MEDIA_QUERY).matches;
 }
 
