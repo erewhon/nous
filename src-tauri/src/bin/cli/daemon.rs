@@ -58,6 +58,10 @@ pub struct DaemonState {
     pub rag: Arc<RagBackend>,
     /// Live RAG config. Reload-able via /api/search/rag/configure.
     pub rag_config: Arc<RwLock<RagConfig>>,
+    /// Live AI provider credentials ([ai] in daemon-config.toml).
+    /// /api/ai/* handlers fill omitted request fields from here;
+    /// updated via /api/ai/configure.
+    pub ai_config: Arc<RwLock<nous_lib::ai_config::AiSection>>,
     /// Path to the on-disk daemon-config.toml — the configure
     /// endpoint writes back here when it persists changes.
     pub daemon_config_path: PathBuf,
@@ -228,6 +232,7 @@ pub async fn run(library_name: Option<&str>, port: Option<u16>, bind: Option<&st
         );
     }
     let rag_config = Arc::new(RwLock::new(daemon_config.search.rag.clone()));
+    let ai_config = Arc::new(RwLock::new(daemon_config.ai.clone()));
     let rag_backend = Arc::new(RagBackend::new(Arc::clone(&rag_config)));
 
     // Create event broadcast channel (capacity 256 — events are small)
@@ -348,6 +353,7 @@ pub async fn run(library_name: Option<&str>, port: Option<u16>, bind: Option<&st
         tantivy: tantivy_backend,
         rag: rag_backend,
         rag_config,
+        ai_config,
         daemon_config_path,
         crdt_store,
         backup_scheduler: Arc::clone(&backup_scheduler),

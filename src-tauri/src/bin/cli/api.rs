@@ -694,6 +694,10 @@ pub fn build_router(state: AppState, auth: AuthState) -> Router {
         .route("/api/ai/suggest-tags", post(ai_suggest_tags))
         .route("/api/ai/suggest-related", post(ai_suggest_related))
         .route("/api/ai/models/discover", post(ai_discover_models))
+        // Daemon-side provider credentials ([ai] in daemon-config.toml).
+        // GET is always redacted; POST merges + persists.
+        .route("/api/ai/config", get(ai_get_config))
+        .route("/api/ai/configure", post(ai_configure))
         // Agile Results daily note
         .route(
             "/api/notebooks/{notebook_id}/agile-daily",
@@ -1159,11 +1163,13 @@ async fn rag_configure(
     if let Some(v) = req.rerank_candidates { current.rerank_candidates = v; }
     if let Some(v) = req.request_timeout_ms { current.request_timeout_ms = v; }
 
-    // Persist to disk so the new config survives restart.
+    // Persist to disk so the new config survives restart. Carry the [ai]
+    // section too — a partial DaemonConfig would wipe it on save.
     let to_persist = DaemonConfig {
         search: nous_lib::search::SearchSection {
             rag: current.clone(),
         },
+        ai: state.ai_config.read().await.clone(),
     };
     if let Err(e) = nous_lib::search::save(&state.daemon_config_path, &to_persist) {
         log::warn!(
@@ -2793,13 +2799,27 @@ impl AiConfigFields {
     fn into_config(self) -> AIConfig {
         AIConfig {
             provider_type: self.provider_type.unwrap_or_else(|| "openai".to_string()),
-            api_key: self.api_key,
-            base_url: self.base_url,
-            model: self.model,
+            // Empty strings mean "unset" — clients that clear a field send ""
+            api_key: self.api_key.filter(|s| !s.is_empty()),
+            base_url: self.base_url.filter(|s| !s.is_empty()),
+            model: self.model.filter(|s| !s.is_empty()),
             temperature: self.temperature,
             max_tokens: self.max_tokens,
         }
     }
+}
+
+/// Request fields → AIConfig, with fields the request omitted filled from
+/// the daemon's `[ai.providers.<type>]` config (see nous_lib::ai_config).
+/// Precedence: request > daemon config > Python-layer defaults. This is
+/// what lets a browser client chat with NO key in localStorage.
+async fn resolve_ai_config(state: &AppState, fields: AiConfigFields) -> AIConfig {
+    let mut config = fields.into_config();
+    let ai = state.ai_config.read().await;
+    if let Some(provider) = ai.providers.get(&config.provider_type) {
+        nous_lib::ai_config::apply_provider_defaults(&mut config, provider);
+    }
+    config
 }
 
 /// Run a PythonAI operation on the blocking pool and map failures into the
@@ -2837,7 +2857,7 @@ async fn ai_chat(
     State(state): State<AppState>,
     Json(req): Json<AiChatRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
-    let config = req.config.into_config();
+    let config = resolve_ai_config(&state, req.config).await;
     let messages = req.messages;
     let resp = ai_blocking(Arc::clone(&state.python_ai), "AI chat", move |ai| {
         ai.chat(messages, config).map_err(|e| e.to_string())
@@ -2860,7 +2880,7 @@ async fn ai_chat_context(
     State(state): State<AppState>,
     Json(req): Json<AiChatContextRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
-    let config = req.config.into_config();
+    let config = resolve_ai_config(&state, req.config).await;
     let (msg, ctx, hist) = (req.user_message, req.page_context, req.conversation_history);
     let resp = ai_blocking(Arc::clone(&state.python_ai), "AI chat", move |ai| {
         ai.chat_with_context(msg, ctx, hist, config)
@@ -2887,7 +2907,7 @@ async fn ai_chat_tools(
     State(state): State<AppState>,
     Json(req): Json<AiChatToolsRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
-    let config = req.config.into_config();
+    let config = resolve_ai_config(&state, req.config).await;
     let (msg, ctx, hist, nbs, nb_id) = (
         req.user_message,
         req.page_context,
@@ -2913,7 +2933,7 @@ async fn ai_chat_stream_sse(
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     use axum::response::sse::{Event, KeepAlive, Sse};
 
-    let config = req.config.into_config();
+    let config = resolve_ai_config(&state, req.config).await;
     let (msg, ctx, hist, nbs, nb_id, sys) = (
         req.user_message,
         req.page_context,
@@ -2977,7 +2997,7 @@ async fn ai_summarize_page(
     State(state): State<AppState>,
     Json(req): Json<AiSummarizePageRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
-    let config = req.config.into_config();
+    let config = resolve_ai_config(&state, req.config).await;
     let (content, title, max_len) = (req.content, req.title, req.max_length);
     let summary = ai_blocking(Arc::clone(&state.python_ai), "AI summarize", move |ai| {
         ai.summarize_page(content, title, max_len, config)
@@ -3001,7 +3021,7 @@ async fn ai_summarize_pages(
     State(state): State<AppState>,
     Json(req): Json<AiSummarizePagesRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
-    let config = req.config.into_config();
+    let config = resolve_ai_config(&state, req.config).await;
     let (pages, prompt, style) = (req.pages, req.custom_prompt, req.summary_style);
     let result = ai_blocking(Arc::clone(&state.python_ai), "AI summarize pages", move |ai| {
         ai.summarize_pages(pages, prompt, style, config)
@@ -3024,7 +3044,7 @@ async fn ai_suggest_tags(
     State(state): State<AppState>,
     Json(req): Json<AiSuggestTagsRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
-    let config = req.config.into_config();
+    let config = resolve_ai_config(&state, req.config).await;
     let (content, existing) = (req.content, req.existing_tags);
     let tags = ai_blocking(Arc::clone(&state.python_ai), "AI suggest tags", move |ai| {
         ai.suggest_tags(content, existing, config)
@@ -3050,7 +3070,7 @@ async fn ai_suggest_related(
     State(state): State<AppState>,
     Json(req): Json<AiSuggestRelatedRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
-    let config = req.config.into_config();
+    let config = resolve_ai_config(&state, req.config).await;
     let (content, title, pages, links, max) = (
         req.content,
         req.title,
@@ -3079,12 +3099,93 @@ async fn ai_discover_models(
     State(state): State<AppState>,
     Json(req): Json<AiDiscoverModelsRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    // Same fallback as chat: a keyless client can discover models when the
+    // daemon holds the provider's key.
+    let api_key = match req.api_key.filter(|k| !k.is_empty()) {
+        Some(k) => Some(k),
+        None => {
+            let ai = state.ai_config.read().await;
+            ai.providers
+                .get(&req.provider)
+                .and_then(|p| p.api_key.clone())
+                .filter(|k| !k.is_empty())
+        }
+    };
     let models = ai_blocking(Arc::clone(&state.python_ai), "AI model discovery", move |ai| {
-        ai.discover_chat_models(&req.provider, &req.base_url, req.api_key.as_deref())
+        ai.discover_chat_models(&req.provider, &req.base_url, api_key.as_deref())
             .map_err(|e| e.to_string())
     })
     .await?;
     Ok(Json(ApiResponse { data: models }))
+}
+
+// ----- AI provider config (daemon-side credentials) -----
+
+/// GET /api/ai/config — the [ai] section with key material redacted
+/// ("***" when a key is set; absent otherwise). Never returns secrets.
+async fn ai_get_config(
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let ai = state.ai_config.read().await;
+    Ok(Json(ApiResponse { data: ai.sanitized() }))
+}
+
+#[derive(Deserialize)]
+struct AiConfigureRequest {
+    /// Per-provider partial updates: present fields overwrite, absent
+    /// fields keep their value, empty string clears.
+    providers: std::collections::BTreeMap<String, AiProviderConfigInput>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AiProviderConfigInput {
+    api_key: Option<String>,
+    base_url: Option<String>,
+    default_model: Option<String>,
+}
+
+/// POST /api/ai/configure — merge provider credential updates and persist
+/// to daemon-config.toml. Mirrors rag_configure; echoes the sanitized
+/// section (never the keys).
+async fn ai_configure(
+    State(state): State<AppState>,
+    Json(req): Json<AiConfigureRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let mut ai = state.ai_config.write().await;
+
+    for (name, input) in req.providers {
+        let entry = ai.providers.entry(name).or_default();
+        let apply = |target: &mut Option<String>, value: Option<String>| {
+            if let Some(v) = value {
+                *target = if v.is_empty() { None } else { Some(v) };
+            }
+        };
+        apply(&mut entry.api_key, input.api_key);
+        apply(&mut entry.base_url, input.base_url);
+        apply(&mut entry.default_model, input.default_model);
+    }
+    // Drop providers with no remaining fields (a full clear removes the entry).
+    ai.providers.retain(|_, p| {
+        p.api_key.is_some() || p.base_url.is_some() || p.default_model.is_some()
+    });
+
+    // Persist BOTH sections — a partial DaemonConfig would wipe the other.
+    let to_persist = nous_lib::search::DaemonConfig {
+        search: nous_lib::search::SearchSection {
+            rag: state.rag_config.read().await.clone(),
+        },
+        ai: ai.clone(),
+    };
+    if let Err(e) = nous_lib::search::save(&state.daemon_config_path, &to_persist) {
+        log::warn!(
+            "Failed to persist daemon config to {}: {}",
+            state.daemon_config_path.display(),
+            e
+        );
+    }
+
+    Ok(Json(ApiResponse { data: ai.sanitized() }))
 }
 
 // ===== Notebook assets =====

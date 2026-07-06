@@ -178,6 +178,7 @@ impl TestEnv {
             tantivy: tantivy_backend,
             rag: rag_backend,
             rag_config: Arc::clone(&rag_config),
+            ai_config: Arc::new(RwLock::new(Default::default())),
             daemon_config_path,
             crdt_store,
             // Plugin host is None in tests by default — keeps construction
@@ -1208,4 +1209,110 @@ async fn ai_routes_require_write_scope() {
         )
         .await;
     assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+}
+
+// ===== AI provider config (daemon-side credentials) =====
+
+#[tokio::test]
+async fn ai_configure_persists_and_redacts() {
+    let env = TestEnv::new();
+
+    // Configure a provider
+    let (status, body) = env
+        .post_json(
+            "/api/ai/configure",
+            json!({"providers": {"openai": {
+                "apiKey": "rw:router-secret",
+                "baseUrl": "http://localhost:4010/v1",
+                "defaultModel": "auto-free"
+            }}}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "body: {body}");
+    // Echo is sanitized — never the key
+    assert_eq!(body["data"]["providers"]["openai"]["api_key"], "***");
+    assert_eq!(
+        body["data"]["providers"]["openai"]["base_url"],
+        "http://localhost:4010/v1"
+    );
+
+    // GET is redacted too
+    let (status, body) = env.get_json("/api/ai/config").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["data"]["providers"]["openai"]["api_key"], "***");
+    let raw = serde_json::to_string(&body).unwrap();
+    assert!(!raw.contains("router-secret"), "key leaked: {raw}");
+
+    // Persisted to daemon-config.toml with the real key on disk (0600)
+    let on_disk = std::fs::read_to_string(&env.state.daemon_config_path).unwrap();
+    assert!(on_disk.contains("router-secret"));
+    assert!(on_disk.contains("[ai.providers.openai]"));
+
+    // Partial update: change model only; key survives
+    let (status, _) = env
+        .post_json(
+            "/api/ai/configure",
+            json!({"providers": {"openai": {"defaultModel": "auto"}}}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let live = env.state.ai_config.read().await;
+    let p = &live.providers["openai"];
+    assert_eq!(p.api_key.as_deref(), Some("rw:router-secret"));
+    assert_eq!(p.default_model.as_deref(), Some("auto"));
+    drop(live);
+
+    // Empty string clears a field; clearing everything removes the provider
+    let (status, body) = env
+        .post_json(
+            "/api/ai/configure",
+            json!({"providers": {"openai": {"apiKey": "", "baseUrl": "", "defaultModel": ""}}}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body["data"]["providers"].get("openai").is_none(), "body: {body}");
+}
+
+#[tokio::test]
+async fn ai_config_survives_rag_configure() {
+    // rag_configure persists the whole DaemonConfig — it must not wipe [ai].
+    let env = TestEnv::new();
+    let (status, _) = env
+        .post_json(
+            "/api/ai/configure",
+            json!({"providers": {"openai": {"apiKey": "keep-me"}}}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, _) = env
+        .post_json("/api/search/rag/configure", json!({"collection": "other"}))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let on_disk = std::fs::read_to_string(&env.state.daemon_config_path).unwrap();
+    assert!(on_disk.contains("keep-me"), "rag_configure wiped [ai]: {on_disk}");
+    assert!(on_disk.contains("collection = \"other\""));
+}
+
+#[tokio::test]
+async fn ai_requests_fall_back_to_daemon_credentials() {
+    // With the placeholder Python bridge the call still fails, but the
+    // failure path proves the request passed daemon-config resolution
+    // (and precedence lives in nous_lib::ai_config unit tests).
+    let env = TestEnv::new();
+    let (status, _) = env
+        .post_json(
+            "/api/ai/configure",
+            json!({"providers": {"openai": {"apiKey": "daemon-key"}}}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, body) = env
+        .post_json("/api/ai/chat", json!({"messages": [{"role": "user", "content": "hi"}]}))
+        .await;
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+    // Clean bridge error — not a config/validation error
+    assert!(body["error"].as_str().unwrap_or("").contains("AI chat"));
 }

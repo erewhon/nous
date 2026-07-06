@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useAIStore, DEFAULT_SYSTEM_PROMPT } from "../../stores/aiStore";
+import { getAiDaemonConfig } from "../../utils/api";
 import { useWebResearchStore } from "../../stores/webResearchStore";
 import { useAudioStore } from "../../stores/audioStore";
 import { useThemeStore } from "../../stores/themeStore";
@@ -317,6 +318,16 @@ function AISettingsContent() {
   const [discoveryResult, setDiscoveryResult] = useState<
     Record<string, string>
   >({});
+  // Daemon-side provider credentials (always redacted) — used only to show
+  // the "key stored on daemon" hint per provider.
+  const [daemonProviders, setDaemonProviders] = useState<
+    Record<string, { api_key?: string }>
+  >({});
+  useEffect(() => {
+    getAiDaemonConfig()
+      .then((cfg) => setDaemonProviders(cfg.providers ?? {}))
+      .catch(() => {}); // older daemon without the route — no hint shown
+  }, []);
   const [showApiKeys, setShowApiKeys] = useState<Record<ProviderType, boolean>>(
     {
       openai: false,
@@ -427,6 +438,7 @@ function AISettingsContent() {
             isDiscovering={isDiscoveringModels}
             discoveryResult={discoveryResult[provider.type]}
             onDiscoverModels={() => handleDiscoverModels(provider.type)}
+            daemonHasKey={!!daemonProviders[provider.type]?.api_key}
           />
         ))}
       </div>
@@ -684,6 +696,7 @@ function ProviderAccordion({
   isDiscovering,
   discoveryResult,
   onDiscoverModels,
+  daemonHasKey,
 }: {
   provider: ProviderConfig;
   info: {
@@ -708,6 +721,8 @@ function ProviderAccordion({
   isDiscovering?: boolean;
   discoveryResult?: string;
   onDiscoverModels?: () => void;
+  /** The daemon holds a key for this provider (see GET /api/ai/config). */
+  daemonHasKey?: boolean;
 }) {
   return (
     <div
@@ -807,6 +822,12 @@ function ProviderAccordion({
                   {showApiKey ? <IconEyeOff /> : <IconEye />}
                 </button>
               </div>
+              {daemonHasKey && !provider.apiKey && (
+                <p className="mt-1 text-xs" style={{ color: "var(--color-accent)" }}>
+                  A key for this provider is stored on the daemon and used
+                  automatically — leave this empty, or enter one to override.
+                </p>
+              )}
               <p
                 className="mt-1 text-xs"
                 style={{ color: "var(--color-text-muted)" }}

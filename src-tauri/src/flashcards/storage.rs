@@ -1,7 +1,7 @@
 //! Storage operations for flashcards
 //!
 //! Directory structure per notebook:
-//! ```
+//! ```text
 //! notebooks/{notebook-id}/flashcards/
 //! ├── decks.json           # Array of all decks
 //! ├── cards/

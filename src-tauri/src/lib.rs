@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use tauri::Manager;
 
+pub mod ai_config;
 pub mod actions;
 mod chat_sessions;
 pub mod collab;

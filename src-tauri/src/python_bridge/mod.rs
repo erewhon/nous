@@ -704,6 +704,9 @@ impl PythonAI {
             if let Some(api_key) = config.api_key {
                 kwargs.set_item("api_key", api_key)?;
             }
+            if let Some(base_url) = config.base_url {
+                kwargs.set_item("base_url", base_url)?;
+            }
             if let Some(model) = config.model {
                 kwargs.set_item("model", model)?;
             }
@@ -760,6 +763,9 @@ impl PythonAI {
 
             if let Some(api_key) = config.api_key {
                 kwargs.set_item("api_key", api_key)?;
+            }
+            if let Some(base_url) = config.base_url {
+                kwargs.set_item("base_url", base_url)?;
             }
             if let Some(model) = config.model {
                 kwargs.set_item("model", model)?;
@@ -844,6 +850,9 @@ impl PythonAI {
 
             if let Some(api_key) = config.api_key {
                 kwargs.set_item("api_key", api_key)?;
+            }
+            if let Some(base_url) = config.base_url {
+                kwargs.set_item("base_url", base_url)?;
             }
             if let Some(model) = config.model {
                 kwargs.set_item("model", model)?;

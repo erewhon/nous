@@ -9,13 +9,16 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-/// Top-level config file shape. Currently only `[search.rag]` is in
-/// use; nesting under `search` leaves room for future search-related
-/// settings (analyzer overrides, fuzzy distance, etc.).
+/// Top-level config file shape: `[search.rag]` plus `[ai]` (provider
+/// credentials — see crate::ai_config). Anything that persists a partial
+/// DaemonConfig must carry BOTH sections or it will wipe the other on
+/// save (see rag_configure / ai_configure in bin/cli/api.rs).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DaemonConfig {
     #[serde(default)]
     pub search: SearchSection,
+    #[serde(default)]
+    pub ai: crate::ai_config::AiSection,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

@@ -761,6 +761,21 @@ export async function aiChatStream(
   return invoke("ai_chat_stream", args);
 }
 
+// Daemon-side AI provider credentials ([ai] in daemon-config.toml).
+// Keys are ALWAYS redacted to "***" by the daemon — this is only for
+// showing "stored on daemon" state in settings.
+export interface AiDaemonProviderConfig {
+  api_key?: string;
+  base_url?: string;
+  default_model?: string;
+}
+
+export async function getAiDaemonConfig(): Promise<{
+  providers: Record<string, AiDaemonProviderConfig>;
+}> {
+  return daemonGet("/api/ai/config");
+}
+
 // ===== Tag Management API =====
 
 export interface TagInfo {
