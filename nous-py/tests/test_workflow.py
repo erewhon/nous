@@ -946,6 +946,18 @@ class TestUpdateTaskStatus:
         db_update = daemon.update_database_rows.call_args[0][2]
         assert db_update[0]["cells"]["External Ref"] == "PROJ-456"
 
+    def test_priority_updated(self):
+        update, storage, daemon = self._setup()
+        update(task="My Task", status="Ready", priority=2)
+        db_update = daemon.update_database_rows.call_args[0][2]
+        assert db_update[0]["cells"]["Priority"] == 2
+
+    def test_priority_untouched_when_omitted(self):
+        update, storage, daemon = self._setup()
+        update(task="My Task", status="Ready")
+        db_update = daemon.update_database_rows.call_args[0][2]
+        assert "Priority" not in db_update[0]["cells"]
+
     def test_old_status_tags_removed(self):
         update, storage, daemon = self._setup(
             task_page_tags=["task", "nous", "ready", "spec-needed"]
@@ -1485,6 +1497,181 @@ class TestCrossProjectBlocking:
 
 
 # ---------------------------------------------------------------------------
+# update_task_fields (registered tool)
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateTaskFields:
+    def _setup(self):
+        db = _make_cross_project_db()
+        storage = _make_storage(
+            folders=[{"id": "folder-nous", "name": "Nous"}],
+            db_content=db,
+        )
+        daemon = _make_daemon()
+
+        def resolve_page(notebook_id, title_or_id):
+            if title_or_id == "Project Tasks":
+                return {
+                    "id": DB_PAGE_ID,
+                    "title": "Project Tasks",
+                    "pageType": "database",
+                }
+            return {
+                "id": "page-task-x",
+                "title": str(title_or_id),
+                "tags": ["task", "nous"],
+                "pageType": "standard",
+                "content": {"blocks": []},
+            }
+
+        daemon.resolve_page.side_effect = resolve_page
+        daemon.update_database_rows.return_value = {"rowsUpdated": 1}
+        tools = _register_tools(storage, daemon)
+        return tools["update_task_fields"], db, daemon
+
+    def _sent_cells(self, daemon):
+        return daemon.update_database_rows.call_args[0][2][0]["cells"]
+
+    def test_set_feature(self):
+        update, _, daemon = self._setup()
+        result = json.loads(
+            update(task="Publish event fan-out", feature="Social features")
+        )
+        assert result["updated"]["feature"] == "Social features"
+        assert self._sent_cells(daemon)["Feature"] == "Social features"
+
+    def test_clear_feature_with_empty_string(self):
+        update, _, daemon = self._setup()
+        result = json.loads(update(task="Publish event fan-out", feature=""))
+        assert result["updated"]["feature"] is None
+        assert self._sent_cells(daemon)["Feature"] == ""
+
+    def test_set_phase_case_insensitive(self):
+        update, _, daemon = self._setup()
+        result = json.loads(
+            update(task="Publish event fan-out", phase="infrastructure")
+        )
+        assert result["updated"]["phase"] == "Infrastructure"
+        assert self._sent_cells(daemon)["Phase"] == "Infrastructure"
+
+    def test_invalid_phase_lists_options(self):
+        update, _, _ = self._setup()
+        with pytest.raises(ValueError, match="Valid phases: .*Feature"):
+            update(task="Publish event fan-out", phase="Nonsense")
+
+    def test_add_dep_by_title(self):
+        update, _, daemon = self._setup()
+        result = json.loads(
+            update(
+                task="Unrelated ready work",
+                depends_on_add=["Publish event fan-out"],
+                project="Nous",
+            )
+        )
+        expected = f"{BLOCKED_ROW_UUID}:Publish event fan-out"
+        assert result["updated"]["depends_on"] == expected
+        assert self._sent_cells(daemon)["Depends On"] == expected
+
+    def test_add_dep_by_uuid_preserves_existing(self):
+        update, _, daemon = self._setup()
+        result = json.loads(
+            update(
+                task="Publish event fan-out",
+                depends_on_add=[OTHER_ROW_UUID],
+            )
+        )
+        value = result["updated"]["depends_on"]
+        assert value == (
+            f"{DEP_ROW_UUID}:Server-side publish model, "
+            f"{OTHER_ROW_UUID}:Unrelated ready work"
+        )
+
+    def test_add_already_present_is_noop_warning(self):
+        update, _, _ = self._setup()
+        result = json.loads(
+            update(
+                task="Publish event fan-out",
+                depends_on_add=["Server-side publish model"],
+            )
+        )
+        assert any("already present" in w for w in result["warnings"])
+        assert result["updated"]["depends_on"].count(DEP_ROW_UUID) == 1
+
+    def test_add_comma_entry_rejected(self):
+        update, _, _ = self._setup()
+        with pytest.raises(ValueError, match="contains a comma"):
+            update(
+                task="Publish event fan-out",
+                depends_on_add=["Task A, Task B"],
+            )
+
+    def test_remove_dep_by_title(self):
+        update, _, daemon = self._setup()
+        result = json.loads(
+            update(
+                task="Publish event fan-out",
+                depends_on_remove=["Server-side publish model"],
+            )
+        )
+        assert result["updated"]["depends_on"] == "None"
+        assert self._sent_cells(daemon)["Depends On"] == "None"
+
+    def test_remove_dep_by_uuid(self):
+        update, _, _ = self._setup()
+        result = json.loads(
+            update(
+                task="Publish event fan-out",
+                depends_on_remove=[DEP_ROW_UUID],
+            )
+        )
+        assert result["updated"]["depends_on"] == "None"
+
+    def test_remove_not_present_is_noop_warning(self):
+        update, _, _ = self._setup()
+        result = json.loads(
+            update(
+                task="Publish event fan-out",
+                depends_on_remove=["Ghost dependency"],
+            )
+        )
+        assert any("no-op" in w for w in result["warnings"])
+        assert DEP_ROW_UUID in result["updated"]["depends_on"]
+
+    def test_nothing_to_update_raises(self):
+        update, _, _ = self._setup()
+        with pytest.raises(ValueError, match="Nothing to update"):
+            update(task="Publish event fan-out")
+
+    def test_status_and_tags_untouched(self):
+        update, _, daemon = self._setup()
+        update(task="Publish event fan-out", feature="X")
+        assert "Status" not in self._sent_cells(daemon)
+        daemon.update_page.assert_not_called()
+        daemon.append_to_page.assert_not_called()
+
+    def test_comma_title_sanitized_in_canonical(self):
+        db = _make_cross_project_db()
+        db["rows"].append(
+            {
+                "id": "cccccccc-0000-4000-8000-000000000004",
+                "cells": {
+                    "prop-task": "Tier 4: indent, blockwise visual, motions",
+                    "prop-project": "opt-proj-nous",
+                    "prop-status": "opt-ready",
+                },
+            }
+        )
+        ref = _resolve_dep_ref(
+            db, "cccccccc-0000-4000-8000-000000000004", "Nous"
+        )
+        assert ref["canonical"] == (
+            "cccccccc-0000-4000-8000-000000000004:"
+            "Tier 4: indent; blockwise visual; motions"
+        )
+
+
+# ---------------------------------------------------------------------------
 # _migrate_dependencies
 # ---------------------------------------------------------------------------
 
@@ -1807,6 +1994,8 @@ class TestGetTaskSpec:
         result = get_spec(task="My Task")
 
         assert "## Task Metadata" in result
+        assert "**Row ID:** row-1" in result
+        assert "**Page ID:** page-task-1" in result
         assert "**Project:** Nous" in result
         assert "**Status:** Ready" in result
         assert "**Priority:** 2" in result

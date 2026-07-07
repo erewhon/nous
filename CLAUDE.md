@@ -81,6 +81,7 @@ The MCP exposes both low-level primitives (`update_database_rows`, `update_page`
 | If you want to... | Use | Don't reach for |
 |---|---|---|
 | Mark a task Done / change task status | `update_task_status(task, status, notes=...)` | `update_database_rows` after looking up a row UUID |
+| Set Feature/Phase or edit Depends On on an existing task | `update_task_fields(task, feature=..., phase=..., depends_on_add=[...], depends_on_remove=[...])` | `update_database_rows` after looking up a row UUID |
 | Add or remove a tag on a page | `manage_tags(notebook, page, add=..., remove=...)` | `get_page` → edit tags → `update_page` |
 | Edit a single block in a page | `find_block` + `replace_block` / `delete_block` / `insert_after_block` | `update_page` with the whole content rewritten |
 | Toggle / add a checklist item | `toggle_checklist_item`, `add_checklist_item` | hand-rolled block edits |

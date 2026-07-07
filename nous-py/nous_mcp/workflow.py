@@ -302,6 +302,10 @@ def _resolve_dep_ref(
 
     def _accept(row: dict, note: str | None = None) -> dict:
         title = _get_row_task_name(row, db_content) or entry
+        # Commas are the cell separator — a comma in the title would corrupt
+        # the cell on read. The UUID drives resolution, so soften the display
+        # title. (Fuller handling: the comma-in-title footgun task.)
+        title = title.replace(",", ";")
         result["row"] = row
         result["canonical"] = f"{row['id']}:{title}"
         result["note"] = note
@@ -1595,6 +1599,7 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
         notes: str | None = None,
         external_ref: str | None = None,
         completed_date: str | None = None,
+        priority: int | None = None,
         execution_mode: str | None = None,
         model_tier: str | None = None,
         estimate: str | None = None,
@@ -1620,6 +1625,7 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
             notes: Implementation notes to append to the page (optional).
             external_ref: Set or update the External Ref field (optional).
             completed_date: Completed date in YYYY-MM-DD format (auto-set for Done).
+            priority: Update priority 1-10 (lower = higher priority).
             execution_mode: Update autonomy gate — "Manual", "Auto-OK", or "Auto-Preferred".
             model_tier: Update model routing — "auto", "auto-free", or "auto-full".
             estimate: Update size estimate — "xs", "s", "m", "l", or "xl".
@@ -1691,6 +1697,8 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
 
             if external_ref is not None:
                 update_cells["External Ref"] = external_ref
+            if priority is not None:
+                update_cells["Priority"] = priority
             if execution_mode is not None:
                 update_cells["Execution Mode"] = execution_mode
             if model_tier is not None:
@@ -1762,6 +1770,193 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
                 "notes_appended": notes_appended,
                 "dependencies": dependencies,
                 "completed_date": completed_date,
+            },
+            indent=2,
+        )
+
+    @mcp.tool()
+    def update_task_fields(
+        task: str,
+        feature: str | None = None,
+        phase: str | None = None,
+        depends_on_add: list[str] | None = None,
+        depends_on_remove: list[str] | None = None,
+        project: str | None = None,
+        notebook: str = "Forge",
+        database: str = "Project Tasks",
+    ) -> str:
+        """Edit board fields on an existing task without touching its status.
+
+        The companion to update_task_status for fields that aren't status
+        transitions: no tags rewrite, no webhook, no completed date. Use this
+        instead of update_database_rows — no row-UUID lookup needed.
+
+        Args:
+            task: Task name (supports "Task: " prefix or bare name), or a
+                page/row UUID. When the same title exists in several projects,
+                pass project= or a UUID to disambiguate.
+            feature: Set the Feature cell. Pass "" to clear it. Omit to leave
+                untouched.
+            phase: Set the Phase cell. Validated against the database's Phase
+                options (e.g. Feature, Infrastructure, Polish, Bugfix, Launch).
+            depends_on_add: Dependency references to add. Each may be a task
+                title, row UUID, "uuid:Title", or "ref:<external-ref>" — same
+                forms as create_task's depends_on; resolved to the canonical
+                "uuid:Title" form (use resolve_tasks to validate first).
+                Entries containing a comma are rejected (commas separate cell
+                entries). Already-present entries are no-op warnings.
+            depends_on_remove: Dependency references to remove, matched by row
+                UUID, title, or exact entry text. Not-present entries are
+                no-op warnings, not errors.
+            project: Project name, to disambiguate duplicate task titles
+                (optional). Also the context for resolving added deps by title.
+            notebook: Notebook name or UUID (default: "Forge").
+            database: Task database title (default: "Project Tasks").
+
+        Returns JSON with task, row_id, updated field values, and warnings.
+        """
+        storage = get_storage()
+        daemon = get_daemon()
+        nb = storage.resolve_notebook(notebook)
+        notebook_id = nb["id"]
+
+        if (
+            feature is None
+            and phase is None
+            and not depends_on_add
+            and not depends_on_remove
+        ):
+            raise ValueError(
+                "Nothing to update — pass feature, phase, depends_on_add, "
+                "or depends_on_remove"
+            )
+
+        db_page = daemon.resolve_page(notebook_id, database)
+        if db_page.get("pageType") != "database":
+            raise ValueError(f"Page '{db_page.get('title')}' is not a database")
+
+        db_content = storage.read_database_content(notebook_id, db_page["id"])
+        if db_content is None:
+            raise ValueError(f"Database file not found for '{database}'")
+
+        task_name, row, _, prop_map, _page = _resolve_task_target(
+            daemon, notebook_id, db_content, task, project
+        )
+        if row is None:
+            raise ValueError(
+                f"Task '{task_name}' not found in database '{database}'."
+            )
+
+        warnings: list[str] = []
+        update_cells: dict[str, str | int] = {}
+        updated: dict = {}
+
+        # --- Feature ("" clears) ---
+        if feature is not None:
+            new_feature = feature.strip()
+            update_cells["Feature"] = new_feature
+            updated["feature"] = new_feature or None
+
+        # --- Phase (validated against the select's options) ---
+        if phase is not None:
+            phase_prop = prop_map.get("phase")
+            options = (
+                [o["label"] for o in phase_prop.get("options", [])]
+                if phase_prop
+                else []
+            )
+            match = next(
+                (o for o in options if o.lower() == phase.strip().lower()), None
+            )
+            if match is None:
+                raise ValueError(
+                    f"Unknown phase '{phase}'. Valid phases: {', '.join(options)}"
+                )
+            update_cells["Phase"] = match
+            updated["phase"] = match
+
+        # --- Depends On add/remove ---
+        if depends_on_add or depends_on_remove:
+            effective_project = project or _row_project_label(row, prop_map) or None
+            depends_prop = prop_map.get("depends on")
+            raw = (
+                str(row.get("cells", {}).get(depends_prop["id"], ""))
+                if depends_prop
+                else ""
+            )
+            if raw.strip().lower() in ("", "none"):
+                entries: list[str] = []
+            else:
+                entries = [e.strip() for e in raw.split(",") if e.strip()]
+
+            def _entry_refers_to(existing: str, resolved: dict, ref: str) -> bool:
+                """Does an existing cell entry refer to the same task as ref?"""
+                if existing.lower() == ref.lower():
+                    return True
+                dep_row = resolved["row"]
+                if dep_row is None:
+                    return False
+                uid, name = _parse_depends_on(existing)[0]
+                if uid == dep_row["id"]:
+                    return True
+                title = _get_row_task_name(dep_row, db_content)
+                return bool(title) and name.lower() == title.lower()
+
+            for ref in depends_on_remove or []:
+                ref = ref.strip()
+                if not ref:
+                    continue
+                resolved = _resolve_dep_ref(db_content, ref, effective_project)
+                kept = [
+                    e for e in entries if not _entry_refers_to(e, resolved, ref)
+                ]
+                if len(kept) == len(entries):
+                    warnings.append(
+                        f"Remove: '{ref}' not present in Depends On — no-op"
+                    )
+                entries = kept
+
+            for ref in depends_on_add or []:
+                ref = ref.strip()
+                if not ref:
+                    continue
+                if "," in ref:
+                    raise ValueError(
+                        f"Dependency entry '{ref}' contains a comma — commas "
+                        f"separate Depends On entries. Pass one reference per "
+                        f"list item (use a row UUID or ref:<external-ref> for "
+                        f"comma-containing titles)."
+                    )
+                resolved = _resolve_dep_ref(db_content, ref, effective_project)
+                if resolved["warning"]:
+                    warnings.append(resolved["warning"])
+                elif resolved["note"]:
+                    warnings.append(f"Dependency '{ref}': {resolved['note']}")
+                if any(_entry_refers_to(e, resolved, ref) for e in entries) or (
+                    resolved["canonical"] in entries
+                ):
+                    warnings.append(
+                        f"Add: '{ref}' already present in Depends On — no-op"
+                    )
+                    continue
+                entries.append(resolved["canonical"])
+
+            new_value = ", ".join(entries) if entries else "None"
+            update_cells["Depends On"] = new_value
+            updated["depends_on"] = new_value
+
+        daemon.update_database_rows(
+            notebook_id,
+            db_page["id"],
+            [{"row": row["id"], "cells": update_cells}],
+        )
+
+        return json.dumps(
+            {
+                "task": task_name,
+                "row_id": row["id"],
+                "updated": updated,
+                "warnings": warnings,
             },
             indent=2,
         )
@@ -2001,6 +2196,8 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
             database: Task database title (default: "Project Tasks").
 
         Returns markdown with metadata, guardrails, and full page content.
+        Metadata includes Row ID and Page ID — both usable as the task
+        argument in other task tools (and row ids in update_database_rows).
         """
         from nous_mcp.markdown import export_page_to_markdown
 
@@ -2152,6 +2349,9 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
             parts.append("")
 
         parts.append("## Task Metadata")
+        if row is not None:
+            parts.append(f"- **Row ID:** {row['id']}")
+        parts.append(f"- **Page ID:** {page['id']}")
         parts.append(f"- **Project:** {project}")
         parts.append(f"- **Status:** {status}")
         parts.append(f"- **Priority:** {priority}")
