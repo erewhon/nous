@@ -1026,6 +1026,7 @@ def _query_tasks(
     task_type: str | None = None,
     complexity: str | None = None,
     worker_ready: bool = False,
+    search: str | None = None,
     limit: int | None = None,
 ) -> list[dict]:
     """Extract tasks from database content with flexible filtering.
@@ -1104,6 +1105,9 @@ def _query_tasks(
     if status:
         status_set = {s.strip().lower() for s in status.split(",")}
 
+    # Free-text search terms — ALL must appear in title/notes/feature
+    search_terms = [t for t in (search or "").lower().split() if t]
+
     result: list[dict] = []
     for row in rows:
         cells = row.get("cells", {})
@@ -1130,8 +1134,15 @@ def _query_tasks(
         if not task_name:
             continue
 
-        # --- Feature filter ---
+        # --- Free-text search (title + notes + feature) ---
         feat_cell = str(cells.get(feature_prop["id"], "")).strip() if feature_prop else ""
+        if search_terms:
+            notes_val = str(cells.get(notes_prop["id"], "")) if notes_prop else ""
+            haystack = f"{task_name} {notes_val} {feat_cell}".lower()
+            if not all(t in haystack for t in search_terms):
+                continue
+
+        # --- Feature filter ---
         if feature:
             if feat_cell:
                 if feat_cell.lower() != feature.lower():
@@ -2814,6 +2825,7 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
         complexity: str | None = None,
         worker_ready: bool = False,
         include_archived: bool = False,
+        search: str | None = None,
         limit: int = 20,
         notebook: str = "Forge",
         database: str = "Project Tasks",
@@ -2847,6 +2859,12 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
                 Done rows moved by archive_tasks). Archived rows are marked
                 "archived": true. Default False — day-to-day queries stay on
                 the active working set.
+            search: Free-text keyword search. Whitespace-separated terms must
+                ALL appear (case-insensitive) in the task title, Notes, or
+                Feature. Composable with every other filter. When set, Done
+                tasks are included by default (finding past work is the main
+                use) — pass status= to narrow, and include_archived=True to
+                also span archived history.
             limit: Max results (default 20, use 0 for unlimited).
             notebook: Notebook name or UUID (default: "Forge").
             database: Task database title (default: "Project Tasks").
@@ -2868,8 +2886,9 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
         if db_content is None:
             raise ValueError(f"Database file not found for '{database}'")
 
-        # Determine if Done tasks should be included
-        include_done = False
+        # Determine if Done tasks should be included. Free-text search
+        # includes Done by default — finding past work is its main use.
+        include_done = bool(search)
         if status:
             status_set = {s.strip().lower() for s in status.split(",")}
             if "done" in status_set:
@@ -2895,6 +2914,7 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
             task_type=task_type,
             complexity=complexity,
             worker_ready=worker_ready,
+            search=search,
             limit=None if effective_blocked is not None else effective_limit,
         )
 
@@ -2915,6 +2935,7 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
                     model_tier=model_tier,
                     task_type=task_type,
                     complexity=complexity,
+                    search=search,
                 )
                 for t in archived_tasks:
                     t["archived"] = True
@@ -2991,6 +3012,7 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
                     "complexity": complexity,
                     "worker_ready": worker_ready if worker_ready else None,
                     "include_archived": include_archived if include_archived else None,
+                    "search": search,
                 }.items() if v is not None
             },
             "tasks": task_list,

@@ -1807,6 +1807,83 @@ class TestArchiveWorkflow:
         assert "**Status:** Done" in spec
 
 
+class TestQueryTasksSearch:
+    def _setup(self):
+        db = _make_cross_project_db()
+        # A Done row to exercise search-includes-Done
+        db["rows"].append(
+            {
+                "id": "eeeeeeee-0000-4000-8000-000000000008",
+                "cells": {
+                    "prop-task": "Dependabot vulnerability triage",
+                    "prop-project": "opt-proj-nous",
+                    "prop-status": "opt-done",
+                    "prop-notes": "Sweep the 249 GitHub alerts",
+                    "prop-depends": "None",
+                },
+            }
+        )
+        storage = _make_storage(
+            folders=[{"id": "folder-nous", "name": "Nous"}],
+            db_content=db,
+        )
+        daemon = _make_daemon()
+
+        def resolve_page(notebook_id, title_or_id):
+            if title_or_id == "Project Tasks":
+                return {
+                    "id": DB_PAGE_ID,
+                    "title": "Project Tasks",
+                    "pageType": "database",
+                }
+            raise DaemonError(
+                f"Daemon API error (404): No page matching '{title_or_id}'"
+            )
+
+        daemon.resolve_page.side_effect = resolve_page
+        tools = _register_tools(storage, daemon)
+        return tools["query_tasks"]
+
+    def test_title_substring_case_insensitive(self):
+        query = self._setup()
+        result = json.loads(query(search="PUBLISH"))
+        names = [t["task"] for t in result["tasks"]]
+        assert names == ["Server-side publish model", "Publish event fan-out"]
+
+    def test_multi_term_and_semantics(self):
+        query = self._setup()
+        result = json.loads(query(search="publish fan-out"))
+        names = [t["task"] for t in result["tasks"]]
+        assert names == ["Publish event fan-out"]
+
+    def test_matches_notes_cell(self):
+        query = self._setup()
+        result = json.loads(query(search="github alerts"))
+        names = [t["task"] for t in result["tasks"]]
+        assert names == ["Dependabot vulnerability triage"]
+
+    def test_search_includes_done_by_default(self):
+        query = self._setup()
+        result = json.loads(query(search="dependabot"))
+        assert [t["task"] for t in result["tasks"]] == [
+            "Dependabot vulnerability triage"
+        ]
+        # Status filter still narrows
+        narrowed = json.loads(query(search="dependabot", status="Ready"))
+        assert narrowed["tasks"] == []
+
+    def test_composes_with_project_filter(self):
+        query = self._setup()
+        result = json.loads(query(search="publish", project="Astra"))
+        names = [t["task"] for t in result["tasks"]]
+        assert names == ["Server-side publish model"]
+
+    def test_no_match_returns_empty_not_everything(self):
+        query = self._setup()
+        result = json.loads(query(search="zzz-nonexistent-keyword"))
+        assert result["total"] == 0
+
+
 # ---------------------------------------------------------------------------
 # update_task_fields (registered tool)
 # ---------------------------------------------------------------------------
