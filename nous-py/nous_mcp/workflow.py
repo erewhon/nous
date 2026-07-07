@@ -18,8 +18,8 @@ from uuid import uuid4
 
 import httpx
 
-from nous_mcp.daemon_client import NousDaemonClient
-from nous_mcp.storage import NousStorage
+from nous_mcp.daemon_client import DaemonError
+from nous_mcp.storage import UUID_RE, NousStorage
 
 logger = logging.getLogger(__name__)
 
@@ -382,33 +382,229 @@ def _format_task_content(
     return f"## Task: {title}\n\n{metadata}\n---\n\n{content}".rstrip()
 
 
-def _find_task_row(
+def _row_project_label(row: dict, prop_map: dict) -> str:
+    """Resolve the Project select label for a row. Returns '' if unset."""
+    proj_prop = prop_map.get("project")
+    if not proj_prop:
+        return ""
+    cell = row.get("cells", {}).get(proj_prop["id"], "")
+    if not cell:
+        return ""
+    options = {o["id"]: o["label"] for o in proj_prop.get("options", [])}
+    return options.get(cell, str(cell))
+
+
+def _find_task_rows(
     db_content: dict,
     task_name: str,
-) -> tuple[dict | None, int | None, dict]:
-    """Find a database row matching a task name.
+    project: str | None = None,
+) -> tuple[list[tuple[dict, int]], dict]:
+    """Find ALL database rows matching a task name (case-insensitive exact).
 
-    Returns (row, row_index, prop_map) where prop_map is {prop_name_lower: prop_dict}.
-    Row and row_index are None if not found.
+    Optionally filters by the Project select label. Returns (matches, prop_map)
+    where matches is a list of (row, row_index) and prop_map is
+    {prop_name_lower: prop_dict}.
     """
     properties = db_content.get("properties", [])
     prop_map = {p["name"].lower(): p for p in properties}
 
     task_prop = prop_map.get("task")
     if task_prop is None:
-        return None, None, prop_map
+        return [], prop_map
 
     task_prop_id = task_prop["id"]
     name_lower = task_name.lower()
+    project_lower = project.strip().lower() if project else None
 
+    matches: list[tuple[dict, int]] = []
     for i, row in enumerate(db_content.get("rows", [])):
         cell_val = row.get("cells", {}).get(task_prop_id, "")
         clean = re.sub(r"<[^>]+>", "", str(cell_val))
         clean = html_unescape(clean).strip().lower()
-        if clean == name_lower:
-            return row, i, prop_map
+        if clean != name_lower:
+            continue
+        if (
+            project_lower is not None
+            and _row_project_label(row, prop_map).lower() != project_lower
+        ):
+            continue
+        matches.append((row, i))
 
+    return matches, prop_map
+
+
+def _task_ambiguity_error(
+    task_name: str,
+    matches: list[tuple[dict, int]],
+    prop_map: dict,
+) -> ValueError:
+    """Build an honest error for a task name matching multiple rows."""
+    projects = [_row_project_label(row, prop_map) or "Unknown" for row, _ in matches]
+    return ValueError(
+        f"{len(matches)} tasks match '{task_name}' "
+        f"(projects: {', '.join(projects)}) — pass project= or a page/row UUID"
+    )
+
+
+def _find_task_row(
+    db_content: dict,
+    task_name: str,
+    project: str | None = None,
+) -> tuple[dict | None, int | None, dict]:
+    """Find the single database row matching a task name.
+
+    Returns (row, row_index, prop_map) where prop_map is {prop_name_lower: prop_dict}.
+    Row and row_index are None if not found. Raises ValueError when several
+    rows match (duplicate titles across projects) — never silently returns
+    the first match; pass project= to disambiguate.
+    """
+    matches, prop_map = _find_task_rows(db_content, task_name, project)
+    if len(matches) > 1:
+        raise _task_ambiguity_error(task_name, matches, prop_map)
+    if matches:
+        row, i = matches[0]
+        return row, i, prop_map
     return None, None, prop_map
+
+
+def _pick_page_by_project(
+    daemon,
+    notebook_id: str,
+    title: str,
+    project: str | None,
+) -> dict | None:
+    """Among pages with a duplicated title, pick the one tagged with project.
+
+    Task pages carry the project name (lowercased) as a tag. Returns the full
+    page when exactly one candidate matches, else None.
+    """
+    if not project:
+        return None
+    try:
+        pages = daemon.list_pages(notebook_id)
+    except DaemonError:
+        return None
+
+    title_lower = title.lower()
+    proj_tag = project.strip().lower()
+
+    def _matches(p: dict, exact: bool) -> bool:
+        if p.get("deletedAt"):
+            return False
+        page_title = str(p.get("title", "")).lower()
+        title_ok = page_title == title_lower if exact else page_title.startswith(title_lower)
+        return title_ok and proj_tag in [str(t).lower() for t in p.get("tags", [])]
+
+    candidates = [p for p in pages if _matches(p, exact=True)]
+    if not candidates:
+        candidates = [p for p in pages if _matches(p, exact=False)]
+    if len(candidates) == 1:
+        # Re-resolve by UUID for the full page (list entries may be trimmed).
+        return daemon.resolve_page(notebook_id, candidates[0]["id"])
+    return None
+
+
+def _resolve_task_page(
+    daemon,
+    notebook_id: str,
+    task_name: str,
+    project: str | None = None,
+) -> dict:
+    """Resolve a task's page by title, reporting duplicates honestly.
+
+    Tries 'Task: {name}' then the bare name (the daemon matches exact title
+    first, then prefix). When the daemon reports an ambiguous title, tries to
+    narrow to a single page by project tag; failing that, raises the honest
+    ambiguity error instead of masking it as "not found".
+    """
+    ambiguous: str | None = None
+    for title in (f"Task: {task_name}", task_name):
+        try:
+            return daemon.resolve_page(notebook_id, title)
+        except (DaemonError, ValueError) as e:
+            msg = str(e)
+            if "ambiguous title" in msg.lower():
+                page = _pick_page_by_project(daemon, notebook_id, title, project)
+                if page is not None:
+                    return page
+                ambiguous = ambiguous or msg
+            elif (
+                "no page matching" in msg.lower()
+                or "not found" in msg.lower()
+                or "(404)" in msg
+            ):
+                continue
+            else:
+                raise
+
+    if ambiguous:
+        hint = f" (project '{project}' did not narrow it down)" if project else ""
+        raise ValueError(
+            f"Multiple pages match task '{task_name}'{hint} — "
+            f"pass project= or a page UUID. Daemon said: {ambiguous}"
+        )
+    raise ValueError(
+        f"Task '{task_name}' not found. "
+        f"Tried both 'Task: {task_name}' and '{task_name}'."
+    )
+
+
+def _resolve_task_target(
+    daemon,
+    notebook_id: str,
+    db_content: dict,
+    task: str,
+    project: str | None = None,
+) -> tuple[str, dict | None, int | None, dict, dict | None]:
+    """Resolve a task identifier (name, page UUID, or row UUID) row-first.
+
+    Returns (task_name, row, row_index, prop_map, page). page is only set when
+    task was a page UUID (already fetched); otherwise callers resolve it via
+    _resolve_task_page. row is None when no database row matches (page-only
+    task). Raises ValueError with an honest ambiguity message when several
+    rows match and neither project= nor a UUID disambiguates.
+    """
+    task_str = task.strip()
+
+    if UUID_RE.match(task_str):
+        # Row UUID?
+        prop_map = {p["name"].lower(): p for p in db_content.get("properties", [])}
+        for i, row in enumerate(db_content.get("rows", [])):
+            if row.get("id") == task_str:
+                name = _get_row_task_name(row, db_content)
+                return name, row, i, prop_map, None
+        # Page UUID?
+        try:
+            page = daemon.resolve_page(notebook_id, task_str)
+        except (DaemonError, ValueError):
+            page = None
+        if page is None:
+            raise ValueError(f"No task row or page found for UUID '{task_str}'")
+        name = str(page.get("title", "")).strip()
+        if name.lower().startswith("task: "):
+            name = name[6:].strip()
+        matches, prop_map = _find_task_rows(db_content, name, project)
+        if len(matches) > 1:
+            # Use the page's project tag to pick the matching row.
+            page_tags = {str(t).lower() for t in page.get("tags", [])}
+            narrowed = [
+                (r, i)
+                for r, i in matches
+                if _row_project_label(r, prop_map).lower() in page_tags
+            ]
+            if len(narrowed) == 1:
+                matches = narrowed
+        if len(matches) > 1:
+            raise _task_ambiguity_error(name, matches, prop_map)
+        row, idx = matches[0] if matches else (None, None)
+        return name, row, idx, prop_map, page
+
+    # Name path — strip optional "Task: " prefix.
+    name = task_str
+    if name.lower().startswith("task: "):
+        name = name[6:].strip()
+    row, idx, prop_map = _find_task_row(db_content, name, project)
+    return name, row, idx, prop_map, None
 
 
 def _check_dependency_status(
@@ -1333,6 +1529,7 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
         task_type: str | None = None,
         max_files: int | None = None,
         requires_tests: bool | None = None,
+        project: str | None = None,
         notebook: str = "Forge",
         database: str = "Project Tasks",
     ) -> str:
@@ -1343,7 +1540,9 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
         When setting status to "In Progress", checks dependency status (advisory, not blocking).
 
         Args:
-            task: Task name (supports "Task: " prefix or bare name, prefix match).
+            task: Task name (supports "Task: " prefix or bare name, prefix match),
+                or a page/row UUID. When the same title exists in several projects,
+                pass project= or a UUID to disambiguate.
             status: New status — "Spec Needed", "Ready", "In Progress", or "Done".
             notes: Implementation notes to append to the page (optional).
             external_ref: Set or update the External Ref field (optional).
@@ -1355,6 +1554,7 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
             task_type: Update type — "bug-fix", "feature", "refactor", "docs", "test", or "chore".
             max_files: Update soft scope guardrail.
             requires_tests: Update whether tests must pass before marking Done.
+            project: Project name, to disambiguate duplicate task titles (optional).
             notebook: Notebook name or UUID (default: "Forge").
             database: Task database title (default: "Project Tasks").
 
@@ -1368,26 +1568,7 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
         nb = storage.resolve_notebook(notebook)
         notebook_id = nb["id"]
 
-        # --- Normalize task name ---
-        task_name = task.strip()
-        if task_name.lower().startswith("task: "):
-            task_name = task_name[6:].strip()
-
-        # --- Resolve task page ---
-        page_title = f"Task: {task_name}"
-        try:
-            page = daemon.resolve_page(notebook_id, page_title)
-        except Exception:
-            # Try bare name as fallback
-            try:
-                page = daemon.resolve_page(notebook_id, task_name)
-            except Exception:
-                raise ValueError(
-                    f"Task '{task_name}' not found. "
-                    f"Tried both 'Task: {task_name}' and '{task_name}'."
-                )
-
-        # --- Resolve database and find row ---
+        # --- Resolve database ---
         db_page = daemon.resolve_page(notebook_id, database)
         if db_page.get("pageType") != "database":
             raise ValueError(f"Page '{db_page.get('title')}' is not a database")
@@ -1396,7 +1577,16 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
         if db_content is None:
             raise ValueError(f"Database file not found for '{database}'")
 
-        row, row_index, prop_map = _find_task_row(db_content, task_name)
+        # --- Resolve task: row first (project-aware), then page ---
+        task_name, row, row_index, prop_map, page = _resolve_task_target(
+            daemon, notebook_id, db_content, task, project
+        )
+        page_title = f"Task: {task_name}"
+        if page is None:
+            effective_project = project or (
+                _row_project_label(row, prop_map) if row else None
+            )
+            page = _resolve_task_page(daemon, notebook_id, task_name, effective_project)
 
         # --- Determine previous status ---
         previous_status = "Unknown"
@@ -1506,6 +1696,7 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
     @mcp.tool()
     def check_dependencies(
         task: str,
+        project: str | None = None,
         notebook: str = "Forge",
         database: str = "Project Tasks",
     ) -> str:
@@ -1514,7 +1705,10 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
         Resolves each dependency (UUID or free-text) and reports its status.
 
         Args:
-            task: Task name (supports "Task: " prefix or bare name).
+            task: Task name (supports "Task: " prefix or bare name), or a
+                page/row UUID. When the same title exists in several projects,
+                pass project= or a UUID to disambiguate.
+            project: Project name, to disambiguate duplicate task titles (optional).
             notebook: Notebook name or UUID (default: "Forge").
             database: Task database title (default: "Project Tasks").
 
@@ -1534,13 +1728,10 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
         if db_content is None:
             raise ValueError(f"Database file not found for '{database}'")
 
-        # Normalize task name
-        task_name = task.strip()
-        if task_name.lower().startswith("task: "):
-            task_name = task_name[6:].strip()
-
-        # Find the task row
-        row, _, prop_map = _find_task_row(db_content, task_name)
+        # Find the task row (row-first, project-aware, honest on duplicates)
+        task_name, row, _, prop_map, _page = _resolve_task_target(
+            daemon, notebook_id, db_content, task, project
+        )
         if row is None:
             raise ValueError(
                 f"Task '{task_name}' not found in database '{database}'."
@@ -1632,6 +1823,7 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
     @mcp.tool()
     def get_task_spec(
         task: str,
+        project: str | None = None,
         notebook: str = "Forge",
         database: str = "Project Tasks",
     ) -> str:
@@ -1641,7 +1833,10 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
         combining metadata header, guardrails, dependency status, and page content.
 
         Args:
-            task: Task name (supports "Task: " prefix or bare name).
+            task: Task name (supports "Task: " prefix or bare name), or a
+                page/row UUID. When the same title exists in several projects,
+                pass project= or a UUID to disambiguate.
+            project: Project name, to disambiguate duplicate task titles (optional).
             notebook: Notebook name or UUID (default: "Forge").
             database: Task database title (default: "Project Tasks").
 
@@ -1654,36 +1849,32 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
         nb = storage.resolve_notebook(notebook)
         notebook_id = nb["id"]
 
-        # --- Normalize task name ---
+        # --- Get database metadata (row-first, project-aware resolution) ---
+        db_page = daemon.resolve_page(notebook_id, database)
+        db_content = None
+        if db_page.get("pageType") == "database":
+            db_content = storage.read_database_content(notebook_id, db_page["id"])
+
         task_name = task.strip()
         if task_name.lower().startswith("task: "):
             task_name = task_name[6:].strip()
+        row = None
+        prop_map: dict = {}
+        page: dict | None = None
+        if db_content:
+            task_name, row, _, prop_map, page = _resolve_task_target(
+                daemon, notebook_id, db_content, task, project
+            )
 
-        # --- Resolve task page ---
-        page_title = f"Task: {task_name}"
-        try:
-            page = daemon.resolve_page(notebook_id, page_title)
-        except Exception:
-            try:
-                page = daemon.resolve_page(notebook_id, task_name)
-            except Exception:
-                raise ValueError(
-                    f"Task '{task_name}' not found. "
-                    f"Tried both 'Task: {task_name}' and '{task_name}'."
-                )
+        # --- Resolve task page (unless the task arg was a page UUID) ---
+        if page is None:
+            effective_project = project or (
+                _row_project_label(row, prop_map) if row else None
+            )
+            page = _resolve_task_page(daemon, notebook_id, task_name, effective_project)
 
         # --- Get page content as markdown ---
         page_content = export_page_to_markdown(page)
-
-        # --- Get database metadata ---
-        db_page = daemon.resolve_page(notebook_id, database)
-        db_content = None
-        row = None
-        prop_map: dict = {}
-        if db_page.get("pageType") == "database":
-            db_content = storage.read_database_content(notebook_id, db_page["id"])
-            if db_content:
-                row, _, prop_map = _find_task_row(db_content, task_name)
 
         # --- Extract metadata from row ---
         project = "Unknown"
@@ -1899,6 +2090,7 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
             entry: dict = {
                 "position": i,
                 "task": t["task"],
+                "row_id": t["id"],
                 "status": t["status"],
                 "priority": t["priority"],
                 "phase": t["phase"],
@@ -1968,6 +2160,8 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
             database: Task database title (default: "Project Tasks").
 
         Returns JSON with filters applied, total count, and compact task list.
+        Each row carries row_id, which other task tools accept as the task
+        argument to bypass title resolution (handy for duplicate titles).
         """
         storage = get_storage()
         daemon = get_daemon()
@@ -2031,6 +2225,7 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
         for t in tasks:
             entry: dict = {
                 "task": t["task"],
+                "row_id": t["id"],
                 "project": t["project"],
                 "status": t["status"],
                 "priority": t["priority"],
@@ -2130,9 +2325,11 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
         for t in tasks:
             is_blocked, _ = _is_task_blocked(t, db_content)
             if not is_blocked:
-                # Delegate to get_task_spec for the full output
+                # Delegate to get_task_spec for the full output. Pass the row
+                # UUID so duplicate titles across projects can't derail it.
                 return get_task_spec(
-                    task=t["task"],
+                    task=t["id"],
+                    project=project,
                     notebook=notebook,
                     database=database,
                 )

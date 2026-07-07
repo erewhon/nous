@@ -8,6 +8,7 @@ from uuid import uuid4
 
 import pytest
 
+from nous_mcp.daemon_client import DaemonError
 from nous_mcp.workflow import (
     ALL_STATUS_TAGS,
     REQUIRED_COLUMNS,
@@ -16,6 +17,7 @@ from nous_mcp.workflow import (
     _ensure_schema,
     _ensure_select_option,
     _find_task_row,
+    _find_task_rows,
     _fire_webhook,
     _format_task_content,
     _get_project_tasks,
@@ -92,6 +94,25 @@ def _make_db_content(
         "rows": rows or [],
         "views": [],
     }
+
+
+def _complete_required_schema(db: dict) -> None:
+    """Append any missing REQUIRED_COLUMNS so _ensure_schema is a no-op."""
+    existing = {p["name"].lower() for p in db["properties"]}
+    for name, ctype, options in REQUIRED_COLUMNS:
+        if name.lower() in existing:
+            continue
+        prop: dict = {
+            "id": f"prop-{name.lower().replace(' ', '-')}",
+            "name": name,
+            "type": ctype,
+        }
+        if options:
+            prop["options"] = [
+                {"id": f"opt-{o.lower()}", "label": o, "color": "#888888"}
+                for o in options
+            ]
+        db["properties"].append(prop)
 
 
 def _make_storage(
@@ -274,9 +295,7 @@ class TestEnsureSchema:
 
     def test_no_duplicates_when_column_exists(self):
         db = _make_db_content()
-        db["properties"].append(
-            {"id": "prop-extref", "name": "External Ref", "type": "text"}
-        )
+        _complete_required_schema(db)
         storage = _make_storage(db_content=db)
 
         added = _ensure_schema(storage, NOTEBOOK_ID, DB_PAGE_ID)
@@ -346,10 +365,8 @@ class TestCreateProject:
 
     def test_idempotent_second_call(self):
         db = _make_db_content(project_options=["TestProject"])
-        # Pre-add External Ref so schema is already up to date
-        db["properties"].append(
-            {"id": "prop-extref", "name": "External Ref", "type": "text"}
-        )
+        # Schema already fully up to date
+        _complete_required_schema(db)
         folders = [{"id": "f1", "name": "TestProject"}]
         storage = _make_storage(folders=folders, db_content=db)
         daemon = _make_daemon()
@@ -908,7 +925,17 @@ class TestUpdateTaskStatus:
 
     def test_unknown_task_raises(self):
         update, storage, daemon = self._setup()
-        daemon.resolve_page.side_effect = Exception("Not found")
+
+        def resolver(notebook_id, title_or_id):
+            if title_or_id == "Project Tasks":
+                return {
+                    "id": DB_PAGE_ID,
+                    "title": "Project Tasks",
+                    "pageType": "database",
+                }
+            raise DaemonError(f"Daemon API error (404): No page matching '{title_or_id}'")
+
+        daemon.resolve_page.side_effect = resolver
         with pytest.raises(ValueError, match="not found"):
             update(task="Ghost Task", status="Done")
 
@@ -1529,7 +1556,17 @@ class TestGetTaskSpec:
 
     def test_unknown_task_raises(self):
         get_spec, _, daemon = self._setup()
-        daemon.resolve_page.side_effect = Exception("Not found")
+
+        def resolver(notebook_id, title_or_id):
+            if title_or_id == "Project Tasks":
+                return {
+                    "id": DB_PAGE_ID,
+                    "title": "Project Tasks",
+                    "pageType": "database",
+                }
+            raise DaemonError(f"Daemon API error (404): No page matching '{title_or_id}'")
+
+        daemon.resolve_page.side_effect = resolver
         with pytest.raises(ValueError, match="not found"):
             get_spec(task="Ghost Task")
 
@@ -1537,6 +1574,251 @@ class TestGetTaskSpec:
         get_spec, _, _ = self._setup()
         result = get_spec(task="Task: My Task")
         assert "## Task Metadata" in result
+
+
+# ---------------------------------------------------------------------------
+# Duplicate task titles across projects (the Nous/Astra collision)
+# ---------------------------------------------------------------------------
+
+NOUS_PAGE_UUID = "11111111-1111-4111-8111-111111111111"
+ASTRA_PAGE_UUID = "22222222-2222-4222-8222-222222222222"
+NOUS_ROW_UUID = "33333333-3333-4333-8333-333333333333"
+ASTRA_ROW_UUID = "44444444-4444-4444-8444-444444444444"
+
+
+def _make_duplicate_db() -> dict:
+    """Two rows titled 'Web parity' in different projects."""
+    return _make_db_content(
+        project_options=["Nous", "Astra"],
+        include_external_ref=True,
+        rows=[
+            {
+                "id": NOUS_ROW_UUID,
+                "cells": {
+                    "prop-task": "Web parity",
+                    "prop-project": "opt-proj-nous",
+                    "prop-status": "opt-ready",
+                    "prop-depends": "None",
+                },
+            },
+            {
+                "id": ASTRA_ROW_UUID,
+                "cells": {
+                    "prop-task": "Web parity",
+                    "prop-project": "opt-proj-astra",
+                    "prop-status": "opt-inprogress",
+                    "prop-depends": "None",
+                },
+            },
+        ],
+    )
+
+
+def _make_duplicate_pages() -> list[dict]:
+    return [
+        {
+            "id": NOUS_PAGE_UUID,
+            "title": "Task: Web parity",
+            "tags": ["task", "nous", "ready"],
+            "pageType": "standard",
+            "content": {"blocks": [
+                {"type": "paragraph", "data": {"text": "Nous version."}},
+            ]},
+        },
+        {
+            "id": ASTRA_PAGE_UUID,
+            "title": "Task: Web parity",
+            "tags": ["task", "astra", "in-progress"],
+            "pageType": "standard",
+            "content": {"blocks": [
+                {"type": "paragraph", "data": {"text": "Astra version."}},
+            ]},
+        },
+    ]
+
+
+class TestDuplicateTaskTitles:
+    def _setup(self):
+        db = _make_duplicate_db()
+        pages = _make_duplicate_pages()
+        storage = _make_storage(
+            folders=[{"id": "folder-nous", "name": "Nous"}],
+            db_content=db,
+        )
+        daemon = _make_daemon()
+
+        def resolve_page(notebook_id, title_or_id):
+            # Mirrors daemon semantics: UUID hit, exact title, 409 on dupes.
+            if title_or_id == "Project Tasks":
+                return {
+                    "id": DB_PAGE_ID,
+                    "title": "Project Tasks",
+                    "pageType": "database",
+                }
+            for p in pages:
+                if p["id"] == title_or_id:
+                    return p
+            matches = [
+                p for p in pages
+                if p["title"].lower() == str(title_or_id).lower()
+            ]
+            if len(matches) > 1:
+                raise DaemonError(
+                    f"Daemon API error (409): Ambiguous title '{title_or_id}'. "
+                    f"Matches: 'Task: Web parity', 'Task: Web parity'"
+                )
+            if matches:
+                return matches[0]
+            raise DaemonError(
+                f"Daemon API error (404): No page matching '{title_or_id}'"
+            )
+
+        daemon.resolve_page.side_effect = resolve_page
+        daemon.list_pages.return_value = pages
+        daemon.update_page.return_value = {}
+        daemon.update_database_rows.return_value = {"rowsUpdated": 1}
+        daemon.append_to_page.return_value = {}
+        tools = _register_tools(storage, daemon)
+        return tools, storage, daemon
+
+    # --- _find_task_row regression: must NOT silently return first match ---
+
+    def test_find_task_row_raises_on_duplicates(self):
+        db = _make_duplicate_db()
+        with pytest.raises(ValueError, match="2 tasks match 'Web parity'"):
+            _find_task_row(db, "Web parity")
+
+    def test_find_task_row_error_names_projects(self):
+        db = _make_duplicate_db()
+        with pytest.raises(ValueError, match="Nous, Astra"):
+            _find_task_row(db, "Web parity")
+
+    def test_find_task_row_project_filter(self):
+        db = _make_duplicate_db()
+        row, idx, _ = _find_task_row(db, "Web parity", project="Astra")
+        assert row["id"] == ASTRA_ROW_UUID
+        assert idx == 1
+
+    def test_find_task_rows_returns_all(self):
+        db = _make_duplicate_db()
+        matches, _ = _find_task_rows(db, "Web parity")
+        assert [row["id"] for row, _ in matches] == [NOUS_ROW_UUID, ASTRA_ROW_UUID]
+
+    # --- update_task_status ---
+
+    def test_update_without_project_raises_ambiguity(self):
+        tools, _, daemon = self._setup()
+        with pytest.raises(ValueError) as exc:
+            tools["update_task_status"](task="Web parity", status="Done")
+        msg = str(exc.value)
+        assert "2 tasks match 'Web parity'" in msg
+        assert "Nous" in msg and "Astra" in msg
+        assert "project=" in msg
+        daemon.update_database_rows.assert_not_called()
+        daemon.update_page.assert_not_called()
+
+    def test_update_with_project_hits_right_row_and_page(self):
+        tools, _, daemon = self._setup()
+        result = json.loads(
+            tools["update_task_status"](
+                task="Web parity", status="Done", project="Astra"
+            )
+        )
+        assert result["task"] == "Web parity"
+        assert result["previous_status"] == "In Progress"
+
+        row_update = daemon.update_database_rows.call_args[0][2]
+        assert row_update[0]["row"] == ASTRA_ROW_UUID
+
+        page_call = daemon.update_page.call_args_list[0]
+        assert page_call[0][1] == ASTRA_PAGE_UUID
+
+    def test_update_with_page_uuid(self):
+        tools, _, daemon = self._setup()
+        result = json.loads(
+            tools["update_task_status"](task=NOUS_PAGE_UUID, status="Done")
+        )
+        assert result["task"] == "Web parity"
+        assert result["previous_status"] == "Ready"
+
+        row_update = daemon.update_database_rows.call_args[0][2]
+        assert row_update[0]["row"] == NOUS_ROW_UUID
+
+        page_call = daemon.update_page.call_args_list[0]
+        assert page_call[0][1] == NOUS_PAGE_UUID
+
+    def test_update_with_row_uuid(self):
+        tools, _, daemon = self._setup()
+        result = json.loads(
+            tools["update_task_status"](task=ASTRA_ROW_UUID, status="Done")
+        )
+        assert result["task"] == "Web parity"
+
+        row_update = daemon.update_database_rows.call_args[0][2]
+        assert row_update[0]["row"] == ASTRA_ROW_UUID
+
+        # Page picked via the row's project tag.
+        page_call = daemon.update_page.call_args_list[0]
+        assert page_call[0][1] == ASTRA_PAGE_UUID
+
+    # --- get_task_spec ---
+
+    def test_spec_without_project_raises_ambiguity(self):
+        tools, _, _ = self._setup()
+        with pytest.raises(ValueError, match="2 tasks match 'Web parity'"):
+            tools["get_task_spec"](task="Web parity")
+
+    def test_spec_with_project(self):
+        tools, _, _ = self._setup()
+        result = tools["get_task_spec"](task="Web parity", project="Astra")
+        assert "**Project:** Astra" in result
+        assert "Astra version." in result
+
+    def test_spec_with_page_uuid(self):
+        tools, _, _ = self._setup()
+        result = tools["get_task_spec"](task=NOUS_PAGE_UUID)
+        assert "**Project:** Nous" in result
+        assert "Nous version." in result
+
+    def test_spec_with_row_uuid(self):
+        tools, _, _ = self._setup()
+        result = tools["get_task_spec"](task=ASTRA_ROW_UUID)
+        assert "**Project:** Astra" in result
+        assert "Astra version." in result
+
+    # --- check_dependencies ---
+
+    def test_check_deps_without_project_raises_ambiguity(self):
+        tools, _, _ = self._setup()
+        with pytest.raises(ValueError, match="2 tasks match 'Web parity'"):
+            tools["check_dependencies"](task="Web parity")
+
+    def test_check_deps_with_project(self):
+        tools, _, _ = self._setup()
+        result = json.loads(
+            tools["check_dependencies"](task="Web parity", project="Nous")
+        )
+        assert result["task"] == "Web parity"
+        assert result["ready"] is True
+
+    def test_check_deps_with_row_uuid(self):
+        tools, _, _ = self._setup()
+        result = json.loads(tools["check_dependencies"](task=NOUS_ROW_UUID))
+        assert result["task"] == "Web parity"
+
+    # --- query_tasks escape hatch ---
+
+    def test_query_tasks_rows_carry_row_id(self):
+        tools, _, _ = self._setup()
+        result = json.loads(tools["query_tasks"](project="Nous"))
+        assert result["total"] == 1
+        assert result["tasks"][0]["row_id"] == NOUS_ROW_UUID
+
+    def test_unknown_uuid_raises(self):
+        tools, _, _ = self._setup()
+        ghost = "99999999-9999-4999-8999-999999999999"
+        with pytest.raises(ValueError, match="No task row or page found"):
+            tools["update_task_status"](task=ghost, status="Done")
 
 
 # ---------------------------------------------------------------------------
