@@ -697,7 +697,8 @@ def _check_dependency_status(
     for uid, dep_name in parsed:
         dep_row = _resolve_dep_row(db_content, uid, dep_name)
         if dep_row is None:
-            warnings.append(f"Dependency '{dep_name}' not found in database")
+            raw = _raw_dep_entry(uid, dep_name)
+            warnings.append(f"Dependency '{raw}' not found in database")
             continue
 
         status_label = _get_row_status(dep_row, db_content)
@@ -1218,10 +1219,17 @@ def _get_project_tasks(
     )
 
 
+def _raw_dep_entry(uid: str | None, dep_name: str) -> str:
+    """Reconstruct the original cell entry from a parsed (uid, name) pair."""
+    return f"{uid}:{dep_name}" if uid else dep_name
+
+
 def _is_task_blocked(task: dict, db_content: dict) -> tuple[bool, list[str]]:
     """Check if a task has unmet dependencies.
 
-    Returns (is_blocked, list_of_blocking_task_names).
+    Returns (is_blocked, list_of_blocking_task_names). Entries that resolve
+    to no row block too (fail closed) and are surfaced as the raw cell entry
+    so a human can see what the task is waiting on.
     """
     depends_raw = task.get("_depends_on_raw", "")
     parsed = _parse_depends_on(depends_raw)
@@ -1236,7 +1244,7 @@ def _is_task_blocked(task: dict, db_content: dict) -> tuple[bool, list[str]]:
             if dep_status.lower() != "done":
                 blocking.append(dep_name)
         else:
-            blocking.append(dep_name)
+            blocking.append(_raw_dep_entry(uid, dep_name))
 
     return bool(blocking), blocking
 
@@ -1983,7 +1991,10 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
             notebook: Notebook name or UUID (default: "Forge").
             database: Task database title (default: "Project Tasks").
 
-        Returns JSON with task, status, ready (bool), dependencies list, and blocking list.
+        Returns JSON with task, status, ready (bool), dependencies list,
+        blocking list, and unresolved list. unresolved ⊆ blocking: entries
+        matching no row, surfaced as the raw cell text — a typo or an
+        external prerequisite, as opposed to a known-but-unmet task.
         """
         storage = get_storage()
         daemon = get_daemon()
@@ -2020,16 +2031,20 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
 
         dep_results: list[dict] = []
         blocking: list[str] = []
+        unresolved: list[str] = []
 
         for uid, dep_name in parsed:
             dep_row = _resolve_dep_row(db_content, uid, dep_name)
             if dep_row is None:
+                raw = _raw_dep_entry(uid, dep_name)
                 dep_results.append({
-                    "task": dep_name,
+                    "task": raw,
                     "status": "Not Found",
                     "satisfied": False,
+                    "resolved": False,
                 })
-                blocking.append(dep_name)
+                blocking.append(raw)
+                unresolved.append(raw)
                 continue
 
             dep_status = _get_row_status(dep_row, db_content)
@@ -2055,6 +2070,7 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
                 "ready": len(blocking) == 0,
                 "dependencies": dep_results,
                 "blocking": blocking,
+                "unresolved": unresolved,
             },
             indent=2,
         )
@@ -2321,8 +2337,9 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
                         if not satisfied:
                             blocking.append(dep_name)
                     else:
-                        dep_parts.append(f"- {dep_name}: **Not Found**")
-                        blocking.append(dep_name)
+                        raw = _raw_dep_entry(uid, dep_name)
+                        dep_parts.append(f"- {raw}: **Not Found (unresolved)**")
+                        blocking.append(raw)
                 dep_section = "\n".join(dep_parts)
             else:
                 dep_section = "None"

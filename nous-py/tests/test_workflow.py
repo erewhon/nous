@@ -1477,6 +1477,69 @@ class TestCrossProjectBlocking:
         assert by_ref["Ghost"]["resolved"] is False
         assert "not found" in by_ref["Ghost"]["warning"]
 
+    def test_unresolvable_entry_blocks_fail_closed(self):
+        tools, db, _ = self._setup()
+        # Give the otherwise-unblocked task a dep that matches nothing.
+        dep_prop = next(
+            p for p in db["properties"] if p["name"].lower() == "depends on"
+        )
+        other = next(r for r in db["rows"] if r["id"] == OTHER_ROW_UUID)
+        other["cells"][dep_prop["id"]] = "Ghost external prerequisite (firmware 3.2)"
+
+        result = json.loads(tools["query_tasks"](project="Nous", blocked=True))
+        by_name = {t["task"]: t for t in result["tasks"]}
+        assert "Unrelated ready work" in by_name
+        assert by_name["Unrelated ready work"]["blocked_by"] == [
+            "Ghost external prerequisite (firmware 3.2)"
+        ]
+
+        ready = json.loads(tools["query_tasks"](project="Nous", worker_ready=True))
+        assert all(t["task"] != "Unrelated ready work" for t in ready["tasks"])
+
+    def test_dead_uuid_entry_surfaces_raw_entry(self):
+        tools, db, _ = self._setup()
+        dep_prop = next(
+            p for p in db["properties"] if p["name"].lower() == "depends on"
+        )
+        dead = "99999999-9999-4999-8999-999999999999:Retired old task"
+        other = next(r for r in db["rows"] if r["id"] == OTHER_ROW_UUID)
+        other["cells"][dep_prop["id"]] = dead
+
+        result = json.loads(
+            tools["check_dependencies"](task="Unrelated ready work")
+        )
+        assert result["ready"] is False
+        assert result["blocking"] == [dead]
+        assert result["unresolved"] == [dead]
+        assert result["dependencies"][0]["status"] == "Not Found"
+        assert result["dependencies"][0]["resolved"] is False
+
+    def test_unmet_vs_unresolved_distinguished(self):
+        tools, db, _ = self._setup()
+        dep_prop = next(
+            p for p in db["properties"] if p["name"].lower() == "depends on"
+        )
+        blocked = next(r for r in db["rows"] if r["id"] == BLOCKED_ROW_UUID)
+        blocked["cells"][dep_prop["id"]] = (
+            f"{DEP_ROW_UUID}:Server-side publish model, Ghost prerequisite"
+        )
+
+        result = json.loads(
+            tools["check_dependencies"](task="Publish event fan-out")
+        )
+        # Both block, only the ghost is unresolved.
+        assert set(result["blocking"]) == {
+            "Server-side publish model",
+            "Ghost prerequisite",
+        }
+        assert result["unresolved"] == ["Ghost prerequisite"]
+        known = next(
+            d for d in result["dependencies"]
+            if d["task"] == "Server-side publish model"
+        )
+        assert known["status"] == "Ready"
+        assert "resolved" not in known or known.get("resolved") is not False
+
     def test_resolve_tasks_flags_ambiguity(self):
         tools, db, _ = self._setup()
         db["rows"].append(
