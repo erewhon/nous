@@ -1560,6 +1560,254 @@ class TestCrossProjectBlocking:
 
 
 # ---------------------------------------------------------------------------
+# Archive workflow
+# ---------------------------------------------------------------------------
+
+ARCHIVE_PAGE_ID = "db-archive-001"
+ARCHIVED_ROW_UUID = "dddddddd-0000-4000-8000-000000000007"
+
+
+def _make_archive_content(base_db: dict) -> dict:
+    """Archive db holding one Done row, mirroring the active properties."""
+    return {
+        "version": 2,
+        "properties": base_db["properties"],
+        "rows": [
+            {
+                "id": ARCHIVED_ROW_UUID,
+                "cells": {
+                    "prop-task": "Ancient shipped work",
+                    "prop-project": "opt-proj-astra",
+                    "prop-status": "opt-done",
+                    "prop-extref": "pipeline:old:ancient-shipped-work",
+                    "prop-completed": "2026-01-15",
+                    "prop-depends": "None",
+                },
+            },
+        ],
+        "views": [],
+    }
+
+
+class TestArchiveWorkflow:
+    def _setup(self, with_archive: bool = True, extra_active_rows: list | None = None):
+        db = _make_cross_project_db()
+        # Completed column + a stale Done row in the active db
+        db["properties"].append(
+            {"id": "prop-completed", "name": "Completed", "type": "date"}
+        )
+        db["rows"].append(
+            {
+                "id": "eeeeeeee-0000-4000-8000-000000000008",
+                "cells": {
+                    "prop-task": "Old done thing",
+                    "prop-project": "opt-proj-nous",
+                    "prop-status": "opt-done",
+                    "prop-completed": "2026-02-01",
+                    "prop-depends": "None",
+                },
+            }
+        )
+        for r in extra_active_rows or []:
+            db["rows"].append(r)
+
+        archive = _make_archive_content(db) if with_archive else None
+
+        storage = _make_storage(
+            folders=[{"id": "folder-nous", "name": "Nous"}],
+            db_content=db,
+        )
+
+        def read_db(notebook_id, page_id):
+            if page_id == DB_PAGE_ID:
+                return db
+            if archive is not None and page_id == ARCHIVE_PAGE_ID:
+                return archive
+            return None
+
+        storage.read_database_content.side_effect = read_db
+        daemon = _make_daemon()
+
+        def resolve_page(notebook_id, title_or_id):
+            if title_or_id in ("Project Tasks", DB_PAGE_ID):
+                return {
+                    "id": DB_PAGE_ID,
+                    "title": "Project Tasks",
+                    "pageType": "database",
+                    "folderId": "folder-forge",
+                }
+            if with_archive and title_or_id in (
+                "Project Tasks Archive",
+                ARCHIVE_PAGE_ID,
+            ):
+                return {
+                    "id": ARCHIVE_PAGE_ID,
+                    "title": "Project Tasks Archive",
+                    "pageType": "database",
+                }
+            if title_or_id == "Project Tasks Archive":
+                raise DaemonError(
+                    "Daemon API error (404): No page matching 'Project Tasks Archive'"
+                )
+            return {
+                "id": "page-task-x",
+                "title": str(title_or_id),
+                "tags": ["task", "nous"],
+                "pageType": "standard",
+                "content": {"blocks": []},
+            }
+
+        daemon.resolve_page.side_effect = resolve_page
+        daemon.update_database_rows.return_value = {"rowsUpdated": 1}
+        daemon.delete_database_rows.return_value = {"rowsDeleted": 1}
+        daemon.create_database.return_value = {"id": ARCHIVE_PAGE_ID}
+        tools = _register_tools(storage, daemon)
+        return tools, db, archive, storage, daemon
+
+    # --- archive_tasks tool ---
+
+    def test_dry_run_reports_candidates_only(self):
+        tools, _, _, storage, daemon = self._setup()
+        result = json.loads(tools["archive_tasks"](before="2026-06-01"))
+        assert result["dry_run"] is True
+        assert result["moved"] == 0
+        names = [c["task"] for c in result["candidates"]]
+        assert names == ["Old done thing"]
+        storage.write_database_content.assert_not_called()
+        daemon.delete_database_rows.assert_not_called()
+
+    def test_cutoff_excludes_recent_done(self):
+        tools, _, _, _, _ = self._setup()
+        result = json.loads(tools["archive_tasks"](before="2026-01-01"))
+        assert result["candidates"] == []
+
+    def test_real_run_moves_rows(self):
+        tools, db, archive, storage, daemon = self._setup()
+        result = json.loads(
+            tools["archive_tasks"](before="2026-06-01", dry_run=False)
+        )
+        assert result["moved"] == 1
+
+        # Archive written first, with active's properties verbatim
+        write_call = storage.write_database_content.call_args
+        assert write_call[0][1] == ARCHIVE_PAGE_ID
+        written = write_call[0][2]
+        assert written["properties"] is db["properties"]
+        written_ids = {r["id"] for r in written["rows"]}
+        assert ARCHIVED_ROW_UUID in written_ids  # pre-existing kept
+        assert "eeeeeeee-0000-4000-8000-000000000008" in written_ids
+
+        # Then deleted from active
+        del_call = daemon.delete_database_rows.call_args
+        assert del_call[0][2] == ["eeeeeeee-0000-4000-8000-000000000008"]
+
+    def test_idempotent_when_row_already_archived(self):
+        tools, db, archive, storage, daemon = self._setup()
+        # Simulate a crash after archive write, before active delete.
+        archive["rows"].append(
+            next(
+                r for r in db["rows"]
+                if r["id"] == "eeeeeeee-0000-4000-8000-000000000008"
+            )
+        )
+        result = json.loads(
+            tools["archive_tasks"](before="2026-06-01", dry_run=False)
+        )
+        assert result["already_archived"] == 1
+        written = storage.write_database_content.call_args[0][2]
+        ids = [r["id"] for r in written["rows"]]
+        assert ids.count("eeeeeeee-0000-4000-8000-000000000008") == 1
+
+    def test_creates_archive_db_when_missing(self):
+        tools, _, _, storage, daemon = self._setup(with_archive=False)
+        result = json.loads(
+            tools["archive_tasks"](before="2026-06-01", dry_run=False)
+        )
+        assert result["moved"] == 1
+        daemon.create_database.assert_called_once()
+        assert daemon.create_database.call_args[0][1] == "Project Tasks Archive"
+
+    # --- read-path fallbacks ---
+
+    def test_dep_on_archived_row_is_satisfied(self):
+        extra = [
+            {
+                "id": "ffffffff-0000-4000-8000-000000000010",
+                "cells": {
+                    "prop-task": "Successor work",
+                    "prop-project": "opt-proj-nous",
+                    "prop-status": "opt-ready",
+                    "prop-depends": f"{ARCHIVED_ROW_UUID}:Ancient shipped work",
+                    "prop-execution-mode": "opt-auto-ok",
+                },
+            }
+        ]
+        tools, _, _, _, _ = self._setup(extra_active_rows=extra)
+
+        res = json.loads(tools["check_dependencies"](task="Successor work"))
+        assert res["ready"] is True
+        dep = res["dependencies"][0]
+        assert dep["status"] == "Done (archived)"
+        assert dep["satisfied"] is True
+        assert dep["archived"] is True
+
+        ready = json.loads(tools["query_tasks"](project="Nous", worker_ready=True))
+        assert any(t["task"] == "Successor work" for t in ready["tasks"])
+
+    def test_missing_dep_still_blocks_with_archive_present(self):
+        extra = [
+            {
+                "id": "ffffffff-0000-4000-8000-000000000010",
+                "cells": {
+                    "prop-task": "Successor work",
+                    "prop-project": "opt-proj-nous",
+                    "prop-status": "opt-ready",
+                    "prop-depends": "Truly ghost prerequisite",
+                    "prop-execution-mode": "opt-auto-ok",
+                },
+            }
+        ]
+        tools, _, _, _, _ = self._setup(extra_active_rows=extra)
+        res = json.loads(tools["check_dependencies"](task="Successor work"))
+        assert res["ready"] is False
+        assert res["unresolved"] == ["Truly ghost prerequisite"]
+
+    def test_resolve_tasks_resolves_archived(self):
+        tools, _, _, _, _ = self._setup()
+        res = json.loads(
+            tools["resolve_tasks"](refs="ref:pipeline:old:ancient-shipped-work")
+        )
+        assert res["resolved_all"] is True
+        entry = res["results"][0]
+        assert entry["archived"] is True
+        assert entry["row_id"] == ARCHIVED_ROW_UUID
+        assert entry["status"] == "Done"
+
+    def test_query_tasks_include_archived(self):
+        tools, _, _, _, _ = self._setup()
+        default = json.loads(
+            tools["query_tasks"](project="Astra", status="Done", limit=0)
+        )
+        assert all(t["task"] != "Ancient shipped work" for t in default["tasks"])
+
+        merged = json.loads(
+            tools["query_tasks"](
+                project="Astra", status="Done", include_archived=True, limit=0
+            )
+        )
+        arch = [t for t in merged["tasks"] if t.get("archived")]
+        assert [t["task"] for t in arch] == ["Ancient shipped work"]
+
+    def test_get_task_spec_archive_fallback(self):
+        tools, _, _, _, _ = self._setup()
+        spec = tools["get_task_spec"](task="Ancient shipped work")
+        assert "**Archived:** Yes" in spec
+        assert f"**Row ID:** {ARCHIVED_ROW_UUID}" in spec
+        assert "**Project:** Astra" in spec
+        assert "**Status:** Done" in spec
+
+
+# ---------------------------------------------------------------------------
 # update_task_fields (registered tool)
 # ---------------------------------------------------------------------------
 

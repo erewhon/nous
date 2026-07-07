@@ -12,7 +12,7 @@ import os
 import re
 import threading
 import time
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from html import unescape as html_unescape
 from uuid import uuid4
 
@@ -273,6 +273,7 @@ def _resolve_dep_ref(
     db_content: dict,
     entry: str,
     project_name: str | None = None,
+    get_archive=None,
 ) -> dict:
     """Resolve one dependency reference to a database row.
 
@@ -285,14 +286,22 @@ def _resolve_dep_ref(
     - "uuid:Title" — the canonical stored form; the UUID wins, title refreshed
     - "ref:<external-ref>" — looked up in the External Ref column
 
-    Returns {"entry", "row": dict|None, "canonical": str, "warning": str|None,
-    "note": str|None}. canonical is "uuid:Title" when resolved, else the
-    original entry (which blocked-resolution treats as unmet — fail closed).
+    Entries that don't resolve in the active database fall back to the
+    archive database (get_archive loader) — archived rows are Done by
+    construction, so they're valid, always-satisfied dep targets.
+
+    Returns {"entry", "row": dict|None, "source": dict|None, "archived": bool,
+    "canonical": str, "warning": str|None, "note": str|None}. source is the
+    database content the row was found in. canonical is "uuid:Title" when
+    resolved, else the original entry (which blocked-resolution treats as
+    unmet — fail closed).
     """
     entry = entry.strip()
     result: dict = {
         "entry": entry,
         "row": None,
+        "source": None,
+        "archived": False,
         "canonical": entry,
         "warning": None,
         "note": None,
@@ -300,22 +309,40 @@ def _resolve_dep_ref(
     rows = db_content.get("rows", [])
     row_by_id = {r["id"]: r for r in rows}
 
-    def _accept(row: dict, note: str | None = None) -> dict:
-        title = _get_row_task_name(row, db_content) or entry
+    def _accept(
+        row: dict, note: str | None = None, source: dict | None = None
+    ) -> dict:
+        source = source or db_content
+        title = _get_row_task_name(row, source) or entry
         # Commas are the cell separator — a comma in the title would corrupt
         # the cell on read. The UUID drives resolution, so soften the display
         # title. (Fuller handling: the comma-in-title footgun task.)
         title = title.replace(",", ";")
         result["row"] = row
+        result["source"] = source
+        result["archived"] = source is not db_content
         result["canonical"] = f"{row['id']}:{title}"
         result["note"] = note
+        result["warning"] = None
         return result
+
+    def _try_archive() -> dict | None:
+        """Re-run resolution against the archive database, if any."""
+        archive = get_archive() if get_archive else None
+        if not archive:
+            return None
+        ref = _resolve_dep_ref(archive, entry, project_name)
+        if ref["row"] is not None:
+            return _accept(ref["row"], note="archived (Done)", source=archive)
+        return None
 
     # --- bare row UUID ---
     if UUID_RE.match(entry):
         row = row_by_id.get(entry)
         if row is not None:
             return _accept(row)
+        if _try_archive():
+            return result
         result["warning"] = f"Dependency row UUID '{entry}' not found in database"
         return result
 
@@ -334,6 +361,8 @@ def _resolve_dep_ref(
                 f"(projects: {projects}) — use a row UUID"
             )
         else:
+            if _try_archive():
+                return result
             result["warning"] = f"Dependency '{entry}' matches no External Ref"
         return result
 
@@ -344,6 +373,8 @@ def _resolve_dep_ref(
             row = row_by_id.get(uid_part.strip())
             if row is not None:
                 return _accept(row)
+            if _try_archive():
+                return result
             result["warning"] = (
                 f"Dependency '{entry}' has a row UUID not found in database"
             )
@@ -353,6 +384,8 @@ def _resolve_dep_ref(
     prop_map = {p["name"].lower(): p for p in db_content.get("properties", [])}
     matches, _ = _find_task_rows(db_content, entry)
     if not matches:
+        if _try_archive():
+            return result
         result["warning"] = f"Dependency '{entry}' not found in database"
         return result
 
@@ -389,12 +422,14 @@ def _resolve_dependencies(
     db_page_id: str,
     project_name: str,
     dep_names: list[str],
+    get_archive=None,
 ) -> tuple[str, list[str]]:
     """Resolve dependency references to the canonical stored string.
 
     Each entry may be a task title, a bare row UUID, "uuid:Title", or
     "ref:<external-ref>" — see _resolve_dep_ref. Resolution spans projects
-    and epics (single shared database).
+    and epics (single shared database), falling back to the archive
+    database for deps on archived (Done) work.
 
     Returns (depends_on_value, warnings) where depends_on_value joins the
     canonical "uuid:Title" entries with ", "; unresolved entries keep their
@@ -411,7 +446,7 @@ def _resolve_dependencies(
     resolved: list[str] = []
     warnings: list[str] = []
     for dep_name in dep_names:
-        ref = _resolve_dep_ref(db_content, dep_name, project_name)
+        ref = _resolve_dep_ref(db_content, dep_name, project_name, get_archive)
         resolved.append(ref["canonical"])
         if ref["warning"]:
             warnings.append(ref["warning"])
@@ -677,10 +712,12 @@ def _resolve_task_target(
 def _check_dependency_status(
     db_content: dict,
     depends_on_value: str,
+    get_archive=None,
 ) -> dict | str:
     """Check if all dependencies are Done.
 
     Returns "all satisfied" or {"warning": "Dependency 'X' is still 'Y'"}.
+    Deps resolving only in the archive database count as satisfied.
     """
     parsed = _parse_depends_on(depends_on_value)
     if not parsed:
@@ -697,6 +734,9 @@ def _check_dependency_status(
     for uid, dep_name in parsed:
         dep_row = _resolve_dep_row(db_content, uid, dep_name)
         if dep_row is None:
+            archive = get_archive() if get_archive else None
+            if archive and _resolve_dep_row(archive, uid, dep_name):
+                continue  # archived ⇒ Done ⇒ satisfied
             raw = _raw_dep_entry(uid, dep_name)
             warnings.append(f"Dependency '{raw}' not found in database")
             continue
@@ -1224,12 +1264,58 @@ def _raw_dep_entry(uid: str | None, dep_name: str) -> str:
     return f"{uid}:{dep_name}" if uid else dep_name
 
 
-def _is_task_blocked(task: dict, db_content: dict) -> tuple[bool, list[str]]:
+def _archive_database_title(database: str) -> str:
+    """Archive database title for a task database."""
+    return f"{database} Archive"
+
+
+def _load_archive_content(
+    storage,
+    daemon,
+    notebook_id: str,
+    database: str,
+) -> dict | None:
+    """Load the archive database content for a task database, or None.
+
+    Missing archive database is the common case — returns None quietly.
+    """
+    try:
+        page = daemon.resolve_page(notebook_id, _archive_database_title(database))
+    except (DaemonError, ValueError):
+        return None
+    if page.get("pageType") != "database":
+        return None
+    return storage.read_database_content(notebook_id, page["id"])
+
+
+def _archive_getter(storage, daemon, notebook_id: str, database: str):
+    """Build a memoized zero-arg loader for the archive database content.
+
+    Read paths only pay the archive lookup when a dependency actually fails
+    to resolve in the active database.
+    """
+    memo: list = []
+
+    def get() -> dict | None:
+        if not memo:
+            memo.append(_load_archive_content(storage, daemon, notebook_id, database))
+        return memo[0]
+
+    return get
+
+
+def _is_task_blocked(
+    task: dict,
+    db_content: dict,
+    get_archive=None,
+) -> tuple[bool, list[str]]:
     """Check if a task has unmet dependencies.
 
     Returns (is_blocked, list_of_blocking_task_names). Entries that resolve
     to no row block too (fail closed) and are surfaced as the raw cell entry
-    so a human can see what the task is waiting on.
+    so a human can see what the task is waiting on. get_archive is an
+    optional zero-arg loader for the archive database — a dep resolving
+    there is satisfied by construction (only Done rows are archived).
     """
     depends_raw = task.get("_depends_on_raw", "")
     parsed = _parse_depends_on(depends_raw)
@@ -1243,8 +1329,11 @@ def _is_task_blocked(task: dict, db_content: dict) -> tuple[bool, list[str]]:
             dep_status = _get_row_status(dep_row, db_content)
             if dep_status.lower() != "done":
                 blocking.append(dep_name)
-        else:
-            blocking.append(_raw_dep_entry(uid, dep_name))
+            continue
+        archive = get_archive() if get_archive else None
+        if archive and _resolve_dep_row(archive, uid, dep_name):
+            continue  # archived ⇒ Done ⇒ satisfied
+        blocking.append(_raw_dep_entry(uid, dep_name))
 
     return bool(blocking), blocking
 
@@ -1432,7 +1521,12 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
             dep_names = [d.strip() for d in depends_on.split(",") if d.strip()]
             if dep_names:
                 depends_on_value, dep_warnings = _resolve_dependencies(
-                    storage, notebook_id, db_page["id"], project, dep_names
+                    storage,
+                    notebook_id,
+                    db_page["id"],
+                    project,
+                    dep_names,
+                    _archive_getter(storage, daemon, notebook_id, database),
                 )
                 warnings.extend(dep_warnings)
 
@@ -1749,7 +1843,11 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
             if "depends on" in prop_map:
                 depends_prop = prop_map["depends on"]
                 depends_on_cell = row.get("cells", {}).get(depends_prop["id"], "")
-            dependencies = _check_dependency_status(db_content, depends_on_cell)
+            dependencies = _check_dependency_status(
+                db_content,
+                depends_on_cell,
+                _archive_getter(storage, daemon, notebook_id, database),
+            )
 
         # --- Fire webhook (fire-and-forget) ---
         project_name = "Unknown"
@@ -1886,6 +1984,7 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
         # --- Depends On add/remove ---
         if depends_on_add or depends_on_remove:
             effective_project = project or _row_project_label(row, prop_map) or None
+            get_archive = _archive_getter(storage, daemon, notebook_id, database)
             depends_prop = prop_map.get("depends on")
             raw = (
                 str(row.get("cells", {}).get(depends_prop["id"], ""))
@@ -1907,14 +2006,18 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
                 uid, name = _parse_depends_on(existing)[0]
                 if uid == dep_row["id"]:
                     return True
-                title = _get_row_task_name(dep_row, db_content)
+                title = _get_row_task_name(
+                    dep_row, resolved.get("source") or db_content
+                )
                 return bool(title) and name.lower() == title.lower()
 
             for ref in depends_on_remove or []:
                 ref = ref.strip()
                 if not ref:
                     continue
-                resolved = _resolve_dep_ref(db_content, ref, effective_project)
+                resolved = _resolve_dep_ref(
+                    db_content, ref, effective_project, get_archive
+                )
                 kept = [
                     e for e in entries if not _entry_refers_to(e, resolved, ref)
                 ]
@@ -1935,7 +2038,9 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
                         f"list item (use a row UUID or ref:<external-ref> for "
                         f"comma-containing titles)."
                     )
-                resolved = _resolve_dep_ref(db_content, ref, effective_project)
+                resolved = _resolve_dep_ref(
+                    db_content, ref, effective_project, get_archive
+                )
                 if resolved["warning"]:
                     warnings.append(resolved["warning"])
                 elif resolved["note"]:
@@ -2032,10 +2137,23 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
         dep_results: list[dict] = []
         blocking: list[str] = []
         unresolved: list[str] = []
+        get_archive = _archive_getter(storage, daemon, notebook_id, database)
 
         for uid, dep_name in parsed:
             dep_row = _resolve_dep_row(db_content, uid, dep_name)
             if dep_row is None:
+                archive = get_archive()
+                arch_row = (
+                    _resolve_dep_row(archive, uid, dep_name) if archive else None
+                )
+                if arch_row is not None:
+                    dep_results.append({
+                        "task": _get_row_task_name(arch_row, archive) or dep_name,
+                        "status": "Done (archived)",
+                        "satisfied": True,
+                        "archived": True,
+                    })
+                    continue
                 raw = _raw_dep_entry(uid, dep_name)
                 dep_results.append({
                     "task": raw,
@@ -2116,15 +2234,21 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
             raise ValueError(f"Database file not found for '{database}'")
 
         prop_map = {p["name"].lower(): p for p in db_content.get("properties", [])}
-        feature_prop = prop_map.get("feature")
+        get_archive = _archive_getter(storage, daemon, notebook_id, database)
 
         results: list[dict] = []
         for raw in refs.split(","):
             raw = raw.strip()
             if not raw:
                 continue
-            ref = _resolve_dep_ref(db_content, raw, project)
+            ref = _resolve_dep_ref(db_content, raw, project, get_archive)
             row = ref["row"]
+            source = ref["source"] or db_content
+            source_prop_map = (
+                prop_map
+                if source is db_content
+                else {p["name"].lower(): p for p in source.get("properties", [])}
+            )
             entry: dict = {
                 "ref": raw,
                 "resolved": row is not None,
@@ -2132,9 +2256,12 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
             }
             if row is not None:
                 entry["row_id"] = row["id"]
-                entry["task"] = _get_row_task_name(row, db_content)
-                entry["project"] = _row_project_label(row, prop_map) or None
-                entry["status"] = _get_row_status(row, db_content)
+                entry["task"] = _get_row_task_name(row, source)
+                entry["project"] = _row_project_label(row, source_prop_map) or None
+                entry["status"] = _get_row_status(row, source)
+                if ref["archived"]:
+                    entry["archived"] = True
+                feature_prop = source_prop_map.get("feature")
                 if feature_prop:
                     feat = str(row.get("cells", {}).get(feature_prop["id"], "")).strip()
                     if feat:
@@ -2152,6 +2279,155 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
             },
             indent=2,
         )
+
+    @mcp.tool()
+    def archive_tasks(
+        before: str | None = None,
+        project: str | None = None,
+        dry_run: bool = True,
+        notebook: str = "Forge",
+        database: str = "Project Tasks",
+    ) -> str:
+        """Move old Done rows to the archive database ("<database> Archive").
+
+        Keeps the active database at working-set size while preserving all
+        history: rows move verbatim (same row UUIDs, same property ids) so
+        canonical "uuid:Title" dependency references keep resolving — deps
+        that resolve into the archive count as satisfied by construction.
+        Task pages are not touched; they remain the full historical record.
+        Archived rows are visible via query_tasks(include_archived=True),
+        get_task_spec, and resolve_tasks.
+
+        Args:
+            before: Cutoff date (YYYY-MM-DD). Rows with Status=Done and a
+                Completed date strictly before this move. Default: 90 days ago.
+            project: Only archive rows of this project (optional).
+            dry_run: Default True — report what would move without writing.
+                Pass False to actually move rows.
+            notebook: Notebook name or UUID (default: "Forge").
+            database: Task database title (default: "Project Tasks").
+
+        Returns JSON with cutoff, candidates (task/project/completed),
+        skipped_no_date count, and moved count (0 on dry runs). Idempotent:
+        rows already present in the archive are not duplicated, so an
+        interrupted run heals on the next invocation.
+        """
+        storage = get_storage()
+        daemon = get_daemon()
+        nb = storage.resolve_notebook(notebook)
+        notebook_id = nb["id"]
+
+        if before is None:
+            before = (date.today() - timedelta(days=90)).isoformat()
+
+        db_page = daemon.resolve_page(notebook_id, database)
+        if db_page.get("pageType") != "database":
+            raise ValueError(f"Page '{db_page.get('title')}' is not a database")
+
+        db_content = storage.read_database_content(notebook_id, db_page["id"])
+        if db_content is None:
+            raise ValueError(f"Database file not found for '{database}'")
+
+        prop_map = {p["name"].lower(): p for p in db_content.get("properties", [])}
+        completed_prop = prop_map.get("completed")
+        if completed_prop is None:
+            raise ValueError(
+                f"Database '{database}' has no Completed column — nothing to cut on"
+            )
+
+        # --- Collect candidates: Done, completed strictly before the cutoff ---
+        candidates: list[dict] = []
+        skipped_no_date = 0
+        for r in db_content.get("rows", []):
+            if _get_row_status(r, db_content).lower() != "done":
+                continue
+            row_project = _row_project_label(r, prop_map)
+            if project and row_project.lower() != project.lower():
+                continue
+            completed = str(r.get("cells", {}).get(completed_prop["id"], "")).strip()
+            if not completed:
+                skipped_no_date += 1
+                continue
+            if completed[:10] >= before:
+                continue
+            candidates.append(r)
+
+        summary = [
+            {
+                "task": _get_row_task_name(r, db_content),
+                "project": _row_project_label(r, prop_map) or None,
+                "completed": str(
+                    r.get("cells", {}).get(completed_prop["id"], "")
+                ).strip(),
+            }
+            for r in candidates
+        ]
+
+        result: dict = {
+            "cutoff": before,
+            "dry_run": dry_run,
+            "candidates": summary,
+            "candidate_count": len(candidates),
+            "skipped_no_date": skipped_no_date,
+            "moved": 0,
+        }
+        if dry_run or not candidates:
+            return json.dumps(result, indent=2)
+
+        # --- Ensure the archive database exists ---
+        archive_title = _archive_database_title(database)
+        try:
+            archive_page = daemon.resolve_page(notebook_id, archive_title)
+        except (DaemonError, ValueError):
+            archive_page = None
+        if archive_page is None:
+            created = daemon.create_database(
+                notebook_id,
+                archive_title,
+                [{"name": "Task", "type": "text"}],
+                tags=["tasks", "archive"],
+                folder_id=db_page.get("folderId"),
+            )
+            archive_page = {"id": created["id"], "pageType": "database"}
+            archive_content: dict | None = None
+        else:
+            if archive_page.get("pageType") != "database":
+                raise ValueError(f"Page '{archive_title}' is not a database")
+            archive_content = storage.read_database_content(
+                notebook_id, archive_page["id"]
+            )
+
+        existing_rows = (archive_content or {}).get("rows", [])
+        existing_ids = {r["id"] for r in existing_rows}
+        new_rows = [r for r in candidates if r["id"] not in existing_ids]
+
+        # Archive properties mirror the active database verbatim — rows'
+        # cells are keyed by property id, so ids must match exactly.
+        merged = {
+            "version": db_content.get("version", 2),
+            "properties": db_content.get("properties", []),
+            "rows": existing_rows + new_rows,
+            "views": (archive_content or {}).get("views", []),
+        }
+
+        # Write archive first, then delete from active: a crash in between
+        # duplicates rows (healed by the idempotent rerun) instead of
+        # losing them.
+        storage.write_database_content(notebook_id, archive_page["id"], merged)
+        daemon.delete_database_rows(
+            notebook_id, db_page["id"], [r["id"] for r in candidates]
+        )
+
+        result["moved"] = len(candidates)
+        result["already_archived"] = len(candidates) - len(new_rows)
+        result["archive_database_id"] = archive_page["id"]
+        logger.info(
+            "Archived %d task rows (cutoff %s) to '%s'",
+            len(candidates),
+            before,
+            archive_title,
+        )
+        return json.dumps(result, indent=2)
 
     @mcp.tool()
     def migrate_dependencies(
@@ -2238,6 +2514,20 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
             task_name, row, _, prop_map, page = _resolve_task_target(
                 daemon, notebook_id, db_content, task, project
             )
+
+        # --- Archive fallback: metadata for archived tasks ---
+        active_content = db_content
+        archived_row = False
+        get_archive = _archive_getter(storage, daemon, notebook_id, database)
+        if row is None and db_content is not None:
+            archive = get_archive()
+            if archive:
+                matches, arch_prop_map = _find_task_rows(archive, task_name, project)
+                if len(matches) == 1:
+                    row = matches[0][0]
+                    prop_map = arch_prop_map
+                    db_content = archive
+                    archived_row = True
 
         # --- Resolve task page (unless the task arg was a page UUID) ---
         if page is None:
@@ -2329,10 +2619,26 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
                 dep_parts: list[str] = []
                 for uid, dep_name in parsed:
                     dep_row = _resolve_dep_row(db_content, uid, dep_name)
+                    dep_db = db_content
+                    dep_archived = archived_row
+                    if dep_row is None:
+                        # The other database: archive for active tasks,
+                        # active for archived ones.
+                        secondary = (
+                            active_content if archived_row else get_archive()
+                        )
+                        if secondary:
+                            dep_row = _resolve_dep_row(secondary, uid, dep_name)
+                            if dep_row is not None:
+                                dep_db = secondary
+                                dep_archived = not archived_row
                     if dep_row:
-                        dep_status = _get_row_status(dep_row, db_content)
+                        dep_status = _get_row_status(dep_row, dep_db)
                         satisfied = dep_status.lower() == "done"
-                        marker = "done" if satisfied else f"**{dep_status}**"
+                        if satisfied:
+                            marker = "done (archived)" if dep_archived else "done"
+                        else:
+                            marker = f"**{dep_status}**"
                         dep_parts.append(f"- {dep_name}: {marker}")
                         if not satisfied:
                             blocking.append(dep_name)
@@ -2369,6 +2675,8 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
         if row is not None:
             parts.append(f"- **Row ID:** {row['id']}")
         parts.append(f"- **Page ID:** {page['id']}")
+        if archived_row:
+            parts.append("- **Archived:** Yes (row lives in the archive database)")
         parts.append(f"- **Project:** {project}")
         parts.append(f"- **Status:** {status}")
         parts.append(f"- **Priority:** {priority}")
@@ -2505,6 +2813,7 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
         task_type: str | None = None,
         complexity: str | None = None,
         worker_ready: bool = False,
+        include_archived: bool = False,
         limit: int = 20,
         notebook: str = "Forge",
         database: str = "Project Tasks",
@@ -2534,6 +2843,10 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
             worker_ready: Convenience flag. True = tasks the autonomous worker can run:
                 status=Ready AND execution_mode IN (Auto-OK, Auto-Preferred) AND blocked=False.
                 Can be combined with other filters (e.g. project, model_tier) to narrow.
+            include_archived: Also search the archive database ("<database> Archive",
+                Done rows moved by archive_tasks). Archived rows are marked
+                "archived": true. Default False — day-to-day queries stay on
+                the active working set.
             limit: Max results (default 20, use 0 for unlimited).
             notebook: Notebook name or UUID (default: "Forge").
             database: Task database title (default: "Project Tasks").
@@ -2585,11 +2898,36 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
             limit=None if effective_blocked is not None else effective_limit,
         )
 
+        # Merge in archived rows on request (all Done by construction)
+        if include_archived:
+            archive = _load_archive_content(storage, daemon, notebook_id, database)
+            if archive:
+                archived_tasks = _query_tasks(
+                    archive,
+                    project=project,
+                    feature=feature,
+                    status=status,
+                    phase=phase,
+                    priority_max=priority_max,
+                    has_external_ref=has_external_ref,
+                    include_done=True,
+                    execution_mode=execution_mode,
+                    model_tier=model_tier,
+                    task_type=task_type,
+                    complexity=complexity,
+                )
+                for t in archived_tasks:
+                    t["archived"] = True
+                tasks = tasks + archived_tasks
+                if effective_blocked is None and effective_limit:
+                    tasks = tasks[:effective_limit]
+
         # Post-filter by blocked status (requires dependency resolution)
         if effective_blocked is not None:
+            get_archive = _archive_getter(storage, daemon, notebook_id, database)
             filtered: list[dict] = []
             for t in tasks:
-                is_blocked, blocking = _is_task_blocked(t, db_content)
+                is_blocked, blocking = _is_task_blocked(t, db_content, get_archive)
                 t["blocked_by"] = blocking
                 if effective_blocked and is_blocked:
                     filtered.append(t)
@@ -2634,6 +2972,8 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
                 entry["max_files"] = t["max_files"]
             if t.get("requires_tests"):
                 entry["requires_tests"] = t["requires_tests"]
+            if t.get("archived"):
+                entry["archived"] = True
             task_list.append(entry)
 
         return json.dumps({
@@ -2650,6 +2990,7 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
                     "task_type": task_type,
                     "complexity": complexity,
                     "worker_ready": worker_ready if worker_ready else None,
+                    "include_archived": include_archived if include_archived else None,
                 }.items() if v is not None
             },
             "tasks": task_list,
@@ -2701,8 +3042,9 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
         tasks.sort(key=lambda t: t["priority"])
 
         # Find first unblocked task
+        get_archive = _archive_getter(storage, daemon, notebook_id, database)
         for t in tasks:
-            is_blocked, _ = _is_task_blocked(t, db_content)
+            is_blocked, _ = _is_task_blocked(t, db_content, get_archive)
             if not is_blocked:
                 # Delegate to get_task_spec for the full output. Pass the row
                 # UUID so duplicate titles across projects can't derail it.
@@ -2717,7 +3059,7 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
         if tasks:
             blocked_names = []
             for t in tasks:
-                _, blocking = _is_task_blocked(t, db_content)
+                _, blocking = _is_task_blocked(t, db_content, get_archive)
                 blocked_names.append(
                     f"- {t['task']} (blocked by: {', '.join(blocking)})"
                 )

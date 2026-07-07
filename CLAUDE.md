@@ -91,5 +91,6 @@ The MCP exposes both low-level primitives (`update_database_rows`, `update_page`
 | Find what to work on next | `get_next_task(project, feature=...)` | `query_tasks` + manual sort |
 | Verify dependency state before starting | `check_dependencies(task)` | parsing `Depends On` cells yourself |
 | Validate dependency refs before filing (incl. cross-project/cross-epic) | `resolve_tasks(refs, project=...)` | guessing titles and hoping they resolve |
+| Archive old Done tasks / query archived ones | `archive_tasks(before=..., dry_run=...)`, `query_tasks(include_archived=True)` | letting the active database grow unbounded |
 
 When in doubt, check `nous-py/nous_mcp/server.py` and `nous-py/nous_mcp/workflow.py` for the full registered list — every `@mcp.tool()` is exposed as `mcp__nous__<func_name>`.
