@@ -269,6 +269,116 @@ def _ensure_database_column(
     return db_content, True
 
 
+def _resolve_dep_ref(
+    db_content: dict,
+    entry: str,
+    project_name: str | None = None,
+) -> dict:
+    """Resolve one dependency reference to a database row.
+
+    Accepted forms (the database holds every project's tasks, so all forms
+    reach across projects and epics):
+
+    - task title — same-project match preferred (project_name), else a
+      unique cross-project match; ambiguous titles fail closed with a warning
+    - bare row UUID
+    - "uuid:Title" — the canonical stored form; the UUID wins, title refreshed
+    - "ref:<external-ref>" — looked up in the External Ref column
+
+    Returns {"entry", "row": dict|None, "canonical": str, "warning": str|None,
+    "note": str|None}. canonical is "uuid:Title" when resolved, else the
+    original entry (which blocked-resolution treats as unmet — fail closed).
+    """
+    entry = entry.strip()
+    result: dict = {
+        "entry": entry,
+        "row": None,
+        "canonical": entry,
+        "warning": None,
+        "note": None,
+    }
+    rows = db_content.get("rows", [])
+    row_by_id = {r["id"]: r for r in rows}
+
+    def _accept(row: dict, note: str | None = None) -> dict:
+        title = _get_row_task_name(row, db_content) or entry
+        result["row"] = row
+        result["canonical"] = f"{row['id']}:{title}"
+        result["note"] = note
+        return result
+
+    # --- bare row UUID ---
+    if UUID_RE.match(entry):
+        row = row_by_id.get(entry)
+        if row is not None:
+            return _accept(row)
+        result["warning"] = f"Dependency row UUID '{entry}' not found in database"
+        return result
+
+    # --- ref:<external-ref> ---
+    if entry.lower().startswith("ref:"):
+        matches = _rows_by_external_ref(db_content, entry[4:])
+        if len(matches) == 1:
+            return _accept(matches[0])
+        if len(matches) > 1:
+            prop_map = {p["name"].lower(): p for p in db_content.get("properties", [])}
+            projects = ", ".join(
+                _row_project_label(r, prop_map) or "Unknown" for r in matches
+            )
+            result["warning"] = (
+                f"Dependency '{entry}' matches {len(matches)} tasks "
+                f"(projects: {projects}) — use a row UUID"
+            )
+        else:
+            result["warning"] = f"Dependency '{entry}' matches no External Ref"
+        return result
+
+    # --- "uuid:Title" (canonical form; anything else with a colon is a title) ---
+    if ":" in entry:
+        uid_part, _, title_part = entry.partition(":")
+        if UUID_RE.match(uid_part.strip()):
+            row = row_by_id.get(uid_part.strip())
+            if row is not None:
+                return _accept(row)
+            result["warning"] = (
+                f"Dependency '{entry}' has a row UUID not found in database"
+            )
+            return result
+
+    # --- task title ---
+    prop_map = {p["name"].lower(): p for p in db_content.get("properties", [])}
+    matches, _ = _find_task_rows(db_content, entry)
+    if not matches:
+        result["warning"] = f"Dependency '{entry}' not found in database"
+        return result
+
+    if project_name:
+        same_project = [
+            (row, i)
+            for row, i in matches
+            if _row_project_label(row, prop_map).lower() == project_name.lower()
+        ]
+        if same_project:
+            return _accept(same_project[0][0])
+
+    if len(matches) == 1:
+        row = matches[0][0]
+        row_project = _row_project_label(row, prop_map)
+        note = None
+        if project_name and row_project and row_project.lower() != project_name.lower():
+            note = f"resolved cross-project to '{row_project}'"
+        return _accept(row, note)
+
+    projects = ", ".join(
+        _row_project_label(row, prop_map) or "Unknown" for row, _ in matches
+    )
+    result["warning"] = (
+        f"Dependency '{entry}' is ambiguous — {len(matches)} tasks match "
+        f"(projects: {projects}); use 'uuid:Title', a row UUID, or ref:<external-ref>"
+    )
+    return result
+
+
 def _resolve_dependencies(
     storage: NousStorage,
     notebook_id: str,
@@ -276,80 +386,33 @@ def _resolve_dependencies(
     project_name: str,
     dep_names: list[str],
 ) -> tuple[str, list[str]]:
-    """Resolve dependency task names to a stored string and collect warnings.
+    """Resolve dependency references to the canonical stored string.
 
-    Searches the database rows for tasks matching each name. Searches within
-    the same project first, then across all projects.
+    Each entry may be a task title, a bare row UUID, "uuid:Title", or
+    "ref:<external-ref>" — see _resolve_dep_ref. Resolution spans projects
+    and epics (single shared database).
 
-    Returns (depends_on_value, warnings) where depends_on_value is a
-    human-readable string like "uuid1:Task Name, uuid2:Other Task" and
-    warnings lists any unresolvable names.
+    Returns (depends_on_value, warnings) where depends_on_value joins the
+    canonical "uuid:Title" entries with ", "; unresolved entries keep their
+    original text (fail-closed: blocked-resolution reports them unmet).
     """
     db_content = storage.read_database_content(notebook_id, db_page_id)
     if db_content is None:
-        return ", ".join(dep_names), [f"Could not read database to resolve dependencies"]
+        return ", ".join(dep_names), ["Could not read database to resolve dependencies"]
 
     properties = db_content.get("properties", [])
-    rows = db_content.get("rows", [])
-
-    # Find the Task and Project property IDs
-    task_prop_id = None
-    project_prop_id = None
-    for p in properties:
-        if p["name"].lower() == "task":
-            task_prop_id = p["id"]
-        elif p["name"].lower() == "project":
-            project_prop_id = p["id"]
-            # Build option_id → label map for select
-            project_options = {
-                opt["id"]: opt["label"]
-                for opt in p.get("options", [])
-            }
-
-    if task_prop_id is None:
+    if not any(p["name"].lower() == "task" for p in properties):
         return ", ".join(dep_names), ["Task property not found in database"]
-
-    # Index rows by task name (lowercased) → (row_id, project_label)
-    rows_by_name: dict[str, list[tuple[str, str]]] = {}
-    for row in rows:
-        cells = row.get("cells", {})
-        task_val = cells.get(task_prop_id, "")
-        if not task_val:
-            continue
-        # Strip HTML tags if present
-        clean_name = re.sub(r"<[^>]+>", "", str(task_val))
-        clean_name = html_unescape(clean_name).strip()
-        proj_val = ""
-        if project_prop_id:
-            raw_proj = cells.get(project_prop_id, "")
-            proj_val = project_options.get(raw_proj, str(raw_proj))
-        rows_by_name.setdefault(clean_name.lower(), []).append(
-            (row["id"], proj_val)
-        )
 
     resolved: list[str] = []
     warnings: list[str] = []
-
     for dep_name in dep_names:
-        dep_lower = dep_name.strip().lower()
-        candidates = rows_by_name.get(dep_lower, [])
-
-        if not candidates:
-            warnings.append(f"Dependency '{dep_name}' not found in database")
-            resolved.append(dep_name)
-            continue
-
-        # Prefer same-project match
-        same_project = [
-            (rid, proj) for rid, proj in candidates
-            if proj.lower() == project_name.lower()
-        ]
-        if same_project:
-            rid, _ = same_project[0]
-            resolved.append(f"{rid}:{dep_name}")
-        else:
-            rid, _ = candidates[0]
-            resolved.append(f"{rid}:{dep_name}")
+        ref = _resolve_dep_ref(db_content, dep_name, project_name)
+        resolved.append(ref["canonical"])
+        if ref["warning"]:
+            warnings.append(ref["warning"])
+        elif ref["note"]:
+            warnings.append(f"Dependency '{dep_name}': {ref['note']}")
 
     return ", ".join(resolved), warnings
 
@@ -615,53 +678,25 @@ def _check_dependency_status(
 
     Returns "all satisfied" or {"warning": "Dependency 'X' is still 'Y'"}.
     """
-    if not depends_on_value or depends_on_value == "None":
+    parsed = _parse_depends_on(depends_on_value)
+    if not parsed:
         return "all satisfied"
 
     properties = db_content.get("properties", [])
-    rows = db_content.get("rows", [])
-
-    # Find property IDs
-    task_prop_id = None
-    status_prop = None
-    for p in properties:
-        if p["name"].lower() == "task":
-            task_prop_id = p["id"]
-        elif p["name"].lower() == "status":
-            status_prop = p
-
-    if task_prop_id is None or status_prop is None:
+    has_props = any(p["name"].lower() == "task" for p in properties) and any(
+        p["name"].lower() == "status" for p in properties
+    )
+    if not has_props:
         return "all satisfied"
 
-    status_options = {opt["id"]: opt["label"] for opt in status_prop.get("options", [])}
-
-    # Parse depends_on entries — format: "uuid:Name, uuid:Name" or just "Name"
-    entries = [e.strip() for e in depends_on_value.split(",") if e.strip()]
-    row_by_id = {r["id"]: r for r in rows}
-
     warnings: list[str] = []
-    for entry in entries:
-        if ":" in entry:
-            row_id, dep_name = entry.split(":", 1)
-            dep_row = row_by_id.get(row_id)
-        else:
-            dep_name = entry
-            dep_row = None
-            # Try to find by name
-            for r in rows:
-                cell_val = r.get("cells", {}).get(task_prop_id, "")
-                clean = re.sub(r"<[^>]+>", "", str(cell_val))
-                clean = html_unescape(clean).strip()
-                if clean.lower() == dep_name.lower():
-                    dep_row = r
-                    break
-
+    for uid, dep_name in parsed:
+        dep_row = _resolve_dep_row(db_content, uid, dep_name)
         if dep_row is None:
             warnings.append(f"Dependency '{dep_name}' not found in database")
             continue
 
-        status_cell = dep_row.get("cells", {}).get(status_prop["id"], "")
-        status_label = status_options.get(status_cell, str(status_cell))
+        status_label = _get_row_status(dep_row, db_content)
         if status_label.lower() != "done":
             warnings.append(f"Dependency '{dep_name}' is still '{status_label}'")
 
@@ -673,7 +708,9 @@ def _check_dependency_status(
 def _parse_depends_on(value: str) -> list[tuple[str | None, str]]:
     """Parse a depends_on field value into (uuid_or_none, name) tuples.
 
-    Handles both UUID format ("uuid:Name") and free-text ("Name").
+    Handles the canonical "uuid:Name" form, free-text ("Name"), and
+    "ref:<external-ref>" entries (kept whole in the name slot — resolved
+    against the External Ref column by _resolve_dep_row).
     """
     if not value or value.strip().lower() == "none":
         return []
@@ -681,7 +718,9 @@ def _parse_depends_on(value: str) -> list[tuple[str | None, str]]:
     entries = [e.strip() for e in value.split(",") if e.strip()]
     result: list[tuple[str | None, str]] = []
     for entry in entries:
-        if ":" in entry:
+        if entry.lower().startswith("ref:"):
+            result.append((None, entry))
+        elif ":" in entry:
             uid, name = entry.split(":", 1)
             result.append((uid.strip(), name.strip()))
         else:
@@ -689,12 +728,35 @@ def _parse_depends_on(value: str) -> list[tuple[str | None, str]]:
     return result
 
 
+def _rows_by_external_ref(db_content: dict, ref_value: str) -> list[dict]:
+    """Find rows whose External Ref cell equals ref_value (case-insensitive)."""
+    properties = db_content.get("properties", [])
+    ext_prop = next(
+        (p for p in properties if p["name"].lower() == "external ref"), None
+    )
+    if ext_prop is None:
+        return []
+    ref_lower = ref_value.strip().lower()
+    if not ref_lower:
+        return []
+    return [
+        r
+        for r in db_content.get("rows", [])
+        if str(r.get("cells", {}).get(ext_prop["id"], "")).strip().lower() == ref_lower
+    ]
+
+
 def _resolve_dep_row(
     db_content: dict,
     uid: str | None,
     name: str,
 ) -> dict | None:
-    """Resolve a dependency to a database row by UUID or name."""
+    """Resolve a dependency to a database row by UUID, external ref, or name.
+
+    The database holds all projects' tasks, so resolution naturally spans
+    projects and epics. "ref:<external-ref>" names resolve via the External
+    Ref column and fail closed (None) when missing or ambiguous.
+    """
     rows = db_content.get("rows", [])
 
     # Try UUID first
@@ -702,6 +764,11 @@ def _resolve_dep_row(
         for r in rows:
             if r["id"] == uid:
                 return r
+
+    # ref:<external-ref> — resolve via the External Ref column only
+    if name.lower().startswith("ref:"):
+        matches = _rows_by_external_ref(db_content, name[4:])
+        return matches[0] if len(matches) == 1 else None
 
     # Fall back to name match
     properties = db_content.get("properties", [])
@@ -1304,7 +1371,13 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
             content: Task description/spec in markdown.
             priority: Priority 1-10 (default 5).
             phase: Phase — Feature, Infrastructure, Polish, Bugfix, or Launch (default "Feature").
-            depends_on: Comma-separated task names this depends on (optional).
+            depends_on: Comma-separated task references this depends on (optional).
+                Dependencies may live in any project or epic. Each entry may be:
+                a task title (same-project match preferred; a unique cross-project
+                match also resolves; ambiguous titles are stored unresolved with a
+                warning), a row UUID, "uuid:Title" (the canonical stored form), or
+                "ref:<external-ref>" (matched against the External Ref column).
+                Use resolve_tasks to validate references before filing.
             status: Status — Spec Needed, Ready, In Progress, or Done (default "Ready").
             feature: Feature name this task belongs to (optional, used by get_feature_tasks).
             external_ref: External reference like a Jira key or GitHub issue (optional).
@@ -1702,7 +1775,10 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
     ) -> str:
         """Check the dependency status of a task.
 
-        Resolves each dependency (UUID or free-text) and reports its status.
+        Resolves each dependency and reports its status. Depends On entries
+        may be "uuid:Title" (canonical), a bare title, or "ref:<external-ref>";
+        all resolve across projects and epics (one shared database). Entries
+        that don't resolve report status "Not Found" and block (fail closed).
 
         Args:
             task: Task name (supports "Task: " prefix or bare name), or a
@@ -1763,13 +1839,19 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
 
             dep_status = _get_row_status(dep_row, db_content)
             satisfied = dep_status.lower() == "done"
-            dep_results.append({
-                "task": dep_name,
+            entry: dict = {
+                "task": _get_row_task_name(dep_row, db_content) or dep_name,
                 "status": dep_status,
                 "satisfied": satisfied,
-            })
+            }
+            if dep_name.lower().startswith("ref:"):
+                entry["ref"] = dep_name
+            dep_project = _row_project_label(dep_row, prop_map)
+            if dep_project:
+                entry["project"] = dep_project
+            dep_results.append(entry)
             if not satisfied:
-                blocking.append(dep_name)
+                blocking.append(entry["task"])
 
         return json.dumps(
             {
@@ -1778,6 +1860,84 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
                 "ready": len(blocking) == 0,
                 "dependencies": dep_results,
                 "blocking": blocking,
+            },
+            indent=2,
+        )
+
+    @mcp.tool()
+    def resolve_tasks(
+        refs: str,
+        project: str | None = None,
+        notebook: str = "Forge",
+        database: str = "Project Tasks",
+    ) -> str:
+        """Validate task references before filing them as dependencies.
+
+        The cheap pre-flight for architect passes and pipeline emitters:
+        checks that each reference resolves to exactly one existing Forge
+        task, across all projects and epics, and returns the canonical
+        "uuid:Title" form to store in Depends On.
+
+        Args:
+            refs: Comma-separated task references. Each may be a task title,
+                a row UUID, "uuid:Title", or "ref:<external-ref>" (matched
+                against the External Ref column, e.g. pipeline:{epic}:{leaf}).
+            project: Project context — same-project matches win for bare
+                titles duplicated across projects (optional).
+            notebook: Notebook name or UUID (default: "Forge").
+            database: Task database title (default: "Project Tasks").
+
+        Returns JSON: {resolved_all, results: [{ref, resolved, canonical,
+        row_id, task, project, status, feature, warning}]}. Unresolved or
+        ambiguous refs carry a warning explaining how to qualify them.
+        """
+        storage = get_storage()
+        daemon = get_daemon()
+        nb = storage.resolve_notebook(notebook)
+        notebook_id = nb["id"]
+
+        db_page = daemon.resolve_page(notebook_id, database)
+        if db_page.get("pageType") != "database":
+            raise ValueError(f"Page '{db_page.get('title')}' is not a database")
+
+        db_content = storage.read_database_content(notebook_id, db_page["id"])
+        if db_content is None:
+            raise ValueError(f"Database file not found for '{database}'")
+
+        prop_map = {p["name"].lower(): p for p in db_content.get("properties", [])}
+        feature_prop = prop_map.get("feature")
+
+        results: list[dict] = []
+        for raw in refs.split(","):
+            raw = raw.strip()
+            if not raw:
+                continue
+            ref = _resolve_dep_ref(db_content, raw, project)
+            row = ref["row"]
+            entry: dict = {
+                "ref": raw,
+                "resolved": row is not None,
+                "canonical": ref["canonical"] if row is not None else None,
+            }
+            if row is not None:
+                entry["row_id"] = row["id"]
+                entry["task"] = _get_row_task_name(row, db_content)
+                entry["project"] = _row_project_label(row, prop_map) or None
+                entry["status"] = _get_row_status(row, db_content)
+                if feature_prop:
+                    feat = str(row.get("cells", {}).get(feature_prop["id"], "")).strip()
+                    if feat:
+                        entry["feature"] = feat
+            if ref["warning"]:
+                entry["warning"] = ref["warning"]
+            elif ref["note"]:
+                entry["note"] = ref["note"]
+            results.append(entry)
+
+        return json.dumps(
+            {
+                "resolved_all": all(r["resolved"] for r in results),
+                "results": results,
             },
             indent=2,
         )
@@ -2147,6 +2307,8 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
             priority_max: Only tasks with priority <= this value (lower = higher priority).
             has_external_ref: True = only tasks with an external ref, False = only without.
             blocked: True = only tasks with unmet deps, False = only unblocked tasks.
+                Deps resolve across projects and epics; unresolvable entries
+                count as unmet (fail closed).
             execution_mode: Filter by autonomy gate — comma-separated list of
                 "Manual", "Auto-OK", "Auto-Preferred". Null values are treated as "Manual".
             model_tier: Filter by model tier — "auto", "auto-free", or "auto-full".

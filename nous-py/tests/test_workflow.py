@@ -24,6 +24,7 @@ from nous_mcp.workflow import (
     _get_row_status,
     _migrate_dependencies,
     _parse_depends_on,
+    _resolve_dep_ref,
     _resolve_dep_row,
     _resolve_dependencies,
     _resolve_project_folder,
@@ -1105,6 +1106,13 @@ class TestParseDependsOn:
         result = _parse_depends_on("abc:My Task")
         assert result == [("abc", "My Task")]
 
+    def test_ref_entries_kept_whole(self):
+        result = _parse_depends_on("ref:pipeline:epic:leaf, abc-123:Task A")
+        assert result == [
+            (None, "ref:pipeline:epic:leaf"),
+            ("abc-123", "Task A"),
+        ]
+
 
 # ---------------------------------------------------------------------------
 # _resolve_dep_row
@@ -1149,6 +1157,331 @@ class TestResolveDepRow:
         db = self._make_db()
         row = _resolve_dep_row(db, "bad-uuid", "Ghost Task")
         assert row is None
+
+
+# ---------------------------------------------------------------------------
+# Cross-epic / cross-project dependencies
+# ---------------------------------------------------------------------------
+
+DEP_ROW_UUID = "aaaaaaaa-0000-4000-8000-000000000001"  # Astra prerequisite
+BLOCKED_ROW_UUID = "aaaaaaaa-0000-4000-8000-000000000002"  # Nous task blocked on it
+OTHER_ROW_UUID = "aaaaaaaa-0000-4000-8000-000000000003"  # Nous unblocked task
+DEP_REF = "pipeline:astra-web-parity:publish-model"
+
+
+def _make_cross_project_db(dep_status: str = "opt-ready") -> dict:
+    """Nous task with a canonical uuid:Title dep on an Astra task."""
+    db = _make_db_content(
+        project_options=["Nous", "Astra"],
+        include_external_ref=True,
+        rows=[
+            {
+                "id": DEP_ROW_UUID,
+                "cells": {
+                    "prop-task": "Server-side publish model",
+                    "prop-project": "opt-proj-astra",
+                    "prop-status": dep_status,
+                    "prop-priority": 2,
+                    "prop-extref": DEP_REF,
+                    "prop-depends": "None",
+                },
+            },
+            {
+                "id": BLOCKED_ROW_UUID,
+                "cells": {
+                    "prop-task": "Publish event fan-out",
+                    "prop-project": "opt-proj-nous",
+                    "prop-status": "opt-ready",
+                    "prop-priority": 1,
+                    "prop-depends": f"{DEP_ROW_UUID}:Server-side publish model",
+                    "prop-execution-mode": "opt-auto-ok",
+                },
+            },
+            {
+                "id": OTHER_ROW_UUID,
+                "cells": {
+                    "prop-task": "Unrelated ready work",
+                    "prop-project": "opt-proj-nous",
+                    "prop-status": "opt-ready",
+                    "prop-priority": 5,
+                    "prop-depends": "None",
+                    "prop-execution-mode": "opt-auto-ok",
+                },
+            },
+        ],
+    )
+    _complete_required_schema(db)
+    return db
+
+
+class TestResolveDepRef:
+    def test_bare_row_uuid(self):
+        db = _make_cross_project_db()
+        ref = _resolve_dep_ref(db, DEP_ROW_UUID, "Nous")
+        assert ref["row"]["id"] == DEP_ROW_UUID
+        assert ref["canonical"] == f"{DEP_ROW_UUID}:Server-side publish model"
+        assert ref["warning"] is None
+
+    def test_unknown_row_uuid_warns(self):
+        db = _make_cross_project_db()
+        ghost = "99999999-9999-4999-8999-999999999999"
+        ref = _resolve_dep_ref(db, ghost, "Nous")
+        assert ref["row"] is None
+        assert ref["canonical"] == ghost
+        assert "not found" in ref["warning"]
+
+    def test_uuid_title_refreshes_stale_title(self):
+        db = _make_cross_project_db()
+        ref = _resolve_dep_ref(db, f"{DEP_ROW_UUID}:Old Stale Title", "Nous")
+        assert ref["row"]["id"] == DEP_ROW_UUID
+        assert ref["canonical"] == f"{DEP_ROW_UUID}:Server-side publish model"
+
+    def test_external_ref_form(self):
+        db = _make_cross_project_db()
+        ref = _resolve_dep_ref(db, f"ref:{DEP_REF}", "Nous")
+        assert ref["row"]["id"] == DEP_ROW_UUID
+        assert ref["canonical"] == f"{DEP_ROW_UUID}:Server-side publish model"
+
+    def test_external_ref_missing_warns(self):
+        db = _make_cross_project_db()
+        ref = _resolve_dep_ref(db, "ref:pipeline:nope:missing", "Nous")
+        assert ref["row"] is None
+        assert "matches no External Ref" in ref["warning"]
+
+    def test_title_unique_cross_project_resolves_with_note(self):
+        db = _make_cross_project_db()
+        ref = _resolve_dep_ref(db, "Server-side publish model", "Nous")
+        assert ref["row"]["id"] == DEP_ROW_UUID
+        assert "cross-project" in ref["note"]
+        assert "Astra" in ref["note"]
+
+    def test_title_prefers_same_project(self):
+        db = _make_cross_project_db()
+        db["rows"].append(
+            {
+                "id": "bbbbbbbb-0000-4000-8000-000000000009",
+                "cells": {
+                    "prop-task": "Server-side publish model",
+                    "prop-project": "opt-proj-nous",
+                    "prop-status": "opt-ready",
+                },
+            }
+        )
+        ref = _resolve_dep_ref(db, "Server-side publish model", "Nous")
+        assert ref["row"]["id"] == "bbbbbbbb-0000-4000-8000-000000000009"
+        assert ref["warning"] is None
+
+    def test_ambiguous_title_fails_closed(self):
+        db = _make_cross_project_db()
+        db["rows"].append(
+            {
+                "id": "bbbbbbbb-0000-4000-8000-000000000009",
+                "cells": {
+                    "prop-task": "Server-side publish model",
+                    "prop-project": "opt-proj-astra",
+                    "prop-status": "opt-ready",
+                },
+            }
+        )
+        # No same-project match for Nous; two Astra rows share the title.
+        ref = _resolve_dep_ref(db, "Server-side publish model", "Nous")
+        assert ref["row"] is None
+        assert ref["canonical"] == "Server-side publish model"
+        assert "ambiguous" in ref["warning"]
+
+    def test_title_containing_colon_resolves_as_title(self):
+        db = _make_cross_project_db()
+        db["rows"].append(
+            {
+                "id": "cccccccc-0000-4000-8000-000000000004",
+                "cells": {
+                    "prop-task": "Tier 4: indent and motions",
+                    "prop-project": "opt-proj-nous",
+                    "prop-status": "opt-ready",
+                },
+            }
+        )
+        ref = _resolve_dep_ref(db, "Tier 4: indent and motions", "Nous")
+        assert ref["row"]["id"] == "cccccccc-0000-4000-8000-000000000004"
+
+
+class TestResolveDepRowRef:
+    def test_resolves_by_external_ref(self):
+        db = _make_cross_project_db()
+        row = _resolve_dep_row(db, None, f"ref:{DEP_REF}")
+        assert row["id"] == DEP_ROW_UUID
+
+    def test_ambiguous_external_ref_fails_closed(self):
+        db = _make_cross_project_db()
+        db["rows"].append(
+            {
+                "id": "bbbbbbbb-0000-4000-8000-000000000009",
+                "cells": {"prop-task": "Copycat", "prop-extref": DEP_REF},
+            }
+        )
+        assert _resolve_dep_row(db, None, f"ref:{DEP_REF}") is None
+
+    def test_missing_external_ref_fails_closed(self):
+        db = _make_cross_project_db()
+        assert _resolve_dep_row(db, None, "ref:pipeline:nope:missing") is None
+
+
+class TestCrossProjectBlocking:
+    def _setup(self, dep_status: str = "opt-ready"):
+        db = _make_cross_project_db(dep_status)
+        storage = _make_storage(
+            folders=[{"id": "folder-nous", "name": "Nous"}],
+            db_content=db,
+        )
+        daemon = _make_daemon()
+
+        def resolve_page(notebook_id, title_or_id):
+            if title_or_id == "Project Tasks":
+                return {
+                    "id": DB_PAGE_ID,
+                    "title": "Project Tasks",
+                    "pageType": "database",
+                }
+            return {
+                "id": "page-task-x",
+                "title": str(title_or_id),
+                "tags": ["task", "nous"],
+                "pageType": "standard",
+                "content": {"blocks": []},
+            }
+
+        daemon.resolve_page.side_effect = resolve_page
+        tools = _register_tools(storage, daemon)
+        return tools, db, daemon
+
+    def test_unmet_cross_project_dep_blocks(self):
+        tools, _, _ = self._setup()
+        result = json.loads(tools["query_tasks"](project="Nous", blocked=True))
+        names = [t["task"] for t in result["tasks"]]
+        assert names == ["Publish event fan-out"]
+        assert result["tasks"][0]["blocked_by"] == ["Server-side publish model"]
+
+    def test_blocked_excluded_from_worker_ready(self):
+        tools, _, _ = self._setup()
+        result = json.loads(tools["query_tasks"](project="Nous", worker_ready=True))
+        names = [t["task"] for t in result["tasks"]]
+        assert "Publish event fan-out" not in names
+        assert "Unrelated ready work" in names
+
+    def test_blocked_excluded_from_get_next_task(self):
+        tools, _, _ = self._setup()
+        result = tools["get_next_task"](project="Nous")
+        # Priority-1 task is blocked cross-project; priority-5 task wins.
+        assert "Unrelated ready work" in result
+
+    def test_dep_done_unblocks_without_manual_touch(self):
+        tools, _, _ = self._setup(dep_status="opt-done")
+        result = json.loads(tools["query_tasks"](project="Nous", worker_ready=True))
+        names = [t["task"] for t in result["tasks"]]
+        assert "Publish event fan-out" in names
+
+        next_task = tools["get_next_task"](project="Nous")
+        assert "Publish event fan-out" in next_task
+
+    def test_check_dependencies_reports_cross_project_dep(self):
+        tools, _, _ = self._setup()
+        result = json.loads(
+            tools["check_dependencies"](task="Publish event fan-out")
+        )
+        assert result["ready"] is False
+        assert result["blocking"] == ["Server-side publish model"]
+        dep = result["dependencies"][0]
+        assert dep["project"] == "Astra"
+        assert dep["status"] == "Ready"
+
+    def test_check_dependencies_ready_after_dep_done(self):
+        tools, _, _ = self._setup(dep_status="opt-done")
+        result = json.loads(
+            tools["check_dependencies"](task="Publish event fan-out")
+        )
+        assert result["ready"] is True
+
+    def test_create_task_with_cross_project_uuid_dep(self):
+        tools, _, daemon = self._setup()
+        daemon.create_page.return_value = {"id": "new-page-id"}
+        daemon.add_database_rows.return_value = {"rowsAdded": 1}
+        result = json.loads(
+            tools["create_task"](
+                project="Nous",
+                title="New downstream work",
+                content="Needs the Astra publish model first.",
+                depends_on=DEP_ROW_UUID,
+            )
+        )
+        assert result["warnings"] == []
+        row_data = daemon.add_database_rows.call_args[0][2][0]
+        assert (
+            row_data["Depends On"]
+            == f"{DEP_ROW_UUID}:Server-side publish model"
+        )
+
+    def test_create_task_with_ref_dep(self):
+        tools, _, daemon = self._setup()
+        daemon.create_page.return_value = {"id": "new-page-id"}
+        daemon.add_database_rows.return_value = {"rowsAdded": 1}
+        json.loads(
+            tools["create_task"](
+                project="Nous",
+                title="New downstream work",
+                content="Needs the Astra publish model first.",
+                depends_on=f"ref:{DEP_REF}",
+            )
+        )
+        row_data = daemon.add_database_rows.call_args[0][2][0]
+        assert (
+            row_data["Depends On"]
+            == f"{DEP_ROW_UUID}:Server-side publish model"
+        )
+
+    def test_resolve_tasks_mixed_refs(self):
+        tools, _, _ = self._setup()
+        result = json.loads(
+            tools["resolve_tasks"](
+                refs=f"{DEP_ROW_UUID}, ref:{DEP_REF}, Unrelated ready work, Ghost",
+                project="Nous",
+            )
+        )
+        assert result["resolved_all"] is False
+        by_ref = {r["ref"]: r for r in result["results"]}
+
+        assert by_ref[DEP_ROW_UUID]["resolved"] is True
+        assert by_ref[DEP_ROW_UUID]["project"] == "Astra"
+        assert (
+            by_ref[DEP_ROW_UUID]["canonical"]
+            == f"{DEP_ROW_UUID}:Server-side publish model"
+        )
+
+        assert by_ref[f"ref:{DEP_REF}"]["resolved"] is True
+        assert by_ref[f"ref:{DEP_REF}"]["row_id"] == DEP_ROW_UUID
+
+        assert by_ref["Unrelated ready work"]["resolved"] is True
+        assert by_ref["Unrelated ready work"]["project"] == "Nous"
+
+        assert by_ref["Ghost"]["resolved"] is False
+        assert "not found" in by_ref["Ghost"]["warning"]
+
+    def test_resolve_tasks_flags_ambiguity(self):
+        tools, db, _ = self._setup()
+        db["rows"].append(
+            {
+                "id": "bbbbbbbb-0000-4000-8000-000000000009",
+                "cells": {
+                    "prop-task": "Server-side publish model",
+                    "prop-project": "opt-proj-astra",
+                    "prop-status": "opt-ready",
+                },
+            }
+        )
+        result = json.loads(
+            tools["resolve_tasks"](refs="Server-side publish model", project="Nous")
+        )
+        assert result["resolved_all"] is False
+        assert "ambiguous" in result["results"][0]["warning"]
 
 
 # ---------------------------------------------------------------------------
