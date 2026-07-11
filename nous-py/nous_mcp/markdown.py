@@ -260,6 +260,73 @@ def _escape_yaml(s: str) -> str:
 # Markdown → Editor.js blocks (import direction)
 # ---------------------------------------------------------------------------
 
+# Inline markdown → HTML (the inverse of _inline_html_to_md). Editor.js
+# stores inline content as HTML, so markdown left verbatim renders literally.
+# Underscore emphasis (_x_, __x__) is deliberately not supported: it would
+# mangle snake_case identifiers, which agent-written content is full of.
+_MD_CODE_RE = re.compile(r"`([^`]+)`")
+_MD_WIKI_RE = re.compile(r"\[\[([^\[\]]+)\]\]")
+_MD_BLOCK_REF_RE = re.compile(r"\(\(([0-9a-fA-F-]{8,36})\)\)")
+_MD_LINK_RE = re.compile(r"\[([^\[\]]*)\]\(([^()\s]+)\)")
+_MD_BOLD_ITALIC_RE = re.compile(r"\*\*\*(.+?)\*\*\*")
+_MD_BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
+_MD_ITALIC_RE = re.compile(r"(?<!\*)\*(?!\s)([^*]+?)(?<!\s)\*(?!\*)")
+_MD_STRIKE_RE = re.compile(r"~~(.+?)~~")
+_MD_HIGHLIGHT_RE = re.compile(r"==(.+?)==")
+
+
+def _escape_html(text: str) -> str:
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def _escape_attr(text: str) -> str:
+    return _escape_html(text).replace('"', "&quot;")
+
+
+def _inline_md_to_html(text: str) -> str:
+    """Convert inline markdown to the HTML Editor.js/BlockNote expects.
+
+    Raw HTML in the input passes through untouched (markdown allows inline
+    HTML, and existing agents rely on it). Code span contents are escaped.
+    """
+    if not text:
+        return ""
+
+    # Pull code spans out first so their contents are never reformatted.
+    code_spans: list[str] = []
+
+    def _stash_code(m: re.Match[str]) -> str:
+        code_spans.append(f"<code>{_escape_html(m.group(1))}</code>")
+        return f"\x00{len(code_spans) - 1}\x00"
+
+    result = _MD_CODE_RE.sub(_stash_code, text)
+
+    result = _MD_WIKI_RE.sub(
+        lambda m: (
+            f'<wiki-link data-page-title="{_escape_attr(m.group(1))}"'
+            f' data-page-id="">{_escape_html(m.group(1))}</wiki-link>'
+        ),
+        result,
+    )
+    result = _MD_BLOCK_REF_RE.sub(
+        r'<block-ref data-block-id="\1"></block-ref>', result
+    )
+    result = _MD_LINK_RE.sub(
+        lambda m: f'<a href="{_escape_attr(m.group(2))}">{m.group(1)}</a>',
+        result,
+    )
+    result = _MD_BOLD_ITALIC_RE.sub(r"<b><i>\1</i></b>", result)
+    result = _MD_BOLD_RE.sub(r"<b>\1</b>", result)
+    result = _MD_ITALIC_RE.sub(r"<i>\1</i>", result)
+    result = _MD_STRIKE_RE.sub(r"<s>\1</s>", result)
+    result = _MD_HIGHLIGHT_RE.sub(r"<mark>\1</mark>", result)
+
+    for idx, span in enumerate(code_spans):
+        result = result.replace(f"\x00{idx}\x00", span)
+
+    return result
+
+
 _HEADER_RE = re.compile(r"^(#{1,6})\s+(.+)$")
 _CHECKLIST_RE = re.compile(r"^[-*]\s+\[([ xX])\]\s*(.*)")
 _ORDERED_RE = re.compile(r"^\d+\.\s+(.*)")
@@ -319,7 +386,10 @@ def markdown_to_blocks(text: str) -> list[dict]:
             blocks.append({
                 "id": _block_id(),
                 "type": "header",
-                "data": {"text": m.group(2).strip(), "level": len(m.group(1))},
+                "data": {
+                    "text": _inline_md_to_html(m.group(2).strip()),
+                    "level": len(m.group(1)),
+                },
             })
             i += 1
             continue
@@ -343,7 +413,7 @@ def markdown_to_blocks(text: str) -> list[dict]:
                 if not cm:
                     break
                 items.append({
-                    "text": cm.group(2),
+                    "text": _inline_md_to_html(cm.group(2)),
                     "checked": cm.group(1).lower() == "x",
                 })
                 i += 1
@@ -362,7 +432,7 @@ def markdown_to_blocks(text: str) -> list[dict]:
                 om = _ORDERED_RE.match(lines[i].strip())
                 if not om:
                     break
-                ol_items.append(om.group(1))
+                ol_items.append(_inline_md_to_html(om.group(1)))
                 i += 1
             blocks.append({
                 "id": _block_id(),
@@ -379,7 +449,7 @@ def markdown_to_blocks(text: str) -> list[dict]:
                 um = _UNORDERED_RE.match(lines[i].strip())
                 if not um:
                     break
-                ul_items.append(um.group(1))
+                ul_items.append(_inline_md_to_html(um.group(1)))
                 i += 1
             blocks.append({
                 "id": _block_id(),
@@ -395,7 +465,7 @@ def markdown_to_blocks(text: str) -> list[dict]:
                 qs = lines[i].strip()
                 if not qs.startswith(">"):
                     break
-                quote_lines.append(qs[1:].lstrip())
+                quote_lines.append(_inline_md_to_html(qs[1:].lstrip()))
                 i += 1
             blocks.append({
                 "id": _block_id(),
@@ -420,7 +490,7 @@ def markdown_to_blocks(text: str) -> list[dict]:
                 or ps.startswith(">")
             ):
                 break
-            para_lines.append(ps)
+            para_lines.append(_inline_md_to_html(ps))
             i += 1
 
         if para_lines:
