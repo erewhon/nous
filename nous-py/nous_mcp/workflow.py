@@ -19,6 +19,7 @@ from uuid import uuid4
 import httpx
 
 from nous_mcp.daemon_client import DaemonError
+from nous_mcp.params import as_list
 from nous_mcp.storage import UUID_RE, NousStorage
 
 logger = logging.getLogger(__name__)
@@ -1504,7 +1505,7 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
         status: str = "Ready",
         feature: str | None = None,
         external_ref: str | None = None,
-        tags: str | None = None,
+        tags: str | list[str] | None = None,
         execution_mode: str | None = None,
         model_tier: str | None = None,
         estimate: str | None = None,
@@ -1536,7 +1537,8 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
             status: Status — Spec Needed, Ready, In Progress, or Done (default "Ready").
             feature: Feature name this task belongs to (optional, used by get_feature_tasks).
             external_ref: External reference like a Jira key or GitHub issue (optional).
-            tags: Comma-separated extra tags (optional). "task" and project name are auto-added.
+            tags: Extra tags (optional) — a list, or a comma-separated string.
+                "task" and project name are auto-added.
             execution_mode: "Manual" (default, null-as-manual), "Auto-OK", or "Auto-Preferred".
                 Gates whether the autonomous task worker can pick up this task.
             model_tier: "auto" (local), "auto-free" (local + free cloud), or "auto-full"
@@ -1600,11 +1602,9 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
         tag_list = ["task", project.lower()]
         if status:
             tag_list.append(status.lower().replace(" ", "-"))
-        if tags:
-            for t in tags.split(","):
-                t = t.strip()
-                if t and t.lower() not in [x.lower() for x in tag_list]:
-                    tag_list.append(t)
+        for t in as_list(tags):
+            if t.lower() not in [x.lower() for x in tag_list]:
+                tag_list.append(t)
 
         # --- Format content and create page ---
         formatted = _format_task_content(
@@ -2902,7 +2902,7 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
     def get_feature_tasks(
         project: str,
         feature: str | None = None,
-        status: str | None = None,
+        status: str | list[str] | None = None,
         include_done: bool = False,
         notebook: str = "Forge",
         database: str = "Project Tasks",
@@ -2915,14 +2915,15 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
         Args:
             project: Project name.
             feature: Optional feature name to filter tasks (matches Feature column).
-            status: Optional status filter — comma-separated (e.g. "Ready, In Progress").
-                Overrides include_done when set.
+            status: Optional status filter — a list (["Ready", "In Progress"])
+                or comma-separated string. Overrides include_done when set.
             include_done: Include completed tasks (default: False). Ignored if status is set.
             notebook: Notebook name or UUID (default: "Forge").
             database: Task database title (default: "Project Tasks").
 
         Returns JSON with project, feature, task counts, and execution_order list.
         """
+        status = ",".join(as_list(status)) or None
         storage = get_storage()
         daemon = get_daemon()
         nb = storage.resolve_notebook(notebook)
@@ -2987,7 +2988,7 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
     def query_tasks(
         project: str | None = None,
         feature: str | None = None,
-        status: str | None = None,
+        status: str | list[str] | None = None,
         phase: str | None = None,
         priority_max: int | None = None,
         has_external_ref: bool | None = None,
@@ -3012,8 +3013,9 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
         Args:
             project: Filter by project name (optional).
             feature: Filter by Feature column value (optional).
-            status: Filter by status — comma-separated (e.g. "Ready, In Progress").
-                By default, Done tasks are excluded unless status explicitly includes "Done".
+            status: Filter by status — a list (["Ready", "In Progress"]) or
+                comma-separated string. By default, Done tasks are excluded
+                unless status explicitly includes "Done".
             phase: Filter by phase (e.g. "Feature", "Infrastructure").
             priority_max: Only tasks with priority <= this value (lower = higher priority).
             has_external_ref: True = only tasks with an external ref, False = only without.
@@ -3046,6 +3048,7 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
         Each row carries row_id, which other task tools accept as the task
         argument to bypass title resolution (handy for duplicate titles).
         """
+        status = ",".join(as_list(status)) or None
         storage = get_storage()
         daemon = get_daemon()
         nb = storage.resolve_notebook(notebook)

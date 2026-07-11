@@ -25,6 +25,7 @@ from nous_ai.database_helpers import (
 )
 from nous_mcp.daemon_client import DaemonError, NousDaemonClient
 from nous_mcp.markdown import export_page_to_markdown, markdown_to_blocks
+from nous_mcp.params import as_list
 from nous_mcp.storage import NousStorage
 
 # All logging to stderr (stdout is reserved for JSON-RPC on stdio transport)
@@ -262,7 +263,7 @@ def create_page(
     notebook: str,
     title: str,
     content: str | None = None,
-    tags: str | None = None,
+    tags: str | list[str] | None = None,
     folder: str | None = None,
     section: str | None = None,
 ) -> str:
@@ -272,7 +273,7 @@ def create_page(
         notebook: Notebook name or UUID.
         title: Page title.
         content: Optional markdown text content. Paragraphs are split on blank lines.
-        tags: Optional comma-separated tags (e.g. "tag1, tag2").
+        tags: Optional tags — a list, or a comma-separated string.
         folder: Optional folder name or UUID to place the page in.
         section: Optional section name or UUID to place the page in.
 
@@ -292,7 +293,7 @@ def create_page(
         sec = storage.resolve_section(nb["id"], section)
         section_id = sec["id"]
 
-    tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else None
+    tag_list = as_list(tags) or None
 
     blocks = _markdown_to_blocks(content) if content else None
 
@@ -357,7 +358,7 @@ def update_page(
     page: str,
     content: str | None = None,
     title: str | None = None,
-    tags: str | None = None,
+    tags: str | list[str] | None = None,
 ) -> str:
     """Replace the content, title, or tags of an existing page.
 
@@ -366,7 +367,8 @@ def update_page(
         page: Page title (prefix match) or UUID.
         content: New markdown content (replaces all existing blocks).
         title: New page title.
-        tags: New comma-separated tags (replaces all existing tags).
+        tags: New tags — a list, or a comma-separated string (replaces ALL
+            existing tags; omit to leave tags untouched).
 
     Returns JSON with id, title of the updated page.
     """
@@ -379,7 +381,7 @@ def update_page(
 
     tag_list = None
     if tags is not None:
-        tag_list = [t.strip() for t in tags.split(",") if t.strip()]
+        tag_list = as_list(tags)
 
     updated = daemon.update_page(
         nb["id"],
@@ -494,16 +496,16 @@ def move_page(
 def manage_tags(
     notebook: str,
     page: str,
-    add: str | None = None,
-    remove: str | None = None,
+    add: str | list[str] | None = None,
+    remove: str | list[str] | None = None,
 ) -> str:
     """Add or remove tags on a page without replacing all existing tags.
 
     Args:
         notebook: Notebook name or UUID.
         page: Page title (prefix match) or UUID.
-        add: Comma-separated tags to add.
-        remove: Comma-separated tags to remove.
+        add: Tags to add — a list, or a comma-separated string.
+        remove: Tags to remove — a list, or a comma-separated string.
 
     Returns JSON with id, title, tags of the updated page.
     """
@@ -515,14 +517,12 @@ def manage_tags(
     existing_tags: list[str] = pg.get("tags", [])
     tag_set = list(dict.fromkeys(existing_tags))  # preserve order, dedup
 
-    if add:
-        for t in add.split(","):
-            t = t.strip()
-            if t and t not in tag_set:
-                tag_set.append(t)
+    for t in as_list(add):
+        if t not in tag_set:
+            tag_set.append(t)
 
-    if remove:
-        remove_set = {t.strip().lower() for t in remove.split(",") if t.strip()}
+    remove_set = {t.lower() for t in as_list(remove)}
+    if remove_set:
         tag_set = [t for t in tag_set if t.lower() not in remove_set]
 
     updated = daemon.update_page(
@@ -1049,7 +1049,7 @@ def create_database(
     properties: str,
     folder: str | None = None,
     section: str | None = None,
-    tags: str | None = None,
+    tags: str | list[str] | None = None,
 ) -> str:
     """Create a new database in a notebook.
 
@@ -1064,7 +1064,7 @@ def create_database(
             checkbox, date, url.
         folder: Optional folder name or UUID to place the database in.
         section: Optional section name or UUID.
-        tags: Optional comma-separated tags.
+        tags: Optional tags — a list, or a comma-separated string.
 
     Returns JSON with id, title, notebookId, propertyCount.
     """
@@ -1081,7 +1081,7 @@ def create_database(
         sec = storage.resolve_section(nb["id"], section)
         section_id = sec["id"]
 
-    tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
+    tag_list = as_list(tags)
 
     daemon = _get_daemon()
     prop_specs = json.loads(properties)
@@ -1340,7 +1340,7 @@ def inbox_list(include_processed: bool = False) -> str:
 def inbox_capture(
     title: str,
     content: str = "",
-    tags: str = "",
+    tags: str | list[str] = "",
     source: str = "mcp",
 ) -> str:
     """Create a new inbox item.
@@ -1348,7 +1348,7 @@ def inbox_capture(
     Args:
         title: Title of the inbox item.
         content: Optional text content (plain text or markdown).
-        tags: Optional comma-separated tags.
+        tags: Optional tags — a list, or a comma-separated string.
         source: Source identifier (default "mcp"). Note: the daemon
             currently overrides this with its own ``daemon-api`` source
             tag — preserved here for forward compat if that changes.
@@ -1356,7 +1356,7 @@ def inbox_capture(
     Returns JSON with id, title, capturedAt of the created item.
     """
     daemon = _get_daemon()
-    tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
+    tag_list = as_list(tags)
     item = daemon.capture_inbox(
         title,
         content=content if content else None,

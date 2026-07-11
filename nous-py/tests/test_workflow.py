@@ -3357,3 +3357,87 @@ class TestLintDependencies:
         assert result["rows_checked"] == 1
         assert result["filters"] == {"project": "Nous"}
         assert [i["task"] for i in result["issues"]] == ["Nous consumer"]
+
+
+# ---------------------------------------------------------------------------
+# List-valued params (tags / status) — the comma-umbrella residue
+# ---------------------------------------------------------------------------
+
+
+class TestListValuedParams:
+    def _setup(self, rows=None):
+        db = _make_db_content(
+            project_options=["Nous"],
+            include_external_ref=True,
+            rows=rows
+            or [
+                {
+                    "id": "r-ready",
+                    "cells": {
+                        "prop-task": "Ready task",
+                        "prop-project": "opt-proj-nous",
+                        "prop-status": "opt-ready",
+                    },
+                },
+                {
+                    "id": "r-done",
+                    "cells": {
+                        "prop-task": "Done task",
+                        "prop-project": "opt-proj-nous",
+                        "prop-status": "opt-done",
+                    },
+                },
+            ],
+        )
+        storage = _make_storage(
+            folders=[{"id": "folder-nous", "name": "Nous"}], db_content=db
+        )
+        daemon = _make_daemon()
+        daemon.create_page.return_value = {"id": "page-123", "title": "Task: X"}
+        daemon.add_database_rows.return_value = {
+            "databaseId": DB_PAGE_ID,
+            "rowsAdded": 1,
+            "totalRows": 1,
+        }
+        return _register_tools(storage, daemon), daemon
+
+    def test_query_tasks_status_list(self):
+        tools, _ = self._setup()
+        result = json.loads(tools["query_tasks"](status=["Ready", "Done"]))
+        names = {t["task"] for t in result["tasks"]}
+        assert names == {"Ready task", "Done task"}
+
+    def test_query_tasks_status_string_unchanged(self):
+        tools, _ = self._setup()
+        result = json.loads(tools["query_tasks"](status="Ready, Done"))
+        names = {t["task"] for t in result["tasks"]}
+        assert names == {"Ready task", "Done task"}
+
+    def test_get_feature_tasks_status_list(self):
+        tools, _ = self._setup()
+        result = json.loads(
+            tools["get_feature_tasks"](project="Nous", status=["Done"])
+        )
+        names = [t["task"] for t in result["execution_order"]]
+        assert names == ["Done task"]
+
+    def test_create_task_tags_list_with_comma_tag(self):
+        tools, daemon = self._setup()
+        tools["create_task"](
+            project="Nous",
+            title="Tagged work",
+            content="x",
+            tags=["research, notes", "sdk"],
+        )
+        tags = daemon.create_page.call_args.kwargs["tags"]
+        assert "research, notes" in tags  # entry preserved whole
+        assert "sdk" in tags
+
+    def test_create_task_tags_string_unchanged(self):
+        tools, daemon = self._setup()
+        tools["create_task"](
+            project="Nous", title="Tagged work", content="x", tags="workflow,sdk"
+        )
+        tags = daemon.create_page.call_args.kwargs["tags"]
+        assert "workflow" in tags
+        assert "sdk" in tags
