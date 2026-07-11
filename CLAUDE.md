@@ -91,6 +91,7 @@ The MCP exposes both low-level primitives (`update_database_rows`, `update_page`
 | Find what to work on next | `get_next_task(project, feature=...)` | `query_tasks` + manual sort |
 | Verify dependency state before starting | `check_dependencies(task)` | parsing `Depends On` cells yourself |
 | Validate dependency refs before filing (incl. cross-project/cross-epic) | `resolve_tasks(refs, project=...)` | guessing titles and hoping they resolve |
+| See what changed recently across all projects | `recent_task_activity(since="12h", ...)` — Done included, transitions annotated | task_summary + repeated query_tasks |
 | Audit all Depends-On cells for typos/comma damage | `lint_dependencies(project=...)` (read-only; repairs via `update_task_fields`) | eyeballing 300+ dep cells |
 | Archive old Done tasks / query archived ones | `archive_tasks(before=..., dry_run=...)`, `query_tasks(include_archived=True)` | letting the active database grow unbounded |
 
