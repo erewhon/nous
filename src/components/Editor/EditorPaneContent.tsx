@@ -106,6 +106,14 @@ export function EditorPaneContent({
   const isStandardPage =
     selectedPage?.pageType === "standard" || !selectedPage?.pageType;
 
+  // Tabs belonging to other notebooks stay in the store (they return on
+  // switch-back) but are hidden from this pane's tab bar.
+  const visibleTabs = useMemo(
+    () =>
+      pane.tabs.filter((t) => !t.notebookId || t.notebookId === notebookId),
+    [pane.tabs, notebookId]
+  );
+
   // Check if this page is a plugin page type
   const activePluginPageType = useMemo(() => {
     if (!selectedPage?.pluginPageType) return null;
@@ -307,14 +315,19 @@ export function EditorPaneContent({
   // Ensure current page is in tabs - replace non-pinned tab for "one page at a time" behavior
   useEffect(() => {
     if (selectedPage && !pane.tabs.find((t) => t.pageId === selectedPage.id)) {
-      // Close the current non-pinned tab before opening new one (single-page mode)
-      const currentNonPinnedTab = pane.tabs.find((t) => !t.isPinned);
+      // Close the current non-pinned tab before opening new one (single-page
+      // mode). Only consider this notebook's tabs — other notebooks' tabs
+      // are hidden while foreign and must survive the round trip.
+      const currentNonPinnedTab = pane.tabs.find(
+        (t) =>
+          !t.isPinned && (!t.notebookId || t.notebookId === notebookId)
+      );
       if (currentNonPinnedTab) {
         closeTabInPane(pane.id, currentNonPinnedTab.pageId);
       }
       openTabInPane(pane.id, selectedPage.id, selectedPage.title);
     }
-  }, [selectedPage, pane.id, pane.tabs, openTabInPane, closeTabInPane]);
+  }, [selectedPage, pane.id, pane.tabs, notebookId, openTabInPane, closeTabInPane]);
 
   // Update tab title when page title changes
   useEffect(() => {
@@ -865,7 +878,7 @@ export function EditorPaneContent({
       {!zenMode && (
         <PaneTabBar
           paneId={pane.id}
-          tabs={pane.tabs}
+          tabs={visibleTabs}
           activePageId={pane.pageId}
         />
       )}

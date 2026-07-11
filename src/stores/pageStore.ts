@@ -61,11 +61,14 @@ export interface RecentPageEntry {
   accessedAt: string;
 }
 
-// Tab within a pane
+// Tab within a pane. notebookId is optional because tabs persisted before it
+// existed lack it — loadPages claims those legacy tabs for the notebook it
+// loads (dropping ones whose page doesn't exist there).
 export interface PaneTab {
   pageId: string;
   title: string;
   isPinned: boolean;
+  notebookId?: string;
 }
 
 // Editor pane for split view support
@@ -203,8 +206,9 @@ interface PageActions {
   getFavoritePages: () => Page[];
   loadAllFavorites: () => Promise<void>;
 
-  // Refresh pages modified by backend (e.g., after action execution)
-  refreshPages: (pageIds: string[]) => Promise<void>;
+  // Refresh pages modified by backend (e.g., after action execution).
+  // notebookId scopes unknown ids to their notebook (see implementation).
+  refreshPages: (pageIds: string[], notebookId?: string) => Promise<void>;
 
   // Recent pages
   clearRecentPages: () => void;
@@ -223,6 +227,32 @@ function generatePaneId(): string {
 
 // Default pane
 const DEFAULT_PANE: EditorPane = { id: "pane-main", pageId: null, tabs: [] };
+
+// Remove a page's tab from every pane, fixing each pane's active pageId the
+// same way closeTabInPane does. Used when a page is deleted (locally or by an
+// external write) so a stale tab can't wedge pane restoration on relaunch.
+function removeTabFromPanes(
+  panes: EditorPane[],
+  pageId: string
+): EditorPane[] {
+  return panes.map((pane) => {
+    const tabIndex = pane.tabs.findIndex((t) => t.pageId === pageId);
+    if (tabIndex === -1 && pane.pageId !== pageId) return pane;
+
+    const newTabs = pane.tabs.filter((t) => t.pageId !== pageId);
+    let newPageId = pane.pageId;
+    if (pane.pageId === pageId) {
+      if (newTabs.length === 0) {
+        newPageId = null;
+      } else if (tabIndex === -1 || tabIndex >= newTabs.length) {
+        newPageId = newTabs[newTabs.length - 1].pageId;
+      } else {
+        newPageId = newTabs[tabIndex].pageId;
+      }
+    }
+    return { ...pane, pageId: newPageId, tabs: newTabs };
+  });
+}
 
 export const usePageStore = create<PageStore>()(
   persist(
@@ -258,7 +288,48 @@ export const usePageStore = create<PageStore>()(
             seen.add(p.id);
             return true;
           });
-          set((state) => ({ pages, isLoading: false, pageDataVersion: state.pageDataVersion + 1 }));
+          set((state) => {
+            const loadedIds = new Set(pages.map((p) => p.id));
+            // Reconcile persisted tabs against this notebook's fresh page
+            // list: tabs for pages deleted from this notebook are dropped;
+            // legacy tabs (persisted before tabs carried a notebookId) are
+            // claimed by this notebook when the page exists here, dropped
+            // otherwise; tabs tagged for other notebooks are kept untouched
+            // so they come back on switch-back.
+            const panes = state.panes.map((pane) => {
+              const tabs = pane.tabs.flatMap((tab) => {
+                if (!tab.notebookId) {
+                  return loadedIds.has(tab.pageId)
+                    ? [{ ...tab, notebookId }]
+                    : [];
+                }
+                if (tab.notebookId === notebookId) {
+                  return loadedIds.has(tab.pageId) ? [tab] : [];
+                }
+                return [tab];
+              });
+              // Retarget the pane's active page when it isn't in this
+              // notebook (foreign tab, deleted page, or nulled on a previous
+              // switch): show this notebook's most recent tab, or the empty
+              // state — never load a page id against the wrong notebook.
+              let pageId = pane.pageId;
+              if (!pageId || !loadedIds.has(pageId)) {
+                const local = tabs.filter((t) => t.notebookId === notebookId);
+                pageId = local.length > 0 ? local[local.length - 1].pageId : null;
+              }
+              return { ...pane, tabs, pageId };
+            });
+            const activePane = panes.find((p) => p.id === state.activePaneId);
+            return {
+              pages,
+              panes,
+              selectedPageId: activePane
+                ? activePane.pageId
+                : state.selectedPageId,
+              isLoading: false,
+              pageDataVersion: state.pageDataVersion + 1,
+            };
+          });
         } catch (err) {
           set({
             error: err instanceof Error ? err.message : "Failed to load pages",
@@ -308,7 +379,12 @@ export const usePageStore = create<PageStore>()(
               // Add to tabs
               const newTabs = [
                 ...pane.tabs,
-                { pageId: page.id, title: page.title, isPinned: false },
+                {
+                  pageId: page.id,
+                  title: page.title,
+                  isPinned: false,
+                  notebookId,
+                },
               ];
               return { ...pane, pageId: page.id, tabs: newTabs };
             });
@@ -366,7 +442,12 @@ export const usePageStore = create<PageStore>()(
               // Add to tabs
               const newTabs = [
                 ...pane.tabs,
-                { pageId: page.id, title: page.title, isPinned: false },
+                {
+                  pageId: page.id,
+                  title: page.title,
+                  isPinned: false,
+                  notebookId,
+                },
               ];
               return { ...pane, pageId: page.id, tabs: newTabs };
             });
@@ -467,11 +548,18 @@ export const usePageStore = create<PageStore>()(
         set({ error: null });
         try {
           await api.deletePage(notebookId, pageId);
-          set((state) => ({
-            pages: state.pages.filter((p) => p.id !== pageId),
-            selectedPageId:
-              state.selectedPageId === pageId ? null : state.selectedPageId,
-          }));
+          set((state) => {
+            const panes = removeTabFromPanes(state.panes, pageId);
+            const activePane = panes.find((p) => p.id === state.activePaneId);
+            return {
+              pages: state.pages.filter((p) => p.id !== pageId),
+              panes,
+              selectedPageId:
+                state.selectedPageId === pageId
+                  ? (activePane?.pageId ?? null)
+                  : state.selectedPageId,
+            };
+          });
 
           // Remove from RAG index in background (non-blocking)
           useRAGStore
@@ -486,11 +574,18 @@ export const usePageStore = create<PageStore>()(
       },
 
       removePageLocal: (pageId) => {
-        set((state) => ({
-          pages: state.pages.filter((p) => p.id !== pageId),
-          selectedPageId:
-            state.selectedPageId === pageId ? null : state.selectedPageId,
-        }));
+        set((state) => {
+          const panes = removeTabFromPanes(state.panes, pageId);
+          const activePane = panes.find((p) => p.id === state.activePaneId);
+          return {
+            pages: state.pages.filter((p) => p.id !== pageId),
+            panes,
+            selectedPageId:
+              state.selectedPageId === pageId
+                ? (activePane?.pageId ?? null)
+                : state.selectedPageId,
+          };
+        });
       },
 
       duplicatePage: async (notebookId, pageId) => {
@@ -529,7 +624,12 @@ export const usePageStore = create<PageStore>()(
               // Add to tabs
               const newTabs = [
                 ...pane.tabs,
-                { pageId: newPage.id, title: newPage.title, isPinned: false },
+                {
+                  pageId: newPage.id,
+                  title: newPage.title,
+                  isPinned: false,
+                  notebookId,
+                },
               ];
               return { ...pane, pageId: newPage.id, tabs: newTabs };
             });
@@ -760,7 +860,14 @@ export const usePageStore = create<PageStore>()(
         const state = get();
         const page = pageId ? state.pages.find((p) => p.id === pageId) : null;
         const tabs: PaneTab[] = page
-          ? [{ pageId: page.id, title: page.title, isPinned: false }]
+          ? [
+              {
+                pageId: page.id,
+                title: page.title,
+                isPinned: false,
+                notebookId: page.notebookId,
+              },
+            ]
           : [];
         const newPane: EditorPane = { id: generatePaneId(), pageId, tabs };
         set((state) => ({
@@ -894,23 +1001,31 @@ export const usePageStore = create<PageStore>()(
 
       // Pane tab management
       openTabInPane: (paneId, pageId, title) => {
-        set((state) => ({
-          panes: state.panes.map((pane) => {
-            if (pane.id !== paneId) return pane;
+        set((state) => {
+          const notebookId = state.pages.find(
+            (p) => p.id === pageId
+          )?.notebookId;
+          return {
+            panes: state.panes.map((pane) => {
+              if (pane.id !== paneId) return pane;
 
-            // Check if tab already exists
-            if (pane.tabs.find((t) => t.pageId === pageId)) {
-              return { ...pane, pageId }; // Just switch to it
-            }
+              // Check if tab already exists
+              if (pane.tabs.find((t) => t.pageId === pageId)) {
+                return { ...pane, pageId }; // Just switch to it
+              }
 
-            // Add new tab
-            return {
-              ...pane,
-              pageId,
-              tabs: [...pane.tabs, { pageId, title, isPinned: false }],
-            };
-          }),
-        }));
+              // Add new tab
+              return {
+                ...pane,
+                pageId,
+                tabs: [
+                  ...pane.tabs,
+                  { pageId, title, isPinned: false, notebookId },
+                ],
+              };
+            }),
+          };
+        });
       },
 
       closeTabInPane: (paneId, pageId) => {
@@ -1124,8 +1239,13 @@ export const usePageStore = create<PageStore>()(
         }
       },
 
-      // Refresh pages modified by backend (e.g., after action execution)
-      refreshPages: async (pageIds) => {
+      // Refresh pages modified by backend (e.g., after action execution).
+      // notebookId, when known (daemon events carry it), scopes the lookup
+      // for ids we don't have locally: pages of other notebooks are skipped
+      // instead of probed against the selected notebook. Probing was the
+      // 404 storm — every external write to another notebook's page (MCP
+      // sessions updating Forge, say) produced a doomed wrong-notebook GET.
+      refreshPages: async (pageIds, notebookId) => {
         if (pageIds.length === 0) return;
         const state = get();
 
@@ -1153,22 +1273,39 @@ export const usePageStore = create<PageStore>()(
           )
           .map((r) => r.value);
 
-        // Fetch newly created pages — try all loaded notebooks
+        // Fetch pages we don't have locally
         const newPages: Page[] = [];
         if (newIds.length > 0) {
           const { useNotebookStore } = await import("./notebookStore");
           const selectedId = useNotebookStore.getState().selectedNotebookId;
-          const notebookIds = selectedId
-            ? [selectedId]
-            : useNotebookStore.getState().notebooks.map((n) => n.id);
-          for (const pageId of newIds) {
-            for (const nbId of notebookIds) {
-              try {
-                const page = await api.getPage(nbId, pageId);
-                newPages.push(page);
-                break;
-              } catch {
-                // Page not in this notebook, try next
+          if (notebookId) {
+            // The caller told us where these pages live. The store only
+            // holds the selected notebook's pages, so anything else isn't
+            // ours to fetch — skip it entirely.
+            if (notebookId === selectedId) {
+              for (const pageId of newIds) {
+                try {
+                  newPages.push(await api.getPage(notebookId, pageId));
+                } catch {
+                  // Deleted or inaccessible — drop, never retry.
+                }
+              }
+            }
+          } else {
+            // Origin unknown (action executor, version restore): try the
+            // selected notebook, or all notebooks when none is selected.
+            const notebookIds = selectedId
+              ? [selectedId]
+              : useNotebookStore.getState().notebooks.map((n) => n.id);
+            for (const pageId of newIds) {
+              for (const nbId of notebookIds) {
+                try {
+                  const page = await api.getPage(nbId, pageId);
+                  newPages.push(page);
+                  break;
+                } catch {
+                  // Page not in this notebook, try next
+                }
               }
             }
           }

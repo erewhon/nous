@@ -72,7 +72,9 @@ export function useAppInit() {
           case "page.updated": {
             const data = evt.data as PageEventData;
             if (data.pageId) {
-              refreshPages([data.pageId]).catch(warn("refreshPages"));
+              refreshPages([data.pageId], data.notebookId).catch(
+                warn("refreshPages")
+              );
             }
             break;
           }
@@ -89,7 +91,9 @@ export function useAppInit() {
           case "page.moved": {
             const data = evt.data as PageEventData;
             if (data.pageId) {
-              refreshPages([data.pageId]).catch(warn("refreshPages"));
+              refreshPages([data.pageId], data.notebookId).catch(
+                warn("refreshPages")
+              );
             }
             break;
           }
@@ -198,7 +202,9 @@ export function useAppInit() {
             const data = evt.data as DatabaseEventData;
             const dbPageId = data.pageId ?? data.databaseId;
             if (dbPageId) {
-              refreshPages([dbPageId]).catch(warn("refreshPages"));
+              refreshPages([dbPageId], data.notebookId).catch(
+                warn("refreshPages")
+              );
             }
             break;
           }
