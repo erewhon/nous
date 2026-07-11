@@ -26,6 +26,7 @@ import { useSectionStore } from "../../stores/sectionStore";
 import { useThemeStore, type PageSortOption as ThemePageSortOption } from "../../stores/themeStore";
 import * as api from "../../utils/api";
 import { FolderTreeItem, DraggablePageItem } from "./FolderTreeItem";
+import { sortFolders } from "./folderTreeUtils";
 import { ObjectTypePicker, ObjectTypeManager } from "../Database/ObjectTypeManager";
 import { ALL_SUPPORTED_EXTENSIONS } from "../../utils/fileImport";
 
@@ -383,19 +384,15 @@ export function FolderTree({
     [visiblePages, sortPages]
   );
 
-  // Get child folders for a parent
+  // Get child folders for a parent, sorted with the same option as pages
   const getChildFolders = useCallback(
     (parentId: string | null) => {
-      return visibleFolders
-        .filter((f) => (f.parentId ?? null) === parentId)
-        .sort((a, b) => {
-          // Archive folder always last
-          if (a.folderType === "archive") return 1;
-          if (b.folderType === "archive") return -1;
-          return a.position - b.position;
-        });
+      return sortFolders(
+        visibleFolders.filter((f) => (f.parentId ?? null) === parentId),
+        pageSortBy
+      );
     },
-    [visibleFolders]
+    [visibleFolders, pageSortBy]
   );
 
   // Handle creating a new page
