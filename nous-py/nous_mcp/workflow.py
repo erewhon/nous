@@ -34,6 +34,9 @@ logger = logging.getLogger(__name__)
 REQUIRED_COLUMNS: list[tuple[str, str, list[str] | None]] = [
     ("External Ref", "text", None),
     ("Feature", "text", None),
+    # Latest status transition ("Ready → Done 2026-07-11"), stamped by
+    # update_task_status; read by recent_task_activity. Sparse.
+    ("Last Transition", "text", None),
     # --- Autonomy / worker metadata (null-as-manual; worker ignores tasks
     # without Execution Mode = Auto-OK or Auto-Preferred) ---
     ("Execution Mode", "select", ["Manual", "Auto-OK", "Auto-Preferred"]),
@@ -1278,6 +1281,44 @@ def _raw_dep_entry(uid: str | None, dep_name: str) -> str:
     return f"{uid}:{dep_name}" if uid else dep_name
 
 
+def _parse_since(since: str) -> datetime:
+    """Parse a recent_task_activity `since` value into an aware datetime.
+
+    Accepts an ISO date ("2026-07-06"), an ISO datetime
+    ("2026-07-06T22:00:00Z"), or relative shorthand "12h" / "7d".
+    """
+    s = since.strip()
+    m = re.fullmatch(r"(\d+)([hd])", s.lower())
+    if m:
+        n, unit = int(m.group(1)), m.group(2)
+        delta = timedelta(hours=n) if unit == "h" else timedelta(days=n)
+        return datetime.now(UTC) - delta
+    try:
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except ValueError:
+        raise ValueError(
+            f"Invalid since value '{since}' — use an ISO date (2026-07-06), "
+            "an ISO datetime (2026-07-06T22:00:00Z), or relative shorthand "
+            "like '12h' or '7d'."
+        ) from None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt
+
+
+def _parse_row_ts(value) -> datetime | None:
+    """Parse a row createdAt/updatedAt timestamp; None if absent/malformed."""
+    if not value:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt
+
+
 def _detect_fragmentation(
     segments: list[str],
     resolved_flags: list[bool],
@@ -1855,7 +1896,24 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
 
         # --- Update database row ---
         if row is not None:
+            # Cells are written by property NAME; a name with no matching
+            # property becomes an orphan cell daemon-side. Ensure the
+            # REQUIRED_COLUMNS (Last Transition, autonomy fields, ...) exist
+            # before writing them — no-op unless the loaded schema is missing
+            # one, so steady state costs a dict lookup.
+            if any(
+                name.lower() not in prop_map for name, _, _ in REQUIRED_COLUMNS
+            ):
+                _ensure_schema(storage, notebook_id, db_page["id"])
+
             update_cells: dict[str, str | int] = {"Status": status}
+
+            # Stamp the transition so recent_task_activity reads as an
+            # activity log. Best-effort: only MCP-mediated changes stamp it;
+            # a UI status edit moves the row's updatedAt but not this cell.
+            update_cells["Last Transition"] = (
+                f"{previous_status} → {status} {date.today().isoformat()}"
+            )
 
             # Auto-set completed date
             if status.lower() == "done":
@@ -2343,6 +2401,139 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
                 "resolved_all": all(r["resolved"] for r in results),
                 "results": results,
             },
+            indent=2,
+        )
+
+    @mcp.tool()
+    def recent_task_activity(
+        since: str | None = None,
+        project: str | None = None,
+        limit: int = 20,
+        include_archived: bool = False,
+        notebook: str = "Forge",
+        database: str = "Project Tasks",
+    ) -> str:
+        """Task activity feed: rows ordered by last touch, newest first.
+
+        Answers "what changed since T" / "what did the worker do overnight"
+        in one call, across all projects. Done tasks are ALWAYS included —
+        status changes are the main event (the key contract difference from
+        query_tasks, which hides Done by default).
+
+        Row timestamps are stamped by every write path (daemon and desktop
+        UI), so updated_at is reliable for "touched". The last_transition
+        annotation ("Ready → Done 2026-07-11") is stamped only by
+        MCP-mediated status changes — best-effort: a status edited directly
+        in the UI moves updated_at but not last_transition.
+
+        Args:
+            since: Only tasks touched at/after this time — ISO date
+                ("2026-07-06"), ISO datetime ("2026-07-06T22:00:00Z"), or
+                relative shorthand "12h" / "7d". None → newest `limit` rows.
+            project: Filter by project name (optional).
+            limit: Max rows (default 20, 0 = unlimited).
+            include_archived: Also merge rows from "<database> Archive" into
+                the same ordering, marked "archived": true.
+            notebook: Notebook name or UUID (default: "Forge").
+            database: Task database title (default: "Project Tasks").
+
+        Returns JSON {total, filters, tasks} sorted by updated_at desc; each
+        task carries task, row_id, project, status, priority, feature,
+        updated_at, created_at, completed, change ("created"/"updated"),
+        last_transition, archived where applicable.
+        """
+        cutoff = _parse_since(since) if since else None
+        storage = get_storage()
+        daemon = get_daemon()
+        nb = storage.resolve_notebook(notebook)
+        notebook_id = nb["id"]
+
+        db_page = daemon.resolve_page(notebook_id, database)
+        if db_page.get("pageType") != "database":
+            raise ValueError(f"Page '{db_page.get('title')}' is not a database")
+        db_content = storage.read_database_content(notebook_id, db_page["id"])
+        if db_content is None:
+            raise ValueError(f"Database file not found for '{database}'")
+
+        sources: list[tuple[dict, bool]] = [(db_content, False)]
+        if include_archived:
+            archive = _archive_getter(storage, daemon, notebook_id, database)()
+            if archive:
+                sources.append((archive, True))
+
+        entries: list[tuple[datetime, dict]] = []
+        for content, archived in sources:
+            prop_map = {
+                p["name"].lower(): p for p in content.get("properties", [])
+            }
+            priority_prop = prop_map.get("priority")
+            feature_prop = prop_map.get("feature")
+            completed_prop = prop_map.get("completed")
+            transition_prop = prop_map.get("last transition")
+
+            for row in content.get("rows", []):
+                row_project = _row_project_label(row, prop_map) or None
+                if project and (row_project or "").lower() != project.lower():
+                    continue
+                updated = _parse_row_ts(row.get("updatedAt"))
+                if updated is None:
+                    continue
+                if cutoff is not None and updated < cutoff:
+                    continue
+                created = _parse_row_ts(row.get("createdAt"))
+                cells = row.get("cells", {})
+
+                entry: dict = {
+                    "task": _get_row_task_name(row, content),
+                    "row_id": row["id"],
+                    "project": row_project,
+                    "status": _get_row_status(row, content),
+                    "updated_at": row.get("updatedAt"),
+                    "created_at": row.get("createdAt"),
+                }
+                if cutoff is not None:
+                    entry["change"] = (
+                        "created" if created and created >= cutoff else "updated"
+                    )
+                else:
+                    entry["change"] = (
+                        "created"
+                        if row.get("createdAt") == row.get("updatedAt")
+                        else "updated"
+                    )
+                pri = cells.get(priority_prop["id"]) if priority_prop else None
+                if pri not in (None, ""):
+                    entry["priority"] = pri
+                if feature_prop:
+                    feat = str(cells.get(feature_prop["id"], "")).strip()
+                    if feat:
+                        entry["feature"] = feat
+                if completed_prop:
+                    comp = str(cells.get(completed_prop["id"], "")).strip()
+                    if comp:
+                        entry["completed"] = comp
+                if transition_prop:
+                    trans = str(cells.get(transition_prop["id"], "")).strip()
+                    if trans:
+                        entry["last_transition"] = trans
+                if archived:
+                    entry["archived"] = True
+                entries.append((updated, entry))
+
+        entries.sort(key=lambda e: e[0], reverse=True)
+        tasks = [e for _, e in entries]
+        if limit:
+            tasks = tasks[:limit]
+
+        filters: dict = {}
+        if since:
+            filters["since"] = since
+        if project:
+            filters["project"] = project
+        if include_archived:
+            filters["include_archived"] = True
+        return json.dumps(
+            {"total": len(tasks), "filters": filters, "tasks": tasks},
             indent=2,
         )
 

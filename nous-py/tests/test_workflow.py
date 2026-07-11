@@ -3441,3 +3441,229 @@ class TestListValuedParams:
         tags = daemon.create_page.call_args.kwargs["tags"]
         assert "workflow" in tags
         assert "sdk" in tags
+
+
+# ---------------------------------------------------------------------------
+# recent_task_activity + Last Transition stamping
+# ---------------------------------------------------------------------------
+
+from nous_mcp.workflow import _parse_since  # noqa: E402
+
+
+class TestParseSince:
+    def test_iso_date(self):
+        dt = _parse_since("2026-07-06")
+        assert dt.isoformat().startswith("2026-07-06T00:00:00")
+        assert dt.tzinfo is not None
+
+    def test_iso_datetime_z(self):
+        dt = _parse_since("2026-07-06T22:00:00Z")
+        assert dt.hour == 22
+        assert dt.utcoffset().total_seconds() == 0
+
+    def test_relative_hours_and_days(self):
+        from datetime import UTC, datetime, timedelta
+
+        now = datetime.now(UTC)
+        assert abs((now - _parse_since("12h")) - timedelta(hours=12)) < timedelta(
+            seconds=5
+        )
+        assert abs((now - _parse_since("7d")) - timedelta(days=7)) < timedelta(
+            seconds=5
+        )
+
+    def test_invalid_raises_with_accepted_forms(self):
+        with pytest.raises(ValueError, match="12h"):
+            _parse_since("next tuesday")
+
+
+class TestRecentTaskActivity:
+    def _row(self, rid, task, status_opt, created, updated, project="opt-proj-nous", **cells):
+        base = {
+            "prop-task": task,
+            "prop-project": project,
+            "prop-status": status_opt,
+        }
+        base.update(cells)
+        return {"id": rid, "cells": base, "createdAt": created, "updatedAt": updated}
+
+    def _setup(self, rows, archive_rows=None):
+        db = _make_db_content(
+            project_options=["Nous", "Astra"],
+            include_external_ref=True,
+            rows=rows,
+        )
+        db["properties"].append(
+            {"id": "prop-last-transition", "name": "Last Transition", "type": "text"}
+        )
+        storage = _make_storage(
+            folders=[{"id": "folder-nous", "name": "Nous"}], db_content=db
+        )
+        daemon = _make_daemon()
+        if archive_rows is not None:
+            archive = _make_db_content(
+                project_options=["Nous", "Astra"],
+                include_external_ref=True,
+                rows=archive_rows,
+            )
+
+            def _resolve(nb_id, title):
+                if "Archive" in title:
+                    return {
+                        "id": "db-archive-001",
+                        "title": title,
+                        "pageType": "database",
+                    }
+                return {
+                    "id": DB_PAGE_ID,
+                    "title": "Project Tasks",
+                    "pageType": "database",
+                }
+
+            daemon.resolve_page.side_effect = _resolve
+
+            def _read(nb_id, page_id):
+                return archive if page_id == "db-archive-001" else db
+
+            storage.read_database_content.side_effect = _read
+        tools = _register_tools(storage, daemon)
+        return tools["recent_task_activity"]
+
+    def test_ordering_newest_first_done_included(self):
+        feed = self._setup(
+            rows=[
+                self._row("r-old", "Old ready", "opt-ready",
+                          "2026-07-01T00:00:00+00:00", "2026-07-02T00:00:00+00:00"),
+                self._row("r-new", "Fresh done", "opt-done",
+                          "2026-07-01T00:00:00+00:00", "2026-07-10T00:00:00+00:00"),
+                self._row("r-mid", "Mid task", "opt-inprogress",
+                          "2026-07-01T00:00:00+00:00", "2026-07-05T00:00:00+00:00"),
+            ]
+        )
+        result = json.loads(feed())
+        names = [t["task"] for t in result["tasks"]]
+        assert names == ["Fresh done", "Mid task", "Old ready"]
+        assert result["tasks"][0]["status"] == "Done"  # Done not hidden
+
+    def test_since_filters_and_flags_created(self):
+        feed = self._setup(
+            rows=[
+                self._row("r-before", "Touched before", "opt-ready",
+                          "2026-07-01T00:00:00+00:00", "2026-07-03T00:00:00+00:00"),
+                self._row("r-updated", "Updated after", "opt-ready",
+                          "2026-07-01T00:00:00+00:00", "2026-07-08T09:00:00+00:00"),
+                self._row("r-created", "Created after", "opt-ready",
+                          "2026-07-08T08:00:00+00:00", "2026-07-08T08:00:00+00:00"),
+            ]
+        )
+        result = json.loads(feed(since="2026-07-08"))
+        by_name = {t["task"]: t for t in result["tasks"]}
+        assert set(by_name) == {"Updated after", "Created after"}
+        assert by_name["Created after"]["change"] == "created"
+        assert by_name["Updated after"]["change"] == "updated"
+
+    def test_since_boundary_inclusive(self):
+        feed = self._setup(
+            rows=[
+                self._row("r-exact", "Exactly at cutoff", "opt-ready",
+                          "2026-07-01T00:00:00+00:00", "2026-07-08T00:00:00+00:00"),
+            ]
+        )
+        result = json.loads(feed(since="2026-07-08"))
+        assert result["total"] == 1
+
+    def test_project_filter_and_limit(self):
+        feed = self._setup(
+            rows=[
+                self._row("r-n1", "Nous one", "opt-ready",
+                          "2026-07-01T00:00:00+00:00", "2026-07-05T00:00:00+00:00"),
+                self._row("r-a1", "Astra one", "opt-ready",
+                          "2026-07-01T00:00:00+00:00", "2026-07-06T00:00:00+00:00",
+                          project="opt-proj-astra"),
+                self._row("r-n2", "Nous two", "opt-ready",
+                          "2026-07-01T00:00:00+00:00", "2026-07-07T00:00:00+00:00"),
+            ]
+        )
+        result = json.loads(feed(project="Nous", limit=1))
+        assert [t["task"] for t in result["tasks"]] == ["Nous two"]
+        assert result["filters"] == {"project": "Nous"}
+
+    def test_last_transition_surfaced(self):
+        feed = self._setup(
+            rows=[
+                self._row("r-t", "Transitioned", "opt-done",
+                          "2026-07-01T00:00:00+00:00", "2026-07-09T00:00:00+00:00",
+                          **{"prop-last-transition": "Ready → Done 2026-07-09"}),
+            ]
+        )
+        result = json.loads(feed())
+        entry = result["tasks"][0]
+        assert entry["last_transition"] == "Ready → Done 2026-07-09"
+
+    def test_archive_merge(self):
+        feed = self._setup(
+            rows=[
+                self._row("r-live", "Live task", "opt-ready",
+                          "2026-07-01T00:00:00+00:00", "2026-07-05T00:00:00+00:00"),
+            ],
+            archive_rows=[
+                self._row("r-arch", "Archived task", "opt-done",
+                          "2026-06-01T00:00:00+00:00", "2026-07-06T00:00:00+00:00"),
+            ],
+        )
+        result = json.loads(feed(include_archived=True))
+        names = [t["task"] for t in result["tasks"]]
+        assert names == ["Archived task", "Live task"]
+        assert result["tasks"][0].get("archived") is True
+        assert "archived" not in result["tasks"][1]
+
+    def test_bad_since_raises(self):
+        feed = self._setup(rows=[])
+        with pytest.raises(ValueError, match="Invalid since"):
+            feed(since="whenever")
+
+
+class TestLastTransitionStamp:
+    def test_update_task_status_stamps_transition(self):
+        db = _make_db_content(
+            project_options=["Nous"],
+            include_external_ref=True,
+            rows=[
+                {
+                    "id": "row-1",
+                    "cells": {
+                        "prop-task": "My Task",
+                        "prop-project": "opt-proj-nous",
+                        "prop-status": "opt-ready",
+                        "prop-depends": "None",
+                    },
+                },
+            ],
+        )
+        storage = _make_storage(
+            folders=[{"id": "folder-nous", "name": "Nous"}], db_content=db
+        )
+        daemon = _make_daemon()
+
+        def _resolve(nb_id, title):
+            if title.startswith("Task:") or title == "My Task":
+                return {
+                    "id": "page-1",
+                    "title": "Task: My Task",
+                    "pageType": "standard",
+                    "tags": ["task", "nous", "ready"],
+                }
+            return {
+                "id": DB_PAGE_ID,
+                "title": "Project Tasks",
+                "pageType": "database",
+            }
+
+        daemon.resolve_page.side_effect = _resolve
+        tools = _register_tools(storage, daemon)
+        tools["update_task_status"](task="My Task", status="Done")
+
+        cells = daemon.update_database_rows.call_args[0][2][0]["cells"]
+        from datetime import date as _date
+
+        assert cells["Last Transition"] == f"Ready → Done {_date.today().isoformat()}"
