@@ -13,6 +13,7 @@ from nous_mcp.workflow import (
     ALL_STATUS_TAGS,
     REQUIRED_COLUMNS,
     _check_dependency_status,
+    _detect_fragmentation,
     _ensure_database_column,
     _ensure_schema,
     _ensure_select_option,
@@ -24,6 +25,7 @@ from nous_mcp.workflow import (
     _get_row_status,
     _migrate_dependencies,
     _parse_depends_on,
+    _raw_dep_entry,
     _resolve_dep_ref,
     _resolve_dep_row,
     _resolve_dependencies,
@@ -720,6 +722,10 @@ class TestFindTaskRow:
 # ---------------------------------------------------------------------------
 
 
+DEP_ROW_ID = "dddddddd-1111-4111-8111-000000000001"
+DEP_ROW_ID2 = "dddddddd-1111-4111-8111-000000000002"
+
+
 class TestCheckDependencyStatus:
     def _make_db_with_deps(self, dep_status_label="Done"):
         db = _make_db_content(project_options=["Nous"])
@@ -731,7 +737,7 @@ class TestCheckDependencyStatus:
         )
         db["rows"] = [
             {
-                "id": "dep-row",
+                "id": DEP_ROW_ID,
                 "cells": {
                     "prop-task": "Prerequisite",
                     "prop-status": status_opt["id"],
@@ -742,12 +748,12 @@ class TestCheckDependencyStatus:
 
     def test_all_satisfied_when_deps_done(self):
         db = self._make_db_with_deps("Done")
-        result = _check_dependency_status(db, "dep-row:Prerequisite")
+        result = _check_dependency_status(db, f"{DEP_ROW_ID}:Prerequisite")
         assert result == "all satisfied"
 
     def test_warning_when_dep_not_done(self):
         db = self._make_db_with_deps("Ready")
-        result = _check_dependency_status(db, "dep-row:Prerequisite")
+        result = _check_dependency_status(db, f"{DEP_ROW_ID}:Prerequisite")
         assert isinstance(result, dict)
         assert "warning" in result
         assert "Prerequisite" in result["warning"]
@@ -868,7 +874,7 @@ class TestUpdateTaskStatus:
             include_external_ref=True,
             rows=[
                 {
-                    "id": "dep-row",
+                    "id": DEP_ROW_ID,
                     "cells": {
                         "prop-task": "Prerequisite",
                         "prop-status": "opt-done",
@@ -880,7 +886,7 @@ class TestUpdateTaskStatus:
                         "prop-task": "My Task",
                         "prop-project": "opt-proj-nous",
                         "prop-status": "opt-ready",
-                        "prop-depends": "dep-row:Prerequisite",
+                        "prop-depends": f"{DEP_ROW_ID}:Prerequisite",
                     },
                 },
             ],
@@ -1096,18 +1102,22 @@ class TestFireWebhook:
 # ---------------------------------------------------------------------------
 
 
+PARSE_UUID_A = "12345678-1234-4123-8123-123456789abc"
+PARSE_UUID_B = "87654321-4321-4321-8321-cba987654321"
+
+
 class TestParseDependsOn:
     def test_uuid_format(self):
-        result = _parse_depends_on("abc-123:Task A, def-456:Task B")
-        assert result == [("abc-123", "Task A"), ("def-456", "Task B")]
+        result = _parse_depends_on(f"{PARSE_UUID_A}:Task A, {PARSE_UUID_B}:Task B")
+        assert result == [(PARSE_UUID_A, "Task A"), (PARSE_UUID_B, "Task B")]
 
     def test_free_text(self):
         result = _parse_depends_on("Task A, Task B")
         assert result == [(None, "Task A"), (None, "Task B")]
 
     def test_mixed_format(self):
-        result = _parse_depends_on("abc-123:Task A, Task B")
-        assert result == [("abc-123", "Task A"), (None, "Task B")]
+        result = _parse_depends_on(f"{PARSE_UUID_A}:Task A, Task B")
+        assert result == [(PARSE_UUID_A, "Task A"), (None, "Task B")]
 
     def test_none_value(self):
         assert _parse_depends_on("None") == []
@@ -1115,15 +1125,31 @@ class TestParseDependsOn:
         assert _parse_depends_on("  none  ") == []
 
     def test_single_entry(self):
-        result = _parse_depends_on("abc:My Task")
-        assert result == [("abc", "My Task")]
+        result = _parse_depends_on(f"{PARSE_UUID_A}:My Task")
+        assert result == [(PARSE_UUID_A, "My Task")]
 
     def test_ref_entries_kept_whole(self):
-        result = _parse_depends_on("ref:pipeline:epic:leaf, abc-123:Task A")
+        result = _parse_depends_on(f"ref:pipeline:epic:leaf, {PARSE_UUID_A}:Task A")
         assert result == [
             (None, "ref:pipeline:epic:leaf"),
-            ("abc-123", "Task A"),
+            (PARSE_UUID_A, "Task A"),
         ]
+
+    def test_free_text_with_colon_stays_whole(self):
+        # Only a UUID prefix triggers the uuid:Title split — free text
+        # containing a colon must survive intact (and round-trip).
+        result = _parse_depends_on("External: astro firmware 3.2 release")
+        assert result == [(None, "External: astro firmware 3.2 release")]
+        assert _raw_dep_entry(*result[0]) == "External: astro firmware 3.2 release"
+
+    def test_non_uuid_colon_prefix_stays_whole(self):
+        result = _parse_depends_on("abc-123:Task A")
+        assert result == [(None, "abc-123:Task A")]
+
+    def test_uuid_entry_round_trips(self):
+        entry = f"{PARSE_UUID_A}:Task A"
+        [(uid, name)] = _parse_depends_on(entry)
+        assert _raw_dep_entry(uid, name) == entry
 
 
 # ---------------------------------------------------------------------------
@@ -2064,15 +2090,37 @@ class TestUpdateTaskFields:
 # ---------------------------------------------------------------------------
 
 
+MIG_SETUP_ID = "eeeeeeee-0000-4000-8000-000000000001"
+MIG_API_ID = "eeeeeeee-0000-4000-8000-000000000002"
+
+
 class TestMigrateDependencies:
     def _make_db_for_migration(self):
         return _make_db_content(
             project_options=["Nous"],
             rows=[
-                {"id": "r-setup", "cells": {"prop-task": "Setup database", "prop-depends": ""}},
-                {"id": "r-api", "cells": {"prop-task": "Add API", "prop-depends": "Setup database"}},
-                {"id": "r-tests", "cells": {"prop-task": "Add tests", "prop-depends": "Setup database, Add API"}},
-                {"id": "r-already", "cells": {"prop-task": "Deploy", "prop-depends": "r-api:Add API"}},
+                {
+                    "id": MIG_SETUP_ID,
+                    "cells": {"prop-task": "Setup database", "prop-depends": ""},
+                },
+                {
+                    "id": MIG_API_ID,
+                    "cells": {"prop-task": "Add API", "prop-depends": "Setup database"},
+                },
+                {
+                    "id": "r-tests",
+                    "cells": {
+                        "prop-task": "Add tests",
+                        "prop-depends": "Setup database, Add API",
+                    },
+                },
+                {
+                    "id": "r-already",
+                    "cells": {
+                        "prop-task": "Deploy",
+                        "prop-depends": f"{MIG_API_ID}:Add API",
+                    },
+                },
             ],
         )
 
@@ -2086,11 +2134,11 @@ class TestMigrateDependencies:
 
         # Check the actual values
         api_row = db["rows"][1]
-        assert f"r-setup:Setup database" == api_row["cells"]["prop-depends"]
+        assert f"{MIG_SETUP_ID}:Setup database" == api_row["cells"]["prop-depends"]
 
         tests_row = db["rows"][2]
-        assert "r-setup:Setup database" in tests_row["cells"]["prop-depends"]
-        assert "r-api:Add API" in tests_row["cells"]["prop-depends"]
+        assert f"{MIG_SETUP_ID}:Setup database" in tests_row["cells"]["prop-depends"]
+        assert f"{MIG_API_ID}:Add API" in tests_row["cells"]["prop-depends"]
 
     def test_already_uuid_format_unchanged(self):
         db = self._make_db_for_migration()
@@ -2099,7 +2147,7 @@ class TestMigrateDependencies:
 
         # Deploy row already had UUID format — should not be in migrated count
         deploy_row = db["rows"][3]
-        assert deploy_row["cells"]["prop-depends"] == "r-api:Add API"
+        assert deploy_row["cells"]["prop-depends"] == f"{MIG_API_ID}:Add API"
 
     def test_unresolved_deps_tracked(self):
         db = _make_db_content(
@@ -2153,14 +2201,14 @@ class TestCheckDependenciesTool:
                 include_external_ref=True,
                 rows=[
                     {
-                        "id": "dep-done",
+                        "id": DEP_ROW_ID,
                         "cells": {
                             "prop-task": "Prerequisite Done",
                             "prop-status": "opt-done",
                         },
                     },
                     {
-                        "id": "dep-ready",
+                        "id": DEP_ROW_ID2,
                         "cells": {
                             "prop-task": "Prerequisite Ready",
                             "prop-status": "opt-ready",
@@ -2171,7 +2219,10 @@ class TestCheckDependenciesTool:
                         "cells": {
                             "prop-task": "Main Task",
                             "prop-status": "opt-ready",
-                            "prop-depends": "dep-done:Prerequisite Done, dep-ready:Prerequisite Ready",
+                            "prop-depends": (
+                                f"{DEP_ROW_ID}:Prerequisite Done, "
+                                f"{DEP_ROW_ID2}:Prerequisite Ready"
+                            ),
                         },
                     },
                 ],
@@ -2207,13 +2258,13 @@ class TestCheckDependenciesTool:
             project_options=["Nous"],
             include_external_ref=True,
             rows=[
-                {"id": "dep1", "cells": {"prop-task": "Dep A", "prop-status": "opt-done"}},
+                {"id": DEP_ROW_ID, "cells": {"prop-task": "Dep A", "prop-status": "opt-done"}},
                 {
                     "id": "row-main",
                     "cells": {
                         "prop-task": "Main Task",
                         "prop-status": "opt-ready",
-                        "prop-depends": "dep1:Dep A",
+                        "prop-depends": f"{DEP_ROW_ID}:Dep A",
                     },
                 },
             ],
@@ -2248,7 +2299,7 @@ class TestCheckDependenciesTool:
             project_options=["Nous"],
             include_external_ref=True,
             rows=[
-                {"id": "dep1", "cells": {"prop-task": "Setup", "prop-status": "opt-done"}},
+                {"id": DEP_ROW_ID, "cells": {"prop-task": "Setup", "prop-status": "opt-done"}},
                 {
                     "id": "row-main",
                     "cells": {
@@ -2396,14 +2447,14 @@ class TestGetTaskSpec:
             project_options=["Nous"],
             include_external_ref=True,
             rows=[
-                {"id": "dep1", "cells": {"prop-task": "Setup", "prop-status": "opt-done"}},
+                {"id": DEP_ROW_ID, "cells": {"prop-task": "Setup", "prop-status": "opt-done"}},
                 {
                     "id": "row-1",
                     "cells": {
                         "prop-task": "My Task",
                         "prop-project": "opt-proj-nous",
                         "prop-status": "opt-ready",
-                        "prop-depends": "dep1:Setup",
+                        "prop-depends": f"{DEP_ROW_ID}:Setup",
                     },
                 },
             ],
@@ -2427,7 +2478,7 @@ class TestGetTaskSpec:
             project_options=["Nous"],
             include_external_ref=True,
             rows=[
-                {"id": "dep1", "cells": {"prop-task": "Blocker", "prop-status": "opt-ready"}},
+                {"id": DEP_ROW_ID, "cells": {"prop-task": "Blocker", "prop-status": "opt-ready"}},
                 {
                     "id": "row-1",
                     "cells": {
@@ -2755,8 +2806,8 @@ class TestTopologicalSort:
     def test_simple_chain(self):
         tasks = self._make_tasks([
             ("a", "A", 1, ""),
-            ("b", "B", 1, "a:A"),
-            ("c", "C", 1, "b:B"),
+            ("b", "B", 1, "A"),
+            ("c", "C", 1, "B"),
         ])
         db = _make_db_content()
         sorted_tasks, cycles = _topological_sort(tasks, db)
@@ -2779,9 +2830,9 @@ class TestTopologicalSort:
         # A → B, A → C, B → D, C → D
         tasks = self._make_tasks([
             ("a", "A", 1, ""),
-            ("b", "B", 1, "a:A"),
-            ("c", "C", 1, "a:A"),
-            ("d", "D", 1, "b:B, c:C"),
+            ("b", "B", 1, "A"),
+            ("c", "C", 1, "A"),
+            ("d", "D", 1, "B, C"),
         ])
         db = _make_db_content()
         sorted_tasks, cycles = _topological_sort(tasks, db)
@@ -2794,8 +2845,8 @@ class TestTopologicalSort:
 
     def test_cycle_detection(self):
         tasks = self._make_tasks([
-            ("a", "A", 1, "b:B"),
-            ("b", "B", 1, "a:A"),
+            ("a", "A", 1, "B"),
+            ("b", "B", 1, "A"),
         ])
         db = _make_db_content()
         sorted_tasks, cycles = _topological_sort(tasks, db)
@@ -2850,7 +2901,7 @@ class TestGetProjectTasks:
                         "prop-project": "opt-proj-nous",
                         "prop-status": "opt-done",
                         "prop-priority": 2,
-                        "prop-depends": "r1:Task A",
+                        "prop-depends": "Task A",
                     },
                 },
                 {
@@ -2930,7 +2981,7 @@ class TestGetFeatureTasksTool:
                             "prop-status": "opt-ready",
                             "prop-priority": 2,
                             "prop-phase": "opt-feature",
-                            "prop-depends": "r-setup:Setup",
+                            "prop-depends": "Setup",
                         },
                     },
                     {
@@ -2941,7 +2992,7 @@ class TestGetFeatureTasksTool:
                             "prop-status": "opt-ready",
                             "prop-priority": 3,
                             "prop-phase": "opt-feature",
-                            "prop-depends": "r-api:Build API",
+                            "prop-depends": "Build API",
                         },
                     },
                 ],
@@ -2992,7 +3043,7 @@ class TestGetFeatureTasksTool:
                         "prop-project": "opt-proj-nous",
                         "prop-status": "opt-ready",
                         "prop-priority": 1,
-                        "prop-depends": "r2:Task B",
+                        "prop-depends": "Task B",
                     },
                 },
                 {
@@ -3002,7 +3053,7 @@ class TestGetFeatureTasksTool:
                         "prop-project": "opt-proj-nous",
                         "prop-status": "opt-ready",
                         "prop-priority": 1,
-                        "prop-depends": "r1:Task A",
+                        "prop-depends": "Task A",
                     },
                 },
             ],
@@ -3049,3 +3100,260 @@ class TestGetFeatureTasksTool:
         result = json.loads(get_tasks(project="Nous"))
         names = [t["task"] for t in result["execution_order"]]
         assert names == ["High Prio", "Low Prio"]
+
+
+# ---------------------------------------------------------------------------
+# Comma-in-title hardening (create_task validation + list deps + lint tool)
+# ---------------------------------------------------------------------------
+
+COMMA_DEP_ID = "cccccccc-0000-4000-8000-000000000001"
+COMMA_TITLE = "Web build target: vite config, dist-web, just recipes"
+COMMA_TITLE_SOFTENED = "Web build target: vite config; dist-web; just recipes"
+
+
+class TestCreateTaskCommaHardening:
+    def _setup(self):
+        db = _make_db_content(
+            project_options=["Nous"],
+            include_external_ref=True,
+            rows=[
+                {
+                    "id": COMMA_DEP_ID,
+                    "cells": {
+                        "prop-task": COMMA_TITLE,
+                        "prop-project": "opt-proj-nous",
+                    },
+                },
+            ],
+        )
+        storage = _make_storage(
+            folders=[{"id": "folder-nous", "name": "Nous"}], db_content=db
+        )
+        daemon = _make_daemon()
+        daemon.create_page.return_value = {"id": "page-123", "title": "Task: X"}
+        daemon.add_database_rows.return_value = {
+            "databaseId": DB_PAGE_ID,
+            "rowsAdded": 1,
+            "totalRows": 1,
+        }
+        tools = _register_tools(storage, daemon)
+        return tools["create_task"], daemon
+
+    def test_comma_in_title_rejected(self):
+        create_task, daemon = self._setup()
+        with pytest.raises(ValueError, match="comma"):
+            create_task(
+                project="Nous", title="CLI — init, put, get", content="x"
+            )
+        daemon.create_page.assert_not_called()
+
+    def test_comma_free_title_unchanged(self):
+        create_task, _ = self._setup()
+        result = json.loads(
+            create_task(project="Nous", title="Clean title", content="x")
+        )
+        assert result["page_id"] == "page-123"
+
+    def test_list_deps_reference_comma_title(self):
+        # The original agent-feedback repro, as a list of one — resolves as
+        # a single dependency with the stored title comma-softened.
+        create_task, daemon = self._setup()
+        result = json.loads(
+            create_task(
+                project="Nous",
+                title="Dependent work",
+                content="x",
+                depends_on=[COMMA_TITLE],
+            )
+        )
+        rows_arg = daemon.add_database_rows.call_args[0][2]
+        assert rows_arg[0]["Depends On"] == f"{COMMA_DEP_ID}:{COMMA_TITLE_SOFTENED}"
+        assert result["warnings"] == []
+
+    def test_list_deps_mixed_with_unresolved(self):
+        create_task, daemon = self._setup()
+        result = json.loads(
+            create_task(
+                project="Nous",
+                title="Dependent work",
+                content="x",
+                depends_on=[COMMA_TITLE, "Ghost Task"],
+            )
+        )
+        assert any("Ghost Task" in w for w in result["warnings"])
+        rows_arg = daemon.add_database_rows.call_args[0][2]
+        assert rows_arg[0]["Depends On"].startswith(f"{COMMA_DEP_ID}:")
+
+    def test_string_deps_still_split_on_commas(self):
+        # String form keeps its historical contract: commas separate refs.
+        # The comma title fragments — but loudly (one warning per fragment).
+        create_task, _ = self._setup()
+        result = json.loads(
+            create_task(
+                project="Nous",
+                title="Dependent work",
+                content="x",
+                depends_on=COMMA_TITLE,
+            )
+        )
+        assert len(result["warnings"]) == 3
+
+
+class TestDetectFragmentation:
+    FRAG_A_ID = "11111111-0000-4000-8000-00000000000a"
+    FRAG_B_ID = "11111111-0000-4000-8000-00000000000b"
+    TITLES = {
+        "cli — init, put, get": (FRAG_A_ID, "CLI — init, put, get"),
+        "fix dashboard: filtering, sorting": (
+            FRAG_B_ID,
+            "Fix dashboard: filtering, sorting",
+        ),
+    }
+
+    def test_two_fragment_rejoin(self):
+        found = _detect_fragmentation(
+            ["Fix dashboard: filtering", "sorting"], [False, False], self.TITLES
+        )
+        assert len(found) == 1
+        assert found[0]["matches_title"] == "Fix dashboard: filtering, sorting"
+        assert found[0]["suggested_entry"] == (
+            f"{self.FRAG_B_ID}:Fix dashboard: filtering; sorting"
+        )
+
+    def test_three_fragment_rejoin(self):
+        found = _detect_fragmentation(
+            ["CLI — init", "put", "get"], [False, False, False], self.TITLES
+        )
+        assert any(f["matches_title"] == "CLI — init, put, get" for f in found)
+
+    def test_uuid_anchored_prefix_join(self):
+        # "uuid:Fix dashboard: filtering, sorting" fragments into a resolved
+        # uuid segment plus debris — the join uses only the title part.
+        row_id = "22222222-0000-4000-8000-000000000002"
+        segs = [f"{row_id}:Fix dashboard: filtering", "sorting"]
+        found = _detect_fragmentation(segs, [True, False], self.TITLES)
+        assert len(found) == 1
+        assert found[0]["fragments"] == segs
+        assert found[0]["matches_title"] == "Fix dashboard: filtering, sorting"
+
+    def test_no_match_returns_empty(self):
+        found = _detect_fragmentation(["alpha", "beta"], [False, False], self.TITLES)
+        assert found == []
+
+    def test_fully_resolved_windows_skipped(self):
+        found = _detect_fragmentation(
+            ["Fix dashboard: filtering", "sorting"], [True, True], self.TITLES
+        )
+        assert found == []
+
+
+class TestLintDependencies:
+    LINT_OK_DEP_ID = "ffffffff-0000-4000-8000-000000000002"
+
+    def _setup(self, rows):
+        db = _make_db_content(
+            project_options=["Nous", "Astra"],
+            include_external_ref=True,
+            rows=rows,
+        )
+        storage = _make_storage(
+            folders=[{"id": "folder-nous", "name": "Nous"}], db_content=db
+        )
+        daemon = _make_daemon()
+        tools = _register_tools(storage, daemon)
+        return tools["lint_dependencies"]
+
+    def test_clean_database_reports_zero(self):
+        lint = self._setup(
+            rows=[
+                {
+                    "id": self.LINT_OK_DEP_ID,
+                    "cells": {"prop-task": "Prerequisite", "prop-status": "opt-done"},
+                },
+                {
+                    "id": "r-consumer",
+                    "cells": {
+                        "prop-task": "Consumer",
+                        "prop-depends": f"{self.LINT_OK_DEP_ID}:Prerequisite",
+                    },
+                },
+                {
+                    "id": "r-nodeps",
+                    "cells": {"prop-task": "Loner", "prop-depends": "None"},
+                },
+            ]
+        )
+        result = json.loads(lint())
+        assert result["rows_checked"] == 1  # only the row with a real dep cell
+        assert result["rows_with_issues"] == 0
+        assert result["issues"] == []
+
+    def test_fragmented_dep_reported_with_repair(self):
+        lint = self._setup(
+            rows=[
+                {"id": COMMA_DEP_ID, "cells": {"prop-task": COMMA_TITLE}},
+                {
+                    "id": "r-consumer",
+                    "cells": {
+                        "prop-task": "Consumer",
+                        "prop-project": "opt-proj-nous",
+                        "prop-depends": COMMA_TITLE,
+                    },
+                },
+            ]
+        )
+        result = json.loads(lint())
+        assert result["rows_with_issues"] == 1
+        issue = result["issues"][0]
+        assert issue["task"] == "Consumer"
+        assert issue["unresolved"]  # the fragments, fail-closed
+        suggested = [
+            f["suggested_entry"]
+            for f in issue["fragmentation"]
+            if f["matches_title"] == COMMA_TITLE
+        ]
+        assert suggested == [f"{COMMA_DEP_ID}:{COMMA_TITLE_SOFTENED}"]
+
+    def test_simple_typo_reported_without_fragmentation(self):
+        lint = self._setup(
+            rows=[
+                {
+                    "id": "r-consumer",
+                    "cells": {
+                        "prop-task": "Consumer",
+                        "prop-depends": "Ghost Task",
+                    },
+                },
+            ]
+        )
+        result = json.loads(lint())
+        assert result["rows_with_issues"] == 1
+        issue = result["issues"][0]
+        assert issue["unresolved"] == ["Ghost Task"]
+        assert "fragmentation" not in issue
+
+    def test_project_filter(self):
+        lint = self._setup(
+            rows=[
+                {
+                    "id": "r-nous",
+                    "cells": {
+                        "prop-task": "Nous consumer",
+                        "prop-project": "opt-proj-nous",
+                        "prop-depends": "Ghost A",
+                    },
+                },
+                {
+                    "id": "r-astra",
+                    "cells": {
+                        "prop-task": "Astra consumer",
+                        "prop-project": "opt-proj-astra",
+                        "prop-depends": "Ghost B",
+                    },
+                },
+            ]
+        )
+        result = json.loads(lint(project="Nous"))
+        assert result["rows_checked"] == 1
+        assert result["filters"] == {"project": "Nous"}
+        assert [i["task"] for i in result["issues"]] == ["Nous consumer"]

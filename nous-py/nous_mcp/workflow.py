@@ -765,11 +765,13 @@ def _parse_depends_on(value: str) -> list[tuple[str | None, str]]:
     for entry in entries:
         if entry.lower().startswith("ref:"):
             result.append((None, entry))
-        elif ":" in entry:
-            uid, name = entry.split(":", 1)
+        elif ":" in entry and UUID_RE.match(entry.partition(":")[0].strip()):
+            uid, _, name = entry.partition(":")
             result.append((uid.strip(), name.strip()))
         else:
-            result.append((None, entry.strip()))
+            # Free text — colons stay part of the name ("External: firmware
+            # 3.2 release"), so the entry round-trips through _raw_dep_entry.
+            result.append((None, entry))
     return result
 
 
@@ -1275,6 +1277,44 @@ def _raw_dep_entry(uid: str | None, dep_name: str) -> str:
     return f"{uid}:{dep_name}" if uid else dep_name
 
 
+def _detect_fragmentation(
+    segments: list[str],
+    resolved_flags: list[bool],
+    known_titles: dict[str, tuple[str, str]],
+) -> list[dict]:
+    """Find windows of cell segments that rejoin into an existing task title.
+
+    A comma inside a referenced title splits one Depends-On entry into
+    several comma-separated segments that resolve to nothing. Every window
+    of consecutive segments that (a) contains at least one unresolved
+    segment and (b) rejoined with ", " case-insensitively matches a known
+    task title is reported with the canonical repair. When the window
+    starts at a "uuid:Title" segment, only its title part joins — the
+    trailing fragments are debris of that same entry.
+    """
+    findings: list[dict] = []
+    n = len(segments)
+    for start in range(n):
+        for end in range(start + 1, n):
+            if all(resolved_flags[start : end + 1]):
+                continue
+            parts = list(segments[start : end + 1])
+            uid_part, _, title_part = parts[0].partition(":")
+            if title_part and UUID_RE.match(uid_part.strip()):
+                parts[0] = title_part.strip()
+            hit = known_titles.get(", ".join(parts).lower())
+            if hit:
+                row_id, title = hit
+                findings.append(
+                    {
+                        "fragments": segments[start : end + 1],
+                        "matches_title": title,
+                        "suggested_entry": f"{row_id}:{title.replace(',', ';')}",
+                    }
+                )
+    return findings
+
+
 def _archive_database_title(database: str) -> str:
     """Archive database title for a task database."""
     return f"{database} Archive"
@@ -1460,7 +1500,7 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
         content: str,
         priority: int = 5,
         phase: str = "Feature",
-        depends_on: str | None = None,
+        depends_on: str | list[str] | None = None,
         status: str = "Ready",
         feature: str | None = None,
         external_ref: str | None = None,
@@ -1483,13 +1523,16 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
             content: Task description/spec in markdown.
             priority: Priority 1-10 (default 5).
             phase: Phase — Feature, Infrastructure, Polish, Bugfix, or Launch (default "Feature").
-            depends_on: Comma-separated task references this depends on (optional).
-                Dependencies may live in any project or epic. Each entry may be:
-                a task title (same-project match preferred; a unique cross-project
-                match also resolves; ambiguous titles are stored unresolved with a
-                warning), a row UUID, "uuid:Title" (the canonical stored form), or
-                "ref:<external-ref>" (matched against the External Ref column).
-                Use resolve_tasks to validate references before filing.
+            depends_on: Task references this depends on (optional) — a list of
+                strings (canonical for programmatic callers: entries are taken
+                whole, so titles containing commas work), or a comma-separated
+                string for comma-free refs. Dependencies may live in any project
+                or epic. Each entry may be: a task title (same-project match
+                preferred; a unique cross-project match also resolves; ambiguous
+                titles are stored unresolved with a warning), a row UUID,
+                "uuid:Title" (the canonical stored form), or "ref:<external-ref>"
+                (matched against the External Ref column). Use resolve_tasks to
+                validate references before filing.
             status: Status — Spec Needed, Ready, In Progress, or Done (default "Ready").
             feature: Feature name this task belongs to (optional, used by get_feature_tasks).
             external_ref: External reference like a Jira key or GitHub issue (optional).
@@ -1510,6 +1553,13 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
         """
         from nous_mcp.markdown import markdown_to_blocks
 
+        if "," in title:
+            raise ValueError(
+                f"Task title contains a comma: '{title}'. Commas break "
+                "Depends-On references to this task (the cell format is "
+                "comma-separated) — use '—' or ';' instead."
+            )
+
         storage = get_storage()
         daemon = get_daemon()
         nb = storage.resolve_notebook(notebook)
@@ -1529,7 +1579,12 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
         warnings: list[str] = []
         depends_on_value = "None"
         if depends_on:
-            dep_names = [d.strip() for d in depends_on.split(",") if d.strip()]
+            if isinstance(depends_on, str):
+                dep_names = [d.strip() for d in depends_on.split(",") if d.strip()]
+            else:
+                # List form: entries taken whole — the only way to reference
+                # an existing task whose title contains a comma.
+                dep_names = [d.strip() for d in depends_on if d and d.strip()]
             if dep_names:
                 depends_on_value, dep_warnings = _resolve_dependencies(
                     storage,
@@ -2287,6 +2342,124 @@ def register_workflow_tools(mcp, get_storage, get_daemon, daemon_available):
             {
                 "resolved_all": all(r["resolved"] for r in results),
                 "results": results,
+            },
+            indent=2,
+        )
+
+    @mcp.tool()
+    def lint_dependencies(
+        project: str | None = None,
+        notebook: str = "Forge",
+        database: str = "Project Tasks",
+    ) -> str:
+        """Audit every Depends-On cell for silent-failure hazards (read-only).
+
+        Scans all task rows (optionally one project) and reports, per row:
+
+        - unresolved: entries resolving to no task (typo'd title, missing
+          UUID, dangling ref:) — fail-closed blocking treats these as unmet.
+        - ambiguous: titles matching several tasks across projects.
+        - fragmentation: probable comma-in-title damage — consecutive
+          segments that rejoined with ", " match an existing task title
+          (active or archive), with the suggested canonical "uuid:Title"
+          repair.
+
+        Makes no writes. Apply repairs via update_task_fields
+        (depends_on_remove the fragments, depends_on_add the suggestion).
+
+        Args:
+            project: Only lint rows of this project (optional).
+            notebook: Notebook name or UUID (default: "Forge").
+            database: Task database title (default: "Project Tasks").
+
+        Returns JSON: {rows_checked, rows_with_issues, filters, issues:
+        [{task, row_id, project, unresolved?, ambiguous?, fragmentation?}]}.
+        """
+        storage = get_storage()
+        daemon = get_daemon()
+        nb = storage.resolve_notebook(notebook)
+        notebook_id = nb["id"]
+
+        db_page = daemon.resolve_page(notebook_id, database)
+        if db_page.get("pageType") != "database":
+            raise ValueError(f"Page '{db_page.get('title')}' is not a database")
+        db_content = storage.read_database_content(notebook_id, db_page["id"])
+        if db_content is None:
+            raise ValueError(f"Database file not found for '{database}'")
+
+        prop_map = {p["name"].lower(): p for p in db_content.get("properties", [])}
+        dep_prop = prop_map.get("depends on")
+        if dep_prop is None:
+            raise ValueError("Depends On property not found in database")
+        get_archive = _archive_getter(storage, daemon, notebook_id, database)
+
+        def _titles_of(content: dict | None) -> dict[str, tuple[str, str]]:
+            out: dict[str, tuple[str, str]] = {}
+            if not content:
+                return out
+            for r in content.get("rows", []):
+                t = _get_row_task_name(r, content)
+                if t:
+                    out.setdefault(t.lower(), (r["id"], t))
+            return out
+
+        # Active titles win over archive titles for repair suggestions.
+        known_titles = {**_titles_of(get_archive()), **_titles_of(db_content)}
+
+        rows_checked = 0
+        issues: list[dict] = []
+        for row in db_content.get("rows", []):
+            row_project = _row_project_label(row, prop_map) or None
+            if project and (row_project or "").lower() != project.lower():
+                continue
+            raw_cell = str(row.get("cells", {}).get(dep_prop["id"], "")).strip()
+            if not raw_cell or raw_cell.lower() == "none":
+                continue
+            rows_checked += 1
+
+            segments = [s.strip() for s in raw_cell.split(",") if s.strip()]
+            resolved_flags: list[bool] = []
+            unresolved: list[str] = []
+            ambiguous: list[str] = []
+            for seg in segments:
+                ref = _resolve_dep_ref(db_content, seg, row_project, get_archive)
+                ok = ref["row"] is not None
+                resolved_flags.append(ok)
+                if not ok:
+                    if ref["warning"] and "ambiguous" in ref["warning"].lower():
+                        ambiguous.append(ref["warning"])
+                    else:
+                        unresolved.append(seg)
+
+            fragmentation: list[dict] = []
+            if len(segments) > 1 and not all(resolved_flags):
+                fragmentation = _detect_fragmentation(
+                    segments, resolved_flags, known_titles
+                )
+
+            if unresolved or ambiguous or fragmentation:
+                issue: dict = {
+                    "task": _get_row_task_name(row, db_content),
+                    "row_id": row["id"],
+                    "project": row_project,
+                }
+                if unresolved:
+                    issue["unresolved"] = unresolved
+                if ambiguous:
+                    issue["ambiguous"] = ambiguous
+                if fragmentation:
+                    issue["fragmentation"] = fragmentation
+                issues.append(issue)
+
+        filters: dict = {}
+        if project:
+            filters["project"] = project
+        return json.dumps(
+            {
+                "rows_checked": rows_checked,
+                "rows_with_issues": len(issues),
+                "filters": filters,
+                "issues": issues,
             },
             indent=2,
         )
