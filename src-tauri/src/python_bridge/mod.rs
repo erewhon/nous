@@ -602,7 +602,7 @@ pub struct MCPToolResult {
 fn configure_python_path(py: Python<'_>, nous_py_path: &std::path::Path) -> Result<()> {
     let sys = py.import("sys")?;
     let path = sys.getattr("path")?;
-    let path_list: Bound<'_, PyList> = path.downcast_into().map_err(|e| {
+    let path_list: Bound<'_, PyList> = path.cast_into().map_err(|e| {
         PythonError::TypeConversion(format!("Failed to convert sys.path to list: {}", e))
     })?;
 
@@ -1018,7 +1018,7 @@ impl PythonAI {
                         if args.len() > 0 {
                             let event_dict: HashMap<String, Py<PyAny>> = args.get_item(0)?.extract()?;
 
-                            Python::with_gil(|py| {
+                            Python::attach(|py| {
                                 let event_type = event_dict.get("type")
                                     .and_then(|v| v.extract::<String>(py).ok())
                                     .unwrap_or_default();
