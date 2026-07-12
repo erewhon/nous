@@ -10,6 +10,7 @@
 
 import type { EditorData, EditorBlock } from "../types/page";
 import { resolveAssetUrl, unresolveAssetUrl } from "./assetUrl";
+import { getCustomBlock } from "../plugin-sdk/custom-block";
 
 // ─── BlockNote types (simplified for the converter) ─────────────────────────
 // We use `any` for the actual BlockNote document type since it depends on the
@@ -236,20 +237,31 @@ function convertBlock(block: EditorBlock): BNBlock | BNBlock[] {
         },
       };
 
-    default:
-      // Unknown block type — preserve as paragraph with raw text
-      console.warn(`Unknown Editor.js block type: ${block.type}`, data);
+    default: {
+      // SDK-contributed block: copy its declared (string-valued) props.
+      const contribution = getCustomBlock(block.type);
+      if (contribution) {
+        const props: Record<string, string> = {};
+        for (const [key, def] of Object.entries(contribution.propSchema)) {
+          const value = data[key];
+          props[key] = typeof value === "string" ? value : def.default;
+        }
+        return { id: block.id, type: block.type, props };
+      }
+
+      // Truly unknown type — preserve type+data verbatim so the round-trip
+      // is lossless (unknownBlock renders an inert chip and the reverse
+      // converter re-emits the original block).
+      console.warn(`Unknown Editor.js block type: ${block.type} — preserving`);
       return {
         id: block.id,
-        type: "paragraph",
-        content: [
-          {
-            type: "text",
-            text: `[Unsupported block: ${block.type}]`,
-            styles: {},
-          },
-        ],
+        type: "unknownBlock",
+        props: {
+          originalType: block.type,
+          dataJson: JSON.stringify(data ?? {}),
+        },
       };
+    }
   }
 }
 
@@ -932,6 +944,26 @@ function convertBlockToEditorJs(
     // Skip column blocks (handled by columnList parent)
     case "column":
       return { blocks: [], nextIndex: index + 1 };
+
+    case "unknownBlock": {
+      // Re-emit the original block that the forward converter preserved.
+      let data: Record<string, unknown> = {};
+      try {
+        data = JSON.parse(block.props?.dataJson || "{}");
+      } catch {
+        data = {};
+      }
+      return {
+        blocks: [
+          {
+            id: block.id ?? generateId(),
+            type: block.props?.originalType || "unknown",
+            data,
+          },
+        ],
+        nextIndex: index + 1,
+      };
+    }
 
     default:
       // Preserve unknown blocks as-is

@@ -10,23 +10,18 @@ import "@blocknote/mantine/style.css";
 import "./guest.css";
 
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
-import { BlockNoteSchema, defaultBlockSpecs, defaultInlineContentSpecs, defaultStyleSpecs, type BlockNoteEditorOptions } from "@blocknote/core";
+import { type BlockNoteEditorOptions } from "@blocknote/core";
 import { BlockNoteView } from "@blocknote/mantine";
 
 type CollaborationOptions = NonNullable<BlockNoteEditorOptions<any, any, any>["collaboration"]>;
 import { useCreateBlockNote } from "@blocknote/react";
 import * as Y from "yjs";
 import YPartyKitProvider from "y-partykit/provider";
+import { guestSchema } from "./guestSchema";
 
 type ConnectionStatus = "connecting" | "connected" | "disconnected" | "error";
 
 const PARTYKIT_HOST = "party.nous.page";
-
-const guestSchema = BlockNoteSchema.create({
-  blockSpecs: defaultBlockSpecs,
-  inlineContentSpecs: defaultInlineContentSpecs,
-  styleSpecs: defaultStyleSpecs,
-});
 
 function decodeTokenPayload(token: string): { permissions?: string } | null {
   try {

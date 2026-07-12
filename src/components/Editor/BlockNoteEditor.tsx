@@ -66,6 +66,13 @@ import { useBlockAttribution } from "../../hooks/useBlockAttribution";
 import { registerSaveFlusher } from "../../utils/saveCoordinator";
 import { WikiLinkTriggerExtension, WIKI_LINK_TRIGGER } from "./wikiLinkTrigger";
 import { buildWikiLinkMenuItems } from "./wikiLinkMenuItems";
+import { EditorErrorBoundary } from "./EditorErrorBoundary";
+import {
+  getCustomBlocks,
+  isCustomBlockEnabled,
+  useDisabledCustomBlocks,
+} from "../../plugin-sdk/custom-block";
+import { setCustomBlockEditorContext } from "../../plugin-sdk/custom-block-spec";
 import { getCollabProvider } from "../../collab/collabStore";
 import type { EditorData } from "../../types/page";
 import { usePluginStore } from "../../stores/pluginStore";
@@ -597,6 +604,12 @@ export const BlockNoteEditor = memo(
 
       // ─── Slash menu with multi-column items + plugin blocks ───────
       const expertMode = useThemeStore((s) => s.expertMode);
+      const disabledCustomBlocks = useDisabledCustomBlocks();
+
+      // Contributions see the current notebook/page at render time.
+      useEffect(() => {
+        setCustomBlockEditorContext(editor, { notebookId, pageId });
+      }, [editor, notebookId, pageId]);
 
       const getSlashMenuItems = useMemo(() => {
         const pluginItems: DefaultReactSuggestionItem[] = pluginBlockTypes.map(
@@ -623,6 +636,26 @@ export const BlockNoteEditor = memo(
           }),
         );
 
+        // SDK-contributed blocks (mermaid, …). Disabled ones lose their
+        // slash-menu entry; their spec stays in the schema so existing
+        // instances keep loading.
+        const customBlockItems: DefaultReactSuggestionItem[] =
+          getCustomBlocks()
+            .filter((c) => isCustomBlockEnabled(c, disabledCustomBlocks))
+            .map((c) => ({
+              title: c.title,
+              onItemClick: () => {
+                editor.insertBlocks(
+                  [{ type: c.id, props: {} } as never],
+                  editor.getTextCursorPosition().block,
+                  "after",
+                );
+              },
+              aliases: c.keywords,
+              group: c.group ?? "Custom",
+              icon: c.icon ? <c.icon /> : undefined,
+            }));
+
         return async (query: string) => {
           const defaultItems = getDefaultReactSlashMenuItems(editor);
           if (!expertMode) {
@@ -634,11 +667,12 @@ export const BlockNoteEditor = memo(
               defaultItems,
               getMultiColumnSlashMenuItems(editor),
               pluginItems,
+              customBlockItems,
             ),
             query,
           );
         };
-      }, [editor, pluginBlockTypes, expertMode]);
+      }, [editor, pluginBlockTypes, expertMode, disabledCustomBlocks]);
 
       // ─── Wiki-link "[[" menu items ─────────────────────────────────
       const getWikiLinkMenuItems = useMemo(
@@ -721,24 +755,26 @@ export const BlockNoteEditor = memo(
           className={`bn-editor-wrapper relative ${className}`}
           data-page-id={pageId}
         >
-          <BlockNoteView
-            editor={editor}
-            editable={!readOnly}
-            onChange={handleEditorChange}
-            slashMenu={false}
-            theme={resolvedMode === "dark" ? "dark" : "light"}
-          >
-            <SuggestionMenuController
-              triggerCharacter="/"
-              getItems={getSlashMenuItems}
-              floatingUIOptions={slashMenuFloatingOptions}
-            />
-            <SuggestionMenuController
-              triggerCharacter={WIKI_LINK_TRIGGER}
-              getItems={getWikiLinkMenuItems}
-              floatingUIOptions={slashMenuFloatingOptions}
-            />
-          </BlockNoteView>
+          <EditorErrorBoundary pageId={pageId}>
+            <BlockNoteView
+              editor={editor}
+              editable={!readOnly}
+              onChange={handleEditorChange}
+              slashMenu={false}
+              theme={resolvedMode === "dark" ? "dark" : "light"}
+            >
+              <SuggestionMenuController
+                triggerCharacter="/"
+                getItems={getSlashMenuItems}
+                floatingUIOptions={slashMenuFloatingOptions}
+              />
+              <SuggestionMenuController
+                triggerCharacter={WIKI_LINK_TRIGGER}
+                getItems={getWikiLinkMenuItems}
+                floatingUIOptions={slashMenuFloatingOptions}
+              />
+            </BlockNoteView>
+          </EditorErrorBoundary>
           {isVimEnabled && (
             <div className="pointer-events-none fixed bottom-16 left-4 z-50">
               <VimModeIndicator

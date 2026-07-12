@@ -7,10 +7,18 @@ import {
   useProcessorSettings,
 } from "../../plugin-sdk/document-processor";
 import { registerBuiltinProcessors } from "../../plugin-sdk/processors";
+import {
+  getCustomBlocks,
+  isCustomBlockEnabled,
+  setCustomBlockEnabled,
+  useDisabledCustomBlocks,
+} from "../../plugin-sdk/custom-block";
+import { registerBuiltinBlocks } from "../../plugin-sdk/blocks";
 
 // Ensure built-in processors are registered even if the editor hasn't mounted
 // yet, so this panel can list them. Idempotent (registry is keyed by id).
 registerBuiltinProcessors();
+registerBuiltinBlocks();
 
 // Capability flag names (matches Rust bitflags)
 const CAPABILITY_NAMES: Record<number, string> = {
@@ -190,6 +198,8 @@ export function PluginSettings() {
       </div>
 
       <DocumentProcessorSettings />
+
+      <CustomBlockSettings />
     </div>
   );
 }
@@ -258,6 +268,86 @@ function DocumentProcessorSettings() {
                       : "var(--color-bg-tertiary, #555)",
                   }}
                   title={on ? "Disable processor" : "Enable processor"}
+                  aria-pressed={on}
+                >
+                  <span
+                    className="absolute top-[2px] w-[14px] h-[14px] rounded-full transition-transform"
+                    style={{ backgroundColor: "#fff", left: on ? "16px" : "2px" }}
+                  />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Toggle list for SDK-contributed custom blocks. Disabling never removes the
+ * block from the schema — existing instances render a dimmed placeholder and
+ * their data survives save/reload; the slash-menu entry is hidden.
+ */
+function CustomBlockSettings() {
+  const disabled = useDisabledCustomBlocks();
+  const blocks = getCustomBlocks();
+
+  return (
+    <div>
+      <h4
+        className="text-sm font-medium mb-1"
+        style={{ color: "var(--color-text-secondary)" }}
+      >
+        Custom Blocks ({blocks.length})
+      </h4>
+      <p className="text-xs mb-2" style={{ color: "var(--color-text-muted)" }}>
+        Block types contributed through the plugin SDK (e.g. Mermaid
+        diagrams). Disabling one hides it from the slash menu and shows a
+        placeholder for existing instances — their content is preserved.
+      </p>
+      {blocks.length === 0 ? (
+        <p className="text-sm italic" style={{ color: "var(--color-text-muted)" }}>
+          No custom blocks registered.
+        </p>
+      ) : (
+        <div className="space-y-2">
+          {blocks.map((b) => {
+            const on = isCustomBlockEnabled(b, disabled);
+            return (
+              <div
+                key={b.id}
+                className="rounded-lg border p-3 flex items-center justify-between"
+                style={{
+                  backgroundColor: "var(--color-bg-secondary)",
+                  borderColor: "var(--color-border)",
+                  opacity: on ? 1 : 0.6,
+                }}
+              >
+                <div className="min-w-0">
+                  <div
+                    className="text-sm font-medium truncate"
+                    style={{ color: "var(--color-text-primary)" }}
+                  >
+                    {b.title}
+                  </div>
+                  <div
+                    className="text-xs truncate"
+                    style={{ color: "var(--color-text-muted)" }}
+                  >
+                    {b.id}
+                    {b.group ? ` · ${b.group}` : ""}
+                  </div>
+                </div>
+                <button
+                  onClick={() => setCustomBlockEnabled(b.id, !on)}
+                  className="relative w-8 h-[18px] rounded-full transition-colors shrink-0"
+                  style={{
+                    backgroundColor: on
+                      ? "var(--color-accent, #3b82f6)"
+                      : "var(--color-bg-tertiary, #555)",
+                  }}
+                  title={on ? "Disable block" : "Enable block"}
                   aria-pressed={on}
                 >
                   <span

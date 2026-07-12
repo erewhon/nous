@@ -10,13 +10,14 @@ import "@blocknote/mantine/style.css";
 import "./guest.css";
 
 import { useEffect, useMemo, useState, useCallback, useRef } from "react";
-import { BlockNoteSchema, defaultBlockSpecs, defaultInlineContentSpecs, defaultStyleSpecs, type BlockNoteEditorOptions } from "@blocknote/core";
+import { type BlockNoteEditorOptions } from "@blocknote/core";
 import { BlockNoteView } from "@blocknote/mantine";
 import { useCreateBlockNote } from "@blocknote/react";
 
 import { GuestSidebar } from "./GuestSidebar";
 import { StatusBar } from "./GuestApp";
 import { getOrCreateProvider, destroyAll } from "./providerManager";
+import { guestSchema } from "./guestSchema";
 
 type CollaborationOptions = NonNullable<BlockNoteEditorOptions<any, any, any>["collaboration"]>;
 type ConnectionStatus = "connecting" | "connected" | "disconnected" | "error";
@@ -29,12 +30,6 @@ interface ManifestPage {
   folderId?: string | null;
   sectionId?: string | null;
 }
-
-const guestSchema = BlockNoteSchema.create({
-  blockSpecs: defaultBlockSpecs,
-  inlineContentSpecs: defaultInlineContentSpecs,
-  styleSpecs: defaultStyleSpecs,
-});
 
 function decodeTokenPayload(token: string): {
   permissions?: string;

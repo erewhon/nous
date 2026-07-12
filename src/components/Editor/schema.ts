@@ -35,6 +35,17 @@ import { BlockRefInline } from "./inline/BlockRefInline";
 // Custom styles
 import { HighlightStyle } from "./styles/HighlightStyle";
 
+// Unknown-type fallback (lossless round-trip for unrecognized blocks)
+import { UnknownBlock } from "./blocks/UnknownBlock";
+
+// SDK-contributed blocks (plugin contribution point)
+import { registerBuiltinBlocks } from "../../plugin-sdk/blocks";
+import { buildCustomBlockSpecs } from "../../plugin-sdk/custom-block-spec";
+
+// Contributions must be registered before the schema is built — the schema
+// is static per build, so every client of the same version agrees on it.
+registerBuiltinBlocks();
+
 // createReactBlockSpec returns a factory — call it to get the BlockSpec
 const baseSchema = BlockNoteSchema.create({
   blockSpecs: {
@@ -53,6 +64,9 @@ const baseSchema = BlockNoteSchema.create({
     audio: AudioBlock(),
     drawing: DrawingBlock(),
     plugin: PluginBlock(),
+    unknownBlock: UnknownBlock(),
+    // SDK-contributed blocks
+    ...buildCustomBlockSpecs(),
   },
   inlineContentSpecs: {
     ...defaultInlineContentSpecs,
