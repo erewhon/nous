@@ -29,14 +29,10 @@ import { CanvasEditor } from "../Canvas";
 import { DatabaseEditor, type DatabaseUndoRedoState } from "../Database";
 import { HtmlViewer } from "../Html";
 import { OutlinePanel } from "./OutlinePanel";
-import { PluginSidebarPanel } from "./PluginSidebarPanel";
-import { PluginPageView } from "./PluginPageView";
-import { usePluginDecorations } from "./usePluginDecorations";
 import { BacklinksPanel } from "./BacklinksPanel";
 import { SimilarPagesPanel } from "./SimilarPagesPanel";
 import type { EditorData, Page } from "../../types/page";
 import { calculatePageStats, type PageStats } from "../../utils/pageStats";
-import { usePluginStore } from "../../stores/pluginStore";
 import { useWritingGoalsStore } from "../../stores/writingGoalsStore";
 import { useKeybindingsStore } from "../../stores/keybindingsStore";
 import { useCollabSession } from "../../collab/useCollabSession";
@@ -86,12 +82,6 @@ export function EditorPaneContent({
   const zenModeSettings = useThemeStore((state) => state.zenModeSettings);
   const showOutline = useThemeStore((state) => state.showOutline);
   const toggleOutline = useThemeStore((state) => state.toggleOutline);
-  const panelTypes = usePluginStore((s) => s.panelTypes);
-  const openPanels = usePluginStore((s) => s.openPanels);
-  const togglePanel = usePluginStore((s) => s.togglePanel);
-  const fetchPanelTypes = usePluginStore((s) => s.fetchPanelTypes);
-  const pluginPageTypes = usePluginStore((s) => s.pageTypes);
-  const fetchPageTypes = usePluginStore((s) => s.fetchPageTypes);
   const [isSaving, setIsSaving] = useState(false);
   const lastSavedRef = useRef<Date | null>(null);
   // Separate state for explicit save indicator only (Ctrl+S) — NOT updated during auto-save
@@ -113,14 +103,6 @@ export function EditorPaneContent({
       pane.tabs.filter((t) => !t.notebookId || t.notebookId === notebookId),
     [pane.tabs, notebookId]
   );
-
-  // Check if this page is a plugin page type
-  const activePluginPageType = useMemo(() => {
-    if (!selectedPage?.pluginPageType) return null;
-    return pluginPageTypes.find(
-      (pt) => pt.pageTypeId === selectedPage.pluginPageType
-    ) ?? null;
-  }, [selectedPage?.pluginPageType, pluginPageTypes]);
 
   // Real-time collaboration session
   const collab = useCollabSession();
@@ -149,24 +131,6 @@ export function EditorPaneContent({
     pageId: pane.pageId || "",
     enabled: isStandardPage && !!pane.pageId,
     onStateChange: handleUndoRedoStateChange,
-  });
-
-  // Fetch plugin panel types and page types once
-  useEffect(() => {
-    fetchPanelTypes();
-    fetchPageTypes();
-  }, [fetchPanelTypes, fetchPageTypes]);
-
-  // Plugin panels that are currently open
-  const activePluginPanels = useMemo(
-    () => panelTypes.filter((p) => openPanels.has(`${p.pluginId}:${p.panelId}`)),
-    [panelTypes, openPanels]
-  );
-
-  // Plugin editor decorations (highlights, badges on blocks)
-  usePluginDecorations({
-    enabled: isStandardPage && !zenMode && !!selectedPage,
-    blocks: selectedPage?.content?.blocks || [],
   });
 
   // Typewriter scrolling for zen mode
@@ -925,33 +889,6 @@ export function EditorPaneContent({
                 />
               </div>
             </>
-          ) : activePluginPageType ? (
-            /* Plugin page type gets header + full-area iframe */
-            <>
-              <div className="relative">
-                <PageHeader
-                  page={selectedPage}
-                  isSaving={false}
-                  lastSaved={null}
-                  stats={null}
-                  zenMode={zenMode}
-                  onExitZenMode={() => setZenMode(false)}
-                  onEnterZenMode={() => setZenMode(true)}
-                  historyCount={0}
-                  canUndo={false}
-                  canRedo={false}
-                  onUndo={() => {}}
-                  onRedo={() => {}}
-                />
-              </div>
-              <PluginPageView
-                key={selectedPage.id}
-                page={selectedPage}
-                notebookId={notebookId}
-                pluginPageType={activePluginPageType}
-                className="min-h-[calc(100vh-300px)]"
-              />
-            </>
           ) : (
             <>
               <div className="relative">
@@ -1161,18 +1098,6 @@ export function EditorPaneContent({
                     editorScrollRef={editorScrollRef}
                   />
                 )}
-                {!zenMode &&
-                  activePluginPanels.map((panel) => (
-                    <PluginSidebarPanel
-                      key={`${panel.pluginId}:${panel.panelId}`}
-                      panel={panel}
-                      context={{
-                        current_page_id: selectedPage.id,
-                        current_notebook_id: notebookId,
-                      }}
-                      onClose={() => togglePanel(panel.pluginId, panel.panelId)}
-                    />
-                  ))}
               </div>
             </>
           )}

@@ -64,7 +64,6 @@ vi.mock("./DatabaseGallery", () => ({ DatabaseGallery: () => null }));
 vi.mock("./DatabaseCalendar", () => ({ DatabaseCalendar: () => null }));
 vi.mock("./DatabaseChart", () => ({ DatabaseChart: () => null }));
 vi.mock("./DatabaseTimeline", () => ({ DatabaseTimeline: () => null }));
-vi.mock("./PluginDatabaseView", () => ({ PluginDatabaseView: () => null }));
 
 import { DatabaseEditor } from "./DatabaseEditor";
 

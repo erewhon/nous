@@ -9,6 +9,7 @@
  */
 import { registerCustomBlock } from "../custom-block";
 import { mermaidBlock } from "./mermaid";
+import { externalDataBlock } from "./externalData";
 
 let registered = false;
 
@@ -17,4 +18,5 @@ export function registerBuiltinBlocks(): void {
   if (registered) return;
   registered = true;
   registerCustomBlock(mermaidBlock);
+  registerCustomBlock(externalDataBlock);
 }

@@ -28,8 +28,7 @@ import { DatabaseGallery } from "./DatabaseGallery";
 import { DatabaseCalendar } from "./DatabaseCalendar";
 import { DatabaseChart } from "./DatabaseChart";
 import { DatabaseTimeline } from "./DatabaseTimeline";
-import { PluginDatabaseView } from "./PluginDatabaseView";
-import { CustomDatabaseView } from "./CustomDatabaseView";
+import { CustomDatabaseView, PlaceholderPanel } from "./CustomDatabaseView";
 import { registerBuiltinDatabaseViews } from "../../plugin-sdk/database-views";
 
 // Contributions register before any database renders (idempotent).
@@ -752,15 +751,20 @@ export function DatabaseEditor({
           />
         );
       case "plugin":
+        // Dead-letter: the Lua/iframe view runtime is retired. The view row
+        // and its config stay untouched (passthrough), so nothing is lost —
+        // there's just no renderer anymore.
         return (
-          <PluginDatabaseView
-            content={content}
-            view={activeView}
-            onUpdateContent={handleUpdateContent}
-            onUpdateView={handleUpdateView}
-            relationContext={relationContext}
-            notebookId={notebookId}
-            onRefreshFromDisk={refreshFromDisk}
+          <PlaceholderPanel
+            title={`Legacy plugin view "${activeView.name}"`}
+            detail="The Lua plugin view runtime was retired. This view type no longer renders."
+            canDelete={content.views.length > 1}
+            onDelete={() =>
+              handleUpdateContent((prev) => ({
+                ...prev,
+                views: prev.views.filter((v) => v.id !== activeView.id),
+              }))
+            }
           />
         );
       case "custom":

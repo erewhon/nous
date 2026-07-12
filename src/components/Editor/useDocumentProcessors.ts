@@ -24,6 +24,8 @@ import {
   type ProcessorContext,
 } from "../../plugin-sdk/document-processor";
 import { registerBuiltinProcessors } from "../../plugin-sdk/processors";
+import { registerDocumentProcessor } from "../../plugin-sdk/document-processor";
+import { daemonDecorationsProcessor } from "./daemonDecorationsProcessor";
 import {
   buildDecorationCss,
   buildTitleResolver,
@@ -33,6 +35,9 @@ import {
 } from "./documentProcessorUtils";
 
 registerBuiltinProcessors();
+// Host-side bridge: daemon (Lua) editor_decoration plugins run through the
+// same processor pipeline as frontend processors.
+registerDocumentProcessor(daemonDecorationsProcessor);
 
 // ─── Hook ───────────────────────────────────────────────────────────────────
 

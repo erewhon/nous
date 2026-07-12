@@ -40,7 +40,7 @@ interface CustomDatabaseViewProps {
   onNavigatePageLink?: (pageId: string) => void;
 }
 
-function PlaceholderPanel({
+export function PlaceholderPanel({
   title,
   detail,
   canDelete,

@@ -4,11 +4,8 @@ import type {
   DatabaseView,
   DatabaseViewType,
   PropertyDef,
-  PluginViewConfig,
   CustomViewConfig,
 } from "../../types/database";
-import { usePluginStore } from "../../stores/pluginStore";
-import type { PluginViewType } from "../../stores/pluginStore";
 import { useThemeStore } from "../../stores/themeStore";
 import {
   getCustomDatabaseViews,
@@ -40,16 +37,8 @@ const VIEW_TYPE_LABELS: Record<DatabaseViewType, string> = {
   custom: "Custom",
 };
 
-function PluginViewIcon({ iconSvg }: { iconSvg?: string }) {
-  if (iconSvg) {
-    return (
-      <span
-        style={{ display: "inline-flex", width: 14, height: 14 }}
-        dangerouslySetInnerHTML={{ __html: iconSvg }}
-      />
-    );
-  }
-  // Default plugin icon (puzzle piece)
+function PluginViewIcon() {
+  // Default contributed-view icon (puzzle piece)
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -235,12 +224,7 @@ export function DatabaseViewTabs({
   onUpdateContent,
 }: DatabaseViewTabsProps) {
   const [showAddMenu, setShowAddMenu] = useState(false);
-  const pluginViewTypes = usePluginStore((s) => s.viewTypes);
   const expertMode = useThemeStore((s) => s.expertMode);
-
-  useEffect(() => {
-    usePluginStore.getState().fetchViewTypes();
-  }, []);
 
   const [contextMenuViewId, setContextMenuViewId] = useState<string | null>(
     null
@@ -362,28 +346,6 @@ export function DatabaseViewTabs({
     setShowAddMenu(false);
   };
 
-  const addPluginView = (pvt: PluginViewType) => {
-    const id = crypto.randomUUID();
-    const config: PluginViewConfig = {
-      pluginId: pvt.pluginId,
-      viewType: pvt.viewType,
-    };
-    const newView: DatabaseView = {
-      id,
-      name: pvt.label,
-      type: "plugin",
-      sorts: [],
-      filters: [],
-      config,
-    };
-    onUpdateContent((prev) => ({
-      ...prev,
-      views: [...prev.views, newView],
-    }));
-    onSelectView(id);
-    setShowAddMenu(false);
-  };
-
   const addCustomView = (contribution: CustomDatabaseViewContribution) => {
     const id = crypto.randomUUID();
     const config: CustomViewConfig = {
@@ -472,15 +434,7 @@ export function DatabaseViewTabs({
             setContextMenuViewId(view.id);
           }}
         >
-          {view.type === "plugin" ? (
-            <PluginViewIcon
-              iconSvg={pluginViewTypes.find(
-                (pvt) =>
-                  pvt.pluginId === (view.config as PluginViewConfig)?.pluginId &&
-                  pvt.viewType === (view.config as PluginViewConfig)?.viewType
-              )?.iconSvg}
-            />
-          ) : view.type === "custom" ? (
+          {view.type === "custom" ? (
             <CustomViewIcon
               contribution={getCustomDatabaseView(
                 (view.config as CustomViewConfig)?.customViewId ?? ""
@@ -628,21 +582,6 @@ export function DatabaseViewTabs({
                     </button>
                   );
                 })}
-              </>
-            )}
-            {expertMode && pluginViewTypes.length > 0 && (
-              <>
-                <div className="db-view-tabs-add-separator" />
-                {pluginViewTypes.map((pvt) => (
-                  <button
-                    key={`${pvt.pluginId}:${pvt.viewType}`}
-                    className="db-view-tabs-add-option"
-                    onClick={() => addPluginView(pvt)}
-                  >
-                    <PluginViewIcon iconSvg={pvt.iconSvg} />
-                    <span>{pvt.label}</span>
-                  </button>
-                ))}
               </>
             )}
           </div>

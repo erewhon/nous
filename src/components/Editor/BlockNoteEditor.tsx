@@ -75,7 +75,6 @@ import {
 import { setCustomBlockEditorContext } from "../../plugin-sdk/custom-block-spec";
 import { getCollabProvider } from "../../collab/collabStore";
 import type { EditorData } from "../../types/page";
-import { usePluginStore } from "../../stores/pluginStore";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -594,15 +593,7 @@ export const BlockNoteEditor = memo(
         return () => { p.doc.off("update", handleYjsUpdate); };
       }, [collaboration, editor]);
 
-      // ─── Plugin block types for slash menu ─────────────────────────
-      const pluginBlockTypes = usePluginStore((s) => s.blockTypes);
-      const fetchBlockTypes = usePluginStore((s) => s.fetchBlockTypes);
-
-      useEffect(() => {
-        fetchBlockTypes();
-      }, [fetchBlockTypes]);
-
-      // ─── Slash menu with multi-column items + plugin blocks ───────
+      // ─── Slash menu with multi-column items + contributed blocks ──
       const expertMode = useThemeStore((s) => s.expertMode);
       const disabledCustomBlocks = useDisabledCustomBlocks();
 
@@ -612,30 +603,6 @@ export const BlockNoteEditor = memo(
       }, [editor, notebookId, pageId]);
 
       const getSlashMenuItems = useMemo(() => {
-        const pluginItems: DefaultReactSuggestionItem[] = pluginBlockTypes.map(
-          (bt) => ({
-            title: bt.label,
-            onItemClick: () => {
-              editor.insertBlocks(
-                [
-                  {
-                    type: "plugin" as const,
-                    props: {
-                      pluginId: bt.pluginId,
-                      blockType: bt.blockType,
-                      dataJson: "{}",
-                    },
-                  },
-                ],
-                editor.getTextCursorPosition().block,
-                "after",
-              );
-            },
-            aliases: [bt.blockType],
-            group: "Plugins",
-          }),
-        );
-
         // SDK-contributed blocks (mermaid, …). Disabled ones lose their
         // slash-menu entry; their spec stays in the schema so existing
         // instances keep loading.
@@ -666,13 +633,12 @@ export const BlockNoteEditor = memo(
             combineByGroup(
               defaultItems,
               getMultiColumnSlashMenuItems(editor),
-              pluginItems,
               customBlockItems,
             ),
             query,
           );
         };
-      }, [editor, pluginBlockTypes, expertMode, disabledCustomBlocks]);
+      }, [editor, expertMode, disabledCustomBlocks]);
 
       // ─── Wiki-link "[[" menu items ─────────────────────────────────
       const getWikiLinkMenuItems = useMemo(

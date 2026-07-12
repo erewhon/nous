@@ -68,6 +68,91 @@ describe("contributed block conversion", () => {
   });
 });
 
+describe("legacy plugin block migration", () => {
+  it("migrates a mermaid plugin block to the contributed mermaid block", () => {
+    // Shape as written by the retired Lua/iframe scaffolding on a real page.
+    const bn = editorJsToBlockNote(
+      doc([
+        {
+          id: "b1",
+          type: "plugin",
+          data: {
+            pluginId: "nous.builtin.mermaid-block",
+            blockType: "mermaid",
+            dataJson: JSON.stringify({ code: "graph TD\n  A-->B" }),
+          },
+        },
+      ]),
+    );
+    expect(bn).toEqual([
+      { id: "b1", type: "mermaid", props: { code: "graph TD\n  A-->B" } },
+    ]);
+  });
+
+  it("migrates an external_data plugin block mapping snake_case fields", () => {
+    const bn = editorJsToBlockNote(
+      doc([
+        {
+          id: "b1",
+          type: "plugin",
+          data: {
+            pluginId: "nous.builtin.external-data-embed",
+            blockType: "external_data",
+            dataJson: JSON.stringify({
+              preset: "custom",
+              custom_url: "https://api.example.com/x",
+              display_key: "data.value",
+            }),
+          },
+        },
+      ]),
+    );
+    expect(bn).toEqual([
+      {
+        id: "b1",
+        type: "externalData",
+        props: {
+          preset: "custom",
+          city: "San Francisco",
+          customUrl: "https://api.example.com/x",
+          displayKey: "data.value",
+        },
+      },
+    ]);
+  });
+
+  it("preserves an unknown plugin block type losslessly via unknownBlock", () => {
+    const original = doc([
+      {
+        id: "b1",
+        type: "plugin",
+        data: {
+          pluginId: "nous.builtin.food-tracker",
+          blockType: "food_search",
+          dataJson: JSON.stringify({ query: "apple" }),
+        },
+      },
+    ]);
+    const bn = editorJsToBlockNote(original);
+    expect(bn[0]!.type).toBe("unknownBlock");
+    const back = blockNoteToEditorJs(bn);
+    expect(back.blocks).toEqual(original.blocks);
+  });
+
+  it("tolerates corrupted dataJson in a migrating block", () => {
+    const bn = editorJsToBlockNote(
+      doc([
+        {
+          id: "b1",
+          type: "plugin",
+          data: { blockType: "mermaid", dataJson: "{corrupt" },
+        },
+      ]),
+    );
+    expect(bn).toEqual([{ id: "b1", type: "mermaid", props: { code: "" } }]);
+  });
+});
+
 describe("unknown block preservation", () => {
   it("converts an unknown type to unknownBlock with data preserved", () => {
     const bn = editorJsToBlockNote(

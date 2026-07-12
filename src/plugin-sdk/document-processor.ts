@@ -85,7 +85,7 @@ export type Decoration =
  * block-scoped. `fromDaemonDecoration` normalizes it into the shared
  * `Decoration` union, so daemon and frontend processors share one result model.
  * See src-tauri/src/plugins/builtins/writing_analysis.lua and the daemon
- * decoration path (usePluginDecorations).
+ * decoration path (daemonDecorationsProcessor).
  */
 export interface DaemonDecoration {
   block_id: string;

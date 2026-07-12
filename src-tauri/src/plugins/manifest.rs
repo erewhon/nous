@@ -130,14 +130,6 @@ pub enum HookPoint {
     OnDatabaseRowAdded,
     /// Fired when database rows are updated (via plugin API)
     OnDatabaseRowUpdated,
-    /// Custom database view rendering
-    DatabaseView {
-        view_type: String,
-    },
-    /// Custom editor block rendering
-    BlockRender {
-        block_type: String,
-    },
     /// Custom export format
     ExportFormat {
         format_id: String,
@@ -146,17 +138,9 @@ pub enum HookPoint {
     ImportFormat {
         format_id: String,
     },
-    /// Custom sidebar panel
-    SidebarPanel {
-        panel_id: String,
-    },
     /// Editor decoration overlay
     EditorDecoration {
         decoration_id: String,
-    },
-    /// Custom page type rendering
-    PluginPageType {
-        page_type_id: String,
     },
 }
 
@@ -177,14 +161,6 @@ impl HookPoint {
                 let step_type = other.strip_prefix("action_step:").unwrap().to_string();
                 Ok(HookPoint::ActionStep { step_type })
             }
-            other if other.starts_with("database_view:") => {
-                let view_type = other.strip_prefix("database_view:").unwrap().to_string();
-                Ok(HookPoint::DatabaseView { view_type })
-            }
-            other if other.starts_with("block_render:") => {
-                let block_type = other.strip_prefix("block_render:").unwrap().to_string();
-                Ok(HookPoint::BlockRender { block_type })
-            }
             other if other.starts_with("export_format:") => {
                 let format_id = other.strip_prefix("export_format:").unwrap().to_string();
                 Ok(HookPoint::ExportFormat { format_id })
@@ -193,17 +169,9 @@ impl HookPoint {
                 let format_id = other.strip_prefix("import_format:").unwrap().to_string();
                 Ok(HookPoint::ImportFormat { format_id })
             }
-            other if other.starts_with("sidebar_panel:") => {
-                let panel_id = other.strip_prefix("sidebar_panel:").unwrap().to_string();
-                Ok(HookPoint::SidebarPanel { panel_id })
-            }
             other if other.starts_with("editor_decoration:") => {
                 let decoration_id = other.strip_prefix("editor_decoration:").unwrap().to_string();
                 Ok(HookPoint::EditorDecoration { decoration_id })
-            }
-            other if other.starts_with("page_type:") => {
-                let page_type_id = other.strip_prefix("page_type:").unwrap().to_string();
-                Ok(HookPoint::PluginPageType { page_type_id })
             }
             other => Err(PluginError::ManifestParse(format!(
                 "unknown hook point: {other}"

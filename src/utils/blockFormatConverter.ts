@@ -227,15 +227,10 @@ function convertBlock(block: EditorBlock): BNBlock | BNBlock[] {
       return convertColumns(block);
 
     case "plugin":
-      return {
-        id: block.id,
-        type: "plugin",
-        props: {
-          pluginId: (data.pluginId as string) ?? "",
-          blockType: (data.blockType as string) ?? "",
-          dataJson: (data.dataJson as string) ?? "{}",
-        },
-      };
+      // Legacy Lua/iframe plugin block (retired). Known block types migrate
+      // to their contributed-block successors; the rest preserve losslessly
+      // through unknownBlock. Persisted in the new shape on next save.
+      return migrateLegacyPluginBlock(block.id, data);
 
     default: {
       // SDK-contributed block: copy its declared (string-valued) props.
@@ -263,6 +258,58 @@ function convertBlock(block: EditorBlock): BNBlock | BNBlock[] {
       };
     }
   }
+}
+
+// ─── Legacy plugin-block migration ──────────────────────────────────────────
+//
+// The Lua/iframe plugin scaffolding is retired. Blocks written by it carry
+// {pluginId, blockType, dataJson}; the two block types that shipped as
+// builtins map onto their contributed-block successors, anything else (e.g.
+// the dropped food_search block) is preserved verbatim via unknownBlock.
+
+function migrateLegacyPluginBlock(
+  id: string,
+  data: Record<string, unknown>,
+): BNBlock {
+  const blockType = (data.blockType as string) ?? "";
+  let parsed: Record<string, unknown> = {};
+  try {
+    parsed = JSON.parse((data.dataJson as string) || "{}") as Record<
+      string,
+      unknown
+    >;
+  } catch {
+    parsed = {};
+  }
+  const str = (v: unknown): string | undefined =>
+    typeof v === "string" ? v : undefined;
+
+  if (blockType === "mermaid") {
+    return {
+      id,
+      type: "mermaid",
+      props: { code: str(parsed.code) ?? "" },
+    };
+  }
+
+  if (blockType === "external_data") {
+    return {
+      id,
+      type: "externalData",
+      props: {
+        preset: str(parsed.preset) ?? "weather",
+        city: str(parsed.city) ?? "San Francisco",
+        customUrl: str(parsed.custom_url) ?? "",
+        displayKey: str(parsed.display_key) ?? "",
+      },
+    };
+  }
+
+  return {
+    id,
+    type: "unknownBlock",
+    props: { originalType: "plugin", dataJson: JSON.stringify(data ?? {}) },
+  };
 }
 
 // ─── List conversion ────────────────────────────────────────────────────────

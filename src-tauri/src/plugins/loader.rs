@@ -25,21 +25,13 @@ static BUILTIN_PLUGINS: &[(&str, &str)] = &[
     ("daily_learning_summary", include_str!("builtins/daily_learning_summary.lua")),
     ("daily_goal_nudge", include_str!("builtins/daily_goal_nudge.lua")),
     ("goal_brainstorm", include_str!("builtins/goal_brainstorm.lua")),
-    ("database_heatmap", include_str!("builtins/database_heatmap.lua")),
-    ("mermaid_block", include_str!("builtins/mermaid_block.lua")),
-    ("map_view", include_str!("builtins/map_view.lua")),
-    ("external_data_embed", include_str!("builtins/external_data_embed.lua")),
-    ("pomodoro_timer", include_str!("builtins/pomodoro_timer.lua")),
     ("food_tracker", include_str!("builtins/food_tracker.lua")),
-    ("treemap_view", include_str!("builtins/treemap_view.lua")),
     ("sprint_planning", include_str!("builtins/sprint_planning.lua")),
     ("database_automation", include_str!("builtins/database_automation.lua")),
     ("database_templates", include_str!("builtins/database_templates.lua")),
     ("export_revealjs", include_str!("builtins/export_revealjs.lua")),
     ("export_print", include_str!("builtins/export_print.lua")),
-    ("writing_stats_panel", include_str!("builtins/writing_stats_panel.lua")),
     ("writing_analysis", include_str!("builtins/writing_analysis.lua")),
-    ("kanban_board", include_str!("builtins/kanban_board.lua")),
 ];
 
 /// Scan a directory for plugin files and return loaded (but not yet initialized) plugins.

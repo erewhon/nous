@@ -31,13 +31,24 @@ Initial inventory — APIs subject to change as they're built:
 | Contribution point | What it does | Where it runs | Status |
 |---|---|---|---|
 | **Backend hook** | React to data events (`OnPageUpdated`, `OnInboxCaptured`, `OnGoalProgress`, etc.) | Daemon (Lua) | **Shipped** |
-| **Custom block** | New inline block type in the editor | Frontend | Planned |
-| **Custom database view** | New visualization for a database | Frontend | Planned |
-| **Document processor** | LSP-style: receive page state, return decorations / diagnostics / actions | Frontend or daemon | Planned |
+| **Custom block** | New inline block type in the editor | Frontend | **Shipped** (`plugin-sdk/custom-block.ts`; mermaid, external data) |
+| **Custom database view** | New visualization for a database | Frontend | **Shipped** (`plugin-sdk/custom-database-view.ts`; stats) |
+| **Document processor** | LSP-style: receive page state, return decorations / diagnostics / actions | Frontend or daemon | **Shipped** (frontend host + daemon `editor_decoration:` bridge) |
 | **Page action** | Button in page header or command palette entry | Frontend | Planned |
-| **Sidebar widget** | Pane in a sidebar slot | Frontend | Planned |
+| **Sidebar widget** | Pane in a sidebar slot | Frontend | Planned (the Lua iframe panels were removed; file as its own task on real demand) |
 | **Importer / exporter** | Read/write external formats | Daemon + optional UI | Partial (built-ins exist) |
 | **Theme** | CSS variable overrides | Frontend (manifest-only, no code) | Planned |
+
+The pre-contribution-point **Lua/iframe UI scaffolding was removed** (2026-07-11):
+`PluginBlock`/`PluginDatabaseView`/`PluginPageView`/`PluginSidebarPanel` and the
+`block_render:` / `database_view:` / `sidebar_panel:` / `page_type:` hook kinds
+are gone, along with the Lua UI builtins they hosted (mermaid_block,
+external_data_embed, map_view, treemap_view, database_heatmap, kanban_board,
+pomodoro_timer, writing_stats_panel; food_tracker kept its palette command
+only). Mermaid and external-data render as contributed blocks; documents
+containing other legacy plugin blocks/views degrade to lossless placeholders.
+`editor_decoration:` remains — daemon decorations run through the
+document-processor host.
 
 The **document processor** is the one to lean on. Same shape as an LSP language server: plugin sees document state, returns structured annotations. A grammar checker, a wiki-link suggester, a broken-image finder, an "extract action items via AI" — all the same contract. Powerful because it pays back across many use cases and across both backend and frontend.
 
@@ -79,11 +90,11 @@ VS Code does this with its built-in extensions (Markdown preview, JS/TS support)
 
 ## Status of the in-progress work
 
-The Forge task "Plugin architecture rethink — UI vs backend plugins" is being narrowed. Slice 1 (daemon-side Lua host, hook dispatch on page/inbox/goals events, `GET /api/plugins`, `POST /api/plugins/{id}/reload`) shipped 2026-05-04. The remaining work splits into smaller, focused tasks:
+The Forge task "Plugin architecture rethink — UI vs backend plugins" is being narrowed. Slice 1 (daemon-side Lua host, hook dispatch on page/inbox/goals events, `GET /api/plugins`, `POST /api/plugins/{id}/reload`) shipped 2026-05-04. The follow-up tasks all landed 2026-07-11:
 
-- Custom block contribution point
-- Custom database view contribution point
-- Document processor contribution point
-- Migrate the existing built-in UI plugin scaffolding (`PluginBlock.tsx`, etc.) onto whichever of the above subsumes it
+- Custom block contribution point — done
+- Custom database view contribution point — done
+- Document processor contribution point — done
+- Migrate the built-in UI plugin scaffolding onto contribution points — done (scaffolding removed; see table note above)
 
 Out of scope for this direction: iframe sandbox, daemon-served opaque JS bundles, hybrid-plugin manifest, plugin marketplace.
