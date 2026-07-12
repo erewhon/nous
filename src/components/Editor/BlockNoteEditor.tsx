@@ -64,6 +64,8 @@ import { useChecklistSort } from "./useChecklistSort";
 import { useDocumentProcessors } from "./useDocumentProcessors";
 import { useBlockAttribution } from "../../hooks/useBlockAttribution";
 import { registerSaveFlusher } from "../../utils/saveCoordinator";
+import { WikiLinkTriggerExtension, WIKI_LINK_TRIGGER } from "./wikiLinkTrigger";
+import { buildWikiLinkMenuItems } from "./wikiLinkMenuItems";
 import { getCollabProvider } from "../../collab/collabStore";
 import type { EditorData } from "../../types/page";
 import { usePluginStore } from "../../stores/pluginStore";
@@ -207,6 +209,13 @@ export const BlockNoteEditor = memo(
       const pageIdRef = useRef(pageId);
       pageIdRef.current = pageId;
 
+      // Notebook page list and create handler, read via refs so the stable
+      // wiki-link item provider always sees fresh values.
+      const pagesRef = useRef(pages);
+      pagesRef.current = pages;
+      const onCreatePageRef = useRef(onCreatePage);
+      onCreatePageRef.current = onCreatePage;
+
       const vimExtension = useMemo(
         () =>
           VimExtension({
@@ -240,6 +249,12 @@ export const BlockNoteEditor = memo(
         [],
       );
 
+      // ─── Wiki-link "[[" autocomplete trigger ──────────────────────
+      const wikiLinkTriggerExtension = useMemo(
+        () => WikiLinkTriggerExtension({}),
+        [],
+      );
+
       // Image upload (drag-drop, paste, file panel). Reads notebookId via
       // ref so the stable editor instance always targets the current page's
       // notebook.
@@ -256,7 +271,7 @@ export const BlockNoteEditor = memo(
         collaboration,
         dropCursor: multiColumnDropCursor,
         dictionary,
-        extensions: [vimExtension],
+        extensions: [vimExtension, wikiLinkTriggerExtension],
         uploadFile,
       });
 
@@ -625,6 +640,25 @@ export const BlockNoteEditor = memo(
         };
       }, [editor, pluginBlockTypes, expertMode]);
 
+      // ─── Wiki-link "[[" menu items ─────────────────────────────────
+      const getWikiLinkMenuItems = useMemo(
+        () => async (query: string) =>
+          buildWikiLinkMenuItems(pagesRef.current ?? [], query, {
+            insertLink: (title, id) => {
+              editor.insertInlineContent([
+                { type: "wikiLink", props: { pageTitle: title, pageId: id } },
+              ]);
+            },
+            createPage: (title) => {
+              editor.insertInlineContent([
+                { type: "wikiLink", props: { pageTitle: title, pageId: "" } },
+              ]);
+              void onCreatePageRef.current?.(title);
+            },
+          }),
+        [editor],
+      );
+
       // ─── Slash menu positioning ─────────────────────────────────────
       // Use strategy:"fixed" to escape overflow:hidden ancestors, and
       // boundary:"clippingAncestors" is the default — but contextElement
@@ -697,6 +731,11 @@ export const BlockNoteEditor = memo(
             <SuggestionMenuController
               triggerCharacter="/"
               getItems={getSlashMenuItems}
+              floatingUIOptions={slashMenuFloatingOptions}
+            />
+            <SuggestionMenuController
+              triggerCharacter={WIKI_LINK_TRIGGER}
+              getItems={getWikiLinkMenuItems}
               floatingUIOptions={slashMenuFloatingOptions}
             />
           </BlockNoteView>
