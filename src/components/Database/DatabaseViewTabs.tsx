@@ -5,10 +5,18 @@ import type {
   DatabaseViewType,
   PropertyDef,
   PluginViewConfig,
+  CustomViewConfig,
 } from "../../types/database";
 import { usePluginStore } from "../../stores/pluginStore";
 import type { PluginViewType } from "../../stores/pluginStore";
 import { useThemeStore } from "../../stores/themeStore";
+import {
+  getCustomDatabaseViews,
+  getCustomDatabaseView,
+  isCustomDatabaseViewEnabled,
+  useDisabledCustomDatabaseViews,
+  type CustomDatabaseViewContribution,
+} from "../../plugin-sdk/custom-database-view";
 
 interface DatabaseViewTabsProps {
   views: DatabaseView[];
@@ -29,6 +37,7 @@ const VIEW_TYPE_LABELS: Record<DatabaseViewType, string> = {
   chart: "Chart",
   timeline: "Timeline",
   plugin: "Plugin",
+  custom: "Custom",
 };
 
 function PluginViewIcon({ iconSvg }: { iconSvg?: string }) {
@@ -200,8 +209,22 @@ function ViewTypeIcon({ type }: { type: DatabaseViewType }) {
         </svg>
       );
     case "plugin":
+    case "custom":
       return <PluginViewIcon />;
   }
+}
+
+/** Contribution icon for tabs and the add menu (puzzle fallback). */
+function CustomViewIcon({
+  contribution,
+}: {
+  contribution?: CustomDatabaseViewContribution;
+}) {
+  if (contribution?.icon) {
+    const Icon = contribution.icon;
+    return <Icon />;
+  }
+  return <PluginViewIcon />;
 }
 
 export function DatabaseViewTabs({
@@ -265,6 +288,23 @@ export function DatabaseViewTabs({
     (p) => p.type === "select" || p.type === "multiSelect"
   );
   const hasDateProperty = properties.some((p) => p.type === "date");
+  const hasNumberProperty = properties.some((p) => p.type === "number");
+
+  const disabledCustomViews = useDisabledCustomDatabaseViews();
+  const customViewContributions = getCustomDatabaseViews().filter((c) =>
+    isCustomDatabaseViewEnabled(c, disabledCustomViews)
+  );
+
+  const customViewPrereqMissing = (
+    c: CustomDatabaseViewContribution
+  ): string | null => {
+    if (c.requires === "select" && !hasSelectProperty)
+      return "Needs select property";
+    if (c.requires === "date" && !hasDateProperty) return "Needs date property";
+    if (c.requires === "number" && !hasNumberProperty)
+      return "Needs number property";
+    return null;
+  };
 
   const addView = (type: DatabaseViewType) => {
     const id = crypto.randomUUID();
@@ -332,6 +372,28 @@ export function DatabaseViewTabs({
       id,
       name: pvt.label,
       type: "plugin",
+      sorts: [],
+      filters: [],
+      config,
+    };
+    onUpdateContent((prev) => ({
+      ...prev,
+      views: [...prev.views, newView],
+    }));
+    onSelectView(id);
+    setShowAddMenu(false);
+  };
+
+  const addCustomView = (contribution: CustomDatabaseViewContribution) => {
+    const id = crypto.randomUUID();
+    const config: CustomViewConfig = {
+      customViewId: contribution.id,
+      viewConfig: {},
+    };
+    const newView: DatabaseView = {
+      id,
+      name: contribution.label,
+      type: "custom",
       sorts: [],
       filters: [],
       config,
@@ -417,6 +479,12 @@ export function DatabaseViewTabs({
                   pvt.pluginId === (view.config as PluginViewConfig)?.pluginId &&
                   pvt.viewType === (view.config as PluginViewConfig)?.viewType
               )?.iconSvg}
+            />
+          ) : view.type === "custom" ? (
+            <CustomViewIcon
+              contribution={getCustomDatabaseView(
+                (view.config as CustomViewConfig)?.customViewId ?? ""
+              )}
             />
           ) : (
             <ViewTypeIcon type={view.type} />
@@ -540,6 +608,28 @@ export function DatabaseViewTabs({
                 </button>
               );
             })}
+            {expertMode && customViewContributions.length > 0 && (
+              <>
+                <div className="db-view-tabs-add-separator" />
+                {customViewContributions.map((c) => {
+                  const missing = customViewPrereqMissing(c);
+                  return (
+                    <button
+                      key={c.id}
+                      className={`db-view-tabs-add-option ${missing ? "db-view-tabs-add-option-disabled" : ""}`}
+                      onClick={() => !missing && addCustomView(c)}
+                      disabled={!!missing}
+                    >
+                      <CustomViewIcon contribution={c} />
+                      <span>{c.label}</span>
+                      {missing && (
+                        <span className="db-view-tabs-add-hint">{missing}</span>
+                      )}
+                    </button>
+                  );
+                })}
+              </>
+            )}
             {expertMode && pluginViewTypes.length > 0 && (
               <>
                 <div className="db-view-tabs-add-separator" />

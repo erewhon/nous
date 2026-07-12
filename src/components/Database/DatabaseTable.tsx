@@ -26,6 +26,7 @@ import {
   PageLinkCell,
   pickNextColor,
 } from "./CellEditors";
+import { applyViewToRows, compareCellValues, applyFilter } from "./viewRows";
 import type { RelationContext } from "./useRelationContext";
 import { PropertyEditor, PropertyTypeIcon } from "./PropertyEditor";
 import { computeSummary, getAggregationsForType, SUMMARY_LABELS } from "./computeSummary";
@@ -108,35 +109,17 @@ export function DatabaseTable({
     [content.properties, relationContext]
   );
 
-  // Sort and filter rows
-  const displayRows = useMemo(() => {
-    let rows = [...content.rows];
-
-    // Apply filters
-    for (const filter of filters) {
-      const prop = content.properties.find((p) => p.id === filter.propertyId);
-      if (!prop) continue;
-      rows = rows.filter((row) => {
-        const cellVal = resolveCellValue(row, filter.propertyId);
-        return applyFilter(cellVal, filter.operator, filter.value, prop);
-      });
-    }
-
-    // Apply sorts
-    if (sorts.length > 0) {
-      rows.sort((a, b) => {
-        for (const sort of sorts) {
-          const aVal = resolveCellValue(a, sort.propertyId);
-          const bVal = resolveCellValue(b, sort.propertyId);
-          const cmp = compareCellValues(aVal, bVal);
-          if (cmp !== 0) return sort.direction === "asc" ? cmp : -cmp;
-        }
-        return 0;
-      });
-    }
-
-    return rows;
-  }, [content.rows, sorts, filters, content.properties, resolveCellValue]);
+  // Sort and filter rows (shared pipeline — also used by contributed views)
+  const displayRows = useMemo(
+    () =>
+      applyViewToRows(
+        content.rows,
+        { sorts, filters },
+        content.properties,
+        (row, propId) => resolveCellValue(row, propId)
+      ),
+    [content.rows, sorts, filters, content.properties, resolveCellValue]
+  );
 
   // Group rows
   const groupedRows = useMemo(() => {
@@ -1180,82 +1163,6 @@ function GroupRows({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-// Helper: compare cell values for sorting
-function compareCellValues(a: CellValue, b: CellValue): number {
-  if (a == null && b == null) return 0;
-  if (a == null) return -1;
-  if (b == null) return 1;
-
-  if (typeof a === "number" && typeof b === "number") return a - b;
-  if (typeof a === "boolean" && typeof b === "boolean")
-    return Number(a) - Number(b);
-  if (Array.isArray(a) && Array.isArray(b))
-    return a.join(",").localeCompare(b.join(","));
-
-  return String(a).localeCompare(String(b));
-}
-
-// Helper: apply a filter to a cell value
-function applyFilter(
-  cellVal: CellValue,
-  operator: string,
-  filterVal: CellValue,
-  prop: PropertyDef
-): boolean {
-  switch (operator) {
-    case "isEmpty":
-      return (
-        cellVal == null ||
-        cellVal === "" ||
-        (Array.isArray(cellVal) && cellVal.length === 0)
-      );
-    case "isNotEmpty":
-      return (
-        cellVal != null &&
-        cellVal !== "" &&
-        !(Array.isArray(cellVal) && cellVal.length === 0)
-      );
-    case "equals":
-      if (prop.type === "checkbox") {
-        return cellVal === (filterVal === "true" || filterVal === true);
-      }
-      if (prop.type === "multiSelect" && Array.isArray(cellVal)) {
-        return cellVal.includes(String(filterVal ?? ""));
-      }
-      // select: both are option IDs; text/number: string comparison
-      return String(cellVal ?? "") === String(filterVal ?? "");
-    case "notEquals":
-      if (prop.type === "checkbox") {
-        return cellVal !== (filterVal === "true" || filterVal === true);
-      }
-      if (prop.type === "multiSelect" && Array.isArray(cellVal)) {
-        return !cellVal.includes(String(filterVal ?? ""));
-      }
-      return String(cellVal ?? "") !== String(filterVal ?? "");
-    case "contains":
-      return String(cellVal ?? "")
-        .toLowerCase()
-        .includes(String(filterVal ?? "").toLowerCase());
-    case "doesNotContain":
-      return !String(cellVal ?? "")
-        .toLowerCase()
-        .includes(String(filterVal ?? "").toLowerCase());
-    case "gt":
-      return Number(cellVal) > Number(filterVal);
-    case "gte":
-      return Number(cellVal) >= Number(filterVal);
-    case "lt":
-      return Number(cellVal) < Number(filterVal);
-    case "lte":
-      return Number(cellVal) <= Number(filterVal);
-    case "before":
-      return String(cellVal ?? "") < String(filterVal ?? "");
-    case "after":
-      return String(cellVal ?? "") > String(filterVal ?? "");
-    default:
-      return true;
-  }
-}
-
-// Export helpers for reuse in other views
+// Filter/sort helpers moved to viewRows.ts (shared with contributed custom
+// views); re-exported here for the existing view imports.
 export { compareCellValues, applyFilter };

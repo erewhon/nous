@@ -14,11 +14,19 @@ import {
   useDisabledCustomBlocks,
 } from "../../plugin-sdk/custom-block";
 import { registerBuiltinBlocks } from "../../plugin-sdk/blocks";
+import {
+  getCustomDatabaseViews,
+  isCustomDatabaseViewEnabled,
+  setCustomDatabaseViewEnabled,
+  useDisabledCustomDatabaseViews,
+} from "../../plugin-sdk/custom-database-view";
+import { registerBuiltinDatabaseViews } from "../../plugin-sdk/database-views";
 
 // Ensure built-in processors are registered even if the editor hasn't mounted
 // yet, so this panel can list them. Idempotent (registry is keyed by id).
 registerBuiltinProcessors();
 registerBuiltinBlocks();
+registerBuiltinDatabaseViews();
 
 // Capability flag names (matches Rust bitflags)
 const CAPABILITY_NAMES: Record<number, string> = {
@@ -200,6 +208,8 @@ export function PluginSettings() {
       <DocumentProcessorSettings />
 
       <CustomBlockSettings />
+
+      <CustomDatabaseViewSettings />
     </div>
   );
 }
@@ -348,6 +358,86 @@ function CustomBlockSettings() {
                       : "var(--color-bg-tertiary, #555)",
                   }}
                   title={on ? "Disable block" : "Enable block"}
+                  aria-pressed={on}
+                >
+                  <span
+                    className="absolute top-[2px] w-[14px] h-[14px] rounded-full transition-transform"
+                    style={{ backgroundColor: "#fff", left: on ? "16px" : "2px" }}
+                  />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Toggle list for SDK-contributed database views. Disabling never deletes a
+ * view: its tab stays, the body shows a placeholder, and the config is
+ * preserved — re-enabling restores the view intact.
+ */
+function CustomDatabaseViewSettings() {
+  const disabled = useDisabledCustomDatabaseViews();
+  const views = getCustomDatabaseViews();
+
+  return (
+    <div>
+      <h4
+        className="text-sm font-medium mb-1"
+        style={{ color: "var(--color-text-secondary)" }}
+      >
+        Custom Database Views ({views.length})
+      </h4>
+      <p className="text-xs mb-2" style={{ color: "var(--color-text-muted)" }}>
+        Database view types contributed through the plugin SDK (e.g. Stats).
+        Disabling one hides it from the add-view menu and shows a placeholder
+        for existing views — their configuration is preserved.
+      </p>
+      {views.length === 0 ? (
+        <p className="text-sm italic" style={{ color: "var(--color-text-muted)" }}>
+          No custom database views registered.
+        </p>
+      ) : (
+        <div className="space-y-2">
+          {views.map((v) => {
+            const on = isCustomDatabaseViewEnabled(v, disabled);
+            return (
+              <div
+                key={v.id}
+                className="rounded-lg border p-3 flex items-center justify-between"
+                style={{
+                  backgroundColor: "var(--color-bg-secondary)",
+                  borderColor: "var(--color-border)",
+                  opacity: on ? 1 : 0.6,
+                }}
+              >
+                <div className="min-w-0">
+                  <div
+                    className="text-sm font-medium truncate"
+                    style={{ color: "var(--color-text-primary)" }}
+                  >
+                    {v.label}
+                  </div>
+                  <div
+                    className="text-xs truncate"
+                    style={{ color: "var(--color-text-muted)" }}
+                  >
+                    {v.id}
+                    {v.requires ? ` · needs ${v.requires} property` : ""}
+                  </div>
+                </div>
+                <button
+                  onClick={() => setCustomDatabaseViewEnabled(v.id, !on)}
+                  className="relative w-8 h-[18px] rounded-full transition-colors shrink-0"
+                  style={{
+                    backgroundColor: on
+                      ? "var(--color-accent, #3b82f6)"
+                      : "var(--color-bg-tertiary, #555)",
+                  }}
+                  title={on ? "Disable view" : "Enable view"}
                   aria-pressed={on}
                 >
                   <span

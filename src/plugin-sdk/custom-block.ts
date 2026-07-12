@@ -21,8 +21,8 @@
  * (collab/guest-editor) imports it into its own bundle, so React is the only
  * runtime dependency allowed (no zustand, no app stores, no Tailwind).
  */
-import { useSyncExternalStore } from "react";
 import type * as React from "react";
+import { createDisabledSetStore } from "./enabled-state";
 
 // ─── Contract ───────────────────────────────────────────────────────────────
 
@@ -88,48 +88,23 @@ export function getCustomBlock(id: string): CustomBlockContribution | undefined 
 
 export const CUSTOM_BLOCKS_DISABLED_KEY = "nous-custom-blocks-disabled";
 
-function loadDisabled(): ReadonlySet<string> {
-  try {
-    const raw =
-      typeof localStorage !== "undefined"
-        ? localStorage.getItem(CUSTOM_BLOCKS_DISABLED_KEY)
-        : null;
-    return new Set(raw ? (JSON.parse(raw) as string[]) : []);
-  } catch {
-    return new Set<string>();
-  }
-}
-
-let disabled: ReadonlySet<string> = loadDisabled();
-const listeners = new Set<() => void>();
+const enabledStore = createDisabledSetStore(CUSTOM_BLOCKS_DISABLED_KEY);
 
 export function getDisabledCustomBlocks(): ReadonlySet<string> {
-  return disabled;
+  return enabledStore.get();
 }
 
 export function setCustomBlockEnabled(id: string, enabled: boolean): void {
-  const next = new Set(disabled);
-  if (enabled) next.delete(id);
-  else next.add(id);
-  disabled = next;
-  try {
-    if (typeof localStorage !== "undefined") {
-      localStorage.setItem(CUSTOM_BLOCKS_DISABLED_KEY, JSON.stringify([...next]));
-    }
-  } catch {
-    // best-effort; an unavailable/full localStorage just loses persistence
-  }
-  for (const cb of listeners) cb();
+  enabledStore.setEnabled(id, enabled);
 }
 
 export function subscribeCustomBlockSettings(cb: () => void): () => void {
-  listeners.add(cb);
-  return () => listeners.delete(cb);
+  return enabledStore.subscribe(cb);
 }
 
 /** React hook: the current disabled set, re-rendering on toggle. */
 export function useDisabledCustomBlocks(): ReadonlySet<string> {
-  return useSyncExternalStore(subscribeCustomBlockSettings, getDisabledCustomBlocks);
+  return enabledStore.useDisabled();
 }
 
 /** Whether a contribution is active, given its default and any user override. */

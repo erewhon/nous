@@ -29,6 +29,11 @@ import { DatabaseCalendar } from "./DatabaseCalendar";
 import { DatabaseChart } from "./DatabaseChart";
 import { DatabaseTimeline } from "./DatabaseTimeline";
 import { PluginDatabaseView } from "./PluginDatabaseView";
+import { CustomDatabaseView } from "./CustomDatabaseView";
+import { registerBuiltinDatabaseViews } from "../../plugin-sdk/database-views";
+
+// Contributions register before any database renders (idempotent).
+registerBuiltinDatabaseViews();
 import { useRelationContext } from "./useRelationContext";
 import { toPhoneListView } from "./mobileListView";
 import { useIsPhone } from "../../hooks/useIsPhone";
@@ -756,6 +761,18 @@ export function DatabaseEditor({
             relationContext={relationContext}
             notebookId={notebookId}
             onRefreshFromDisk={refreshFromDisk}
+          />
+        );
+      case "custom":
+        return (
+          <CustomDatabaseView
+            content={content}
+            view={activeView}
+            onUpdateContent={handleUpdateContent}
+            onUpdateView={handleUpdateView}
+            relationContext={relationContext}
+            pageLinkPages={pageLinkPages}
+            onNavigatePageLink={onNavigatePageLink}
           />
         );
       default:

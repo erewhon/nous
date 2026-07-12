@@ -162,6 +162,7 @@ export const DatabaseViewTypeSchema = z.enum([
   "chart",
   "timeline",
   "plugin",
+  "custom",
 ]);
 export type DatabaseViewType = z.infer<typeof DatabaseViewTypeSchema>;
 
@@ -227,6 +228,15 @@ export const PluginViewConfigSchema = z.object({
   pluginConfig: z.record(z.string(), z.unknown()).optional(),
 });
 export type PluginViewConfig = z.infer<typeof PluginViewConfigSchema>;
+
+// SDK-contributed view (plugin contribution point — typed ES module, no
+// iframe). Distinct from "plugin", which keeps its Lua/iframe semantics
+// until the scaffolding migration retires it.
+export const CustomViewConfigSchema = z.object({
+  customViewId: z.string(),
+  viewConfig: z.record(z.string(), z.unknown()).optional(),
+});
+export type CustomViewConfig = z.infer<typeof CustomViewConfigSchema>;
 
 // Use passthrough record instead of union to avoid stripping unknown fields.
 // A z.union tries schemas in order; TableViewConfigSchema (all-optional) matches
