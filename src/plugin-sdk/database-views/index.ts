@@ -7,6 +7,7 @@
  */
 import { registerCustomDatabaseView } from "../custom-database-view";
 import { statsView } from "./stats";
+import { heatmapView } from "./heatmap";
 
 let registered = false;
 
@@ -15,4 +16,5 @@ export function registerBuiltinDatabaseViews(): void {
   if (registered) return;
   registered = true;
   registerCustomDatabaseView(statsView);
+  registerCustomDatabaseView(heatmapView);
 }

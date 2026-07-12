@@ -293,11 +293,49 @@ export const SELECT_COLORS = [
   "#a855f7", // purple
 ];
 
+// Legacy Lua plugin views whose retired viewType has an SDK-contributed
+// successor. A closed historical set (the iframe scaffolding is gone) — do
+// not extend it for new contributions; new views are created as "custom"
+// directly. Legacy viewTypes NOT listed here (e.g. the food-tracker views)
+// stay type "plugin" and render the dead-letter placeholder, config intact.
+const LEGACY_PLUGIN_VIEW_SUCCESSORS: Record<string, string> = {
+  heatmap: "heatmap",
+};
+
+/** Rewrite retired plugin-format views onto their contributed successors. */
+export function migrateLegacyPluginViews(
+  content: DatabaseContentV2,
+): DatabaseContentV2 {
+  let changed = false;
+  const views = content.views.map((view) => {
+    if (view.type !== "plugin") return view;
+    const config = view.config as {
+      viewType?: unknown;
+      pluginConfig?: Record<string, unknown>;
+    };
+    const successor =
+      typeof config?.viewType === "string"
+        ? LEGACY_PLUGIN_VIEW_SUCCESSORS[config.viewType]
+        : undefined;
+    if (!successor) return view;
+    changed = true;
+    return {
+      ...view,
+      type: "custom" as const,
+      config: {
+        customViewId: successor,
+        viewConfig: config.pluginConfig ?? {},
+      },
+    };
+  });
+  return changed ? { ...content, views } : content;
+}
+
 // Migrate from any version to V2
 export function migrateDatabaseContent(raw: unknown): DatabaseContentV2 {
   // Try V2 first
   const v2Result = DatabaseContentV2Schema.safeParse(raw);
-  if (v2Result.success) return v2Result.data;
+  if (v2Result.success) return migrateLegacyPluginViews(v2Result.data);
 
   // Try V1
   const v1Result = DatabaseContentV1Schema.safeParse(raw);
