@@ -75,6 +75,7 @@ export function DatabaseToolbar({
   const [showFilter, setShowFilter] = useState(false);
   const [showGroup, setShowGroup] = useState(false);
   const [showProperties, setShowProperties] = useState(false);
+  const [showCardFields, setShowCardFields] = useState(false);
   const [newPropName, setNewPropName] = useState("");
   const [newPropType, setNewPropType] = useState<PropertyType>("text");
 
@@ -97,6 +98,31 @@ export function DatabaseToolbar({
       },
     }));
     setShowGroup(false);
+  };
+
+  // Board "card fields": which properties appear on each card. When unset, the
+  // board defaults to the first 3 non-title properties, so mirror that default
+  // here so the checkboxes match what the card actually shows.
+  const titleProp = properties.find((p) => p.type === "text");
+  const defaultCardPropertyIds = properties
+    .filter((p) => p.id !== titleProp?.id)
+    .slice(0, 3)
+    .map((p) => p.id);
+  const cardPropertyIds =
+    view.type === "board"
+      ? ((view.config as BoardViewConfig).cardPropertyIds ??
+        defaultCardPropertyIds)
+      : [];
+
+  const handleToggleCardField = (propertyId: string) => {
+    onUpdateView((prev) => {
+      const cfg = prev.config as BoardViewConfig;
+      const current = cfg.cardPropertyIds ?? defaultCardPropertyIds;
+      const next = current.includes(propertyId)
+        ? current.filter((id) => id !== propertyId)
+        : [...current, propertyId];
+      return { ...prev, config: { ...prev.config, cardPropertyIds: next } };
+    });
   };
 
   return (
@@ -236,13 +262,51 @@ export function DatabaseToolbar({
             </button>
             {showGroup && (
               <GroupPopover
-                properties={view.type === "board"
-                  ? properties.filter(p => p.type === "select" || p.type === "multiSelect")
-                  : properties}
+                properties={
+                  view.type === "board"
+                    ? properties.filter(
+                        (p) => p.type === "select" || p.type === "multiSelect"
+                      )
+                    : properties
+                }
                 groupByPropertyId={groupByPropertyId}
                 onSetGroupBy={handleSetGroupBy}
                 onClose={() => setShowGroup(false)}
                 showNone={view.type !== "board"}
+              />
+            )}
+          </div>
+        )}
+        {/* Card fields (board view only) */}
+        {view.type === "board" && (
+          <div className="db-toolbar-btn-group">
+            <button
+              className="db-toolbar-btn"
+              onClick={() => setShowCardFields(!showCardFields)}
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
+                <rect x="4" y="4" width="16" height="16" rx="2" />
+                <path d="M4 9h16" />
+                <path d="M8 14h8" />
+                <path d="M8 17h5" />
+              </svg>
+              Cards
+            </button>
+            {showCardFields && (
+              <CardFieldsPopover
+                properties={properties}
+                titlePropertyId={titleProp?.id}
+                selectedIds={cardPropertyIds}
+                onToggle={handleToggleCardField}
+                onClose={() => setShowCardFields(false)}
               />
             )}
           </div>
@@ -252,7 +316,8 @@ export function DatabaseToolbar({
           <div className="db-toolbar-btn-group">
             <button
               className={`db-toolbar-btn ${
-                ((view.config as TableViewConfig).hiddenPropertyIds?.length ?? 0) > 0
+                ((view.config as TableViewConfig).hiddenPropertyIds?.length ??
+                  0) > 0
                   ? "db-toolbar-btn-active"
                   : ""
               }`}
@@ -271,16 +336,20 @@ export function DatabaseToolbar({
                 <circle cx="12" cy="12" r="3" />
               </svg>
               Properties
-              {((view.config as TableViewConfig).hiddenPropertyIds?.length ?? 0) > 0 && (
+              {((view.config as TableViewConfig).hiddenPropertyIds?.length ??
+                0) > 0 && (
                 <span className="db-toolbar-badge">
-                  {(view.config as TableViewConfig).hiddenPropertyIds!.length} hidden
+                  {(view.config as TableViewConfig).hiddenPropertyIds!.length}{" "}
+                  hidden
                 </span>
               )}
             </button>
             {showProperties && (
               <PropertiesPopover
                 properties={properties}
-                hiddenPropertyIds={(view.config as TableViewConfig).hiddenPropertyIds ?? []}
+                hiddenPropertyIds={
+                  (view.config as TableViewConfig).hiddenPropertyIds ?? []
+                }
                 onToggleProperty={(propertyId) => {
                   onUpdateView((prev) => {
                     const cfg = prev.config as TableViewConfig;
@@ -305,7 +374,17 @@ export function DatabaseToolbar({
         {/* Export CSV */}
         <button
           className="db-toolbar-btn"
-          onClick={() => exportDatabaseAsCsv(properties, rows, title || "database", pageLinkPages, computedValues, view.filters, view.sorts)}
+          onClick={() =>
+            exportDatabaseAsCsv(
+              properties,
+              rows,
+              title || "database",
+              pageLinkPages,
+              computedValues,
+              view.filters,
+              view.sorts
+            )
+          }
         >
           <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -664,7 +743,10 @@ function SortPopover({
 }
 
 // Operators by property type
-export const OPERATORS_BY_TYPE: Record<string, { value: string; label: string }[]> = {
+export const OPERATORS_BY_TYPE: Record<
+  string,
+  { value: string; label: string }[]
+> = {
   text: [
     { value: "contains", label: "Contains" },
     { value: "doesNotContain", label: "Does not contain" },
@@ -763,7 +845,11 @@ function FilterPopover({
       const prop = properties[0];
       onUpdateFilters([
         ...filters,
-        { propertyId: prop.id, operator: getDefaultOperator(prop.type), value: "" },
+        {
+          propertyId: prop.id,
+          operator: getDefaultOperator(prop.type),
+          value: "",
+        },
       ]);
     }
   };
@@ -798,7 +884,8 @@ function FilterPopover({
         const prop = properties.find((p) => p.id === filter.propertyId);
         const propType = prop?.type ?? "text";
         const operators = getOperatorsForType(propType);
-        const needsValue = filter.operator !== "isEmpty" && filter.operator !== "isNotEmpty";
+        const needsValue =
+          filter.operator !== "isEmpty" && filter.operator !== "isNotEmpty";
 
         return (
           <div key={idx} className="db-popover-row">
@@ -900,11 +987,13 @@ function FilterValueInput({
           onChange={(e) => onChange(e.target.value)}
         >
           <option value="">Select...</option>
-          {(options ?? []).map((opt) => (
-            <option key={opt.id} value={opt.id}>
-              {opt.label}
-            </option>
-          ))}
+          {[...(options ?? [])]
+            .sort((a, b) => a.label.localeCompare(b.label))
+            .map((opt) => (
+              <option key={opt.id} value={opt.id}>
+                {opt.label}
+              </option>
+            ))}
         </select>
       );
     case "checkbox":
@@ -963,7 +1052,12 @@ function PropertiesPopover({
           <label
             key={prop.id}
             className={`db-select-option db-properties-option ${isTitle ? "db-properties-option-disabled" : ""}`}
-            style={{ display: "flex", alignItems: "center", gap: "8px", cursor: isTitle ? "default" : "pointer" }}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+              cursor: isTitle ? "default" : "pointer",
+            }}
           >
             <input
               type="checkbox"
@@ -972,6 +1066,67 @@ function PropertiesPopover({
               onChange={() => {
                 if (!isTitle) onToggleProperty(prop.id);
               }}
+              style={{ accentColor: "var(--color-accent)" }}
+            />
+            <PropertyTypeIcon type={prop.type} />
+            <span>{prop.name}</span>
+          </label>
+        );
+      })}
+    </div>
+  );
+}
+
+// Card Fields Popover (board view — which properties show on each card)
+function CardFieldsPopover({
+  properties,
+  titlePropertyId,
+  selectedIds,
+  onToggle,
+  onClose,
+}: {
+  properties: PropertyDef[];
+  titlePropertyId?: string;
+  selectedIds: string[];
+  onToggle: (propertyId: string) => void;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const handle = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    };
+    document.addEventListener("mousedown", handle);
+    return () => document.removeEventListener("mousedown", handle);
+  }, [onClose]);
+
+  const selectedSet = new Set(selectedIds);
+  // The title is always the card heading; it can't be toggled as a field.
+  const fieldProps = properties.filter((p) => p.id !== titlePropertyId);
+
+  return (
+    <div ref={ref} className="db-popover">
+      <div className="db-popover-title">Card fields</div>
+      {fieldProps.length === 0 && (
+        <div className="db-relation-empty">No other properties to show.</div>
+      )}
+      {fieldProps.map((prop) => {
+        const isVisible = selectedSet.has(prop.id);
+        return (
+          <label
+            key={prop.id}
+            className="db-select-option db-properties-option"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+              cursor: "pointer",
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={isVisible}
+              onChange={() => onToggle(prop.id)}
               style={{ accentColor: "var(--color-accent)" }}
             />
             <PropertyTypeIcon type={prop.type} />

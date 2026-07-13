@@ -16,6 +16,7 @@ import type {
   DatabaseRow,
   DatabaseView,
 } from "../../types/database";
+import { generateId } from "../../utils/generateId";
 import { createDefaultRow } from "../../types/database";
 import type { RelationContext } from "./useRelationContext";
 import { applyViewToRows } from "./viewRows";
@@ -200,7 +201,7 @@ export function CustomDatabaseView({
       const existing =
         content.properties.find((p) => p.id === propertyId)?.options ?? [];
       const newOption = {
-        id: crypto.randomUUID(),
+        id: generateId(),
         label,
         color: pickNextColor(existing),
       };

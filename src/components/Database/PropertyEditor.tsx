@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback } from "react";
 import type { PropertyDef, PropertyType, SelectOption, CellValue, NumberFormat, FormulaConfig, ConditionalFormatRule } from "../../types/database";
+import { generateId } from "../../utils/generateId";
 import { pickNextColor } from "./CellEditors";
 import { evaluateFormula } from "./formulaEvaluator";
 import { useFormulaAutocomplete, FormulaDropdown } from "./FormulaAutocomplete";
@@ -55,7 +56,7 @@ export function PropertyEditor({ property, onUpdate, onDelete, onClose, allPrope
     if (!newOptionLabel.trim()) return;
     const existing = property.options ?? [];
     const newOption: SelectOption = {
-      id: crypto.randomUUID(),
+      id: generateId(),
       label: newOptionLabel.trim(),
       color: pickNextColor(existing),
     };
@@ -536,7 +537,7 @@ function ConditionalFormatEditor({
 
   const addRule = () => {
     const newRule: ConditionalFormatRule = {
-      id: crypto.randomUUID(),
+      id: generateId(),
       operator: getDefaultOperator(property.type),
       value: "",
       style: { backgroundColor: "#22c55e30", textColor: "#22c55e" },

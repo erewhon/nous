@@ -7,6 +7,7 @@ import type {
   CalendarViewConfig,
   SelectOption,
 } from "../../types/database";
+import { generateId } from "../../utils/generateId";
 import { createDefaultRow } from "../../types/database";
 import { pickNextColor } from "./CellEditors";
 import type { RelationContext } from "./useRelationContext";
@@ -196,7 +197,7 @@ export function DatabaseCalendar({
       const existing =
         content.properties.find((p) => p.id === propertyId)?.options ?? [];
       const newOption: SelectOption = {
-        id: crypto.randomUUID(),
+        id: generateId(),
         label,
         color: pickNextColor(existing),
       };

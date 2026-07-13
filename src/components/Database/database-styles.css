@@ -25,6 +25,15 @@
   color: var(--color-text-muted);
 }
 
+.db-save-error {
+  font-size: 11px;
+  color: var(--color-danger, #dc2626);
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Loading/Error */
 .db-loading {
   display: flex;
@@ -782,6 +791,15 @@
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 120px;
+}
+
+/* Drag-to-reorder tabs */
+.db-view-tab-dragging {
+  opacity: 0.4;
+}
+
+.db-view-tab-dragover {
+  box-shadow: inset 2px 0 0 var(--color-accent);
 }
 
 .db-view-tab-rename {

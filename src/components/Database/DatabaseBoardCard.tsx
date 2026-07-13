@@ -1,6 +1,9 @@
 import type { DatabaseRow, PropertyDef, CellValue } from "../../types/database";
 import { formatNumber } from "./formatNumber";
-import { evaluateConditionalFormat, conditionalStyleToCSS } from "./conditionalFormat";
+import {
+  evaluateConditionalFormat,
+  conditionalStyleToCSS,
+} from "./conditionalFormat";
 
 interface DatabaseBoardCardProps {
   row: DatabaseRow;
@@ -9,6 +12,11 @@ interface DatabaseBoardCardProps {
   dragHandleProps?: Record<string, unknown>;
   pageLinkPages?: Array<{ id: string; title: string }>;
   formulaValues?: Map<string, Map<string, CellValue>>;
+  /**
+   * Property ids (in order) to show on the card, excluding the title. When
+   * undefined, falls back to the first 3 non-title properties.
+   */
+  cardPropertyIds?: string[];
 }
 
 export function DatabaseBoardCard({
@@ -18,14 +26,19 @@ export function DatabaseBoardCard({
   dragHandleProps,
   pageLinkPages,
   formulaValues,
+  cardPropertyIds,
 }: DatabaseBoardCardProps) {
   const titleProp = properties.find((p) => p.type === "text");
   const title = titleProp ? String(row.cells[titleProp.id] ?? "") : "";
 
-  // Show up to 3 secondary properties
-  const secondaryProps = properties
-    .filter((p) => p.id !== titleProp?.id)
-    .slice(0, 3);
+  // Which secondary properties to show: an explicit configured list (in order),
+  // otherwise the first 3 non-title properties as a default.
+  const secondaryProps =
+    cardPropertyIds && cardPropertyIds.length > 0
+      ? cardPropertyIds
+          .map((id) => properties.find((p) => p.id === id))
+          .filter((p): p is PropertyDef => p != null && p.id !== titleProp?.id)
+      : properties.filter((p) => p.id !== titleProp?.id).slice(0, 3);
 
   const renderValue = (prop: PropertyDef) => {
     const val = row.cells[prop.id];
@@ -75,9 +88,13 @@ export function DatabaseBoardCard({
       return (
         <span className="db-board-card-pills">
           {val.slice(0, 2).map((id, i) => (
-            <span key={i} className="db-relation-pill">{id.slice(0, 8)}...</span>
+            <span key={i} className="db-relation-pill">
+              {id.slice(0, 8)}...
+            </span>
           ))}
-          {val.length > 2 && <span className="db-board-card-more">+{val.length - 2}</span>}
+          {val.length > 2 && (
+            <span className="db-board-card-more">+{val.length - 2}</span>
+          )}
         </span>
       );
     }
@@ -96,11 +113,17 @@ export function DatabaseBoardCard({
     if (prop.type === "pageLink" && typeof val === "string") {
       const linked = pageLinkPages?.find((p) => p.id === val);
       if (!linked) return null;
-      return <span className="db-pagelink-pill">{linked.title || "Untitled"}</span>;
+      return (
+        <span className="db-pagelink-pill">{linked.title || "Untitled"}</span>
+      );
     }
 
     if (prop.type === "number" && typeof val === "number") {
-      return <span className="db-board-card-text">{formatNumber(val, prop.numberFormat)}</span>;
+      return (
+        <span className="db-board-card-text">
+          {formatNumber(val, prop.numberFormat)}
+        </span>
+      );
     }
 
     return <span className="db-board-card-text">{String(val)}</span>;

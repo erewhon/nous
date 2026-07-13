@@ -65,7 +65,9 @@ export type FormulaConfig = z.infer<typeof FormulaConfigSchema>;
 
 // Number formatting configuration
 export const NumberFormatSchema = z.object({
-  style: z.enum(["plain", "currency", "percent", "progressBar"]).default("plain"),
+  style: z
+    .enum(["plain", "currency", "percent", "progressBar"])
+    .default("plain"),
   decimals: z.number().optional(),
   thousandsSeparator: z.boolean().optional(),
   currencySymbol: z.string().optional(),
@@ -87,7 +89,9 @@ export const ConditionalFormatStyleSchema = z.object({
   backgroundColor: z.string().optional(),
   textColor: z.string().optional(),
 });
-export type ConditionalFormatStyle = z.infer<typeof ConditionalFormatStyleSchema>;
+export type ConditionalFormatStyle = z.infer<
+  typeof ConditionalFormatStyleSchema
+>;
 
 export const ConditionalFormatRuleSchema = z.object({
   id: z.string(),
@@ -178,6 +182,9 @@ export const BoardViewConfigSchema = z.object({
   groupByPropertyId: z.string(),
   hiddenColumns: z.array(z.string()).optional(),
   columnOrder: z.array(z.string()).optional(),
+  // Property ids (in order) to show on each card, excluding the title. When
+  // unset, the card falls back to the first few non-title properties.
+  cardPropertyIds: z.array(z.string()).optional(),
 });
 export type BoardViewConfig = z.infer<typeof BoardViewConfigSchema>;
 
@@ -200,7 +207,13 @@ export type CalendarViewConfig = z.infer<typeof CalendarViewConfigSchema>;
 export const ChartTypeSchema = z.enum(["bar", "line", "pie"]);
 export type ChartType = z.infer<typeof ChartTypeSchema>;
 
-export const ChartAggregationSchema = z.enum(["count", "sum", "average", "min", "max"]);
+export const ChartAggregationSchema = z.enum([
+  "count",
+  "sum",
+  "average",
+  "min",
+  "max",
+]);
 export type ChartAggregation = z.infer<typeof ChartAggregationSchema>;
 
 export const ChartViewConfigSchema = z.object({
@@ -304,7 +317,7 @@ const LEGACY_PLUGIN_VIEW_SUCCESSORS: Record<string, string> = {
 
 /** Rewrite retired plugin-format views onto their contributed successors. */
 export function migrateLegacyPluginViews(
-  content: DatabaseContentV2,
+  content: DatabaseContentV2
 ): DatabaseContentV2 {
   let changed = false;
   const views = content.views.map((view) => {
@@ -414,15 +427,23 @@ export const ObjectTypeSchema = z.object({
   properties: z.array(ObjectTypePropertySchema),
   defaultViewType: DatabaseViewTypeSchema.optional(),
   builtIn: z.boolean().optional(), // true for system-provided types
-  defaultSorts: z.array(z.object({
-    propertyName: z.string(),
-    direction: z.enum(["asc", "desc"]),
-  })).optional(),
-  defaultFilters: z.array(z.object({
-    propertyName: z.string(),
-    operator: z.string(),
-    value: CellValueSchema,
-  })).optional(),
+  defaultSorts: z
+    .array(
+      z.object({
+        propertyName: z.string(),
+        direction: z.enum(["asc", "desc"]),
+      })
+    )
+    .optional(),
+  defaultFilters: z
+    .array(
+      z.object({
+        propertyName: z.string(),
+        operator: z.string(),
+        value: CellValueSchema,
+      })
+    )
+    .optional(),
   defaultGroupByPropertyName: z.string().optional(),
   defaultDatePropertyName: z.string().optional(),
 });
@@ -440,19 +461,28 @@ export const BUILT_IN_OBJECT_TYPES: ObjectType[] = [
     properties: [
       { name: "Title", type: "text" },
       { name: "Author", type: "text" },
-      { name: "Genre", type: "select", options: [
-        { id: "genre-fiction", label: "Fiction", color: "#3b82f6" },
-        { id: "genre-nonfiction", label: "Non-fiction", color: "#22c55e" },
-        { id: "genre-sci-fi", label: "Sci-fi", color: "#8b5cf6" },
-        { id: "genre-biography", label: "Biography", color: "#f97316" },
-        { id: "genre-self-help", label: "Self-help", color: "#eab308" },
-      ]},
-      { name: "Status", type: "select", options: [
-        { id: "status-to-read", label: "To Read", color: "#6b7280" },
-        { id: "status-reading", label: "Reading", color: "#3b82f6" },
-        { id: "status-finished", label: "Finished", color: "#22c55e" },
-        { id: "status-abandoned", label: "Abandoned", color: "#ef4444" },
-      ], defaultValue: "status-to-read" },
+      {
+        name: "Genre",
+        type: "select",
+        options: [
+          { id: "genre-fiction", label: "Fiction", color: "#3b82f6" },
+          { id: "genre-nonfiction", label: "Non-fiction", color: "#22c55e" },
+          { id: "genre-sci-fi", label: "Sci-fi", color: "#8b5cf6" },
+          { id: "genre-biography", label: "Biography", color: "#f97316" },
+          { id: "genre-self-help", label: "Self-help", color: "#eab308" },
+        ],
+      },
+      {
+        name: "Status",
+        type: "select",
+        options: [
+          { id: "status-to-read", label: "To Read", color: "#6b7280" },
+          { id: "status-reading", label: "Reading", color: "#3b82f6" },
+          { id: "status-finished", label: "Finished", color: "#22c55e" },
+          { id: "status-abandoned", label: "Abandoned", color: "#ef4444" },
+        ],
+        defaultValue: "status-to-read",
+      },
       { name: "Rating", type: "number" },
       { name: "Date Read", type: "date" },
       { name: "URL", type: "url" },
@@ -462,19 +492,24 @@ export const BUILT_IN_OBJECT_TYPES: ObjectType[] = [
     id: "builtin-person",
     name: "Person",
     icon: "\ud83d\udc64",
-    description: "Contact directory with roles, company, and communication details",
+    description:
+      "Contact directory with roles, company, and communication details",
     builtIn: true,
     properties: [
       { name: "Name", type: "text" },
       { name: "Company", type: "text" },
       { name: "Role", type: "text" },
       { name: "Email", type: "url" },
-      { name: "Tags", type: "multiSelect", options: [
-        { id: "tag-work", label: "Work", color: "#3b82f6" },
-        { id: "tag-personal", label: "Personal", color: "#22c55e" },
-        { id: "tag-client", label: "Client", color: "#f97316" },
-        { id: "tag-mentor", label: "Mentor", color: "#8b5cf6" },
-      ]},
+      {
+        name: "Tags",
+        type: "multiSelect",
+        options: [
+          { id: "tag-work", label: "Work", color: "#3b82f6" },
+          { id: "tag-personal", label: "Personal", color: "#22c55e" },
+          { id: "tag-client", label: "Client", color: "#f97316" },
+          { id: "tag-mentor", label: "Mentor", color: "#8b5cf6" },
+        ],
+      },
       { name: "Last Contacted", type: "date" },
     ],
   },
@@ -489,19 +524,29 @@ export const BUILT_IN_OBJECT_TYPES: ObjectType[] = [
     defaultSorts: [{ propertyName: "Priority", direction: "desc" }],
     properties: [
       { name: "Name", type: "text" },
-      { name: "Status", type: "select", options: [
-        { id: "proj-planning", label: "Planning", color: "#6b7280" },
-        { id: "proj-active", label: "Active", color: "#3b82f6" },
-        { id: "proj-on-hold", label: "On Hold", color: "#eab308" },
-        { id: "proj-completed", label: "Completed", color: "#22c55e" },
-        { id: "proj-cancelled", label: "Cancelled", color: "#ef4444" },
-      ], defaultValue: "proj-planning" },
-      { name: "Priority", type: "select", options: [
-        { id: "pri-low", label: "Low", color: "#6b7280" },
-        { id: "pri-medium", label: "Medium", color: "#eab308" },
-        { id: "pri-high", label: "High", color: "#f97316" },
-        { id: "pri-urgent", label: "Urgent", color: "#ef4444" },
-      ], defaultValue: "pri-medium" },
+      {
+        name: "Status",
+        type: "select",
+        options: [
+          { id: "proj-planning", label: "Planning", color: "#6b7280" },
+          { id: "proj-active", label: "Active", color: "#3b82f6" },
+          { id: "proj-on-hold", label: "On Hold", color: "#eab308" },
+          { id: "proj-completed", label: "Completed", color: "#22c55e" },
+          { id: "proj-cancelled", label: "Cancelled", color: "#ef4444" },
+        ],
+        defaultValue: "proj-planning",
+      },
+      {
+        name: "Priority",
+        type: "select",
+        options: [
+          { id: "pri-low", label: "Low", color: "#6b7280" },
+          { id: "pri-medium", label: "Medium", color: "#eab308" },
+          { id: "pri-high", label: "High", color: "#f97316" },
+          { id: "pri-urgent", label: "Urgent", color: "#ef4444" },
+        ],
+        defaultValue: "pri-medium",
+      },
       { name: "Start Date", type: "date" },
       { name: "Due Date", type: "date" },
       { name: "Owner", type: "text" },
@@ -520,13 +565,17 @@ export const BUILT_IN_OBJECT_TYPES: ObjectType[] = [
     properties: [
       { name: "Title", type: "text" },
       { name: "Date", type: "date" },
-      { name: "Type", type: "select", options: [
-        { id: "mtg-standup", label: "Standup", color: "#22c55e" },
-        { id: "mtg-planning", label: "Planning", color: "#3b82f6" },
-        { id: "mtg-review", label: "Review", color: "#8b5cf6" },
-        { id: "mtg-1on1", label: "1:1", color: "#f97316" },
-        { id: "mtg-other", label: "Other", color: "#6b7280" },
-      ]},
+      {
+        name: "Type",
+        type: "select",
+        options: [
+          { id: "mtg-standup", label: "Standup", color: "#22c55e" },
+          { id: "mtg-planning", label: "Planning", color: "#3b82f6" },
+          { id: "mtg-review", label: "Review", color: "#8b5cf6" },
+          { id: "mtg-1on1", label: "1:1", color: "#f97316" },
+          { id: "mtg-other", label: "Other", color: "#6b7280" },
+        ],
+      },
       { name: "Attendees", type: "text" },
       { name: "Agenda", type: "text" },
       { name: "Action Items", type: "text" },
@@ -536,7 +585,8 @@ export const BUILT_IN_OBJECT_TYPES: ObjectType[] = [
     id: "builtin-crm",
     name: "CRM Contact",
     icon: "\ud83e\udd1d",
-    description: "Sales pipeline with deal stages, values, and follow-up tracking",
+    description:
+      "Sales pipeline with deal stages, values, and follow-up tracking",
     builtIn: true,
     defaultViewType: "board",
     defaultGroupByPropertyName: "Stage",
@@ -546,22 +596,31 @@ export const BUILT_IN_OBJECT_TYPES: ObjectType[] = [
       { name: "Company", type: "text" },
       { name: "Email", type: "url" },
       { name: "Phone", type: "text" },
-      { name: "Stage", type: "select", options: [
-        { id: "crm-lead", label: "Lead", color: "#6b7280" },
-        { id: "crm-contacted", label: "Contacted", color: "#3b82f6" },
-        { id: "crm-proposal", label: "Proposal", color: "#8b5cf6" },
-        { id: "crm-negotiation", label: "Negotiation", color: "#eab308" },
-        { id: "crm-won", label: "Won", color: "#22c55e" },
-        { id: "crm-lost", label: "Lost", color: "#ef4444" },
-      ], defaultValue: "crm-lead" },
+      {
+        name: "Stage",
+        type: "select",
+        options: [
+          { id: "crm-lead", label: "Lead", color: "#6b7280" },
+          { id: "crm-contacted", label: "Contacted", color: "#3b82f6" },
+          { id: "crm-proposal", label: "Proposal", color: "#8b5cf6" },
+          { id: "crm-negotiation", label: "Negotiation", color: "#eab308" },
+          { id: "crm-won", label: "Won", color: "#22c55e" },
+          { id: "crm-lost", label: "Lost", color: "#ef4444" },
+        ],
+        defaultValue: "crm-lead",
+      },
       { name: "Value", type: "number" },
-      { name: "Source", type: "select", options: [
-        { id: "crm-src-referral", label: "Referral", color: "#22c55e" },
-        { id: "crm-src-website", label: "Website", color: "#3b82f6" },
-        { id: "crm-src-cold", label: "Cold Outreach", color: "#6b7280" },
-        { id: "crm-src-event", label: "Event", color: "#8b5cf6" },
-        { id: "crm-src-other", label: "Other", color: "#f97316" },
-      ]},
+      {
+        name: "Source",
+        type: "select",
+        options: [
+          { id: "crm-src-referral", label: "Referral", color: "#22c55e" },
+          { id: "crm-src-website", label: "Website", color: "#3b82f6" },
+          { id: "crm-src-cold", label: "Cold Outreach", color: "#6b7280" },
+          { id: "crm-src-event", label: "Event", color: "#8b5cf6" },
+          { id: "crm-src-other", label: "Other", color: "#f97316" },
+        ],
+      },
       { name: "Last Contacted", type: "date" },
       { name: "Next Follow-up", type: "date" },
       { name: "Notes", type: "text" },
@@ -576,20 +635,28 @@ export const BUILT_IN_OBJECT_TYPES: ObjectType[] = [
     defaultSorts: [{ propertyName: "Category", direction: "asc" }],
     properties: [
       { name: "Habit", type: "text" },
-      { name: "Category", type: "select", options: [
-        { id: "hab-health", label: "Health", color: "#22c55e" },
-        { id: "hab-productivity", label: "Productivity", color: "#3b82f6" },
-        { id: "hab-learning", label: "Learning", color: "#8b5cf6" },
-        { id: "hab-mindfulness", label: "Mindfulness", color: "#06b6d4" },
-        { id: "hab-fitness", label: "Fitness", color: "#f97316" },
-        { id: "hab-other", label: "Other", color: "#6b7280" },
-      ]},
-      { name: "Frequency", type: "select", options: [
-        { id: "hab-daily", label: "Daily", color: "#22c55e" },
-        { id: "hab-weekdays", label: "Weekdays", color: "#3b82f6" },
-        { id: "hab-weekly", label: "Weekly", color: "#eab308" },
-        { id: "hab-monthly", label: "Monthly", color: "#8b5cf6" },
-      ]},
+      {
+        name: "Category",
+        type: "select",
+        options: [
+          { id: "hab-health", label: "Health", color: "#22c55e" },
+          { id: "hab-productivity", label: "Productivity", color: "#3b82f6" },
+          { id: "hab-learning", label: "Learning", color: "#8b5cf6" },
+          { id: "hab-mindfulness", label: "Mindfulness", color: "#06b6d4" },
+          { id: "hab-fitness", label: "Fitness", color: "#f97316" },
+          { id: "hab-other", label: "Other", color: "#6b7280" },
+        ],
+      },
+      {
+        name: "Frequency",
+        type: "select",
+        options: [
+          { id: "hab-daily", label: "Daily", color: "#22c55e" },
+          { id: "hab-weekdays", label: "Weekdays", color: "#3b82f6" },
+          { id: "hab-weekly", label: "Weekly", color: "#eab308" },
+          { id: "hab-monthly", label: "Monthly", color: "#8b5cf6" },
+        ],
+      },
       { name: "Current Streak", type: "number" },
       { name: "Best Streak", type: "number" },
       { name: "Last Done", type: "date" },
@@ -600,19 +667,24 @@ export const BUILT_IN_OBJECT_TYPES: ObjectType[] = [
     id: "builtin-inventory",
     name: "Inventory",
     icon: "\ud83d\udce6",
-    description: "Track items, equipment, and supplies with quantities and locations",
+    description:
+      "Track items, equipment, and supplies with quantities and locations",
     builtIn: true,
     defaultSorts: [{ propertyName: "Category", direction: "asc" }],
     properties: [
       { name: "Item", type: "text" },
-      { name: "Category", type: "select", options: [
-        { id: "inv-electronics", label: "Electronics", color: "#3b82f6" },
-        { id: "inv-office", label: "Office", color: "#6b7280" },
-        { id: "inv-kitchen", label: "Kitchen", color: "#f97316" },
-        { id: "inv-tools", label: "Tools", color: "#eab308" },
-        { id: "inv-supplies", label: "Supplies", color: "#22c55e" },
-        { id: "inv-other", label: "Other", color: "#8b5cf6" },
-      ]},
+      {
+        name: "Category",
+        type: "select",
+        options: [
+          { id: "inv-electronics", label: "Electronics", color: "#3b82f6" },
+          { id: "inv-office", label: "Office", color: "#6b7280" },
+          { id: "inv-kitchen", label: "Kitchen", color: "#f97316" },
+          { id: "inv-tools", label: "Tools", color: "#eab308" },
+          { id: "inv-supplies", label: "Supplies", color: "#22c55e" },
+          { id: "inv-other", label: "Other", color: "#8b5cf6" },
+        ],
+      },
       { name: "Quantity", type: "number" },
       { name: "Location", type: "text" },
       { name: "SKU", type: "text" },
@@ -626,28 +698,37 @@ export const BUILT_IN_OBJECT_TYPES: ObjectType[] = [
     id: "builtin-recipe",
     name: "Recipe",
     icon: "\ud83c\udf73",
-    description: "Recipe collection with cuisine, course, prep time, and ratings",
+    description:
+      "Recipe collection with cuisine, course, prep time, and ratings",
     builtIn: true,
     defaultViewType: "gallery",
     defaultSorts: [{ propertyName: "Name", direction: "asc" }],
     properties: [
       { name: "Name", type: "text" },
-      { name: "Cuisine", type: "select", options: [
-        { id: "rec-italian", label: "Italian", color: "#22c55e" },
-        { id: "rec-mexican", label: "Mexican", color: "#f97316" },
-        { id: "rec-asian", label: "Asian", color: "#ef4444" },
-        { id: "rec-indian", label: "Indian", color: "#eab308" },
-        { id: "rec-american", label: "American", color: "#3b82f6" },
-        { id: "rec-mediterranean", label: "Mediterranean", color: "#06b6d4" },
-        { id: "rec-other", label: "Other", color: "#6b7280" },
-      ]},
-      { name: "Course", type: "select", options: [
-        { id: "rec-breakfast", label: "Breakfast", color: "#eab308" },
-        { id: "rec-lunch", label: "Lunch", color: "#22c55e" },
-        { id: "rec-dinner", label: "Dinner", color: "#3b82f6" },
-        { id: "rec-snack", label: "Snack", color: "#f97316" },
-        { id: "rec-dessert", label: "Dessert", color: "#ec4899" },
-      ]},
+      {
+        name: "Cuisine",
+        type: "select",
+        options: [
+          { id: "rec-italian", label: "Italian", color: "#22c55e" },
+          { id: "rec-mexican", label: "Mexican", color: "#f97316" },
+          { id: "rec-asian", label: "Asian", color: "#ef4444" },
+          { id: "rec-indian", label: "Indian", color: "#eab308" },
+          { id: "rec-american", label: "American", color: "#3b82f6" },
+          { id: "rec-mediterranean", label: "Mediterranean", color: "#06b6d4" },
+          { id: "rec-other", label: "Other", color: "#6b7280" },
+        ],
+      },
+      {
+        name: "Course",
+        type: "select",
+        options: [
+          { id: "rec-breakfast", label: "Breakfast", color: "#eab308" },
+          { id: "rec-lunch", label: "Lunch", color: "#22c55e" },
+          { id: "rec-dinner", label: "Dinner", color: "#3b82f6" },
+          { id: "rec-snack", label: "Snack", color: "#f97316" },
+          { id: "rec-dessert", label: "Dessert", color: "#ec4899" },
+        ],
+      },
       { name: "Prep Time", type: "text" },
       { name: "Cook Time", type: "text" },
       { name: "Servings", type: "number" },
@@ -667,26 +748,40 @@ export const BUILT_IN_OBJECT_TYPES: ObjectType[] = [
     defaultSorts: [{ propertyName: "Due Date", direction: "asc" }],
     properties: [
       { name: "Task", type: "text" },
-      { name: "Status", type: "select", options: [
-        { id: "task-todo", label: "To Do", color: "#6b7280" },
-        { id: "task-in-progress", label: "In Progress", color: "#3b82f6" },
-        { id: "task-blocked", label: "Blocked", color: "#ef4444" },
-        { id: "task-done", label: "Done", color: "#22c55e" },
-      ], defaultValue: "task-todo" },
-      { name: "Priority", type: "select", options: [
-        { id: "task-pri-low", label: "Low", color: "#6b7280" },
-        { id: "task-pri-medium", label: "Medium", color: "#eab308" },
-        { id: "task-pri-high", label: "High", color: "#f97316" },
-        { id: "task-pri-urgent", label: "Urgent", color: "#ef4444" },
-      ], defaultValue: "task-pri-medium" },
+      {
+        name: "Status",
+        type: "select",
+        options: [
+          { id: "task-todo", label: "To Do", color: "#6b7280" },
+          { id: "task-in-progress", label: "In Progress", color: "#3b82f6" },
+          { id: "task-blocked", label: "Blocked", color: "#ef4444" },
+          { id: "task-done", label: "Done", color: "#22c55e" },
+        ],
+        defaultValue: "task-todo",
+      },
+      {
+        name: "Priority",
+        type: "select",
+        options: [
+          { id: "task-pri-low", label: "Low", color: "#6b7280" },
+          { id: "task-pri-medium", label: "Medium", color: "#eab308" },
+          { id: "task-pri-high", label: "High", color: "#f97316" },
+          { id: "task-pri-urgent", label: "Urgent", color: "#ef4444" },
+        ],
+        defaultValue: "task-pri-medium",
+      },
       { name: "Due Date", type: "date" },
       { name: "Assignee", type: "text" },
-      { name: "Tags", type: "multiSelect", options: [
-        { id: "task-tag-work", label: "Work", color: "#3b82f6" },
-        { id: "task-tag-personal", label: "Personal", color: "#22c55e" },
-        { id: "task-tag-urgent", label: "Urgent", color: "#ef4444" },
-        { id: "task-tag-quickwin", label: "Quick Win", color: "#eab308" },
-      ]},
+      {
+        name: "Tags",
+        type: "multiSelect",
+        options: [
+          { id: "task-tag-work", label: "Work", color: "#3b82f6" },
+          { id: "task-tag-personal", label: "Personal", color: "#22c55e" },
+          { id: "task-tag-urgent", label: "Urgent", color: "#ef4444" },
+          { id: "task-tag-quickwin", label: "Quick Win", color: "#eab308" },
+        ],
+      },
       { name: "Completed", type: "checkbox", defaultValue: false },
     ],
   },
@@ -694,26 +789,36 @@ export const BUILT_IN_OBJECT_TYPES: ObjectType[] = [
     id: "builtin-reading-list",
     name: "Reading List",
     icon: "\ud83d\udcda",
-    description: "Track articles, papers, and links with tags and reading status",
+    description:
+      "Track articles, papers, and links with tags and reading status",
     builtIn: true,
     defaultSorts: [{ propertyName: "Added", direction: "desc" }],
     properties: [
       { name: "Title", type: "text" },
       { name: "URL", type: "url" },
       { name: "Source", type: "text" },
-      { name: "Status", type: "select", options: [
-        { id: "rl-unread", label: "Unread", color: "#6b7280" },
-        { id: "rl-reading", label: "Reading", color: "#3b82f6" },
-        { id: "rl-finished", label: "Finished", color: "#22c55e" },
-        { id: "rl-reference", label: "Reference", color: "#8b5cf6" },
-      ], defaultValue: "rl-unread" },
-      { name: "Tags", type: "multiSelect", options: [
-        { id: "rl-tech", label: "Tech", color: "#3b82f6" },
-        { id: "rl-science", label: "Science", color: "#22c55e" },
-        { id: "rl-business", label: "Business", color: "#f97316" },
-        { id: "rl-design", label: "Design", color: "#ec4899" },
-        { id: "rl-writing", label: "Writing", color: "#8b5cf6" },
-      ]},
+      {
+        name: "Status",
+        type: "select",
+        options: [
+          { id: "rl-unread", label: "Unread", color: "#6b7280" },
+          { id: "rl-reading", label: "Reading", color: "#3b82f6" },
+          { id: "rl-finished", label: "Finished", color: "#22c55e" },
+          { id: "rl-reference", label: "Reference", color: "#8b5cf6" },
+        ],
+        defaultValue: "rl-unread",
+      },
+      {
+        name: "Tags",
+        type: "multiSelect",
+        options: [
+          { id: "rl-tech", label: "Tech", color: "#3b82f6" },
+          { id: "rl-science", label: "Science", color: "#22c55e" },
+          { id: "rl-business", label: "Business", color: "#f97316" },
+          { id: "rl-design", label: "Design", color: "#ec4899" },
+          { id: "rl-writing", label: "Writing", color: "#8b5cf6" },
+        ],
+      },
       { name: "Rating", type: "number" },
       { name: "Added", type: "date" },
       { name: "Notes", type: "text" },
@@ -728,12 +833,16 @@ export const BUILT_IN_OBJECT_TYPES: ObjectType[] = [
     defaultSorts: [{ propertyName: "Date", direction: "desc" }],
     properties: [
       { name: "Food Name", type: "text" },
-      { name: "Meal", type: "select", options: [
-        { id: "fl-breakfast", label: "Breakfast", color: "#eab308" },
-        { id: "fl-lunch", label: "Lunch", color: "#22c55e" },
-        { id: "fl-dinner", label: "Dinner", color: "#3b82f6" },
-        { id: "fl-snack", label: "Snack", color: "#f97316" },
-      ]},
+      {
+        name: "Meal",
+        type: "select",
+        options: [
+          { id: "fl-breakfast", label: "Breakfast", color: "#eab308" },
+          { id: "fl-lunch", label: "Lunch", color: "#22c55e" },
+          { id: "fl-dinner", label: "Dinner", color: "#3b82f6" },
+          { id: "fl-snack", label: "Snack", color: "#f97316" },
+        ],
+      },
       { name: "Calories", type: "number" },
       { name: "Protein", type: "number" },
       { name: "Carbs", type: "number" },
@@ -751,13 +860,17 @@ export const BUILT_IN_OBJECT_TYPES: ObjectType[] = [
     defaultSorts: [{ propertyName: "Date", direction: "desc" }],
     properties: [
       { name: "Exercise", type: "text" },
-      { name: "Type", type: "select", options: [
-        { id: "wl-strength", label: "Strength", color: "#ef4444" },
-        { id: "wl-cardio", label: "Cardio", color: "#22c55e" },
-        { id: "wl-flexibility", label: "Flexibility", color: "#8b5cf6" },
-        { id: "wl-hiit", label: "HIIT", color: "#f97316" },
-        { id: "wl-sport", label: "Sport", color: "#3b82f6" },
-      ]},
+      {
+        name: "Type",
+        type: "select",
+        options: [
+          { id: "wl-strength", label: "Strength", color: "#ef4444" },
+          { id: "wl-cardio", label: "Cardio", color: "#22c55e" },
+          { id: "wl-flexibility", label: "Flexibility", color: "#8b5cf6" },
+          { id: "wl-hiit", label: "HIIT", color: "#f97316" },
+          { id: "wl-sport", label: "Sport", color: "#3b82f6" },
+        ],
+      },
       { name: "Sets", type: "number" },
       { name: "Reps", type: "number" },
       { name: "Weight", type: "number" },
@@ -770,39 +883,58 @@ export const BUILT_IN_OBJECT_TYPES: ObjectType[] = [
     id: "builtin-sprint",
     name: "Sprint",
     icon: "\ud83c\udfc3",
-    description: "Agile sprint board with story points, assignees, and status tracking",
+    description:
+      "Agile sprint board with story points, assignees, and status tracking",
     builtIn: true,
     defaultViewType: "board",
     defaultGroupByPropertyName: "Status",
     defaultSorts: [{ propertyName: "Priority", direction: "desc" }],
     properties: [
       { name: "Story", type: "text" },
-      { name: "Status", type: "select", options: [
-        { id: "sp-backlog", label: "Backlog", color: "#6b7280" },
-        { id: "sp-todo", label: "To Do", color: "#3b82f6" },
-        { id: "sp-in-progress", label: "In Progress", color: "#eab308" },
-        { id: "sp-review", label: "In Review", color: "#8b5cf6" },
-        { id: "sp-done", label: "Done", color: "#22c55e" },
-      ], defaultValue: "sp-backlog" },
-      { name: "Priority", type: "select", options: [
-        { id: "sp-pri-low", label: "Low", color: "#6b7280" },
-        { id: "sp-pri-medium", label: "Medium", color: "#eab308" },
-        { id: "sp-pri-high", label: "High", color: "#f97316" },
-        { id: "sp-pri-critical", label: "Critical", color: "#ef4444" },
-      ], defaultValue: "sp-pri-medium" },
+      {
+        name: "Status",
+        type: "select",
+        options: [
+          { id: "sp-backlog", label: "Backlog", color: "#6b7280" },
+          { id: "sp-todo", label: "To Do", color: "#3b82f6" },
+          { id: "sp-in-progress", label: "In Progress", color: "#eab308" },
+          { id: "sp-review", label: "In Review", color: "#8b5cf6" },
+          { id: "sp-done", label: "Done", color: "#22c55e" },
+        ],
+        defaultValue: "sp-backlog",
+      },
+      {
+        name: "Priority",
+        type: "select",
+        options: [
+          { id: "sp-pri-low", label: "Low", color: "#6b7280" },
+          { id: "sp-pri-medium", label: "Medium", color: "#eab308" },
+          { id: "sp-pri-high", label: "High", color: "#f97316" },
+          { id: "sp-pri-critical", label: "Critical", color: "#ef4444" },
+        ],
+        defaultValue: "sp-pri-medium",
+      },
       { name: "Points", type: "number" },
       { name: "Assignee", type: "text" },
-      { name: "Sprint", type: "select", options: [
-        { id: "sp-sprint-1", label: "Sprint 1", color: "#3b82f6" },
-        { id: "sp-sprint-2", label: "Sprint 2", color: "#22c55e" },
-        { id: "sp-sprint-3", label: "Sprint 3", color: "#8b5cf6" },
-      ]},
-      { name: "Type", type: "select", options: [
-        { id: "sp-feature", label: "Feature", color: "#3b82f6" },
-        { id: "sp-bug", label: "Bug", color: "#ef4444" },
-        { id: "sp-chore", label: "Chore", color: "#6b7280" },
-        { id: "sp-spike", label: "Spike", color: "#eab308" },
-      ]},
+      {
+        name: "Sprint",
+        type: "select",
+        options: [
+          { id: "sp-sprint-1", label: "Sprint 1", color: "#3b82f6" },
+          { id: "sp-sprint-2", label: "Sprint 2", color: "#22c55e" },
+          { id: "sp-sprint-3", label: "Sprint 3", color: "#8b5cf6" },
+        ],
+      },
+      {
+        name: "Type",
+        type: "select",
+        options: [
+          { id: "sp-feature", label: "Feature", color: "#3b82f6" },
+          { id: "sp-bug", label: "Bug", color: "#ef4444" },
+          { id: "sp-chore", label: "Chore", color: "#6b7280" },
+          { id: "sp-spike", label: "Spike", color: "#eab308" },
+        ],
+      },
       { name: "Due Date", type: "date" },
     ],
   },
@@ -816,22 +948,30 @@ export const BUILT_IN_OBJECT_TYPES: ObjectType[] = [
     properties: [
       { name: "Description", type: "text" },
       { name: "Amount", type: "number" },
-      { name: "Type", type: "select", options: [
-        { id: "bud-income", label: "Income", color: "#22c55e" },
-        { id: "bud-expense", label: "Expense", color: "#ef4444" },
-        { id: "bud-transfer", label: "Transfer", color: "#6b7280" },
-      ]},
-      { name: "Category", type: "select", options: [
-        { id: "bud-housing", label: "Housing", color: "#3b82f6" },
-        { id: "bud-food", label: "Food", color: "#f97316" },
-        { id: "bud-transport", label: "Transport", color: "#eab308" },
-        { id: "bud-utilities", label: "Utilities", color: "#06b6d4" },
-        { id: "bud-entertainment", label: "Entertainment", color: "#ec4899" },
-        { id: "bud-health", label: "Health", color: "#22c55e" },
-        { id: "bud-shopping", label: "Shopping", color: "#8b5cf6" },
-        { id: "bud-salary", label: "Salary", color: "#22c55e" },
-        { id: "bud-other", label: "Other", color: "#6b7280" },
-      ]},
+      {
+        name: "Type",
+        type: "select",
+        options: [
+          { id: "bud-income", label: "Income", color: "#22c55e" },
+          { id: "bud-expense", label: "Expense", color: "#ef4444" },
+          { id: "bud-transfer", label: "Transfer", color: "#6b7280" },
+        ],
+      },
+      {
+        name: "Category",
+        type: "select",
+        options: [
+          { id: "bud-housing", label: "Housing", color: "#3b82f6" },
+          { id: "bud-food", label: "Food", color: "#f97316" },
+          { id: "bud-transport", label: "Transport", color: "#eab308" },
+          { id: "bud-utilities", label: "Utilities", color: "#06b6d4" },
+          { id: "bud-entertainment", label: "Entertainment", color: "#ec4899" },
+          { id: "bud-health", label: "Health", color: "#22c55e" },
+          { id: "bud-shopping", label: "Shopping", color: "#8b5cf6" },
+          { id: "bud-salary", label: "Salary", color: "#22c55e" },
+          { id: "bud-other", label: "Other", color: "#6b7280" },
+        ],
+      },
       { name: "Account", type: "text" },
       { name: "Date", type: "date" },
       { name: "Recurring", type: "checkbox", defaultValue: false },
@@ -853,7 +993,9 @@ export function createDefaultRow(properties: PropertyDef[]): DatabaseRow {
 }
 
 // Create database content from an object type
-export function createDatabaseFromObjectType(objectType: ObjectType): DatabaseContentV2 {
+export function createDatabaseFromObjectType(
+  objectType: ObjectType
+): DatabaseContentV2 {
   const properties: PropertyDef[] = objectType.properties.map((p) => ({
     id: crypto.randomUUID(),
     name: p.name,
@@ -868,21 +1010,28 @@ export function createDatabaseFromObjectType(objectType: ObjectType): DatabaseCo
   // Resolve sorts from property names to IDs
   const sorts = (objectType.defaultSorts ?? [])
     .filter((s) => propIdByName.has(s.propertyName))
-    .map((s) => ({ propertyId: propIdByName.get(s.propertyName)!, direction: s.direction }));
+    .map((s) => ({
+      propertyId: propIdByName.get(s.propertyName)!,
+      direction: s.direction,
+    }));
 
   // Resolve filters from property names to IDs
   const filters = (objectType.defaultFilters ?? [])
     .filter((f) => propIdByName.has(f.propertyName))
-    .map((f) => ({ propertyId: propIdByName.get(f.propertyName)!, operator: f.operator, value: f.value }));
+    .map((f) => ({
+      propertyId: propIdByName.get(f.propertyName)!,
+      operator: f.operator,
+      value: f.value,
+    }));
 
   // Resolve group-by
   const groupByPropertyId = objectType.defaultGroupByPropertyName
-    ? propIdByName.get(objectType.defaultGroupByPropertyName) ?? null
+    ? (propIdByName.get(objectType.defaultGroupByPropertyName) ?? null)
     : null;
 
   // Resolve date property (calendar)
   const datePropertyId = objectType.defaultDatePropertyName
-    ? propIdByName.get(objectType.defaultDatePropertyName) ?? null
+    ? (propIdByName.get(objectType.defaultDatePropertyName) ?? null)
     : null;
 
   // Build view config
@@ -896,12 +1045,20 @@ export function createDatabaseFromObjectType(objectType: ObjectType): DatabaseCo
     config = { datePropertyId };
   }
 
-  const viewName = viewType === "board" ? "Board" :
-    viewType === "gallery" ? "Gallery" :
-    viewType === "list" ? "List" :
-    viewType === "calendar" ? "Calendar" :
-    viewType === "chart" ? "Chart" :
-    viewType === "timeline" ? "Timeline" : "Table";
+  const viewName =
+    viewType === "board"
+      ? "Board"
+      : viewType === "gallery"
+        ? "Gallery"
+        : viewType === "list"
+          ? "List"
+          : viewType === "calendar"
+            ? "Calendar"
+            : viewType === "chart"
+              ? "Chart"
+              : viewType === "timeline"
+                ? "Timeline"
+                : "Table";
 
   return {
     version: 2,

@@ -15,6 +15,7 @@ import type {
   RollupConfig,
   FormulaConfig,
 } from "../../types/database";
+import { generateId } from "../../utils/generateId";
 import {
   migrateDatabaseContent,
   createDefaultDatabaseContent,
@@ -77,6 +78,9 @@ export function DatabaseEditor({
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
+  // Set when a save fails so the failure is visible instead of silently
+  // console.error'd (the edit otherwise looks saved but is only in the outbox).
+  const [saveError, setSaveError] = useState<string | null>(null);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Latest debounced-but-not-yet-saved content, so unmount can flush it (DL-38).
   const pendingContentRef = useRef<DatabaseContentV2 | null>(null);
@@ -174,13 +178,16 @@ export function DatabaseEditor({
             page.id,
             newContent as unknown as Record<string, unknown>,
             baselineRowIdsRef.current,
-            baselineContentRef.current as unknown as Record<string, unknown> | undefined
+            baselineContentRef.current as unknown as
+              | Record<string, unknown>
+              | undefined
           );
           pendingContentRef.current = null; // saved
           baselineRowIdsRef.current = newContent.rows.map((r) => r.id);
           // What we just wrote is now (our view of) disk → next save's merge base.
           baselineContentRef.current = newContent;
           setLastSaved(new Date());
+          setSaveError(null);
           // An external write arrived mid-edit; now that our edit is saved
           // (and merged server-side), pull the merged result onto screen.
           if (pendingExternalRefreshRef.current) {
@@ -189,6 +196,9 @@ export function DatabaseEditor({
           }
         } catch (err) {
           console.error("Failed to save database:", err);
+          setSaveError(
+            err instanceof Error ? err.message : "Failed to save changes"
+          );
         } finally {
           setIsSaving(false);
         }
@@ -205,6 +215,11 @@ export function DatabaseEditor({
   flushPendingSaveRef.current = () => {
     const pending = pendingContentRef.current;
     if (!pending || !notebookId || !page) return;
+    // Cancel the debounce so it doesn't re-fire and redundantly re-save.
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = null;
+    }
     pendingContentRef.current = null;
     const p = api
       .putDatabase(
@@ -212,7 +227,9 @@ export function DatabaseEditor({
         page.id,
         pending as unknown as Record<string, unknown>,
         baselineRowIdsRef.current,
-        baselineContentRef.current as unknown as Record<string, unknown> | undefined
+        baselineContentRef.current as unknown as
+          | Record<string, unknown>
+          | undefined
       )
       .then(() => {})
       .catch((err) =>
@@ -228,6 +245,25 @@ export function DatabaseEditor({
       flushPendingSaveRef.current();
     };
   }, []);
+
+  // Flush a pending debounced save before the tab is reloaded/closed or hidden.
+  // A browser reload doesn't go through the in-app selectPage path (which awaits
+  // the unmount flush), so without this a rename/filter/config edit made within
+  // the 800ms debounce window is lost on reload. Mirrors the text editors'
+  // visibilitychange/beforeunload flush (BlockNoteEditor.tsx).
+  useEffect(() => {
+    if (isInlineMode) return;
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") flushPendingSaveRef.current();
+    };
+    const onBeforeUnload = () => flushPendingSaveRef.current();
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("beforeunload", onBeforeUnload);
+    };
+  }, [isInlineMode]);
 
   // Reload content from disk (e.g., after a plugin or MCP server modifies the database).
   // Cancels any pending debounced save to prevent overwriting the fresh data.
@@ -362,8 +398,8 @@ export function DatabaseEditor({
     ) => {
       if (type === "relation" && relationConfig && notebookId && page) {
         // Bidirectional: create forward property in this DB, then back-relation in target DB
-        const forwardPropId = crypto.randomUUID();
-        const backPropId = crypto.randomUUID();
+        const forwardPropId = generateId();
+        const backPropId = generateId();
 
         // 1. Create forward property with backRelationPropertyId
         handleUpdateContent((prev) => ({
@@ -430,7 +466,7 @@ export function DatabaseEditor({
           properties: [
             ...prev.properties,
             {
-              id: crypto.randomUUID(),
+              id: generateId(),
               name,
               type: "rollup" as const,
               rollupConfig,
@@ -443,7 +479,7 @@ export function DatabaseEditor({
           properties: [
             ...prev.properties,
             {
-              id: crypto.randomUUID(),
+              id: generateId(),
               name,
               type: "formula" as const,
               formulaConfig,
@@ -456,7 +492,7 @@ export function DatabaseEditor({
           properties: [
             ...prev.properties,
             {
-              id: crypto.randomUUID(),
+              id: generateId(),
               name,
               type,
               ...(relationConfig ? { relationConfig } : {}),
@@ -588,9 +624,7 @@ export function DatabaseEditor({
       if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) {
         e.preventDefault();
         handleUndo();
-      } else if (
-        (e.ctrlKey || e.metaKey) && e.key === "z" && e.shiftKey
-      ) {
+      } else if ((e.ctrlKey || e.metaKey) && e.key === "z" && e.shiftKey) {
         e.preventDefault();
         handleRedo();
       } else if ((e.ctrlKey || e.metaKey) && e.key === "y") {
@@ -605,7 +639,8 @@ export function DatabaseEditor({
   // Report undo/redo state to parent
   useEffect(() => {
     onUndoRedoStateChange?.({
-      canUndo: undoStackRef.current.length > 0 || pendingBaselineRef.current !== null,
+      canUndo:
+        undoStackRef.current.length > 0 || pendingBaselineRef.current !== null,
       canRedo: redoStackRef.current.length > 0,
       historyCount: undoStackRef.current.length,
       onUndo: handleUndo,
@@ -785,11 +820,18 @@ export function DatabaseEditor({
   };
 
   return (
-    <div className={`db-editor ${compact ? "db-editor-compact" : ""} ${className ?? ""}`}>
+    <div
+      className={`db-editor ${compact ? "db-editor-compact" : ""} ${className ?? ""}`}
+    >
       {!isInlineMode && (
         <div className="db-save-indicator">
           {isSaving && <span className="db-saving">Saving...</span>}
-          {!isSaving && lastSaved && (
+          {!isSaving && saveError && (
+            <span className="db-save-error" title={saveError}>
+              ⚠ Not saved — {saveError}
+            </span>
+          )}
+          {!isSaving && !saveError && lastSaved && (
             <span className="db-saved">
               Saved at {lastSaved.toLocaleTimeString()}
             </span>

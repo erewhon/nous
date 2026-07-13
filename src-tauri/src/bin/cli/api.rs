@@ -818,6 +818,11 @@ pub fn build_router(state: AppState, auth: AuthState) -> Router {
         // WebSocket event stream
         .route("/api/events", get(ws_events))
         .layer(middleware::from_fn_with_state(auth, auth_middleware))
+        // Raise the default 2 MB body limit for the whole API. Whole-content
+        // writes (databases send content + an equal-sized merge baseline) exceed
+        // 2 MB for even modestly large databases. The asset route keeps its own
+        // (larger) per-route limit above; this governs every other route.
+        .layer(axum::extract::DefaultBodyLimit::max(API_BODY_LIMIT))
         .layer(
             // Clients authenticate via Bearer token, so allow any origin. The
             // Tauri webview's origin varies by platform (tauri://localhost,
@@ -3197,6 +3202,15 @@ async fn ai_configure(
 // command but writes atomically.
 
 const NOTEBOOK_ASSET_BODY_LIMIT: usize = 50 * 1024 * 1024;
+
+/// Body-size limit for the JSON API routes. Axum's default is 2 MB, which is
+/// too small for whole-content writes: a database PUT sends the full content
+/// *plus* an equal-sized `baseline` for the 3-way merge (DL-04), so a database
+/// only ~1 MB on disk produces a ~2+ MB request and gets rejected with HTTP 413
+/// — silently blocking all edits (rename/filter/view/card config) to large
+/// databases from the web frontend. This is a local single-writer daemon behind
+/// an auth gate, so a generous limit is safe.
+const API_BODY_LIMIT: usize = 64 * 1024 * 1024;
 
 /// Resolve a request path inside a notebook's assets directory.
 ///

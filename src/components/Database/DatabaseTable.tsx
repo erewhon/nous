@@ -11,6 +11,7 @@ import type {
   TableViewConfig,
   SummaryAggregation,
 } from "../../types/database";
+import { generateId } from "../../utils/generateId";
 import { createDefaultRow } from "../../types/database";
 import {
   TextCell,
@@ -373,7 +374,7 @@ export function DatabaseTable({
       const existing =
         content.properties.find((p) => p.id === propertyId)?.options ?? [];
       const newOption: SelectOption = {
-        id: crypto.randomUUID(),
+        id: generateId(),
         label,
         color: pickNextColor(existing),
       };

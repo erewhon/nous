@@ -7,6 +7,7 @@ import type {
   ListViewConfig,
   SelectOption,
 } from "../../types/database";
+import { generateId } from "../../utils/generateId";
 import { createDefaultRow } from "../../types/database";
 import { formatNumber } from "./formatNumber";
 import { pickNextColor } from "./CellEditors";
@@ -116,7 +117,7 @@ export function DatabaseList({
       const existing =
         content.properties.find((p) => p.id === propertyId)?.options ?? [];
       const newOption: SelectOption = {
-        id: crypto.randomUUID(),
+        id: generateId(),
         label,
         color: pickNextColor(existing),
       };

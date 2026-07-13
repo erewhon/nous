@@ -6,6 +6,7 @@ import type {
   PropertyDef,
   CustomViewConfig,
 } from "../../types/database";
+import { generateId } from "../../utils/generateId";
 import { useThemeStore } from "../../stores/themeStore";
 import {
   getCustomDatabaseViews,
@@ -232,6 +233,9 @@ export function DatabaseViewTabs({
   const [contextMenuPos, setContextMenuPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [renamingViewId, setRenamingViewId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
+  // Drag-to-reorder tab state.
+  const [draggedViewId, setDraggedViewId] = useState<string | null>(null);
+  const [dragOverViewId, setDragOverViewId] = useState<string | null>(null);
   const addMenuRef = useRef<HTMLDivElement>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
@@ -291,7 +295,7 @@ export function DatabaseViewTabs({
   };
 
   const addView = (type: DatabaseViewType) => {
-    const id = crypto.randomUUID();
+    const id = generateId();
     let config: DatabaseView["config"] = {};
     if (type === "board") {
       const selectProp = properties.find(
@@ -347,7 +351,7 @@ export function DatabaseViewTabs({
   };
 
   const addCustomView = (contribution: CustomDatabaseViewContribution) => {
-    const id = crypto.randomUUID();
+    const id = generateId();
     const config: CustomViewConfig = {
       customViewId: contribution.id,
       viewConfig: {},
@@ -384,7 +388,7 @@ export function DatabaseViewTabs({
   const duplicateView = (viewId: string) => {
     const source = views.find((v) => v.id === viewId);
     if (!source) return;
-    const newId = crypto.randomUUID();
+    const newId = generateId();
     const newView: DatabaseView = {
       ...source,
       id: newId,
@@ -420,19 +424,58 @@ export function DatabaseViewTabs({
     setRenamingViewId(null);
   };
 
+  // Reorder tabs: move the dragged view to the dropped-on view's position.
+  const moveView = (fromId: string, toId: string) => {
+    if (fromId === toId) return;
+    onUpdateContent((prev) => {
+      const arr = [...prev.views];
+      const from = arr.findIndex((v) => v.id === fromId);
+      const to = arr.findIndex((v) => v.id === toId);
+      if (from === -1 || to === -1) return prev;
+      const [moved] = arr.splice(from, 1);
+      arr.splice(to, 0, moved);
+      return { ...prev, views: arr };
+    });
+  };
+
+  const clearDrag = () => {
+    setDraggedViewId(null);
+    setDragOverViewId(null);
+  };
+
   return (
     <div className="db-view-tabs-wrapper">
     <div className="db-view-tabs">
       {views.map((view) => (
         <div
           key={view.id}
-          className={`db-view-tab ${view.id === activeViewId ? "db-view-tab-active" : ""}`}
+          className={`db-view-tab ${view.id === activeViewId ? "db-view-tab-active" : ""} ${dragOverViewId === view.id && draggedViewId !== view.id ? "db-view-tab-dragover" : ""} ${draggedViewId === view.id ? "db-view-tab-dragging" : ""}`}
+          draggable={renamingViewId !== view.id}
           onClick={() => onSelectView(view.id)}
           onContextMenu={(e) => {
             e.preventDefault();
             setContextMenuPos({ x: e.clientX, y: e.clientY });
             setContextMenuViewId(view.id);
           }}
+          onDragStart={(e) => {
+            setDraggedViewId(view.id);
+            e.dataTransfer.effectAllowed = "move";
+          }}
+          onDragOver={(e) => {
+            if (!draggedViewId || draggedViewId === view.id) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "move";
+            if (dragOverViewId !== view.id) setDragOverViewId(view.id);
+          }}
+          onDragLeave={() => {
+            if (dragOverViewId === view.id) setDragOverViewId(null);
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            if (draggedViewId) moveView(draggedViewId, view.id);
+            clearDrag();
+          }}
+          onDragEnd={clearDrag}
         >
           {view.type === "custom" ? (
             <CustomViewIcon
