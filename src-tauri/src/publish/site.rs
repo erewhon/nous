@@ -482,6 +482,15 @@ fn build_nav_html(
         }
     }
 
+    // Present pages in the notebook's manual order (matching the app sidebar),
+    // not the `updated_at` order `list_pages` hands us. Mirrors the docs nav.
+    let by_position =
+        |a: &&Page, b: &&Page| a.position.cmp(&b.position).then_with(|| a.title.cmp(&b.title));
+    root_pages.sort_by(by_position);
+    for fps in folder_pages.values_mut() {
+        fps.sort_by(by_position);
+    }
+
     let mut html = String::new();
 
     // Root pages first
@@ -991,6 +1000,26 @@ mod tests {
     /// multi-page site served under `pub.nous.page/{id}/` resolves them within the
     /// share prefix instead of at the host root (which would 404). The serve
     /// route's trailing-slash redirect depends on this invariant.
+    /// The table-of-contents nav must follow the manual page order (`position`),
+    /// not the `updated_at` order that `list_pages` returns.
+    #[test]
+    fn nav_orders_root_pages_by_position() {
+        let nb = Uuid::new_v4();
+        let mut a = Page::new(nb, "Alpha".to_string());
+        let mut b = Page::new(nb, "Bravo".to_string());
+        let mut c = Page::new(nb, "Charlie".to_string());
+        a.position = 2;
+        b.position = 0;
+        c.position = 1;
+        // Pass them in a deliberately scrambled (updated_at-like) order.
+        let pages = vec![a, c, b];
+        let html = build_nav_html(&pages, &[], &HashMap::new(), "academic");
+        let ia = html.find("Alpha").unwrap();
+        let ib = html.find("Bravo").unwrap();
+        let ic = html.find("Charlie").unwrap();
+        assert!(ib < ic && ic < ia, "expected Bravo(0) < Charlie(1) < Alpha(2): {html}");
+    }
+
     #[test]
     fn nav_item_links_are_relative() {
         for theme in ["blog", "documentation", "minimal"] {

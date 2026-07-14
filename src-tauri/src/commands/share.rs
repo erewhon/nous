@@ -245,6 +245,9 @@ pub struct ShareFolderRequest {
     pub site_title: Option<String>,
     #[serde(default)]
     pub upload_external: bool,
+    /// Optional allowlist of page ids to publish (None/empty = all pages).
+    #[serde(default)]
+    pub page_ids: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -257,6 +260,9 @@ pub struct ShareSectionRequest {
     pub site_title: Option<String>,
     #[serde(default)]
     pub upload_external: bool,
+    /// Optional allowlist of page ids to publish (None/empty = all pages).
+    #[serde(default)]
+    pub page_ids: Option<Vec<String>>,
 }
 
 #[tauri::command]
@@ -290,6 +296,7 @@ pub async fn share_folder(
     };
 
     // Generate site in a blocking task
+    let allowlist = publish::parse_page_allowlist(&request.page_ids);
     let (site_dir, record) = tokio::task::spawn_blocking(move || {
         let storage = storage.lock().map_err(|e| e.to_string())?;
 
@@ -313,6 +320,7 @@ pub async fn share_folder(
             .into_iter()
             .filter(|p| {
                 p.deleted_at.is_none()
+                    && allowlist.as_ref().map_or(true, |a| a.contains(&p.id))
                     && p.folder_id.map_or(false, |fid| folder_ids.contains(&fid))
             })
             .collect();
@@ -406,6 +414,7 @@ pub async fn share_section(
     };
 
     // Generate site in a blocking task
+    let allowlist = publish::parse_page_allowlist(&request.page_ids);
     let (site_dir, record) = tokio::task::spawn_blocking(move || {
         let storage = storage.lock().map_err(|e| e.to_string())?;
 
@@ -424,7 +433,11 @@ pub async fn share_section(
         // Filter pages in section, not deleted
         let pages: Vec<_> = all_pages
             .into_iter()
-            .filter(|p| p.deleted_at.is_none() && p.section_id == Some(section_id))
+            .filter(|p| {
+                p.deleted_at.is_none()
+                    && allowlist.as_ref().map_or(true, |a| a.contains(&p.id))
+                    && p.section_id == Some(section_id)
+            })
             .collect();
 
         // Filter folders in section
@@ -494,6 +507,9 @@ pub struct ShareNotebookRequest {
     pub site_title: Option<String>,
     #[serde(default)]
     pub upload_external: bool,
+    /// Optional allowlist of page ids to publish (None/empty = all pages).
+    #[serde(default)]
+    pub page_ids: Option<Vec<String>>,
 }
 
 #[tauri::command]
@@ -525,6 +541,7 @@ pub async fn share_notebook(
     };
 
     // Generate site in a blocking task
+    let allowlist = publish::parse_page_allowlist(&request.page_ids);
     let (site_dir, record) = tokio::task::spawn_blocking(move || {
         let storage = storage.lock().map_err(|e| e.to_string())?;
 
@@ -540,7 +557,10 @@ pub async fn share_notebook(
         // Include all non-deleted pages
         let pages: Vec<_> = all_pages
             .into_iter()
-            .filter(|p| p.deleted_at.is_none())
+            .filter(|p| {
+                p.deleted_at.is_none()
+                    && allowlist.as_ref().map_or(true, |a| a.contains(&p.id))
+            })
             .collect();
 
         let page_count = pages.len();
@@ -632,6 +652,7 @@ pub async fn publish_folder_to_nous(
     let (data_dir, publisher_id) = publish_identity(&state)?;
 
     // Render the folder mini-site under the storage lock, off the async thread.
+    let allowlist = publish::parse_page_allowlist(&request.page_ids);
     let (site_dir, record) = tokio::task::spawn_blocking(move || {
         let storage = storage.lock().map_err(|e| e.to_string())?;
 
@@ -650,6 +671,7 @@ pub async fn publish_folder_to_nous(
             .into_iter()
             .filter(|p| {
                 p.deleted_at.is_none()
+                    && allowlist.as_ref().map_or(true, |a| a.contains(&p.id))
                     && p.folder_id.map_or(false, |fid| folder_ids.contains(&fid))
             })
             .collect();
@@ -694,6 +716,7 @@ pub async fn publish_section_to_nous(
 
     let (data_dir, publisher_id) = publish_identity(&state)?;
 
+    let allowlist = publish::parse_page_allowlist(&request.page_ids);
     let (site_dir, record) = tokio::task::spawn_blocking(move || {
         let storage = storage.lock().map_err(|e| e.to_string())?;
 
@@ -710,7 +733,11 @@ pub async fn publish_section_to_nous(
 
         let pages: Vec<_> = all_pages
             .into_iter()
-            .filter(|p| p.deleted_at.is_none() && p.section_id == Some(section_id))
+            .filter(|p| {
+                p.deleted_at.is_none()
+                    && allowlist.as_ref().map_or(true, |a| a.contains(&p.id))
+                    && p.section_id == Some(section_id)
+            })
             .collect();
         let folders: Vec<_> = all_folders
             .into_iter()
@@ -751,6 +778,7 @@ pub async fn publish_notebook_to_nous(
 
     let (data_dir, publisher_id) = publish_identity(&state)?;
 
+    let allowlist = publish::parse_page_allowlist(&request.page_ids);
     let (site_dir, record) = tokio::task::spawn_blocking(move || {
         let storage = storage.lock().map_err(|e| e.to_string())?;
 
@@ -765,7 +793,10 @@ pub async fn publish_notebook_to_nous(
 
         let pages: Vec<_> = all_pages
             .into_iter()
-            .filter(|p| p.deleted_at.is_none())
+            .filter(|p| {
+                p.deleted_at.is_none()
+                    && allowlist.as_ref().map_or(true, |a| a.contains(&p.id))
+            })
             .collect();
 
         let page_count = pages.len();

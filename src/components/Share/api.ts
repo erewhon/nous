@@ -80,16 +80,17 @@ export async function publishFolderToNous(
   folderId: string,
   theme: string,
   expiry: string,
-  siteTitle?: string
+  siteTitle?: string,
+  pageIds?: string[]
 ): Promise<PublishToNousResponse> {
   if (isTauri()) {
     return invoke("publish_folder_to_nous", {
-      request: { notebookId, folderId, theme, expiry, siteTitle },
+      request: { notebookId, folderId, theme, expiry, siteTitle, pageIds },
     });
   }
   return daemonPost<PublishToNousResponse>(
     `/api/notebooks/${notebookId}/folders/${folderId}/publish-nous`,
-    { theme, expiry }
+    { theme, expiry, pageIds }
   );
 }
 
@@ -102,16 +103,17 @@ export async function publishSectionToNous(
   sectionId: string,
   theme: string,
   expiry: string,
-  siteTitle?: string
+  siteTitle?: string,
+  pageIds?: string[]
 ): Promise<PublishToNousResponse> {
   if (isTauri()) {
     return invoke("publish_section_to_nous", {
-      request: { notebookId, sectionId, theme, expiry, siteTitle },
+      request: { notebookId, sectionId, theme, expiry, siteTitle, pageIds },
     });
   }
   return daemonPost<PublishToNousResponse>(
     `/api/notebooks/${notebookId}/sections/${sectionId}/publish-nous`,
-    { theme, expiry }
+    { theme, expiry, pageIds }
   );
 }
 
@@ -123,16 +125,17 @@ export async function publishNotebookToNous(
   notebookId: string,
   theme: string,
   expiry: string,
-  siteTitle?: string
+  siteTitle?: string,
+  pageIds?: string[]
 ): Promise<PublishToNousResponse> {
   if (isTauri()) {
     return invoke("publish_notebook_to_nous", {
-      request: { notebookId, theme, expiry, siteTitle },
+      request: { notebookId, theme, expiry, siteTitle, pageIds },
     });
   }
   return daemonPost<PublishToNousResponse>(
     `/api/notebooks/${notebookId}/publish-nous`,
-    { theme, expiry }
+    { theme, expiry, pageIds }
   );
 }
 
@@ -152,10 +155,11 @@ export async function shareFolder(
   theme: string,
   expiry: string,
   uploadExternal: boolean = false,
-  siteTitle?: string
+  siteTitle?: string,
+  pageIds?: string[]
 ): Promise<SharePageResponse> {
   return invoke("share_folder", {
-    request: { notebookId, folderId, theme, expiry, uploadExternal, siteTitle },
+    request: { notebookId, folderId, theme, expiry, uploadExternal, siteTitle, pageIds },
   });
 }
 
@@ -165,10 +169,11 @@ export async function shareSection(
   theme: string,
   expiry: string,
   uploadExternal: boolean = false,
-  siteTitle?: string
+  siteTitle?: string,
+  pageIds?: string[]
 ): Promise<SharePageResponse> {
   return invoke("share_section", {
-    request: { notebookId, sectionId, theme, expiry, uploadExternal, siteTitle },
+    request: { notebookId, sectionId, theme, expiry, uploadExternal, siteTitle, pageIds },
   });
 }
 
@@ -177,10 +182,11 @@ export async function shareNotebook(
   theme: string,
   expiry: string,
   uploadExternal: boolean = false,
-  siteTitle?: string
+  siteTitle?: string,
+  pageIds?: string[]
 ): Promise<SharePageResponse> {
   return invoke("share_notebook", {
-    request: { notebookId, theme, expiry, uploadExternal, siteTitle },
+    request: { notebookId, theme, expiry, uploadExternal, siteTitle, pageIds },
   });
 }
 

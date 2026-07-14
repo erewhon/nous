@@ -32,9 +32,19 @@ vi.mock("../../stores/notebookStore", () => ({
     sel({ selectedNotebookId: "nb-1" }),
 }));
 vi.mock("../../stores/pageStore", () => ({
-  usePageStore: (
-    sel: (s: { pages: Array<{ id: string; title: string }>; selectedPageId: string }) => unknown,
-  ) => sel({ pages: [{ id: "pg-1", title: "Doc" }], selectedPageId: "pg-1" }),
+  usePageStore: (sel: (s: unknown) => unknown) =>
+    sel({
+      pages: [
+        { id: "pg-1", title: "Doc", folderId: null, position: 0 },
+        { id: "pg-2", title: "Talk A", folderId: "fld-1", position: 0 },
+        { id: "pg-3", title: "Talk B", folderId: "fld-1", position: 1 },
+      ],
+      selectedPageId: "pg-1",
+    }),
+}));
+vi.mock("../../stores/folderStore", () => ({
+  useFolderStore: (sel: (s: unknown) => unknown) =>
+    sel({ folders: [{ id: "fld-1", parentId: null }] }),
 }));
 vi.mock("../../stores/toastStore", () => ({
   useToastStore: () => ({ success: vi.fn(), error: vi.fn() }),
@@ -103,12 +113,48 @@ describe("ShareDialog publish destination", () => {
         "minimal",
         "1w",
         "My Folder",
+        undefined,
       ),
     );
     expect(publishToNous).not.toHaveBeenCalled();
     expect(
       await screen.findByDisplayValue("https://pub.nous.page/fold1234/"),
     ).toBeInTheDocument();
+  });
+
+  it("excludes a deselected page from a folder publish (Advanced → choose pages)", async () => {
+    publishFolderToNous.mockResolvedValue({
+      share: { id: "fold1234", expiresAt: null },
+      url: "https://pub.nous.page/fold1234/",
+    });
+
+    render(
+      <ShareDialog
+        isOpen
+        onClose={() => {}}
+        folderId="fld-1"
+        folderName="My Folder"
+        notebookId="nb-1"
+      />,
+    );
+    await waitFor(() => expect(getShareUploadConfig).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole("button", { name: "Nous" }));
+    // Open the advanced page picker and deselect "Talk B" (pg-3).
+    fireEvent.click(screen.getByRole("button", { name: /Choose pages/ }));
+    fireEvent.click(screen.getByLabelText("Talk B"));
+    fireEvent.click(screen.getByRole("button", { name: "Share" }));
+
+    await waitFor(() =>
+      expect(publishFolderToNous).toHaveBeenCalledWith(
+        "nb-1",
+        "fld-1",
+        "minimal",
+        "1w",
+        "My Folder",
+        ["pg-2"],
+      ),
+    );
   });
 
   it("uses the local daemon (sharePage) by default, not Nous", async () => {

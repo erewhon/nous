@@ -2,9 +2,11 @@
 //! (`commands/share.rs`) and the daemon HTTP endpoint (`bin/cli/api.rs`) so the
 //! render → sign → upload path stays identical regardless of entry point.
 
+use std::collections::HashSet;
 use std::path::Path;
 
 use chrono::Duration;
+use uuid::Uuid;
 
 use super::publish_token;
 use super::storage::ShareRecord;
@@ -12,6 +14,16 @@ use super::upload;
 
 /// Cloud API base for Publish-Static-to-Nous uploads.
 pub const NOUS_API_BASE: &str = "https://api.nous.page";
+
+/// Parse the optional "publish only these pages" allowlist (page-id strings from
+/// the share dialog) into a set of UUIDs. Returns `None` when the list is absent
+/// or empty — meaning *no filtering*, i.e. publish every page in the scope (the
+/// default). Unparseable ids are skipped rather than failing the whole publish.
+pub fn parse_page_allowlist(page_ids: &Option<Vec<String>>) -> Option<HashSet<Uuid>> {
+    let ids = page_ids.as_ref()?;
+    let set: HashSet<Uuid> = ids.iter().filter_map(|s| Uuid::parse_str(s).ok()).collect();
+    (!set.is_empty()).then_some(set)
+}
 
 /// Get-or-create the publish secret and sign a short-lived (~10-min) publish
 /// token for `publisher_id`. Shared by the single-page and multi-page helpers so
@@ -73,4 +85,36 @@ pub async fn publish_rendered_site(
         expires_at.as_deref(),
     )
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn allowlist_none_and_empty_mean_publish_all() {
+        assert!(parse_page_allowlist(&None).is_none());
+        assert!(parse_page_allowlist(&Some(vec![])).is_none());
+    }
+
+    #[test]
+    fn allowlist_parses_valid_ids_and_skips_junk() {
+        let a = Uuid::new_v4();
+        let b = Uuid::new_v4();
+        let set = parse_page_allowlist(&Some(vec![
+            a.to_string(),
+            "not-a-uuid".to_string(),
+            b.to_string(),
+        ]))
+        .expect("some ids parsed");
+        assert_eq!(set.len(), 2);
+        assert!(set.contains(&a) && set.contains(&b));
+    }
+
+    #[test]
+    fn allowlist_all_junk_means_no_filter() {
+        // If nothing parses, treat it as "publish all" rather than "publish none"
+        // so a malformed request never silently drops every page.
+        assert!(parse_page_allowlist(&Some(vec!["x".into(), "y".into()])).is_none());
+    }
 }

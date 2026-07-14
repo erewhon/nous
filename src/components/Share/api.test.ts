@@ -77,9 +77,33 @@ describe("publishFolderToNous", () => {
 
     expect(daemonPost).toHaveBeenCalledWith(
       "/api/notebooks/nb/folders/fld/publish-nous",
-      { theme: "minimal", expiry: "never" }
+      { theme: "minimal", expiry: "never", pageIds: undefined }
     );
     expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("forwards a page allowlist on desktop and web", async () => {
+    isTauri.mockReturnValue(true);
+    invoke.mockResolvedValue({ share: { id: "x" }, url: "https://pub.nous.page/x/" });
+    await publishFolderToNous("nb", "fld", "minimal", "never", "My Folder", ["p1", "p2"]);
+    expect(invoke).toHaveBeenCalledWith("publish_folder_to_nous", {
+      request: {
+        notebookId: "nb",
+        folderId: "fld",
+        theme: "minimal",
+        expiry: "never",
+        siteTitle: "My Folder",
+        pageIds: ["p1", "p2"],
+      },
+    });
+
+    isTauri.mockReturnValue(false);
+    daemonPost.mockResolvedValue({ share: { id: "x" }, url: "https://pub.nous.page/x/" });
+    await publishFolderToNous("nb", "fld", "minimal", "never", undefined, ["p1"]);
+    expect(daemonPost).toHaveBeenCalledWith(
+      "/api/notebooks/nb/folders/fld/publish-nous",
+      { theme: "minimal", expiry: "never", pageIds: ["p1"] }
+    );
   });
 });
 

@@ -2073,6 +2073,9 @@ async fn append_to_page(
 struct PublishNousRequest {
     theme: String,
     expiry: String,
+    /// Optional allowlist of page ids to publish (None/empty = all pages).
+    #[serde(default)]
+    page_ids: Option<Vec<String>>,
 }
 
 #[derive(Serialize)]
@@ -2214,6 +2217,7 @@ async fn publish_folder_to_nous(
         ShareExpiry::from_str(&req.expiry).map_err(|e| api_err(StatusCode::BAD_REQUEST, e))?;
 
     // Render the mini-site under the storage lock, release before the upload.
+    let allowlist = publish::parse_page_allowlist(&req.page_ids);
     let (site_dir, record) = {
         let storage = state.storage.lock().unwrap();
         let all_pages = storage
@@ -2234,6 +2238,7 @@ async fn publish_folder_to_nous(
             .into_iter()
             .filter(|p| {
                 p.deleted_at.is_none()
+                    && allowlist.as_ref().map_or(true, |a| a.contains(&p.id))
                     && p.folder_id.map_or(false, |fid| folder_ids.contains(&fid))
             })
             .collect();
@@ -2272,6 +2277,7 @@ async fn publish_section_to_nous(
     let expiry =
         ShareExpiry::from_str(&req.expiry).map_err(|e| api_err(StatusCode::BAD_REQUEST, e))?;
 
+    let allowlist = publish::parse_page_allowlist(&req.page_ids);
     let (site_dir, record) = {
         let storage = state.storage.lock().unwrap();
         let all_pages = storage
@@ -2292,7 +2298,11 @@ async fn publish_section_to_nous(
 
         let pages: Vec<_> = all_pages
             .into_iter()
-            .filter(|p| p.deleted_at.is_none() && p.section_id == Some(section_id))
+            .filter(|p| {
+                p.deleted_at.is_none()
+                    && allowlist.as_ref().map_or(true, |a| a.contains(&p.id))
+                    && p.section_id == Some(section_id)
+            })
             .collect();
         let folders: Vec<_> = all_folders
             .into_iter()
@@ -2328,6 +2338,7 @@ async fn publish_notebook_to_nous(
     let expiry =
         ShareExpiry::from_str(&req.expiry).map_err(|e| api_err(StatusCode::BAD_REQUEST, e))?;
 
+    let allowlist = publish::parse_page_allowlist(&req.page_ids);
     let (site_dir, record) = {
         let storage = state.storage.lock().unwrap();
         let notebook = storage
@@ -2344,7 +2355,10 @@ async fn publish_notebook_to_nous(
 
         let pages: Vec<_> = all_pages
             .into_iter()
-            .filter(|p| p.deleted_at.is_none())
+            .filter(|p| {
+                p.deleted_at.is_none()
+                    && allowlist.as_ref().map_or(true, |a| a.contains(&p.id))
+            })
             .collect();
 
         let page_count = pages.len();

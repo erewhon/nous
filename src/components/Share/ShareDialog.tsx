@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { DAEMON_BASE_URL } from "../../utils/daemon";
 import { useNotebookStore } from "../../stores/notebookStore";
 import { usePageStore } from "../../stores/pageStore";
+import { useFolderStore } from "../../stores/folderStore";
 import { useToastStore } from "../../stores/toastStore";
 import {
   sharePage,
@@ -75,6 +76,10 @@ export function ShareDialog({
   const [destination, setDestination] = useState<"local" | "nous" | "s3">("local");
   const [hasUploadConfig, setHasUploadConfig] = useState(false);
   const [siteTitle, setSiteTitle] = useState("");
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  // Page ids excluded from a multi-page publish. Empty = publish everything (the
+  // default); any exclusions send an explicit allowlist of the rest.
+  const [excludedPageIds, setExcludedPageIds] = useState<Set<string>>(new Set());
 
   // Determine sharing mode
   const isMultiPage = !!folderId || !!sectionId || !!notebookShareId;
@@ -98,9 +103,44 @@ export function ShareDialog({
   const selectedPageId = usePageStore((s) => s.selectedPageId);
   const toastStore = useToastStore();
 
+  const folders = useFolderStore((s) => s.folders);
+
   const effectiveNotebookId = notebookId || selectedNotebookId;
   const effectivePageId = pageId || selectedPageId;
   const currentPage = pages.find((p) => p.id === effectivePageId);
+
+  // The pages that would be published for this multi-page scope, mirroring the
+  // backend's selection (folder subtree / section / whole notebook), in the
+  // sidebar's manual order. Drives the "Advanced → choose pages" list.
+  const scopePages = useMemo(() => {
+    if (!isMultiPage) return [];
+    const live = pages.filter((p) => !p.deletedAt);
+    let scoped: typeof live;
+    if (folderId) {
+      // Collect the folder and all descendant folder ids (matches the backend).
+      const ids = new Set<string>([folderId]);
+      let grew = true;
+      while (grew) {
+        grew = false;
+        for (const f of folders) {
+          if (f.parentId && ids.has(f.parentId) && !ids.has(f.id)) {
+            ids.add(f.id);
+            grew = true;
+          }
+        }
+      }
+      scoped = live.filter((p) => p.folderId != null && ids.has(p.folderId));
+    } else if (sectionId) {
+      scoped = live.filter((p) => p.sectionId === sectionId);
+    } else {
+      scoped = live; // whole notebook
+    }
+    return [...scoped].sort(
+      (a, b) => (a.position ?? 0) - (b.position ?? 0) || a.title.localeCompare(b.title)
+    );
+  }, [isMultiPage, folderId, sectionId, pages, folders]);
+
+  const selectedCount = scopePages.length - excludedPageIds.size;
 
   // Reset state when dialog opens
   useEffect(() => {
@@ -112,6 +152,8 @@ export function ShareDialog({
       setCopied(false);
       setSiteTitle(shareName || "");
       setDestination("local");
+      setShowAdvanced(false);
+      setExcludedPageIds(new Set());
 
       // Load existing shares that match this context
       listShares()
@@ -148,6 +190,18 @@ export function ShareDialog({
   const handleShare = useCallback(async () => {
     if (!effectiveNotebookId && !notebookShareId) return;
 
+    // Multi-page publishes honor the "Advanced → choose pages" selection.
+    // No exclusions = publish everything (send no allowlist, the default).
+    const includedPageIds = scopePages
+      .filter((p) => !excludedPageIds.has(p.id))
+      .map((p) => p.id);
+    const pageIds =
+      isMultiPage && excludedPageIds.size > 0 ? includedPageIds : undefined;
+    if (isMultiPage && scopePages.length > 0 && includedPageIds.length === 0) {
+      setError("Select at least one page to publish.");
+      return;
+    }
+
     setDialogState("sharing");
     setError(null);
 
@@ -161,7 +215,8 @@ export function ShareDialog({
             notebookShareId,
             theme,
             expiry,
-            siteTitle || undefined
+            siteTitle || undefined,
+            pageIds
           );
         } else if (!effectiveNotebookId) {
           return;
@@ -171,7 +226,8 @@ export function ShareDialog({
             folderId,
             theme,
             expiry,
-            siteTitle || undefined
+            siteTitle || undefined,
+            pageIds
           );
         } else if (sectionId) {
           nousResp = await publishSectionToNous(
@@ -179,7 +235,8 @@ export function ShareDialog({
             sectionId,
             theme,
             expiry,
-            siteTitle || undefined
+            siteTitle || undefined,
+            pageIds
           );
         } else {
           if (!effectivePageId) return;
@@ -206,7 +263,8 @@ export function ShareDialog({
           theme,
           expiry,
           uploadExternal,
-          siteTitle || undefined
+          siteTitle || undefined,
+          pageIds
         );
       } else if (!effectiveNotebookId) {
         // Every non-notebook share below needs a notebook id. The guard above
@@ -220,7 +278,8 @@ export function ShareDialog({
           theme,
           expiry,
           uploadExternal,
-          siteTitle || undefined
+          siteTitle || undefined,
+          pageIds
         );
       } else if (sectionId) {
         response = await shareSection(
@@ -229,7 +288,8 @@ export function ShareDialog({
           theme,
           expiry,
           uploadExternal,
-          siteTitle || undefined
+          siteTitle || undefined,
+          pageIds
         );
       } else {
         if (!effectivePageId) return;
@@ -253,7 +313,7 @@ export function ShareDialog({
       setError(String(err));
       setDialogState("configure");
     }
-  }, [effectiveNotebookId, effectivePageId, folderId, sectionId, notebookShareId, isMultiPage, theme, expiry, destination, siteTitle, toastStore]);
+  }, [effectiveNotebookId, effectivePageId, folderId, sectionId, notebookShareId, isMultiPage, theme, expiry, destination, siteTitle, scopePages, excludedPageIds, toastStore]);
 
   const handleCopy = useCallback(async () => {
     if (!shareUrl) return;
@@ -347,6 +407,100 @@ export function ShareDialog({
                     onChange={(e) => setSiteTitle(e.target.value)}
                     placeholder={shareName || "My Shared Site"}
                   />
+                </div>
+              )}
+
+              {/* Advanced: choose which pages to publish (multi-page only) */}
+              {isMultiPage && scopePages.length > 0 && (
+                <div>
+                  <button
+                    type="button"
+                    aria-expanded={showAdvanced}
+                    onClick={() => setShowAdvanced((v) => !v)}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      width: "100%",
+                      background: "none",
+                      border: "none",
+                      padding: "2px 0",
+                      cursor: "pointer",
+                      font: "inherit",
+                      color: "inherit",
+                    }}
+                  >
+                    <span className="share-section-label" style={{ margin: 0 }}>
+                      {showAdvanced ? "▾" : "▸"} Choose pages
+                    </span>
+                    <span style={{ opacity: 0.65, fontSize: "0.85em" }}>
+                      {selectedCount} of {scopePages.length}
+                    </span>
+                  </button>
+                  {showAdvanced && (
+                    <div style={{ marginTop: 6 }}>
+                      <div style={{ display: "flex", gap: 14, marginBottom: 6, fontSize: "0.85em" }}>
+                        <button
+                          type="button"
+                          onClick={() => setExcludedPageIds(new Set())}
+                          style={{ background: "none", border: "none", padding: 0, cursor: "pointer", color: "inherit", opacity: 0.8, textDecoration: "underline" }}
+                        >
+                          Select all
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setExcludedPageIds(new Set(scopePages.map((p) => p.id)))}
+                          style={{ background: "none", border: "none", padding: 0, cursor: "pointer", color: "inherit", opacity: 0.8, textDecoration: "underline" }}
+                        >
+                          Select none
+                        </button>
+                      </div>
+                      <ul
+                        style={{
+                          listStyle: "none",
+                          margin: 0,
+                          padding: 0,
+                          maxHeight: 180,
+                          overflowY: "auto",
+                          border: "1px solid rgba(128,128,128,0.25)",
+                          borderRadius: 6,
+                        }}
+                      >
+                        {scopePages.map((p) => {
+                          const checked = !excludedPageIds.has(p.id);
+                          return (
+                            <li key={p.id} style={{ padding: "3px 8px" }}>
+                              <label
+                                style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() =>
+                                    setExcludedPageIds((prev) => {
+                                      const next = new Set(prev);
+                                      if (checked) next.add(p.id);
+                                      else next.delete(p.id);
+                                      return next;
+                                    })
+                                  }
+                                />
+                                <span
+                                  style={{
+                                    overflow: "hidden",
+                                    textOverflow: "ellipsis",
+                                    whiteSpace: "nowrap",
+                                  }}
+                                >
+                                  {p.title || "Untitled"}
+                                </span>
+                              </label>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                  )}
                 </div>
               )}
 
