@@ -41,6 +41,7 @@ fn convert_block_to_markdown(block: &EditorBlock) -> String {
         "list" => convert_list(block),
         "checklist" => convert_checklist(block),
         "code" => convert_code(block),
+        "mermaid" => convert_mermaid(block),
         "quote" => convert_quote(block),
         "delimiter" => "---".to_string(),
         "table" => convert_table(block),
@@ -134,6 +135,16 @@ fn convert_code(block: &EditorBlock) -> String {
         .unwrap_or("");
 
     format!("```{}\n{}\n```", language, code)
+}
+
+/// A contributed Mermaid diagram block round-trips to a ```mermaid fence (the
+/// same shape the importer reads back in).
+fn convert_mermaid(block: &EditorBlock) -> String {
+    let code = block.data.get("code")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+
+    format!("```mermaid\n{}\n```", code)
 }
 
 fn convert_quote(block: &EditorBlock) -> String {
@@ -431,6 +442,20 @@ mod tests {
         let result = convert_block_to_markdown(&block);
         assert!(result.starts_with("```rust"));
         assert!(result.contains("fn main()"));
+        assert!(result.ends_with("```"));
+    }
+
+    #[test]
+    fn test_convert_mermaid_block() {
+        let block = EditorBlock {
+            id: "1".to_string(),
+            block_type: "mermaid".to_string(),
+            data: serde_json::json!({ "code": "graph TD\n  A --> B" }),
+        };
+
+        let result = convert_block_to_markdown(&block);
+        assert!(result.starts_with("```mermaid"), "got: {result}");
+        assert!(result.contains("A --> B"));
         assert!(result.ends_with("```"));
     }
 

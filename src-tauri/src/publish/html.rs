@@ -33,7 +33,10 @@ pub fn render_block(
         "paragraph" => render_paragraph(block, page_slugs, block_texts),
         "list" => render_list(block, page_slugs, block_texts),
         "checklist" => render_checklist(block, page_slugs, block_texts),
+        // A fenced `code` block tagged `mermaid` is a diagram, not source text.
+        "code" if code_language(block).eq_ignore_ascii_case("mermaid") => render_mermaid(block),
         "code" => render_code(block),
+        "mermaid" => render_mermaid(block),
         "quote" => render_quote(block, page_slugs, block_texts),
         "delimiter" => "<hr>".to_string(),
         "table" => render_table(block, page_slugs, block_texts),
@@ -145,6 +148,53 @@ fn render_checklist(
         .collect();
 
     format!("<ul class=\"checklist\">\n{}\n</ul>", items_html.join("\n"))
+}
+
+/// The `language` field of a `code` block (empty string when absent).
+fn code_language(block: &EditorBlock) -> &str {
+    block
+        .data
+        .get("language")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+}
+
+/// Render a Mermaid diagram block. The source lands verbatim (HTML-escaped)
+/// inside `<pre class="mermaid">`; a theme that opts in injects the Mermaid
+/// runtime, which reads the element's text and replaces it with rendered SVG.
+/// Themes without that runtime degrade to the raw diagram source in a code box.
+fn render_mermaid(block: &EditorBlock) -> String {
+    let code = block
+        .data
+        .get("code")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+
+    if code.trim().is_empty() {
+        return String::new();
+    }
+
+    format!("<pre class=\"mermaid\">{}</pre>", html_escape(code))
+}
+
+/// True if the block renders as a Mermaid diagram — a native `mermaid` block
+/// with non-empty source, or a `code` block tagged `mermaid`.
+fn block_is_mermaid(block: &EditorBlock) -> bool {
+    match block.block_type.as_str() {
+        "mermaid" => block
+            .data
+            .get("code")
+            .and_then(|v| v.as_str())
+            .is_some_and(|c| !c.trim().is_empty()),
+        "code" => code_language(block).eq_ignore_ascii_case("mermaid"),
+        _ => false,
+    }
+}
+
+/// True if any block on the page renders as a Mermaid diagram. Themes use this
+/// to decide whether a page needs the Mermaid runtime injected into its head.
+pub fn blocks_have_mermaid(blocks: &[EditorBlock]) -> bool {
+    blocks.iter().any(block_is_mermaid)
 }
 
 fn render_code(block: &EditorBlock) -> String {
@@ -456,4 +506,74 @@ fn strip_html_tags(text: &str) -> String {
         .unwrap()
         .replace_all(text, "")
         .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn block(block_type: &str, data: serde_json::Value) -> EditorBlock {
+        EditorBlock {
+            id: "b1".to_string(),
+            block_type: block_type.to_string(),
+            data,
+        }
+    }
+
+    fn render(b: &EditorBlock) -> String {
+        render_block(b, &HashMap::new(), &HashMap::new())
+    }
+
+    #[test]
+    fn mermaid_block_renders_escaped_source_in_a_mermaid_pre() {
+        let b = block("mermaid", json!({ "code": "graph TD\n  A[Start] --> B{Ok?}" }));
+        let html = render(&b);
+        assert!(
+            html.starts_with("<pre class=\"mermaid\">"),
+            "expected a .mermaid container, got: {html}"
+        );
+        // The diagram source is preserved (not dropped) and HTML-escaped.
+        assert!(html.contains("A[Start] --&gt; B{Ok?}"), "got: {html}");
+        assert!(html.trim_end().ends_with("</pre>"));
+    }
+
+    #[test]
+    fn code_block_tagged_mermaid_is_a_diagram_not_a_code_box() {
+        let b = block("code", json!({ "code": "graph LR\n  X --> Y", "language": "Mermaid" }));
+        let html = render(&b);
+        assert!(html.contains("class=\"mermaid\""), "got: {html}");
+        // Must not fall through to the <code> path.
+        assert!(!html.contains("<code"), "got: {html}");
+    }
+
+    #[test]
+    fn ordinary_code_block_still_renders_as_code() {
+        let b = block("code", json!({ "code": "let x = 1;", "language": "rust" }));
+        let html = render(&b);
+        assert!(html.contains("<pre><code"), "got: {html}");
+        assert!(!html.contains("class=\"mermaid\""), "got: {html}");
+    }
+
+    #[test]
+    fn empty_mermaid_block_renders_nothing() {
+        assert_eq!(render(&block("mermaid", json!({ "code": "   " }))), "");
+        assert_eq!(render(&block("mermaid", json!({}))), "");
+    }
+
+    #[test]
+    fn blocks_have_mermaid_detects_both_shapes() {
+        assert!(blocks_have_mermaid(&[block("mermaid", json!({ "code": "graph TD; A-->B" }))]));
+        assert!(blocks_have_mermaid(&[block(
+            "code",
+            json!({ "code": "graph TD; A-->B", "language": "mermaid" })
+        )]));
+        // Empty native block and non-mermaid code do not trigger injection.
+        assert!(!blocks_have_mermaid(&[block("mermaid", json!({ "code": "" }))]));
+        assert!(!blocks_have_mermaid(&[block(
+            "code",
+            json!({ "code": "x", "language": "python" })
+        )]));
+        assert!(!blocks_have_mermaid(&[block("paragraph", json!({ "text": "hi" }))]));
+    }
 }

@@ -66,6 +66,30 @@ describe("contributed block conversion", () => {
     );
     expect(bn[0]!.props).toEqual({ code: "", variant: "plain" });
   });
+
+  it("renders a mermaid-tagged code block as the live Mermaid block", () => {
+    // A ```mermaid fence (markdown import) must render as a diagram, not a code box.
+    const bn = editorJsToBlockNote(
+      doc([
+        {
+          id: "b1",
+          type: "code",
+          data: { code: "graph TD\n  A-->B", language: "mermaid" },
+        },
+      ]),
+    );
+    expect(bn).toEqual([{ id: "b1", type: "mermaid", props: { code: "graph TD\n  A-->B" } }]);
+  });
+
+  it("leaves an ordinary code block as a code block", () => {
+    const bn = editorJsToBlockNote(
+      doc([
+        { id: "b1", type: "code", data: { code: "let x = 1;", language: "rust" } },
+      ]),
+    );
+    expect(bn[0]!.type).toBe("codeBlock");
+    expect(bn[0]!.props).toEqual({ language: "rust" });
+  });
 });
 
 describe("legacy plugin block migration", () => {

@@ -68,7 +68,17 @@ function convertBlock(block: EditorBlock): BNBlock | BNBlock[] {
     case "checklist":
       return convertChecklist(block);
 
-    case "code":
+    case "code": {
+      // A `mermaid`-tagged fence (e.g. from markdown import) is a diagram, not
+      // a code listing — render it live via the contributed Mermaid block so the
+      // editor matches the published output. `code` remains the on-disk field.
+      if (((data.language as string) ?? "").toLowerCase() === "mermaid") {
+        return {
+          id: block.id,
+          type: "mermaid",
+          props: { code: (data.code as string) ?? "" },
+        };
+      }
       return {
         id: block.id,
         type: "codeBlock",
@@ -77,6 +87,7 @@ function convertBlock(block: EditorBlock): BNBlock | BNBlock[] {
           { type: "text", text: (data.code as string) ?? "", styles: {} },
         ],
       };
+    }
 
     case "quote":
       return {

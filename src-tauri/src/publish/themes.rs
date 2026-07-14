@@ -23,6 +23,56 @@ pub fn available_themes() -> Vec<&'static str> {
     vec!["minimal", "documentation", "blog", "academic", "docs"]
 }
 
+/// Mermaid runtime + palette bridge, injected into a page's `<head>` (through
+/// the `{{head_extra}}` slot) when the page contains a diagram. It maps
+/// Mermaid's `base` theme variables onto the theme's CSS custom properties and
+/// re-renders on the light/dark toggle so diagrams flip with the page. Returns
+/// `None` for themes that don't ship the palette tokens this bridge reads —
+/// they degrade to the raw diagram source in a code box. Delivery is a pinned
+/// CDN ESM build (matches the app's mermaid ^11.16.0).
+pub fn mermaid_head(theme_name: &str) -> Option<&'static str> {
+    match theme_name {
+        "academic" => Some(ACADEMIC_MERMAID_HEAD),
+        _ => None,
+    }
+}
+
+const ACADEMIC_MERMAID_HEAD: &str = r#"<script type="module">
+import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11.16.0/dist/mermaid.esm.min.mjs';
+const nodes = Array.from(document.querySelectorAll('pre.mermaid'));
+// Stash each diagram's source so we can re-render when the palette flips.
+nodes.forEach(function (n) { n.dataset.src = n.textContent; });
+function palette() {
+  var cs = getComputedStyle(document.documentElement);
+  var v = function (name) { return cs.getPropertyValue(name).trim(); };
+  return {
+    background: v('--bg'),
+    mainBkg: v('--panel'),
+    primaryColor: v('--panel'),
+    primaryTextColor: v('--text'),
+    primaryBorderColor: v('--accent'),
+    secondaryColor: v('--callout-bg'),
+    tertiaryColor: v('--code-bg'),
+    lineColor: v('--muted'),
+    textColor: v('--text'),
+    noteBkgColor: v('--panel'),
+    noteTextColor: v('--text'),
+    noteBorderColor: v('--border'),
+    fontFamily: 'Georgia, "Times New Roman", serif'
+  };
+}
+async function renderAll() {
+  mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'base', themeVariables: palette() });
+  nodes.forEach(function (n) { n.textContent = n.dataset.src; n.removeAttribute('data-processed'); });
+  try { await mermaid.run({ nodes: nodes }); } catch (e) { /* leave source visible on parse error */ }
+}
+renderAll();
+// Re-render after the toggle flips data-theme so diagrams follow the palette.
+document.querySelectorAll('.theme-toggle').forEach(function (b) {
+  b.addEventListener('click', function () { requestAnimationFrame(renderAll); });
+});
+</script>"#;
+
 // ---------------------------------------------------------------------------
 // Minimal Theme
 // ---------------------------------------------------------------------------
@@ -411,6 +461,7 @@ fn theme_academic() -> Theme {
   "#,
             r#"<script>(function(){try{var t=localStorage.getItem('nous-theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>"#,
             r#"
+  {{head_extra}}
 </head>
 <body>
   <header class="site-header">
@@ -451,6 +502,7 @@ fn theme_academic() -> Theme {
   "#,
             r#"<script>(function(){try{var t=localStorage.getItem('nous-theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>"#,
             r#"
+  {{head_extra}}
 </head>
 <body>
   <header class="site-header">
@@ -1166,5 +1218,34 @@ mod tests {
                 "persistence listener missing"
             );
         }
+    }
+
+    #[test]
+    fn academic_page_template_exposes_head_extra_slot() {
+        assert!(
+            theme_academic().page_template.contains("{{head_extra}}"),
+            "academic page template must expose the {{head_extra}} injection slot"
+        );
+    }
+
+    #[test]
+    fn mermaid_head_is_academic_only_and_themes_to_the_palette() {
+        assert!(mermaid_head("minimal").is_none());
+        assert!(mermaid_head("docs").is_none());
+
+        let head = mermaid_head("academic").expect("academic ships a mermaid runtime");
+        // Pinned CDN ESM delivery (matches the app's mermaid ^11.16.0).
+        assert!(head.contains("cdn.jsdelivr.net/npm/mermaid@11.16.0"), "pinned CDN missing");
+        assert!(head.contains(r#"type="module""#));
+        // Initialised per the task: no auto-start, strict sanitising, base theme.
+        assert!(head.contains("startOnLoad: false"));
+        assert!(head.contains("securityLevel: 'strict'"));
+        assert!(head.contains("theme: 'base'"));
+        assert!(head.contains("themeVariables"));
+        // Palette is read from the theme's CSS custom properties, not hardcoded.
+        assert!(head.contains("'--bg'") && head.contains("'--text'") && head.contains("'--accent'"));
+        // Re-renders on the light/dark toggle so diagrams follow the page.
+        assert!(head.contains(r#"querySelectorAll('.theme-toggle')"#));
+        assert!(head.contains("mermaid.run"));
     }
 }
