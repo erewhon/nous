@@ -38,18 +38,31 @@ pub fn mermaid_head(theme_name: &str) -> Option<&'static str> {
 }
 
 const ACADEMIC_MERMAID_HEAD: &str = r#"<style>
-/* Scroll reveal: nodes/edges fade in as the diagram enters view. The whole
-   effect lives inside prefers-reduced-motion:no-preference, so reduced-motion
-   readers (and any diagram opted out with class "no-reveal") see it fully
-   drawn with no animation. */
+/* Scroll reveal (default): nodes/edges fade in as the diagram enters view.
+   The whole effect lives inside prefers-reduced-motion:no-preference, so
+   reduced-motion readers (and any diagram opted out with class "no-reveal")
+   see it fully drawn with no animation. */
 @media (prefers-reduced-motion: no-preference) {
   pre.mermaid.mreveal-rendering svg { opacity: 0; }
-  pre.mermaid.mreveal:not(.no-reveal):not(.mreveal-shown) [data-reveal] { opacity: 0; }
-  pre.mermaid.mreveal:not(.no-reveal) [data-reveal] {
+  pre.mermaid.mreveal:not(.no-reveal):not(.mreveal-shown):not(.mstep) [data-reveal] { opacity: 0; }
+  pre.mermaid.mreveal:not(.no-reveal):not(.mstep) [data-reveal] {
     transition: opacity 480ms ease;
     transition-delay: calc(var(--reveal-i, 0) * 55ms);
   }
 }
+/* Sequence step-through (opt-in via a "%% nous:step" comment). Parts past the
+   current step are hidden; the hide is unconditional so reduced-motion still
+   works (it just starts fully shown), and only the fade is motion-gated. */
+pre.mermaid.mstep [data-step]:not(.mstep-on) { opacity: 0; }
+@media (prefers-reduced-motion: no-preference) {
+  pre.mermaid.mstep [data-step] { transition: opacity 300ms ease; }
+}
+.mstep-controls { display: flex; align-items: center; gap: 0.75rem; margin: 0.3rem 0 1.4rem; font-family: Georgia, "Times New Roman", serif; font-size: 0.85rem; color: var(--muted); }
+.mstep-controls button { font: inherit; color: var(--text); background: transparent; border: 1px solid var(--border); border-radius: 3px; padding: 0.15rem 0.7rem; cursor: pointer; }
+.mstep-controls button:hover:not(:disabled) { background: var(--code-bg); border-color: var(--muted); }
+.mstep-controls button:disabled { opacity: 0.4; cursor: default; }
+.mstep-controls:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.mstep-count { font-variant: small-caps; letter-spacing: 0.04em; min-width: 4.5em; text-align: center; }
 </style>
 <script type="module">
 import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11.16.0/dist/mermaid.esm.min.mjs';
@@ -59,10 +72,11 @@ nodes.forEach(function (n) { n.dataset.src = n.textContent; n.classList.add('mre
 var reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
 // Diagram parts to reveal in order, covering flowchart + sequence shapes.
 var REVEAL_SEL = '.node, .cluster, .edgePath, .flowchart-link, .edgeLabel, .actor, .actor-line, .messageLine0, .messageLine1, .messageText, .note, .loopLine, .loopText, .labelBox, .labelText, .activation0, .activation1';
-function armReveal(pre) {
-  var svg = pre.querySelector('svg');
-  pre.classList.remove('mreveal-rendering');
-  if (!svg || pre.classList.contains('no-reveal')) return;
+// Steppable parts of a sequence diagram (participants + lifelines stay put).
+var STEP_SEL = '.messageText, .messageLine0, .messageLine1, .note, .noteText, .activation0, .activation1, .loopLine, .loopText, .labelBox, .labelText';
+function bboxTop(el) { try { return el.getBBox().y; } catch (e) { return 0; } }
+function hasClass(el, c) { return (' ' + (el.getAttribute('class') || '') + ' ').indexOf(' ' + c + ' ') !== -1; }
+function armReveal(pre, svg) {
   var parts = Array.prototype.slice.call(svg.querySelectorAll(REVEAL_SEL));
   // Reveal in reading order (top-to-bottom, then left-to-right).
   parts.sort(function (a, b) {
@@ -81,6 +95,63 @@ function armReveal(pre) {
     });
   }, { threshold: 0.15 });
   io.observe(pre);
+}
+// Step-through for sequence diagrams: each message (and note) is one step;
+// participants + lifelines are always visible. Messages render in source order
+// with the label ~a line above its arrow, so we anchor steps on the arrows/notes
+// (sorted by y) and attach labels/activations to the anchor just below them.
+function armStep(pre, svg) {
+  var stepEls = Array.prototype.slice.call(svg.querySelectorAll(STEP_SEL));
+  var anchors = stepEls.filter(function (el) {
+    return hasClass(el, 'messageLine0') || hasClass(el, 'messageLine1') || hasClass(el, 'note');
+  }).sort(function (a, b) { return bboxTop(a) - bboxTop(b); });
+  var total = anchors.length;
+  if (!total) { armReveal(pre, svg); return; }  // no messages to step through
+  pre.classList.add('mstep');
+  var rank = new Map();
+  anchors.forEach(function (a, i) { rank.set(a, i + 1); });
+  stepEls.forEach(function (el) {
+    var s;
+    if (rank.has(el)) { s = rank.get(el); }
+    else {
+      var y = bboxTop(el); s = total;
+      for (var i = 0; i < total; i++) { if (bboxTop(anchors[i]) >= y - 14) { s = i + 1; break; } }
+    }
+    el.setAttribute('data-step', String(s));
+  });
+  var oldBar = pre.nextElementSibling;
+  if (oldBar && oldBar.classList && oldBar.classList.contains('mstep-controls')) oldBar.remove();
+  var bar = document.createElement('div');
+  bar.className = 'mstep-controls'; bar.tabIndex = 0;
+  bar.setAttribute('role', 'group'); bar.setAttribute('aria-label', 'Diagram step controls');
+  var prev = document.createElement('button'); prev.type = 'button'; prev.textContent = '← Prev';
+  var count = document.createElement('span'); count.className = 'mstep-count';
+  var next = document.createElement('button'); next.type = 'button'; next.textContent = 'Next →';
+  bar.appendChild(prev); bar.appendChild(count); bar.appendChild(next);
+  pre.insertAdjacentElement('afterend', bar);
+  var cur = reduce ? total : Math.min(parseInt(pre.dataset.cur || '1', 10) || 1, total);
+  function apply() {
+    pre.dataset.cur = String(cur);
+    stepEls.forEach(function (el) { el.classList.toggle('mstep-on', parseInt(el.getAttribute('data-step'), 10) <= cur); });
+    count.textContent = cur + ' / ' + total;
+    prev.disabled = cur <= 1; next.disabled = cur >= total;
+  }
+  prev.addEventListener('click', function () { if (cur > 1) { cur--; apply(); } });
+  next.addEventListener('click', function () { if (cur < total) { cur++; apply(); } });
+  bar.addEventListener('keydown', function (e) {
+    if (e.key === 'ArrowLeft' && cur > 1) { cur--; apply(); e.preventDefault(); }
+    else if (e.key === 'ArrowRight' && cur < total) { cur++; apply(); e.preventDefault(); }
+  });
+  apply();
+}
+function arm(pre) {
+  var svg = pre.querySelector('svg');
+  if (svg && !pre.classList.contains('no-reveal')) {
+    var src = pre.dataset.src || '';
+    if (/%%\s*nous:step/.test(src) && /(^|\n)\s*sequenceDiagram\b/.test(src)) armStep(pre, svg);
+    else armReveal(pre, svg);
+  }
+  pre.classList.remove('mreveal-rendering');
 }
 function palette() {
   var cs = getComputedStyle(document.documentElement);
@@ -104,9 +175,14 @@ function palette() {
 async function renderAll() {
   mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'base', themeVariables: palette() });
   // Hide the SVG while it re-renders so the reveal starts from blank, not a flash.
-  nodes.forEach(function (n) { n.textContent = n.dataset.src; n.removeAttribute('data-processed'); n.classList.remove('mreveal-shown'); n.classList.add('mreveal-rendering'); });
+  nodes.forEach(function (n) {
+    n.textContent = n.dataset.src; n.removeAttribute('data-processed');
+    n.classList.remove('mreveal-shown'); n.classList.add('mreveal-rendering');
+    var bar = n.nextElementSibling;  // drop stale step controls before re-render
+    if (bar && bar.classList && bar.classList.contains('mstep-controls')) bar.remove();
+  });
   try { await mermaid.run({ nodes: nodes }); } catch (e) { nodes.forEach(function (n) { n.classList.remove('mreveal-rendering'); }); return; }
-  nodes.forEach(armReveal);
+  nodes.forEach(arm);
 }
 renderAll();
 // Re-render after the toggle flips data-theme so diagrams follow the palette.
@@ -1303,5 +1379,19 @@ mod tests {
         assert!(head.contains("prefers-reduced-motion: reduce"), "no JS reduced-motion guard");
         // Opt-out hook so a diagram can skip the animation.
         assert!(head.contains("no-reveal"), "no opt-out hook");
+    }
+
+    #[test]
+    fn mermaid_head_embeds_sequence_step_through() {
+        let head = mermaid_head("academic").unwrap();
+        // Opt-in gate: a sequence diagram tagged `%% nous:step` steps through.
+        assert!(head.contains("nous:step"), "no step opt-in token");
+        assert!(head.contains("sequenceDiagram"), "no sequence-type detection");
+        // Per-step gating + themed prev/next controls.
+        assert!(head.contains("data-step") && head.contains("mstep-on"), "no per-step gating");
+        assert!(head.contains("mstep-controls"), "no step controls");
+        assert!(head.contains("Prev") && head.contains("Next"), "no prev/next buttons");
+        // Keyboard support and reduced-motion (starts fully shown).
+        assert!(head.contains("ArrowLeft") && head.contains("ArrowRight"), "no keyboard stepping");
     }
 }
