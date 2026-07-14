@@ -408,6 +408,32 @@ mod tests {
     }
 
     #[test]
+    fn multi_share_record_wires_scope_and_leaves_url_unset() {
+        // The publish-to-Nous commands build the record here, then set
+        // `external_url` only after a successful upload. Verify the pre-upload
+        // wiring: 8-char id, the given scope/page_count, and no URL yet.
+        let nb = Uuid::new_v4();
+        let folder = Uuid::new_v4();
+        let record = build_multi_share_record(
+            ShareType::Folder { folder_id: folder },
+            nb,
+            "My Folder",
+            "default",
+            ShareExpiry::Never,
+            7,
+        );
+        assert_eq!(record.id.len(), 8);
+        assert_eq!(record.notebook_id, nb);
+        assert_eq!(record.page_count, Some(7));
+        assert_eq!(record.title, "My Folder");
+        assert!(record.external_url.is_none());
+        assert!(matches!(
+            record.share_type,
+            Some(ShareType::Folder { folder_id }) if folder_id == folder
+        ));
+    }
+
+    #[test]
     fn unique_generator_avoids_existing_ids() {
         // Force the first few candidates to be "taken" by seeding a large set,
         // then confirm the returned id is genuinely fresh.

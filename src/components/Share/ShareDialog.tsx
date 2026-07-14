@@ -9,6 +9,9 @@ import {
   shareSection,
   shareNotebook,
   publishToNous,
+  publishFolderToNous,
+  publishSectionToNous,
+  publishNotebookToNous,
   listShares,
   deleteShare,
   getShareUploadConfig,
@@ -149,15 +152,44 @@ export function ShareDialog({
     setError(null);
 
     try {
-      // Publish to Nous (single-page only) — themed static render to pub.nous.page.
-      if (destination === "nous" && !isMultiPage) {
-        if (!effectiveNotebookId || !effectivePageId) return;
-        const nousResp = await publishToNous(
-          effectiveNotebookId,
-          effectivePageId,
-          theme,
-          expiry
-        );
+      // Publish to Nous — themed static render(s) to pub.nous.page. Dispatch by
+      // share scope: page, folder, section, or whole notebook.
+      if (destination === "nous") {
+        let nousResp;
+        if (notebookShareId) {
+          nousResp = await publishNotebookToNous(
+            notebookShareId,
+            theme,
+            expiry,
+            siteTitle || undefined
+          );
+        } else if (!effectiveNotebookId) {
+          return;
+        } else if (folderId) {
+          nousResp = await publishFolderToNous(
+            effectiveNotebookId,
+            folderId,
+            theme,
+            expiry,
+            siteTitle || undefined
+          );
+        } else if (sectionId) {
+          nousResp = await publishSectionToNous(
+            effectiveNotebookId,
+            sectionId,
+            theme,
+            expiry,
+            siteTitle || undefined
+          );
+        } else {
+          if (!effectivePageId) return;
+          nousResp = await publishToNous(
+            effectiveNotebookId,
+            effectivePageId,
+            theme,
+            expiry
+          );
+        }
         setShareUrl(nousResp.url);
         setCurrentShare(nousResp.share);
         setDialogState("success");
@@ -374,14 +406,12 @@ export function ShareDialog({
                   >
                     Local
                   </button>
-                  {!isMultiPage && (
-                    <button
-                      className={`share-expiry-btn${destination === "nous" ? " selected" : ""}`}
-                      onClick={() => setDestination("nous")}
-                    >
-                      Nous
-                    </button>
-                  )}
+                  <button
+                    className={`share-expiry-btn${destination === "nous" ? " selected" : ""}`}
+                    onClick={() => setDestination("nous")}
+                  >
+                    Nous
+                  </button>
                   {hasUploadConfig && (
                     <button
                       className={`share-expiry-btn${destination === "s3" ? " selected" : ""}`}

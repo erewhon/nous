@@ -48,6 +48,17 @@ describe("GET pub.nous.page/:shareId/* (serve static share)", () => {
     expect(await res.text()).toBe("<h1>home</h1>");
   });
 
+  it("redirects the bare root to a trailing slash so relative links resolve", async () => {
+    const res = await app.request("http://pub.nous.page/abc12345", {}, env);
+    expect(res.status).toBe(301);
+    expect(res.headers.get("Location")).toBe("/abc12345/");
+  });
+
+  it("does not redirect sub-paths (only the bare root)", async () => {
+    const res = await app.request("http://pub.nous.page/abc12345/styles.css", {}, env);
+    expect(res.status).toBe(200);
+  });
+
   it("returns 410 for an expired share", async () => {
     await createStaticShare(env.DB, "expired1", "user1", null, "E", null, "2000-01-01 00:00:00", 1);
     await putStaticFile(env.STORAGE, "expired1", "index.html", enc("old"));

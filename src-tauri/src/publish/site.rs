@@ -982,3 +982,27 @@ fn build_breadcrumbs(
 
     parts.join("<span class=\"sep\">/</span>")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Inter-page links must be relative (`slug.html`, never `/slug.html`) so a
+    /// multi-page site served under `pub.nous.page/{id}/` resolves them within the
+    /// share prefix instead of at the host root (which would 404). The serve
+    /// route's trailing-slash redirect depends on this invariant.
+    #[test]
+    fn nav_item_links_are_relative() {
+        for theme in ["blog", "documentation", "minimal"] {
+            let html = format_nav_item("My Page", "my-page", theme);
+            assert!(
+                html.contains("href=\"my-page.html\""),
+                "expected relative link for theme {theme}: {html}"
+            );
+            assert!(
+                !html.contains("href=\"/"),
+                "link must not be host-absolute for theme {theme}: {html}"
+            );
+        }
+    }
+}

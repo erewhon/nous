@@ -26,9 +26,11 @@ use nous_lib::python_bridge::{
     AIConfig, ChatMessage, NotebookInfo, PageContext, PageInfo, PageSummaryInput, PythonAI,
     StreamEvent,
 };
-use nous_lib::share::html_gen::render_share_html;
+use nous_lib::share::html_gen::{generate_share_site, render_share_html};
 use nous_lib::share::publish;
-use nous_lib::share::storage::{build_share_record, ShareExpiry, ShareRecord, ShareStorage};
+use nous_lib::share::storage::{
+    build_multi_share_record, build_share_record, ShareExpiry, ShareRecord, ShareStorage, ShareType,
+};
 use nous_lib::plugins::api::HostApi;
 use nous_lib::git;
 use nous_lib::storage::{EditorBlock, EditorData, FileStorageMode, Page, PageType, SystemPromptMode};
@@ -602,6 +604,18 @@ pub fn build_router(state: AppState, auth: AuthState) -> Router {
         .route(
             "/api/notebooks/{notebook_id}/pages/{page_id}/publish-nous",
             post(publish_page_to_nous),
+        )
+        .route(
+            "/api/notebooks/{notebook_id}/folders/{folder_id}/publish-nous",
+            post(publish_folder_to_nous),
+        )
+        .route(
+            "/api/notebooks/{notebook_id}/sections/{section_id}/publish-nous",
+            post(publish_section_to_nous),
+        )
+        .route(
+            "/api/notebooks/{notebook_id}/publish-nous",
+            post(publish_notebook_to_nous),
         )
         .route(
             "/api/notebooks/{notebook_id}/pages/{page_id}/delete-block",
@@ -2123,6 +2137,233 @@ async fn publish_page_to_nous(
     Ok(Json(ApiResponse {
         data: PublishNousResponse { share: record, url },
     }))
+}
+
+/// Collect a folder and all its descendant folder IDs (mirrors the desktop
+/// command's subtree walk).
+fn collect_folder_subtree(
+    root_id: Uuid,
+    all_folders: &[nous_lib::storage::Folder],
+) -> std::collections::HashSet<Uuid> {
+    let mut result = std::collections::HashSet::new();
+    result.insert(root_id);
+    let mut queue = vec![root_id];
+    while let Some(parent_id) = queue.pop() {
+        for folder in all_folders {
+            if folder.parent_id == Some(parent_id) && !result.contains(&folder.id) {
+                result.insert(folder.id);
+                queue.push(folder.id);
+            }
+        }
+    }
+    result
+}
+
+/// Sign + upload a rendered mini-site to Nous, record the URL, persist the
+/// multi-share, and clean up the temp render dir. Shared tail for the folder /
+/// section / notebook daemon publish handlers. Upload failure → 502 with no
+/// partial persist.
+async fn finish_publish_site_to_nous(
+    state: &AppState,
+    site_dir: std::path::PathBuf,
+    mut record: ShareRecord,
+    publisher_id: &str,
+) -> Result<Json<ApiResponse<PublishNousResponse>>, (StatusCode, Json<ApiError>)> {
+    let upload =
+        publish::publish_rendered_site(&site_dir, &record, &state.library_path, publisher_id).await;
+
+    let url = match upload {
+        Ok(url) => url,
+        Err(e) => {
+            let _ = std::fs::remove_dir_all(&site_dir);
+            return Err(api_err(StatusCode::BAD_GATEWAY, e));
+        }
+    };
+
+    record.external_url = Some(url.clone());
+
+    let share_storage = ShareStorage::new(state.library_path.clone());
+    let persist = share_storage.create_multi_share(record.clone(), &site_dir);
+    let _ = std::fs::remove_dir_all(&site_dir);
+    persist.map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+
+    Ok(Json(ApiResponse {
+        data: PublishNousResponse { share: record, url },
+    }))
+}
+
+/// The current library id, used as the stable publisher id for publish tokens.
+fn publisher_id(state: &AppState) -> Result<String, (StatusCode, Json<ApiError>)> {
+    let lib = state.library_storage.lock().unwrap();
+    Ok(lib
+        .get_current_library()
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .id
+        .to_string())
+}
+
+/// Publish a folder mini-site to Nous. Multi-page twin of `publish_page_to_nous`.
+async fn publish_folder_to_nous(
+    State(state): State<AppState>,
+    Path((notebook_id, folder_id)): Path<(String, String)>,
+    Json(req): Json<PublishNousRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let nb_id = parse_uuid(&notebook_id)?;
+    let folder_id = parse_uuid(&folder_id)?;
+    let expiry =
+        ShareExpiry::from_str(&req.expiry).map_err(|e| api_err(StatusCode::BAD_REQUEST, e))?;
+
+    // Render the mini-site under the storage lock, release before the upload.
+    let (site_dir, record) = {
+        let storage = state.storage.lock().unwrap();
+        let all_pages = storage
+            .list_pages(nb_id)
+            .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        let all_folders = storage
+            .list_folders(nb_id)
+            .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+        let folder = all_folders
+            .iter()
+            .find(|f| f.id == folder_id)
+            .ok_or_else(|| api_err(StatusCode::NOT_FOUND, "Folder not found"))?;
+        let folder_name = folder.name.clone();
+
+        let folder_ids = collect_folder_subtree(folder_id, &all_folders);
+        let pages: Vec<_> = all_pages
+            .into_iter()
+            .filter(|p| {
+                p.deleted_at.is_none()
+                    && p.folder_id.map_or(false, |fid| folder_ids.contains(&fid))
+            })
+            .collect();
+        let folders: Vec<_> = all_folders
+            .into_iter()
+            .filter(|f| folder_ids.contains(&f.id))
+            .collect();
+
+        let page_count = pages.len();
+        let site_dir =
+            generate_share_site(&storage, nb_id, &pages, &folders, &folder_name, &req.theme)
+                .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        let record = build_multi_share_record(
+            ShareType::Folder { folder_id },
+            nb_id,
+            &folder_name,
+            &req.theme,
+            expiry,
+            page_count,
+        );
+        (site_dir, record)
+    };
+
+    let pub_id = publisher_id(&state)?;
+    finish_publish_site_to_nous(&state, site_dir, record, &pub_id).await
+}
+
+/// Publish a section mini-site to Nous. Multi-page twin of `publish_page_to_nous`.
+async fn publish_section_to_nous(
+    State(state): State<AppState>,
+    Path((notebook_id, section_id)): Path<(String, String)>,
+    Json(req): Json<PublishNousRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let nb_id = parse_uuid(&notebook_id)?;
+    let section_id = parse_uuid(&section_id)?;
+    let expiry =
+        ShareExpiry::from_str(&req.expiry).map_err(|e| api_err(StatusCode::BAD_REQUEST, e))?;
+
+    let (site_dir, record) = {
+        let storage = state.storage.lock().unwrap();
+        let all_pages = storage
+            .list_pages(nb_id)
+            .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        let all_folders = storage
+            .list_folders(nb_id)
+            .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        let sections = storage
+            .list_sections(nb_id)
+            .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+        let section = sections
+            .iter()
+            .find(|s| s.id == section_id)
+            .ok_or_else(|| api_err(StatusCode::NOT_FOUND, "Section not found"))?;
+        let section_name = section.name.clone();
+
+        let pages: Vec<_> = all_pages
+            .into_iter()
+            .filter(|p| p.deleted_at.is_none() && p.section_id == Some(section_id))
+            .collect();
+        let folders: Vec<_> = all_folders
+            .into_iter()
+            .filter(|f| f.section_id == Some(section_id))
+            .collect();
+
+        let page_count = pages.len();
+        let site_dir =
+            generate_share_site(&storage, nb_id, &pages, &folders, &section_name, &req.theme)
+                .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        let record = build_multi_share_record(
+            ShareType::Section { section_id },
+            nb_id,
+            &section_name,
+            &req.theme,
+            expiry,
+            page_count,
+        );
+        (site_dir, record)
+    };
+
+    let pub_id = publisher_id(&state)?;
+    finish_publish_site_to_nous(&state, site_dir, record, &pub_id).await
+}
+
+/// Publish a whole-notebook mini-site to Nous. Multi-page twin of `publish_page_to_nous`.
+async fn publish_notebook_to_nous(
+    State(state): State<AppState>,
+    Path(notebook_id): Path<String>,
+    Json(req): Json<PublishNousRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let nb_id = parse_uuid(&notebook_id)?;
+    let expiry =
+        ShareExpiry::from_str(&req.expiry).map_err(|e| api_err(StatusCode::BAD_REQUEST, e))?;
+
+    let (site_dir, record) = {
+        let storage = state.storage.lock().unwrap();
+        let notebook = storage
+            .get_notebook(nb_id)
+            .map_err(|e| api_err(StatusCode::NOT_FOUND, e.to_string()))?;
+        let notebook_name = notebook.name.clone();
+
+        let all_pages = storage
+            .list_pages(nb_id)
+            .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        let all_folders = storage
+            .list_folders(nb_id)
+            .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+        let pages: Vec<_> = all_pages
+            .into_iter()
+            .filter(|p| p.deleted_at.is_none())
+            .collect();
+
+        let page_count = pages.len();
+        let site_dir =
+            generate_share_site(&storage, nb_id, &pages, &all_folders, &notebook_name, &req.theme)
+                .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        let record = build_multi_share_record(
+            ShareType::Notebook { notebook_id: nb_id },
+            nb_id,
+            &notebook_name,
+            &req.theme,
+            expiry,
+            page_count,
+        );
+        (site_dir, record)
+    };
+
+    let pub_id = publisher_id(&state)?;
+    finish_publish_site_to_nous(&state, site_dir, record, &pub_id).await
 }
 
 async fn delete_block(

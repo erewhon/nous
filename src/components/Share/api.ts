@@ -71,6 +71,71 @@ export async function publishToNous(
   );
 }
 
+/**
+ * Publish a folder mini-site to Nous (multi-page twin of {@link publishToNous}).
+ * Desktop → Tauri command; web → daemon HTTP endpoint.
+ */
+export async function publishFolderToNous(
+  notebookId: string,
+  folderId: string,
+  theme: string,
+  expiry: string,
+  siteTitle?: string
+): Promise<PublishToNousResponse> {
+  if (isTauri()) {
+    return invoke("publish_folder_to_nous", {
+      request: { notebookId, folderId, theme, expiry, siteTitle },
+    });
+  }
+  return daemonPost<PublishToNousResponse>(
+    `/api/notebooks/${notebookId}/folders/${folderId}/publish-nous`,
+    { theme, expiry }
+  );
+}
+
+/**
+ * Publish a section mini-site to Nous (multi-page twin of {@link publishToNous}).
+ * Desktop → Tauri command; web → daemon HTTP endpoint.
+ */
+export async function publishSectionToNous(
+  notebookId: string,
+  sectionId: string,
+  theme: string,
+  expiry: string,
+  siteTitle?: string
+): Promise<PublishToNousResponse> {
+  if (isTauri()) {
+    return invoke("publish_section_to_nous", {
+      request: { notebookId, sectionId, theme, expiry, siteTitle },
+    });
+  }
+  return daemonPost<PublishToNousResponse>(
+    `/api/notebooks/${notebookId}/sections/${sectionId}/publish-nous`,
+    { theme, expiry }
+  );
+}
+
+/**
+ * Publish a whole-notebook mini-site to Nous (multi-page twin of
+ * {@link publishToNous}). Desktop → Tauri command; web → daemon HTTP endpoint.
+ */
+export async function publishNotebookToNous(
+  notebookId: string,
+  theme: string,
+  expiry: string,
+  siteTitle?: string
+): Promise<PublishToNousResponse> {
+  if (isTauri()) {
+    return invoke("publish_notebook_to_nous", {
+      request: { notebookId, theme, expiry, siteTitle },
+    });
+  }
+  return daemonPost<PublishToNousResponse>(
+    `/api/notebooks/${notebookId}/publish-nous`,
+    { theme, expiry }
+  );
+}
+
 export async function listShares(): Promise<ShareRecord[]> {
   return invoke("list_shares");
 }

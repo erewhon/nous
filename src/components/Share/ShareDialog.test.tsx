@@ -8,6 +8,9 @@ import { ShareDialog } from "./ShareDialog";
 
 const sharePage = vi.fn();
 const publishToNous = vi.fn();
+const publishFolderToNous = vi.fn();
+const publishSectionToNous = vi.fn();
+const publishNotebookToNous = vi.fn();
 const listShares = vi.fn();
 const getShareUploadConfig = vi.fn();
 vi.mock("./api", () => ({
@@ -16,6 +19,9 @@ vi.mock("./api", () => ({
   shareSection: vi.fn(),
   shareNotebook: vi.fn(),
   publishToNous: (...a: unknown[]) => publishToNous(...a),
+  publishFolderToNous: (...a: unknown[]) => publishFolderToNous(...a),
+  publishSectionToNous: (...a: unknown[]) => publishSectionToNous(...a),
+  publishNotebookToNous: (...a: unknown[]) => publishNotebookToNous(...a),
   listShares: (...a: unknown[]) => listShares(...a),
   deleteShare: vi.fn(),
   getShareUploadConfig: (...a: unknown[]) => getShareUploadConfig(...a),
@@ -67,6 +73,41 @@ describe("ShareDialog publish destination", () => {
     expect(sharePage).not.toHaveBeenCalled();
     expect(
       await screen.findByDisplayValue("https://pub.nous.page/abc12345/"),
+    ).toBeInTheDocument();
+  });
+
+  it("publishes a folder mini-site to Nous via publishFolderToNous", async () => {
+    publishFolderToNous.mockResolvedValue({
+      share: { id: "fold1234", expiresAt: null },
+      url: "https://pub.nous.page/fold1234/",
+    });
+
+    render(
+      <ShareDialog
+        isOpen
+        onClose={() => {}}
+        folderId="fld-1"
+        folderName="My Folder"
+        notebookId="nb-1"
+      />,
+    );
+    await waitFor(() => expect(getShareUploadConfig).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole("button", { name: "Nous" }));
+    fireEvent.click(screen.getByRole("button", { name: "Share" }));
+
+    await waitFor(() =>
+      expect(publishFolderToNous).toHaveBeenCalledWith(
+        "nb-1",
+        "fld-1",
+        "minimal",
+        "1w",
+        "My Folder",
+      ),
+    );
+    expect(publishToNous).not.toHaveBeenCalled();
+    expect(
+      await screen.findByDisplayValue("https://pub.nous.page/fold1234/"),
     ).toBeInTheDocument();
   });
 

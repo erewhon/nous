@@ -25,6 +25,14 @@ export async function serveStaticShare(
     return c.text("This share has expired", 410);
   }
 
+  // Canonicalize the bare root to a trailing slash. The generated sites use
+  // relative links (`page.html`), which the browser resolves against the current
+  // directory. Without the slash, `pub.nous.page/{id}` resolves them against the
+  // host root (`pub.nous.page/page.html` → 404), so redirect to `/{id}/`.
+  if (segments.length === 1 && !c.req.path.endsWith("/")) {
+    return c.redirect(`/${shareId}/`, 301);
+  }
+
   let path = segments.slice(1).join("/");
   if (path === "") path = "index.html";
 

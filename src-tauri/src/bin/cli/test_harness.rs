@@ -1361,3 +1361,114 @@ async fn publish_nous_bad_expiry_400() {
         .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
 }
+
+// ─── Publish folder/section/notebook mini-sites to Nous ─────────────────────
+
+const FAKE_ID: &str = "22222222-2222-2222-2222-222222222222";
+
+#[tokio::test]
+async fn publish_folder_nous_rejects_missing_token() {
+    let env = TestEnv::with_auth();
+    let nb = env.create_notebook("pub-nb");
+    let (status, _) = env
+        .request_with_token(
+            Method::POST,
+            &format!("/api/notebooks/{}/folders/{}/publish-nous", nb, FAKE_ID),
+            Some(json!({"theme": "minimal", "expiry": "never"})),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn publish_folder_nous_unknown_folder_404() {
+    let env = TestEnv::new();
+    let nb = env.create_notebook("pub-nb");
+    let (status, _) = env
+        .post_json(
+            &format!("/api/notebooks/{}/folders/{}/publish-nous", nb, FAKE_ID),
+            json!({"theme": "minimal", "expiry": "never"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn publish_folder_nous_bad_expiry_400() {
+    let env = TestEnv::new();
+    let nb = env.create_notebook("pub-nb");
+    let (status, _) = env
+        .post_json(
+            &format!("/api/notebooks/{}/folders/{}/publish-nous", nb, FAKE_ID),
+            json!({"theme": "minimal", "expiry": "bogus"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn publish_section_nous_unknown_section_404() {
+    let env = TestEnv::new();
+    let nb = env.create_notebook("pub-nb");
+    let (status, _) = env
+        .post_json(
+            &format!("/api/notebooks/{}/sections/{}/publish-nous", nb, FAKE_ID),
+            json!({"theme": "minimal", "expiry": "never"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn publish_section_nous_bad_expiry_400() {
+    let env = TestEnv::new();
+    let nb = env.create_notebook("pub-nb");
+    let (status, _) = env
+        .post_json(
+            &format!("/api/notebooks/{}/sections/{}/publish-nous", nb, FAKE_ID),
+            json!({"theme": "minimal", "expiry": "bogus"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn publish_notebook_nous_rejects_missing_token() {
+    let env = TestEnv::with_auth();
+    let nb = env.create_notebook("pub-nb");
+    let (status, _) = env
+        .request_with_token(
+            Method::POST,
+            &format!("/api/notebooks/{}/publish-nous", nb),
+            Some(json!({"theme": "minimal", "expiry": "never"})),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn publish_notebook_nous_unknown_notebook_404() {
+    let env = TestEnv::new();
+    let (status, _) = env
+        .post_json(
+            &format!("/api/notebooks/{}/publish-nous", FAKE_ID),
+            json!({"theme": "minimal", "expiry": "never"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn publish_notebook_nous_bad_expiry_400() {
+    let env = TestEnv::new();
+    let nb = env.create_notebook("pub-nb");
+    let (status, _) = env
+        .post_json(
+            &format!("/api/notebooks/{}/publish-nous", nb),
+            json!({"theme": "minimal", "expiry": "bogus"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
