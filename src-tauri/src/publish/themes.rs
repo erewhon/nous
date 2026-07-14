@@ -37,11 +37,51 @@ pub fn mermaid_head(theme_name: &str) -> Option<&'static str> {
     }
 }
 
-const ACADEMIC_MERMAID_HEAD: &str = r#"<script type="module">
+const ACADEMIC_MERMAID_HEAD: &str = r#"<style>
+/* Scroll reveal: nodes/edges fade in as the diagram enters view. The whole
+   effect lives inside prefers-reduced-motion:no-preference, so reduced-motion
+   readers (and any diagram opted out with class "no-reveal") see it fully
+   drawn with no animation. */
+@media (prefers-reduced-motion: no-preference) {
+  pre.mermaid.mreveal-rendering svg { opacity: 0; }
+  pre.mermaid.mreveal:not(.no-reveal):not(.mreveal-shown) [data-reveal] { opacity: 0; }
+  pre.mermaid.mreveal:not(.no-reveal) [data-reveal] {
+    transition: opacity 480ms ease;
+    transition-delay: calc(var(--reveal-i, 0) * 55ms);
+  }
+}
+</style>
+<script type="module">
 import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11.16.0/dist/mermaid.esm.min.mjs';
 const nodes = Array.from(document.querySelectorAll('pre.mermaid'));
 // Stash each diagram's source so we can re-render when the palette flips.
-nodes.forEach(function (n) { n.dataset.src = n.textContent; });
+nodes.forEach(function (n) { n.dataset.src = n.textContent; n.classList.add('mreveal'); });
+var reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+// Diagram parts to reveal in order, covering flowchart + sequence shapes.
+var REVEAL_SEL = '.node, .cluster, .edgePath, .flowchart-link, .edgeLabel, .actor, .actor-line, .messageLine0, .messageLine1, .messageText, .note, .loopLine, .loopText, .labelBox, .labelText, .activation0, .activation1';
+function armReveal(pre) {
+  var svg = pre.querySelector('svg');
+  pre.classList.remove('mreveal-rendering');
+  if (!svg || pre.classList.contains('no-reveal')) return;
+  var parts = Array.prototype.slice.call(svg.querySelectorAll(REVEAL_SEL));
+  // Reveal in reading order (top-to-bottom, then left-to-right).
+  parts.sort(function (a, b) {
+    var ra = a.getBoundingClientRect(), rb = b.getBoundingClientRect();
+    return (ra.top - rb.top) || (ra.left - rb.left);
+  });
+  parts.forEach(function (el, i) { el.setAttribute('data-reveal', ''); el.style.setProperty('--reveal-i', String(i)); });
+  // Already shown (e.g. re-render on theme toggle), reduced motion, or no
+  // observer support: show immediately with no animation.
+  if (reduce || pre.dataset.shown === '1' || typeof IntersectionObserver === 'undefined') {
+    pre.classList.add('mreveal-shown'); pre.dataset.shown = '1'; return;
+  }
+  var io = new IntersectionObserver(function (entries) {
+    entries.forEach(function (e) {
+      if (e.isIntersecting) { pre.classList.add('mreveal-shown'); pre.dataset.shown = '1'; io.disconnect(); }
+    });
+  }, { threshold: 0.15 });
+  io.observe(pre);
+}
 function palette() {
   var cs = getComputedStyle(document.documentElement);
   var v = function (name) { return cs.getPropertyValue(name).trim(); };
@@ -63,8 +103,10 @@ function palette() {
 }
 async function renderAll() {
   mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'base', themeVariables: palette() });
-  nodes.forEach(function (n) { n.textContent = n.dataset.src; n.removeAttribute('data-processed'); });
-  try { await mermaid.run({ nodes: nodes }); } catch (e) { /* leave source visible on parse error */ }
+  // Hide the SVG while it re-renders so the reveal starts from blank, not a flash.
+  nodes.forEach(function (n) { n.textContent = n.dataset.src; n.removeAttribute('data-processed'); n.classList.remove('mreveal-shown'); n.classList.add('mreveal-rendering'); });
+  try { await mermaid.run({ nodes: nodes }); } catch (e) { nodes.forEach(function (n) { n.classList.remove('mreveal-rendering'); }); return; }
+  nodes.forEach(armReveal);
 }
 renderAll();
 // Re-render after the toggle flips data-theme so diagrams follow the palette.
@@ -1247,5 +1289,19 @@ mod tests {
         // Re-renders on the light/dark toggle so diagrams follow the page.
         assert!(head.contains(r#"querySelectorAll('.theme-toggle')"#));
         assert!(head.contains("mermaid.run"));
+    }
+
+    #[test]
+    fn mermaid_head_embeds_scroll_reveal_with_reduced_motion_guard() {
+        let head = mermaid_head("academic").unwrap();
+        // Reveal is IntersectionObserver-driven and staggered per element.
+        assert!(head.contains("IntersectionObserver"), "no scroll observer");
+        assert!(head.contains("data-reveal") && head.contains("--reveal-i"), "no staggered reveal");
+        // The whole effect is gated on prefers-reduced-motion: no-preference,
+        // and there's a JS reduced-motion short-circuit too.
+        assert!(head.contains("prefers-reduced-motion: no-preference"), "reveal not motion-gated");
+        assert!(head.contains("prefers-reduced-motion: reduce"), "no JS reduced-motion guard");
+        // Opt-out hook so a diagram can skip the animation.
+        assert!(head.contains("no-reveal"), "no opt-out hook");
     }
 }
