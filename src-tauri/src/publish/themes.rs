@@ -400,17 +400,27 @@ fn theme_academic() -> Theme {
     Theme {
         name: "academic",
         js: None,
-        page_template: r#"<!DOCTYPE html>
+        page_template: concat!(
+            r#"<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{page_title}} — {{site_title}}</title>
   <link rel="stylesheet" href="style.css">
+  "#,
+            r#"<script>(function(){try{var t=localStorage.getItem('nous-theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>"#,
+            r#"
 </head>
 <body>
   <header class="site-header">
     <a href="index.html" class="site-name">{{site_title}}</a>
+    "#,
+            r#"<button type="button" class="theme-toggle" aria-label="Toggle dark mode" title="Toggle dark mode">
+      <svg class="icon-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" fill="currentColor"/></svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.4" fill="currentColor"/><g stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><line x1="12" y1="2.5" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="21.5"/><line x1="2.5" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="21.5" y2="12"/><line x1="5.2" y1="5.2" x2="6.9" y2="6.9"/><line x1="17.1" y1="17.1" x2="18.8" y2="18.8"/><line x1="18.8" y1="5.2" x2="17.1" y2="6.9"/><line x1="6.9" y1="17.1" x2="5.2" y2="18.8"/></g></svg>
+    </button>"#,
+            r#"
   </header>
   <main>
     <article>
@@ -424,19 +434,33 @@ fn theme_academic() -> Theme {
     </article>
     {{backlinks}}
   </main>
+  "#,
+            r#"<script>document.querySelectorAll('.theme-toggle').forEach(function(b){b.addEventListener('click',function(){var d=document.documentElement,n=d.getAttribute('data-theme')==='dark'?'light':'dark';d.setAttribute('data-theme',n);try{localStorage.setItem('nous-theme',n);}catch(e){}});});</script>"#,
+            r#"
 </body>
-</html>"#,
-        index_template: r#"<!DOCTYPE html>
+</html>"#
+        ),
+        index_template: concat!(
+            r#"<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{site_title}}</title>
   <link rel="stylesheet" href="style.css">
+  "#,
+            r#"<script>(function(){try{var t=localStorage.getItem('nous-theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>"#,
+            r#"
 </head>
 <body>
   <header class="site-header">
     <a href="index.html" class="site-name">{{site_title}}</a>
+    "#,
+            r#"<button type="button" class="theme-toggle" aria-label="Toggle dark mode" title="Toggle dark mode">
+      <svg class="icon-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" fill="currentColor"/></svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.4" fill="currentColor"/><g stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><line x1="12" y1="2.5" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="21.5"/><line x1="2.5" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="21.5" y2="12"/><line x1="5.2" y1="5.2" x2="6.9" y2="6.9"/><line x1="17.1" y1="17.1" x2="18.8" y2="18.8"/><line x1="18.8" y1="5.2" x2="17.1" y2="6.9"/><line x1="6.9" y1="17.1" x2="5.2" y2="18.8"/></g></svg>
+    </button>"#,
+            r#"
   </header>
   <main>
     <h1>{{site_title}}</h1>
@@ -444,54 +468,105 @@ fn theme_academic() -> Theme {
 {{nav}}
     </ul>
   </main>
+  "#,
+            r#"<script>document.querySelectorAll('.theme-toggle').forEach(function(b){b.addEventListener('click',function(){var d=document.documentElement,n=d.getAttribute('data-theme')==='dark'?'light':'dark';d.setAttribute('data-theme',n);try{localStorage.setItem('nous-theme',n);}catch(e){}});});</script>"#,
+            r#"
 </body>
-</html>"#,
-        css: r#"*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+</html>"#
+        ),
+        css: r#":root {
+  --bg: #fffff8;
+  --text: #1a1a1a;
+  --accent: #8b0000;
+  --panel: #f5f5ef;
+  --code-bg: #f0f0ea;
+  --callout-bg: #f9f9f4;
+  --muted: #666;
+  --quote: #444;
+  --border: #ccc;
+  --pre-border: #ddd;
+  --quote-border: #999;
+}
+/* Warm complementary dark palette — follows the OS until the visitor chooses. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) {
+    --bg: #1a1712; --text: #ece8dc; --accent: #e79285;
+    --panel: #231f18; --code-bg: #2a2620; --callout-bg: #201d16;
+    --muted: #a49e8c; --quote: #c4bfb0;
+    --border: #38342a; --pre-border: #38342a; --quote-border: #4a463b;
+  }
+}
+/* Explicit visitor choice — wins over the OS media query in both directions. */
+:root[data-theme="dark"] {
+  --bg: #1a1712; --text: #ece8dc; --accent: #e79285;
+  --panel: #231f18; --code-bg: #2a2620; --callout-bg: #201d16;
+  --muted: #a49e8c; --quote: #c4bfb0;
+  --border: #38342a; --pre-border: #38342a; --quote-border: #4a463b;
+}
+:root[data-theme="light"] {
+  --bg: #fffff8; --text: #1a1a1a; --accent: #8b0000;
+  --panel: #f5f5ef; --code-bg: #f0f0ea; --callout-bg: #f9f9f4;
+  --muted: #666; --quote: #444;
+  --border: #ccc; --pre-border: #ddd; --quote-border: #999;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html { background: var(--bg); }
 body {
   font-family: "Georgia", "Times New Roman", "Palatino Linotype", serif;
   line-height: 1.8;
-  color: #1a1a1a;
-  background: #fffff8;
+  color: var(--text);
+  background: var(--bg);
   max-width: 700px;
   margin: 0 auto;
   padding: 2rem 1.5rem;
 }
-.site-header { margin-bottom: 2rem; padding-bottom: 1rem; border-bottom: 2px solid #1a1a1a; }
-.site-name { color: #1a1a1a; text-decoration: none; font-weight: 700; font-size: 1.2rem; font-variant: small-caps; letter-spacing: 0.05em; }
+.site-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 2rem; padding-bottom: 1rem; border-bottom: 2px solid var(--text); }
+.site-name { color: var(--text); text-decoration: none; font-weight: 700; font-size: 1.2rem; font-variant: small-caps; letter-spacing: 0.05em; }
+.theme-toggle { width: 34px; height: 34px; flex: none; border-radius: 50%; border: 1px solid var(--border); background: transparent; color: var(--text); display: inline-flex; align-items: center; justify-content: center; cursor: pointer; padding: 0; transition: background 0.15s ease, border-color 0.15s ease; }
+.theme-toggle:hover { background: var(--code-bg); border-color: var(--muted); }
+.theme-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.theme-toggle svg { width: 17px; height: 17px; display: block; }
+.theme-toggle .icon-sun { display: none; }
+:root[data-theme="dark"] .theme-toggle .icon-moon { display: none; }
+:root[data-theme="dark"] .theme-toggle .icon-sun { display: block; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) .theme-toggle .icon-moon { display: none; }
+  :root:not([data-theme]) .theme-toggle .icon-sun { display: block; }
+}
 .article-header { margin-bottom: 2rem; }
 .article-header h1 { font-size: 2rem; line-height: 1.25; margin-bottom: 0.5rem; }
-.article-meta { color: #666; font-size: 0.9rem; font-style: italic; }
+.article-meta { color: var(--muted); font-size: 0.9rem; font-style: italic; }
 .article-body > * + * { margin-top: 1.2rem; }
 h1, h2, h3, h4 { font-family: "Georgia", serif; margin-top: 2rem; line-height: 1.3; }
 h2 { font-size: 1.4rem; }
 h3 { font-size: 1.2rem; }
 p { text-align: justify; hyphens: auto; }
-a { color: #8b0000; }
+a { color: var(--accent); }
 a:hover { text-decoration: underline; }
-pre { background: #f5f5ef; padding: 1rem; border-radius: 2px; overflow-x: auto; font-size: 0.85rem; border: 1px solid #ddd; }
+pre { background: var(--panel); padding: 1rem; border-radius: 2px; overflow-x: auto; font-size: 0.85rem; border: 1px solid var(--pre-border); }
 code { font-family: "Courier New", Courier, monospace; font-size: 0.9em; }
-:not(pre) > code { background: #f0f0ea; padding: 0.1em 0.3em; border-radius: 2px; }
-blockquote { border-left: 2px solid #999; padding-left: 1.25rem; color: #444; font-style: italic; margin: 1.5rem 0; }
+:not(pre) > code { background: var(--code-bg); padding: 0.1em 0.3em; border-radius: 2px; }
+blockquote { border-left: 2px solid var(--quote-border); padding-left: 1.25rem; color: var(--quote); font-style: italic; margin: 1.5rem 0; }
 table { width: 100%; border-collapse: collapse; font-size: 0.95rem; }
-th, td { border: 1px solid #ccc; padding: 0.5rem 0.75rem; text-align: left; }
-th { background: #f5f5ef; font-weight: 700; }
+th, td { border: 1px solid var(--border); padding: 0.5rem 0.75rem; text-align: left; }
+th { background: var(--panel); font-weight: 700; }
 figure { margin: 2rem 0; text-align: center; }
 figure img { max-width: 100%; height: auto; }
-figcaption { font-size: 0.85rem; color: #666; margin-top: 0.5rem; font-style: italic; }
-hr { border: none; border-top: 1px solid #ccc; margin: 2.5rem 0; }
+figcaption { font-size: 0.85rem; color: var(--muted); margin-top: 0.5rem; font-style: italic; }
+hr { border: none; border-top: 1px solid var(--border); margin: 2.5rem 0; }
 .checklist { list-style: none; padding-left: 0; }
 .checklist li { display: flex; align-items: baseline; gap: 0.5rem; }
-.callout { border: 1px solid #ccc; background: #f9f9f4; padding: 1rem; margin: 1.5rem 0; }
+.callout { border: 1px solid var(--border); background: var(--callout-bg); padding: 1rem; margin: 1.5rem 0; }
 .callout-title { font-weight: 700; margin-bottom: 0.5rem; font-variant: small-caps; }
-.broken-link { color: #8b0000; text-decoration: line-through; }
-.block-ref { background: #f0f0ea; padding: 0.1em 0.3em; font-style: italic; }
-.backlinks { margin-top: 3rem; padding-top: 1.5rem; border-top: 2px solid #1a1a1a; }
-.backlinks h2 { font-size: 1rem; font-variant: small-caps; color: #666; letter-spacing: 0.05em; }
+.broken-link { color: var(--accent); text-decoration: line-through; }
+.block-ref { background: var(--code-bg); padding: 0.1em 0.3em; font-style: italic; }
+.backlinks { margin-top: 3rem; padding-top: 1.5rem; border-top: 2px solid var(--text); }
+.backlinks h2 { font-size: 1rem; font-variant: small-caps; color: var(--muted); letter-spacing: 0.05em; }
 .backlinks ul { list-style: none; padding: 0; }
 .backlinks li { margin-bottom: 0.35rem; }
 .page-list { list-style: none; padding: 0; }
 .page-list li { margin-bottom: 0.6rem; }
-.page-list a { text-decoration: none; font-size: 1.05rem; color: #8b0000; }
+.page-list a { text-decoration: none; font-size: 1.05rem; color: var(--accent); }
 .page-list a:hover { text-decoration: underline; }
 "#,
     }
@@ -1053,3 +1128,43 @@ const DOCS_JS: &str = r#"(function(){
   function esc(s) { var d = document.createElement("div"); d.textContent = s; return d.innerHTML; }
 })();
 "#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn academic_css_defines_tokens_and_dark_palette() {
+        let css = theme_academic().css;
+        // Palette is driven by custom properties, not hardcoded hex.
+        for token in ["--bg:", "--text:", "--accent:", "--panel:", "--muted:"] {
+            assert!(css.contains(token), "academic CSS missing token {token}");
+        }
+        // Explicit dark override + OS-preference default both present.
+        assert!(css.contains(r#":root[data-theme="dark"]"#));
+        assert!(css.contains(r#":root[data-theme="light"]"#));
+        assert!(css.contains("prefers-color-scheme: dark"));
+        // Approved dark ground + lightened accent.
+        assert!(css.contains("#1a1712"), "dark background missing");
+        assert!(css.contains("#e79285"), "dark accent missing");
+    }
+
+    #[test]
+    fn academic_templates_embed_toggle_and_no_flash_init() {
+        for template in [theme_academic().page_template, theme_academic().index_template] {
+            // No-FOUC init runs in <head> before <body>.
+            let init = template
+                .find("localStorage.getItem('nous-theme')")
+                .expect("theme init script missing");
+            let body = template.find("<body>").expect("no <body>");
+            assert!(init < body, "init script must precede <body> (no flash)");
+            // The sun/moon toggle button + persistence listener are present.
+            assert!(template.contains(r#"class="theme-toggle""#), "toggle button missing");
+            assert!(template.contains("icon-moon") && template.contains("icon-sun"));
+            assert!(
+                template.contains("localStorage.setItem('nous-theme'"),
+                "persistence listener missing"
+            );
+        }
+    }
+}
