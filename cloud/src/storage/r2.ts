@@ -132,6 +132,51 @@ export async function listPageIds(
   });
 }
 
+// ─── Static Shares (Publish-Static-to-Nous) ─────────────────────────────────
+// Published themed static sites live under `pub/{shareId}/{path}` and are served
+// (Worker-fronted) at pub.nous.page/{shareId}/{path}.
+
+function staticSharePath(shareId: string, path: string): string {
+  return `pub/${shareId}/${path}`;
+}
+
+/** Store one file of a published static share. */
+export async function putStaticFile(
+  bucket: R2Bucket,
+  shareId: string,
+  path: string,
+  data: ArrayBuffer,
+): Promise<void> {
+  await bucket.put(staticSharePath(shareId, path), data);
+}
+
+/** Read one file of a published static share. Null if it doesn't exist. */
+export async function getStaticFile(
+  bucket: R2Bucket,
+  shareId: string,
+  path: string,
+): Promise<{ data: ArrayBuffer } | null> {
+  const obj = await bucket.get(staticSharePath(shareId, path));
+  if (!obj) return null;
+  return { data: await obj.arrayBuffer() };
+}
+
+/** Delete every stored file of a published static share. */
+export async function deleteStaticShareFiles(
+  bucket: R2Bucket,
+  shareId: string,
+): Promise<void> {
+  const prefix = `pub/${shareId}/`;
+  let cursor: string | undefined;
+  do {
+    const listed = await bucket.list({ prefix, cursor });
+    if (listed.objects.length > 0) {
+      await bucket.delete(listed.objects.map((o) => o.key));
+    }
+    cursor = listed.truncated ? listed.cursor : undefined;
+  } while (cursor);
+}
+
 /**
  * Delete all objects for a notebook (pages, meta, assets).
  */

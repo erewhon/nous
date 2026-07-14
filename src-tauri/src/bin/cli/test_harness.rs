@@ -1316,3 +1316,48 @@ async fn ai_requests_fall_back_to_daemon_credentials() {
     // Clean bridge error — not a config/validation error
     assert!(body["error"].as_str().unwrap_or("").contains("AI chat"));
 }
+
+// ─── Publish to Nous (daemon HTTP endpoint) ─────────────────────────────────
+
+const FAKE_PAGE_ID: &str = "11111111-1111-1111-1111-111111111111";
+
+#[tokio::test]
+async fn publish_nous_rejects_missing_token() {
+    let env = TestEnv::with_auth();
+    let nb = env.create_notebook("pub-nb");
+    let (status, _) = env
+        .request_with_token(
+            Method::POST,
+            &format!("/api/notebooks/{}/pages/{}/publish-nous", nb, FAKE_PAGE_ID),
+            Some(json!({"theme": "minimal", "expiry": "never"})),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn publish_nous_unknown_page_404() {
+    let env = TestEnv::new();
+    let nb = env.create_notebook("pub-nb");
+    let (status, _) = env
+        .post_json(
+            &format!("/api/notebooks/{}/pages/{}/publish-nous", nb, FAKE_PAGE_ID),
+            json!({"theme": "minimal", "expiry": "never"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn publish_nous_bad_expiry_400() {
+    let env = TestEnv::new();
+    let nb = env.create_notebook("pub-nb");
+    let (status, _) = env
+        .post_json(
+            &format!("/api/notebooks/{}/pages/{}/publish-nous", nb, FAKE_PAGE_ID),
+            json!({"theme": "minimal", "expiry": "bogus"}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}

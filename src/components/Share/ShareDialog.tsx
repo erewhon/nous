@@ -8,6 +8,7 @@ import {
   shareFolder,
   shareSection,
   shareNotebook,
+  publishToNous,
   listShares,
   deleteShare,
   getShareUploadConfig,
@@ -67,7 +68,8 @@ export function ShareDialog({
   const [existingShares, setExistingShares] = useState<ShareRecord[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [uploadExternal, setUploadExternal] = useState(false);
+  // Publish destination: local daemon, Nous cloud, or configured S3.
+  const [destination, setDestination] = useState<"local" | "nous" | "s3">("local");
   const [hasUploadConfig, setHasUploadConfig] = useState(false);
   const [siteTitle, setSiteTitle] = useState("");
 
@@ -106,6 +108,7 @@ export function ShareDialog({
       setCurrentShare(null);
       setCopied(false);
       setSiteTitle(shareName || "");
+      setDestination("local");
 
       // Load existing shares that match this context
       listShares()
@@ -130,12 +133,10 @@ export function ShareDialog({
         })
         .catch(() => setExistingShares([]));
 
-      // Check if upload config exists
+      // Check if S3 upload config exists (enables the S3 destination option)
       getShareUploadConfig()
         .then((config) => {
-          const configured = config !== null && config.hasCredentials;
-          setHasUploadConfig(configured);
-          setUploadExternal(configured);
+          setHasUploadConfig(config !== null && config.hasCredentials);
         })
         .catch(() => setHasUploadConfig(false));
     }
@@ -148,6 +149,24 @@ export function ShareDialog({
     setError(null);
 
     try {
+      // Publish to Nous (single-page only) — themed static render to pub.nous.page.
+      if (destination === "nous" && !isMultiPage) {
+        if (!effectiveNotebookId || !effectivePageId) return;
+        const nousResp = await publishToNous(
+          effectiveNotebookId,
+          effectivePageId,
+          theme,
+          expiry
+        );
+        setShareUrl(nousResp.url);
+        setCurrentShare(nousResp.share);
+        setDialogState("success");
+        setExistingShares((prev) => [nousResp.share, ...prev]);
+        toastStore.success("Published to Nous");
+        return;
+      }
+
+      const uploadExternal = destination === "s3";
       let response;
       if (notebookShareId) {
         response = await shareNotebook(
@@ -202,7 +221,7 @@ export function ShareDialog({
       setError(String(err));
       setDialogState("configure");
     }
-  }, [effectiveNotebookId, effectivePageId, folderId, sectionId, notebookShareId, theme, expiry, uploadExternal, siteTitle, toastStore]);
+  }, [effectiveNotebookId, effectivePageId, folderId, sectionId, notebookShareId, isMultiPage, theme, expiry, destination, siteTitle, toastStore]);
 
   const handleCopy = useCallback(async () => {
     if (!shareUrl) return;
@@ -345,20 +364,41 @@ export function ShareDialog({
                 </div>
               </div>
 
-              {/* Upload to web toggle */}
-              {hasUploadConfig && (
-                <label className="share-upload-toggle">
-                  <input
-                    type="checkbox"
-                    checked={uploadExternal}
-                    onChange={(e) => setUploadExternal(e.target.checked)}
-                  />
-                  <span>Upload to web</span>
-                  <span className="share-upload-hint">
-                    Publish to your configured S3 storage
-                  </span>
-                </label>
-              )}
+              {/* Publish destination */}
+              <div>
+                <div className="share-section-label">Publish to</div>
+                <div className="share-expiry-options">
+                  <button
+                    className={`share-expiry-btn${destination === "local" ? " selected" : ""}`}
+                    onClick={() => setDestination("local")}
+                  >
+                    Local
+                  </button>
+                  {!isMultiPage && (
+                    <button
+                      className={`share-expiry-btn${destination === "nous" ? " selected" : ""}`}
+                      onClick={() => setDestination("nous")}
+                    >
+                      Nous
+                    </button>
+                  )}
+                  {hasUploadConfig && (
+                    <button
+                      className={`share-expiry-btn${destination === "s3" ? " selected" : ""}`}
+                      onClick={() => setDestination("s3")}
+                    >
+                      S3
+                    </button>
+                  )}
+                </div>
+                <span className="share-upload-hint">
+                  {destination === "local"
+                    ? "Served by your local Nous daemon"
+                    : destination === "nous"
+                      ? "Published to Nous at pub.nous.page"
+                      : "Published to your configured S3 storage"}
+                </span>
+              </div>
 
               {/* Existing shares for this page */}
               {existingShares.length > 0 && (

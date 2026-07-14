@@ -278,16 +278,33 @@ impl ShareStorage {
     }
 }
 
-/// Generate a 12-character alphanumeric share ID.
+/// Length of a generated share id. 8 base-36 chars is ~2.8e12 combinations —
+/// ample for a single-publisher store while keeping published URLs short
+/// (e.g. pub.nous.page/{id}/). Existing 12-char ids remain valid.
+const SHARE_ID_LEN: usize = 8;
+
+/// Generate an 8-character lowercase base-36 share ID.
 pub fn generate_share_id() -> String {
     const CHARSET: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
     let mut rng = rand::thread_rng();
-    (0..12)
+    (0..SHARE_ID_LEN)
         .map(|_| {
             let idx = rng.gen_range(0..CHARSET.len());
             CHARSET[idx] as char
         })
         .collect()
+}
+
+/// Generate a share id that does not collide with any id in `existing`.
+/// The pure `generate_share_id` has no store to check against; callers that
+/// hold the set of live ids use this to guarantee uniqueness.
+pub fn generate_unique_share_id(existing: &std::collections::HashSet<String>) -> String {
+    loop {
+        let id = generate_share_id();
+        if !existing.contains(&id) {
+            return id;
+        }
+    }
 }
 
 /// Build a ShareRecord for a single page share.
@@ -364,4 +381,42 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    #[test]
+    fn share_id_is_8_lowercase_base36_chars() {
+        for _ in 0..100 {
+            let id = generate_share_id();
+            assert_eq!(id.len(), 8, "id should be 8 chars: {id}");
+            assert!(
+                id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()),
+                "id should be lowercase base-36: {id}"
+            );
+        }
+    }
+
+    #[test]
+    fn share_ids_are_unique_across_many_generations() {
+        let ids: HashSet<String> = (0..5000).map(|_| generate_share_id()).collect();
+        // With 8 base-36 chars, 5000 draws should essentially never collide.
+        assert_eq!(ids.len(), 5000);
+    }
+
+    #[test]
+    fn unique_generator_avoids_existing_ids() {
+        // Force the first few candidates to be "taken" by seeding a large set,
+        // then confirm the returned id is genuinely fresh.
+        let mut existing: HashSet<String> = HashSet::new();
+        for _ in 0..1000 {
+            existing.insert(generate_share_id());
+        }
+        let fresh = generate_unique_share_id(&existing);
+        assert!(!existing.contains(&fresh));
+        assert_eq!(fresh.len(), 8);
+    }
 }

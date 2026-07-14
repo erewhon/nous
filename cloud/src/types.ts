@@ -5,6 +5,8 @@ export interface Env {
   JWT_SECRET: string;
   /** HMAC secret (hex-encoded) for signing collab session tokens. Same key as collab Worker. */
   COLLAB_HMAC_SECRET: string;
+  /** HMAC secret (hex-encoded) shared with the desktop for publish tokens (Publish-Static-to-Nous). */
+  PUBLISH_HMAC_SECRET: string;
 }
 
 /** Variables set by middleware on the Hono context. */
@@ -62,6 +64,18 @@ export interface SavedShareRow {
   share_id: string;
   wrapped_notebook_key: string;
   saved_at: string;
+}
+
+export interface StaticShareRow {
+  id: string;
+  owner_user_id: string;
+  notebook_id: string | null;
+  title: string | null;
+  theme: string | null;
+  created_at: string;
+  /** TEXT datetime; NULL means never expires. */
+  expires_at: string | null;
+  page_count: number | null;
 }
 
 /** JWT payload. */

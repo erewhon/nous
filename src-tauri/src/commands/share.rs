@@ -4,6 +4,7 @@ use uuid::Uuid;
 
 use crate::share::credentials;
 use crate::share::html_gen::{generate_share_site, render_share_html};
+use crate::share::publish;
 use crate::share::storage::{
     build_multi_share_record, build_share_record, ShareExpiry, ShareRecord, ShareType,
 };
@@ -107,6 +108,85 @@ pub async fn share_page(
         share: record,
         local_url,
     })
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublishToNousRequest {
+    pub notebook_id: String,
+    pub page_id: String,
+    pub theme: String,
+    pub expiry: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublishToNousResponse {
+    pub share: ShareRecord,
+    pub url: String,
+}
+
+/// Publish a themed static render of a page to Nous (Worker-fronted R2), served
+/// at pub.nous.page/{id}/. Authenticates with an HMAC publish token signed by
+/// the shared publish secret (same secret set on the cloud Worker as
+/// PUBLISH_HMAC_SECRET). No S3 credentials, no cloud account.
+#[tauri::command]
+pub async fn publish_share_to_nous(
+    state: State<'_, AppState>,
+    request: PublishToNousRequest,
+) -> Result<PublishToNousResponse, String> {
+    let nb_id =
+        Uuid::parse_str(&request.notebook_id).map_err(|e| format!("Invalid notebook ID: {}", e))?;
+    let pg_id =
+        Uuid::parse_str(&request.page_id).map_err(|e| format!("Invalid page ID: {}", e))?;
+    let expiry = ShareExpiry::from_str(&request.expiry)?;
+
+    let storage = state.storage.clone();
+    let share_storage = state.share_storage.clone();
+    let library_storage = state.library_storage.clone();
+    let theme = request.theme.clone();
+
+    // data_dir + a stable publisher id (the library id) for the publish token.
+    let (data_dir, publisher_id) = {
+        let lib_storage = library_storage.lock().map_err(|e| e.to_string())?;
+        let library = lib_storage
+            .get_current_library()
+            .map_err(|e| format!("Failed to get library: {}", e))?;
+        (library.path.clone(), library.id.to_string())
+    };
+
+    // Render + build the record (needs the storage lock) off the async thread.
+    let (html, record) = tokio::task::spawn_blocking(move || {
+        let storage = storage.lock().map_err(|e| e.to_string())?;
+        let page = storage
+            .get_page(nb_id, pg_id)
+            .map_err(|e| format!("Failed to get page: {}", e))?;
+        let all_pages = storage
+            .list_pages(nb_id)
+            .map_err(|e| format!("Failed to list pages: {}", e))?;
+        let html = render_share_html(&storage, nb_id, &page, &all_pages, &theme)?;
+        let record = build_share_record(pg_id, nb_id, &page.title, &theme, expiry);
+        Ok::<_, String>((html, record))
+    })
+    .await
+    .map_err(|e| format!("Task failed: {}", e))??;
+
+    // Sign, upload, and get the public URL (shared with the daemon endpoint).
+    let url = publish::publish_rendered_page(&html, &record, &data_dir, &publisher_id).await?;
+
+    // Persist locally with the public URL recorded.
+    let mut record = record;
+    record.external_url = Some(url.clone());
+    let record_clone = record.clone();
+    let html_clone = html.clone();
+    tokio::task::spawn_blocking(move || {
+        let mut share_store = share_storage.lock().map_err(|e| e.to_string())?;
+        share_store.create_share(record_clone, &html_clone)
+    })
+    .await
+    .map_err(|e| format!("Task failed: {}", e))??;
+
+    Ok(PublishToNousResponse { share: record, url })
 }
 
 #[tauri::command]

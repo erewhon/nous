@@ -20,6 +20,10 @@ export function conflict(message: string): HTTPException {
   return new HTTPException(409, { message });
 }
 
+export function gone(message = "Gone"): HTTPException {
+  return new HTTPException(410, { message });
+}
+
 export function preconditionFailed(message = "Precondition failed"): HTTPException {
   return new HTTPException(412, { message });
 }

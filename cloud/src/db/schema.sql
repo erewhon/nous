@@ -78,3 +78,23 @@ CREATE TABLE IF NOT EXISTS saved_shares (
 );
 
 CREATE INDEX IF NOT EXISTS idx_saved_shares_user ON saved_shares(user_id);
+
+-- Static page shares (Publish-Static-to-Nous): a themed static HTML render
+-- published to R2 and served (Worker-fronted) at pub.nous.page/{id}/. The
+-- publisher owns the record (owner_user_id); viewers just need the link.
+-- Timestamps are TEXT datetime('now') to match the rest of this schema;
+-- expires_at NULL means "never".
+CREATE TABLE IF NOT EXISTS static_shares (
+  id TEXT PRIMARY KEY,
+  -- The publisher identity (the library id), authenticated by the shared
+  -- publish HMAC secret — NOT a cloud user account, so no FK to users.
+  owner_user_id TEXT NOT NULL,
+  notebook_id TEXT,
+  title TEXT,
+  theme TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  expires_at TEXT,
+  page_count INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_static_shares_owner ON static_shares(owner_user_id);

@@ -5,16 +5,19 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "db:migrate": "wrangler d1 execute nous-cloud --file=src/db/schema.sql",
+    "db:migrate": "wrangler d1 execute nous-cloud --remote --file=src/db/schema.sql",
     "db:migrate:local": "wrangler d1 execute nous-cloud --local --file=src/db/schema.sql",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "hono": "^4.7.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260712.1",
+    "@types/node": "^22.10.0",
     "typescript": "^5.9.3",
+    "vitest": "^3.0.0",
     "wrangler": "^4.110.0"
   }
 }

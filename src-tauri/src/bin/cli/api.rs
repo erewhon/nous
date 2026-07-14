@@ -26,7 +26,9 @@ use nous_lib::python_bridge::{
     AIConfig, ChatMessage, NotebookInfo, PageContext, PageInfo, PageSummaryInput, PythonAI,
     StreamEvent,
 };
-use nous_lib::share::storage::ShareStorage;
+use nous_lib::share::html_gen::render_share_html;
+use nous_lib::share::publish;
+use nous_lib::share::storage::{build_share_record, ShareExpiry, ShareRecord, ShareStorage};
 use nous_lib::plugins::api::HostApi;
 use nous_lib::git;
 use nous_lib::storage::{EditorBlock, EditorData, FileStorageMode, Page, PageType, SystemPromptMode};
@@ -596,6 +598,10 @@ pub fn build_router(state: AppState, auth: AuthState) -> Router {
         .route(
             "/api/notebooks/{notebook_id}/pages/{page_id}/append",
             post(append_to_page),
+        )
+        .route(
+            "/api/notebooks/{notebook_id}/pages/{page_id}/publish-nous",
+            post(publish_page_to_nous),
         )
         .route(
             "/api/notebooks/{notebook_id}/pages/{page_id}/delete-block",
@@ -2047,6 +2053,76 @@ async fn append_to_page(
     after_block_level_write(&state, &page, &notebook_id, &page_id);
 
     Ok(Json(ApiResponse { data: page }))
+}
+
+#[derive(Deserialize)]
+struct PublishNousRequest {
+    theme: String,
+    expiry: String,
+}
+
+#[derive(Serialize)]
+struct PublishNousResponse {
+    share: ShareRecord,
+    url: String,
+}
+
+/// Publish a themed static render of a page to Nous (pub.nous.page). Mirrors the
+/// desktop `publish_share_to_nous` command so the web frontend can publish
+/// without the Tauri bridge. Auth is the daemon's own API key (this route is
+/// under the auth-gated /api prefix).
+async fn publish_page_to_nous(
+    State(state): State<AppState>,
+    Path((notebook_id, page_id)): Path<(String, String)>,
+    Json(req): Json<PublishNousRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let nb_id = parse_uuid(&notebook_id)?;
+    let pg_id = parse_uuid(&page_id)?;
+    let expiry = ShareExpiry::from_str(&req.expiry)
+        .map_err(|e| api_err(StatusCode::BAD_REQUEST, e))?;
+
+    // Render + build the record under the storage lock, then release it before
+    // the async upload (never hold the lock across .await). Done before the
+    // library lookup so a missing page fails fast with 404.
+    let (html, record) = {
+        let storage = state.storage.lock().unwrap();
+        let page = storage
+            .get_page(nb_id, pg_id)
+            .map_err(|e| api_err(StatusCode::NOT_FOUND, e.to_string()))?;
+        let all_pages = storage
+            .list_pages(nb_id)
+            .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        let html = render_share_html(&storage, nb_id, &page, &all_pages, &req.theme)
+            .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        let record = build_share_record(pg_id, nb_id, &page.title, &req.theme, expiry);
+        (html, record)
+    };
+
+    // Publisher id = the current library id, matching the desktop app so shares
+    // are co-owned (owner check on the Worker uses this).
+    let publisher_id = {
+        let lib = state.library_storage.lock().unwrap();
+        lib.get_current_library()
+            .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+            .id
+            .to_string()
+    };
+
+    let url = publish::publish_rendered_page(&html, &record, &state.library_path, &publisher_id)
+        .await
+        .map_err(|e| api_err(StatusCode::BAD_GATEWAY, e))?;
+
+    let mut record = record;
+    record.external_url = Some(url.clone());
+
+    let share_storage = ShareStorage::new(state.library_path.clone());
+    share_storage
+        .create_share(record.clone(), &html)
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
+
+    Ok(Json(ApiResponse {
+        data: PublishNousResponse { share: record, url },
+    }))
 }
 
 async fn delete_block(

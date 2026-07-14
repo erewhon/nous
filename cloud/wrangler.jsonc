@@ -19,6 +19,15 @@
     {
       "pattern": "api.nous.page",
       "custom_domain": true
+    },
+    {
+      // Publish-Static-to-Nous: published static shares are served here.
+      // Host dispatch lives in src/index.ts (routes this host to serveStaticShare).
+      // NOTE: the custom domain must also be added/approved in the Cloudflare
+      // dashboard (Workers & Pages -> nous-cloud -> Custom Domains) with a DNS
+      // record before `wrangler deploy` will serve it.
+      "pattern": "pub.nous.page",
+      "custom_domain": true
     }
   ]
   // Secrets (set via `wrangler secret put <NAME>`):

@@ -1,4 +1,6 @@
 import { invoke } from "../../platform/core";
+import { isTauri } from "../../utils/platform";
+import { daemonPost } from "../../utils/daemon";
 
 export type ShareType =
   | { type: "single_page"; pageId: string }
@@ -37,6 +39,36 @@ export async function sharePage(
   return invoke("share_page", {
     request: { notebookId, pageId, theme, expiry, uploadExternal },
   });
+}
+
+export interface PublishToNousResponse {
+  share: ShareRecord;
+  url: string;
+}
+
+/**
+ * Publish a themed static render of a page to Nous (Worker-fronted R2), served
+ * at pub.nous.page/{id}/. Uses the shared publish secret (no S3 creds).
+ *
+ * Desktop goes through the Tauri command; the web frontend has no Tauri bridge,
+ * so it calls the equivalent daemon HTTP endpoint (the daemon signs + uploads
+ * on the same library path).
+ */
+export async function publishToNous(
+  notebookId: string,
+  pageId: string,
+  theme: string,
+  expiry: string
+): Promise<PublishToNousResponse> {
+  if (isTauri()) {
+    return invoke("publish_share_to_nous", {
+      request: { notebookId, pageId, theme, expiry },
+    });
+  }
+  return daemonPost<PublishToNousResponse>(
+    `/api/notebooks/${notebookId}/pages/${pageId}/publish-nous`,
+    { theme, expiry }
+  );
 }
 
 export async function listShares(): Promise<ShareRecord[]> {

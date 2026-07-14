@@ -4,6 +4,7 @@ import type {
   CloudNotebookRow,
   NotebookShareRow,
   SavedShareRow,
+  StaticShareRow,
 } from "../types";
 
 // ─── Users ──────────────────────────────────────────────────────────────────
@@ -294,4 +295,55 @@ export async function removeSavedShare(
     .prepare("DELETE FROM saved_shares WHERE user_id = ? AND share_id = ?")
     .bind(userId, shareId)
     .run();
+}
+
+// ─── Static Shares ───────────────────────────────────────────────────────────
+
+export async function createStaticShare(
+  db: D1Database,
+  id: string,
+  ownerUserId: string,
+  notebookId: string | null,
+  title: string | null,
+  theme: string | null,
+  expiresAt: string | null,
+  pageCount: number | null,
+): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO static_shares (id, owner_user_id, notebook_id, title, theme, expires_at, page_count)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .bind(id, ownerUserId, notebookId, title, theme, expiresAt, pageCount)
+    .run();
+}
+
+export async function getStaticShare(
+  db: D1Database,
+  id: string,
+): Promise<StaticShareRow | null> {
+  return db
+    .prepare("SELECT * FROM static_shares WHERE id = ?")
+    .bind(id)
+    .first<StaticShareRow>();
+}
+
+export async function deleteStaticShare(
+  db: D1Database,
+  id: string,
+): Promise<void> {
+  await db.prepare("DELETE FROM static_shares WHERE id = ?").bind(id).run();
+}
+
+export async function listStaticSharesForUser(
+  db: D1Database,
+  userId: string,
+): Promise<StaticShareRow[]> {
+  const result = await db
+    .prepare(
+      "SELECT * FROM static_shares WHERE owner_user_id = ? ORDER BY created_at DESC",
+    )
+    .bind(userId)
+    .all<StaticShareRow>();
+  return result.results;
 }

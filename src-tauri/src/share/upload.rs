@@ -235,6 +235,90 @@ pub async fn test_upload(
     Ok(())
 }
 
+// ─── Publish to Nous (Worker-fronted R2, pub.nous.page) ─────────────────────
+//
+// Unlike the S3 path above, this uploads through the Nous cloud Worker using the
+// user's existing cloud JWT (no S3 credentials). Each file is PUT to
+// `{api_base}/shares/{share_id}/static/{rel_path}`; the Worker creates the
+// static-share record on the first file (owned by the authenticated publisher)
+// and stores each file in R2 under `pub/{share_id}/{rel_path}`.
+
+/// Build the Worker upload URL for one static file.
+fn static_file_url(api_base: &str, share_id: &str, rel_path: &str) -> String {
+    format!(
+        "{}/shares/{}/static/{}",
+        api_base.trim_end_matches('/'),
+        share_id,
+        rel_path,
+    )
+}
+
+/// The public URL for a share published to Nous.
+pub fn nous_public_url(share_id: &str) -> String {
+    format!("https://pub.nous.page/{}/", share_id)
+}
+
+/// Publish a rendered static site to Nous by PUTting each file to the cloud
+/// Worker with the user's JWT. `expires_at`, when set, is an RFC3339 timestamp
+/// the Worker stores for view-time expiry (sent on every file; the Worker only
+/// applies it when creating the record on the first upload). Returns the public
+/// `pub.nous.page/{share_id}/` URL.
+pub async fn publish_share_site_to_nous(
+    api_base: &str,
+    jwt: &str,
+    share_id: &str,
+    site_dir: &Path,
+    title: Option<&str>,
+    theme: Option<&str>,
+    expires_at: Option<&str>,
+) -> Result<String, String> {
+    let client = reqwest::Client::new();
+    let auth = format!("Bearer {}", jwt);
+
+    for entry in walkdir::WalkDir::new(site_dir)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
+    {
+        let rel_path = entry
+            .path()
+            .strip_prefix(site_dir)
+            .map_err(|e| format!("Path error: {}", e))?;
+        let rel = rel_path.to_string_lossy().replace('\\', "/");
+
+        let body = std::fs::read(entry.path())
+            .map_err(|e| format!("Failed to read {}: {}", entry.path().display(), e))?;
+
+        let mut request = client
+            .put(static_file_url(api_base, share_id, &rel))
+            .header("Authorization", &auth)
+            .header("Content-Type", mime_for_path(entry.path()));
+        if let Some(t) = title {
+            request = request.header("X-Static-Share-Title", t);
+        }
+        if let Some(t) = theme {
+            request = request.header("X-Static-Share-Theme", t);
+        }
+        if let Some(e) = expires_at {
+            request = request.header("X-Static-Share-Expires-At", e);
+        }
+
+        let response = request
+            .body(body)
+            .send()
+            .await
+            .map_err(|e| format!("Nous publish upload failed for {}: {}", rel, e))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let text = response.text().await.unwrap_or_default();
+            return Err(format!("Nous publish failed for {} ({}): {}", rel, status, text));
+        }
+    }
+
+    Ok(nous_public_url(share_id))
+}
+
 fn normalize_prefix(prefix: &str) -> String {
     if prefix.is_empty() {
         return String::new();
@@ -272,5 +356,36 @@ fn mime_for_path(path: &Path) -> &'static str {
         "woff" => "font/woff",
         "woff2" => "font/woff2",
         _ => "application/octet-stream",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn static_file_url_joins_base_share_and_path() {
+        assert_eq!(
+            static_file_url("https://api.nous.page", "abc12345", "index.html"),
+            "https://api.nous.page/shares/abc12345/static/index.html"
+        );
+        // Nested asset path is preserved.
+        assert_eq!(
+            static_file_url("https://api.nous.page", "abc12345", "assets/app.css"),
+            "https://api.nous.page/shares/abc12345/static/assets/app.css"
+        );
+    }
+
+    #[test]
+    fn static_file_url_trims_trailing_slash_on_base() {
+        assert_eq!(
+            static_file_url("https://api.nous.page/", "abc12345", "index.html"),
+            "https://api.nous.page/shares/abc12345/static/index.html"
+        );
+    }
+
+    #[test]
+    fn nous_public_url_points_at_pub_host() {
+        assert_eq!(nous_public_url("abc12345"), "https://pub.nous.page/abc12345/");
     }
 }

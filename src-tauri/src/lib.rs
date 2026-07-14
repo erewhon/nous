@@ -959,6 +959,7 @@ pub fn run() {
             commands::share_folder,
             commands::share_section,
             commands::share_notebook,
+            commands::publish_share_to_nous,
             commands::list_shares,
             commands::delete_share,
             commands::configure_share_upload,
