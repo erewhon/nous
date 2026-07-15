@@ -18,10 +18,12 @@
  * guest editor (no Tailwind, no app stores).
  */
 import { useEffect, useRef, useState } from "react";
+import type * as React from "react";
 import type {
   CustomBlockContribution,
   CustomBlockRenderProps,
 } from "../custom-block";
+import { ANIMATION_TEMPLATES } from "./animationTemplates";
 
 /**
  * CSP for the sandboxed document. `default-src 'none'` plus `connect-src 'none'`
@@ -91,6 +93,18 @@ function hostTheme(): "light" | "dark" {
     ? "dark"
     : "light";
 }
+
+/** Shared style for the starter-template picker buttons. */
+const templateButtonStyle: React.CSSProperties = {
+  font: "inherit",
+  fontSize: "0.8em",
+  padding: "4px 10px",
+  border: "1px solid var(--color-border, #8884)",
+  borderRadius: "999px",
+  background: "var(--color-bg-secondary, transparent)",
+  color: "inherit",
+  cursor: "pointer",
+};
 
 /** Sanitize an `aspect-ratio` value; fall back to 16/9 on anything unexpected. */
 function safeAspect(aspect: string | undefined): string {
@@ -332,7 +346,7 @@ function AnimationRender({
             }}
           />
         )
-      ) : (
+      ) : readOnly ? (
         <div
           style={{
             padding: "8px 10px",
@@ -342,7 +356,50 @@ function AnimationRender({
             color: "var(--color-text-muted, #888)",
           }}
         >
-          Empty animation — double-click to add HTML/SVG/canvas source
+          Empty animation
+        </div>
+      ) : (
+        <div
+          style={{
+            padding: "12px",
+            border: "1px dashed var(--color-border, #8884)",
+            borderRadius: "6px",
+          }}
+        >
+          <div
+            style={{
+              fontSize: "0.85em",
+              color: "var(--color-text-muted, #888)",
+              marginBottom: "8px",
+            }}
+          >
+            Insert an animation — pick a starter or begin blank:
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+            {ANIMATION_TEMPLATES.map((t) => (
+              <button
+                key={t.id}
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  updateProps({ html: t.html });
+                }}
+                style={templateButtonStyle}
+              >
+                {t.label}
+              </button>
+            ))}
+            <button
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                setEditing(true);
+              }}
+              style={templateButtonStyle}
+            >
+              Blank
+            </button>
+          </div>
         </div>
       )}
     </div>
