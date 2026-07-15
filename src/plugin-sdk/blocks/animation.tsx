@@ -105,12 +105,25 @@ function AnimationRender({
 }: CustomBlockRenderProps) {
   const html = props.html ?? "";
   const aspect = safeAspect(props.aspect);
+  const poster = (props.poster ?? "").trim();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(html);
+  const [posterDraft, setPosterDraft] = useState(poster);
   const [visible, setVisible] = useState(false);
+  const [reduceMotion, setReduceMotion] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const boxRef = useRef<HTMLDivElement | null>(null);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
+
+  // Track the reader's motion preference so a poster can replace live motion.
+  useEffect(() => {
+    if (typeof matchMedia === "undefined") return;
+    const mq = matchMedia("(prefers-reduced-motion: reduce)");
+    const update = () => setReduceMotion(mq.matches);
+    update();
+    mq.addEventListener?.("change", update);
+    return () => mq.removeEventListener?.("change", update);
+  }, []);
 
   // Lazy-mount the preview: don't run an animation that's offscreen.
   useEffect(() => {
@@ -172,14 +185,18 @@ function AnimationRender({
   useEffect(() => {
     if (editing) {
       setDraft(html);
+      setPosterDraft(poster);
       textareaRef.current?.focus();
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- reset draft only when opening
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reset drafts only when opening
   }, [editing]);
 
   const commit = () => {
     setEditing(false);
-    if (draft !== html) updateProps({ html: draft });
+    const patch: Record<string, string> = {};
+    if (draft !== html) patch.html = draft;
+    if (posterDraft !== poster) patch.poster = posterDraft;
+    if (Object.keys(patch).length) updateProps(patch);
   };
 
   if (editing && !readOnly) {
@@ -209,6 +226,56 @@ function AnimationRender({
             background: "var(--color-bg-secondary, transparent)",
             color: "inherit",
             resize: "vertical",
+          }}
+        />
+        <input
+          value={posterDraft}
+          onChange={(e) => setPosterDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") commit();
+            e.stopPropagation();
+          }}
+          placeholder="Poster image (data: URI or URL) — shown when motion is reduced"
+          style={{
+            width: "100%",
+            marginTop: "6px",
+            fontFamily: "monospace",
+            fontSize: "0.8em",
+            padding: "6px 8px",
+            border: "1px solid var(--color-border, #8884)",
+            borderRadius: "6px",
+            background: "var(--color-bg-secondary, transparent)",
+            color: "inherit",
+          }}
+        />
+      </div>
+    );
+  }
+
+  // Reduced motion + a poster → show the still instead of running the animation.
+  if (reduceMotion && poster) {
+    return (
+      <div
+        ref={boxRef}
+        contentEditable={false}
+        onDoubleClick={readOnly ? undefined : () => setEditing(true)}
+        title={readOnly ? undefined : "Double-click to edit animation source"}
+        style={{
+          width: "100%",
+          aspectRatio: aspect,
+          cursor: readOnly ? "default" : "pointer",
+        }}
+      >
+        <img
+          src={poster}
+          alt="Animation (static poster)"
+          style={{
+            width: "100%",
+            height: "100%",
+            objectFit: "contain",
+            border: "1px solid var(--color-border, #8884)",
+            borderRadius: "6px",
           }}
         />
       </div>
@@ -241,6 +308,18 @@ function AnimationRender({
               border: "1px solid var(--color-border, #8884)",
               borderRadius: "6px",
               background: "var(--color-bg-secondary, transparent)",
+            }}
+          />
+        ) : poster ? (
+          <img
+            src={poster}
+            alt=""
+            style={{
+              width: "100%",
+              height: "100%",
+              objectFit: "contain",
+              border: "1px solid var(--color-border, #8884)",
+              borderRadius: "6px",
             }}
           />
         ) : (
@@ -278,6 +357,7 @@ export const animationBlock: CustomBlockContribution = {
   propSchema: {
     html: { default: "" },
     aspect: { default: "16/9" },
+    poster: { default: "" },
   },
   content: "none",
   Render: AnimationRender,

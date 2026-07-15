@@ -304,18 +304,63 @@ fn render_animation(block: &EditorBlock) -> String {
         .unwrap_or("16/9");
     let aspect = safe_aspect(aspect);
 
+    let poster = block
+        .data
+        .get("poster")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim();
+
     // The whole document is placed in the `srcdoc` attribute; HTML-escaping the
     // four attribute-significant characters lets the parser reconstruct it.
     let srcdoc = html_escape(&animation_srcdoc(html));
 
-    format!(
-        "<iframe class=\"nous-animation\" title=\"Interactive animation\" \
+    // No poster → the Phase 1 markup: the iframe carries the aspect box.
+    if !is_safe_poster(poster) {
+        return format!(
+            "<iframe class=\"nous-animation\" title=\"Interactive animation\" \
 loading=\"lazy\" sandbox=\"allow-scripts\" referrerpolicy=\"no-referrer\" \
 style=\"width:100%;aspect-ratio:{aspect};border:1px solid var(--border);\
 border-radius:2px;background:var(--panel);\" srcdoc=\"{srcdoc}\"></iframe>",
+            aspect = html_escape(aspect),
+            srcdoc = srcdoc,
+        );
+    }
+
+    // With a poster: a figure carries the aspect box; the poster is hidden by
+    // default and revealed (with the live iframe removed) under reduced motion
+    // by the academic head bridge, so motion-sensitive readers get a still.
+    format!(
+        "<div class=\"nous-animation-figure\" \
+style=\"position:relative;width:100%;aspect-ratio:{aspect};\
+border:1px solid var(--border);border-radius:2px;background:var(--panel);\">\
+<iframe class=\"nous-animation\" title=\"Interactive animation\" loading=\"lazy\" \
+sandbox=\"allow-scripts\" referrerpolicy=\"no-referrer\" \
+style=\"width:100%;height:100%;border:0;\" srcdoc=\"{srcdoc}\"></iframe>\
+<img class=\"nous-animation-poster\" src=\"{poster}\" alt=\"Animation (static poster)\" \
+style=\"display:none;position:absolute;inset:0;width:100%;height:100%;object-fit:contain;\"></div>",
         aspect = html_escape(aspect),
         srcdoc = srcdoc,
+        poster = html_escape(poster),
     )
+}
+
+/// Whether an author-supplied poster `src` is safe to place in an `<img>`.
+/// Defense in depth on top of attribute escaping: only inline images, http(s),
+/// or same-origin relative paths — no `javascript:`/other schemes.
+fn is_safe_poster(src: &str) -> bool {
+    let s = src.trim();
+    if s.is_empty() {
+        return false;
+    }
+    let lower = s.to_ascii_lowercase();
+    lower.starts_with("data:image/")
+        || lower.starts_with("https://")
+        || lower.starts_with("http://")
+        || s.starts_with('/')
+        || s.starts_with("./")
+        || s.starts_with("../")
+        || !s.contains(':') // scheme-less relative path
 }
 
 fn render_code(block: &EditorBlock) -> String {
@@ -745,6 +790,35 @@ mod tests {
         // The frame listens for the host's nous-theme postMessage.
         assert!(html.contains("nous-theme"), "got: {html}");
         assert!(html.contains("addEventListener("), "got: {html}");
+    }
+
+    #[test]
+    fn animation_with_poster_emits_a_figure_with_a_hidden_still() {
+        let b = block(
+            "animation",
+            json!({ "html": "<i></i>", "poster": "data:image/svg+xml,<svg/>" }),
+        );
+        let html = render(&b);
+        assert!(html.starts_with("<div class=\"nous-animation-figure\""), "got: {html}");
+        // Live frame is still present (removed client-side under reduced motion).
+        assert!(html.contains("<iframe class=\"nous-animation\""), "got: {html}");
+        // Poster is hidden by default and revealed by the reduced-motion bridge.
+        assert!(html.contains("class=\"nous-animation-poster\""), "got: {html}");
+        assert!(html.contains("display:none"), "poster must start hidden, got: {html}");
+        assert!(html.contains("src=\"data:image/svg+xml,&lt;svg/&gt;\""), "got: {html}");
+    }
+
+    #[test]
+    fn unsafe_poster_is_dropped_to_the_plain_iframe() {
+        // A javascript: (or any non-image) scheme must not reach the <img>.
+        let b = block(
+            "animation",
+            json!({ "html": "<i></i>", "poster": "javascript:alert(1)" }),
+        );
+        let html = render(&b);
+        assert!(html.starts_with("<iframe"), "got: {html}");
+        assert!(!html.contains("nous-animation-figure"), "got: {html}");
+        assert!(!html.contains("javascript:"), "got: {html}");
     }
 
     #[test]

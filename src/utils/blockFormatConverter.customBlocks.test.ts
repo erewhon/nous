@@ -92,12 +92,16 @@ describe("contributed block conversion", () => {
     ]);
   });
 
-  it("round-trips an animation block through save", () => {
+  it("round-trips an animation block (incl. poster) through save", () => {
     const original = doc([
       {
         id: "b1",
         type: "animation",
-        data: { html: "<canvas id='c'></canvas>", aspect: "4/3" },
+        data: {
+          html: "<canvas id='c'></canvas>",
+          aspect: "4/3",
+          poster: "data:image/svg+xml,<svg/>",
+        },
       },
     ]);
     const back = blockNoteToEditorJs(editorJsToBlockNote(original));
@@ -105,7 +109,11 @@ describe("contributed block conversion", () => {
       {
         id: "b1",
         type: "animation",
-        data: { html: "<canvas id='c'></canvas>", aspect: "4/3" },
+        data: {
+          html: "<canvas id='c'></canvas>",
+          aspect: "4/3",
+          poster: "data:image/svg+xml,<svg/>",
+        },
       },
     ]);
   });

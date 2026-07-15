@@ -52,6 +52,17 @@ pub fn animation_head(theme_name: &str) -> Option<&'static str> {
 }
 
 const ACADEMIC_ANIMATION_HEAD: &str = r#"<script type="module">
+// Reduced motion: swap each animation that ships a poster for its still frame
+// and drop the live iframe entirely, so motion-sensitive readers get no motion.
+if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
+  document.querySelectorAll('.nous-animation-figure').forEach(function (fig) {
+    var poster = fig.querySelector('.nous-animation-poster');
+    if (!poster) return;
+    poster.style.display = 'block';
+    var frame = fig.querySelector('iframe.nous-animation');
+    if (frame) frame.remove();
+  });
+}
 function currentTheme() {
   var t = document.documentElement.getAttribute('data-theme');
   return (t === 'dark' || t === 'light')
@@ -1409,6 +1420,10 @@ mod tests {
         assert!(head.contains("querySelectorAll('.theme-toggle')"), "not wired to toggle");
         // Self-contained: no external/CDN dependency.
         assert!(!head.contains("cdn.jsdelivr.net"), "animation bridge must not load a CDN");
+        // Reduced motion swaps a poster in and removes the live frame.
+        assert!(head.contains("prefers-reduced-motion: reduce"), "no reduced-motion guard");
+        assert!(head.contains("nous-animation-poster"), "no poster swap");
+        assert!(head.contains("frame.remove()"), "live frame not removed under reduced motion");
     }
 
     #[test]
