@@ -94,6 +94,9 @@ function hostTheme(): "light" | "dark" {
     : "light";
 }
 
+/** Common aspect-ratio presets offered in the editor. */
+const ASPECT_PRESETS = ["16/9", "4/3", "1/1", "21/9"];
+
 /** Shared style for the starter-template picker buttons. */
 const templateButtonStyle: React.CSSProperties = {
   font: "inherit",
@@ -107,7 +110,7 @@ const templateButtonStyle: React.CSSProperties = {
 };
 
 /** Sanitize an `aspect-ratio` value; fall back to 16/9 on anything unexpected. */
-function safeAspect(aspect: string | undefined): string {
+export function safeAspect(aspect: string | undefined): string {
   const a = (aspect ?? "").trim();
   return /^[0-9]+(\.[0-9]+)?\s*(\/\s*[0-9]+(\.[0-9]+)?)?$/.test(a) ? a : "16/9";
 }
@@ -123,6 +126,7 @@ function AnimationRender({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(html);
   const [posterDraft, setPosterDraft] = useState(poster);
+  const [aspectDraft, setAspectDraft] = useState(aspect);
   const [visible, setVisible] = useState(false);
   const [reduceMotion, setReduceMotion] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -200,6 +204,7 @@ function AnimationRender({
     if (editing) {
       setDraft(html);
       setPosterDraft(poster);
+      setAspectDraft(aspect);
       textareaRef.current?.focus();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reset drafts only when opening
@@ -207,9 +212,11 @@ function AnimationRender({
 
   const commit = () => {
     setEditing(false);
+    const nextAspect = safeAspect(aspectDraft);
     const patch: Record<string, string> = {};
     if (draft !== html) patch.html = draft;
     if (posterDraft !== poster) patch.poster = posterDraft;
+    if (nextAspect !== aspect) patch.aspect = nextAspect;
     if (Object.keys(patch).length) updateProps(patch);
   };
 
@@ -263,6 +270,60 @@ function AnimationRender({
             color: "inherit",
           }}
         />
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            flexWrap: "wrap",
+            gap: "6px",
+            marginTop: "6px",
+            fontSize: "0.8em",
+          }}
+        >
+          <span style={{ color: "var(--color-text-muted, #888)" }}>Aspect</span>
+          {ASPECT_PRESETS.map((preset) => {
+            const active = safeAspect(aspectDraft) === preset;
+            return (
+              <button
+                key={preset}
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setAspectDraft(preset);
+                }}
+                style={{
+                  ...templateButtonStyle,
+                  borderColor: active
+                    ? "var(--color-accent, #8b0000)"
+                    : "var(--color-border, #8884)",
+                  fontWeight: active ? 600 : 400,
+                }}
+              >
+                {preset}
+              </button>
+            );
+          })}
+          <input
+            value={aspectDraft}
+            onChange={(e) => setAspectDraft(e.target.value)}
+            onBlur={commit}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") commit();
+              e.stopPropagation();
+            }}
+            placeholder="custom (e.g. 3/2)"
+            style={{
+              width: "8em",
+              fontFamily: "monospace",
+              fontSize: "0.95em",
+              padding: "4px 8px",
+              border: "1px solid var(--color-border, #8884)",
+              borderRadius: "6px",
+              background: "var(--color-bg-secondary, transparent)",
+              color: "inherit",
+            }}
+          />
+        </div>
       </div>
     );
   }

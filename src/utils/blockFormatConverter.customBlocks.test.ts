@@ -21,6 +21,7 @@ import { registerCustomBlock } from "../plugin-sdk/custom-block";
 import {
   animationBlock,
   buildAnimationSrcdoc,
+  safeAspect,
 } from "../plugin-sdk/blocks/animation";
 import type { EditorData } from "../types/page";
 
@@ -116,6 +117,16 @@ describe("contributed block conversion", () => {
         },
       },
     ]);
+  });
+
+  it("accepts aspect presets/custom values and rejects unsafe ones", () => {
+    for (const ok of ["16/9", "4/3", "1/1", "21/9", "3/2", "1.5", "1.5/1"]) {
+      expect(safeAspect(ok)).toBe(ok);
+    }
+    // Anything that could break out of the style attribute → safe default.
+    expect(safeAspect('1/1;" onload=alert(1) x="')).toBe("16/9");
+    expect(safeAspect("")).toBe("16/9");
+    expect(safeAspect(undefined)).toBe("16/9");
   });
 
   it("wraps author source in a sandboxed, network-blocked document shell", () => {
