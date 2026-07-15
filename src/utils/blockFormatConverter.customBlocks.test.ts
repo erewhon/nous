@@ -117,6 +117,12 @@ describe("contributed block conversion", () => {
     expect(src).toContain("connect-src 'none'");
     // Palette custom properties are inlined (they don't cross the iframe boundary).
     expect(src).toContain("--accent");
+    // An explicit data-theme (pushed by the host) can re-theme the frame, and a
+    // listener receives the host's nous-theme postMessage.
+    expect(src).toContain('[data-theme="dark"]');
+    expect(src).toContain('[data-theme="light"]');
+    expect(src).toContain("nous-theme");
+    expect(src).toContain("addEventListener");
     // Author markup is present in the body verbatim (the iframe origin isolates it).
     expect(src).toContain("<canvas id='c'></canvas>");
   });

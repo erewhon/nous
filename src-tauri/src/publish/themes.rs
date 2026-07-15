@@ -37,6 +37,54 @@ pub fn mermaid_head(theme_name: &str) -> Option<&'static str> {
     }
 }
 
+/// Parent-side bridge for interactive animation blocks, injected into a page's
+/// `<head>` when the page contains one. Animation frames are null-origin
+/// sandboxed iframes and cannot read the page theme, so the parent pushes it:
+/// `postMessage({type:'nous-theme', theme})` to each `iframe.nous-animation`
+/// once it loads and again whenever the reader clicks the theme toggle. The
+/// frame's own listener (in the srcdoc) flips its `data-theme`, re-theming any
+/// `var()`-based animation. `None` for themes without the toggle/palette.
+pub fn animation_head(theme_name: &str) -> Option<&'static str> {
+    match theme_name {
+        "academic" => Some(ACADEMIC_ANIMATION_HEAD),
+        _ => None,
+    }
+}
+
+const ACADEMIC_ANIMATION_HEAD: &str = r#"<script type="module">
+function currentTheme() {
+  var t = document.documentElement.getAttribute('data-theme');
+  return (t === 'dark' || t === 'light')
+    ? t
+    : (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+}
+function push(frame) {
+  try { frame.contentWindow.postMessage({ type: 'nous-theme', theme: currentTheme() }, '*'); } catch (e) {}
+}
+function pushAll() { document.querySelectorAll('iframe.nous-animation').forEach(push); }
+document.querySelectorAll('iframe.nous-animation').forEach(function (f) {
+  f.addEventListener('load', function () { push(f); });
+  push(f); // already-loaded frames
+});
+// Re-push after the toggle flips data-theme (its own handler runs on the same click).
+document.querySelectorAll('.theme-toggle').forEach(function (b) {
+  b.addEventListener('click', function () { setTimeout(pushAll, 0); });
+});
+</script>"#;
+
+/// Combined `{{head_extra}}` for a page: the Mermaid runtime and/or the
+/// animation theme bridge, in that order, for whatever the page contains.
+pub fn page_head_extra(theme_name: &str, has_mermaid: bool, has_animation: bool) -> String {
+    let mut out = String::new();
+    if has_mermaid {
+        out.push_str(mermaid_head(theme_name).unwrap_or(""));
+    }
+    if has_animation {
+        out.push_str(animation_head(theme_name).unwrap_or(""));
+    }
+    out
+}
+
 const ACADEMIC_MERMAID_HEAD: &str = r#"<style>
 /* Scroll reveal (default): nodes/edges fade in as the diagram enters view.
    The whole effect lives inside prefers-reduced-motion:no-preference, so
@@ -1344,6 +1392,40 @@ mod tests {
             theme_academic().page_template.contains("{{head_extra}}"),
             "academic page template must expose the {{head_extra}} injection slot"
         );
+    }
+
+    #[test]
+    fn animation_head_bridges_theme_toggle_to_sandboxed_frames() {
+        assert!(animation_head("minimal").is_none());
+        assert!(animation_head("docs").is_none());
+
+        let head = animation_head("academic").expect("academic ships an animation bridge");
+        // Deferred module script so the iframes/toggle exist when it runs.
+        assert!(head.contains(r#"type="module""#));
+        // Pushes the theme to each animation frame on load and on toggle click.
+        assert!(head.contains("iframe.nous-animation"), "no frame selector");
+        assert!(head.contains("postMessage"), "no postMessage push");
+        assert!(head.contains("type: 'nous-theme'"), "wrong message shape");
+        assert!(head.contains("querySelectorAll('.theme-toggle')"), "not wired to toggle");
+        // Self-contained: no external/CDN dependency.
+        assert!(!head.contains("cdn.jsdelivr.net"), "animation bridge must not load a CDN");
+    }
+
+    #[test]
+    fn page_head_extra_concatenates_only_what_the_page_needs() {
+        // Nothing needed → empty (clean head).
+        assert_eq!(page_head_extra("academic", false, false), "");
+        // Mermaid only.
+        let m = page_head_extra("academic", true, false);
+        assert!(m.contains("mermaid@11.16.0") && !m.contains("iframe.nous-animation"));
+        // Animation only.
+        let a = page_head_extra("academic", false, true);
+        assert!(a.contains("iframe.nous-animation") && !a.contains("mermaid@11.16.0"));
+        // Both, in order.
+        let both = page_head_extra("academic", true, true);
+        assert!(both.find("mermaid@11.16.0").unwrap() < both.find("iframe.nous-animation").unwrap());
+        // A theme without the tokens gets nothing even when the page has blocks.
+        assert_eq!(page_head_extra("minimal", true, true), "");
     }
 
     #[test]

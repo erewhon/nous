@@ -1,9 +1,9 @@
 use std::fs;
 use std::path::PathBuf;
 
-use crate::publish::html::{blocks_have_mermaid, render_page_html};
+use crate::publish::html::{blocks_have_animation, blocks_have_mermaid, render_page_html};
 use crate::publish::site::{build_lookup_maps, generate_site, PublishOptions};
-use crate::publish::themes::{get_theme, mermaid_head};
+use crate::publish::themes::{get_theme, page_head_extra};
 use crate::storage::{FileStorage, Folder, Page};
 use uuid::Uuid;
 
@@ -24,11 +24,11 @@ pub fn render_share_html(
     let content_html = render_page_html(page, &page_slugs, &block_texts);
     let date = page.updated_at.format("%B %d, %Y").to_string();
 
-    let head_extra = if blocks_have_mermaid(&page.content.blocks) {
-        mermaid_head(theme.name).unwrap_or("")
-    } else {
-        ""
-    };
+    let head_extra = page_head_extra(
+        theme.name,
+        blocks_have_mermaid(&page.content.blocks),
+        blocks_have_animation(&page.content.blocks),
+    );
 
     let html = theme
         .page_template
@@ -38,7 +38,7 @@ pub fn render_share_html(
         .replace("{{date}}", &date)
         .replace("{{backlinks}}", "")
         .replace("{{nav}}", "")
-        .replace("{{head_extra}}", head_extra);
+        .replace("{{head_extra}}", &head_extra);
 
     // Inline CSS (replace <link> with <style>)
     let html = html.replace(

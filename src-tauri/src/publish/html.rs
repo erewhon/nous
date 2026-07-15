@@ -204,13 +204,36 @@ pub fn blocks_have_mermaid(blocks: &[EditorBlock]) -> bool {
 const ANIMATION_CSP: &str = "default-src 'none'; img-src data: blob:; media-src data: blob:; \
 style-src 'unsafe-inline'; script-src 'unsafe-inline'; font-src data:; connect-src 'none'";
 
-/// Page palette as CSS custom properties, inlined into the srcdoc (custom
-/// properties do not cross the null-origin iframe boundary). Mirrors the
-/// Academic theme tokens; follows the OS light/dark preference.
-const ANIMATION_PALETTE_CSS: &str = ":root{color-scheme:light dark;--bg:#fffff8;--text:#1a1a1a;\
---accent:#8b0000;--panel:#f5f5ef;--code-bg:#f0f0ea;--callout-bg:#f9f9f4;--muted:#666;--border:#ccc;}\
-@media (prefers-color-scheme:dark){:root{--bg:#1a1712;--text:#ece8dc;--accent:#e79285;\
---panel:#231f18;--code-bg:#2a2620;--callout-bg:#201d16;--muted:#a49e8c;--border:#38342a;}}";
+/// Academic-theme light/dark token values. Kept byte-identical to the palette
+/// in `src/plugin-sdk/blocks/animation.tsx` so editor and published output
+/// theme the same.
+const ANIMATION_LIGHT_VARS: &str = "--bg:#fffff8;--text:#1a1a1a;--accent:#8b0000;--panel:#f5f5ef;\
+--code-bg:#f0f0ea;--callout-bg:#f9f9f4;--muted:#666;--border:#ccc;";
+const ANIMATION_DARK_VARS: &str = "--bg:#1a1712;--text:#ece8dc;--accent:#e79285;--panel:#231f18;\
+--code-bg:#2a2620;--callout-bg:#201d16;--muted:#a49e8c;--border:#38342a;";
+
+/// Page palette, inlined into the srcdoc (custom properties do not cross the
+/// null-origin iframe boundary). Defaults to the OS preference; an explicit
+/// `data-theme` (pushed by the parent's theme toggle via postMessage) always
+/// wins, matching the main Academic theme's `:root:not([data-theme])` pattern.
+fn animation_palette_css() -> String {
+    format!(
+        ":root{{color-scheme:light dark;{light}}}\
+@media (prefers-color-scheme:dark){{:root:not([data-theme]){{{dark}}}}}\
+:root[data-theme=\"dark\"]{{{dark}}}:root[data-theme=\"light\"]{{{light}}}",
+        light = ANIMATION_LIGHT_VARS,
+        dark = ANIMATION_DARK_VARS,
+    )
+}
+
+/// Listener inside the sandboxed frame: the parent pushes `{type:'nous-theme',
+/// theme}` on load and whenever the reader flips the page theme; we set
+/// `data-theme` (re-theming any `var()`-based animation) and re-dispatch a
+/// `nous-themechange` event canvas authors can hook.
+const ANIMATION_THEME_LISTENER: &str = "<script>addEventListener('message',function(e){\
+var d=e&&e.data,t=d&&d.type==='nous-theme'&&d.theme;\
+if(t==='dark'||t==='light'){document.documentElement.setAttribute('data-theme',t);\
+window.dispatchEvent(new CustomEvent('nous-themechange',{detail:{theme:t}}));}});</script>";
 
 /// Sanitize an `aspect-ratio` value; fall back to 16/9 on anything unexpected.
 fn safe_aspect(aspect: &str) -> &str {
@@ -225,7 +248,8 @@ fn safe_aspect(aspect: &str) -> &str {
     }
 }
 
-/// Wrap untrusted author source in the sandboxed document shell (CSP + palette).
+/// Wrap untrusted author source in the sandboxed document shell (CSP + palette
+/// + theme listener).
 fn animation_srcdoc(html: &str) -> String {
     format!(
         "<!doctype html><html><head><meta charset=\"utf-8\">\
@@ -233,11 +257,28 @@ fn animation_srcdoc(html: &str) -> String {
 <style>{palette} html,body{{margin:0;padding:0;height:100%;}}\
 body{{background:var(--bg);color:var(--text);\
 font-family:Georgia,'Times New Roman',serif;overflow:hidden;}}</style>\
-</head><body>{html}</body></html>",
+{listener}</head><body>{html}</body></html>",
         csp = ANIMATION_CSP,
-        palette = ANIMATION_PALETTE_CSS,
+        palette = animation_palette_css(),
+        listener = ANIMATION_THEME_LISTENER,
         html = html,
     )
+}
+
+/// True if the block renders as an interactive animation (non-empty source).
+fn block_is_animation(block: &EditorBlock) -> bool {
+    block.block_type == "animation"
+        && block
+            .data
+            .get("html")
+            .and_then(|v| v.as_str())
+            .is_some_and(|h| !h.trim().is_empty())
+}
+
+/// True if any block on the page renders an animation. Themes use this to
+/// decide whether a page needs the theme-toggle → iframe postMessage bridge.
+pub fn blocks_have_animation(blocks: &[EditorBlock]) -> bool {
+    blocks.iter().any(block_is_animation)
 }
 
 /// Render an interactive animation block. The author's untrusted HTML/JS runs
@@ -692,5 +733,25 @@ mod tests {
     fn empty_animation_block_renders_nothing() {
         assert_eq!(render(&block("animation", json!({ "html": "   " }))), "");
         assert_eq!(render(&block("animation", json!({}))), "");
+    }
+
+    #[test]
+    fn animation_srcdoc_carries_theme_listener_and_data_theme_overrides() {
+        let b = block("animation", json!({ "html": "<i></i>" }));
+        let html = render(&b);
+        // An explicit data-theme (pushed by the host) must be able to re-theme.
+        assert!(html.contains("[data-theme=&quot;dark&quot;]"), "got: {html}");
+        assert!(html.contains("[data-theme=&quot;light&quot;]"), "got: {html}");
+        // The frame listens for the host's nous-theme postMessage.
+        assert!(html.contains("nous-theme"), "got: {html}");
+        assert!(html.contains("addEventListener("), "got: {html}");
+    }
+
+    #[test]
+    fn blocks_have_animation_detects_non_empty_animation() {
+        assert!(blocks_have_animation(&[block("animation", json!({ "html": "<b>1</b>" }))]));
+        assert!(!blocks_have_animation(&[block("animation", json!({ "html": "  " }))]));
+        assert!(!blocks_have_animation(&[block("animation", json!({}))]));
+        assert!(!blocks_have_animation(&[block("paragraph", json!({ "text": "hi" }))]));
     }
 }

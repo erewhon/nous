@@ -33,17 +33,39 @@ const SANDBOX_CSP =
   "style-src 'unsafe-inline'; script-src 'unsafe-inline'; font-src data:; connect-src 'none'";
 
 /**
+ * Academic-theme light/dark token values. Kept byte-identical to the palette in
+ * `src-tauri/src/publish/html.rs` so editor and published output theme the same.
+ */
+const LIGHT_VARS =
+  "--bg:#fffff8;--text:#1a1a1a;--accent:#8b0000;--panel:#f5f5ef;" +
+  "--code-bg:#f0f0ea;--callout-bg:#f9f9f4;--muted:#666;--border:#ccc;";
+const DARK_VARS =
+  "--bg:#1a1712;--text:#ece8dc;--accent:#e79285;--panel:#231f18;" +
+  "--code-bg:#2a2620;--callout-bg:#201d16;--muted:#a49e8c;--border:#38342a;";
+
+/**
  * The page palette, injected as CSS custom properties so an animation can theme
- * itself with `var(--accent)` etc. CSS custom properties do NOT cross the
- * null-origin iframe boundary, so the values are inlined here (mirrors the
- * Academic theme tokens). Follows the OS light/dark preference; explicit
- * toggle propagation is Phase 2.
+ * itself with `var(--accent)` etc. Custom properties do NOT cross the
+ * null-origin iframe boundary, so the values are inlined here. Defaults to the
+ * OS preference; an explicit `data-theme` (pushed by the host via postMessage)
+ * always wins — matching the main Academic theme's `:root:not([data-theme])`.
  */
 const PALETTE_CSS =
-  ":root{color-scheme:light dark;--bg:#fffff8;--text:#1a1a1a;--accent:#8b0000;" +
-  "--panel:#f5f5ef;--code-bg:#f0f0ea;--callout-bg:#f9f9f4;--muted:#666;--border:#ccc;}" +
-  "@media (prefers-color-scheme:dark){:root{--bg:#1a1712;--text:#ece8dc;--accent:#e79285;" +
-  "--panel:#231f18;--code-bg:#2a2620;--callout-bg:#201d16;--muted:#a49e8c;--border:#38342a;}}";
+  `:root{color-scheme:light dark;${LIGHT_VARS}}` +
+  `@media (prefers-color-scheme:dark){:root:not([data-theme]){${DARK_VARS}}}` +
+  `:root[data-theme="dark"]{${DARK_VARS}}:root[data-theme="light"]{${LIGHT_VARS}}`;
+
+/**
+ * Listener inside the sandboxed frame: the host pushes `{type:'nous-theme',
+ * theme}` on load and on every theme flip; we set `data-theme` (re-theming any
+ * `var()`-based animation) and re-dispatch a `nous-themechange` event that
+ * canvas authors can hook to repaint.
+ */
+const THEME_LISTENER =
+  "<script>addEventListener('message',function(e){" +
+  "var d=e&&e.data,t=d&&d.type==='nous-theme'&&d.theme;" +
+  "if(t==='dark'||t==='light'){document.documentElement.setAttribute('data-theme',t);" +
+  "window.dispatchEvent(new CustomEvent('nous-themechange',{detail:{theme:t}}));}});<\/script>";
 
 /** Wrap author source in the sandboxed document shell (CSP + palette + reset). */
 export function buildAnimationSrcdoc(html: string): string {
@@ -53,8 +75,21 @@ export function buildAnimationSrcdoc(html: string): string {
     `<style>${PALETTE_CSS} html,body{margin:0;padding:0;height:100%;}` +
     "body{background:var(--bg);color:var(--text);" +
     "font-family:Georgia,'Times New Roman',serif;overflow:hidden;}</style>" +
-    `</head><body>${html}</body></html>`
+    `${THEME_LISTENER}</head><body>${html}</body></html>`
   );
+}
+
+/** The host's current theme, read from the document root (falls back to OS). */
+function hostTheme(): "light" | "dark" {
+  const t =
+    typeof document !== "undefined"
+      ? document.documentElement.getAttribute("data-theme")
+      : null;
+  if (t === "dark" || t === "light") return t;
+  return typeof matchMedia !== "undefined" &&
+    matchMedia("(prefers-color-scheme: dark)").matches
+    ? "dark"
+    : "light";
 }
 
 /** Sanitize an `aspect-ratio` value; fall back to 16/9 on anything unexpected. */
@@ -75,6 +110,7 @@ function AnimationRender({
   const [visible, setVisible] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const boxRef = useRef<HTMLDivElement | null>(null);
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
 
   // Lazy-mount the preview: don't run an animation that's offscreen.
   useEffect(() => {
@@ -97,6 +133,41 @@ function AnimationRender({
     io.observe(el);
     return () => io.disconnect();
   }, [visible]);
+
+  // Push the host theme into the sandboxed frame (it can't read the parent):
+  // once the frame loads and again whenever the app's `data-theme` flips.
+  useEffect(() => {
+    if (!visible) return;
+    const frame = iframeRef.current;
+    if (!frame) return;
+    const push = () => {
+      try {
+        frame.contentWindow?.postMessage(
+          { type: "nous-theme", theme: hostTheme() },
+          "*"
+        );
+      } catch {
+        /* frame not ready yet — the load handler will retry */
+      }
+    };
+    frame.addEventListener("load", push);
+    push();
+    let mo: MutationObserver | undefined;
+    if (
+      typeof MutationObserver !== "undefined" &&
+      typeof document !== "undefined"
+    ) {
+      mo = new MutationObserver(push);
+      mo.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ["data-theme"],
+      });
+    }
+    return () => {
+      frame.removeEventListener("load", push);
+      mo?.disconnect();
+    };
+  }, [visible, html]);
 
   useEffect(() => {
     if (editing) {
@@ -159,6 +230,7 @@ function AnimationRender({
       {html.trim() ? (
         visible ? (
           <iframe
+            ref={iframeRef}
             title="Interactive animation"
             sandbox="allow-scripts"
             referrerPolicy="no-referrer"

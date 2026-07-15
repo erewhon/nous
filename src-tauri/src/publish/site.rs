@@ -8,9 +8,10 @@ use uuid::Uuid;
 use crate::storage::{FileStorage, Folder, Page, Section};
 
 use super::html::{
-    block_plain_text, blocks_have_mermaid, render_page_html, rewrite_asset_url, slugify,
+    block_plain_text, blocks_have_animation, blocks_have_mermaid, render_page_html,
+    rewrite_asset_url, slugify,
 };
-use super::themes::{get_theme, mermaid_head};
+use super::themes::{get_theme, page_head_extra};
 
 #[derive(Serialize)]
 struct SearchEntry {
@@ -181,13 +182,13 @@ pub fn preview_page(
         String::new()
     };
 
-    // Inject the Mermaid runtime only when the page has a diagram and the theme
-    // ships one (empty replacement otherwise leaves a clean head).
-    let head_extra = if blocks_have_mermaid(&page.content.blocks) {
-        mermaid_head(theme.name).unwrap_or("")
-    } else {
-        ""
-    };
+    // Inject the Mermaid runtime and/or animation theme bridge only when the
+    // page needs them and the theme ships them (empty otherwise = clean head).
+    let head_extra = page_head_extra(
+        theme.name,
+        blocks_have_mermaid(&page.content.blocks),
+        blocks_have_animation(&page.content.blocks),
+    );
 
     let html = theme
         .page_template
@@ -201,7 +202,7 @@ pub fn preview_page(
         .replace("{{prev_link}}", "")
         .replace("{{next_link}}", "")
         .replace("{{breadcrumbs}}", "")
-        .replace("{{head_extra}}", head_extra);
+        .replace("{{head_extra}}", &head_extra);
 
     // Inline the CSS for preview
     let mut full_html = html.replace(
@@ -383,11 +384,11 @@ pub fn generate_site(
             String::new()
         };
 
-        let head_extra = if blocks_have_mermaid(&page.content.blocks) {
-            mermaid_head(theme.name).unwrap_or("")
-        } else {
-            ""
-        };
+        let head_extra = page_head_extra(
+            theme.name,
+            blocks_have_mermaid(&page.content.blocks),
+            blocks_have_animation(&page.content.blocks),
+        );
 
         let page_html = theme
             .page_template
@@ -401,7 +402,7 @@ pub fn generate_site(
             .replace("{{prev_link}}", &prev_html)
             .replace("{{next_link}}", &next_html)
             .replace("{{breadcrumbs}}", &breadcrumbs_html)
-            .replace("{{head_extra}}", head_extra);
+            .replace("{{head_extra}}", &head_extra);
 
         let filename = format!("{}.html", slug);
         fs::write(output_dir.join(&filename), page_html)
