@@ -37,6 +37,7 @@ pub fn render_block(
         "code" if code_language(block).eq_ignore_ascii_case("mermaid") => render_mermaid(block),
         "code" => render_code(block),
         "mermaid" => render_mermaid(block),
+        "animation" => render_animation(block),
         "quote" => render_quote(block, page_slugs, block_texts),
         "delimiter" => "<hr>".to_string(),
         "table" => render_table(block, page_slugs, block_texts),
@@ -195,6 +196,85 @@ fn block_is_mermaid(block: &EditorBlock) -> bool {
 /// to decide whether a page needs the Mermaid runtime injected into its head.
 pub fn blocks_have_mermaid(blocks: &[EditorBlock]) -> bool {
     blocks.iter().any(block_is_mermaid)
+}
+
+/// CSP for the sandboxed animation document. `default-src 'none'` +
+/// `connect-src 'none'` kill fetch/XHR/WebSocket; assets must be inlined as
+/// `data:`/`blob:` URIs. Only inline `<style>`/`<script>` may execute.
+const ANIMATION_CSP: &str = "default-src 'none'; img-src data: blob:; media-src data: blob:; \
+style-src 'unsafe-inline'; script-src 'unsafe-inline'; font-src data:; connect-src 'none'";
+
+/// Page palette as CSS custom properties, inlined into the srcdoc (custom
+/// properties do not cross the null-origin iframe boundary). Mirrors the
+/// Academic theme tokens; follows the OS light/dark preference.
+const ANIMATION_PALETTE_CSS: &str = ":root{color-scheme:light dark;--bg:#fffff8;--text:#1a1a1a;\
+--accent:#8b0000;--panel:#f5f5ef;--code-bg:#f0f0ea;--callout-bg:#f9f9f4;--muted:#666;--border:#ccc;}\
+@media (prefers-color-scheme:dark){:root{--bg:#1a1712;--text:#ece8dc;--accent:#e79285;\
+--panel:#231f18;--code-bg:#2a2620;--callout-bg:#201d16;--muted:#a49e8c;--border:#38342a;}}";
+
+/// Sanitize an `aspect-ratio` value; fall back to 16/9 on anything unexpected.
+fn safe_aspect(aspect: &str) -> &str {
+    let a = aspect.trim();
+    let ok = !a.is_empty()
+        && a.chars().all(|c| c.is_ascii_digit() || c == '.' || c == '/' || c == ' ')
+        && a.chars().any(|c| c.is_ascii_digit());
+    if ok {
+        a
+    } else {
+        "16/9"
+    }
+}
+
+/// Wrap untrusted author source in the sandboxed document shell (CSP + palette).
+fn animation_srcdoc(html: &str) -> String {
+    format!(
+        "<!doctype html><html><head><meta charset=\"utf-8\">\
+<meta http-equiv=\"Content-Security-Policy\" content=\"{csp}\">\
+<style>{palette} html,body{{margin:0;padding:0;height:100%;}}\
+body{{background:var(--bg);color:var(--text);\
+font-family:Georgia,'Times New Roman',serif;overflow:hidden;}}</style>\
+</head><body>{html}</body></html>",
+        csp = ANIMATION_CSP,
+        palette = ANIMATION_PALETTE_CSS,
+        html = html,
+    )
+}
+
+/// Render an interactive animation block. The author's untrusted HTML/JS runs
+/// inside a null-origin sandboxed iframe (`allow-scripts`, no
+/// `allow-same-origin`) with a strict inner CSP — the Claude-artifacts
+/// isolation model, matching the editor's `animation.tsx`. Empty source →
+/// empty output.
+fn render_animation(block: &EditorBlock) -> String {
+    let html = block
+        .data
+        .get("html")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+
+    if html.trim().is_empty() {
+        return String::new();
+    }
+
+    let aspect = block
+        .data
+        .get("aspect")
+        .and_then(|v| v.as_str())
+        .unwrap_or("16/9");
+    let aspect = safe_aspect(aspect);
+
+    // The whole document is placed in the `srcdoc` attribute; HTML-escaping the
+    // four attribute-significant characters lets the parser reconstruct it.
+    let srcdoc = html_escape(&animation_srcdoc(html));
+
+    format!(
+        "<iframe class=\"nous-animation\" title=\"Interactive animation\" \
+loading=\"lazy\" sandbox=\"allow-scripts\" referrerpolicy=\"no-referrer\" \
+style=\"width:100%;aspect-ratio:{aspect};border:1px solid var(--border);\
+border-radius:2px;background:var(--panel);\" srcdoc=\"{srcdoc}\"></iframe>",
+        aspect = html_escape(aspect),
+        srcdoc = srcdoc,
+    )
 }
 
 fn render_code(block: &EditorBlock) -> String {
@@ -575,5 +655,42 @@ mod tests {
             json!({ "code": "x", "language": "python" })
         )]));
         assert!(!blocks_have_mermaid(&[block("paragraph", json!({ "text": "hi" }))]));
+    }
+
+    #[test]
+    fn animation_block_renders_a_null_origin_sandboxed_iframe() {
+        let b = block("animation", json!({ "html": "<canvas id=\"c\"></canvas><script>1</script>" }));
+        let html = render(&b);
+        assert!(html.starts_with("<iframe"), "got: {html}");
+        // Scripts run, but the frame gets an opaque origin — no allow-same-origin.
+        assert!(html.contains("sandbox=\"allow-scripts\""), "got: {html}");
+        assert!(!html.contains("allow-same-origin"), "got: {html}");
+        assert!(html.contains("referrerpolicy=\"no-referrer\""), "got: {html}");
+        // The document (with its inner CSP) is carried, attribute-escaped, in srcdoc.
+        assert!(html.contains("srcdoc=\""), "got: {html}");
+        assert!(html.contains("connect-src &#39;none&#39;") || html.contains("connect-src 'none'"),
+            "inner CSP must block the network, got: {html}");
+        // Author markup is escaped into the attribute, not left as live tags.
+        assert!(html.contains("&lt;canvas"), "author html must be attribute-escaped, got: {html}");
+        assert!(!html.contains("<canvas"), "no un-escaped author tags may leak out, got: {html}");
+    }
+
+    #[test]
+    fn animation_block_honors_and_sanitizes_aspect() {
+        let good = render(&block("animation", json!({ "html": "<i></i>", "aspect": "4/3" })));
+        assert!(good.contains("aspect-ratio:4/3;"), "got: {good}");
+        // A hostile aspect that would break out of the style attribute is rejected.
+        let bad = render(&block(
+            "animation",
+            json!({ "html": "<i></i>", "aspect": "1/1;\" onload=alert(1) x=\"" }),
+        ));
+        assert!(bad.contains("aspect-ratio:16/9;"), "got: {bad}");
+        assert!(!bad.contains("onload"), "got: {bad}");
+    }
+
+    #[test]
+    fn empty_animation_block_renders_nothing() {
+        assert_eq!(render(&block("animation", json!({ "html": "   " }))), "");
+        assert_eq!(render(&block("animation", json!({}))), "");
     }
 }

@@ -42,6 +42,7 @@ fn convert_block_to_markdown(block: &EditorBlock) -> String {
         "checklist" => convert_checklist(block),
         "code" => convert_code(block),
         "mermaid" => convert_mermaid(block),
+        "animation" => convert_animation(block),
         "quote" => convert_quote(block),
         "delimiter" => "---".to_string(),
         "table" => convert_table(block),
@@ -145,6 +146,16 @@ fn convert_mermaid(block: &EditorBlock) -> String {
         .unwrap_or_default();
 
     format!("```mermaid\n{}\n```", code)
+}
+
+/// An interactive animation block round-trips to an ```animation fence so its
+/// source survives markdown export (contributed blocks are otherwise dropped).
+fn convert_animation(block: &EditorBlock) -> String {
+    let html = block.data.get("html")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+
+    format!("```animation\n{}\n```", html)
 }
 
 fn convert_quote(block: &EditorBlock) -> String {
@@ -456,6 +467,20 @@ mod tests {
         let result = convert_block_to_markdown(&block);
         assert!(result.starts_with("```mermaid"), "got: {result}");
         assert!(result.contains("A --> B"));
+        assert!(result.ends_with("```"));
+    }
+
+    #[test]
+    fn test_convert_animation_block() {
+        let block = EditorBlock {
+            id: "1".to_string(),
+            block_type: "animation".to_string(),
+            data: serde_json::json!({ "html": "<canvas id=\"c\"></canvas>", "aspect": "4/3" }),
+        };
+
+        let result = convert_block_to_markdown(&block);
+        assert!(result.starts_with("```animation"), "got: {result}");
+        assert!(result.contains("<canvas id=\"c\"></canvas>"), "got: {result}");
         assert!(result.ends_with("```"));
     }
 

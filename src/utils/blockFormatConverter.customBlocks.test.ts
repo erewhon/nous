@@ -13,8 +13,15 @@ vi.hoisted(() => {
   } as Storage;
 });
 
-import { editorJsToBlockNote, blockNoteToEditorJs } from "./blockFormatConverter";
+import {
+  editorJsToBlockNote,
+  blockNoteToEditorJs,
+} from "./blockFormatConverter";
 import { registerCustomBlock } from "../plugin-sdk/custom-block";
+import {
+  animationBlock,
+  buildAnimationSrcdoc,
+} from "../plugin-sdk/blocks/animation";
 import type { EditorData } from "../types/page";
 
 registerCustomBlock({
@@ -24,6 +31,8 @@ registerCustomBlock({
   Render: () => null,
 });
 
+registerCustomBlock(animationBlock);
+
 function doc(blocks: EditorData["blocks"]): EditorData {
   return { time: 1, version: "2.28.0", blocks };
 }
@@ -31,7 +40,7 @@ function doc(blocks: EditorData["blocks"]): EditorData {
 describe("contributed block conversion", () => {
   it("maps a contributed type to its block spec props", () => {
     const bn = editorJsToBlockNote(
-      doc([{ id: "b1", type: "testDiagram", data: { code: "A->B" } }]),
+      doc([{ id: "b1", type: "testDiagram", data: { code: "A->B" } }])
     );
     expect(bn).toEqual([
       {
@@ -62,7 +71,7 @@ describe("contributed block conversion", () => {
 
   it("drops non-string prop values back to declared defaults", () => {
     const bn = editorJsToBlockNote(
-      doc([{ id: "b1", type: "testDiagram", data: { code: 42 } }]),
+      doc([{ id: "b1", type: "testDiagram", data: { code: 42 } }])
     );
     expect(bn[0]!.props).toEqual({ code: "", variant: "plain" });
   });
@@ -76,16 +85,51 @@ describe("contributed block conversion", () => {
           type: "code",
           data: { code: "graph TD\n  A-->B", language: "mermaid" },
         },
-      ]),
+      ])
     );
-    expect(bn).toEqual([{ id: "b1", type: "mermaid", props: { code: "graph TD\n  A-->B" } }]);
+    expect(bn).toEqual([
+      { id: "b1", type: "mermaid", props: { code: "graph TD\n  A-->B" } },
+    ]);
+  });
+
+  it("round-trips an animation block through save", () => {
+    const original = doc([
+      {
+        id: "b1",
+        type: "animation",
+        data: { html: "<canvas id='c'></canvas>", aspect: "4/3" },
+      },
+    ]);
+    const back = blockNoteToEditorJs(editorJsToBlockNote(original));
+    expect(back.blocks).toEqual([
+      {
+        id: "b1",
+        type: "animation",
+        data: { html: "<canvas id='c'></canvas>", aspect: "4/3" },
+      },
+    ]);
+  });
+
+  it("wraps author source in a sandboxed, network-blocked document shell", () => {
+    const src = buildAnimationSrcdoc("<canvas id='c'></canvas>");
+    // Inner CSP kills the network and external resource loads.
+    expect(src).toContain("default-src 'none'");
+    expect(src).toContain("connect-src 'none'");
+    // Palette custom properties are inlined (they don't cross the iframe boundary).
+    expect(src).toContain("--accent");
+    // Author markup is present in the body verbatim (the iframe origin isolates it).
+    expect(src).toContain("<canvas id='c'></canvas>");
   });
 
   it("leaves an ordinary code block as a code block", () => {
     const bn = editorJsToBlockNote(
       doc([
-        { id: "b1", type: "code", data: { code: "let x = 1;", language: "rust" } },
-      ]),
+        {
+          id: "b1",
+          type: "code",
+          data: { code: "let x = 1;", language: "rust" },
+        },
+      ])
     );
     expect(bn[0]!.type).toBe("codeBlock");
     expect(bn[0]!.props).toEqual({ language: "rust" });
@@ -106,7 +150,7 @@ describe("legacy plugin block migration", () => {
             dataJson: JSON.stringify({ code: "graph TD\n  A-->B" }),
           },
         },
-      ]),
+      ])
     );
     expect(bn).toEqual([
       { id: "b1", type: "mermaid", props: { code: "graph TD\n  A-->B" } },
@@ -129,7 +173,7 @@ describe("legacy plugin block migration", () => {
             }),
           },
         },
-      ]),
+      ])
     );
     expect(bn).toEqual([
       {
@@ -171,7 +215,7 @@ describe("legacy plugin block migration", () => {
           type: "plugin",
           data: { blockType: "mermaid", dataJson: "{corrupt" },
         },
-      ]),
+      ])
     );
     expect(bn).toEqual([{ id: "b1", type: "mermaid", props: { code: "" } }]);
   });
@@ -186,7 +230,7 @@ describe("unknown block preservation", () => {
           type: "bogusWidget",
           data: { nested: { a: [1, 2], b: "x" }, flag: true },
         },
-      ]),
+      ])
     );
     expect(bn).toEqual([
       {
@@ -194,7 +238,10 @@ describe("unknown block preservation", () => {
         type: "unknownBlock",
         props: {
           originalType: "bogusWidget",
-          dataJson: JSON.stringify({ nested: { a: [1, 2], b: "x" }, flag: true }),
+          dataJson: JSON.stringify({
+            nested: { a: [1, 2], b: "x" },
+            flag: true,
+          }),
         },
       },
     ]);
@@ -220,14 +267,12 @@ describe("unknown block preservation", () => {
         props: { originalType: "bogusWidget", dataJson: "{not json" },
       },
     ]);
-    expect(back.blocks).toEqual([
-      { id: "b1", type: "bogusWidget", data: {} },
-    ]);
+    expect(back.blocks).toEqual([{ id: "b1", type: "bogusWidget", data: {} }]);
   });
 
   it("does not emit the old lossy unsupported-block paragraph", () => {
     const bn = editorJsToBlockNote(
-      doc([{ id: "b1", type: "bogusWidget", data: {} }]),
+      doc([{ id: "b1", type: "bogusWidget", data: {} }])
     );
     expect(JSON.stringify(bn)).not.toContain("Unsupported block");
   });
