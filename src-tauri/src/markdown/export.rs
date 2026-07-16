@@ -485,6 +485,34 @@ mod tests {
     }
 
     #[test]
+    fn animation_block_survives_an_export_import_round_trip() {
+        // The fence only earns its keep if it comes back as an animation. The
+        // importer reads the first fence token as the language; the editor and
+        // publish converters promote an `animation`-tagged code block.
+        let block = EditorBlock {
+            id: "1".to_string(),
+            block_type: "animation".to_string(),
+            data: serde_json::json!({ "html": "<canvas id=\"c\"></canvas>" }),
+        };
+
+        let md = convert_block_to_markdown(&block);
+        let back = crate::markdown::import::parse_markdown_to_blocks(&md);
+
+        assert_eq!(back.len(), 1, "got: {back:?}");
+        assert_eq!(back[0].block_type, "code");
+        assert_eq!(
+            back[0].data.get("language").and_then(|v| v.as_str()),
+            Some("animation")
+        );
+        assert_eq!(
+            back[0].data.get("code").and_then(|v| v.as_str()),
+            Some("<canvas id=\"c\"></canvas>")
+        );
+        // And the publish path renders that as a live sandboxed frame.
+        assert!(crate::publish::html::blocks_have_animation(&back));
+    }
+
+    #[test]
     fn test_convert_ordered_list() {
         let block = EditorBlock {
             id: "1".to_string(),

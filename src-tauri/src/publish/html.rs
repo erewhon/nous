@@ -35,6 +35,9 @@ pub fn render_block(
         "checklist" => render_checklist(block, page_slugs, block_texts),
         // A fenced `code` block tagged `mermaid` is a diagram, not source text.
         "code" if code_language(block).eq_ignore_ascii_case("mermaid") => render_mermaid(block),
+        // Likewise a `code` block tagged `animation` — the form markdown export
+        // emits, and the only animation an agent writing markdown can author.
+        "code" if code_language(block).eq_ignore_ascii_case("animation") => render_animation(block),
         "code" => render_code(block),
         "mermaid" => render_mermaid(block),
         "animation" => render_animation(block),
@@ -266,13 +269,21 @@ font-family:Georgia,'Times New Roman',serif;overflow:hidden;}}</style>\
 }
 
 /// True if the block renders as an interactive animation (non-empty source).
+/// The author's source for an animation block. A native block keeps it in
+/// `html`; an ```animation fence (markdown import/export) keeps it in `code`.
+fn animation_source(block: &EditorBlock) -> &str {
+    block
+        .data
+        .get("html")
+        .or_else(|| block.data.get("code"))
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+}
+
 fn block_is_animation(block: &EditorBlock) -> bool {
-    block.block_type == "animation"
-        && block
-            .data
-            .get("html")
-            .and_then(|v| v.as_str())
-            .is_some_and(|h| !h.trim().is_empty())
+    let is_animation = block.block_type == "animation"
+        || (block.block_type == "code" && code_language(block).eq_ignore_ascii_case("animation"));
+    is_animation && !animation_source(block).trim().is_empty()
 }
 
 /// True if any block on the page renders an animation. Themes use this to
@@ -287,11 +298,7 @@ pub fn blocks_have_animation(blocks: &[EditorBlock]) -> bool {
 /// isolation model, matching the editor's `animation.tsx`. Empty source →
 /// empty output.
 fn render_animation(block: &EditorBlock) -> String {
-    let html = block
-        .data
-        .get("html")
-        .and_then(|v| v.as_str())
-        .unwrap_or_default();
+    let html = animation_source(block);
 
     if html.trim().is_empty() {
         return String::new();
@@ -711,6 +718,35 @@ mod tests {
         assert!(html.contains("class=\"mermaid\""), "got: {html}");
         // Must not fall through to the <code> path.
         assert!(!html.contains("<code"), "got: {html}");
+    }
+
+    #[test]
+    fn code_block_tagged_animation_renders_the_sandboxed_iframe() {
+        // The ```animation fence markdown export emits, coming back in.
+        let b = block(
+            "code",
+            json!({ "code": "<canvas id='c'></canvas>", "language": "animation" }),
+        );
+        let html = render(&b);
+        assert!(html.contains("sandbox=\"allow-scripts\""), "got: {html}");
+        assert!(!html.contains("allow-same-origin"), "got: {html}");
+        // Must not fall through to the <code> path.
+        assert!(!html.contains("<pre><code"), "got: {html}");
+    }
+
+    #[test]
+    fn code_tagged_animation_gets_the_theme_bridge_injected() {
+        // block_is_animation must see the fence form, or page_head_extra skips
+        // the theme bridge and the frame never follows the toggle.
+        let blocks = vec![block(
+            "code",
+            json!({ "code": "<canvas id='c'></canvas>", "language": "animation" }),
+        )];
+        assert!(blocks_have_animation(&blocks));
+
+        // An empty fence is not an animation.
+        let empty = vec![block("code", json!({ "code": "  ", "language": "animation" }))];
+        assert!(!blocks_have_animation(&empty));
     }
 
     #[test]

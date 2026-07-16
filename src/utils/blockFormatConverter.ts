@@ -72,11 +72,22 @@ function convertBlock(block: EditorBlock): BNBlock | BNBlock[] {
       // A `mermaid`-tagged fence (e.g. from markdown import) is a diagram, not
       // a code listing — render it live via the contributed Mermaid block so the
       // editor matches the published output. `code` remains the on-disk field.
-      if (((data.language as string) ?? "").toLowerCase() === "mermaid") {
+      const language = ((data.language as string) ?? "").toLowerCase();
+      if (language === "mermaid") {
         return {
           id: block.id,
           type: "mermaid",
           props: { code: (data.code as string) ?? "" },
+        };
+      }
+      // Likewise an `animation`-tagged fence — the form markdown export emits,
+      // and the only way an agent writing markdown can author one. Aspect and
+      // poster don't survive a fence, so they fall back to their defaults.
+      if (language === "animation") {
+        return {
+          id: block.id,
+          type: "animation",
+          props: { html: (data.code as string) ?? "" },
         };
       }
       return {
@@ -197,8 +208,7 @@ function convertBlock(block: EditorBlock): BNBlock | BNBlock[] {
           currentTime: (data.currentTime as number) ?? 0,
           displayMode: (data.displayMode as string) ?? "standard",
           transcription: (data.transcription as string) ?? "",
-          transcriptionStatus:
-            (data.transcriptionStatus as string) ?? "idle",
+          transcriptionStatus: (data.transcriptionStatus as string) ?? "idle",
           showTranscript: (data.showTranscript as boolean) ?? false,
         },
       };
@@ -212,8 +222,7 @@ function convertBlock(block: EditorBlock): BNBlock | BNBlock[] {
           url: (data.url as string) ?? "",
           caption: (data.caption as string) ?? "",
           transcription: (data.transcription as string) ?? "",
-          transcriptionStatus:
-            (data.transcriptionStatus as string) ?? "idle",
+          transcriptionStatus: (data.transcriptionStatus as string) ?? "idle",
           showTranscript: (data.showTranscript as boolean) ?? false,
           recordedAt: (data.recordedAt as string) ?? "",
         },
@@ -280,7 +289,7 @@ function convertBlock(block: EditorBlock): BNBlock | BNBlock[] {
 
 function migrateLegacyPluginBlock(
   id: string,
-  data: Record<string, unknown>,
+  data: Record<string, unknown>
 ): BNBlock {
   const blockType = (data.blockType as string) ?? "";
   let parsed: Record<string, unknown> = {};
@@ -329,8 +338,7 @@ function convertList(block: EditorBlock): BNBlock[] {
   const data = block.data as Record<string, unknown>;
   const style = (data.style as string) ?? "unordered";
   const items = (data.items as unknown[]) ?? [];
-  const blockType =
-    style === "ordered" ? "numberedListItem" : "bulletListItem";
+  const blockType = style === "ordered" ? "numberedListItem" : "bulletListItem";
 
   return flattenListItems(items, blockType, block.id);
 }
@@ -339,7 +347,7 @@ function flattenListItems(
   items: unknown[],
   blockType: string,
   baseId: string,
-  depth = 0,
+  depth = 0
 ): BNBlock[] {
   const result: BNBlock[] = [];
   for (let i = 0; i < items.length; i++) {
@@ -348,9 +356,9 @@ function flattenListItems(
     const text =
       typeof item === "string"
         ? item
-        : (item.content as string) ?? (item.text as string) ?? "";
+        : ((item.content as string) ?? (item.text as string) ?? "");
     const children =
-      typeof item === "object" ? (item.items as unknown[]) ?? [] : [];
+      typeof item === "object" ? ((item.items as unknown[]) ?? []) : [];
 
     result.push({
       id: `${baseId}-${depth}-${i}`,
@@ -375,7 +383,7 @@ function convertChecklist(block: EditorBlock): BNBlock[] {
 function flattenChecklistItems(
   items: unknown[],
   baseId: string,
-  depth = 0,
+  depth = 0
 ): BNBlock[] {
   const result: BNBlock[] = [];
   for (let i = 0; i < items.length; i++) {
@@ -386,7 +394,7 @@ function flattenChecklistItems(
       (item.meta as Record<string, unknown>)?.checked ??
       false;
     const children =
-      typeof item === "object" ? (item.items as unknown[]) ?? [] : [];
+      typeof item === "object" ? ((item.items as unknown[]) ?? []) : [];
 
     result.push({
       id: `${baseId}-${depth}-${i}`,
@@ -517,7 +525,7 @@ interface StyleState {
 function walkDom(
   node: Node,
   styles: StyleState,
-  result: BNInlineContent[],
+  result: BNInlineContent[]
 ): void {
   for (let i = 0; i < node.childNodes.length; i++) {
     const child = node.childNodes[i]!;
@@ -610,9 +618,7 @@ function walkDom(
       }
       case "mark": {
         const color =
-          el.getAttribute("data-color") ??
-          el.style.backgroundColor ??
-          "yellow";
+          el.getAttribute("data-color") ?? el.style.backgroundColor ?? "yellow";
         newStyles.highlight = color;
         break;
       }
@@ -674,7 +680,7 @@ interface ConvertResult {
 function convertBlockToEditorJs(
   block: BNBlock,
   doc: BNDocument,
-  index: number,
+  index: number
 ): ConvertResult {
   switch (block.type) {
     case "paragraph":
@@ -742,9 +748,7 @@ function convertBlockToEditorJs(
 
     case "delimiter":
       return {
-        blocks: [
-          { id: block.id ?? generateId(), type: "delimiter", data: {} },
-        ],
+        blocks: [{ id: block.id ?? generateId(), type: "delimiter", data: {} }],
         nextIndex: index + 1,
       };
 
@@ -757,14 +761,24 @@ function convertBlockToEditorJs(
             data: {
               withHeadings: (block.content?.headerRows ?? 0) > 0,
               content: (block.content?.rows ?? []).map(
-                (row: { cells: Array<{ type: string; content: BNInlineContent[]; props?: Record<string, unknown> } | BNInlineContent[]> }) =>
+                (row: {
+                  cells: Array<
+                    | {
+                        type: string;
+                        content: BNInlineContent[];
+                        props?: Record<string, unknown>;
+                      }
+                    | BNInlineContent[]
+                  >;
+                }) =>
                   row.cells.map((cell) => {
                     // BlockNote 0.47 table cells are { type: "tableCell", content: [...] }
                     const inlineContent = Array.isArray(cell)
                       ? cell
-                      : (cell as { content: BNInlineContent[] }).content ?? [];
+                      : ((cell as { content: BNInlineContent[] }).content ??
+                        []);
                     return inlineContentToHtml(inlineContent);
-                  }),
+                  })
               ),
             },
           },
@@ -925,8 +939,7 @@ function convertBlockToEditorJs(
               currentTime: block.props?.currentTime ?? 0,
               displayMode: block.props?.displayMode ?? "standard",
               transcription: block.props?.transcription ?? "",
-              transcriptionStatus:
-                block.props?.transcriptionStatus ?? "idle",
+              transcriptionStatus: block.props?.transcriptionStatus ?? "idle",
               showTranscript: block.props?.showTranscript ?? false,
             },
           },
@@ -945,8 +958,7 @@ function convertBlockToEditorJs(
               url: block.props?.url ?? "",
               caption: block.props?.caption ?? "",
               transcription: block.props?.transcription ?? "",
-              transcriptionStatus:
-                block.props?.transcriptionStatus ?? "idle",
+              transcriptionStatus: block.props?.transcriptionStatus ?? "idle",
               showTranscript: block.props?.showTranscript ?? false,
               recordedAt: block.props?.recordedAt ?? "",
             },
@@ -983,16 +995,12 @@ function convertBlockToEditorJs(
             type: "columns",
             data: {
               columns: block.children?.length ?? 2,
-              columnData: (block.children ?? []).map(
-                (col: BNBlock) => ({
-                  blocks: (col.children ?? []).flatMap(
-                    (child: BNBlock) => {
-                      const r = convertBlockToEditorJs(child, [], 0);
-                      return r.blocks;
-                    },
-                  ),
+              columnData: (block.children ?? []).map((col: BNBlock) => ({
+                blocks: (col.children ?? []).flatMap((child: BNBlock) => {
+                  const r = convertBlockToEditorJs(child, [], 0);
+                  return r.blocks;
                 }),
-              ),
+              })),
             },
           },
         ],
@@ -1046,7 +1054,7 @@ function collectListItems(
   doc: BNDocument,
   startIndex: number,
   blockType: string,
-  style: string,
+  style: string
 ): ConvertResult {
   const items: unknown[] = [];
   let i = startIndex;
@@ -1077,7 +1085,7 @@ function blockToListItem(block: BNBlock): unknown {
 
 function collectChecklistItems(
   doc: BNDocument,
-  startIndex: number,
+  startIndex: number
 ): ConvertResult {
   const items: unknown[] = [];
   let i = startIndex;
@@ -1149,7 +1157,9 @@ function extractPlainText(content: BNInlineContent[]): string {
     .map((node) => {
       if (node.type === "text") return node.text ?? "";
       if (node.type === "link")
-        return (node.content ?? []).map((c: BNInlineContent) => c.text ?? "").join("");
+        return (node.content ?? [])
+          .map((c: BNInlineContent) => c.text ?? "")
+          .join("");
       if (node.type === "wikiLink") return node.props?.pageTitle ?? "";
       if (node.type === "blockRef") return node.props?.text ?? "";
       return "";

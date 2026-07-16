@@ -146,6 +146,29 @@ describe("contributed block conversion", () => {
     expect(src).toContain("<canvas id='c'></canvas>");
   });
 
+  it("renders an animation-tagged code block as the live animation block", () => {
+    // The ```animation fence markdown export emits — and the only way an agent
+    // writing markdown through the MCP server can author one.
+    const bn = editorJsToBlockNote(
+      doc([
+        {
+          id: "b1",
+          type: "code",
+          data: { code: "<canvas id='c'></canvas>", language: "animation" },
+        },
+      ])
+    );
+    expect(bn).toEqual([
+      {
+        id: "b1",
+        type: "animation",
+        // Aspect/poster don't survive a fence; BlockNote fills their schema
+        // defaults, same as the mermaid arm above.
+        props: { html: "<canvas id='c'></canvas>" },
+      },
+    ]);
+  });
+
   it("leaves an ordinary code block as a code block", () => {
     const bn = editorJsToBlockNote(
       doc([
