@@ -26,13 +26,14 @@ pub fn available_themes() -> Vec<&'static str> {
 /// Mermaid runtime + palette bridge, injected into a page's `<head>` (through
 /// the `{{head_extra}}` slot) when the page contains a diagram. It maps
 /// Mermaid's `base` theme variables onto the theme's CSS custom properties and
-/// re-renders on the light/dark toggle so diagrams flip with the page. Returns
-/// `None` for themes that don't ship the palette tokens this bridge reads —
-/// they degrade to the raw diagram source in a code box. Delivery is a pinned
+/// re-renders on the light/dark toggle so diagrams flip with the page. Every
+/// shipped theme now defines the palette tokens this reads (`--bg --panel
+/// --text --accent --callout-bg --muted --border`), so all of them get it;
+/// `None` is reserved for a future theme that omits them. Delivery is a pinned
 /// CDN ESM build (matches the app's mermaid ^11.16.0).
 pub fn mermaid_head(theme_name: &str) -> Option<&'static str> {
     match theme_name {
-        "academic" => Some(ACADEMIC_MERMAID_HEAD),
+        "academic" | "minimal" | "documentation" | "blog" | "docs" => Some(MERMAID_HEAD),
         _ => None,
     }
 }
@@ -43,15 +44,17 @@ pub fn mermaid_head(theme_name: &str) -> Option<&'static str> {
 /// `postMessage({type:'nous-theme', theme})` to each `iframe.nous-animation`
 /// once it loads and again whenever the reader clicks the theme toggle. The
 /// frame's own listener (in the srcdoc) flips its `data-theme`, re-theming any
-/// `var()`-based animation. `None` for themes without the toggle/palette.
+/// `var()`-based animation. All shipped themes get it: those with a toggle
+/// follow it live; the light-only themes (which pin `data-theme="light"`) get
+/// a correct initial push plus the reduced-motion poster swap.
 pub fn animation_head(theme_name: &str) -> Option<&'static str> {
     match theme_name {
-        "academic" => Some(ACADEMIC_ANIMATION_HEAD),
+        "academic" | "minimal" | "documentation" | "blog" | "docs" => Some(ANIMATION_HEAD),
         _ => None,
     }
 }
 
-const ACADEMIC_ANIMATION_HEAD: &str = r#"<script type="module">
+const ANIMATION_HEAD: &str = r#"<script type="module">
 // Reduced motion: swap each animation that ships a poster for its still frame
 // and drop the live iframe entirely, so motion-sensitive readers get no motion.
 if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
@@ -96,7 +99,11 @@ pub fn page_head_extra(theme_name: &str, has_mermaid: bool, has_animation: bool)
     out
 }
 
-const ACADEMIC_MERMAID_HEAD: &str = r#"<style>
+const MERMAID_HEAD: &str = r#"<style>
+/* A diagram lives in a <pre class="mermaid">, so a theme that styles <pre> as a
+   (often dark) code block would frame the diagram in that background. Neutralize
+   the container so the diagram sits on the page, whatever the theme's pre style. */
+pre.mermaid { background: transparent; color: var(--text); border: none; padding: 0; margin: 1.5rem 0; text-align: center; overflow-x: auto; }
 /* Scroll reveal (default): nodes/edges fade in as the diagram enters view.
    The whole effect lives inside prefers-reduced-motion:no-preference, so
    reduced-motion readers (and any diagram opted out with class "no-reveal")
@@ -116,9 +123,9 @@ pre.mermaid.mstep [data-step]:not(.mstep-on) { opacity: 0; }
 @media (prefers-reduced-motion: no-preference) {
   pre.mermaid.mstep [data-step] { transition: opacity 300ms ease; }
 }
-.mstep-controls { display: flex; align-items: center; gap: 0.75rem; margin: 0.3rem 0 1.4rem; font-family: Georgia, "Times New Roman", serif; font-size: 0.85rem; color: var(--muted); }
+.mstep-controls { display: flex; align-items: center; gap: 0.75rem; margin: 0.3rem 0 1.4rem; font-family: inherit; font-size: 0.85rem; color: var(--muted); }
 .mstep-controls button { font: inherit; color: var(--text); background: transparent; border: 1px solid var(--border); border-radius: 3px; padding: 0.15rem 0.7rem; cursor: pointer; }
-.mstep-controls button:hover:not(:disabled) { background: var(--code-bg); border-color: var(--muted); }
+.mstep-controls button:hover:not(:disabled) { background: var(--panel); border-color: var(--muted); }
 .mstep-controls button:disabled { opacity: 0.4; cursor: default; }
 .mstep-controls:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .mstep-count { font-variant: small-caps; letter-spacing: 0.04em; min-width: 4.5em; text-align: center; }
@@ -222,13 +229,17 @@ function palette() {
     primaryTextColor: v('--text'),
     primaryBorderColor: v('--accent'),
     secondaryColor: v('--callout-bg'),
-    tertiaryColor: v('--code-bg'),
+    // A light subtle surface in every theme. Deliberately NOT --code-bg: the
+    // docs theme uses that name for a *dark* fenced-code background, which
+    // would render mermaid's tertiary fills dark-on-dark.
+    tertiaryColor: v('--callout-bg'),
     lineColor: v('--muted'),
     textColor: v('--text'),
     noteBkgColor: v('--panel'),
     noteTextColor: v('--text'),
     noteBorderColor: v('--border'),
-    fontFamily: 'Georgia, "Times New Roman", serif'
+    // Follow the page's body font rather than hardcoding academic's serif.
+    fontFamily: getComputedStyle(document.body).fontFamily || 'Georgia, "Times New Roman", serif'
   };
 }
 async function renderAll() {
@@ -258,12 +269,13 @@ fn theme_minimal() -> Theme {
         name: "minimal",
         js: None,
         page_template: r#"<!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{page_title}} — {{site_title}}</title>
   <link rel="stylesheet" href="style.css">
+  {{head_extra}}
 </head>
 <body>
   <nav class="top-nav">
@@ -298,7 +310,14 @@ fn theme_minimal() -> Theme {
   </main>
 </body>
 </html>"#,
-        css: r#"*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        css: r#":root {
+  /* Diagram/animation palette — read by the mermaid + animation runtimes.
+     This theme is light-only; the tokens mirror its own colors so an embedded
+     diagram matches the page. */
+  --bg: #ffffff; --panel: #f6f6f6; --text: #222222; --accent: #0066cc;
+  --callout-bg: #f0f7ff; --muted: #666666; --border: #dddddd;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   line-height: 1.7;
@@ -360,12 +379,13 @@ fn theme_documentation() -> Theme {
         name: "documentation",
         js: None,
         page_template: r#"<!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{page_title}} — {{site_title}}</title>
   <link rel="stylesheet" href="style.css">
+  {{head_extra}}
 </head>
 <body>
   <aside class="sidebar">
@@ -412,7 +432,13 @@ fn theme_documentation() -> Theme {
   </main>
 </body>
 </html>"#,
-        css: r#"*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        css: r#":root {
+  /* Diagram/animation palette — read by the mermaid + animation runtimes.
+     Light-only theme; tokens mirror its own colors. */
+  --bg: #ffffff; --panel: #f8f9fa; --text: #1a1a2e; --accent: #0066cc;
+  --callout-bg: #f0f7ff; --muted: #666666; --border: #e0e0e0;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   line-height: 1.7;
@@ -500,12 +526,13 @@ fn theme_blog() -> Theme {
         name: "blog",
         js: None,
         page_template: r#"<!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{page_title}} — {{site_title}}</title>
   <link rel="stylesheet" href="style.css">
+  {{head_extra}}
 </head>
 <body>
   <header class="blog-header">
@@ -550,7 +577,14 @@ fn theme_blog() -> Theme {
   </footer>
 </body>
 </html>"#,
-        css: r#"*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        css: r#":root {
+  /* Diagram/animation palette — read by the mermaid + animation runtimes.
+     Light-only theme; tokens mirror its own colors. Diagrams sit on the white
+     post card, so --bg is white rather than the page's #fafafa. */
+  --bg: #ffffff; --panel: #f6f6f6; --text: #333333; --accent: #0066cc;
+  --callout-bg: #f0f7ff; --muted: #888888; --border: #e8e8e8;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   line-height: 1.8;
@@ -821,6 +855,7 @@ const DOCS_PAGE_TEMPLATE: &str = r#"<!DOCTYPE html>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{page_title}} — {{site_title}}</title>
   <link rel="stylesheet" href="style.css">
+  {{head_extra}}
 </head>
 <body>
   <header class="top-bar">
@@ -964,6 +999,9 @@ const DOCS_CSS: &str = r#"*, *::before, *::after { box-sizing: border-box; margi
   --accent-light: #eff6ff;
   --code-bg: #1e293b;
   --code-text: #e2e8f0;
+  /* Aliases for the diagram/animation runtime contract (--code-bg here is a
+     dark fenced-code bg, so it is deliberately NOT reused). */
+  --panel: #f4f5f7; --callout-bg: #eef1f5; --muted: #94a3b8;
 }
 
 /* ---- Dark theme ---- */
@@ -981,6 +1019,8 @@ const DOCS_CSS: &str = r#"*, *::before, *::after { box-sizing: border-box; margi
   --accent-light: rgba(96,165,250,0.1);
   --code-bg: #0f172a;
   --code-text: #e2e8f0;
+  /* Diagram/animation runtime contract — dark surfaces. */
+  --panel: #1e293b; --callout-bg: #334155; --muted: #64748b;
 }
 
 html { scroll-behavior: smooth; }
@@ -1406,9 +1446,52 @@ mod tests {
     }
 
     #[test]
+    fn every_theme_defines_the_diagram_palette_contract() {
+        // The tokens the mermaid palette() and step controls read. Missing any
+        // one leaves a diagram element unstyled (empty custom property).
+        let contract = ["--bg:", "--panel:", "--text:", "--accent:", "--callout-bg:", "--muted:", "--border:"];
+        for theme_name in available_themes() {
+            let css = get_theme(theme_name).css;
+            for token in contract {
+                assert!(css.contains(token), "{theme_name} CSS missing palette token {token}");
+            }
+        }
+    }
+
+    #[test]
+    fn every_page_template_exposes_the_head_extra_slot() {
+        // Without the slot the injected runtime is silently dropped by the
+        // no-op string replace — the bug that stranded four of five themes.
+        for theme_name in available_themes() {
+            assert!(
+                get_theme(theme_name).page_template.contains("{{head_extra}}"),
+                "{theme_name} page template missing {{head_extra}} slot"
+            );
+        }
+    }
+
+    #[test]
+    fn light_only_themes_pin_data_theme_so_frames_match_the_page() {
+        // These themes have no dark styling and no toggle; pinning light keeps a
+        // sandboxed animation frame (which follows data-theme) from going dark.
+        for theme_name in ["minimal", "documentation", "blog"] {
+            let t = get_theme(theme_name).page_template;
+            assert!(
+                t.contains(r#"<html lang="en" data-theme="light">"#),
+                "{theme_name} page template must pin data-theme=\"light\""
+            );
+            assert!(!t.contains(r#"class="theme-toggle""#), "{theme_name} is light-only, no toggle");
+        }
+    }
+
+    #[test]
     fn animation_head_bridges_theme_toggle_to_sandboxed_frames() {
-        assert!(animation_head("minimal").is_none());
-        assert!(animation_head("docs").is_none());
+        // Every shipped theme now carries the bridge (all define the palette
+        // tokens and either a toggle or a pinned data-theme).
+        for theme in available_themes() {
+            assert!(animation_head(theme).is_some(), "{theme} missing animation bridge");
+        }
+        assert!(animation_head("nonesuch").is_none());
 
         let head = animation_head("academic").expect("academic ships an animation bridge");
         // Deferred module script so the iframes/toggle exist when it runs.
@@ -1439,14 +1522,24 @@ mod tests {
         // Both, in order.
         let both = page_head_extra("academic", true, true);
         assert!(both.find("mermaid@11.16.0").unwrap() < both.find("iframe.nous-animation").unwrap());
-        // A theme without the tokens gets nothing even when the page has blocks.
-        assert_eq!(page_head_extra("minimal", true, true), "");
+        // A non-academic theme now gets both runtimes too (they all ship tokens).
+        let mini = page_head_extra("minimal", true, true);
+        assert!(mini.contains("mermaid@11.16.0") && mini.contains("iframe.nous-animation"));
+        // An unknown theme name still gets nothing.
+        assert_eq!(page_head_extra("nonesuch", true, true), "");
     }
 
     #[test]
-    fn mermaid_head_is_academic_only_and_themes_to_the_palette() {
-        assert!(mermaid_head("minimal").is_none());
-        assert!(mermaid_head("docs").is_none());
+    fn mermaid_head_ships_on_every_theme_and_themes_to_the_palette() {
+        for theme in available_themes() {
+            assert!(mermaid_head(theme).is_some(), "{theme} missing mermaid runtime");
+        }
+        assert!(mermaid_head("nonesuch").is_none());
+        // The palette read must not depend on --code-bg: docs uses that name for
+        // a *dark* fenced-code background, which would render tertiary fills
+        // dark-on-dark. tertiaryColor is sourced from --callout-bg instead.
+        let shared = mermaid_head("docs").unwrap();
+        assert!(!shared.contains("v('--code-bg')"), "mermaid must not read --code-bg");
 
         let head = mermaid_head("academic").expect("academic ships a mermaid runtime");
         // Pinned CDN ESM delivery (matches the app's mermaid ^11.16.0).
