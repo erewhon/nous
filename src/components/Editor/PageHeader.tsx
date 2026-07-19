@@ -573,8 +573,15 @@ export function PageHeader({
             <div className="flex items-center gap-3">
               <h1
                 onClick={() => setIsEditing(true)}
-                className="cursor-text text-2xl font-bold"
-                style={{ color: "var(--color-text-primary)" }}
+                className="cursor-text"
+                style={{
+                  color: "var(--color-text-primary)",
+                  fontFamily: "var(--font-display)",
+                  fontWeight: 600,
+                  fontSize: "calc(var(--font-size-base, 16px) * 1.35)",
+                  letterSpacing: "-0.01em",
+                  lineHeight: 1.2,
+                }}
               >
                 {page.title || "Untitled"}
               </h1>
