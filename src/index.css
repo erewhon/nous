@@ -246,6 +246,26 @@ select:focus-visible {
   box-shadow: 0 0 0 3px rgb(from var(--color-accent) r g b / 0.2) !important;
 }
 
+/* Graph constellation — faint twinkling stars (dark mode only; added by GraphView).
+   Each star carries its own --star-opacity; the twinkle modulates around it. */
+@keyframes graph-twinkle {
+  0%,
+  100% {
+    opacity: var(--star-opacity, 0.3);
+  }
+  50% {
+    opacity: calc(var(--star-opacity, 0.3) * 0.22);
+  }
+}
+.graph-star {
+  animation: graph-twinkle 5s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .graph-star {
+    animation: none;
+  }
+}
+
 /* Toast animations */
 @keyframes slide-in {
   from {

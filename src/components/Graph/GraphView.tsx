@@ -355,6 +355,30 @@ export function GraphView({ onClose, onNodeClick }: GraphViewProps) {
       .attr("d", "M 0,-5 L 10,0 L 0,5")
       .attr("fill", themeColor("--color-accent", "#8b5cf6"));
 
+    // Decorative constellation stars — a faint starfield behind the graph in
+    // dark mode only ("stars disappear by daylight"). Fixed layer (not zoomed);
+    // the CSS twinkle is disabled under prefers-reduced-motion (see index.css).
+    if (document.documentElement.getAttribute("data-theme") === "dark") {
+      const starLayer = svg
+        .insert("g", ":first-child")
+        .attr("class", "graph-stars")
+        .attr("pointer-events", "none");
+      const starFill = themeColor("--color-text-secondary", "#b3aac2");
+      for (let i = 0; i < 70; i++) {
+        const op = Math.random() * 0.35 + 0.12;
+        starLayer
+          .append("circle")
+          .attr("class", "graph-star")
+          .attr("cx", Math.random() * width)
+          .attr("cy", Math.random() * height)
+          .attr("r", Math.random() * 1.1 + 0.3)
+          .attr("fill", starFill)
+          .attr("opacity", op)
+          .style("--star-opacity", `${op}`)
+          .style("animation-delay", `${(Math.random() * 6).toFixed(2)}s`);
+      }
+    }
+
     // Add zoom behavior
     const g = svg.append("g");
 
