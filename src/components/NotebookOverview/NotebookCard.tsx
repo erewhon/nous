@@ -64,6 +64,9 @@ export const NotebookCard = memo(function NotebookCard({
       style.border = "1px solid";
     }
 
+    // Bookshelf spine — a 3px colored edge in the notebook's own accent
+    style.borderLeft = `3px solid ${notebook.color || "var(--color-accent)"}`;
+
     return style;
   }, [hasCoverImage, hasColor, notebook.color, notebook.coverImage]);
 
@@ -169,8 +172,12 @@ export const NotebookCard = memo(function NotebookCard({
             }
           >
             <h3
-              className="mb-1 text-left text-lg font-semibold line-clamp-2"
+              className="mb-1 text-left line-clamp-2"
               style={{
+                fontFamily: "var(--font-display)",
+                fontWeight: 600,
+                fontSize: "1.35rem",
+                letterSpacing: "-0.01em",
                 color: hasCoverImage || hasColor
                   ? "white"
                   : "var(--color-text-primary)",

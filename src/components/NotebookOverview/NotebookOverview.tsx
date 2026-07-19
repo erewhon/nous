@@ -194,8 +194,14 @@ export function NotebookOverview({
           </div>
           <div>
             <h1
-              className="text-2xl font-bold"
-              style={{ color: "var(--color-text-primary)" }}
+              className="font-bold"
+              style={{
+                fontFamily: "var(--font-display)",
+                fontWeight: 600,
+                fontSize: "calc(var(--font-size-base, 16px) * 1.9)",
+                letterSpacing: "-0.01em",
+                color: "var(--color-text-primary)",
+              }}
             >
               Nous
             </h1>
