@@ -79,7 +79,32 @@
   font-weight: 600;
 }
 
-/* Display face (Cormorant) on editor headings — "titles open like chapters" */
+/* ── Editor typography: the BlockNote / TipTap path (the LIVE editor) ─────────
+   BlockNote ships its own --bn-font-family (Inter); repoint it at the brand
+   body face so paragraphs read in DM Sans, then give headings the display
+   serif ("titles open like chapters") and code the mono face. */
+.bn-editor,
+.tiptap.ProseMirror {
+  --bn-font-family: var(--font-family);
+}
+
+.bn-editor h1,
+.bn-editor h2,
+.bn-editor h3,
+.bn-editor h4 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+}
+
+.bn-editor code,
+.bn-editor pre,
+.bn-editor pre code {
+  font-family: var(--font-mono);
+}
+
+/* Display face (Cormorant) on legacy Editor.js headings — kept for that path */
 h1.ce-header,
 h2.ce-header,
 h3.ce-header,
