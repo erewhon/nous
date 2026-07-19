@@ -6,7 +6,7 @@ import type { PinnedSectionEntry } from "../types/page";
 const THEME_STORE_KEY = libraryScopedKey("nous-theme");
 
 export type ThemeMode = "light" | "dark" | "system";
-export type ColorScheme = "default" | "catppuccin" | "nord" | "dracula" | "tufte";
+export type ColorScheme = "study" | "default" | "catppuccin" | "nord" | "dracula" | "tufte";
 export type FontFamily = "system" | "inter" | "jetbrains-mono" | "fira-code" | "serif" | "tufte";
 export type EditorWidth = "narrow" | "medium" | "wide" | "full";
 export type UIMode = "classic" | "overview";
@@ -131,7 +131,7 @@ interface ThemeState {
 
 const DEFAULT_SETTINGS: ThemeSettings = {
   mode: "dark",
-  colorScheme: "catppuccin",
+  colorScheme: "study",
   fontFamily: "system",
   editorWidth: "medium",
   editorKeymap: "standard",
@@ -378,6 +378,54 @@ const COLOR_SCHEMES = {
       "--color-border": "#333330",
       "--color-border-muted": "#252522",
       "--color-selection": "rgba(232, 84, 80, 0.25)",
+    },
+  },
+  study: {
+    // "The Study" — the signature default. Warm ink-violet (hue ~262°), lamplit
+    // at night, parchment by morning. See design/README.md for the full rationale.
+    dark: {
+      "--color-bg-primary": "#1b1526",
+      "--color-bg-secondary": "#171120",
+      "--color-bg-tertiary": "#272033",
+      "--color-bg-elevated": "#241c33",
+      "--color-bg-sidebar": "#120d1b",
+      "--color-bg-panel": "#150f1e",
+      "--color-text-primary": "#ece7de",
+      "--color-text-secondary": "#b3aac2",
+      "--color-text-muted": "#8a80a0",
+      "--color-accent": "#ab87fc",
+      "--color-accent-hover": "#bfa3ff",
+      "--color-accent-secondary": "#8a5cf5",
+      "--color-accent-tertiary": "#6e46d9",
+      "--color-success": "#a9c98b",
+      "--color-warning": "#e3b96f",
+      "--color-error": "#e58e87",
+      "--color-info": "#8fb8e8",
+      "--color-border": "#322a44",
+      "--color-border-muted": "#251e35",
+      "--color-selection": "rgba(171, 135, 252, 0.28)",
+    },
+    light: {
+      "--color-bg-primary": "#faf7f0",
+      "--color-bg-secondary": "#f3eee3",
+      "--color-bg-tertiary": "#eae3d3",
+      "--color-bg-elevated": "#fffdf8",
+      "--color-bg-sidebar": "#f1ecdf",
+      "--color-bg-panel": "#f6f2e8",
+      "--color-text-primary": "#241d33",
+      "--color-text-secondary": "#564c6b",
+      "--color-text-muted": "#6f6584",
+      "--color-accent": "#6d40cf",
+      "--color-accent-hover": "#5a30b8",
+      "--color-accent-secondary": "#5a34ad",
+      "--color-accent-tertiary": "#48288c",
+      "--color-success": "#3f6827",
+      "--color-warning": "#7d5507",
+      "--color-error": "#aa332a",
+      "--color-info": "#2f639e",
+      "--color-border": "#ded5c2",
+      "--color-border-muted": "#ebe5d6",
+      "--color-selection": "rgba(109, 64, 207, 0.16)",
     },
   },
 };
