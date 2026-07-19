@@ -1,0 +1,831 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nous — Direction A · The Study · Style Tile</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22><circle cx=%228%22 cy=%228%22 r=%226%22 fill=%22%238b5cf6%22/></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,500;1,600&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400;1,9..40,500&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script>const _t=new URLSearchParams(location.search).get("theme");if(_t==="light"||_t==="dark")document.documentElement.dataset.theme=_t;</script>
+<style>
+/* ============================================================
+   NOUS · DIRECTION A · "THE STUDY"
+   The marketing site's cosmic-editorial identity, brought inside.
+   A lamplit study at night: warm ink-violet, ivory light, serif
+   chapter openings, wiki-links as manuscript annotations.
+   ============================================================ */
+
+/* ---- Palette constants (single source of truth) ---- */
+:root {
+  /* Dark — "the study at night" */
+  --A-dark-bg-primary:   #1b1526;
+  --A-dark-bg-secondary: #171120;
+  --A-dark-bg-tertiary:  #272033;
+  --A-dark-bg-elevated:  #241c33;
+  --A-dark-bg-sidebar:   #120d1b;
+  --A-dark-bg-panel:     #150f1e;
+  --A-dark-text-primary:   #ece7de;
+  --A-dark-text-secondary: #b3aac2;
+  --A-dark-text-muted:     #8a80a0;
+  --A-dark-accent:           #ab87fc;
+  --A-dark-accent-hover:     #bfa3ff;
+  --A-dark-accent-secondary: #8a5cf5;
+  --A-dark-accent-tertiary:  #6e46d9;
+  --A-dark-success: #a9c98b;
+  --A-dark-warning: #e3b96f;
+  --A-dark-error:   #e58e87;
+  --A-dark-info:    #8fb8e8;
+  --A-dark-border:       #322a44;
+  --A-dark-border-muted: #251e35;
+  --A-dark-selection: rgba(171, 135, 252, 0.28);
+
+  /* Light — "the study by morning" */
+  --A-light-bg-primary:   #faf7f0;
+  --A-light-bg-secondary: #f3eee3;
+  --A-light-bg-tertiary:  #eae3d3;
+  --A-light-bg-elevated:  #fffdf8;
+  --A-light-bg-sidebar:   #f1ecdf;
+  --A-light-bg-panel:     #f6f2e8;
+  --A-light-text-primary:   #241d33;
+  --A-light-text-secondary: #564c6b;
+  --A-light-text-muted:     #6f6584;
+  --A-light-accent:           #6d40cf;
+  --A-light-accent-hover:     #5a30b8;
+  --A-light-accent-secondary: #5a34ad;
+  --A-light-accent-tertiary:  #48288c;
+  --A-light-success: #3f6827;
+  --A-light-warning: #7d5507;
+  --A-light-error:   #aa332a;
+  --A-light-info:    #2f639e;
+  --A-light-border:       #ded5c2;
+  --A-light-border-muted: #ebe5d6;
+  --A-light-selection: rgba(109, 64, 207, 0.16);
+
+  /* ---- Typefaces ---- */
+  --font-display: "Cormorant Garamond", "Iowan Old Style", Georgia, serif;
+  --font-ui: "DM Sans", -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", "SF Mono", Menlo, monospace;
+
+  /* ---- Spacing rhythm (4px base) ---- */
+  --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px; --sp-4: 16px; --sp-5: 20px;
+  --sp-6: 24px; --sp-7: 32px; --sp-8: 40px; --sp-9: 48px; --sp-10: 64px;
+
+  /* ---- Radius scale ---- */
+  --r-xs: 4px; --r-sm: 7px; --r-md: 10px; --r-lg: 14px; --r-xl: 20px; --r-full: 999px;
+
+  /* ---- Motion ---- */
+  --dur-fast: 130ms; --dur-base: 190ms; --dur-slow: 260ms;
+  --ease-settle: cubic-bezier(.22,.61,.36,1);
+  --ease-inout: cubic-bezier(.45,.05,.35,.95);
+}
+
+/* ---- Theme maps (paste-ready shape for COLOR_SCHEMES) ---- */
+:root[data-theme="dark"] {
+  --color-bg-primary:   var(--A-dark-bg-primary);
+  --color-bg-secondary: var(--A-dark-bg-secondary);
+  --color-bg-tertiary:  var(--A-dark-bg-tertiary);
+  --color-bg-elevated:  var(--A-dark-bg-elevated);
+  --color-bg-sidebar:   var(--A-dark-bg-sidebar);
+  --color-bg-panel:     var(--A-dark-bg-panel);
+  --color-text-primary:   var(--A-dark-text-primary);
+  --color-text-secondary: var(--A-dark-text-secondary);
+  --color-text-muted:     var(--A-dark-text-muted);
+  --color-accent:           var(--A-dark-accent);
+  --color-accent-hover:     var(--A-dark-accent-hover);
+  --color-accent-secondary: var(--A-dark-accent-secondary);
+  --color-accent-tertiary:  var(--A-dark-accent-tertiary);
+  --color-success: var(--A-dark-success);
+  --color-warning: var(--A-dark-warning);
+  --color-error:   var(--A-dark-error);
+  --color-info:    var(--A-dark-info);
+  --color-border:       var(--A-dark-border);
+  --color-border-muted: var(--A-dark-border-muted);
+  --color-selection: var(--A-dark-selection);
+  --shadow-1: 0 1px 2px rgba(10,5,20,.5);
+  --shadow-2: 0 2px 8px rgba(10,5,20,.45), 0 1px 2px rgba(10,5,20,.4);
+  --shadow-3: 0 8px 28px rgba(10,5,20,.5), 0 2px 8px rgba(10,5,20,.35);
+  --shadow-4: 0 20px 60px rgba(8,4,18,.6), 0 4px 16px rgba(8,4,18,.4);
+}
+:root[data-theme="light"] {
+  --color-bg-primary:   var(--A-light-bg-primary);
+  --color-bg-secondary: var(--A-light-bg-secondary);
+  --color-bg-tertiary:  var(--A-light-bg-tertiary);
+  --color-bg-elevated:  var(--A-light-bg-elevated);
+  --color-bg-sidebar:   var(--A-light-bg-sidebar);
+  --color-bg-panel:     var(--A-light-bg-panel);
+  --color-text-primary:   var(--A-light-text-primary);
+  --color-text-secondary: var(--A-light-text-secondary);
+  --color-text-muted:     var(--A-light-text-muted);
+  --color-accent:           var(--A-light-accent);
+  --color-accent-hover:     var(--A-light-accent-hover);
+  --color-accent-secondary: var(--A-light-accent-secondary);
+  --color-accent-tertiary:  var(--A-light-accent-tertiary);
+  --color-success: var(--A-light-success);
+  --color-warning: var(--A-light-warning);
+  --color-error:   var(--A-light-error);
+  --color-info:    var(--A-light-info);
+  --color-border:       var(--A-light-border);
+  --color-border-muted: var(--A-light-border-muted);
+  --color-selection: var(--A-light-selection);
+  --shadow-1: 0 1px 2px rgba(60,45,85,.08);
+  --shadow-2: 0 2px 8px rgba(60,45,85,.10), 0 1px 2px rgba(60,45,85,.07);
+  --shadow-3: 0 8px 28px rgba(60,45,85,.14), 0 2px 8px rgba(60,45,85,.08);
+  --shadow-4: 0 20px 60px rgba(50,35,75,.20), 0 4px 16px rgba(50,35,75,.10);
+}
+
+/* ---- Base ---- */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+::selection { background: var(--color-selection); }
+html { scrollbar-color: var(--color-border) transparent; }
+body {
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 1.55;
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  -webkit-font-smoothing: antialiased;
+  transition: background var(--dur-slow) var(--ease-inout), color var(--dur-slow) var(--ease-inout);
+}
+.wrap { max-width: 1160px; margin: 0 auto; padding: var(--sp-8) var(--sp-6) var(--sp-10); }
+
+/* ---- Focus ring (shared craft) ---- */
+:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--color-bg-primary),
+              0 0 0 4px color-mix(in srgb, var(--color-accent) 70%, transparent);
+  border-radius: var(--r-xs);
+}
+
+/* ---- Tile header ---- */
+.tile-head {
+  display: flex; align-items: flex-end; justify-content: space-between; gap: var(--sp-4);
+  padding-bottom: var(--sp-6); margin-bottom: var(--sp-8);
+  border-bottom: 1px solid var(--color-border);
+}
+.wordmark {
+  font-family: var(--font-display); font-weight: 600; font-size: 46px; line-height: 1;
+  letter-spacing: .01em;
+}
+.wordmark .tail { color: var(--color-accent); }
+.tile-head .sub { margin-top: var(--sp-2); color: var(--color-text-secondary); font-size: 14px; }
+.tile-head .sub em { font-family: var(--font-display); font-size: 16px; }
+.dir-tag {
+  display: inline-flex; align-items: center; gap: var(--sp-2);
+  font-size: 11px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+.dir-tag b { color: var(--color-accent); font-weight: 600; }
+
+.theme-toggle {
+  display: inline-flex; align-items: center; gap: var(--sp-2);
+  font-family: var(--font-ui); font-size: 12.5px; font-weight: 500;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary); border: 1px solid var(--color-border);
+  border-radius: var(--r-full); padding: 6px 14px; cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-settle), color var(--dur-fast) var(--ease-settle);
+}
+.theme-toggle:hover { color: var(--color-text-primary); background: var(--color-bg-elevated); }
+.theme-toggle .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--color-accent); }
+
+/* ---- Section scaffolding ---- */
+section { margin-bottom: var(--sp-10); }
+.eyebrow {
+  font-size: 11px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase;
+  color: var(--color-text-muted); margin-bottom: var(--sp-2);
+}
+.sec-title {
+  font-family: var(--font-display); font-weight: 600; font-size: 27px; line-height: 1.2;
+  margin-bottom: var(--sp-2);
+}
+.sec-note { color: var(--color-text-secondary); font-size: 13.5px; max-width: 68ch; margin-bottom: var(--sp-6); }
+.sec-note code { font-family: var(--font-mono); font-size: 12px; background: var(--color-bg-tertiary); padding: 1px 5px; border-radius: var(--r-xs); }
+
+/* ---- Token boards ---- */
+.boards { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-5); }
+.board {
+  border: 1px solid var(--color-border); border-radius: var(--r-lg);
+  overflow: hidden; box-shadow: var(--shadow-2);
+}
+.board-head {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: var(--sp-3) var(--sp-4);
+  font-size: 11px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase;
+  border-bottom: 1px solid var(--board-border);
+}
+.board-body { padding: var(--sp-4); display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--sp-2) var(--sp-4); }
+.board { background: var(--board-bg); color: var(--board-text); }
+.board-head { color: var(--board-mut); }
+.swatch { display: flex; align-items: center; gap: var(--sp-3); padding: 3px 0; min-width: 0; }
+.swatch .chip {
+  width: 34px; height: 26px; flex: none; border-radius: var(--r-xs);
+  border: 1px solid var(--board-border);
+}
+.swatch .meta { min-width: 0; line-height: 1.3; }
+.swatch .name { font-size: 11.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.swatch .hex { font-family: var(--font-mono); font-size: 10.5px; color: var(--board-mut); }
+/* Board scopes carry their own theme regardless of page toggle */
+.board--dark {
+  --board-bg: var(--A-dark-bg-secondary); --board-text: var(--A-dark-text-primary);
+  --board-mut: var(--A-dark-text-muted); --board-border: var(--A-dark-border);
+}
+.board--light {
+  --board-bg: var(--A-light-bg-secondary); --board-text: var(--A-light-text-primary);
+  --board-mut: var(--A-light-text-muted); --board-border: var(--A-light-border);
+}
+
+/* ---- Type specimen ---- */
+.spec { display: grid; grid-template-columns: 1fr; gap: 0; border: 1px solid var(--color-border); border-radius: var(--r-lg); overflow: hidden; }
+.spec-row {
+  display: grid; grid-template-columns: 230px 1fr; gap: var(--sp-5); align-items: baseline;
+  padding: var(--sp-4) var(--sp-5); border-bottom: 1px solid var(--color-border-muted);
+  background: var(--color-bg-secondary);
+}
+.spec-row:last-child { border-bottom: none; }
+.spec-label { font-family: var(--font-mono); font-size: 11px; color: var(--color-text-muted); line-height: 1.5; }
+.t-wordmark { font-family: var(--font-display); font-weight: 600; font-size: 44px; line-height: 1.05; }
+.t-h1 { font-family: var(--font-display); font-weight: 600; font-size: 34px; line-height: 1.15; }
+.t-h2 { font-family: var(--font-display); font-weight: 600; font-size: 25px; line-height: 1.22; }
+.t-h3 { font-family: var(--font-ui); font-weight: 600; font-size: 17px; letter-spacing: -.01em; }
+.t-h4 { font-family: var(--font-ui); font-weight: 600; font-size: 15px; }
+.t-body { font-family: var(--font-ui); font-weight: 400; font-size: 16px; line-height: 1.7; max-width: 62ch; }
+.t-ui { font-family: var(--font-ui); font-weight: 500; font-size: 13px; color: var(--color-text-secondary); }
+.t-label { font-size: 11px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase; color: var(--color-text-muted); }
+.t-code { font-family: var(--font-mono); font-size: 13px; }
+.t-body .wiki { color: var(--color-accent); text-decoration: none; border-bottom: 1px solid color-mix(in srgb, var(--color-accent) 35%, transparent); transition: border-color var(--dur-fast) var(--ease-settle), color var(--dur-fast) var(--ease-settle); cursor: pointer; }
+.t-body .wiki:hover { color: var(--color-accent-hover); border-bottom-color: var(--color-accent-hover); }
+
+/* ---- Craft scales ---- */
+.craft { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-5); }
+.craft-card {
+  background: var(--color-bg-secondary); border: 1px solid var(--color-border);
+  border-radius: var(--r-lg); padding: var(--sp-5);
+}
+.craft-card h4 { font-size: 13px; font-weight: 600; margin-bottom: var(--sp-4); }
+.craft-card h4 span { font-family: var(--font-mono); font-weight: 400; font-size: 11px; color: var(--color-text-muted); margin-left: var(--sp-2); }
+.sp-ruler { display: flex; align-items: flex-end; gap: var(--sp-2); }
+.sp-ruler .bar { background: var(--color-accent); opacity: .85; border-radius: 2px 2px 0 0; width: 22px; }
+.sp-ruler .cell { text-align: center; }
+.sp-ruler .cap { font-family: var(--font-mono); font-size: 10px; color: var(--color-text-muted); margin-top: var(--sp-1); }
+.r-row { display: flex; gap: var(--sp-4); align-items: flex-end; flex-wrap: wrap; }
+.r-chip { width: 64px; height: 48px; background: var(--color-bg-tertiary); border: 1px solid var(--color-border); }
+.r-cap { font-family: var(--font-mono); font-size: 10px; color: var(--color-text-muted); text-align: center; margin-top: var(--sp-1); }
+.sh-row { display: flex; gap: var(--sp-5); flex-wrap: wrap; }
+.sh-chip { width: 108px; height: 68px; border-radius: var(--r-md); background: var(--color-bg-elevated); display: flex; align-items: flex-end; padding: var(--sp-2); }
+.sh-chip span { font-family: var(--font-mono); font-size: 10px; color: var(--color-text-muted); }
+.mo-row { display: flex; flex-direction: column; gap: var(--sp-3); }
+.mo-item { display: flex; align-items: center; gap: var(--sp-4); flex-wrap: wrap; }
+.mo-item .cap { font-family: var(--font-mono); font-size: 11px; color: var(--color-text-muted); width: 170px; flex: none; }
+.mo-demo {
+  height: 30px; padding: 0 var(--sp-4); display: inline-flex; align-items: center;
+  border-radius: var(--r-sm); background: var(--color-bg-tertiary); font-size: 12.5px; cursor: pointer;
+  border: 1px solid var(--color-border);
+  transition: transform var(--dur-base) var(--ease-settle), background var(--dur-base) var(--ease-settle), box-shadow var(--dur-base) var(--ease-settle);
+}
+.mo-demo:hover { transform: translateY(-2px); background: var(--color-bg-elevated); box-shadow: var(--shadow-2); }
+
+/* ---- Primitives grid ---- */
+.prims { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-5); }
+.prim {
+  background: var(--color-bg-secondary); border: 1px solid var(--color-border);
+  border-radius: var(--r-lg); padding: var(--sp-5);
+}
+.prim > h4 { font-size: 13px; font-weight: 600; margin-bottom: var(--sp-4); }
+.prim .hint { font-size: 11.5px; color: var(--color-text-muted); margin-top: var(--sp-3); }
+.prim--wide { grid-column: 1 / -1; }
+
+/* Buttons */
+.btn-grid { display: grid; grid-template-columns: repeat(4, auto); gap: var(--sp-3) var(--sp-4); justify-content: start; align-items: center; }
+.btn-grid .cap { font-family: var(--font-mono); font-size: 10.5px; color: var(--color-text-muted); }
+.btn {
+  font-family: var(--font-ui); font-size: 13px; font-weight: 500; line-height: 1;
+  display: inline-flex; align-items: center; gap: var(--sp-2);
+  padding: 9px 16px; border-radius: var(--r-sm); cursor: pointer;
+  border: 1px solid transparent;
+  transition: background var(--dur-fast) var(--ease-settle), color var(--dur-fast) var(--ease-settle),
+              border-color var(--dur-fast) var(--ease-settle), box-shadow var(--dur-fast) var(--ease-settle),
+              transform var(--dur-fast) var(--ease-settle);
+}
+.btn:active { transform: translateY(1px); }
+.btn-primary { background: var(--color-accent); color: var(--color-bg-sidebar); }
+.btn-primary:hover, .btn-primary.is-hover { background: var(--color-accent-hover); box-shadow: var(--shadow-1); }
+.btn-primary.is-active { background: var(--color-accent-secondary); color: #fff; }
+.btn-secondary { background: transparent; color: var(--color-text-primary); border-color: var(--color-border); }
+.btn-secondary:hover, .btn-secondary.is-hover { background: var(--color-bg-tertiary); border-color: var(--color-text-muted); }
+.btn-secondary.is-active { background: var(--color-bg-tertiary); }
+.btn-ghost { background: transparent; color: var(--color-text-secondary); }
+.btn-ghost:hover, .btn-ghost.is-hover { background: var(--color-bg-tertiary); color: var(--color-text-primary); }
+.btn-ghost.is-active { background: var(--color-bg-tertiary); color: var(--color-text-primary); }
+.btn[disabled] { opacity: .42; cursor: not-allowed; pointer-events: none; }
+.btn.show-focus { box-shadow: 0 0 0 2px var(--color-bg-secondary), 0 0 0 4px color-mix(in srgb, var(--color-accent) 70%, transparent); }
+
+/* Inputs */
+.field { display: flex; flex-direction: column; gap: var(--sp-2); margin-bottom: var(--sp-4); }
+.field label { font-size: 12px; font-weight: 600; color: var(--color-text-secondary); }
+.input {
+  font-family: var(--font-ui); font-size: 13.5px; color: var(--color-text-primary);
+  background: var(--color-bg-primary); border: 1px solid var(--color-border);
+  border-radius: var(--r-sm); padding: 9px 12px; width: 100%;
+  transition: border-color var(--dur-fast) var(--ease-settle), box-shadow var(--dur-fast) var(--ease-settle);
+}
+.input::placeholder { color: var(--color-text-muted); }
+.input:hover { border-color: var(--color-text-muted); }
+.input:focus-visible {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 22%, transparent);
+}
+.cmdk {
+  display: flex; align-items: center; gap: var(--sp-3);
+  background: var(--color-bg-elevated); border: 1px solid var(--color-border);
+  border-radius: var(--r-md); padding: 10px 14px; box-shadow: var(--shadow-2);
+  color: var(--color-text-muted); font-size: 13.5px; cursor: text;
+}
+.cmdk svg { flex: none; }
+.cmdk .ph { flex: 1; }
+.kbd {
+  font-family: var(--font-mono); font-size: 10.5px; color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary); border: 1px solid var(--color-border);
+  border-bottom-width: 2px; border-radius: var(--r-xs); padding: 2px 6px; line-height: 1.4;
+}
+
+/* List rows */
+.rows { display: flex; flex-direction: column; gap: 2px; }
+.row {
+  display: flex; align-items: center; gap: var(--sp-3);
+  padding: 7px 10px; border-radius: var(--r-sm); font-size: 13px; cursor: pointer;
+  color: var(--color-text-secondary); border: none; background: transparent; text-align: left;
+  transition: background var(--dur-fast) var(--ease-settle), color var(--dur-fast) var(--ease-settle);
+}
+.row .ico { flex: none; width: 16px; height: 16px; color: var(--color-text-muted); }
+.row .grow { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row .meta { font-size: 11px; color: var(--color-text-muted); }
+.row:hover, .row.is-hover { background: var(--color-bg-tertiary); color: var(--color-text-primary); }
+.row.is-selected { background: var(--color-selection); color: var(--color-text-primary); }
+.row.is-selected .ico { color: var(--color-accent); }
+.cap-inline { font-family: var(--font-mono); font-size: 10.5px; color: var(--color-text-muted); margin: var(--sp-2) 0 2px; }
+
+/* Card */
+.demo-card {
+  background: var(--color-bg-elevated); border: 1px solid var(--color-border);
+  border-radius: var(--r-lg); padding: var(--sp-5); box-shadow: var(--shadow-2);
+  transition: transform var(--dur-base) var(--ease-settle), box-shadow var(--dur-base) var(--ease-settle);
+  position: relative; overflow: hidden; cursor: pointer;
+}
+.demo-card::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+  background: var(--color-accent); opacity: .9;
+}
+.demo-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-3); }
+.demo-card h5 { font-family: var(--font-display); font-weight: 600; font-size: 20px; margin-bottom: 2px; }
+.demo-card p { font-size: 12.5px; color: var(--color-text-secondary); }
+.demo-card .meta { margin-top: var(--sp-3); font-size: 11px; color: var(--color-text-muted); display: flex; gap: var(--sp-3); }
+
+/* Tabs & pills */
+.tabs { display: flex; gap: var(--sp-1); border-bottom: 1px solid var(--color-border); }
+.tab {
+  font-family: var(--font-ui); font-size: 13px; font-weight: 500; color: var(--color-text-muted);
+  background: none; border: none; cursor: pointer;
+  padding: 8px 12px; border-bottom: 2px solid transparent; margin-bottom: -1px;
+  transition: color var(--dur-fast) var(--ease-settle), border-color var(--dur-fast) var(--ease-settle);
+}
+.tab:hover { color: var(--color-text-primary); }
+.tab.is-active { color: var(--color-text-primary); border-bottom-color: var(--color-accent); }
+.pills { display: flex; gap: var(--sp-2); flex-wrap: wrap; margin-top: var(--sp-4); }
+.pill {
+  font-size: 12px; font-weight: 500; color: var(--color-text-secondary);
+  background: transparent; border: 1px solid var(--color-border); border-radius: var(--r-full);
+  padding: 4px 12px; cursor: pointer;
+  transition: all var(--dur-fast) var(--ease-settle);
+}
+.pill:hover { border-color: var(--color-text-muted); color: var(--color-text-primary); }
+.pill.is-on {
+  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+  border-color: color-mix(in srgb, var(--color-accent) 45%, transparent);
+  color: var(--color-accent);
+}
+
+/* Callouts */
+.callout {
+  display: flex; gap: var(--sp-3); padding: var(--sp-4);
+  border-radius: var(--r-md); border: 1px solid; border-left-width: 3px;
+  margin-bottom: var(--sp-3); font-size: 13.5px; line-height: 1.6;
+}
+.callout .ci { flex: none; margin-top: 1px; }
+.callout b { display: block; font-size: 12px; font-weight: 600; letter-spacing: .02em; margin-bottom: 1px; }
+.callout p { color: var(--color-text-secondary); font-size: 13px; }
+.callout--info    { border-color: color-mix(in srgb, var(--color-info) 30%, transparent);    background: color-mix(in srgb, var(--color-info) 7%, transparent);    border-left-color: var(--color-info); }
+.callout--warning { border-color: color-mix(in srgb, var(--color-warning) 30%, transparent); background: color-mix(in srgb, var(--color-warning) 7%, transparent); border-left-color: var(--color-warning); }
+.callout--tip     { border-color: color-mix(in srgb, var(--color-success) 30%, transparent); background: color-mix(in srgb, var(--color-success) 7%, transparent); border-left-color: var(--color-success); }
+.callout--danger  { border-color: color-mix(in srgb, var(--color-error) 30%, transparent);   background: color-mix(in srgb, var(--color-error) 7%, transparent);   border-left-color: var(--color-error); }
+.callout--info .ci, .callout--info b { color: var(--color-info); }
+.callout--warning .ci, .callout--warning b { color: var(--color-warning); }
+.callout--tip .ci, .callout--tip b { color: var(--color-success); }
+.callout--danger .ci, .callout--danger b { color: var(--color-error); }
+
+/* Code block */
+.codeblock {
+  background: var(--color-bg-sidebar); border: 1px solid var(--color-border);
+  border-radius: var(--r-md); overflow: hidden;
+}
+.codeblock .cb-head {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 7px 14px; border-bottom: 1px solid var(--color-border-muted);
+  font-family: var(--font-mono); font-size: 11px; color: var(--color-text-muted);
+}
+.codeblock pre {
+  padding: var(--sp-4); overflow-x: auto;
+  font-family: var(--font-mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--color-text-primary);
+}
+.tok-kw { color: var(--color-accent); }
+.tok-str { color: var(--color-success); }
+.tok-fn { color: var(--color-info); }
+.tok-cm { color: var(--color-text-muted); font-style: italic; }
+.tok-num { color: var(--color-warning); }
+
+/* To-do */
+.todo { display: flex; align-items: flex-start; gap: var(--sp-3); padding: 5px 0; font-size: 14px; }
+.todo .box {
+  flex: none; width: 16px; height: 16px; margin-top: 2px; border-radius: 5px;
+  border: 1.5px solid var(--color-text-muted); cursor: pointer; position: relative;
+  transition: all var(--dur-fast) var(--ease-settle);
+}
+.todo.is-done .box { background: var(--color-accent); border-color: var(--color-accent); }
+.todo.is-done .box::after {
+  content: ""; position: absolute; left: 4.5px; top: 1.5px; width: 4px; height: 8px;
+  border: solid var(--color-bg-sidebar); border-width: 0 2px 2px 0; transform: rotate(45deg);
+}
+.todo.is-done .txt { color: var(--color-text-muted); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--color-text-muted) 55%, transparent); }
+
+/* Focus demo */
+.focus-demo { display: flex; gap: var(--sp-4); align-items: center; flex-wrap: wrap; }
+
+/* Port map */
+.portmap pre { font-size: 11.5px; }
+
+/* Footer */
+.tile-foot {
+  margin-top: var(--sp-10); padding-top: var(--sp-5);
+  border-top: 1px solid var(--color-border);
+  display: flex; justify-content: space-between; align-items: baseline; gap: var(--sp-4);
+  font-size: 12px; color: var(--color-text-muted);
+}
+.tile-foot .lic { font-family: var(--font-mono); font-size: 11px; }
+.tile-foot em { font-family: var(--font-display); font-size: 14px; color: var(--color-text-secondary); }
+
+@media (max-width: 900px) {
+  .boards, .craft, .prims { grid-template-columns: 1fr; }
+  .spec-row { grid-template-columns: 1fr; gap: var(--sp-2); }
+  .tile-head { flex-direction: column; align-items: flex-start; }
+}
+@media (max-width: 520px) {
+  .wrap { padding: var(--sp-6) var(--sp-4) var(--sp-8); }
+  .board-body { grid-template-columns: 1fr; }
+  .btn-grid { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="tile-head">
+    <div>
+      <div class="dir-tag">Direction A · <b>The Study</b> · Style tile</div>
+      <div class="wordmark">Nou<span class="tail">s</span></div>
+      <div class="sub"><em>Where thinking takes form.</em> &nbsp;The landing page's cosmic-editorial voice, brought inside the tool.</div>
+    </div>
+    <button class="theme-toggle" id="themeToggle" aria-label="Toggle color theme">
+      <span class="dot"></span><span id="themeLabel">Dark — the study at night</span>
+    </button>
+  </header>
+
+  <!-- ============ THE IDEA ============ -->
+  <section>
+    <div class="eyebrow">01 · The idea</div>
+    <h2 class="sec-title">A lamplit study, open to the night sky</h2>
+    <p class="sec-note">
+      Nous already speaks this language on its landing page — Cormorant Garamond, DM Sans, a violet
+      constellation. Direction A brings that identity inside. Dark mode is the study at night: warm
+      ink-violet surfaces, ivory text like lamplight on paper. Light mode is the same room by morning:
+      parchment, ink, deep violet. Titles open like chapters; wiki-links read as a scholar's marginalia.
+      The chrome stays dense and quick — only the reading surface breathes.
+    </p>
+  </section>
+
+  <!-- ============ TOKENS ============ -->
+  <section>
+    <div class="eyebrow">02 · Color tokens</div>
+    <h2 class="sec-title">Two rooms, one palette</h2>
+    <p class="sec-note">
+      The complete <code>--color-*</code> contract, both modes — paste-ready for <code>COLOR_SCHEMES</code>.
+      Warm hue throughout (violet leaning red, never navy); accents descend from the landing page's
+      <code>#7C4DFF</code>.
+    </p>
+    <div class="boards">
+      <div class="board board--dark">
+        <div class="board-head"><span>Dark · the study at night</span><span>default</span></div>
+        <div class="board-body" id="boardDark"></div>
+      </div>
+      <div class="board board--light">
+        <div class="board-head"><span>Light · the study by morning</span><span></span></div>
+        <div class="board-body" id="boardLight"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ TYPE ============ -->
+  <section>
+    <div class="eyebrow">03 · Typography</div>
+    <h2 class="sec-title">Cormorant Garamond speaks, DM Sans works</h2>
+    <p class="sec-note">
+      The display serif appears only where thought is named — page titles, notebook names, section
+      headings, the wordmark. Everything operational is DM Sans; code and data are IBM Plex Mono.
+      All three self-host as <code>.woff2</code>.
+    </p>
+    <div class="spec">
+      <div class="spec-row"><div class="spec-label">wordmark<br>Cormorant Garamond 600 · 44px</div><div class="t-wordmark">Nous</div></div>
+      <div class="spec-row"><div class="spec-label">h1 · page title<br>Cormorant Garamond 600 · 34/39</div><div class="t-h1">The Extended Mind</div></div>
+      <div class="spec-row"><div class="spec-label">h2 · section<br>Cormorant Garamond 600 · 25/31</div><div class="t-h2">Where does the mind stop?</div></div>
+      <div class="spec-row"><div class="spec-label">h3<br>DM Sans 600 · 17/24 · -1%</div><div class="t-h3">Notes toward an answer</div></div>
+      <div class="spec-row"><div class="spec-label">h4<br>DM Sans 600 · 15/22</div><div class="t-h4">Follow-ups from Tuesday</div></div>
+      <div class="spec-row"><div class="spec-label">body · editor<br>DM Sans 400 · 16/27</div><div class="t-body">Otto's notebook plays the same role as Inga's memory — the coupling matters, not the location. This is the whole argument for <span class="wiki">tools for thought</span>: cognition leaks into whatever holds it reliably.</div></div>
+      <div class="spec-row"><div class="spec-label">ui · chrome<br>DM Sans 500 · 13/19</div><div class="t-ui">Open in new pane · Copy link · Move to notebook</div></div>
+      <div class="spec-row"><div class="spec-label">label · eyebrow<br>DM Sans 600 · 11 · +9% caps</div><div class="t-label">Notebook · Research</div></div>
+      <div class="spec-row"><div class="spec-label">code<br>IBM Plex Mono 400 · 13/21</div><div class="t-code">nous search "extended mind" --notebook research --depth 2</div></div>
+    </div>
+  </section>
+
+  <!-- ============ CRAFT SCALES ============ -->
+  <section>
+    <div class="eyebrow">04 · Craft scales</div>
+    <h2 class="sec-title">The measures of the room</h2>
+    <p class="sec-note">These are the shared chrome — they hold under catppuccin, nord, dracula and tufte unchanged. Only palette and type above are the new signature.</p>
+    <div class="craft">
+      <div class="craft-card">
+        <h4>Spacing rhythm <span>4px base · --sp-1…10</span></h4>
+        <div class="sp-ruler">
+          <div class="cell"><div class="bar" style="height:4px"></div><div class="cap">4</div></div>
+          <div class="cell"><div class="bar" style="height:8px"></div><div class="cap">8</div></div>
+          <div class="cell"><div class="bar" style="height:12px"></div><div class="cap">12</div></div>
+          <div class="cell"><div class="bar" style="height:16px"></div><div class="cap">16</div></div>
+          <div class="cell"><div class="bar" style="height:20px"></div><div class="cap">20</div></div>
+          <div class="cell"><div class="bar" style="height:24px"></div><div class="cap">24</div></div>
+          <div class="cell"><div class="bar" style="height:32px"></div><div class="cap">32</div></div>
+          <div class="cell"><div class="bar" style="height:40px"></div><div class="cap">40</div></div>
+          <div class="cell"><div class="bar" style="height:48px"></div><div class="cap">48</div></div>
+          <div class="cell"><div class="bar" style="height:64px"></div><div class="cap">64</div></div>
+        </div>
+      </div>
+      <div class="craft-card">
+        <h4>Radius scale <span>--r-xs…xl, full</span></h4>
+        <div class="r-row">
+          <div><div class="r-chip" style="border-radius:4px"></div><div class="r-cap">xs 4</div></div>
+          <div><div class="r-chip" style="border-radius:7px"></div><div class="r-cap">sm 7</div></div>
+          <div><div class="r-chip" style="border-radius:10px"></div><div class="r-cap">md 10</div></div>
+          <div><div class="r-chip" style="border-radius:14px"></div><div class="r-cap">lg 14</div></div>
+          <div><div class="r-chip" style="border-radius:20px"></div><div class="r-cap">xl 20</div></div>
+          <div><div class="r-chip" style="border-radius:999px;width:80px"></div><div class="r-cap">full</div></div>
+        </div>
+      </div>
+      <div class="craft-card">
+        <h4>Elevation <span>lamplight — warm-tinted, never pure black</span></h4>
+        <div class="sh-row">
+          <div class="sh-chip" style="box-shadow:var(--shadow-1)"><span>1 · rows</span></div>
+          <div class="sh-chip" style="box-shadow:var(--shadow-2)"><span>2 · cards</span></div>
+          <div class="sh-chip" style="box-shadow:var(--shadow-3)"><span>3 · popovers</span></div>
+          <div class="sh-chip" style="box-shadow:var(--shadow-4)"><span>4 · modals</span></div>
+        </div>
+      </div>
+      <div class="craft-card">
+        <h4>Motion <span>settle, don't bounce</span></h4>
+        <div class="mo-row">
+          <div class="mo-item"><div class="cap">fast · 130ms · hover, press</div><div class="mo-demo">hover me</div></div>
+          <div class="mo-item"><div class="cap">base · 190ms · reveal, cards</div><div class="mo-demo">hover me</div></div>
+          <div class="mo-item"><div class="cap">slow · 260ms · panels, theme</div><div class="cap" style="width:auto;flex:1 1 140px;min-width:0;overflow-wrap:anywhere">ease: cubic-bezier(.22,.61,.36,1)</div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ PRIMITIVES ============ -->
+  <section>
+    <div class="eyebrow">05 · Primitives</div>
+    <h2 class="sec-title">The everyday furniture</h2>
+    <p class="sec-note">Every state, deliberately: default / hover / active / disabled / focus-visible. Hover is a filled room, selection is violet light.</p>
+    <div class="prims">
+
+      <div class="prim prim--wide">
+        <h4>Buttons</h4>
+        <div class="btn-grid">
+          <span class="cap"></span><span class="cap">default</span><span class="cap">hover</span><span class="cap">active / disabled / focus</span>
+          <span class="cap">primary</span>
+          <button class="btn btn-primary">New page</button>
+          <button class="btn btn-primary is-hover">New page</button>
+          <span style="display:flex;gap:12px;flex-wrap:wrap">
+            <button class="btn btn-primary is-active">New page</button>
+            <button class="btn btn-primary" disabled>New page</button>
+            <button class="btn btn-primary show-focus">New page</button>
+          </span>
+          <span class="cap">secondary</span>
+          <button class="btn btn-secondary">Share</button>
+          <button class="btn btn-secondary is-hover">Share</button>
+          <span style="display:flex;gap:12px;flex-wrap:wrap">
+            <button class="btn btn-secondary is-active">Share</button>
+            <button class="btn btn-secondary" disabled>Share</button>
+          </span>
+          <span class="cap">ghost</span>
+          <button class="btn btn-ghost">Cancel</button>
+          <button class="btn btn-ghost is-hover">Cancel</button>
+          <span style="display:flex;gap:12px;flex-wrap:wrap">
+            <button class="btn btn-ghost is-active">Cancel</button>
+            <button class="btn btn-ghost" disabled>Cancel</button>
+          </span>
+        </div>
+      </div>
+
+      <div class="prim">
+        <h4>Inputs &amp; the ⌘K field</h4>
+        <div class="field">
+          <label for="f1">Page title</label>
+          <input id="f1" class="input" placeholder="Untitled page">
+        </div>
+        <div class="field">
+          <label for="f2">Rename notebook</label>
+          <input id="f2" class="input" value="Research">
+        </div>
+        <div class="cmdk" tabindex="0">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          <span class="ph">Search or jump to…</span>
+          <span class="kbd">⌘K</span>
+        </div>
+        <div class="hint">Focused inputs glow violet at 22% — a lamp turning toward you.</div>
+      </div>
+
+      <div class="prim">
+        <h4>List rows</h4>
+        <div class="cap-inline">default · hover · selected</div>
+        <div class="rows">
+          <button class="row">
+            <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5"/></svg>
+            <span class="grow">Attention is a finite resource</span><span class="meta">2d</span>
+          </button>
+          <button class="row is-hover">
+            <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5"/></svg>
+            <span class="grow">Zettelkasten, actually practiced</span><span class="meta">4d</span>
+          </button>
+          <button class="row is-selected">
+            <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5"/></svg>
+            <span class="grow">The Extended Mind</span><span class="meta">now</span>
+          </button>
+        </div>
+        <div class="hint">Selection uses the violet <span style="font-family:var(--font-mono);font-size:10.5px">--color-selection</span> wash — light on the open page.</div>
+      </div>
+
+      <div class="prim">
+        <h4>Card — notebook spine</h4>
+        <div class="demo-card" tabindex="0">
+          <h5>Research</h5>
+          <p>Extended cognition, note-taking systems, attention.</p>
+          <div class="meta"><span>128 pages</span><span>·</span><span>edited 2h ago</span></div>
+        </div>
+        <div class="hint">The 3px spine band is the bookshelf motif — each notebook keeps its color.</div>
+      </div>
+
+      <div class="prim">
+        <h4>Tabs &amp; filter pills</h4>
+        <div class="tabs">
+          <button class="tab is-active">All pages</button>
+          <button class="tab">Daily notes</button>
+          <button class="tab">Favorites</button>
+          <button class="tab">Trash</button>
+        </div>
+        <div class="pills">
+          <button class="pill is-on">#philosophy</button>
+          <button class="pill">#pkm</button>
+          <button class="pill">#reading</button>
+          <button class="pill">#homelab</button>
+        </div>
+      </div>
+
+      <div class="prim prim--wide">
+        <h4>Callouts — marginalia, four voices</h4>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-3)" class="co-grid">
+          <div class="callout callout--info">
+            <svg class="ci" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>
+            <div><b>Note</b><p>Clark &amp; Chalmers published “The Extended Mind” in 1998 — Analysis 58(1).</p></div>
+          </div>
+          <div class="callout callout--warning">
+            <svg class="ci" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 2 20h20L12 3z"/><path d="M12 10v4M12 17h.01"/></svg>
+            <div><b>Caution</b><p>Don't cite the 2010 reprint's pagination — it differs from the original.</p></div>
+          </div>
+          <div class="callout callout--tip">
+            <svg class="ci" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 1 3.5 10.9c-.7.5-1 1.3-1 2.1h-5c0-.8-.3-1.6-1-2.1A6 6 0 0 1 12 3z"/></svg>
+            <div><b>Tip</b><p>Link the notebook itself with <span style="font-family:var(--font-mono);font-size:12px">[[Research]]</span> to see it in the graph.</p></div>
+          </div>
+          <div class="callout callout--danger">
+            <svg class="ci" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="m15 9-6 6M9 9l6 6"/></svg>
+            <div><b>Danger</b><p>Deleting this page breaks 12 inbound links. They'll be marked, not lost.</p></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="prim">
+        <h4>Code block</h4>
+        <div class="codeblock">
+          <div class="cb-head"><span>saved-search.nq</span><span>nous query</span></div>
+          <pre><span class="tok-kw">search</span> <span class="tok-str">"extended mind"</span>
+  <span class="tok-fn">in</span> notebook:<span class="tok-str">research</span>
+  <span class="tok-fn">linked-from</span> <span class="tok-str">[[Tools for thought]]</span>
+  <span class="tok-fn">depth</span> <span class="tok-num">2</span>  <span class="tok-cm">// follow backlinks twice</span></pre>
+        </div>
+      </div>
+
+      <div class="prim">
+        <h4>To-dos &amp; focus ring</h4>
+        <div class="todo is-done"><span class="box" role="checkbox" aria-checked="true" tabindex="0"></span><span class="txt">Re-read §3 on coupling</span></div>
+        <div class="todo"><span class="box" role="checkbox" aria-checked="false" tabindex="0"></span><span class="txt">Pull the Otto/Inga passage into <span class="wiki" style="color:var(--color-accent);border-bottom:1px solid color-mix(in srgb,var(--color-accent) 35%,transparent)">[[quotes]]</span></span></div>
+        <div class="todo"><span class="box" role="checkbox" aria-checked="false" tabindex="0"></span><span class="txt">Draft the argument map</span></div>
+        <div class="cap-inline" style="margin-top:var(--sp-4)">focus-visible — tab through this tile to see it live</div>
+        <div class="focus-demo">
+          <button class="btn btn-secondary show-focus">Focused button</button>
+          <span class="kbd">Tab</span>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ============ PORT MAP ============ -->
+  <section>
+    <div class="eyebrow">06 · Port map</div>
+    <h2 class="sec-title">Paste-ready tokens</h2>
+    <p class="sec-note">The exact object for <code>COLOR_SCHEMES.study</code> in <code>themeStore.ts</code>. Fonts self-host: Cormorant Garamond (500–700 + italics), DM Sans (400–700), IBM Plex Mono (400–500).</p>
+    <div class="codeblock portmap">
+      <div class="cb-head"><span>themeStore.ts · COLOR_SCHEMES.study</span><span>copy</span></div>
+      <pre id="portJson"></pre>
+    </div>
+  </section>
+
+  <footer class="tile-foot">
+    <span><em>Nous</em> — local-first · private · yours</span>
+    <span class="lic">AGPL-3.0 · direction A “The Study” · style tile</span>
+  </footer>
+</div>
+
+<script>
+/* Theme toggle */
+const root = document.documentElement;
+const btn = document.getElementById("themeToggle");
+const label = document.getElementById("themeLabel");
+function setTheme(t) {
+  root.dataset.theme = t;
+  label.textContent = t === "dark" ? "Dark — the study at night" : "Light — the study by morning";
+}
+btn.addEventListener("click", () => setTheme(root.dataset.theme === "dark" ? "light" : "dark"));
+
+/* Token boards — rendered from the same constants the theme maps use */
+const TOKENS = [
+  "bg-primary","bg-secondary","bg-tertiary","bg-elevated","bg-sidebar","bg-panel",
+  "text-primary","text-secondary","text-muted",
+  "accent","accent-hover","accent-secondary","accent-tertiary",
+  "success","warning","error","info",
+  "border","border-muted","selection"
+];
+const styles = getComputedStyle(root);
+function val(mode, name) { return styles.getPropertyValue(`--A-${mode}-${name}`).trim(); }
+function renderBoard(el, mode) {
+  el.innerHTML = TOKENS.map(t => {
+    const v = val(mode, t);
+    return `<div class="swatch">
+      <span class="chip" style="background:${v}"></span>
+      <span class="meta"><span class="name">--color-${t}</span><br><span class="hex">${v}</span></span>
+    </div>`;
+  }).join("");
+}
+renderBoard(document.getElementById("boardDark"), "dark");
+renderBoard(document.getElementById("boardLight"), "light");
+
+/* Port-ready JSON */
+function schemeObj(mode) {
+  const o = {};
+  TOKENS.forEach(t => o[`--color-${t}`] = val(mode, t));
+  return o;
+}
+const port = { study: { dark: schemeObj("dark"), light: schemeObj("light") } };
+document.getElementById("portJson").textContent = JSON.stringify(port, null, 2)
+  .replace(/"([^"]+)":/g, '"$1":');
+
+/* To-do toggles (prototype nicety) */
+document.querySelectorAll(".todo .box").forEach(box => {
+  box.addEventListener("click", () => box.parentElement.classList.toggle("is-done"));
+  box.addEventListener("keydown", e => {
+    if (e.key === " " || e.key === "Enter") { e.preventDefault(); box.parentElement.classList.toggle("is-done"); }
+  });
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,838 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nous — Direction B · The Workshop · Style Tile</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22><circle cx=%228%22 cy=%228%22 r=%226%22 fill=%22%238b5cf6%22/></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400..700;1,400..700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script>const _t=new URLSearchParams(location.search).get("theme");if(_t==="light"||_t==="dark")document.documentElement.dataset.theme=_t;</script>
+<style>
+/* ============================================================
+   NOUS · DIRECTION B · "THE WORKSHOP"
+   A precision hand tool. One excellent sans, violet-warmed zinc,
+   a real elevation system, and a machined index-mark language
+   for every active state. Calm density, Linear/Things lineage —
+   but its own bench.
+   ============================================================ */
+
+/* ---- Palette constants (single source of truth) ---- */
+:root {
+  /* Dark — "the bench at night" */
+  --B-dark-bg-primary:   #17171d;
+  --B-dark-bg-secondary: #141419;
+  --B-dark-bg-tertiary:  #22222b;
+  --B-dark-bg-elevated:  #1d1d25;
+  --B-dark-bg-sidebar:   #0e0e12;
+  --B-dark-bg-panel:     #131317;
+  --B-dark-text-primary:   #ececf1;
+  --B-dark-text-secondary: #a3a3b2;
+  --B-dark-text-muted:     #80808f;
+  --B-dark-accent:           #8b7cf8;
+  --B-dark-accent-hover:     #a29af9;
+  --B-dark-accent-secondary: #6c5ce7;
+  --B-dark-accent-tertiary:  #5646c6;
+  --B-dark-success: #56c186;
+  --B-dark-warning: #dfae4f;
+  --B-dark-error:   #ec6a5e;
+  --B-dark-info:    #5aa7e8;
+  --B-dark-border:       #26262f;
+  --B-dark-border-muted: #1e1e26;
+  --B-dark-selection: rgba(139, 124, 248, 0.25);
+
+  /* Light — "the bench by daylight" */
+  --B-light-bg-primary:   #fdfdfd;
+  --B-light-bg-secondary: #f5f5f7;
+  --B-light-bg-tertiary:  #ebebef;
+  --B-light-bg-elevated:  #ffffff;
+  --B-light-bg-sidebar:   #f8f8fa;
+  --B-light-bg-panel:     #fafafb;
+  --B-light-text-primary:   #1b1b21;
+  --B-light-text-secondary: #55555f;
+  --B-light-text-muted:     #6e6e79;
+  --B-light-accent:           #5b48d8;
+  --B-light-accent-hover:     #5443c4;
+  --B-light-accent-secondary: #4f3fbd;
+  --B-light-accent-tertiary:  #40339c;
+  --B-light-success: #136c3d;
+  --B-light-warning: #7d5608;
+  --B-light-error:   #af352c;
+  --B-light-info:    #1e639f;
+  --B-light-border:       #e5e5ea;
+  --B-light-border-muted: #efeff3;
+  --B-light-selection: rgba(91, 72, 216, 0.16);
+
+  /* ---- Typefaces ---- */
+  --font-ui: "Instrument Sans", -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono", "SF Mono", Menlo, monospace;
+
+  /* ---- Spacing rhythm (4px base) ---- */
+  --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px; --sp-4: 16px; --sp-5: 20px;
+  --sp-6: 24px; --sp-7: 32px; --sp-8: 40px; --sp-9: 48px; --sp-10: 64px;
+
+  /* ---- Radius scale ---- */
+  --r-xs: 5px; --r-sm: 8px; --r-md: 10px; --r-lg: 14px; --r-full: 999px;
+
+  /* ---- Motion ---- */
+  --dur-fast: 120ms; --dur-base: 160ms; --dur-slow: 220ms;
+  --ease-work: cubic-bezier(.25,.1,.25,1);
+}
+
+/* ---- Theme maps (paste-ready shape for COLOR_SCHEMES) ---- */
+:root[data-theme="dark"] {
+  --color-bg-primary:   var(--B-dark-bg-primary);
+  --color-bg-secondary: var(--B-dark-bg-secondary);
+  --color-bg-tertiary:  var(--B-dark-bg-tertiary);
+  --color-bg-elevated:  var(--B-dark-bg-elevated);
+  --color-bg-sidebar:   var(--B-dark-bg-sidebar);
+  --color-bg-panel:     var(--B-dark-bg-panel);
+  --color-text-primary:   var(--B-dark-text-primary);
+  --color-text-secondary: var(--B-dark-text-secondary);
+  --color-text-muted:     var(--B-dark-text-muted);
+  --color-accent:           var(--B-dark-accent);
+  --color-accent-hover:     var(--B-dark-accent-hover);
+  --color-accent-secondary: var(--B-dark-accent-secondary);
+  --color-accent-tertiary:  var(--B-dark-accent-tertiary);
+  --color-success: var(--B-dark-success);
+  --color-warning: var(--B-dark-warning);
+  --color-error:   var(--B-dark-error);
+  --color-info:    var(--B-dark-info);
+  --color-border:       var(--B-dark-border);
+  --color-border-muted: var(--B-dark-border-muted);
+  --color-selection: var(--B-dark-selection);
+  --shadow-1: 0 1px 2px rgba(0,0,0,.4);
+  --shadow-2: 0 2px 6px rgba(0,0,0,.35), 0 1px 2px rgba(0,0,0,.3);
+  --shadow-3: 0 10px 32px rgba(0,0,0,.45), 0 2px 8px rgba(0,0,0,.3);
+  --shadow-4: 0 24px 64px rgba(0,0,0,.55), 0 4px 16px rgba(0,0,0,.35);
+  --edge-highlight: inset 0 1px 0 rgba(255,255,255,.09);
+}
+:root[data-theme="light"] {
+  --color-bg-primary:   var(--B-light-bg-primary);
+  --color-bg-secondary: var(--B-light-bg-secondary);
+  --color-bg-tertiary:  var(--B-light-bg-tertiary);
+  --color-bg-elevated:  var(--B-light-bg-elevated);
+  --color-bg-sidebar:   var(--B-light-bg-sidebar);
+  --color-bg-panel:     var(--B-light-bg-panel);
+  --color-text-primary:   var(--B-light-text-primary);
+  --color-text-secondary: var(--B-light-text-secondary);
+  --color-text-muted:     var(--B-light-text-muted);
+  --color-accent:           var(--B-light-accent);
+  --color-accent-hover:     var(--B-light-accent-hover);
+  --color-accent-secondary: var(--B-light-accent-secondary);
+  --color-accent-tertiary:  var(--B-light-accent-tertiary);
+  --color-success: var(--B-light-success);
+  --color-warning: var(--B-light-warning);
+  --color-error:   var(--B-light-error);
+  --color-info:    var(--B-light-info);
+  --color-border:       var(--B-light-border);
+  --color-border-muted: var(--B-light-border-muted);
+  --color-selection: var(--B-light-selection);
+  --shadow-1: 0 1px 2px rgba(24,24,33,.06);
+  --shadow-2: 0 2px 8px rgba(24,24,33,.08), 0 1px 2px rgba(24,24,33,.05);
+  --shadow-3: 0 10px 32px rgba(24,24,33,.12), 0 2px 8px rgba(24,24,33,.06);
+  --shadow-4: 0 24px 64px rgba(24,24,33,.18), 0 4px 16px rgba(24,24,33,.08);
+  --edge-highlight: inset 0 1px 0 rgba(255,255,255,.6);
+}
+
+/* ---- Base ---- */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+::selection { background: var(--color-selection); }
+html { scrollbar-color: var(--color-border) transparent; }
+body {
+  font-family: var(--font-ui);
+  font-size: 14px; font-weight: 450;
+  line-height: 1.55;
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  -webkit-font-smoothing: antialiased;
+  transition: background var(--dur-slow) var(--ease-work), color var(--dur-slow) var(--ease-work);
+}
+.wrap { max-width: 1160px; margin: 0 auto; padding: var(--sp-8) var(--sp-6) var(--sp-10); }
+
+/* ---- Focus ring (shared craft) ---- */
+:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--color-bg-primary),
+              0 0 0 4px color-mix(in srgb, var(--color-accent) 75%, transparent);
+  border-radius: var(--r-xs);
+}
+
+/* ---- The index mark — B's signature active-state language ---- */
+.mark { position: relative; }
+.mark::before {
+  content: ""; position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+  width: 3px; height: 14px; border-radius: 2px; background: var(--color-accent);
+}
+
+/* ---- Tile header ---- */
+.tile-head {
+  display: flex; align-items: flex-end; justify-content: space-between; gap: var(--sp-4);
+  padding-bottom: var(--sp-6); margin-bottom: var(--sp-8);
+  border-bottom: 1px solid var(--color-border);
+}
+.wordmark { font-weight: 700; font-size: 42px; line-height: 1; letter-spacing: -.035em; }
+.wordmark .tail { color: var(--color-accent); }
+.tile-head .sub { margin-top: var(--sp-3); color: var(--color-text-secondary); font-size: 14px; letter-spacing: -.005em; }
+.dir-tag {
+  display: inline-flex; align-items: center; gap: var(--sp-2);
+  font-size: 11px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+.dir-tag b { color: var(--color-accent); font-weight: 600; }
+.theme-toggle {
+  display: inline-flex; align-items: center; gap: var(--sp-2);
+  font-family: var(--font-ui); font-size: 12.5px; font-weight: 500;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary); border: 1px solid var(--color-border);
+  border-radius: var(--r-full); padding: 6px 14px; cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-work), color var(--dur-fast) var(--ease-work);
+}
+.theme-toggle:hover { color: var(--color-text-primary); background: var(--color-bg-elevated); }
+.theme-toggle .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--color-accent); }
+
+/* ---- Section scaffolding ---- */
+section { margin-bottom: var(--sp-10); }
+.eyebrow {
+  font-size: 11px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase;
+  color: var(--color-text-muted); margin-bottom: var(--sp-2);
+}
+.sec-title { font-weight: 650; font-size: 24px; line-height: 1.2; letter-spacing: -.02em; margin-bottom: var(--sp-2); }
+.sec-note { color: var(--color-text-secondary); font-size: 13.5px; max-width: 68ch; margin-bottom: var(--sp-6); }
+.sec-note code { font-family: var(--font-mono); font-size: 12px; background: var(--color-bg-tertiary); padding: 1px 5px; border-radius: var(--r-xs); }
+
+/* ---- Token boards ---- */
+.boards { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-5); }
+.board { border: 1px solid var(--color-border); border-radius: var(--r-lg); overflow: hidden; box-shadow: var(--shadow-2); }
+.board-head {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: var(--sp-3) var(--sp-4);
+  font-size: 11px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase;
+  border-bottom: 1px solid var(--board-border);
+}
+.board-body { padding: var(--sp-4); display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--sp-2) var(--sp-4); }
+.board { background: var(--board-bg); color: var(--board-text); }
+.board-head { color: var(--board-mut); }
+.swatch { display: flex; align-items: center; gap: var(--sp-3); padding: 3px 0; min-width: 0; }
+.swatch .chip { width: 34px; height: 26px; flex: none; border-radius: var(--r-xs); border: 1px solid var(--board-border); }
+.swatch .meta { min-width: 0; line-height: 1.3; }
+.swatch .name { font-size: 11.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.swatch .hex { font-family: var(--font-mono); font-size: 10.5px; color: var(--board-mut); }
+.board--dark {
+  --board-bg: var(--B-dark-bg-secondary); --board-text: var(--B-dark-text-primary);
+  --board-mut: var(--B-dark-text-muted); --board-border: var(--B-dark-border);
+}
+.board--light {
+  --board-bg: var(--B-light-bg-secondary); --board-text: var(--B-light-text-primary);
+  --board-mut: var(--B-light-text-muted); --board-border: var(--B-light-border);
+}
+
+/* ---- Type specimen ---- */
+.spec { border: 1px solid var(--color-border); border-radius: var(--r-lg); overflow: hidden; }
+.spec-row {
+  display: grid; grid-template-columns: 230px 1fr; gap: var(--sp-5); align-items: baseline;
+  padding: var(--sp-4) var(--sp-5); border-bottom: 1px solid var(--color-border-muted);
+  background: var(--color-bg-secondary);
+}
+.spec-row:last-child { border-bottom: none; }
+.spec-label { font-family: var(--font-mono); font-size: 11px; color: var(--color-text-muted); line-height: 1.5; }
+.t-wordmark { font-weight: 700; font-size: 40px; line-height: 1.05; letter-spacing: -.035em; }
+.t-h1 { font-weight: 650; font-size: 30px; line-height: 1.15; letter-spacing: -.022em; }
+.t-h2 { font-weight: 600; font-size: 22px; line-height: 1.25; letter-spacing: -.015em; }
+.t-h3 { font-weight: 600; font-size: 17px; letter-spacing: -.008em; }
+.t-h4 { font-weight: 600; font-size: 14px; }
+.t-body { font-weight: 450; font-size: 15px; line-height: 1.65; max-width: 64ch; }
+.t-ui { font-weight: 500; font-size: 13px; color: var(--color-text-secondary); }
+.t-label { font-size: 11px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase; color: var(--color-text-muted); }
+.t-code { font-family: var(--font-mono); font-size: 12.5px; }
+.wiki {
+  color: var(--color-accent); cursor: pointer; text-decoration: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-accent) 32%, transparent);
+  transition: color var(--dur-fast) var(--ease-work), border-color var(--dur-fast) var(--ease-work);
+}
+.wiki:hover { color: var(--color-accent-hover); border-bottom-color: var(--color-accent-hover); }
+
+/* ---- Craft scales ---- */
+.craft { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-5); }
+.craft-card { background: var(--color-bg-secondary); border: 1px solid var(--color-border); border-radius: var(--r-lg); padding: var(--sp-5); }
+.craft-card h4 { font-size: 13px; font-weight: 600; margin-bottom: var(--sp-4); }
+.craft-card h4 span { font-family: var(--font-mono); font-weight: 400; font-size: 11px; color: var(--color-text-muted); margin-left: var(--sp-2); }
+.sp-ruler { display: flex; align-items: flex-end; gap: var(--sp-2); }
+.sp-ruler .bar { background: var(--color-accent); opacity: .85; border-radius: 2px 2px 0 0; width: 22px; }
+.sp-ruler .cell { text-align: center; }
+.sp-ruler .cap { font-family: var(--font-mono); font-size: 10px; color: var(--color-text-muted); margin-top: var(--sp-1); }
+.r-row { display: flex; gap: var(--sp-4); align-items: flex-end; flex-wrap: wrap; }
+.r-chip { width: 64px; height: 48px; background: var(--color-bg-tertiary); border: 1px solid var(--color-border); }
+.r-cap { font-family: var(--font-mono); font-size: 10px; color: var(--color-text-muted); text-align: center; margin-top: var(--sp-1); }
+.sh-row { display: flex; gap: var(--sp-5); flex-wrap: wrap; }
+.sh-chip {
+  width: 108px; height: 68px; border-radius: var(--r-md); background: var(--color-bg-elevated);
+  display: flex; align-items: flex-end; padding: var(--sp-2);
+  box-shadow: var(--edge-highlight);
+}
+.sh-chip span { font-family: var(--font-mono); font-size: 10px; color: var(--color-text-muted); }
+.mo-row { display: flex; flex-direction: column; gap: var(--sp-3); }
+.mo-item { display: flex; align-items: center; gap: var(--sp-4); flex-wrap: wrap; }
+.mo-item .cap { font-family: var(--font-mono); font-size: 11px; color: var(--color-text-muted); width: 190px; flex: none; }
+.mo-demo {
+  height: 30px; padding: 0 var(--sp-4); display: inline-flex; align-items: center;
+  border-radius: var(--r-sm); background: var(--color-bg-tertiary); font-size: 12.5px; cursor: pointer;
+  border: 1px solid var(--color-border);
+  transition: transform var(--dur-fast) var(--ease-work), background var(--dur-fast) var(--ease-work), box-shadow var(--dur-fast) var(--ease-work);
+}
+.mo-demo:hover { background: var(--color-bg-elevated); box-shadow: var(--shadow-2); }
+.mo-demo:active { transform: scale(.985); }
+
+/* ---- Primitives ---- */
+.prims { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-5); }
+.prims > .prim, .craft > .craft-card { min-width: 0; }
+.prim { background: var(--color-bg-secondary); border: 1px solid var(--color-border); border-radius: var(--r-lg); padding: var(--sp-5); }
+.prim > h4 { font-size: 13px; font-weight: 600; margin-bottom: var(--sp-4); }
+.prim .hint { font-size: 11.5px; color: var(--color-text-muted); margin-top: var(--sp-3); }
+.prim--wide { grid-column: 1 / -1; }
+
+/* Buttons — machined: crisp edge highlight, press compresses */
+.btn-grid { display: grid; grid-template-columns: repeat(4, auto); gap: var(--sp-3) var(--sp-4); justify-content: start; align-items: center; }
+.btn-grid .cap { font-family: var(--font-mono); font-size: 10.5px; color: var(--color-text-muted); }
+.btn {
+  font-family: var(--font-ui); font-size: 13px; font-weight: 550; line-height: 1;
+  display: inline-flex; align-items: center; gap: var(--sp-2);
+  padding: 9px 15px; border-radius: var(--r-sm); cursor: pointer;
+  border: 1px solid transparent;
+  transition: background var(--dur-fast) var(--ease-work), color var(--dur-fast) var(--ease-work),
+              border-color var(--dur-fast) var(--ease-work), box-shadow var(--dur-fast) var(--ease-work),
+              transform var(--dur-fast) var(--ease-work);
+}
+.btn:active { transform: scale(.985); }
+.btn-primary { background: var(--color-accent); color: #fff; box-shadow: var(--edge-highlight), var(--shadow-1); }
+.btn-primary:hover, .btn-primary.is-hover { background: var(--color-accent-hover); }
+.btn-primary.is-active { background: var(--color-accent-secondary); }
+.btn-secondary {
+  background: var(--color-bg-elevated); color: var(--color-text-primary);
+  border-color: var(--color-border); box-shadow: var(--edge-highlight), var(--shadow-1);
+}
+.btn-secondary:hover, .btn-secondary.is-hover { border-color: var(--color-text-muted); }
+.btn-secondary.is-active { background: var(--color-bg-tertiary); }
+.btn-ghost { background: transparent; color: var(--color-text-secondary); }
+.btn-ghost:hover, .btn-ghost.is-hover { background: var(--color-bg-tertiary); color: var(--color-text-primary); }
+.btn-ghost.is-active { background: var(--color-bg-tertiary); color: var(--color-text-primary); }
+.btn[disabled] { opacity: .42; cursor: not-allowed; pointer-events: none; }
+.btn.show-focus { box-shadow: 0 0 0 2px var(--color-bg-secondary), 0 0 0 4px color-mix(in srgb, var(--color-accent) 75%, transparent); }
+
+/* Inputs */
+.field { display: flex; flex-direction: column; gap: var(--sp-2); margin-bottom: var(--sp-4); }
+.field label { font-size: 12px; font-weight: 600; color: var(--color-text-secondary); }
+.input {
+  font-family: var(--font-ui); font-size: 13.5px; font-weight: 450; color: var(--color-text-primary);
+  background: var(--color-bg-primary); border: 1px solid var(--color-border);
+  border-radius: var(--r-sm); padding: 9px 12px; width: 100%;
+  transition: border-color var(--dur-fast) var(--ease-work), box-shadow var(--dur-fast) var(--ease-work);
+}
+.input::placeholder { color: var(--color-text-muted); }
+.input:hover { border-color: var(--color-text-muted); }
+.input:focus-visible {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 20%, transparent);
+}
+.cmdk {
+  display: flex; align-items: center; gap: var(--sp-3);
+  background: var(--color-bg-elevated); border: 1px solid var(--color-border);
+  border-radius: var(--r-md); padding: 10px 14px;
+  box-shadow: var(--edge-highlight), var(--shadow-2);
+  color: var(--color-text-muted); font-size: 13.5px; cursor: text;
+}
+.cmdk .ph { flex: 1; }
+.kbd {
+  font-family: var(--font-mono); font-size: 10.5px; color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary); border: 1px solid var(--color-border);
+  border-bottom-width: 2px; border-radius: var(--r-xs); padding: 2px 6px; line-height: 1.4;
+}
+
+/* List rows — index mark on selection */
+.rows { display: flex; flex-direction: column; gap: 2px; }
+.row {
+  display: flex; align-items: center; gap: var(--sp-3);
+  padding: 7px 10px 7px 12px; border-radius: var(--r-sm); font-size: 13px; cursor: pointer;
+  color: var(--color-text-secondary); border: none; background: transparent; text-align: left;
+  transition: background var(--dur-fast) var(--ease-work), color var(--dur-fast) var(--ease-work);
+}
+.row .ico { flex: none; width: 16px; height: 16px; color: var(--color-text-muted); }
+.row .grow { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row .meta { font-size: 11px; font-family: var(--font-mono); color: var(--color-text-muted); }
+.row:hover, .row.is-hover { background: var(--color-bg-tertiary); color: var(--color-text-primary); }
+.row.is-selected { background: var(--color-selection); color: var(--color-text-primary); }
+.row.is-selected .ico { color: var(--color-accent); }
+.cap-inline { font-family: var(--font-mono); font-size: 10.5px; color: var(--color-text-muted); margin: var(--sp-2) 0 2px; }
+
+/* Card */
+.demo-card {
+  background: var(--color-bg-elevated); border: 1px solid var(--color-border);
+  border-radius: var(--r-lg); padding: var(--sp-5);
+  box-shadow: var(--edge-highlight), var(--shadow-2);
+  transition: transform var(--dur-base) var(--ease-work), box-shadow var(--dur-base) var(--ease-work), border-color var(--dur-base) var(--ease-work);
+  cursor: pointer;
+}
+.demo-card:hover { transform: translateY(-2px); box-shadow: var(--edge-highlight), var(--shadow-3); border-color: var(--color-text-muted); }
+.demo-card .ictile {
+  width: 34px; height: 34px; border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
+  color: var(--color-accent);
+  display: flex; align-items: center; justify-content: center; margin-bottom: var(--sp-3);
+}
+.demo-card h5 { font-weight: 600; font-size: 15px; letter-spacing: -.008em; margin-bottom: 2px; }
+.demo-card p { font-size: 12.5px; color: var(--color-text-secondary); }
+.demo-card .meta { margin-top: var(--sp-3); font-size: 11.5px; color: var(--color-text-muted); display: flex; gap: var(--sp-2); }
+
+/* Tabs — chip rail with index mark */
+.tabs {
+  display: inline-flex; gap: 2px; background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border-muted); border-radius: var(--r-md); padding: 3px;
+}
+.tab {
+  font-family: var(--font-ui); font-size: 12.5px; font-weight: 550; color: var(--color-text-muted);
+  background: none; border: none; cursor: pointer;
+  padding: 6px 14px; border-radius: calc(var(--r-md) - 3px);
+  transition: color var(--dur-fast) var(--ease-work), background var(--dur-fast) var(--ease-work), box-shadow var(--dur-fast) var(--ease-work);
+}
+.tab:hover { color: var(--color-text-primary); }
+.tab.is-active {
+  color: var(--color-text-primary); background: var(--color-bg-elevated);
+  box-shadow: var(--edge-highlight), var(--shadow-1);
+}
+.pills { display: flex; gap: var(--sp-2); flex-wrap: wrap; margin-top: var(--sp-4); }
+.pill {
+  font-size: 12px; font-weight: 500; color: var(--color-text-secondary);
+  background: transparent; border: 1px solid var(--color-border); border-radius: var(--r-full);
+  padding: 4px 12px; cursor: pointer;
+  transition: all var(--dur-fast) var(--ease-work);
+}
+.pill:hover { border-color: var(--color-text-muted); color: var(--color-text-primary); }
+.pill.is-on {
+  background: color-mix(in srgb, var(--color-accent) 13%, transparent);
+  border-color: color-mix(in srgb, var(--color-accent) 45%, transparent);
+  color: var(--color-accent);
+}
+
+/* Callouts */
+.callout {
+  display: flex; gap: var(--sp-3); padding: var(--sp-4);
+  border-radius: var(--r-md); border: 1px solid;
+  margin-bottom: var(--sp-3); font-size: 13.5px; line-height: 1.6;
+}
+.callout .ci { flex: none; margin-top: 1px; }
+.callout b { display: block; font-size: 12px; font-weight: 600; margin-bottom: 1px; }
+.callout p { color: var(--color-text-secondary); font-size: 13px; }
+.callout--info    { border-color: color-mix(in srgb, var(--color-info) 28%, transparent);    background: color-mix(in srgb, var(--color-info) 6%, transparent); }
+.callout--warning { border-color: color-mix(in srgb, var(--color-warning) 28%, transparent); background: color-mix(in srgb, var(--color-warning) 6%, transparent); }
+.callout--tip     { border-color: color-mix(in srgb, var(--color-success) 28%, transparent); background: color-mix(in srgb, var(--color-success) 6%, transparent); }
+.callout--danger  { border-color: color-mix(in srgb, var(--color-error) 28%, transparent);   background: color-mix(in srgb, var(--color-error) 6%, transparent); }
+.callout--info .ci, .callout--info b { color: var(--color-info); }
+.callout--warning .ci, .callout--warning b { color: var(--color-warning); }
+.callout--tip .ci, .callout--tip b { color: var(--color-success); }
+.callout--danger .ci, .callout--danger b { color: var(--color-error); }
+
+/* Code block */
+.codeblock { background: var(--color-bg-sidebar); border: 1px solid var(--color-border); border-radius: var(--r-md); overflow: hidden; }
+.codeblock .cb-head {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 7px 14px; border-bottom: 1px solid var(--color-border-muted);
+  font-family: var(--font-mono); font-size: 11px; color: var(--color-text-muted);
+}
+.codeblock pre {
+  padding: var(--sp-4); overflow-x: auto;
+  font-family: var(--font-mono); font-size: 12.5px; line-height: 1.65;
+  color: var(--color-text-primary);
+}
+.tok-kw { color: var(--color-accent); }
+.tok-str { color: var(--color-success); }
+.tok-fn { color: var(--color-info); }
+.tok-cm { color: var(--color-text-muted); font-style: italic; }
+.tok-num { color: var(--color-warning); }
+
+/* To-do */
+.todo { display: flex; align-items: flex-start; gap: var(--sp-3); padding: 5px 0; font-size: 14px; }
+.todo .box {
+  flex: none; width: 16px; height: 16px; margin-top: 2px; border-radius: 5px;
+  border: 1.5px solid var(--color-text-muted); cursor: pointer; position: relative;
+  transition: all var(--dur-fast) var(--ease-work); background: none;
+}
+.todo.is-done .box { background: var(--color-accent); border-color: var(--color-accent); }
+.todo.is-done .box::after {
+  content: ""; position: absolute; left: 4.5px; top: 1.5px; width: 4px; height: 8px;
+  border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg);
+}
+.todo.is-done .txt { color: var(--color-text-muted); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--color-text-muted) 55%, transparent); }
+
+/* Index mark demo */
+.markdemo { display: flex; flex-direction: column; gap: 2px; }
+.markdemo .row { padding-left: 14px; }
+.markdemo .row.is-selected.mark::before { left: 2px; }
+
+/* Focus demo */
+.focus-demo { display: flex; gap: var(--sp-4); align-items: center; flex-wrap: wrap; }
+
+/* Footer */
+.tile-foot {
+  margin-top: var(--sp-10); padding-top: var(--sp-5);
+  border-top: 1px solid var(--color-border);
+  display: flex; justify-content: space-between; align-items: baseline; gap: var(--sp-4);
+  font-size: 12px; color: var(--color-text-muted);
+}
+.tile-foot .lic { font-family: var(--font-mono); font-size: 11px; }
+.tile-foot b { font-weight: 650; letter-spacing: -.02em; color: var(--color-text-secondary); }
+
+@media (max-width: 900px) {
+  .boards, .craft, .prims { grid-template-columns: 1fr; }
+  .spec-row { grid-template-columns: 1fr; gap: var(--sp-2); }
+  .tile-head { flex-direction: column; align-items: flex-start; }
+}
+@media (max-width: 520px) {
+  .wrap { padding: var(--sp-6) var(--sp-4) var(--sp-8); }
+  .board-body { grid-template-columns: 1fr; }
+  .btn-grid { display: flex; flex-direction: column; align-items: flex-start; }
+}
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="tile-head">
+    <div>
+      <div class="dir-tag">Direction B · <b>The Workshop</b> · Style tile</div>
+      <div class="wordmark">Nou<span class="tail">s</span></div>
+      <div class="sub">A precision tool for thinking. One sans, machined states, calm density.</div>
+    </div>
+    <button class="theme-toggle" id="themeToggle" aria-label="Toggle color theme">
+      <span class="dot"></span><span id="themeLabel">Dark — the bench at night</span>
+    </button>
+  </header>
+
+  <!-- ============ THE IDEA ============ -->
+  <section>
+    <div class="eyebrow">01 · The idea</div>
+    <h2 class="sec-title">A workbench, not a stage</h2>
+    <p class="sec-note">
+      Direction B treats Nous as a beautifully made hand tool: one excellent sans (Instrument Sans)
+      doing every job through weight and size alone, zinc neutrals warmed two degrees toward violet,
+      and a single signature device — the <b>index mark</b>, a small machined violet bar that indicates
+      the active thing everywhere: sidebar page, tab, palette row, focused cell. Elevation is real
+      (edge highlight + layered shadow), motion is quick and physical (things compress when pressed),
+      and nothing decorates.
+    </p>
+  </section>
+
+  <!-- ============ TOKENS ============ -->
+  <section>
+    <div class="eyebrow">02 · Color tokens</div>
+    <h2 class="sec-title">Zinc, warmed toward violet</h2>
+    <p class="sec-note">
+      The complete <code>--color-*</code> contract, both modes — paste-ready for <code>COLOR_SCHEMES</code>.
+      Neutrals carry a 2° violet cast so the accent never sits on foreign grey; the accent itself is a
+      tuned working violet, calmer than Catppuccin's.
+    </p>
+    <div class="boards">
+      <div class="board board--dark">
+        <div class="board-head"><span>Dark · the bench at night</span><span>default</span></div>
+        <div class="board-body" id="boardDark"></div>
+      </div>
+      <div class="board board--light">
+        <div class="board-head"><span>Light · the bench by daylight</span><span></span></div>
+        <div class="board-body" id="boardLight"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ TYPE ============ -->
+  <section>
+    <div class="eyebrow">03 · Typography</div>
+    <h2 class="sec-title">One voice, many weights</h2>
+    <p class="sec-note">
+      Instrument Sans everywhere — variable weight 400–700 gives the whole hierarchy; negative tracking
+      tightens as size grows. Geist Mono for code and data. Both self-host as <code>.woff2</code>.
+    </p>
+    <div class="spec">
+      <div class="spec-row"><div class="spec-label">wordmark<br>Instrument Sans 700 · 40 · -3.5%</div><div class="t-wordmark">Nous</div></div>
+      <div class="spec-row"><div class="spec-label">h1 · page title<br>650 · 30/34 · -2.2%</div><div class="t-h1">Sync engine — design notes</div></div>
+      <div class="spec-row"><div class="spec-label">h2 · section<br>600 · 22/27 · -1.5%</div><div class="t-h2">The operation log is the truth</div></div>
+      <div class="spec-row"><div class="spec-label">h3<br>600 · 17/24 · -0.8%</div><div class="t-h3">Conflict cases</div></div>
+      <div class="spec-row"><div class="spec-label">h4<br>600 · 14/20</div><div class="t-h4">Open questions</div></div>
+      <div class="spec-row"><div class="spec-label">body · editor<br>450 · 15/25</div><div class="t-body">Every mutation appends to the <span class="wiki">[[operation log]]</span> before it touches state. Replaying the log from any prefix must converge — that property is the whole design.</div></div>
+      <div class="spec-row"><div class="spec-label">ui · chrome<br>500 · 13/19</div><div class="t-ui">Open in new pane · Copy link · Move to notebook</div></div>
+      <div class="spec-row"><div class="spec-label">label · eyebrow<br>600 · 11 · +7% caps</div><div class="t-label">Erewhon · Infrastructure</div></div>
+      <div class="spec-row"><div class="spec-label">code<br>Geist Mono 400 · 12.5/21</div><div class="t-code">just check && just test-rust -- sync::</div></div>
+    </div>
+  </section>
+
+  <!-- ============ CRAFT ============ -->
+  <section>
+    <div class="eyebrow">04 · Craft scales</div>
+    <h2 class="sec-title">Bench measures</h2>
+    <p class="sec-note">Shared chrome — identical under catppuccin, nord, dracula and tufte. Only palette and type are the new signature.</p>
+    <div class="craft">
+      <div class="craft-card">
+        <h4>Spacing rhythm <span>4px base · --sp-1…10</span></h4>
+        <div class="sp-ruler">
+          <div class="cell"><div class="bar" style="height:4px"></div><div class="cap">4</div></div>
+          <div class="cell"><div class="bar" style="height:8px"></div><div class="cap">8</div></div>
+          <div class="cell"><div class="bar" style="height:12px"></div><div class="cap">12</div></div>
+          <div class="cell"><div class="bar" style="height:16px"></div><div class="cap">16</div></div>
+          <div class="cell"><div class="bar" style="height:20px"></div><div class="cap">20</div></div>
+          <div class="cell"><div class="bar" style="height:24px"></div><div class="cap">24</div></div>
+          <div class="cell"><div class="bar" style="height:32px"></div><div class="cap">32</div></div>
+          <div class="cell"><div class="bar" style="height:40px"></div><div class="cap">40</div></div>
+          <div class="cell"><div class="bar" style="height:48px"></div><div class="cap">48</div></div>
+          <div class="cell"><div class="bar" style="height:64px"></div><div class="cap">64</div></div>
+        </div>
+      </div>
+      <div class="craft-card">
+        <h4>Radius scale <span>--r-xs…lg, full</span></h4>
+        <div class="r-row">
+          <div><div class="r-chip" style="border-radius:5px"></div><div class="r-cap">xs 5</div></div>
+          <div><div class="r-chip" style="border-radius:8px"></div><div class="r-cap">sm 8</div></div>
+          <div><div class="r-chip" style="border-radius:10px"></div><div class="r-cap">md 10</div></div>
+          <div><div class="r-chip" style="border-radius:14px"></div><div class="r-cap">lg 14</div></div>
+          <div><div class="r-chip" style="border-radius:999px;width:80px"></div><div class="r-cap">full</div></div>
+        </div>
+      </div>
+      <div class="craft-card">
+        <h4>Elevation <span>edge highlight + layered shadow</span></h4>
+        <div class="sh-row">
+          <div class="sh-chip" style="box-shadow:var(--edge-highlight), var(--shadow-1)"><span>1 · rows</span></div>
+          <div class="sh-chip" style="box-shadow:var(--edge-highlight), var(--shadow-2)"><span>2 · cards</span></div>
+          <div class="sh-chip" style="box-shadow:var(--edge-highlight), var(--shadow-3)"><span>3 · popovers</span></div>
+          <div class="sh-chip" style="box-shadow:var(--edge-highlight), var(--shadow-4)"><span>4 · modals</span></div>
+        </div>
+      </div>
+      <div class="craft-card">
+        <h4>Motion <span>quick, physical, quiet</span></h4>
+        <div class="mo-row">
+          <div class="mo-item"><div class="cap">fast · 120ms · hover, press</div><div class="mo-demo">press me</div></div>
+          <div class="mo-item"><div class="cap">base · 160ms · reveal, cards</div><div class="mo-demo">press me</div></div>
+          <div class="mo-item"><div class="cap">slow · 220ms · panels, theme</div><div class="cap" style="width:auto;flex:1 1 140px;min-width:0;overflow-wrap:anywhere">ease: cubic-bezier(.25,.1,.25,1) · press: scale(.985)</div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ PRIMITIVES ============ -->
+  <section>
+    <div class="eyebrow">05 · Primitives</div>
+    <h2 class="sec-title">The tools on the bench</h2>
+    <p class="sec-note">Every state, deliberately: default / hover / active / disabled / focus-visible. The index mark carries selection; hover is a filled surface, never a color change alone.</p>
+    <div class="prims">
+
+      <div class="prim prim--wide">
+        <h4>Buttons</h4>
+        <div class="btn-grid">
+          <span class="cap"></span><span class="cap">default</span><span class="cap">hover</span><span class="cap">active / disabled / focus</span>
+          <span class="cap">primary</span>
+          <button class="btn btn-primary">New page</button>
+          <button class="btn btn-primary is-hover">New page</button>
+          <span style="display:flex;gap:12px;flex-wrap:wrap">
+            <button class="btn btn-primary is-active">New page</button>
+            <button class="btn btn-primary" disabled>New page</button>
+            <button class="btn btn-primary show-focus">New page</button>
+          </span>
+          <span class="cap">secondary</span>
+          <button class="btn btn-secondary">Share</button>
+          <button class="btn btn-secondary is-hover">Share</button>
+          <span style="display:flex;gap:12px;flex-wrap:wrap">
+            <button class="btn btn-secondary is-active">Share</button>
+            <button class="btn btn-secondary" disabled>Share</button>
+          </span>
+          <span class="cap">ghost</span>
+          <button class="btn btn-ghost">Cancel</button>
+          <button class="btn btn-ghost is-hover">Cancel</button>
+          <span style="display:flex;gap:12px;flex-wrap:wrap">
+            <button class="btn btn-ghost is-active">Cancel</button>
+            <button class="btn btn-ghost" disabled>Cancel</button>
+          </span>
+        </div>
+        <div class="hint">Primary and secondary carry the machined edge highlight; pressing compresses to 98.5%.</div>
+      </div>
+
+      <div class="prim">
+        <h4>Inputs &amp; the ⌘K field</h4>
+        <div class="field">
+          <label for="f1">Page title</label>
+          <input id="f1" class="input" placeholder="Untitled page">
+        </div>
+        <div class="field">
+          <label for="f2">Rename notebook</label>
+          <input id="f2" class="input" value="Erewhon">
+        </div>
+        <div class="cmdk" tabindex="0">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          <span class="ph">Search or run a command…</span>
+          <span class="kbd">⌘K</span>
+        </div>
+      </div>
+
+      <div class="prim">
+        <h4>List rows — the index mark</h4>
+        <div class="cap-inline">default · hover · selected (mark)</div>
+        <div class="markdemo rows">
+          <button class="row">
+            <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5"/></svg>
+            <span class="grow">Operation log compaction</span><span class="meta">2d</span>
+          </button>
+          <button class="row is-hover">
+            <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5"/></svg>
+            <span class="grow">Guest editor permissions</span><span class="meta">4d</span>
+          </button>
+          <button class="row is-selected mark">
+            <svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 3h9l4 4v14H6z"/><path d="M14 3v5h5"/></svg>
+            <span class="grow">Sync engine — design notes</span><span class="meta">now</span>
+          </button>
+        </div>
+        <div class="hint">The 3×14 mark is the one place violet asserts itself in chrome — everywhere, consistently.</div>
+      </div>
+
+      <div class="prim">
+        <h4>Card — notebook tile</h4>
+        <div class="demo-card" tabindex="0">
+          <div class="ictile">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 5a2 2 0 0 1 2-2h13v18H6a2 2 0 0 1-2-2z"/><path d="M19 17H6a2 2 0 0 0 0 4"/></svg>
+          </div>
+          <h5>Erewhon</h5>
+          <p>The homelab: topology, runbooks, incidents.</p>
+          <div class="meta"><span>89 pages</span><span>·</span><span>edited 3d ago</span></div>
+        </div>
+      </div>
+
+      <div class="prim">
+        <h4>Tabs &amp; filter pills</h4>
+        <div class="tabs">
+          <button class="tab is-active">Table</button>
+          <button class="tab">Board</button>
+          <button class="tab">Gallery</button>
+          <button class="tab">Calendar</button>
+        </div>
+        <div class="pills">
+          <button class="pill is-on">status: open</button>
+          <button class="pill">phase: 0.9</button>
+          <button class="pill">#sync</button>
+          <button class="pill">#publish</button>
+        </div>
+      </div>
+
+      <div class="prim prim--wide">
+        <h4>Callouts</h4>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-3)">
+          <div class="callout callout--info">
+            <svg class="ci" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg>
+            <div><b>Note</b><p>The log is append-only JSONL; each entry carries the hash of the previous one.</p></div>
+          </div>
+          <div class="callout callout--warning">
+            <svg class="ci" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 2 20h20L12 3z"/><path d="M12 10v4M12 17h.01"/></svg>
+            <div><b>Caution</b><p>Never trust wall clocks across devices — order by log position, not timestamp.</p></div>
+          </div>
+          <div class="callout callout--tip">
+            <svg class="ci" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 1 3.5 10.9c-.7.5-1 1.3-1 2.1h-5c0-.8-.3-1.6-1-2.1A6 6 0 0 1 12 3z"/></svg>
+            <div><b>Tip</b><p>Run <span style="font-family:var(--font-mono);font-size:12px">just test-rust -- sync::</span> before touching the merge path.</p></div>
+          </div>
+          <div class="callout callout--danger">
+            <svg class="ci" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="m15 9-6 6M9 9l6 6"/></svg>
+            <div><b>Danger</b><p>Compaction below the sync horizon loses offline edits. Guard with a fence entry.</p></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="prim">
+        <h4>Code block</h4>
+        <div class="codeblock">
+          <div class="cb-head"><span>storage/atomic.rs</span><span>rust</span></div>
+          <pre><span class="tok-kw">pub fn</span> <span class="tok-fn">atomic_write</span>(path: &amp;Path, bytes: &amp;[u8]) -&gt; Result&lt;()&gt; {
+    <span class="tok-kw">let</span> tmp = path.with_extension(<span class="tok-str">"json.tmp"</span>);
+    fs::write(&amp;tmp, bytes)?;          <span class="tok-cm">// write fully…</span>
+    fs::rename(&amp;tmp, path)?;          <span class="tok-cm">// …then swap</span>
+    <span class="tok-fn">Ok</span>(())
+}</pre>
+        </div>
+      </div>
+
+      <div class="prim">
+        <h4>To-dos &amp; focus ring</h4>
+        <div class="todo is-done"><button class="box" role="checkbox" aria-checked="true" aria-label="toggle"></button><span class="txt">Fence entries for compaction</span></div>
+        <div class="todo"><button class="box" role="checkbox" aria-checked="false" aria-label="toggle"></button><span class="txt">Property test: replay from every prefix</span></div>
+        <div class="todo"><button class="box" role="checkbox" aria-checked="false" aria-label="toggle"></button><span class="txt">Write up clock-skew findings in <span class="wiki">[[Sync engine — design notes]]</span></span></div>
+        <div class="cap-inline" style="margin-top:var(--sp-4)">focus-visible — tab through this tile to see it live</div>
+        <div class="focus-demo">
+          <button class="btn btn-secondary show-focus">Focused button</button>
+          <span class="kbd">Tab</span>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ============ PORT MAP ============ -->
+  <section>
+    <div class="eyebrow">06 · Port map</div>
+    <h2 class="sec-title">Paste-ready tokens</h2>
+    <p class="sec-note">The exact object for <code>COLOR_SCHEMES.workshop</code> in <code>themeStore.ts</code>. Fonts self-host: Instrument Sans variable (400–700 + italics), Geist Mono (400–500).</p>
+    <div class="codeblock">
+      <div class="cb-head"><span>themeStore.ts · COLOR_SCHEMES.workshop</span><span>copy</span></div>
+      <pre id="portJson" style="font-size:11.5px"></pre>
+    </div>
+  </section>
+
+  <footer class="tile-foot">
+    <span><b>Nous</b> — local-first · private · yours</span>
+    <span class="lic">AGPL-3.0 · direction B “The Workshop” · style tile</span>
+  </footer>
+</div>
+
+<script>
+const root = document.documentElement;
+const btn = document.getElementById("themeToggle");
+const label = document.getElementById("themeLabel");
+function setTheme(t) {
+  root.dataset.theme = t;
+  label.textContent = t === "dark" ? "Dark — the bench at night" : "Light — the bench by daylight";
+}
+btn.addEventListener("click", () => setTheme(root.dataset.theme === "dark" ? "light" : "dark"));
+if (root.dataset.theme === "light") label.textContent = "Light — the bench by daylight";
+
+const TOKENS = [
+  "bg-primary","bg-secondary","bg-tertiary","bg-elevated","bg-sidebar","bg-panel",
+  "text-primary","text-secondary","text-muted",
+  "accent","accent-hover","accent-secondary","accent-tertiary",
+  "success","warning","error","info",
+  "border","border-muted","selection"
+];
+const styles = getComputedStyle(root);
+function val(mode, name) { return styles.getPropertyValue(`--B-${mode}-${name}`).trim(); }
+function renderBoard(el, mode) {
+  el.innerHTML = TOKENS.map(t => {
+    const v = val(mode, t);
+    return `<div class="swatch">
+      <span class="chip" style="background:${v}"></span>
+      <span class="meta"><span class="name">--color-${t}</span><br><span class="hex">${v}</span></span>
+    </div>`;
+  }).join("");
+}
+renderBoard(document.getElementById("boardDark"), "dark");
+renderBoard(document.getElementById("boardLight"), "light");
+
+function schemeObj(mode) {
+  const o = {};
+  TOKENS.forEach(t => o[`--color-${t}`] = val(mode, t));
+  return o;
+}
+document.getElementById("portJson").textContent =
+  JSON.stringify({ workshop: { dark: schemeObj("dark"), light: schemeObj("light") } }, null, 2);
+
+document.querySelectorAll(".todo .box").forEach(box => {
+  box.addEventListener("click", () => {
+    const t = box.parentElement.classList.toggle("is-done");
+    box.setAttribute("aria-checked", String(t));
+  });
+});
+</script>
+</body>
+</html>
