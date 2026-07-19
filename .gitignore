@@ -2,6 +2,9 @@
 node_modules/
 .pnpm-store/
 
+# forge coding-pipeline worker runtime state (dispatch lock, etc.)
+.task_worker/
+
 # Build outputs
 dist/
 target/
