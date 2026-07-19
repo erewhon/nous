@@ -7,8 +7,18 @@
  * When the processor is disabled, links simply render in this resolved state.
  */
 .bn-wiki-link {
-  color: var(--wiki-link-color, #3b82f6);
+  color: var(--wiki-link-color, var(--color-accent));
   text-decoration: none;
   cursor: pointer;
-  border-bottom: 1px dashed currentColor;
+  border-bottom: 1px solid rgb(from var(--color-accent) r g b / 0.4);
+  border-radius: 2px;
+  padding: 0 1px;
+  transition:
+    border-color var(--motion-fast, 130ms) var(--ease-settle, ease),
+    background-color var(--motion-fast, 130ms) var(--ease-settle, ease);
+}
+
+.bn-wiki-link:hover {
+  border-bottom-color: var(--color-accent);
+  background-color: rgb(from var(--color-accent) r g b / 0.12);
 }

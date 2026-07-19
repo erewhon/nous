@@ -104,6 +104,19 @@
   font-family: var(--font-mono);
 }
 
+/* Blockquote — Cormorant italic with the accent rule, "a scholar's marginalia" */
+.bn-quote {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-weight: 500;
+  font-size: 1.2em;
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+  border-left: 3px solid var(--color-accent);
+  padding: 0.15em 0 0.15em 1rem;
+  margin: 1rem 0;
+}
+
 /* Display face (Cormorant) on legacy Editor.js headings — kept for that path */
 h1.ce-header,
 h2.ce-header,
