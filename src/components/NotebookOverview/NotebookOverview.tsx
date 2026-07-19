@@ -7,7 +7,19 @@ import { useThemeStore, type NotebookSortOption } from "../../stores/themeStore"
 import { useActionStore } from "../../stores/actionStore";
 import { useInboxStore } from "../../stores/inboxStore";
 import { useFlashcardStore } from "../../stores/flashcardStore";
+import { usePageStore } from "../../stores/pageStore";
 import * as api from "../../utils/api";
+
+// Compact relative time for the Recent list ("just now" / "2h ago" / "3d ago").
+function relativeTime(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const m = Math.floor(diff / 60000);
+  if (m < 1) return "just now";
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
 
 const SORT_OPTIONS: { value: NotebookSortOption; label: string }[] = [
   { value: "name-asc", label: "Name (A-Z)" },
@@ -49,6 +61,33 @@ export function NotebookOverview({
   const openActionLibrary = useActionStore((state) => state.openActionLibrary);
   const { summary, openQuickCapture, openInboxPanel } = useInboxStore();
   const { togglePanel: toggleFlashcards, stats: flashcardStats } = useFlashcardStore();
+
+  // Library front-door meta: greeting, date, totals, recent pages
+  const recentPages = usePageStore((s) => s.recentPages);
+  const totalPages = useMemo(
+    () => notebooksWithMeta.reduce((sum, n) => sum + n.pageCount, 0),
+    [notebooksWithMeta]
+  );
+  const nbName = useCallback(
+    (id: string) => notebooks.find((n) => n.id === id)?.name ?? "",
+    [notebooks]
+  );
+  const greeting = useMemo(() => {
+    const h = new Date().getHours();
+    if (h < 5) return "Good night.";
+    if (h < 12) return "Good morning.";
+    if (h < 17) return "Good afternoon.";
+    return "Good evening.";
+  }, []);
+  const todayLabel = useMemo(
+    () =>
+      new Date().toLocaleDateString(undefined, {
+        weekday: "long",
+        month: "long",
+        day: "numeric",
+      }),
+    []
+  );
 
   // Close sort menu when clicking outside
   useEffect(() => {
@@ -193,23 +232,31 @@ export function NotebookOverview({
             </svg>
           </div>
           <div>
+            <div
+              className="mb-1 text-xs font-medium uppercase"
+              style={{ color: "var(--color-text-muted)", letterSpacing: "0.08em" }}
+            >
+              The Library · {todayLabel}
+            </div>
             <h1
               className="font-bold"
               style={{
                 fontFamily: "var(--font-display)",
                 fontWeight: 600,
-                fontSize: "calc(var(--font-size-base, 16px) * 1.9)",
+                fontSize: "calc(var(--font-size-base, 16px) * 2)",
                 letterSpacing: "-0.01em",
+                lineHeight: 1.1,
                 color: "var(--color-text-primary)",
               }}
             >
-              Nous
+              {greeting}
             </h1>
             <p
-              className="text-sm"
+              className="mt-1 text-sm"
               style={{ color: "var(--color-text-muted)" }}
             >
-              Your notebooks
+              {notebooks.length} {notebooks.length === 1 ? "notebook" : "notebooks"} ·{" "}
+              {totalPages} {totalPages === 1 ? "page" : "pages"}
             </p>
           </div>
         </div>
@@ -519,18 +566,55 @@ export function NotebookOverview({
             </button>
           </div>
         ) : (
-          <div className="flex flex-wrap gap-6">
-            {filteredNotebooks.map(({ notebook, coverPage, pageCount }) => (
-              <NotebookCard
-                key={notebook.id}
-                notebook={notebook}
-                coverPage={coverPage}
-                pageCount={pageCount}
-                onClick={() => onSelectNotebook(notebook.id)}
-                onSettings={() => setSettingsNotebook(notebook)}
-              />
-            ))}
-          </div>
+          <>
+            <div className="flex flex-wrap gap-6">
+              {filteredNotebooks.map(({ notebook, coverPage, pageCount }) => (
+                <NotebookCard
+                  key={notebook.id}
+                  notebook={notebook}
+                  coverPage={coverPage}
+                  pageCount={pageCount}
+                  onClick={() => onSelectNotebook(notebook.id)}
+                  onSettings={() => setSettingsNotebook(notebook)}
+                />
+              ))}
+            </div>
+
+            {/* Recent — the warm front door's quick way back in */}
+            {!searchQuery && recentPages.length > 0 && (
+              <div className="mt-12" style={{ maxWidth: "640px" }}>
+                <div
+                  className="mb-3 text-xs font-medium uppercase"
+                  style={{ color: "var(--color-text-muted)", letterSpacing: "0.08em" }}
+                >
+                  Recent
+                </div>
+                <div className="flex flex-col">
+                  {recentPages.slice(0, 8).map((r) => (
+                    <button
+                      key={r.pageId}
+                      onClick={() => onSelectNotebook(r.notebookId)}
+                      className="flex items-center justify-between gap-4 rounded-md px-3 py-2 text-left transition-colors hover:bg-[--color-bg-secondary]"
+                    >
+                      <span
+                        className="truncate text-sm"
+                        style={{ color: "var(--color-text-primary)" }}
+                      >
+                        {r.title || "Untitled"}
+                      </span>
+                      <span
+                        className="flex flex-shrink-0 items-center gap-3 text-xs"
+                        style={{ color: "var(--color-text-muted)" }}
+                      >
+                        <span>{nbName(r.notebookId)}</span>
+                        <span>{relativeTime(r.accessedAt)}</span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
         )}
       </div>
 
