@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nous — Direction B · The Workshop · Database</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22><circle cx=%228%22 cy=%228%22 r=%226%22 fill=%22%238b5cf6%22/></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400..700;1,400..700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script>const _t=new URLSearchParams(location.search).get("theme");if(_t==="light"||_t==="dark")document.documentElement.dataset.theme=_t;</script>
+<style>
+/* NOUS · DIRECTION B · "THE WORKSHOP" · Database view (grouped table) */
+
+:root {
+  --font-ui: "Instrument Sans", -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono", "SF Mono", Menlo, monospace;
+  --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px; --sp-4: 16px; --sp-5: 20px;
+  --sp-6: 24px; --sp-7: 32px; --sp-8: 40px; --sp-9: 48px; --sp-10: 64px;
+  --r-xs: 5px; --r-sm: 8px; --r-md: 10px; --r-lg: 14px; --r-full: 999px;
+  --dur-fast: 120ms; --dur-base: 160ms; --dur-slow: 220ms;
+  --ease-work: cubic-bezier(.25,.1,.25,1);
+}
+:root[data-theme="dark"] {
+  --color-bg-primary: #17171d; --color-bg-secondary: #141419; --color-bg-tertiary: #22222b;
+  --color-bg-elevated: #1d1d25; --color-bg-sidebar: #0e0e12; --color-bg-panel: #131317;
+  --color-text-primary: #ececf1; --color-text-secondary: #a3a3b2; --color-text-muted: #80808f;
+  --color-accent: #8b7cf8; --color-accent-hover: #a29af9;
+  --color-accent-secondary: #6c5ce7; --color-accent-tertiary: #5646c6;
+  --color-success: #56c186; --color-warning: #dfae4f; --color-error: #ec6a5e; --color-info: #5aa7e8;
+  --color-border: #26262f; --color-border-muted: #1e1e26;
+  --color-selection: rgba(139, 124, 248, 0.25);
+  --shadow-1: 0 1px 2px rgba(0,0,0,.4);
+  --shadow-2: 0 2px 6px rgba(0,0,0,.35), 0 1px 2px rgba(0,0,0,.3);
+  --shadow-3: 0 10px 32px rgba(0,0,0,.45), 0 2px 8px rgba(0,0,0,.3);
+  --edge-highlight: inset 0 1px 0 rgba(255,255,255,.09);
+}
+:root[data-theme="light"] {
+  --color-bg-primary: #fdfdfd; --color-bg-secondary: #f5f5f7; --color-bg-tertiary: #ebebef;
+  --color-bg-elevated: #ffffff; --color-bg-sidebar: #f8f8fa; --color-bg-panel: #fafafb;
+  --color-text-primary: #1b1b21; --color-text-secondary: #55555f; --color-text-muted: #6e6e79;
+  --color-accent: #5b48d8; --color-accent-hover: #5443c4;
+  --color-accent-secondary: #4f3fbd; --color-accent-tertiary: #40339c;
+  --color-success: #136c3d; --color-warning: #7d5608; --color-error: #af352c; --color-info: #1e639f;
+  --color-border: #e5e5ea; --color-border-muted: #efeff3;
+  --color-selection: rgba(91, 72, 216, 0.16);
+  --shadow-1: 0 1px 2px rgba(24,24,33,.06);
+  --shadow-2: 0 2px 8px rgba(24,24,33,.08), 0 1px 2px rgba(24,24,33,.05);
+  --shadow-3: 0 10px 32px rgba(24,24,33,.12), 0 2px 8px rgba(24,24,33,.06);
+  --edge-highlight: inset 0 1px 0 rgba(255,255,255,.6);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+::selection { background: var(--color-selection); }
+body {
+  font-family: var(--font-ui); font-size: 13px; font-weight: 450; line-height: 1.5;
+  background: var(--color-bg-primary); color: var(--color-text-primary);
+  -webkit-font-smoothing: antialiased;
+  transition: background var(--dur-slow) var(--ease-work), color var(--dur-slow) var(--ease-work);
+}
+:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--color-bg-primary),
+              0 0 0 4px color-mix(in srgb, var(--color-accent) 75%, transparent);
+  border-radius: var(--r-xs);
+}
+button { font-family: inherit; color: inherit; background: none; border: none; cursor: pointer; }
+
+/* ---------- Top bar ---------- */
+.topbar {
+  height: 44px; display: flex; align-items: center; gap: var(--sp-3);
+  padding: 0 var(--sp-4); border-bottom: 1px solid var(--color-border-muted);
+}
+.crumb { display: flex; align-items: center; gap: var(--sp-2); font-size: 12.5px; color: var(--color-text-muted); }
+.crumb a { color: var(--color-text-muted); text-decoration: none; }
+.crumb a:hover { color: var(--color-text-primary); }
+.crumb .here { color: var(--color-text-secondary); font-weight: 550; }
+.topbar .spacer { flex: 1; }
+.tb-btn {
+  display: inline-flex; align-items: center; gap: var(--sp-2);
+  font-size: 12.5px; font-weight: 550; color: var(--color-text-secondary);
+  padding: 6px 10px; border-radius: var(--r-sm);
+  transition: background var(--dur-fast) var(--ease-work), color var(--dur-fast) var(--ease-work), transform var(--dur-fast) var(--ease-work);
+}
+.tb-btn:hover { background: var(--color-bg-tertiary); color: var(--color-text-primary); }
+.tb-btn:active { transform: scale(.985); }
+.tb-btn.primary { background: var(--color-accent); color: #fff; box-shadow: var(--edge-highlight), var(--shadow-1); }
+.tb-btn.primary:hover { background: var(--color-accent-hover); }
+
+/* ---------- Database header ---------- */
+.wrap { max-width: 1240px; margin: 0 auto; padding: var(--sp-7) var(--sp-6) var(--sp-9); }
+.db-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-4); margin-bottom: var(--sp-5); }
+.db-eyebrow {
+  font-size: 11px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase;
+  color: var(--color-text-muted); margin-bottom: var(--sp-2);
+  display: flex; gap: var(--sp-2); align-items: center;
+}
+.db-eyebrow .dot { width: 8px; height: 8px; border-radius: 2.5px; background: var(--color-warning); }
+.db-head h1 { font-weight: 650; font-size: 26px; letter-spacing: -.02em; line-height: 1.1; margin-bottom: var(--sp-1); }
+.db-head .sub { font-size: 13px; color: var(--color-text-secondary); }
+.progress { display: flex; align-items: center; gap: var(--sp-3); margin-top: var(--sp-2); }
+.progress .bar { width: 220px; height: 5px; border-radius: 3px; background: var(--color-bg-tertiary); overflow: hidden; }
+.progress .fill { height: 100%; width: 40%; border-radius: 3px; background: var(--color-accent); }
+.progress .pct { font-family: var(--font-mono); font-size: 11px; color: var(--color-text-muted); }
+
+/* View tabs + toolbar */
+.viewbar { display: flex; align-items: center; gap: var(--sp-3); margin-bottom: var(--sp-4); flex-wrap: wrap; }
+.tabs {
+  display: inline-flex; gap: 2px; background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border-muted); border-radius: var(--r-md); padding: 3px;
+}
+.tab {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12.5px; font-weight: 550; color: var(--color-text-muted);
+  padding: 5px 13px; border-radius: calc(var(--r-md) - 3px);
+  transition: color var(--dur-fast) var(--ease-work), background var(--dur-fast) var(--ease-work), box-shadow var(--dur-fast) var(--ease-work);
+}
+.tab:hover { color: var(--color-text-primary); }
+.tab.is-active { color: var(--color-text-primary); background: var(--color-bg-elevated); box-shadow: var(--edge-highlight), var(--shadow-1); }
+.viewbar .spacer { flex: 1; }
+.toolchip {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; font-weight: 500; color: var(--color-text-secondary);
+  border: 1px solid var(--color-border); border-radius: var(--r-full); padding: 4px 11px;
+  transition: all var(--dur-fast) var(--ease-work);
+}
+.toolchip:hover { border-color: var(--color-text-muted); color: var(--color-text-primary); }
+.toolchip.is-on {
+  background: color-mix(in srgb, var(--color-accent) 13%, transparent);
+  border-color: color-mix(in srgb, var(--color-accent) 45%, transparent);
+  color: var(--color-accent);
+}
+
+/* ---------- Grouped table ---------- */
+.tablewrap {
+  border: 1px solid var(--color-border); border-radius: var(--r-lg);
+  overflow-x: auto; background: var(--color-bg-secondary);
+  box-shadow: var(--edge-highlight), var(--shadow-1);
+}
+table { border-collapse: collapse; width: 100%; min-width: 1020px; }
+thead th {
+  font-size: 11px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase;
+  color: var(--color-text-muted); text-align: left; white-space: nowrap;
+  background: var(--color-bg-secondary);
+  padding: 9px 14px; border-bottom: 1px solid var(--color-border);
+  position: sticky; top: 0; z-index: 2;
+}
+tbody td {
+  padding: 7px 14px; border-bottom: 1px solid var(--color-border-muted);
+  font-size: 13px; color: var(--color-text-secondary); white-space: nowrap;
+  transition: background var(--dur-fast) var(--ease-work);
+}
+tbody tr:last-child td { border-bottom: none; }
+tbody tr.task { cursor: pointer; }
+tbody tr.task:hover td { background: color-mix(in srgb, var(--color-bg-tertiary) 65%, transparent); }
+tbody tr.is-selected td { background: var(--color-selection); }
+tbody tr.is-selected td:first-child { position: relative; }
+tbody tr.is-selected td:first-child::before {
+  content: ""; position: absolute; left: 3px; top: 50%; transform: translateY(-50%);
+  width: 3px; height: 16px; border-radius: 2px; background: var(--color-accent);
+}
+tr.group td {
+  background: var(--color-bg-panel);
+  font-size: 12px; font-weight: 600; color: var(--color-text-primary);
+  padding: 6px 14px; border-bottom: 1px solid var(--color-border-muted);
+}
+tr.group .g-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; vertical-align: 0; }
+tr.group .g-count { font-family: var(--font-mono); font-weight: 400; font-size: 11px; color: var(--color-text-muted); margin-left: 8px; }
+td.c-title { font-weight: 550; color: var(--color-text-primary); }
+td.c-title .tid { font-family: var(--font-mono); font-size: 10.5px; color: var(--color-text-muted); margin-right: 9px; }
+td.c-num { font-family: var(--font-mono); font-size: 11.5px; color: var(--color-text-muted); }
+tr.done td.c-title { color: var(--color-text-muted); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--color-text-muted) 55%, transparent); }
+
+.prio { display: inline-flex; align-items: flex-end; gap: 1.5px; height: 12px; margin-right: 7px; }
+.prio i { width: 3px; border-radius: 1px; background: var(--color-bg-tertiary); display: block; }
+.prio i:nth-child(1) { height: 5px; } .prio i:nth-child(2) { height: 8px; } .prio i:nth-child(3) { height: 11px; }
+.prio.p0 i { background: var(--color-error); }
+.prio.p1 i:nth-child(-n+2) { background: var(--color-warning); }
+.prio.p2 i:first-child { background: var(--color-info); }
+.prio-label { font-family: var(--font-mono); font-size: 11px; color: var(--color-text-secondary); }
+
+.phase {
+  font-size: 11.5px; font-weight: 500; color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary); border-radius: var(--r-full); padding: 2px 9px;
+}
+.tagset { display: inline-flex; gap: 5px; }
+.tag {
+  font-size: 11px; font-weight: 500; color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+  border-radius: var(--r-full); padding: 2px 8px;
+}
+td.due-late { color: var(--color-error); }
+
+/* editing cell */
+td.is-editing {
+  background: var(--color-bg-primary) !important;
+  box-shadow: inset 0 0 0 2px var(--color-accent);
+  border-radius: var(--r-xs);
+}
+td.is-editing .caret { border-right: 1.5px solid var(--color-accent); animation: blink 1.1s steps(1) infinite; padding-right: 1px; }
+@keyframes blink { 50% { border-color: transparent; } }
+
+/* Table footer */
+.tfoot {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: var(--sp-3) var(--sp-2) 0; font-size: 12px; color: var(--color-text-muted);
+}
+.newrow {
+  display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 550;
+  color: var(--color-text-muted); padding: 6px 10px; border-radius: var(--r-sm);
+  transition: all var(--dur-fast) var(--ease-work);
+}
+.newrow:hover { color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 8%, transparent); }
+.tfoot .aggr { font-family: var(--font-mono); font-size: 11px; }
+
+@media (max-width: 700px) {
+  .wrap { padding: var(--sp-5) var(--sp-3); }
+  .db-head { flex-direction: column; }
+  .db-head h1 { font-size: 22px; }
+}
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="crumb">
+    <a href="#">Erewhon</a><span>›</span><span class="here">Release 0.9 — Sync &amp; Publish</span>
+  </div>
+  <div class="spacer"></div>
+  <button class="tb-btn primary">New task</button>
+  <button class="tb-btn" id="themeToggle" aria-label="Toggle color theme">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M20.5 14A8.5 8.5 0 0 1 10 3.5 8.5 8.5 0 1 0 20.5 14z"/></svg>
+  </button>
+  <button class="tb-btn" aria-label="More options">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/></svg>
+  </button>
+</header>
+
+<div class="wrap">
+  <div class="db-head">
+    <div>
+      <div class="db-eyebrow"><span class="dot"></span>Erewhon · database</div>
+      <h1>Release 0.9 — Sync &amp; Publish</h1>
+      <div class="sub">Everything between here and shipping multi-device sync with static publishing.</div>
+    </div>
+    <div class="progress">
+      <div class="bar"><div class="fill"></div></div>
+      <span class="pct">6 / 15 done</span>
+    </div>
+  </div>
+
+  <div class="viewbar">
+    <div class="tabs">
+      <button class="tab is-active">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 5h18M3 10h18M3 15h18M3 20h18"/></svg>
+        Table
+      </button>
+      <button class="tab">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="5" height="16" rx="1"/><rect x="10" y="4" width="5" height="10" rx="1"/><rect x="17" y="4" width="5" height="13" rx="1"/></svg>
+        Board
+      </button>
+      <button class="tab">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="4" y="5" width="16" height="16" rx="2"/><path d="M16 3v4M8 3v4M4 11h16"/></svg>
+        Calendar
+      </button>
+      <button class="tab">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 6h6v12H3zM11 6h6v7h-6zM19 6h2v4h-2z"/></svg>
+        Timeline
+      </button>
+    </div>
+    <div class="spacer"></div>
+    <button class="toolchip is-on">Group: status</button>
+    <button class="toolchip">Filter</button>
+    <button class="toolchip">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M6 12h12M10 18h4"/></svg>
+      Sort: priority
+    </button>
+    <button class="toolchip">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      Search
+    </button>
+  </div>
+
+  <div class="tablewrap">
+    <table>
+      <thead>
+        <tr>
+          <th style="width:38%">Task</th>
+          <th>Priority</th>
+          <th>Phase</th>
+          <th>Estimate</th>
+          <th>Due</th>
+          <th>Tags</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="group"><td colspan="6"><span class="g-dot" style="background:var(--color-accent)"></span>In Progress<span class="g-count">3</span></td></tr>
+        <tr class="task is-selected">
+          <td class="c-title"><span class="tid">NOU-231</span>Operation log compaction with fence entries</td>
+          <td><span class="prio p0"><i></i><i></i><i></i></span><span class="prio-label">P0</span></td>
+          <td><span class="phase">Sync core</span></td>
+          <td class="c-num">L</td>
+          <td class="c-num">Jul 24</td>
+          <td><span class="tagset"><span class="tag">sync</span><span class="tag">rust</span></span></td>
+        </tr>
+        <tr class="task">
+          <td class="c-title"><span class="tid">NOU-227</span>CRDT silent-wipe guard on empty snapshot</td>
+          <td><span class="prio p0"><i></i><i></i><i></i></span><span class="prio-label">P0</span></td>
+          <td><span class="phase">Sync core</span></td>
+          <td class="c-num">M</td>
+          <td class="c-num due-late">Jul 18</td>
+          <td><span class="tagset"><span class="tag">data-loss</span><span class="tag">crdt</span></span></td>
+        </tr>
+        <tr class="task">
+          <td class="c-title"><span class="tid">NOU-235</span>Publish static: deploy worker + approve domain</td>
+          <td><span class="prio p1"><i></i><i></i><i></i></span><span class="prio-label">P1</span></td>
+          <td><span class="phase">Publish</span></td>
+          <td class="c-num">S</td>
+          <td class="c-num">Jul 22</td>
+          <td><span class="tagset"><span class="tag">publish</span><span class="tag">cloud</span></span></td>
+        </tr>
+
+        <tr class="group"><td colspan="6"><span class="g-dot" style="background:var(--color-info)"></span>Ready<span class="g-count">4</span></td></tr>
+        <tr class="task">
+          <td class="c-title"><span class="tid">NOU-238</span>Property test: replay from every log prefix converges</td>
+          <td><span class="prio p1"><i></i><i></i><i></i></span><span class="prio-label">P1</span></td>
+          <td><span class="phase">Sync core</span></td>
+          <td class="c-num">M</td>
+          <td class="c-num">Jul 26</td>
+          <td><span class="tagset"><span class="tag">tests</span></span></td>
+        </tr>
+        <tr class="task">
+          <td class="c-title"><span class="tid">NOU-240</span>Conflicts panel: surface edited-after-delete blocks</td>
+          <td><span class="prio p1"><i></i><i></i><i></i></span><span class="prio-label">P1</span></td>
+          <td><span class="phase">Sync UI</span></td>
+          <td class="c-num">M</td>
+          <td class="c-num">Jul 29</td>
+          <td><span class="tagset"><span class="tag">frontend</span></span></td>
+        </tr>
+        <tr class="task">
+          <td class="c-title"><span class="tid">NOU-242</span>Guest editor: snapshot-only sync for read-write links</td>
+          <td class="is-editing"><span class="prio p2"><i></i><i></i><i></i></span><span class="prio-label">P2</span><span class="caret"></span></td>
+          <td><span class="phase">Collab</span></td>
+          <td class="c-num">L</td>
+          <td class="c-num">Aug 05</td>
+          <td><span class="tagset"><span class="tag">collab</span></span></td>
+        </tr>
+        <tr class="task">
+          <td class="c-title"><span class="tid">NOU-243</span>Sync status indicator in the status bar</td>
+          <td><span class="prio p2"><i></i><i></i><i></i></span><span class="prio-label">P2</span></td>
+          <td><span class="phase">Sync UI</span></td>
+          <td class="c-num">XS</td>
+          <td class="c-num">—</td>
+          <td><span class="tagset"><span class="tag">frontend</span></span></td>
+        </tr>
+
+        <tr class="group"><td colspan="6"><span class="g-dot" style="background:var(--color-warning)"></span>Review<span class="g-count">2</span></td></tr>
+        <tr class="task">
+          <td class="c-title"><span class="tid">NOU-229</span>Atomic write recovery: fuzz the torn-write window</td>
+          <td><span class="prio p1"><i></i><i></i><i></i></span><span class="prio-label">P1</span></td>
+          <td><span class="phase">Storage</span></td>
+          <td class="c-num">S</td>
+          <td class="c-num">Jul 20</td>
+          <td><span class="tagset"><span class="tag">storage</span><span class="tag">tests</span></span></td>
+        </tr>
+        <tr class="task">
+          <td class="c-title"><span class="tid">NOU-233</span>Publish token HMAC: rotate + revoke flow</td>
+          <td><span class="prio p2"><i></i><i></i><i></i></span><span class="prio-label">P2</span></td>
+          <td><span class="phase">Publish</span></td>
+          <td class="c-num">S</td>
+          <td class="c-num">Jul 21</td>
+          <td><span class="tagset"><span class="tag">publish</span><span class="tag">auth</span></span></td>
+        </tr>
+
+        <tr class="group"><td colspan="6"><span class="g-dot" style="background:var(--color-text-muted)"></span>Backlog<span class="g-count">4</span></td></tr>
+        <tr class="task">
+          <td class="c-title"><span class="tid">NOU-244</span>Selective sync: exclude notebooks per device</td>
+          <td><span class="prio p2"><i></i><i></i><i></i></span><span class="prio-label">P2</span></td>
+          <td><span class="phase">Sync core</span></td>
+          <td class="c-num">XL</td>
+          <td class="c-num">—</td>
+          <td><span class="tagset"><span class="tag">sync</span></span></td>
+        </tr>
+        <tr class="task">
+          <td class="c-title"><span class="tid">NOU-245</span>Bandwidth cap + backoff tuning for metered links</td>
+          <td><span class="prio p3"><i></i><i></i><i></i></span><span class="prio-label">P3</span></td>
+          <td><span class="phase">Sync core</span></td>
+          <td class="c-num">M</td>
+          <td class="c-num">—</td>
+          <td><span class="tagset"><span class="tag">sync</span></span></td>
+        </tr>
+        <tr class="task">
+          <td class="c-title"><span class="tid">NOU-246</span>Publish: custom domains for pub.nous.page</td>
+          <td><span class="prio p3"><i></i><i></i><i></i></span><span class="prio-label">P3</span></td>
+          <td><span class="phase">Publish</span></td>
+          <td class="c-num">L</td>
+          <td class="c-num">—</td>
+          <td><span class="tagset"><span class="tag">publish</span></span></td>
+        </tr>
+        <tr class="task">
+          <td class="c-title"><span class="tid">NOU-247</span>Import: merge remote library on first pairing</td>
+          <td><span class="prio p3"><i></i><i></i><i></i></span><span class="prio-label">P3</span></td>
+          <td><span class="phase">Sync UI</span></td>
+          <td class="c-num">L</td>
+          <td class="c-num">—</td>
+          <td><span class="tagset"><span class="tag">onboarding</span></span></td>
+        </tr>
+
+        <tr class="group"><td colspan="6"><span class="g-dot" style="background:var(--color-success)"></span>Done<span class="g-count">2 of 6 shown</span></td></tr>
+        <tr class="task done">
+          <td class="c-title"><span class="tid">NOU-224</span>Hash-chained operation log (JSONL)</td>
+          <td><span class="prio p0"><i></i><i></i><i></i></span><span class="prio-label">P0</span></td>
+          <td><span class="phase">Sync core</span></td>
+          <td class="c-num">L</td>
+          <td class="c-num">Jul 08</td>
+          <td><span class="tagset"><span class="tag">sync</span></span></td>
+        </tr>
+        <tr class="task done">
+          <td class="c-title"><span class="tid">NOU-226</span>Crash-atomic writes (storage/atomic.rs)</td>
+          <td><span class="prio p0"><i></i><i></i><i></i></span><span class="prio-label">P0</span></td>
+          <td><span class="phase">Storage</span></td>
+          <td class="c-num">M</td>
+          <td class="c-num">Jul 11</td>
+          <td><span class="tagset"><span class="tag">storage</span></span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="tfoot">
+    <button class="newrow">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+      New task
+    </button>
+    <span class="aggr">15 tasks · 2 overdue · median estimate M</span>
+  </div>
+</div>
+
+<script>
+const root = document.documentElement;
+document.getElementById("themeToggle").addEventListener("click", () => {
+  root.dataset.theme = root.dataset.theme === "dark" ? "light" : "dark";
+});
+</script>
+</body>
+</html>

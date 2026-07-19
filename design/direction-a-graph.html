@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nous — Direction A · The Study · Graph</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22><circle cx=%228%22 cy=%228%22 r=%226%22 fill=%22%238b5cf6%22/></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,500;1,600&family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400;1,9..40,500&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script>const _t=new URLSearchParams(location.search).get("theme");if(_t==="light"||_t==="dark")document.documentElement.dataset.theme=_t;</script>
+<style>
+/* NOUS · DIRECTION A · "THE STUDY" · Graph view — the constellation */
+
+:root {
+  --font-display: "Cormorant Garamond", "Iowan Old Style", Georgia, serif;
+  --font-ui: "DM Sans", -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", "SF Mono", Menlo, monospace;
+  --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px; --sp-4: 16px; --sp-5: 20px;
+  --sp-6: 24px; --sp-7: 32px; --sp-8: 40px;
+  --r-xs: 4px; --r-sm: 7px; --r-md: 10px; --r-lg: 14px; --r-xl: 20px; --r-full: 999px;
+  --dur-fast: 130ms; --dur-base: 190ms; --dur-slow: 260ms;
+  --ease-settle: cubic-bezier(.22,.61,.36,1);
+  --ease-inout: cubic-bezier(.45,.05,.35,.95);
+}
+:root[data-theme="dark"] {
+  --color-bg-primary: #1b1526; --color-bg-secondary: #171120; --color-bg-tertiary: #272033;
+  --color-bg-elevated: #241c33; --color-bg-sidebar: #120d1b; --color-bg-panel: #150f1e;
+  --color-text-primary: #ece7de; --color-text-secondary: #b3aac2; --color-text-muted: #8a80a0;
+  --color-accent: #ab87fc; --color-accent-hover: #bfa3ff;
+  --color-accent-secondary: #8a5cf5; --color-accent-tertiary: #6e46d9;
+  --color-success: #a9c98b; --color-warning: #e3b96f; --color-error: #e58e87; --color-info: #8fb8e8;
+  --color-border: #322a44; --color-border-muted: #251e35;
+  --color-selection: rgba(171, 135, 252, 0.28);
+  --shadow-1: 0 1px 2px rgba(10,5,20,.5);
+  --shadow-2: 0 2px 8px rgba(10,5,20,.45), 0 1px 2px rgba(10,5,20,.4);
+  --shadow-3: 0 8px 28px rgba(10,5,20,.5), 0 2px 8px rgba(10,5,20,.35);
+  --shadow-4: 0 20px 60px rgba(8,4,18,.6), 0 4px 16px rgba(8,4,18,.4);
+  --graph-bg: #120d1b;
+  --edge-op: .22; --edge-op-hot: .6; --star-display: block;
+}
+:root[data-theme="light"] {
+  --color-bg-primary: #faf7f0; --color-bg-secondary: #f3eee3; --color-bg-tertiary: #eae3d3;
+  --color-bg-elevated: #fffdf8; --color-bg-sidebar: #f1ecdf; --color-bg-panel: #f6f2e8;
+  --color-text-primary: #241d33; --color-text-secondary: #564c6b; --color-text-muted: #6f6584;
+  --color-accent: #6d40cf; --color-accent-hover: #5a30b8;
+  --color-accent-secondary: #5a34ad; --color-accent-tertiary: #48288c;
+  --color-success: #3f6827; --color-warning: #7d5507; --color-error: #aa332a; --color-info: #2f639e;
+  --color-border: #ded5c2; --color-border-muted: #ebe5d6;
+  --color-selection: rgba(109, 64, 207, 0.16);
+  --shadow-1: 0 1px 2px rgba(60,45,85,.08);
+  --shadow-2: 0 2px 8px rgba(60,45,85,.10), 0 1px 2px rgba(60,45,85,.07);
+  --shadow-3: 0 8px 28px rgba(60,45,85,.14), 0 2px 8px rgba(60,45,85,.08);
+  --shadow-4: 0 20px 60px rgba(50,35,75,.20), 0 4px 16px rgba(50,35,75,.10);
+  --graph-bg: #f6f2e8;
+  --edge-op: .3; --edge-op-hot: .75; --star-display: none;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+::selection { background: var(--color-selection); }
+html, body { height: 100%; }
+body {
+  font-family: var(--font-ui); font-size: 13px; line-height: 1.5;
+  background: var(--graph-bg); color: var(--color-text-primary);
+  -webkit-font-smoothing: antialiased; overflow: hidden;
+  transition: background var(--dur-slow) var(--ease-inout), color var(--dur-slow) var(--ease-inout);
+}
+:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--graph-bg),
+              0 0 0 4px color-mix(in srgb, var(--color-accent) 70%, transparent);
+  border-radius: var(--r-xs);
+}
+button { font-family: inherit; color: inherit; background: none; border: none; cursor: pointer; }
+
+/* ---------- Top bar ---------- */
+.topbar {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 10;
+  height: 44px; display: flex; align-items: center; gap: var(--sp-3);
+  padding: 0 var(--sp-4);
+  background: color-mix(in srgb, var(--graph-bg) 78%, transparent);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--color-border-muted);
+}
+.crumb { display: flex; align-items: center; gap: var(--sp-2); font-size: 12.5px; color: var(--color-text-muted); }
+.crumb .here { color: var(--color-text-secondary); font-weight: 500; }
+.crumb .wordmark { font-family: var(--font-display); font-weight: 600; font-size: 19px; color: var(--color-text-primary); margin-right: var(--sp-2); }
+.crumb .wordmark .tail { color: var(--color-accent); }
+.topbar .spacer { flex: 1; }
+.tb-btn {
+  display: inline-flex; align-items: center; gap: var(--sp-2);
+  font-size: 12.5px; font-weight: 500; color: var(--color-text-secondary);
+  padding: 6px 10px; border-radius: var(--r-sm);
+  transition: background var(--dur-fast) var(--ease-settle), color var(--dur-fast) var(--ease-settle);
+}
+.tb-btn:hover { background: var(--color-bg-tertiary); color: var(--color-text-primary); }
+.kbd {
+  font-family: var(--font-mono); font-size: 10px; color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary); border: 1px solid var(--color-border);
+  border-bottom-width: 2px; border-radius: var(--r-xs); padding: 1px 5px;
+}
+
+/* ---------- Stage ---------- */
+.stage { position: absolute; inset: 0; }
+#sky { position: absolute; inset: 0; display: var(--star-display); }
+#sky .star {
+  position: absolute; border-radius: 50%; background: var(--color-text-muted);
+  animation: twinkle 7s ease-in-out infinite;
+}
+@keyframes twinkle { 0%,100% { opacity: .12; } 50% { opacity: .4; } }
+
+#graph { position: absolute; inset: 0; width: 100%; height: 100%; }
+.edge { stroke: var(--color-text-muted); stroke-opacity: var(--edge-op); stroke-width: 1; transition: stroke-opacity var(--dur-base) var(--ease-settle), stroke var(--dur-base) var(--ease-settle); }
+.edge.hot { stroke: var(--color-accent); stroke-opacity: var(--edge-op-hot); stroke-width: 1.4; }
+.node { cursor: pointer; }
+.node circle.core { transition: r var(--dur-fast) var(--ease-settle), fill-opacity var(--dur-fast) var(--ease-settle); }
+.node:hover circle.core { fill-opacity: 1; }
+.node text {
+  font-family: var(--font-ui); font-size: 11px; font-weight: 500;
+  fill: var(--color-text-secondary); pointer-events: none;
+  transition: fill var(--dur-fast) var(--ease-settle);
+}
+.node:hover text { fill: var(--color-text-primary); }
+.node.focus text { font-family: var(--font-display); font-weight: 600; font-size: 17px; fill: var(--color-text-primary); }
+.halo { fill: none; stroke: var(--color-accent); stroke-opacity: .5; animation: haloPulse 4s var(--ease-inout) infinite; transform-origin: center; transform-box: fill-box; }
+@keyframes haloPulse { 0%,100% { stroke-opacity: .5; } 50% { stroke-opacity: .18; } }
+
+/* ---------- Filter panel ---------- */
+.panel {
+  position: fixed; left: var(--sp-4); top: 60px; z-index: 9; width: 218px;
+  background: color-mix(in srgb, var(--color-bg-panel) 88%, transparent);
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--color-border); border-radius: var(--r-lg);
+  box-shadow: var(--shadow-3); padding: var(--sp-4);
+}
+.panel h2 { font-family: var(--font-display); font-weight: 600; font-size: 19px; margin-bottom: var(--sp-1); }
+.panel .sub { font-size: 11.5px; color: var(--color-text-muted); margin-bottom: var(--sp-4); }
+.p-label {
+  font-size: 10.5px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase;
+  color: var(--color-text-muted); margin: var(--sp-4) 0 var(--sp-2);
+}
+.p-label:first-of-type { margin-top: 0; }
+.check {
+  display: flex; align-items: center; gap: var(--sp-2); width: 100%;
+  padding: 4px 6px; border-radius: var(--r-sm); font-size: 12.5px; text-align: left;
+  color: var(--color-text-secondary);
+  transition: background var(--dur-fast) var(--ease-settle), color var(--dur-fast) var(--ease-settle);
+}
+.check:hover { background: var(--color-bg-tertiary); color: var(--color-text-primary); }
+.check .dot { width: 8px; height: 8px; border-radius: 2.5px; flex: none; }
+.check .n { flex: 1; }
+.check .c { font-family: var(--font-mono); font-size: 10px; color: var(--color-text-muted); }
+.check.off { opacity: .45; }
+.check.off .n { text-decoration: line-through; }
+.slider { display: flex; align-items: center; gap: var(--sp-2); padding: 2px 6px; }
+.slider .track { flex: 1; height: 3px; border-radius: 2px; background: var(--color-bg-tertiary); position: relative; }
+.slider .fill { position: absolute; left: 0; top: 0; bottom: 0; width: 66%; border-radius: 2px; background: var(--color-accent); }
+.slider .thumb {
+  position: absolute; left: 66%; top: 50%; transform: translate(-50%, -50%);
+  width: 12px; height: 12px; border-radius: 50%; background: var(--color-accent);
+  box-shadow: var(--shadow-1); cursor: grab;
+}
+.slider .val { font-family: var(--font-mono); font-size: 10.5px; color: var(--color-text-secondary); width: 14px; text-align: right; }
+.p-switch { display: flex; align-items: center; justify-content: space-between; padding: 4px 6px; font-size: 12.5px; color: var(--color-text-secondary); }
+.sw { width: 28px; height: 16px; border-radius: 8px; background: var(--color-bg-tertiary); border: 1px solid var(--color-border); position: relative; transition: background var(--dur-fast) var(--ease-settle); }
+.sw::after { content: ""; position: absolute; left: 2px; top: 50%; transform: translateY(-50%); width: 10px; height: 10px; border-radius: 50%; background: var(--color-text-muted); transition: all var(--dur-fast) var(--ease-settle); }
+.sw.on { background: var(--color-accent); border-color: var(--color-accent); }
+.sw.on::after { left: 14px; background: var(--color-bg-sidebar); }
+
+/* ---------- Focus card ---------- */
+.focus-card {
+  position: fixed; right: var(--sp-4); top: 60px; z-index: 9; width: 250px;
+  background: color-mix(in srgb, var(--color-bg-elevated) 92%, transparent);
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--color-border); border-radius: var(--r-lg);
+  box-shadow: var(--shadow-3); overflow: hidden;
+}
+.focus-card .fc-body { padding: var(--sp-4); }
+.fc-eyebrow { font-size: 10.5px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase; color: var(--color-accent); margin-bottom: var(--sp-1); display: flex; align-items: center; gap: 6px; }
+.fc-eyebrow .dot { width: 7px; height: 7px; border-radius: 2px; background: var(--color-accent); }
+.focus-card h3 { font-family: var(--font-display); font-weight: 600; font-size: 22px; line-height: 1.15; margin-bottom: var(--sp-2); }
+.focus-card .fx { font-size: 12px; color: var(--color-text-secondary); line-height: 1.55; margin-bottom: var(--sp-3); }
+.fc-meta { display: flex; gap: var(--sp-3); font-size: 11px; color: var(--color-text-muted); margin-bottom: var(--sp-1); }
+.fc-meta b { color: var(--color-text-secondary); font-weight: 500; font-family: var(--font-mono); font-size: 10.5px; }
+.fc-actions { display: flex; border-top: 1px solid var(--color-border-muted); }
+.fc-actions button {
+  flex: 1; padding: 9px 0; font-size: 12px; font-weight: 500; color: var(--color-text-secondary);
+  transition: background var(--dur-fast) var(--ease-settle), color var(--dur-fast) var(--ease-settle);
+}
+.fc-actions button:hover { background: var(--color-bg-tertiary); color: var(--color-text-primary); }
+.fc-actions button.go { color: var(--color-accent); }
+.fc-actions button + button { border-left: 1px solid var(--color-border-muted); }
+
+/* ---------- Legend & zoom ---------- */
+.legend {
+  position: fixed; left: var(--sp-4); bottom: var(--sp-4); z-index: 9;
+  display: flex; gap: var(--sp-4); align-items: center;
+  background: color-mix(in srgb, var(--color-bg-panel) 85%, transparent);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border: 1px solid var(--color-border); border-radius: var(--r-full);
+  padding: 6px 14px; font-size: 11.5px; color: var(--color-text-secondary);
+}
+.legend .li { display: inline-flex; align-items: center; gap: 6px; }
+.legend .dot { width: 8px; height: 8px; border-radius: 50%; }
+.zoom {
+  position: fixed; right: var(--sp-4); bottom: var(--sp-4); z-index: 9;
+  display: flex; flex-direction: column;
+  background: color-mix(in srgb, var(--color-bg-panel) 85%, transparent);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border: 1px solid var(--color-border); border-radius: var(--r-md);
+  box-shadow: var(--shadow-2); overflow: hidden;
+}
+.zoom button {
+  width: 34px; height: 32px; display: flex; align-items: center; justify-content: center;
+  color: var(--color-text-secondary); font-size: 15px;
+  transition: background var(--dur-fast) var(--ease-settle), color var(--dur-fast) var(--ease-settle);
+}
+.zoom button:hover { background: var(--color-bg-tertiary); color: var(--color-text-primary); }
+.zoom button + button { border-top: 1px solid var(--color-border-muted); }
+.zoom .pct { font-family: var(--font-mono); font-size: 9.5px; color: var(--color-text-muted); }
+
+@media (max-width: 860px) {
+  .panel { display: none; }
+  .focus-card { right: var(--sp-3); top: 56px; width: 210px; }
+}
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="crumb">
+    <span class="wordmark">Nou<span class="tail">s</span></span>
+    <span class="here">Graph</span><span>·</span><span>All notebooks</span>
+  </div>
+  <div class="spacer"></div>
+  <button class="tb-btn">Focus mode <span class="kbd">F</span></button>
+  <button class="tb-btn" id="themeToggle" aria-label="Toggle color theme">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M20.5 14A8.5 8.5 0 0 1 10 3.5 8.5 8.5 0 1 0 20.5 14z"/></svg>
+  </button>
+</header>
+
+<div class="stage">
+  <div id="sky" aria-hidden="true"></div>
+  <svg id="graph" role="img" aria-label="Force-directed graph of 34 pages across five notebooks, centered on The Extended Mind"></svg>
+</div>
+
+<aside class="panel">
+  <h2>The constellation</h2>
+  <div class="sub">837 pages · 2,114 links</div>
+  <div class="p-label">Notebooks</div>
+  <button class="check"><span class="dot" style="background:var(--color-accent)"></span><span class="n">Research</span><span class="c">128</span></button>
+  <button class="check"><span class="dot" style="background:var(--color-info)"></span><span class="n">Daily Notes</span><span class="c">312</span></button>
+  <button class="check"><span class="dot" style="background:var(--color-success)"></span><span class="n">Reading</span><span class="c">64</span></button>
+  <button class="check"><span class="dot" style="background:var(--color-warning)"></span><span class="n">Erewhon</span><span class="c">89</span></button>
+  <button class="check"><span class="dot" style="background:var(--color-error)"></span><span class="n">Writing</span><span class="c">41</span></button>
+  <button class="check off"><span class="dot" style="background:var(--color-text-muted)"></span><span class="n">Archive</span><span class="c">203</span></button>
+  <div class="p-label">Depth from focus</div>
+  <div class="slider" role="slider" aria-valuemin="1" aria-valuemax="3" aria-valuenow="2" aria-label="Depth from focus" tabindex="0">
+    <div class="track"><div class="fill"></div><div class="thumb"></div></div>
+    <span class="val">2</span>
+  </div>
+  <div class="p-switch"><span>Show orphan pages</span><span class="sw" role="switch" aria-checked="false" tabindex="0"></span></div>
+  <div class="p-switch"><span>Dim unlinked</span><span class="sw on" role="switch" aria-checked="true" tabindex="0"></span></div>
+</aside>
+
+<aside class="focus-card">
+  <div class="fc-body">
+    <div class="fc-eyebrow"><span class="dot"></span>Research</div>
+    <h3>The Extended Mind</h3>
+    <div class="fx">Otto's notebook plays for Otto the role that memory plays for Inga — the coupling matters, not the location.</div>
+    <div class="fc-meta"><span><b>12</b> inbound</span><span><b>7</b> outbound</span><span>edited <b>2h</b></span></div>
+  </div>
+  <div class="fc-actions">
+    <button class="go">Open page</button>
+    <button>Center</button>
+  </div>
+</aside>
+
+<div class="legend">
+  <span class="li"><span class="dot" style="background:var(--color-accent)"></span>Research</span>
+  <span class="li"><span class="dot" style="background:var(--color-info)"></span>Daily</span>
+  <span class="li"><span class="dot" style="background:var(--color-success)"></span>Reading</span>
+  <span class="li"><span class="dot" style="background:var(--color-warning)"></span>Erewhon</span>
+  <span class="li"><span class="dot" style="background:var(--color-error)"></span>Writing</span>
+</div>
+
+<div class="zoom">
+  <button aria-label="Zoom in">+</button>
+  <button aria-label="Zoom out">−</button>
+  <button aria-label="Zoom to fit" class="pct">100%</button>
+</div>
+
+<script>
+const root = document.documentElement;
+document.getElementById("themeToggle").addEventListener("click", () => {
+  root.dataset.theme = root.dataset.theme === "dark" ? "light" : "dark";
+});
+
+/* ---- Decorative sky (dark mode only, via CSS) ---- */
+const sky = document.getElementById("sky");
+const starSeed = [
+  [4,12],[9,28],[14,7],[19,44],[24,16],[29,68],[33,30],[38,84],[43,9],[48,55],
+  [53,22],[58,74],[63,38],[68,12],[73,62],[78,27],[83,80],[88,48],[93,18],[96,70],
+  [7,88],[17,58],[27,92],[47,78],[67,88],[87,64],[12,72],[52,6],[72,40],[92,86]
+];
+starSeed.forEach(([x, y], i) => {
+  const s = document.createElement("div");
+  s.className = "star";
+  const size = (i % 3 === 0) ? 2 : 1.4;
+  s.style.cssText = `left:${x}%;top:${y}%;width:${size}px;height:${size}px;animation-delay:${(i * 0.7) % 7}s`;
+  sky.appendChild(s);
+});
+
+/* ---- The constellation ---- */
+const C = {
+  research: "var(--color-accent)",
+  daily: "var(--color-info)",
+  reading: "var(--color-success)",
+  erewhon: "var(--color-warning)",
+  writing: "var(--color-error)"
+};
+/* x,y in a 1280×760 space; r = degree-weighted radius */
+const nodes = [
+  { id:"ext",  label:"The Extended Mind",              x:560, y:330, r:13, c:"research", focus:true },
+  { id:"tft",  label:"Tools for thought",              x:428, y:238, r:10, c:"research" },
+  { id:"zet",  label:"Zettelkasten, actually practiced",x:398, y:388, r:8,  c:"research" },
+  { id:"att",  label:"Attention is a finite resource", x:520, y:172, r:7,  c:"research" },
+  { id:"lfc",  label:"Local-first as cognitive coupling",x:688, y:242, r:8, c:"research" },
+  { id:"wm",   label:"Working memory",                 x:474, y:462, r:5,  c:"research" },
+  { id:"par",  label:"Parity principle",               x:648, y:436, r:5,  c:"research" },
+  { id:"com",  label:"Commonplace book",               x:326, y:308, r:6,  c:"research" },
+  { id:"spa",  label:"Spaced repetition",              x:300, y:180, r:5,  c:"research" },
+  { id:"mar",  label:"Marginalia",                     x:238, y:262, r:4,  c:"research" },
+
+  { id:"d19", label:"2026-07-19", x:868, y:132, r:5, c:"daily" },
+  { id:"d18", label:"2026-07-18", x:948, y:196, r:4, c:"daily" },
+  { id:"d14", label:"2026-07-14", x:830, y:236, r:5, c:"daily" },
+  { id:"d12", label:"2026-07-12", x:1002, y:130, r:4, c:"daily" },
+  { id:"d05", label:"2026-07-05", x:934, y:76,  r:4, c:"daily" },
+
+  { id:"rlog", label:"Reading Log",             x:238, y:534, r:9, c:"reading" },
+  { id:"dawn", label:"The Dawn of Everything",  x:132, y:470, r:6, c:"reading" },
+  { id:"exh",  label:"Exhalation",              x:150, y:610, r:5, c:"reading" },
+  { id:"pir",  label:"Piranesi",                x:280, y:660, r:5, c:"reading" },
+  { id:"smart",label:"How to Take Smart Notes", x:372, y:560, r:7, c:"reading" },
+  { id:"ftw",  label:"Four Thousand Weeks",     x:118, y:368, r:5, c:"reading" },
+
+  { id:"topo", label:"Homelab topology v3",  x:988, y:474, r:8, c:"erewhon" },
+  { id:"sync", label:"Sync engine notes",    x:862, y:420, r:7, c:"erewhon" },
+  { id:"bak",  label:"Backup runbook",       x:1096, y:410, r:5, c:"erewhon" },
+  { id:"mesh", label:"NetBird mesh",         x:1102, y:540, r:5, c:"erewhon" },
+  { id:"inc",  label:"Incident 2026-06-14",  x:938, y:568, r:5, c:"erewhon" },
+
+  { id:"draft", label:"Draft: local-first is a feature of minds", x:668, y:588, r:8, c:"writing" },
+  { id:"queue", label:"Blog queue",                    x:566, y:664, r:5, c:"writing" },
+  { id:"parp",  label:"Parity-principle post",         x:784, y:648, r:5, c:"writing" }
+];
+const edges = [
+  ["ext","tft"],["ext","zet"],["ext","lfc"],["ext","par"],["ext","wm"],["ext","smart"],
+  ["ext","d14"],["ext","draft"],["ext","com"],
+  ["tft","att"],["tft","spa"],["tft","zet"],["tft","com"],["tft","lfc"],
+  ["zet","smart"],["zet","com"],["com","mar"],["spa","att"],
+  ["lfc","sync"],["lfc","draft"],["par","draft"],["par","parp"],
+  ["d19","d18"],["d18","d14"],["d14","d12"],["d12","d05"],["d19","ext"],
+  ["rlog","dawn"],["rlog","exh"],["rlog","pir"],["rlog","smart"],["rlog","ftw"],
+  ["smart","com"],["ftw","att"],
+  ["topo","sync"],["topo","bak"],["topo","mesh"],["topo","inc"],["sync","inc"],
+  ["draft","queue"],["draft","parp"],["queue","parp"],["sync","d14"]
+];
+
+const svg = document.getElementById("graph");
+const NS = "http://www.w3.org/2000/svg";
+svg.setAttribute("viewBox", "0 0 1280 760");
+svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+
+const byId = Object.fromEntries(nodes.map(n => [n.id, n]));
+const edgeEls = [];
+edges.forEach(([a, b]) => {
+  const A = byId[a], B = byId[b];
+  const line = document.createElementNS(NS, "line");
+  line.setAttribute("x1", A.x); line.setAttribute("y1", A.y);
+  line.setAttribute("x2", B.x); line.setAttribute("y2", B.y);
+  line.setAttribute("class", "edge");
+  line.dataset.a = a; line.dataset.b = b;
+  if (a === "ext" || b === "ext") line.classList.add("hot");
+  svg.appendChild(line);
+  edgeEls.push(line);
+});
+
+nodes.forEach(n => {
+  const g = document.createElementNS(NS, "g");
+  g.setAttribute("class", "node" + (n.focus ? " focus" : ""));
+  g.setAttribute("tabindex", "0");
+  g.setAttribute("role", "button");
+  g.setAttribute("aria-label", n.label);
+
+  if (n.focus) {
+    const halo = document.createElementNS(NS, "circle");
+    halo.setAttribute("cx", n.x); halo.setAttribute("cy", n.y);
+    halo.setAttribute("r", n.r + 9);
+    halo.setAttribute("class", "halo");
+    halo.setAttribute("stroke-width", "1.5");
+    g.appendChild(halo);
+  }
+  const dot = document.createElementNS(NS, "circle");
+  dot.setAttribute("cx", n.x); dot.setAttribute("cy", n.y);
+  dot.setAttribute("r", n.r);
+  dot.setAttribute("class", "core");
+  dot.setAttribute("fill", C[n.c]);
+  dot.setAttribute("fill-opacity", n.focus ? "1" : "0.82");
+  g.appendChild(dot);
+
+  if (n.r >= 5) {
+    const t = document.createElementNS(NS, "text");
+    t.setAttribute("x", n.x); t.setAttribute("y", n.y + n.r + (n.focus ? 24 : 15));
+    t.setAttribute("text-anchor", "middle");
+    t.textContent = n.label;
+    g.appendChild(t);
+  }
+
+  g.addEventListener("mouseenter", () => {
+    edgeEls.forEach(e => {
+      const touches = e.dataset.a === n.id || e.dataset.b === n.id;
+      e.classList.toggle("hot", touches || e.dataset.a === "ext" || e.dataset.b === "ext");
+    });
+  });
+  g.addEventListener("mouseleave", () => {
+    edgeEls.forEach(e => e.classList.toggle("hot", e.dataset.a === "ext" || e.dataset.b === "ext"));
+  });
+  svg.appendChild(g);
+});
+</script>
+</body>
+</html>

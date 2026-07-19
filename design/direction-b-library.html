@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nous — Direction B · The Workshop · Library</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22><circle cx=%228%22 cy=%228%22 r=%226%22 fill=%22%238b5cf6%22/></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400..700;1,400..700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script>const _t=new URLSearchParams(location.search).get("theme");if(_t==="light"||_t==="dark")document.documentElement.dataset.theme=_t;</script>
+<style>
+/* NOUS · DIRECTION B · "THE WORKSHOP" · Library / notebook home */
+
+:root {
+  --font-ui: "Instrument Sans", -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono", "SF Mono", Menlo, monospace;
+  --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px; --sp-4: 16px; --sp-5: 20px;
+  --sp-6: 24px; --sp-7: 32px; --sp-8: 40px; --sp-9: 48px; --sp-10: 64px;
+  --r-xs: 5px; --r-sm: 8px; --r-md: 10px; --r-lg: 14px; --r-full: 999px;
+  --dur-fast: 120ms; --dur-base: 160ms; --dur-slow: 220ms;
+  --ease-work: cubic-bezier(.25,.1,.25,1);
+}
+:root[data-theme="dark"] {
+  --color-bg-primary: #17171d; --color-bg-secondary: #141419; --color-bg-tertiary: #22222b;
+  --color-bg-elevated: #1d1d25; --color-bg-sidebar: #0e0e12; --color-bg-panel: #131317;
+  --color-text-primary: #ececf1; --color-text-secondary: #a3a3b2; --color-text-muted: #80808f;
+  --color-accent: #8b7cf8; --color-accent-hover: #a29af9;
+  --color-accent-secondary: #6c5ce7; --color-accent-tertiary: #5646c6;
+  --color-success: #56c186; --color-warning: #dfae4f; --color-error: #ec6a5e; --color-info: #5aa7e8;
+  --color-border: #26262f; --color-border-muted: #1e1e26;
+  --color-selection: rgba(139, 124, 248, 0.25);
+  --shadow-1: 0 1px 2px rgba(0,0,0,.4);
+  --shadow-2: 0 2px 6px rgba(0,0,0,.35), 0 1px 2px rgba(0,0,0,.3);
+  --shadow-3: 0 10px 32px rgba(0,0,0,.45), 0 2px 8px rgba(0,0,0,.3);
+  --shadow-4: 0 24px 64px rgba(0,0,0,.55), 0 4px 16px rgba(0,0,0,.35);
+  --edge-highlight: inset 0 1px 0 rgba(255,255,255,.09);
+}
+:root[data-theme="light"] {
+  --color-bg-primary: #fdfdfd; --color-bg-secondary: #f5f5f7; --color-bg-tertiary: #ebebef;
+  --color-bg-elevated: #ffffff; --color-bg-sidebar: #f8f8fa; --color-bg-panel: #fafafb;
+  --color-text-primary: #1b1b21; --color-text-secondary: #55555f; --color-text-muted: #6e6e79;
+  --color-accent: #5b48d8; --color-accent-hover: #5443c4;
+  --color-accent-secondary: #4f3fbd; --color-accent-tertiary: #40339c;
+  --color-success: #136c3d; --color-warning: #7d5608; --color-error: #af352c; --color-info: #1e639f;
+  --color-border: #e5e5ea; --color-border-muted: #efeff3;
+  --color-selection: rgba(91, 72, 216, 0.16);
+  --shadow-1: 0 1px 2px rgba(24,24,33,.06);
+  --shadow-2: 0 2px 8px rgba(24,24,33,.08), 0 1px 2px rgba(24,24,33,.05);
+  --shadow-3: 0 10px 32px rgba(24,24,33,.12), 0 2px 8px rgba(24,24,33,.06);
+  --shadow-4: 0 24px 64px rgba(24,24,33,.18), 0 4px 16px rgba(24,24,33,.08);
+  --edge-highlight: inset 0 1px 0 rgba(255,255,255,.6);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+::selection { background: var(--color-selection); }
+body {
+  font-family: var(--font-ui); font-size: 13px; font-weight: 450; line-height: 1.5;
+  background: var(--color-bg-primary); color: var(--color-text-primary);
+  -webkit-font-smoothing: antialiased;
+  transition: background var(--dur-slow) var(--ease-work), color var(--dur-slow) var(--ease-work);
+}
+:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--color-bg-primary),
+              0 0 0 4px color-mix(in srgb, var(--color-accent) 75%, transparent);
+  border-radius: var(--r-xs);
+}
+button { font-family: inherit; color: inherit; background: none; border: none; cursor: pointer; }
+a { color: inherit; }
+
+/* ---------- Top bar ---------- */
+.topbar {
+  height: 52px; display: flex; align-items: center; gap: var(--sp-4);
+  padding: 0 var(--sp-6); border-bottom: 1px solid var(--color-border-muted);
+  position: sticky; top: 0; background: var(--color-bg-primary); z-index: 5;
+  transition: background var(--dur-slow) var(--ease-work);
+}
+.wordmark { font-weight: 700; font-size: 21px; letter-spacing: -.03em; }
+.wordmark .tail { color: var(--color-accent); }
+.topbar .spacer { flex: 1; }
+.cmdk {
+  display: flex; align-items: center; gap: var(--sp-2);
+  background: var(--color-bg-secondary); border: 1px solid var(--color-border);
+  border-radius: var(--r-sm); padding: 7px 12px; width: 340px;
+  color: var(--color-text-muted); font-size: 12.5px; cursor: text;
+  transition: border-color var(--dur-fast) var(--ease-work);
+}
+.cmdk:hover { border-color: var(--color-text-muted); }
+.cmdk .ph { flex: 1; text-align: left; }
+.kbd {
+  font-family: var(--font-mono); font-size: 10px; color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary); border: 1px solid var(--color-border);
+  border-bottom-width: 2px; border-radius: var(--r-xs); padding: 1px 5px; line-height: 1.4;
+}
+.tb-btn {
+  display: inline-flex; align-items: center; gap: var(--sp-2);
+  font-size: 12.5px; font-weight: 550; color: var(--color-text-secondary);
+  padding: 6px 10px; border-radius: var(--r-sm);
+  transition: background var(--dur-fast) var(--ease-work), color var(--dur-fast) var(--ease-work), transform var(--dur-fast) var(--ease-work);
+}
+.tb-btn:hover { background: var(--color-bg-tertiary); color: var(--color-text-primary); }
+.tb-btn:active { transform: scale(.985); }
+.tb-btn.primary { background: var(--color-accent); color: #fff; box-shadow: var(--edge-highlight), var(--shadow-1); }
+.tb-btn.primary:hover { background: var(--color-accent-hover); }
+
+/* ---------- Page ---------- */
+.wrap { max-width: 1160px; margin: 0 auto; padding: var(--sp-8) var(--sp-6) var(--sp-10); }
+.hello { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--sp-4); margin-bottom: var(--sp-7); }
+.hello h1 { font-weight: 650; font-size: 27px; letter-spacing: -.02em; line-height: 1.15; margin-bottom: var(--sp-1); }
+.hello .sub { color: var(--color-text-secondary); font-size: 13.5px; }
+.hello .sub b { color: var(--color-text-primary); font-weight: 550; }
+.hello .date { font-family: var(--font-mono); font-size: 11.5px; color: var(--color-text-muted); }
+
+.sec-label {
+  font-size: 11px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase;
+  color: var(--color-text-muted); margin-bottom: var(--sp-3);
+  display: flex; align-items: center; justify-content: space-between;
+}
+.sec-label .more { font-size: 12px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--color-text-muted); }
+.sec-label .more:hover { color: var(--color-accent); }
+
+/* Jump back in */
+.jump { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--sp-3); margin-bottom: var(--sp-8); }
+.jump-card {
+  position: relative; text-align: left;
+  background: var(--color-bg-elevated); border: 1px solid var(--color-border);
+  border-radius: var(--r-md); padding: var(--sp-4) var(--sp-4) var(--sp-4) calc(var(--sp-4) + 6px);
+  box-shadow: var(--edge-highlight), var(--shadow-1);
+  transition: transform var(--dur-base) var(--ease-work), box-shadow var(--dur-base) var(--ease-work), border-color var(--dur-base) var(--ease-work);
+  cursor: pointer;
+}
+.jump-card::before {
+  content: ""; position: absolute; left: 6px; top: 50%; transform: translateY(-50%);
+  width: 3px; height: 18px; border-radius: 2px; background: var(--jc, var(--color-accent));
+}
+.jump-card:hover { transform: translateY(-2px); box-shadow: var(--edge-highlight), var(--shadow-2); border-color: var(--color-text-muted); }
+.jump-card .jt { font-size: 13.5px; font-weight: 550; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.jump-card .jm { font-size: 11.5px; color: var(--color-text-muted); display: flex; gap: var(--sp-2); }
+
+/* ---------- Notebook grid ---------- */
+.shelf {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: var(--sp-3); margin-bottom: var(--sp-9);
+}
+.nb-card {
+  --nb: var(--color-accent);
+  text-align: left;
+  background: var(--color-bg-elevated); border: 1px solid var(--color-border);
+  border-radius: var(--r-lg); padding: var(--sp-4);
+  box-shadow: var(--edge-highlight), var(--shadow-1);
+  transition: transform var(--dur-base) var(--ease-work), box-shadow var(--dur-base) var(--ease-work), border-color var(--dur-base) var(--ease-work);
+  cursor: pointer;
+}
+.nb-card:hover { transform: translateY(-2px); box-shadow: var(--edge-highlight), var(--shadow-3); border-color: color-mix(in srgb, var(--nb) 40%, var(--color-border)); }
+.nb-card .head { display: flex; align-items: center; gap: var(--sp-3); margin-bottom: var(--sp-3); }
+.nb-card .ictile {
+  width: 34px; height: 34px; border-radius: var(--r-sm); flex: none;
+  background: color-mix(in srgb, var(--nb) 14%, transparent);
+  color: var(--nb);
+  display: flex; align-items: center; justify-content: center;
+}
+.nb-card h3 { font-weight: 600; font-size: 15px; letter-spacing: -.008em; }
+.nb-card .desc { font-size: 12.5px; color: var(--color-text-secondary); line-height: 1.5; min-height: 2.9em; }
+.nb-card .meta {
+  display: flex; gap: var(--sp-2); align-items: baseline; margin-top: var(--sp-3);
+  font-size: 11.5px; color: var(--color-text-muted);
+}
+.nb-card .meta b { font-family: var(--font-mono); font-weight: 500; font-size: 11px; color: var(--color-text-secondary); }
+.nb-card.ghost {
+  background: transparent; border-style: dashed; box-shadow: none;
+  display: flex; align-items: center; justify-content: center; gap: var(--sp-2);
+  color: var(--color-text-muted); font-size: 13px; min-height: 118px;
+}
+.nb-card.ghost:hover { color: var(--color-accent); border-color: color-mix(in srgb, var(--color-accent) 45%, transparent); transform: none; box-shadow: none; }
+
+/* ---------- Lower columns ---------- */
+.cols { display: grid; grid-template-columns: 1.6fr 1fr; gap: var(--sp-7); }
+.recent { display: flex; flex-direction: column; gap: 2px; }
+.r-row {
+  display: flex; align-items: center; gap: var(--sp-3); width: 100%; text-align: left;
+  padding: 8px 10px; border-radius: var(--r-sm); font-size: 13.5px;
+  color: var(--color-text-secondary); text-decoration: none;
+  transition: background var(--dur-fast) var(--ease-work), color var(--dur-fast) var(--ease-work);
+}
+.r-row:hover { background: var(--color-bg-tertiary); color: var(--color-text-primary); }
+.r-row .dot { flex: none; width: 8px; height: 8px; border-radius: 2.5px; }
+.r-row .t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 550; color: var(--color-text-primary); }
+.r-row .nb-name { font-size: 11.5px; color: var(--color-text-muted); flex: none; }
+.r-row .when { font-size: 11px; font-family: var(--font-mono); color: var(--color-text-muted); flex: none; width: 34px; text-align: right; }
+
+/* Today panel */
+.today {
+  background: var(--color-bg-elevated); border: 1px solid var(--color-border);
+  border-radius: var(--r-lg); box-shadow: var(--edge-highlight), var(--shadow-2); overflow: hidden;
+}
+.today .th {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: var(--sp-4) var(--sp-5); border-bottom: 1px solid var(--color-border-muted);
+}
+.today .th h3 { font-weight: 600; font-size: 14.5px; letter-spacing: -.008em; }
+.today .th span { font-size: 11px; font-family: var(--font-mono); color: var(--color-text-muted); }
+.today .tb { padding: var(--sp-4) var(--sp-5); }
+.today p { font-size: 13px; line-height: 1.6; color: var(--color-text-secondary); margin-bottom: var(--sp-3); }
+.today .wiki { color: var(--color-accent); border-bottom: 1px solid color-mix(in srgb, var(--color-accent) 32%, transparent); cursor: pointer; }
+.todo { display: flex; align-items: flex-start; gap: var(--sp-3); padding: 3px 0; font-size: 13px; }
+.todo .box {
+  flex: none; width: 15px; height: 15px; margin-top: 2px; border-radius: 4.5px;
+  border: 1.5px solid var(--color-text-muted); cursor: pointer; position: relative;
+  transition: all var(--dur-fast) var(--ease-work); background: none;
+}
+.todo.is-done .box { background: var(--color-accent); border-color: var(--color-accent); }
+.todo.is-done .box::after {
+  content: ""; position: absolute; left: 3.8px; top: 1px; width: 3.5px; height: 7px;
+  border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg);
+}
+.todo.is-done .txt { color: var(--color-text-muted); text-decoration: line-through; }
+.stats {
+  display: grid; grid-template-columns: repeat(3, 1fr);
+  border-top: 1px solid var(--color-border-muted);
+}
+.stat { padding: var(--sp-3) var(--sp-4); text-align: center; }
+.stat + .stat { border-left: 1px solid var(--color-border-muted); }
+.stat .v { font-family: var(--font-mono); font-size: 15px; font-weight: 500; color: var(--color-text-primary); }
+.stat .k { font-size: 10.5px; color: var(--color-text-muted); margin-top: 1px; }
+
+/* Footer */
+.foot {
+  margin-top: var(--sp-10); padding-top: var(--sp-5); border-top: 1px solid var(--color-border-muted);
+  display: flex; justify-content: space-between; font-size: 11.5px; color: var(--color-text-muted);
+}
+.foot .lic { font-family: var(--font-mono); font-size: 10.5px; }
+
+@media (max-width: 1000px) { .cols { grid-template-columns: 1fr; } .cmdk { width: 220px; } .jump { grid-template-columns: 1fr; } }
+@media (max-width: 560px) {
+  .wrap { padding: var(--sp-6) var(--sp-4); }
+  .cmdk { display: none; }
+  .shelf { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 420px) { .shelf { grid-template-columns: 1fr; } }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="wordmark">Nou<span class="tail">s</span></div>
+  <div class="spacer"></div>
+  <button class="cmdk"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span class="ph">Search or run a command…</span><span class="kbd">⌘K</span></button>
+  <div class="spacer"></div>
+  <button class="tb-btn primary">New page</button>
+  <button class="tb-btn" id="themeToggle" aria-label="Toggle color theme">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M20.5 14A8.5 8.5 0 0 1 10 3.5 8.5 8.5 0 1 0 20.5 14z"/></svg>
+  </button>
+  <button class="tb-btn" aria-label="Settings">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M4.5 4.5l2 2M17.5 17.5l2 2M2 12h3M19 12h3M4.5 19.5l2-2M17.5 6.5l2-2"/></svg>
+  </button>
+</header>
+
+<div class="wrap">
+  <div class="hello">
+    <div>
+      <h1>Library</h1>
+      <div class="sub">Six notebooks, <b>837 pages</b> · last edit <b>20 minutes ago</b> in <b>Erewhon</b></div>
+    </div>
+    <div class="date">Sat 2026-07-19</div>
+  </div>
+
+  <div class="sec-label"><span>Jump back in</span></div>
+  <div class="jump">
+    <button class="jump-card" style="--jc:var(--color-warning)">
+      <div class="jt">Sync engine — design notes</div>
+      <div class="jm"><span>Erewhon</span><span>·</span><span>20m ago</span></div>
+    </button>
+    <button class="jump-card" style="--jc:var(--color-info)">
+      <div class="jt">2026-07-19</div>
+      <div class="jm"><span>Daily Notes</span><span>·</span><span>5h ago</span></div>
+    </button>
+    <button class="jump-card" style="--jc:var(--color-accent)">
+      <div class="jt">The Extended Mind</div>
+      <div class="jm"><span>Research</span><span>·</span><span>yesterday</span></div>
+    </button>
+  </div>
+
+  <div class="sec-label"><span>Notebooks</span><button class="more">Manage →</button></div>
+  <div class="shelf">
+    <button class="nb-card" style="--nb:var(--color-accent)">
+      <div class="head">
+        <span class="ictile"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M9.5 3v18M3 9.5h18"/></svg></span>
+        <h3>Research</h3>
+      </div>
+      <div class="desc">Extended cognition, note-taking systems, attention, memory.</div>
+      <div class="meta"><b>128</b><span>pages</span><span>·</span><span>edited yesterday</span></div>
+    </button>
+    <button class="nb-card" style="--nb:var(--color-info)">
+      <div class="head">
+        <span class="ictile"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="4" y="5" width="16" height="16" rx="2"/><path d="M16 3v4M8 3v4M4 11h16"/></svg></span>
+        <h3>Daily Notes</h3>
+      </div>
+      <div class="desc">One page a day — carry-forward tasks, energy, the log of small things.</div>
+      <div class="meta"><b>312</b><span>pages</span><span>·</span><span>edited today</span></div>
+    </button>
+    <button class="nb-card" style="--nb:var(--color-warning)">
+      <div class="head">
+        <span class="ictile"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M5 21V7l7-4 7 4v14"/><path d="M9 21v-6h6v6"/></svg></span>
+        <h3>Erewhon</h3>
+      </div>
+      <div class="desc">The homelab: topology, runbooks, incidents, plans.</div>
+      <div class="meta"><b>89</b><span>pages</span><span>·</span><span>edited 20m ago</span></div>
+    </button>
+    <button class="nb-card" style="--nb:var(--color-success)">
+      <div class="head">
+        <span class="ictile"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 19V5a2 2 0 0 1 2-2h13v18H6a2 2 0 0 1-2-2z"/><path d="M19 17H6a2 2 0 0 0 0 4"/></svg></span>
+        <h3>Reading</h3>
+      </div>
+      <div class="desc">Book notes, the reading log database, quotes worth keeping.</div>
+      <div class="meta"><b>64</b><span>pages</span><span>·</span><span>edited yesterday</span></div>
+    </button>
+    <button class="nb-card" style="--nb:var(--color-error)">
+      <div class="head">
+        <span class="ictile"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="m17 3 4 4L8 20l-5 1 1-5z"/></svg></span>
+        <h3>Writing</h3>
+      </div>
+      <div class="desc">Drafts, outlines, half-arguments on their way to posts.</div>
+      <div class="meta"><b>41</b><span>pages</span><span>·</span><span>edited 5d ago</span></div>
+    </button>
+    <button class="nb-card" style="--nb:var(--color-text-muted)">
+      <div class="head">
+        <span class="ictile"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8M10 12h4"/></svg></span>
+        <h3>Archive</h3>
+      </div>
+      <div class="desc">Cold storage — finished projects, still searchable.</div>
+      <div class="meta"><b>203</b><span>pages</span><span>·</span><span>edited May 12</span></div>
+    </button>
+    <button class="nb-card ghost">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+      New notebook
+    </button>
+  </div>
+
+  <div class="cols">
+    <div>
+      <div class="sec-label"><span>Recent</span><button class="more">All pages →</button></div>
+      <div class="recent">
+        <a class="r-row" href="#"><span class="dot" style="background:var(--color-warning)"></span><span class="t">Sync engine — design notes</span><span class="nb-name">Erewhon</span><span class="when">20m</span></a>
+        <a class="r-row" href="#"><span class="dot" style="background:var(--color-info)"></span><span class="t">2026-07-19</span><span class="nb-name">Daily Notes</span><span class="when">5h</span></a>
+        <a class="r-row" href="#"><span class="dot" style="background:var(--color-accent)"></span><span class="t">The Extended Mind</span><span class="nb-name">Research</span><span class="when">1d</span></a>
+        <a class="r-row" href="#"><span class="dot" style="background:var(--color-success)"></span><span class="t">The Dawn of Everything — notes</span><span class="nb-name">Reading</span><span class="when">1d</span></a>
+        <a class="r-row" href="#"><span class="dot" style="background:var(--color-warning)"></span><span class="t">Homelab topology v3</span><span class="nb-name">Erewhon</span><span class="when">3d</span></a>
+        <a class="r-row" href="#"><span class="dot" style="background:var(--color-error)"></span><span class="t">Draft: local-first is a feature of minds</span><span class="nb-name">Writing</span><span class="when">5d</span></a>
+        <a class="r-row" href="#"><span class="dot" style="background:var(--color-accent)"></span><span class="t">Zettelkasten, actually practiced</span><span class="nb-name">Research</span><span class="when">6d</span></a>
+        <a class="r-row" href="#"><span class="dot" style="background:var(--color-info)"></span><span class="t">2026-07-18</span><span class="nb-name">Daily Notes</span><span class="when">1d</span></a>
+      </div>
+    </div>
+
+    <div>
+      <div class="sec-label"><span>Today</span></div>
+      <div class="today">
+        <div class="th"><h3>Saturday, July 19</h3><span>2026-07-19</span></div>
+        <div class="tb">
+          <p>Compaction fence sketch is in. Next: property tests for <span class="wiki">[[Sync engine — design notes]]</span> before the weekend ends.</p>
+          <div class="todo is-done"><button class="box" role="checkbox" aria-checked="true" aria-label="toggle"></button><span class="txt">Morning review</span></div>
+          <div class="todo"><button class="box" role="checkbox" aria-checked="false" aria-label="toggle"></button><span class="txt">Property test: replay convergence</span></div>
+          <div class="todo"><button class="box" role="checkbox" aria-checked="false" aria-label="toggle"></button><span class="txt">Triage release 0.9 board</span></div>
+        </div>
+        <div class="stats">
+          <div class="stat"><div class="v">3/5</div><div class="k">tasks</div></div>
+          <div class="stat"><div class="v">17</div><div class="k">cards due</div></div>
+          <div class="stat"><div class="v">12d</div><div class="k">streak</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer class="foot">
+    <span>Local-first · private · yours</span>
+    <span class="lic">AGPL-3.0 · Nous</span>
+  </footer>
+</div>
+
+<script>
+const root = document.documentElement;
+document.getElementById("themeToggle").addEventListener("click", () => {
+  root.dataset.theme = root.dataset.theme === "dark" ? "light" : "dark";
+});
+document.querySelectorAll(".todo .box").forEach(box => {
+  box.addEventListener("click", () => {
+    const t = box.parentElement.classList.toggle("is-done");
+    box.setAttribute("aria-checked", String(t));
+  });
+});
+</script>
+</body>
+</html>
