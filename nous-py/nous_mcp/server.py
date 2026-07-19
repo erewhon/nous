@@ -400,6 +400,85 @@ def update_page(
     )
 
 
+def _resolve_page_for_delete(pages: list[dict], query: str) -> dict:
+    """Strictly resolve ``query`` (UUID, exact title, or unique title prefix)
+    against a notebook's non-trashed pages.
+
+    Deletion is the one operation where a silently wrong match is expensive,
+    so unlike the read tools (whose resolve takes the first match) this fails
+    loudly: an ambiguous title or prefix raises with the candidates listed
+    instead of guessing.
+    """
+    from nous_mcp.storage import UUID_RE
+
+    live = [p for p in pages if p.get("deletedAt") is None]
+    q = query.strip()
+
+    if UUID_RE.match(q):
+        for p in live:
+            if p.get("id", "").lower() == q.lower():
+                return p
+        raise ValueError(
+            f"No page with id {q} in this notebook (it may already be in trash)."
+        )
+
+    ql = q.lower()
+    exact = [p for p in live if p.get("title", "").lower() == ql]
+    if len(exact) == 1:
+        return exact[0]
+    if len(exact) > 1:
+        titles = ", ".join(f"{p['title']!r} ({p['id']})" for p in exact[:10])
+        raise ValueError(
+            f"Ambiguous page title {query!r} — {len(exact)} pages share it: "
+            f"{titles}. Pass the page UUID to delete a specific one."
+        )
+
+    prefix = [p for p in live if p.get("title", "").lower().startswith(ql)]
+    if len(prefix) == 1:
+        return prefix[0]
+    if len(prefix) > 1:
+        titles = ", ".join(f"{p['title']!r} ({p['id']})" for p in prefix[:10])
+        raise ValueError(
+            f"Ambiguous page reference {query!r} — matches {len(prefix)} pages: "
+            f"{titles}. Use a longer prefix, the exact title, or the page UUID."
+        )
+    raise ValueError(f"No page matching {query!r} in this notebook.")
+
+
+@mcp.tool()
+def delete_page(notebook: str, page: str) -> str:
+    """Delete a page. Soft delete: the page moves to trash and stays restorable.
+
+    Args:
+        notebook: Notebook name or UUID.
+        page: Page title (exact or unique prefix) or UUID. Unlike the read
+            tools, an ambiguous title or prefix is an error rather than a
+            guess — deletion never picks among multiple matches. Pass the
+            page UUID to disambiguate.
+
+    Returns JSON with id, title, notebookId, and deleted status. The page is
+    soft-deleted (moved to trash, restorable from the app); there is no
+    permanent-delete path through this tool.
+    """
+    storage = _get_storage()
+    daemon = _get_daemon()
+    nb = storage.resolve_notebook(notebook)
+
+    target = _resolve_page_for_delete(daemon.list_pages(nb["id"]), page)
+    daemon.delete_page(nb["id"], target["id"])
+
+    return json.dumps(
+        {
+            "id": target["id"],
+            "title": target.get("title", ""),
+            "notebookId": nb["id"],
+            "deleted": True,
+            "trash": "Soft-deleted — restorable from the app's trash.",
+        },
+        indent=2,
+    )
+
+
 @mcp.tool()
 def create_folder(
     notebook: str,

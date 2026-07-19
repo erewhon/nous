@@ -134,6 +134,13 @@ class NousDaemonClient:
         )
         return self._unwrap(resp)
 
+    def delete_page(self, notebook_id: str, page_id: str) -> dict:
+        """Soft-delete a page — sets deleted_at, moving it to trash (restorable)."""
+        resp = self.client.delete(
+            self._url(f"/api/notebooks/{notebook_id}/pages/{page_id}")
+        )
+        return self._unwrap(resp)
+
     def create_page(
         self,
         notebook_id: str,
