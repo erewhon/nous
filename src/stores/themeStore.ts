@@ -7,7 +7,7 @@ const THEME_STORE_KEY = libraryScopedKey("nous-theme");
 
 export type ThemeMode = "light" | "dark" | "system";
 export type ColorScheme = "study" | "default" | "catppuccin" | "nord" | "dracula" | "tufte";
-export type FontFamily = "system" | "inter" | "jetbrains-mono" | "fira-code" | "serif" | "tufte";
+export type FontFamily = "dm-sans" | "system" | "inter" | "jetbrains-mono" | "fira-code" | "serif" | "tufte";
 export type EditorWidth = "narrow" | "medium" | "wide" | "full";
 export type UIMode = "classic" | "overview";
 export type NotebookSortOption = "position" | "name-asc" | "name-desc" | "updated" | "created" | "pages";
@@ -132,7 +132,7 @@ interface ThemeState {
 const DEFAULT_SETTINGS: ThemeSettings = {
   mode: "dark",
   colorScheme: "study",
-  fontFamily: "system",
+  fontFamily: "dm-sans",
   editorWidth: "medium",
   editorKeymap: "standard",
   fontSize: 16,
@@ -431,6 +431,7 @@ const COLOR_SCHEMES = {
 };
 
 const FONT_FAMILIES = {
+  "dm-sans": '"DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
   system: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
   inter: '"Inter", -apple-system, BlinkMacSystemFont, sans-serif',
   "jetbrains-mono": '"JetBrains Mono", "Fira Code", monospace',
