@@ -1,0 +1,406 @@
+{
+  "time": 1775403984818,
+  "version": "2.28.0",
+  "blocks": [
+    {
+      "id": "4af5f90b-2",
+      "type": "list",
+      "data": {
+        "items": [
+          {
+            "content": "Welcome to Joplin!",
+            "items": []
+          }
+        ],
+        "style": "ordered"
+      }
+    },
+    {
+      "id": "1da51185-b",
+      "type": "header",
+      "data": {
+        "level": 1,
+        "text": "Welcome to Joplin!"
+      }
+    },
+    {
+      "id": "578faaea-7",
+      "type": "paragraph",
+      "data": {
+        "text": "Joplin is a free, open source note taking and to-do application, which helps you write and organise your notes, and synchronise them between your devices. The notes are searchable, can be copied, tagged and modified either from the application directly or from your own text editor. The notes are in <a href=\"https://joplinapp.org/help/apps/markdown\">Markdown format</a>. Joplin is available as a <b>desktop</b>, <b>mobile</b> and <b>terminal</b> application."
+      }
+    },
+    {
+      "id": "82ab3932-9",
+      "type": "paragraph",
+      "data": {
+        "text": "The notes in this notebook give an overview of what Joplin can do and how to use it. In general, the three applications share roughly the same functionalities; any differences will be clearly indicated."
+      }
+    },
+    {
+      "id": "7dc00944-2",
+      "type": "image",
+      "data": {
+        "caption": "",
+        "file": {
+          "url": "asset://24560359-564f-4407-8e7d-5122f99a7061/8b83f13fd8814671a489ece78cd738a8.png"
+        }
+      }
+    },
+    {
+      "id": "9e7e9ba8-2",
+      "type": "header",
+      "data": {
+        "level": 2,
+        "text": "Joplin is divided into three parts"
+      }
+    },
+    {
+      "id": "0378ca54-c",
+      "type": "paragraph",
+      "data": {
+        "text": "Joplin has three main columns:"
+      }
+    },
+    {
+      "id": "d3578755-4",
+      "type": "paragraph",
+      "data": {
+        "text": "<b>Sidebar</b> contains the list of your notebooks and tags, as well as the synchronisation status."
+      }
+    },
+    {
+      "id": "ae676c1d-c",
+      "type": "paragraph",
+      "data": {
+        "text": "<b>Note List</b> contains the current list of notes - either the notes in the currently selected notebook, the notes in the currently selected tag, or search results."
+      }
+    },
+    {
+      "id": "d199d2a6-7",
+      "type": "paragraph",
+      "data": {
+        "text": "<b>Note Editor</b> is the place where you write your notes. There is a <b>Rich Text editor</b> and a <b>Markdown editor</b> - click on the <b>Toggle editor</b> button in the top right hand corner to switch between both! You may also use an <a href=\"https://joplinapp.org/help/apps/external_text_editor\">external editor</a> to edit notes. For example you can use Typora as an external editor and it will display the note as well as any embedded images."
+      }
+    },
+    {
+      "id": "76258485-e",
+      "type": "list",
+      "data": {
+        "items": [
+          {
+            "content": "",
+            "items": []
+          }
+        ],
+        "style": "unordered"
+      }
+    },
+    {
+      "id": "c7c7350e-b",
+      "type": "list",
+      "data": {
+        "items": [
+          {
+            "content": "",
+            "items": []
+          }
+        ],
+        "style": "unordered"
+      }
+    },
+    {
+      "id": "908fb27a-8",
+      "type": "list",
+      "data": {
+        "items": [
+          {
+            "content": "",
+            "items": []
+          }
+        ],
+        "style": "unordered"
+      }
+    },
+    {
+      "id": "a0631d56-d",
+      "type": "header",
+      "data": {
+        "level": 2,
+        "text": "Writing notes in Markdown"
+      }
+    },
+    {
+      "id": "47423f6e-3",
+      "type": "paragraph",
+      "data": {
+        "text": "Markdown is a lightweight markup language with plain text formatting syntax. Joplin supports a <a href=\"https://joplinapp.org/help/apps/markdown\">Github-flavoured Markdown syntax</a> with a few variations and additions."
+      }
+    },
+    {
+      "id": "c301a242-1",
+      "type": "paragraph",
+      "data": {
+        "text": "In general, while Markdown is a markup language, it is meant to be human readable, even without being rendered. This is a simple example (you can see how it looks in the viewer panel):"
+      }
+    },
+    {
+      "id": "efdf7c8e-d",
+      "type": "delimiter",
+      "data": {}
+    },
+    {
+      "id": "dd960741-a",
+      "type": "header",
+      "data": {
+        "level": 1,
+        "text": "Heading"
+      }
+    },
+    {
+      "id": "975198bd-e",
+      "type": "header",
+      "data": {
+        "level": 2,
+        "text": "Sub-heading"
+      }
+    },
+    {
+      "id": "a2ea051f-b",
+      "type": "paragraph",
+      "data": {
+        "text": "Paragraphs are separated by a blank line. Text attributes <i>italic</i>, <b>bold</b> and <code>monospace</code> are supported. You can create bullet lists:"
+      }
+    },
+    {
+      "id": "2942f701-2",
+      "type": "list",
+      "data": {
+        "items": [
+          {
+            "content": "apples",
+            "items": []
+          }
+        ],
+        "style": "unordered"
+      }
+    },
+    {
+      "id": "ec7dc3e6-f",
+      "type": "list",
+      "data": {
+        "items": [
+          {
+            "content": "oranges",
+            "items": []
+          }
+        ],
+        "style": "unordered"
+      }
+    },
+    {
+      "id": "5bf9d4f3-c",
+      "type": "list",
+      "data": {
+        "items": [
+          {
+            "content": "pears",
+            "items": []
+          }
+        ],
+        "style": "unordered"
+      }
+    },
+    {
+      "id": "37a240b9-1",
+      "type": "paragraph",
+      "data": {
+        "text": "Or numbered lists:"
+      }
+    },
+    {
+      "id": "294d973d-6",
+      "type": "list",
+      "data": {
+        "items": [
+          {
+            "content": "wash",
+            "items": []
+          }
+        ],
+        "style": "ordered"
+      }
+    },
+    {
+      "id": "6a6cbc23-7",
+      "type": "list",
+      "data": {
+        "items": [
+          {
+            "content": "rinse",
+            "items": []
+          }
+        ],
+        "style": "ordered"
+      }
+    },
+    {
+      "id": "8b6d2ec4-b",
+      "type": "list",
+      "data": {
+        "items": [
+          {
+            "content": "repeat",
+            "items": []
+          }
+        ],
+        "style": "ordered"
+      }
+    },
+    {
+      "id": "b6574e9d-0",
+      "type": "paragraph",
+      "data": {
+        "text": "This is a <a href=\"https://joplinapp.org\">link</a> and, finally, below is a horizontal rule:"
+      }
+    },
+    {
+      "id": "e30a7d23-e",
+      "type": "delimiter",
+      "data": {}
+    },
+    {
+      "id": "91262040-9",
+      "type": "paragraph",
+      "data": {
+        "text": "A lot more is possible including adding code samples, math formulae or checkbox lists - see the <a href=\"https://joplinapp.org/help/apps/markdown\">Markdown documentation</a> for more information."
+      }
+    },
+    {
+      "id": "f72f8a83-4",
+      "type": "header",
+      "data": {
+        "level": 2,
+        "text": "Organising your notes"
+      }
+    },
+    {
+      "id": "8ab4bbf9-2",
+      "type": "header",
+      "data": {
+        "level": 3,
+        "text": "With notebooks"
+      }
+    },
+    {
+      "id": "27f98192-3",
+      "type": "paragraph",
+      "data": {
+        "text": "Joplin notes are organised into a tree of notebooks and sub-notebooks."
+      }
+    },
+    {
+      "id": "6ee7cb8c-c",
+      "type": "list",
+      "data": {
+        "items": [
+          {
+            "content": "On <b>desktop</b>, you can create a notebook by clicking on New Notebook, then you can organise them as you wish by drag and drop them into other notebooks or right-clicking and selecting \"Move to notebook\". You can also drag a sub-notebook to the \"Notebooks\" header to move it to the root.",
+            "items": []
+          }
+        ],
+        "style": "unordered"
+      }
+    },
+    {
+      "id": "444bb21b-3",
+      "type": "list",
+      "data": {
+        "items": [
+          {
+            "content": "On <b>mobile</b>, press the \"+\" icon and select \"New notebook\".",
+            "items": []
+          }
+        ],
+        "style": "unordered"
+      }
+    },
+    {
+      "id": "d294d86c-3",
+      "type": "list",
+      "data": {
+        "items": [
+          {
+            "content": "On <b>terminal</b>, press <code>:mn</code>",
+            "items": []
+          }
+        ],
+        "style": "unordered"
+      }
+    },
+    {
+      "id": "51f58c5b-c",
+      "type": "image",
+      "data": {
+        "caption": "",
+        "file": {
+          "url": "asset://24560359-564f-4407-8e7d-5122f99a7061/adf840e14eef4828a5ca0d712dafadc3.png"
+        }
+      }
+    },
+    {
+      "id": "9716a85c-b",
+      "type": "header",
+      "data": {
+        "level": 3,
+        "text": "With tags"
+      }
+    },
+    {
+      "id": "650e931c-a",
+      "type": "paragraph",
+      "data": {
+        "text": "The second way to organise your notes is using tags:"
+      }
+    },
+    {
+      "id": "10dbbe73-4",
+      "type": "list",
+      "data": {
+        "items": [
+          {
+            "content": "On <b>desktop</b>, right-click on any note in the Note List, and select \"Tags\". You can then add the tags, separating them by commas.",
+            "items": []
+          }
+        ],
+        "style": "unordered"
+      }
+    },
+    {
+      "id": "7e004940-2",
+      "type": "list",
+      "data": {
+        "items": [
+          {
+            "content": "On <b>mobile</b>, open the note and press the \"\u22ee\" button and select \"Tags\".",
+            "items": []
+          }
+        ],
+        "style": "unordered"
+      }
+    },
+    {
+      "id": "1a438874-6",
+      "type": "list",
+      "data": {
+        "items": [
+          {
+            "content": "On <b>terminal</b>, type <code>:help tag</code> for the available commands.",
+            "items": []
+          }
+        ],
+        "style": "unordered"
+      }
+    }
+  ]
+}

@@ -11,6 +11,7 @@
 import type { EditorData, EditorBlock } from "../types/page";
 import { resolveAssetUrl, unresolveAssetUrl } from "./assetUrl";
 import { getCustomBlock } from "../plugin-sdk/custom-block";
+import { generateId } from "./generateId";
 
 // ─── BlockNote types (simplified for the converter) ─────────────────────────
 // We use `any` for the actual BlockNote document type since it depends on the
@@ -38,7 +39,35 @@ export function editorJsToBlockNote(data: EditorData): BNDocument {
       blocks.push(converted);
     }
   }
+  dedupeBlockIds(blocks);
   return blocks;
+}
+
+/**
+ * Reassign repeated block ids in place (the first occurrence keeps its id,
+ * later ones get fresh ids).
+ *
+ * Damaged pages exist in real libraries: historic importers stamped a
+ * millisecond-timestamp id onto every block, so an entire imported page can
+ * share one id (and the list conversion then derives colliding item ids from
+ * it). BlockNote resolves blocks by id — with duplicates, getBlockFromPos
+ * finds the first same-id block, sees the wrong type, and throws "Block type
+ * does not match" while creating node views (image, delimiter, …), killing
+ * the whole editor pane. Healing at this boundary covers every load path;
+ * the repaired ids persist on the next save.
+ */
+function dedupeBlockIds(blocks: BNBlock[], seen = new Set<string>()): void {
+  for (const block of blocks) {
+    if (typeof block.id === "string" && block.id) {
+      if (seen.has(block.id)) {
+        block.id = generateId();
+      }
+      seen.add(block.id);
+    }
+    if (Array.isArray(block.children) && block.children.length > 0) {
+      dedupeBlockIds(block.children as BNBlock[], seen);
+    }
+  }
 }
 
 function convertBlock(block: EditorBlock): BNBlock | BNBlock[] {
@@ -360,14 +389,18 @@ function flattenListItems(
     const children =
       typeof item === "object" ? ((item.items as unknown[]) ?? []) : [];
 
+    // Derive child ids from this item's id (not the shared baseId): sibling
+    // items each restart the recursion at index 0, so a baseId-derived child
+    // id would collide across siblings.
+    const id = `${baseId}-${depth}-${i}`;
     result.push({
-      id: `${baseId}-${depth}-${i}`,
+      id,
       type: blockType,
       content: parseHtmlToInlineContent(text),
       // BlockNote uses nested children for indentation
       children:
         children.length > 0
-          ? flattenListItems(children, blockType, baseId, depth + 1)
+          ? flattenListItems(children, blockType, id, depth + 1)
           : [],
     });
   }
@@ -1182,9 +1215,4 @@ function escapeAttr(text: string): string {
     .replace(/"/g, "&quot;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
-}
-
-let _idCounter = 0;
-function generateId(): string {
-  return `bn-${Date.now().toString(36)}-${(++_idCounter).toString(36)}`;
 }

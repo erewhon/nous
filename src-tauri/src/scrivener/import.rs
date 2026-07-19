@@ -295,12 +295,11 @@ fn extract_text_from_rtf(rtf: &str) -> String {
 
 /// Generate a block ID
 fn generate_block_id() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    format!("{:x}", timestamp % 0xFFFFFFFFFF)
+    // Random, not clock-based: timestamp ids collide for every block created
+    // in the same tick, giving whole imported pages one shared id — which
+    // breaks BlockNote's id-based block resolution ("Block type does not
+    // match" crash on open). Matches markdown/import.rs.
+    Uuid::new_v4().simple().to_string()[..10].to_string()
 }
 
 /// Convert plain text to EditorJS blocks
@@ -706,6 +705,15 @@ pub fn import_scrivener_project(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn block_ids_are_unique_in_a_tight_loop() {
+        // Regression: the old clock-based id gave every block created in the
+        // same tick an identical id, corrupting whole imported pages.
+        let ids: std::collections::HashSet<String> =
+            (0..1000).map(|_| generate_block_id()).collect();
+        assert_eq!(ids.len(), 1000);
+    }
 
     #[test]
     fn test_extract_text_from_rtf() {
