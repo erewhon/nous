@@ -653,53 +653,53 @@ h4.ce-header {
 .ce-popover *,
 .ce-popover [class*="__title"],
 .ce-popover [class*="__label"] {
-  color: #f0f0f0 !important;
+  color: var(--color-text-primary) !important;
 }
 
 .ce-popover {
-  background-color: #1a1a2e !important;
-  border: 1px solid #3a3a5a !important;
+  background-color: var(--color-bg-elevated) !important;
+  border: 1px solid var(--color-border) !important;
   border-radius: 8px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
   z-index: 10002 !important;
 }
 
 .ce-popover__container {
-  background-color: #1a1a2e !important;
+  background-color: var(--color-bg-elevated) !important;
 }
 
 .ce-popover__items {
-  background-color: #1a1a2e !important;
+  background-color: var(--color-bg-elevated) !important;
 }
 
 /* Popover header/title area */
 .ce-popover-header {
-  background-color: #1a1a2e !important;
-  color: #ffffff !important;
-  border-bottom: 1px solid #3a3a5a !important;
+  background-color: var(--color-bg-elevated) !important;
+  color: var(--color-text-primary) !important;
+  border-bottom: 1px solid var(--color-border) !important;
 }
 
 .ce-popover-header__text {
-  color: #ffffff !important;
+  color: var(--color-text-primary) !important;
 }
 
 .ce-popover__custom-content {
-  background-color: #1a1a2e !important;
-  color: #f0f0f0 !important;
+  background-color: var(--color-bg-elevated) !important;
+  color: var(--color-text-primary) !important;
 }
 
 /* Popover item separator/divider */
 .ce-popover-item-separator {
-  background-color: #1a1a2e !important;
+  background-color: var(--color-bg-elevated) !important;
 }
 
 .ce-popover-item-separator__line {
-  background-color: #3a3a5a !important;
+  background-color: var(--color-border) !important;
 }
 
 /* Popover item title/secondary text */
 .ce-popover-item__title {
-  color: #f0f0f0 !important;
+  color: var(--color-text-primary) !important;
 }
 
 .ce-popover-item__secondary-title {
@@ -707,17 +707,17 @@ h4.ce-header {
 }
 
 .ce-popover-item {
-  color: #f0f0f0 !important;
+  color: var(--color-text-primary) !important;
   background-color: transparent !important;
 }
 
 .ce-popover-item:hover {
   background-color: #2a2a4a !important;
-  color: #ffffff !important;
+  color: var(--color-text-primary) !important;
 }
 
 .ce-popover-item:hover .ce-popover-item__title {
-  color: #ffffff !important;
+  color: var(--color-text-primary) !important;
 }
 
 .ce-popover-item--focused {
@@ -725,7 +725,7 @@ h4.ce-header {
 }
 
 .ce-popover-item--focused .ce-popover-item__title {
-  color: #ffffff !important;
+  color: var(--color-text-primary) !important;
 }
 
 .ce-popover-item__icon {
@@ -750,7 +750,7 @@ h4.ce-header {
 }
 
 .ce-popover-item--confirmation .ce-popover-item__title {
-  color: #ffffff !important;
+  color: var(--color-text-primary) !important;
 }
 
 /* Disabled/inactive popover items */
@@ -769,7 +769,7 @@ h4.ce-header {
 
 /* Block tunes specific */
 .ce-block-tunes {
-  background-color: #1a1a2e !important;
+  background-color: var(--color-bg-elevated) !important;
   /* Ensure block tunes appear above all block content including videos */
   z-index: 10001 !important;
   position: relative;
