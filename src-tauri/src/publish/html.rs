@@ -209,7 +209,9 @@ style-src 'unsafe-inline'; script-src 'unsafe-inline'; font-src data:; connect-s
 
 /// Academic-theme light/dark token values. Kept byte-identical to the palette
 /// in `src/plugin-sdk/blocks/animation.tsx` so editor and published output
-/// theme the same.
+/// theme the same. These are only the fallback: when the parent bridge pushes
+/// the page's actual palette values (see `ANIMATION_HEAD` in `themes.rs`),
+/// those land as inline custom properties and win.
 const ANIMATION_LIGHT_VARS: &str = "--bg:#fffff8;--text:#1a1a1a;--accent:#8b0000;--panel:#f5f5ef;\
 --code-bg:#f0f0ea;--callout-bg:#f9f9f4;--muted:#666;--border:#ccc;";
 const ANIMATION_DARK_VARS: &str = "--bg:#1a1712;--text:#ece8dc;--accent:#e79285;--panel:#231f18;\
@@ -230,13 +232,15 @@ fn animation_palette_css() -> String {
 }
 
 /// Listener inside the sandboxed frame: the parent pushes `{type:'nous-theme',
-/// theme}` on load and whenever the reader flips the page theme; we set
-/// `data-theme` (re-theming any `var()`-based animation) and re-dispatch a
-/// `nous-themechange` event canvas authors can hook.
-const ANIMATION_THEME_LISTENER: &str = "<script>addEventListener('message',function(e){\
-var d=e&&e.data,t=d&&d.type==='nous-theme'&&d.theme;\
-if(t==='dark'||t==='light'){document.documentElement.setAttribute('data-theme',t);\
-window.dispatchEvent(new CustomEvent('nous-themechange',{detail:{theme:t}}));}});</script>";
+/// theme, palette}` on load and whenever the reader flips the page theme. We
+/// set `data-theme` (re-theming any `var()`-based animation), overwrite the
+/// inlined academic defaults with the page's actual palette values — only a
+/// fixed allowlist of tokens, only color-shaped values, never arbitrary CSS —
+/// and re-dispatch a `nous-themechange` event canvas authors can hook (values
+/// land before the event so repaints read the new palette). A message without
+/// `palette` flips the theme against the inlined defaults. Kept byte-identical
+/// to `THEME_LISTENER` in `src/plugin-sdk/blocks/animation.tsx`.
+const ANIMATION_THEME_LISTENER: &str = r#"<script>addEventListener('message',function(e){var d=e&&e.data,t=d&&d.type==='nous-theme'&&d.theme;if(t!=='dark'&&t!=='light')return;var r=document.documentElement,p=d.palette;r.setAttribute('data-theme',t);if(p&&typeof p==='object'){['bg','text','accent','panel','code-bg','callout-bg','muted','border'].forEach(function(k){var v=typeof p[k]==='string'?p[k].trim():'';if(/^(#[0-9A-Fa-f]{3,8}|[A-Za-z]+|(rgb|rgba|hsl|hsla)\([0-9,.% /-]+\))$/.test(v)){r.style.setProperty('--'+k,v);}else{r.style.removeProperty('--'+k);}});}window.dispatchEvent(new CustomEvent('nous-themechange',{detail:{theme:t}}));});</script>"#;
 
 /// Sanitize an `aspect-ratio` value; fall back to 16/9 on anything unexpected.
 fn safe_aspect(aspect: &str) -> &str {
@@ -826,6 +830,28 @@ mod tests {
         // The frame listens for the host's nous-theme postMessage.
         assert!(html.contains("nous-theme"), "got: {html}");
         assert!(html.contains("addEventListener("), "got: {html}");
+    }
+
+    #[test]
+    fn animation_srcdoc_listener_applies_pushed_palette_values() {
+        let b = block("animation", json!({ "html": "<i></i>" }));
+        let html = render(&b);
+        // Pushed values land as inline custom properties on the frame root, so
+        // both var() CSS and canvas getPropertyValue() reads see the page's
+        // actual palette instead of the inlined academic fallback…
+        assert!(html.contains("r.style.setProperty('--'+k,v)"), "got: {html}");
+        // …but only for the fixed token allowlist…
+        for tok in ["'bg'", "'text'", "'accent'", "'panel'", "'code-bg'", "'callout-bg'", "'muted'", "'border'"] {
+            assert!(html.contains(tok), "palette allowlist missing {tok} in: {html}");
+        }
+        // …and only when the value is color-shaped; anything else clears the
+        // override so the token falls back to the inlined default.
+        assert!(html.contains(".test(v)"), "pushed values must be validated, got: {html}");
+        assert!(html.contains("removeProperty('--'+k)"), "invalid values must clear, got: {html}");
+        // Palette lands before the repaint event so canvas hooks read new values.
+        let apply = html.find("setProperty('--'+k,v)").unwrap();
+        let event = html.find("nous-themechange").unwrap();
+        assert!(apply < event, "palette must be applied before nous-themechange fires");
     }
 
     #[test]

@@ -37,6 +37,8 @@ const SANDBOX_CSP =
 /**
  * Academic-theme light/dark token values. Kept byte-identical to the palette in
  * `src-tauri/src/publish/html.rs` so editor and published output theme the same.
+ * These are only the fallback: when the host pushes its actual palette values
+ * (see THEME_LISTENER), those land as inline custom properties and win.
  */
 const LIGHT_VARS =
   "--bg:#fffff8;--text:#1a1a1a;--accent:#8b0000;--panel:#f5f5ef;" +
@@ -58,16 +60,39 @@ const PALETTE_CSS =
   `:root[data-theme="dark"]{${DARK_VARS}}:root[data-theme="light"]{${LIGHT_VARS}}`;
 
 /**
+ * Shape of an acceptable pushed color value: hex, a bare keyword, or an
+ * rgb()/hsl() function with a digits-and-separators body. Anything else (raw
+ * CSS, url(), var()) is rejected. Validated on both sides of the boundary:
+ * the host only pushes values that pass, the frame only applies values that
+ * pass.
+ */
+const COLOR_VALUE_RE =
+  /^(#[0-9A-Fa-f]{3,8}|[A-Za-z]+|(rgb|rgba|hsl|hsla)\([0-9,.% /-]+\))$/;
+
+/**
  * Listener inside the sandboxed frame: the host pushes `{type:'nous-theme',
- * theme}` on load and on every theme flip; we set `data-theme` (re-theming any
- * `var()`-based animation) and re-dispatch a `nous-themechange` event that
- * canvas authors can hook to repaint.
+ * theme, palette}` on load and on every theme flip. We set `data-theme`
+ * (re-theming any `var()`-based animation), overwrite the inlined academic
+ * defaults with the page's actual palette values — only a fixed allowlist of
+ * tokens, only color-shaped values, never arbitrary CSS — and then re-dispatch
+ * a `nous-themechange` event that canvas authors can hook to repaint (values
+ * land before the event so repaints read the new palette). A message without
+ * `palette` flips the theme against the inlined defaults, so frames behind an
+ * older bridge still work. Kept byte-identical to `ANIMATION_THEME_LISTENER`
+ * in `src-tauri/src/publish/html.rs`.
  */
 const THEME_LISTENER =
   "<script>addEventListener('message',function(e){" +
   "var d=e&&e.data,t=d&&d.type==='nous-theme'&&d.theme;" +
-  "if(t==='dark'||t==='light'){document.documentElement.setAttribute('data-theme',t);" +
-  "window.dispatchEvent(new CustomEvent('nous-themechange',{detail:{theme:t}}));}});<\/script>";
+  "if(t!=='dark'&&t!=='light')return;" +
+  "var r=document.documentElement,p=d.palette;" +
+  "r.setAttribute('data-theme',t);" +
+  "if(p&&typeof p==='object'){" +
+  "['bg','text','accent','panel','code-bg','callout-bg','muted','border'].forEach(function(k){" +
+  "var v=typeof p[k]==='string'?p[k].trim():'';" +
+  "if(/^(#[0-9A-Fa-f]{3,8}|[A-Za-z]+|(rgb|rgba|hsl|hsla)\\([0-9,.% /-]+\\))$/.test(v)){r.style.setProperty('--'+k,v);}" +
+  "else{r.style.removeProperty('--'+k);}});}" +
+  "window.dispatchEvent(new CustomEvent('nous-themechange',{detail:{theme:t}}));});<\/script>";
 
 /** Wrap author source in the sandboxed document shell (CSP + palette + reset). */
 export function buildAnimationSrcdoc(html: string): string {
@@ -92,6 +117,50 @@ function hostTheme(): "light" | "dark" {
     matchMedia("(prefers-color-scheme: dark)").matches
     ? "dark"
     : "light";
+}
+
+/**
+ * Where each frame palette token is read from in the parent document, first
+ * match wins: the token itself (a host already speaking the frame contract),
+ * the desktop app's `--color-*` theme tokens, then the guest editor's
+ * `--guest-*` set. A token that resolves to nothing (or to a non-color) is
+ * omitted from the push, so the frame keeps its inlined default for it.
+ */
+const PALETTE_SOURCES: ReadonlyArray<[string, string[]]> = [
+  ["bg", ["--bg", "--color-bg-primary", "--guest-bg"]],
+  ["text", ["--text", "--color-text-primary", "--guest-text"]],
+  ["accent", ["--accent", "--color-accent", "--guest-accent"]],
+  ["panel", ["--panel", "--color-bg-secondary", "--guest-surface"]],
+  ["code-bg", ["--code-bg", "--color-bg-tertiary", "--guest-surface"]],
+  ["callout-bg", ["--callout-bg", "--color-bg-secondary", "--guest-surface"]],
+  ["muted", ["--muted", "--color-text-muted", "--guest-text-muted"]],
+  ["border", ["--border", "--color-border", "--guest-border"]],
+];
+
+/**
+ * The host's palette as frame-contract tokens, for pushing into the sandboxed
+ * frame (which can't read the parent's custom properties across the
+ * null-origin boundary). Exported for tests.
+ */
+export function hostPalette(): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (
+    typeof document === "undefined" ||
+    typeof getComputedStyle === "undefined"
+  ) {
+    return out;
+  }
+  const cs = getComputedStyle(document.documentElement);
+  for (const [token, sources] of PALETTE_SOURCES) {
+    for (const source of sources) {
+      const v = cs.getPropertyValue(source).trim();
+      if (COLOR_VALUE_RE.test(v)) {
+        out[token] = v;
+        break;
+      }
+    }
+  }
+  return out;
 }
 
 /** Common aspect-ratio presets offered in the editor. */
@@ -165,8 +234,10 @@ function AnimationRender({
     return () => io.disconnect();
   }, [visible]);
 
-  // Push the host theme into the sandboxed frame (it can't read the parent):
-  // once the frame loads and again whenever the app's `data-theme` flips.
+  // Push the host theme + palette values into the sandboxed frame (it can't
+  // read the parent): once the frame loads and again whenever the app's
+  // `data-theme` flips. themeStore.applyTheme() writes the `--color-*` values
+  // before setting `data-theme`, so a re-push here always reads fresh colors.
   useEffect(() => {
     if (!visible) return;
     const frame = iframeRef.current;
@@ -174,7 +245,7 @@ function AnimationRender({
     const push = () => {
       try {
         frame.contentWindow?.postMessage(
-          { type: "nous-theme", theme: hostTheme() },
+          { type: "nous-theme", theme: hostTheme(), palette: hostPalette() },
           "*"
         );
       } catch {

@@ -40,13 +40,18 @@ pub fn mermaid_head(theme_name: &str) -> Option<&'static str> {
 
 /// Parent-side bridge for interactive animation blocks, injected into a page's
 /// `<head>` when the page contains one. Animation frames are null-origin
-/// sandboxed iframes and cannot read the page theme, so the parent pushes it:
-/// `postMessage({type:'nous-theme', theme})` to each `iframe.nous-animation`
-/// once it loads and again whenever the reader clicks the theme toggle. The
-/// frame's own listener (in the srcdoc) flips its `data-theme`, re-theming any
-/// `var()`-based animation. All shipped themes get it: those with a toggle
-/// follow it live; the light-only themes (which pin `data-theme="light"`) get
-/// a correct initial push plus the reduced-motion poster swap.
+/// sandboxed iframes and cannot read the page theme or its custom properties,
+/// so the parent pushes both: `postMessage({type:'nous-theme', theme,
+/// palette})` to each `iframe.nous-animation` once it loads and again whenever
+/// the reader clicks the theme toggle. `palette` carries the page's resolved
+/// token values (read from computed style, so a re-push after the toggle sees
+/// the flipped values) — a fixed allowlist of tokens, filtered to color-shaped
+/// values only. The frame's own listener (in the srcdoc) flips its
+/// `data-theme` and applies the pushed values, so an animation themes with the
+/// page's actual palette instead of its inlined academic fallback. All shipped
+/// themes get it: those with a toggle follow it live; the light-only themes
+/// (which pin `data-theme="light"`) get a correct initial push plus the
+/// reduced-motion poster swap.
 pub fn animation_head(theme_name: &str) -> Option<&'static str> {
     match theme_name {
         "academic" | "minimal" | "documentation" | "blog" | "docs" => Some(ANIMATION_HEAD),
@@ -72,8 +77,22 @@ function currentTheme() {
     ? t
     : (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
 }
+// The frame can't read the page's custom properties (null origin), so the
+// palette *values* travel with the theme. Only allowlisted tokens whose value
+// looks like a color are pushed; the frame's listener validates them again.
+var PALETTE_TOKENS = ['bg', 'text', 'accent', 'panel', 'code-bg', 'callout-bg', 'muted', 'border'];
+var COLOR_OK = /^(#[0-9A-Fa-f]{3,8}|[A-Za-z]+|(rgb|rgba|hsl|hsla)\([0-9,.% /-]+\))$/;
+function pagePalette() {
+  var cs = getComputedStyle(document.documentElement);
+  var out = {};
+  PALETTE_TOKENS.forEach(function (t) {
+    var v = cs.getPropertyValue('--' + t).trim();
+    if (COLOR_OK.test(v)) out[t] = v;
+  });
+  return out;
+}
 function push(frame) {
-  try { frame.contentWindow.postMessage({ type: 'nous-theme', theme: currentTheme() }, '*'); } catch (e) {}
+  try { frame.contentWindow.postMessage({ type: 'nous-theme', theme: currentTheme(), palette: pagePalette() }, '*'); } catch (e) {}
 }
 function pushAll() { document.querySelectorAll('iframe.nous-animation').forEach(push); }
 document.querySelectorAll('iframe.nous-animation').forEach(function (f) {
@@ -1507,6 +1526,26 @@ mod tests {
         assert!(head.contains("prefers-reduced-motion: reduce"), "no reduced-motion guard");
         assert!(head.contains("nous-animation-poster"), "no poster swap");
         assert!(head.contains("frame.remove()"), "live frame not removed under reduced motion");
+    }
+
+    #[test]
+    fn animation_head_pushes_the_pages_resolved_palette_values() {
+        let head = animation_head("academic").expect("academic ships an animation bridge");
+        // Reads the page's resolved palette from computed style (so a re-push
+        // after the toggle flips data-theme sees the new values)…
+        assert!(
+            head.contains("getComputedStyle(document.documentElement)"),
+            "bridge must read the page's computed palette"
+        );
+        // …for the fixed token allowlist the frame contract defines…
+        for tok in ["'bg'", "'text'", "'accent'", "'panel'", "'code-bg'", "'callout-bg'", "'muted'", "'border'"] {
+            assert!(head.contains(tok), "palette allowlist missing {tok}");
+        }
+        // …and the message carries the values alongside the theme.
+        assert!(head.contains("palette: pagePalette()"), "message must carry palette values");
+        assert!(head.contains("theme: currentTheme(), palette:"), "palette must ride the theme push");
+        // Only color-shaped values pass; raw CSS never crosses the boundary.
+        assert!(head.contains("COLOR_OK.test(v)"), "pushed values must be validated as colors");
     }
 
     #[test]
