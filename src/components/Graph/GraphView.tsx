@@ -4,6 +4,15 @@ import { usePageStore } from "../../stores/pageStore";
 import { useLinkStore } from "../../stores/linkStore";
 import type { Page } from "../../types/page";
 
+// Resolve a CSS custom property to a concrete color. D3 sets colors on SVG
+// presentation attributes (fill/stroke), which do NOT resolve var() — so the
+// graph reads the active theme's tokens here, staying theme-aware.
+function themeColor(name: string, fallback: string): string {
+  if (typeof document === "undefined") return fallback;
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return v || fallback;
+}
+
 interface GraphNode extends d3.SimulationNodeDatum {
   id: string;
   title: string;
@@ -266,17 +275,17 @@ export function GraphView({ onClose, onNodeClick }: GraphViewProps) {
 
   // Get node color based on type and state
   const getNodeColor = useCallback((node: GraphNode, isHighlighted: boolean) => {
-    if (node.isSelected) return "var(--color-accent)";
-    if (isHighlighted) return "#fbbf24"; // Amber for search matches
+    if (node.isSelected) return themeColor("--color-accent", "#8b5cf6");
+    if (isHighlighted) return themeColor("--color-warning", "#fbbf24"); // search matches
     switch (node.nodeType) {
       case "orphan":
-        return "#ef4444"; // Red for orphans
+        return themeColor("--color-error", "#ef4444");
       case "hub":
-        return "#22c55e"; // Green for hubs
+        return themeColor("--color-success", "#22c55e");
       case "leaf":
-        return "#8b5cf6"; // Purple for leaves
+        return themeColor("--color-accent", "#8b5cf6");
       default:
-        return "var(--color-bg-tertiary)";
+        return themeColor("--color-bg-tertiary", "#313244");
     }
   }, []);
 
@@ -318,7 +327,7 @@ export function GraphView({ onClose, onNodeClick }: GraphViewProps) {
       .attr("markerHeight", 6)
       .append("path")
       .attr("d", "M 0,-5 L 10,0 L 0,5")
-      .attr("fill", "#6c7086");
+      .attr("fill", themeColor("--color-text-muted", "#6c7086"));
 
     defs
       .append("marker")
@@ -331,7 +340,7 @@ export function GraphView({ onClose, onNodeClick }: GraphViewProps) {
       .attr("markerHeight", 6)
       .append("path")
       .attr("d", "M 0,-5 L 10,0 L 0,5")
-      .attr("fill", "#22c55e");
+      .attr("fill", themeColor("--color-success", "#22c55e"));
 
     defs
       .append("marker")
@@ -344,7 +353,7 @@ export function GraphView({ onClose, onNodeClick }: GraphViewProps) {
       .attr("markerHeight", 6)
       .append("path")
       .attr("d", "M 0,-5 L 10,0 L 0,5")
-      .attr("fill", "#8b5cf6");
+      .attr("fill", themeColor("--color-accent", "#8b5cf6"));
 
     // Add zoom behavior
     const g = svg.append("g");
@@ -379,7 +388,7 @@ export function GraphView({ onClose, onNodeClick }: GraphViewProps) {
       .selectAll("line")
       .data(linksCopy)
       .join("line")
-      .attr("stroke", (d) => d.isBlockRef ? "#8b5cf6" : d.bidirectional ? "#22c55e" : "#313244")
+      .attr("stroke", (d) => d.isBlockRef ? themeColor("--color-accent", "#8b5cf6") : d.bidirectional ? themeColor("--color-success", "#22c55e") : themeColor("--color-border", "#313244"))
       .attr("stroke-opacity", 0.6)
       .attr("stroke-width", (d) => d.bidirectional ? 2 : 1.5)
       .attr("stroke-dasharray", (d) => d.isBlockRef ? "4 3" : null)
@@ -423,9 +432,9 @@ export function GraphView({ onClose, onNodeClick }: GraphViewProps) {
       })
       .attr("fill", (d) => getNodeColor(d, highlightedNodes.has(d.id)))
       .attr("stroke", (d) => {
-        if (d.isSelected) return "#a78bfa";
-        if (highlightedNodes.has(d.id)) return "#fbbf24";
-        return "#6c7086";
+        if (d.isSelected) return themeColor("--color-accent-hover", "#a78bfa");
+        if (highlightedNodes.has(d.id)) return themeColor("--color-warning", "#fbbf24");
+        return themeColor("--color-text-muted", "#6c7086");
       })
       .attr("stroke-width", (d) => highlightedNodes.has(d.id) ? 3 : 2);
 
@@ -462,7 +471,7 @@ export function GraphView({ onClose, onNodeClick }: GraphViewProps) {
         return baseSize + connectionBonus + 14;
       })
       .attr("text-anchor", "middle")
-      .attr("fill", "#a6adc8")
+      .attr("fill", themeColor("--color-text-secondary", "#a6adc8"))
       .attr("font-size", "11px")
       .attr("pointer-events", "none");
 
@@ -636,7 +645,7 @@ export function GraphView({ onClose, onNodeClick }: GraphViewProps) {
               className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors"
               style={{
                 backgroundColor: showOrphansOnly ? "rgba(239, 68, 68, 0.2)" : "var(--color-bg-secondary)",
-                color: showOrphansOnly ? "#f87171" : "var(--color-text-muted)",
+                color: showOrphansOnly ? "var(--color-error)" : "var(--color-text-muted)",
               }}
               title="Show only orphaned pages (no links)"
             >
@@ -865,7 +874,7 @@ export function GraphView({ onClose, onNodeClick }: GraphViewProps) {
             <span>Bidirectional</span>
           </div>
           <div className="flex items-center gap-2">
-            <div className="w-6" style={{ height: "2px", backgroundImage: "repeating-linear-gradient(to right, #8b5cf6 0, #8b5cf6 4px, transparent 4px, transparent 7px)" }} />
+            <div className="w-6" style={{ height: "2px", backgroundImage: "repeating-linear-gradient(to right, var(--color-accent) 0, var(--color-accent) 4px, transparent 4px, transparent 7px)" }} />
             <span>Block ref</span>
           </div>
           <span className="ml-auto">
