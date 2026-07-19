@@ -1,39 +1,39 @@
 @import "tailwindcss";
 
 /* CSS Custom Properties - needed for arbitrary value syntax like bg-[--color-name] */
-/* Default values are Catppuccin Mocha (dark) - overridden by themeStore.applyTheme() */
+/* Default values are the "study" scheme (dark) - overridden by themeStore.applyTheme() */
 :root {
   /* Background colors */
-  --color-bg-primary: #1e1e2e;
-  --color-bg-secondary: #181825;
-  --color-bg-tertiary: #313244;
-  --color-bg-elevated: #45475a;
-  --color-bg-sidebar: #11111b;
-  --color-bg-panel: #1e1e2e;
+  --color-bg-primary: #1b1526;
+  --color-bg-secondary: #171120;
+  --color-bg-tertiary: #272033;
+  --color-bg-elevated: #241c33;
+  --color-bg-sidebar: #120d1b;
+  --color-bg-panel: #150f1e;
 
   /* Text colors */
-  --color-text-primary: #cdd6f4;
-  --color-text-secondary: #a6adc8;
-  --color-text-muted: #6c7086;
+  --color-text-primary: #ece7de;
+  --color-text-secondary: #b3aac2;
+  --color-text-muted: #8a80a0;
 
-  /* Accent colors - purple/indigo theme */
-  --color-accent: #8b5cf6;
-  --color-accent-hover: #a78bfa;
-  --color-accent-secondary: #7c3aed;
-  --color-accent-tertiary: #6d28d9;
+  /* Accent colors - warm ink-violet */
+  --color-accent: #ab87fc;
+  --color-accent-hover: #bfa3ff;
+  --color-accent-secondary: #8a5cf5;
+  --color-accent-tertiary: #6e46d9;
 
   /* Semantic colors */
-  --color-success: #a6e3a1;
-  --color-warning: #f9e2af;
-  --color-error: #f38ba8;
-  --color-info: #89b4fa;
+  --color-success: #a9c98b;
+  --color-warning: #e3b96f;
+  --color-error: #e58e87;
+  --color-info: #8fb8e8;
 
   /* Border colors */
-  --color-border: #313244;
-  --color-border-muted: #1e1e2e;
+  --color-border: #322a44;
+  --color-border-muted: #251e35;
 
   /* Selection/highlight */
-  --color-selection: rgba(139, 92, 246, 0.3);
+  --color-selection: rgba(171, 135, 252, 0.28);
 
   /* Typography - set by themeStore */
   --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
