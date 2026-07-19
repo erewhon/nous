@@ -52,6 +52,36 @@
 
   /* Editor layout */
   --editor-max-width: 768px;
+
+  /* Craft scales — radius (shared chrome, theme-independent) */
+  --radius-xs: 4px;
+  --radius-sm: 7px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --radius-full: 9999px;
+
+  /* Elevation — "lamplight" (warm-tinted, never pure black).
+     Dark defaults here; light-mode values overridden in [data-theme="light"] below. */
+  --shadow-1: 0 1px 2px rgba(10, 5, 20, 0.5);
+  --shadow-2: 0 2px 8px rgba(10, 5, 20, 0.45), 0 1px 2px rgba(10, 5, 20, 0.4);
+  --shadow-3: 0 8px 28px rgba(10, 5, 20, 0.5), 0 2px 8px rgba(10, 5, 20, 0.35);
+  --shadow-4: 0 20px 60px rgba(8, 4, 18, 0.6), 0 4px 16px rgba(8, 4, 18, 0.4);
+
+  /* Motion — quiet, "settle" character */
+  --motion-fast: 130ms;
+  --motion-base: 190ms;
+  --motion-slow: 260ms;
+  --ease-settle: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --ease-inout: cubic-bezier(0.45, 0.05, 0.35, 0.95);
+}
+
+/* Light-mode elevation — warmer, lower-alpha lamplight (shared chrome, all light themes) */
+[data-theme="light"] {
+  --shadow-1: 0 1px 2px rgba(60, 45, 85, 0.08);
+  --shadow-2: 0 2px 8px rgba(60, 45, 85, 0.1), 0 1px 2px rgba(60, 45, 85, 0.07);
+  --shadow-3: 0 8px 28px rgba(60, 45, 85, 0.14), 0 2px 8px rgba(60, 45, 85, 0.08);
+  --shadow-4: 0 20px 60px rgba(50, 35, 75, 0.2), 0 4px 16px rgba(50, 35, 75, 0.1);
 }
 
 /* Base styles - DON'T reset padding/margin as it overrides Tailwind */
@@ -184,7 +214,7 @@ input:focus-visible,
 textarea:focus-visible,
 select:focus-visible {
   border-color: var(--color-accent) !important;
-  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.2) !important;
+  box-shadow: 0 0 0 3px rgb(from var(--color-accent) r g b / 0.2) !important;
 }
 
 /* Toast animations */
