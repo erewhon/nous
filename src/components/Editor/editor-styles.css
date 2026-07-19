@@ -64,7 +64,7 @@
 
 /* Override Editor.js default block selection highlight for dark mode */
 .ce-block--selected .ce-block__content {
-  background: rgba(139, 92, 246, 0.15) !important;
+  background: rgb(from var(--color-accent) r g b / 0.15) !important;
 }
 
 .ce-paragraph {
@@ -171,7 +171,7 @@ h4.ce-header {
 }
 
 .cdx-list__item--drag-over {
-  background-color: var(--color-accent-light, rgba(139, 92, 246, 0.1));
+  background-color: rgb(from var(--color-accent) r g b / 0.1);
 }
 
 .cdx-list__item--drag-over::before {
@@ -339,7 +339,7 @@ h4.ce-header {
 }
 
 .ce-block .cdx-checklist__item--drag-over {
-  background-color: var(--color-accent-light, rgba(139, 92, 246, 0.1));
+  background-color: rgb(from var(--color-accent) r g b / 0.1);
   border-radius: 4px;
 }
 
@@ -357,7 +357,7 @@ h4.ce-header {
 /* Placeholder during drag */
 .ce-block .cdx-checklist__item-placeholder {
   height: 2.25rem;
-  background-color: var(--color-accent-light, rgba(139, 92, 246, 0.1));
+  background-color: rgb(from var(--color-accent) r g b / 0.1);
   border: 2px dashed var(--color-accent);
   border-radius: 4px;
   margin: 0.125rem 0;
@@ -832,14 +832,14 @@ block-ref {
   color: var(--color-accent);
   text-decoration: underline dashed;
   cursor: pointer;
-  background: rgba(139, 92, 246, 0.08);
+  background: rgb(from var(--color-accent) r g b / 0.08);
   padding: 0 2px;
   border-radius: 2px;
 }
 
 block-ref:hover {
   text-decoration-style: solid;
-  background: rgba(139, 92, 246, 0.15);
+  background: rgb(from var(--color-accent) r g b / 0.15);
 }
 
 block-ref.broken {
@@ -853,7 +853,7 @@ block-ref.broken {
 
 @keyframes block-ref-pulse {
   0% {
-    background-color: rgba(139, 92, 246, 0.3);
+    background-color: rgb(from var(--color-accent) r g b / 0.3);
   }
   100% {
     background-color: transparent;
@@ -1016,7 +1016,7 @@ block-ref.broken {
 }
 
 .tc-cell--selected {
-  background-color: rgba(139, 92, 246, 0.1);
+  background-color: rgb(from var(--color-accent) r g b / 0.1);
 }
 
 .tc-toolbox {
@@ -1058,23 +1058,23 @@ block-ref.broken {
 }
 
 .callout-block--info {
-  border-color: #3b82f6;
-  background-color: rgba(59, 130, 246, 0.1);
+  border-color: var(--color-info);
+  background-color: rgb(from var(--color-info) r g b / 0.1);
 }
 
 .callout-block--warning {
-  border-color: #f59e0b;
-  background-color: rgba(245, 158, 11, 0.1);
+  border-color: var(--color-warning);
+  background-color: rgb(from var(--color-warning) r g b / 0.1);
 }
 
 .callout-block--tip {
-  border-color: #10b981;
-  background-color: rgba(16, 185, 129, 0.1);
+  border-color: var(--color-success);
+  background-color: rgb(from var(--color-success) r g b / 0.1);
 }
 
 .callout-block--danger {
-  border-color: #ef4444;
-  background-color: rgba(239, 68, 68, 0.1);
+  border-color: var(--color-error);
+  background-color: rgb(from var(--color-error) r g b / 0.1);
 }
 
 .callout-header {
@@ -1416,7 +1416,7 @@ block-ref.broken {
 }
 
 .flashcard-block--flipped .flashcard-back {
-  background: rgba(139, 92, 246, 0.1);
+  background: rgb(from var(--color-accent) r g b / 0.1);
 }
 
 .flashcard-label {
@@ -1559,12 +1559,12 @@ block-ref.broken {
 
 .pdf-uploader:hover {
   border-color: var(--color-accent);
-  background: rgba(139, 92, 246, 0.05);
+  background: rgb(from var(--color-accent) r g b / 0.05);
 }
 
 .pdf-uploader--dragover {
   border-color: var(--color-accent);
-  background: rgba(139, 92, 246, 0.1);
+  background: rgb(from var(--color-accent) r g b / 0.1);
 }
 
 .pdf-uploader-content {
@@ -1779,12 +1779,12 @@ block-ref.broken {
 
 .video-uploader:hover {
   border-color: var(--color-accent);
-  background: rgba(139, 92, 246, 0.05);
+  background: rgb(from var(--color-accent) r g b / 0.05);
 }
 
 .video-uploader--dragover {
   border-color: var(--color-accent);
-  background: rgba(139, 92, 246, 0.1);
+  background: rgb(from var(--color-accent) r g b / 0.1);
 }
 
 .video-uploader-content {
@@ -1981,7 +1981,7 @@ block-ref.broken {
 }
 
 .video-transcript-segment--active {
-  background: rgba(139, 92, 246, 0.1);
+  background: rgb(from var(--color-accent) r g b / 0.1);
 }
 
 .video-transcript-timestamp {
@@ -2098,7 +2098,7 @@ block-ref.broken {
 
 .drawing-canvas-placeholder:hover {
   border-color: var(--color-accent);
-  background: rgba(139, 92, 246, 0.05);
+  background: rgb(from var(--color-accent) r g b / 0.05);
 }
 
 .drawing-uploader-icon {
@@ -4174,7 +4174,7 @@ block-ref.broken {
 }
 
 .audio-recorder__mic-btn:hover {
-  background: rgba(139, 92, 246, 0.15);
+  background: rgb(from var(--color-accent) r g b / 0.15);
   transform: scale(1.05);
 }
 
