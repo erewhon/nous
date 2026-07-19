@@ -786,19 +786,13 @@ export function DatabaseTable({
                             <path d="M9 18l6-6-6-6" />
                           </svg>
                         </button>
-                        {group.color ? (
+                        {group.color && (
                           <span
-                            className="db-select-pill"
-                            style={{
-                              backgroundColor: group.color + "30",
-                              color: group.color,
-                            }}
-                          >
-                            {group.label}
-                          </span>
-                        ) : (
-                          <span className="db-group-label">{group.label}</span>
+                            className="db-group-dot"
+                            style={{ backgroundColor: group.color }}
+                          />
                         )}
+                        <span className="db-group-label">{group.label}</span>
                         <span className="db-group-count">
                           {group.rows.length}
                         </span>

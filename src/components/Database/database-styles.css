@@ -115,7 +115,7 @@
 
 .db-toolbar-btn-active {
   color: var(--color-accent);
-  background-color: rgba(139, 92, 246, 0.1);
+  background-color: rgb(from var(--color-accent) r g b / 0.1);
 }
 
 /* Table */
@@ -349,7 +349,7 @@
 }
 
 .db-cell-input:focus {
-  background-color: rgba(139, 92, 246, 0.08);
+  background-color: rgb(from var(--color-accent) r g b / 0.08);
   outline: 2px solid var(--color-accent);
   outline-offset: -2px;
 }
@@ -425,7 +425,7 @@
 }
 
 .db-select-option-checked {
-  background-color: rgba(139, 92, 246, 0.08);
+  background-color: rgb(from var(--color-accent) r g b / 0.08);
 }
 
 .db-select-checkbox {
@@ -737,7 +737,7 @@
 .db-popover-type-btn-active {
   border-color: var(--color-accent);
   color: var(--color-accent);
-  background-color: rgba(139, 92, 246, 0.08);
+  background-color: rgb(from var(--color-accent) r g b / 0.08);
 }
 
 /* ============================================
@@ -783,7 +783,7 @@
 
 .db-view-tab-active {
   color: var(--color-accent);
-  background-color: rgba(139, 92, 246, 0.1);
+  background-color: rgb(from var(--color-accent) r g b / 0.1);
   font-weight: 500;
 }
 
@@ -1089,8 +1089,17 @@
   transform: rotate(90deg);
 }
 
+.db-group-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 9999px;
+  flex-shrink: 0;
+}
+
 .db-group-label {
   color: var(--color-text-secondary);
+  font-weight: 600;
+  letter-spacing: 0.01em;
 }
 
 .db-group-count {
@@ -1208,7 +1217,7 @@
 
 .db-board-column-over {
   border-color: var(--color-accent);
-  background-color: rgba(139, 92, 246, 0.04);
+  background-color: rgb(from var(--color-accent) r g b / 0.04);
 }
 
 .db-board-column-header {
@@ -1508,7 +1517,7 @@
   font-size: 11px;
   padding: 2px 4px;
   border-radius: 3px;
-  background-color: rgba(139, 92, 246, 0.1);
+  background-color: rgb(from var(--color-accent) r g b / 0.1);
   color: var(--color-accent);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1517,7 +1526,7 @@
 }
 
 .db-calendar-item:hover {
-  background-color: rgba(139, 92, 246, 0.2);
+  background-color: rgb(from var(--color-accent) r g b / 0.2);
 }
 
 .db-calendar-more {
@@ -1609,9 +1618,9 @@
   font-size: 12px;
   font-weight: 500;
   white-space: nowrap;
-  background-color: rgba(139, 92, 246, 0.08);
+  background-color: rgb(from var(--color-accent) r g b / 0.08);
   color: var(--color-accent);
-  border: 1px solid rgba(139, 92, 246, 0.2);
+  border: 1px solid rgb(from var(--color-accent) r g b / 0.2);
 }
 
 .db-relation-dropdown {
@@ -2449,21 +2458,26 @@
 
 /* Selected row highlight */
 .db-row-selected {
-  background-color: rgba(139, 92, 246, 0.08) !important;
+  background-color: rgb(from var(--color-accent) r g b / 0.08) !important;
 }
 
 .db-row-selected:hover {
-  background-color: rgba(139, 92, 246, 0.12) !important;
+  background-color: rgb(from var(--color-accent) r g b / 0.12) !important;
 }
 
 .db-row-selected .db-cell-pinned,
 .db-row-selected .db-row-num {
-  background-color: rgba(139, 92, 246, 0.08) !important;
+  background-color: rgb(from var(--color-accent) r g b / 0.08) !important;
 }
 
 .db-row-selected:hover .db-cell-pinned,
 .db-row-selected:hover .db-row-num {
-  background-color: rgba(139, 92, 246, 0.12) !important;
+  background-color: rgb(from var(--color-accent) r g b / 0.12) !important;
+}
+
+/* Index-mark — the selected/active row carries a violet bar on its left edge */
+.db-row-selected .db-row-num {
+  box-shadow: inset 3px 0 0 0 var(--color-accent) !important;
 }
 
 /* ============================================
