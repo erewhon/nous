@@ -35,7 +35,10 @@ import { PrintDialog } from "../Print";
 import { useFolderStore } from "../../stores/folderStore";
 import { useNotebookStore } from "../../stores/notebookStore";
 import { useToastStore } from "../../stores/toastStore";
-import { usePluginStore, type PluginExportFormat } from "../../stores/pluginStore";
+import {
+  usePluginStore,
+  type PluginExportFormat,
+} from "../../stores/pluginStore";
 import { useDrawingStore } from "../../stores/drawingStore";
 import { WritingGoalProgress } from "./WritingGoalProgress";
 import { WritingGoalSettings } from "./WritingGoalSettings";
@@ -98,9 +101,7 @@ export function PageHeader({
   const [isSyncing, setIsSyncing] = useState(false);
   const [showWritingGoalSettings, setShowWritingGoalSettings] = useState(false);
   const [showDailyNoteDialog, setShowDailyNoteDialog] = useState(false);
-  const [dailyNoteDate, setDailyNoteDate] = useState(
-    localToday()
-  );
+  const [dailyNoteDate, setDailyNoteDate] = useState(localToday());
   const inputRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const {
@@ -132,38 +133,53 @@ export function PageHeader({
     }
   }, [isMenuOpen, fetchExportFormats]);
 
-  const handlePluginExport = useCallback(async (format: PluginExportFormat) => {
-    setIsMenuOpen(false);
-    try {
-      const fullPage = await import("../../utils/api").then(api => api.getPage(page.notebookId, page.id));
-      const result = await executeExport(format.pluginId, format.formatId, fullPage, page.notebookId) as {
-        content: string;
-        encoding: string;
-        filename: string;
-      };
-      if (result?.content && result?.filename) {
-        const suggestedName = result.filename;
-        const ext = format.fileExtension.replace(/^\./, "");
-        const path = await save({
-          defaultPath: suggestedName,
-          filters: [{ name: format.label, extensions: [ext] }],
-        });
-        if (path) {
-          const { writeTextFile, writeFile } = await import("@tauri-apps/plugin-fs");
-          if (result.encoding === "base64") {
-            const bytes = Uint8Array.from(atob(result.content), c => c.charCodeAt(0));
-            await writeFile(path, bytes);
-          } else {
-            await writeTextFile(path, result.content);
+  const handlePluginExport = useCallback(
+    async (format: PluginExportFormat) => {
+      setIsMenuOpen(false);
+      try {
+        const fullPage = await import("../../utils/api").then((api) =>
+          api.getPage(page.notebookId, page.id)
+        );
+        const result = (await executeExport(
+          format.pluginId,
+          format.formatId,
+          fullPage,
+          page.notebookId
+        )) as {
+          content: string;
+          encoding: string;
+          filename: string;
+        };
+        if (result?.content && result?.filename) {
+          const suggestedName = result.filename;
+          const ext = format.fileExtension.replace(/^\./, "");
+          const path = await save({
+            defaultPath: suggestedName,
+            filters: [{ name: format.label, extensions: [ext] }],
+          });
+          if (path) {
+            const { writeTextFile, writeFile } =
+              await import("@tauri-apps/plugin-fs");
+            if (result.encoding === "base64") {
+              const bytes = Uint8Array.from(atob(result.content), (c) =>
+                c.charCodeAt(0)
+              );
+              await writeFile(path, bytes);
+            } else {
+              await writeTextFile(path, result.content);
+            }
+            toast.success(`Exported as ${format.label}`);
           }
-          toast.success(`Exported as ${format.label}`);
         }
+      } catch (error) {
+        console.error("Plugin export failed:", error);
+        toast.error(
+          `Export failed: ${error instanceof Error ? error.message : String(error)}`
+        );
       }
-    } catch (error) {
-      console.error("Plugin export failed:", error);
-      toast.error(`Export failed: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }, [page.notebookId, page.id, executeExport, toast]);
+    },
+    [page.notebookId, page.id, executeExport, toast]
+  );
 
   // Check if this page is a template source
   const pageTemplate = getTemplateForPage(page.id);
@@ -717,7 +733,11 @@ export function PageHeader({
           onClick={() => toggleFavorite(page.notebookId, page.id)}
           className="ml-4 rounded-lg p-2 transition-colors hover:opacity-80"
           style={{ backgroundColor: "var(--color-bg-tertiary)" }}
-          title={page.isFavorite ? "Unstar page (Ctrl+Shift+S)" : "Star page (Ctrl+Shift+S)"}
+          title={
+            page.isFavorite
+              ? "Unstar page (Ctrl+Shift+S)"
+              : "Star page (Ctrl+Shift+S)"
+          }
         >
           {page.isFavorite ? (
             <svg
@@ -1277,9 +1297,21 @@ export function PageHeader({
                       style={{ color: "var(--color-text-secondary)" }}
                     >
                       {format.iconSvg ? (
-                        <span dangerouslySetInnerHTML={{ __html: format.iconSvg }} />
+                        <span
+                          dangerouslySetInnerHTML={{ __html: format.iconSvg }}
+                        />
                       ) : (
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          width="16"
+                          height="16"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
                           <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
                           <polyline points="17 8 12 3 7 8" />
                           <line x1="12" y1="3" x2="12" y2="15" />
@@ -1528,7 +1560,9 @@ export function PageHeader({
 
         {/* Writing goal progress */}
         <div className="ml-2">
-          <WritingGoalProgress onOpenSettings={() => setShowWritingGoalSettings(true)} />
+          <WritingGoalProgress
+            onOpenSettings={() => setShowWritingGoalSettings(true)}
+          />
         </div>
 
         {/* Save status */}

@@ -3,12 +3,16 @@ import type { Notebook } from "../../types/notebook";
 import type { Page } from "../../types/page";
 import { NotebookCard } from "./NotebookCard";
 import { NotebookSettingsDialog } from "../NotebookSettings";
-import { useThemeStore, type NotebookSortOption } from "../../stores/themeStore";
+import {
+  useThemeStore,
+  type NotebookSortOption,
+} from "../../stores/themeStore";
 import { useActionStore } from "../../stores/actionStore";
 import { useInboxStore } from "../../stores/inboxStore";
 import { useFlashcardStore } from "../../stores/flashcardStore";
 import { usePageStore } from "../../stores/pageStore";
 import * as api from "../../utils/api";
+import { localToday } from "../../utils/dateLocal";
 
 // Compact relative time for the Recent list ("just now" / "2h ago" / "3d ago").
 function relativeTime(iso: string): string {
@@ -19,6 +23,66 @@ function relativeTime(iso: string): string {
   const h = Math.floor(m / 60);
   if (h < 24) return `${h}h ago`;
   return `${Math.floor(h / 24)}d ago`;
+}
+
+// Plain text from stored block HTML (entities included).
+function stripHtml(html: string): string {
+  const el = document.createElement("div");
+  el.innerHTML = html;
+  return (el.textContent || "").trim();
+}
+
+// Same calendar day one year earlier ("YYYY-MM-DD" in, out).
+function yearAgo(date: string): string {
+  const md = date.slice(5);
+  return `${Number(date.slice(0, 4)) - 1}-${md === "02-29" ? "02-28" : md}`;
+}
+
+interface TodayCardData {
+  note: Page;
+  excerpt: string;
+  checklist: { text: string; checked: boolean }[];
+}
+
+interface OnThisDayData {
+  quote: string;
+  date: string;
+  notebookId: string;
+}
+
+// First paragraph/heading text of a daily note. Skips leading blocks that
+// just repeat the note's title or its date ("Sunday, July 19, 2026") —
+// daily notes usually open with their own date line.
+function firstText(note: Page): string {
+  const title = note.title.trim().toLowerCase();
+  for (const block of note.content.blocks) {
+    if (block.type === "paragraph" || block.type === "header") {
+      const t = stripHtml(String(block.data.text ?? ""));
+      if (!t) continue;
+      if (t.trim().toLowerCase() === title) continue;
+      if (t.length < 40 && !isNaN(Date.parse(t))) continue;
+      return t;
+    }
+  }
+  return "";
+}
+
+// Excerpt + first few checklist items for the Today card.
+function extractTodayCard(note: Page): TodayCardData {
+  const checklist: TodayCardData["checklist"] = [];
+  for (const block of note.content.blocks) {
+    if (block.type === "checklist" && checklist.length === 0) {
+      const items =
+        (block.data.items as
+          | { text?: string; checked?: boolean }[]
+          | undefined) ?? [];
+      for (const it of items.slice(0, 3)) {
+        const text = stripHtml(String(it.text ?? ""));
+        if (text) checklist.push({ text, checked: !!it.checked });
+      }
+    }
+  }
+  return { note, excerpt: firstText(note), checklist };
 }
 
 const SORT_OPTIONS: { value: NotebookSortOption; label: string }[] = [
@@ -46,21 +110,27 @@ export function NotebookOverview({
   onSelectNotebook,
   onCreateNotebook,
 }: NotebookOverviewProps) {
-  const [notebooksWithMeta, setNotebooksWithMeta] = useState<NotebookWithMeta[]>([]);
+  const [notebooksWithMeta, setNotebooksWithMeta] = useState<
+    NotebookWithMeta[]
+  >([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [showSortMenu, setShowSortMenu] = useState(false);
-  const [settingsNotebook, setSettingsNotebook] = useState<Notebook | null>(null);
+  const [settingsNotebook, setSettingsNotebook] = useState<Notebook | null>(
+    null
+  );
   const searchInputRef = useRef<HTMLInputElement>(null);
   const sortMenuRef = useRef<HTMLDivElement>(null);
 
   // Get persisted sort preference from store
-  const { notebookSortBy: sortBy, setNotebookSortBy: setSortBy } = useThemeStore();
+  const { notebookSortBy: sortBy, setNotebookSortBy: setSortBy } =
+    useThemeStore();
 
   // Tool button stores
   const openActionLibrary = useActionStore((state) => state.openActionLibrary);
   const { summary, openQuickCapture, openInboxPanel } = useInboxStore();
-  const { togglePanel: toggleFlashcards, stats: flashcardStats } = useFlashcardStore();
+  const { togglePanel: toggleFlashcards, stats: flashcardStats } =
+    useFlashcardStore();
 
   // Library front-door meta: greeting, date, totals, recent pages
   const recentPages = usePageStore((s) => s.recentPages);
@@ -89,10 +159,51 @@ export function NotebookOverview({
     []
   );
 
+  // Today card: today's daily note (whichever notebook holds it) and the
+  // on-this-day echo from a year ago.
+  const [todayCard, setTodayCard] = useState<TodayCardData | null>(null);
+  const [onThisDay, setOnThisDay] = useState<OnThisDayData | null>(null);
+
+  useEffect(() => {
+    if (notebooks.length === 0) return;
+    let cancelled = false;
+    const today = localToday();
+    const lastYear = yearAgo(today);
+
+    async function findDailyNote(date: string): Promise<Page | null> {
+      const results = await Promise.all(
+        notebooks.map((nb) => api.getDailyNote(nb.id, date).catch(() => null))
+      );
+      return results.find((p): p is Page => p !== null) ?? null;
+    }
+
+    (async () => {
+      const [todayNote, yearNote] = await Promise.all([
+        findDailyNote(today),
+        findDailyNote(lastYear),
+      ]);
+      if (cancelled) return;
+      setTodayCard(todayNote ? extractTodayCard(todayNote) : null);
+      const quote = yearNote ? firstText(yearNote) : "";
+      setOnThisDay(
+        yearNote && quote
+          ? { quote, date: lastYear, notebookId: yearNote.notebookId }
+          : null
+      );
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [notebooks]);
+
   // Close sort menu when clicking outside
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
-      if (sortMenuRef.current && !sortMenuRef.current.contains(event.target as Node)) {
+      if (
+        sortMenuRef.current &&
+        !sortMenuRef.current.contains(event.target as Node)
+      ) {
         setShowSortMenu(false);
       }
     }
@@ -123,9 +234,15 @@ export function NotebookOverview({
         case "name-desc":
           return b.notebook.name.localeCompare(a.notebook.name);
         case "updated":
-          return new Date(b.notebook.updatedAt).getTime() - new Date(a.notebook.updatedAt).getTime();
+          return (
+            new Date(b.notebook.updatedAt).getTime() -
+            new Date(a.notebook.updatedAt).getTime()
+          );
         case "created":
-          return new Date(b.notebook.createdAt).getTime() - new Date(a.notebook.createdAt).getTime();
+          return (
+            new Date(b.notebook.createdAt).getTime() -
+            new Date(a.notebook.createdAt).getTime()
+          );
         case "pages":
           return b.pageCount - a.pageCount;
         default:
@@ -234,7 +351,10 @@ export function NotebookOverview({
           <div>
             <div
               className="mb-1 text-xs font-medium uppercase"
-              style={{ color: "var(--color-text-muted)", letterSpacing: "0.08em" }}
+              style={{
+                color: "var(--color-text-muted)",
+                letterSpacing: "0.08em",
+              }}
             >
               The Library · {todayLabel}
             </div>
@@ -255,8 +375,9 @@ export function NotebookOverview({
               className="mt-1 text-sm"
               style={{ color: "var(--color-text-muted)" }}
             >
-              {notebooks.length} {notebooks.length === 1 ? "notebook" : "notebooks"} ·{" "}
-              {totalPages} {totalPages === 1 ? "page" : "pages"}
+              {notebooks.length}{" "}
+              {notebooks.length === 1 ? "notebook" : "notebooks"} · {totalPages}{" "}
+              {totalPages === 1 ? "page" : "pages"}
             </p>
           </div>
         </div>
@@ -379,8 +500,14 @@ export function NotebookOverview({
                     }}
                     className="flex w-full items-center justify-between px-3 py-2 text-left text-sm transition-colors hover:bg-[--color-bg-tertiary]"
                     style={{
-                      color: sortBy === option.value ? "var(--color-accent)" : "var(--color-text-primary)",
-                      backgroundColor: sortBy === option.value ? "var(--color-bg-tertiary)" : undefined,
+                      color:
+                        sortBy === option.value
+                          ? "var(--color-accent)"
+                          : "var(--color-text-primary)",
+                      backgroundColor:
+                        sortBy === option.value
+                          ? "var(--color-bg-tertiary)"
+                          : undefined,
                     }}
                   >
                     {option.label}
@@ -466,7 +593,10 @@ export function NotebookOverview({
           <div className="flex h-full items-center justify-center">
             <div
               className="h-8 w-8 animate-spin rounded-full border-2 border-t-transparent"
-              style={{ borderColor: "var(--color-accent)", borderTopColor: "transparent" }}
+              style={{
+                borderColor: "var(--color-accent)",
+                borderTopColor: "transparent",
+              }}
             />
           </div>
         ) : notebooks.length === 0 ? (
@@ -580,37 +710,212 @@ export function NotebookOverview({
               ))}
             </div>
 
-            {/* Recent — the warm front door's quick way back in */}
-            {!searchQuery && recentPages.length > 0 && (
-              <div className="mt-12" style={{ maxWidth: "640px" }}>
-                <div
-                  className="mb-3 text-xs font-medium uppercase"
-                  style={{ color: "var(--color-text-muted)", letterSpacing: "0.08em" }}
-                >
-                  Recent
-                </div>
-                <div className="flex flex-col">
-                  {recentPages.slice(0, 8).map((r) => (
-                    <button
-                      key={r.pageId}
-                      onClick={() => onSelectNotebook(r.notebookId)}
-                      className="flex items-center justify-between gap-4 rounded-md px-3 py-2 text-left transition-colors hover:bg-[--color-bg-secondary]"
+            {/* Recent + Today — the warm front door's quick way back in */}
+            {!searchQuery && (
+              <div className="mt-12 flex flex-wrap gap-10">
+                {recentPages.length > 0 && (
+                  <div
+                    className="min-w-[320px] flex-1"
+                    style={{ maxWidth: "640px" }}
+                  >
+                    <div
+                      className="mb-3 text-xs font-medium uppercase"
+                      style={{
+                        color: "var(--color-text-muted)",
+                        letterSpacing: "0.08em",
+                      }}
                     >
+                      Recent
+                    </div>
+                    <div className="flex flex-col">
+                      {recentPages.slice(0, 8).map((r) => (
+                        <button
+                          key={r.pageId}
+                          onClick={() => onSelectNotebook(r.notebookId)}
+                          className="flex items-center justify-between gap-4 rounded-md px-3 py-2 text-left transition-colors hover:bg-[--color-bg-secondary]"
+                        >
+                          <span
+                            className="truncate text-sm"
+                            style={{ color: "var(--color-text-primary)" }}
+                          >
+                            {r.title || "Untitled"}
+                          </span>
+                          <span
+                            className="flex flex-shrink-0 items-center gap-3 text-xs"
+                            style={{ color: "var(--color-text-muted)" }}
+                          >
+                            <span>{nbName(r.notebookId)}</span>
+                            <span>{relativeTime(r.accessedAt)}</span>
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="w-[380px] flex-shrink-0">
+                  <div
+                    className="mb-3 text-xs font-medium uppercase"
+                    style={{
+                      color: "var(--color-text-muted)",
+                      letterSpacing: "0.08em",
+                    }}
+                  >
+                    Today
+                  </div>
+                  <div
+                    className={`rounded-xl border p-5 shadow-sm ${todayCard ? "cursor-pointer transition-colors hover:border-[--color-accent]" : ""}`}
+                    style={{
+                      backgroundColor: "var(--color-bg-secondary)",
+                      borderColor: "var(--color-border)",
+                    }}
+                    onClick={
+                      todayCard
+                        ? () => onSelectNotebook(todayCard.note.notebookId)
+                        : undefined
+                    }
+                  >
+                    <div className="flex items-baseline justify-between gap-4">
                       <span
-                        className="truncate text-sm"
-                        style={{ color: "var(--color-text-primary)" }}
+                        style={{
+                          fontFamily: "var(--font-display)",
+                          fontWeight: 600,
+                          fontSize: "calc(var(--font-size-base, 16px) * 1.15)",
+                          color: "var(--color-text-primary)",
+                        }}
                       >
-                        {r.title || "Untitled"}
+                        {todayLabel}
                       </span>
                       <span
-                        className="flex flex-shrink-0 items-center gap-3 text-xs"
+                        className="text-xs"
+                        style={{
+                          fontFamily: "var(--font-mono)",
+                          color: "var(--color-text-muted)",
+                        }}
+                      >
+                        {localToday()}
+                      </span>
+                    </div>
+
+                    {todayCard ? (
+                      <>
+                        {todayCard.excerpt && (
+                          <p
+                            className="mt-3 text-sm"
+                            style={{
+                              color: "var(--color-text-secondary)",
+                              display: "-webkit-box",
+                              WebkitLineClamp: 3,
+                              WebkitBoxOrient: "vertical",
+                              overflow: "hidden",
+                            }}
+                          >
+                            {todayCard.excerpt}
+                          </p>
+                        )}
+                        {todayCard.checklist.length > 0 && (
+                          <div className="mt-3 flex flex-col gap-1.5">
+                            {todayCard.checklist.map((item, i) => (
+                              <div
+                                key={i}
+                                className="flex items-center gap-2.5"
+                              >
+                                <span
+                                  aria-hidden
+                                  className="flex h-4 w-4 flex-shrink-0 items-center justify-center rounded"
+                                  style={{
+                                    backgroundColor: item.checked
+                                      ? "var(--color-accent)"
+                                      : "transparent",
+                                    border: item.checked
+                                      ? "1px solid var(--color-accent)"
+                                      : "1px solid var(--color-border)",
+                                  }}
+                                >
+                                  {item.checked && (
+                                    <svg
+                                      xmlns="http://www.w3.org/2000/svg"
+                                      width="10"
+                                      height="10"
+                                      viewBox="0 0 24 24"
+                                      fill="none"
+                                      stroke="white"
+                                      strokeWidth="3"
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                    >
+                                      <path d="M20 6L9 17l-5-5" />
+                                    </svg>
+                                  )}
+                                </span>
+                                <span
+                                  className="truncate text-sm"
+                                  style={{
+                                    color: item.checked
+                                      ? "var(--color-text-muted)"
+                                      : "var(--color-text-secondary)",
+                                    textDecoration: item.checked
+                                      ? "line-through"
+                                      : undefined,
+                                  }}
+                                >
+                                  {item.text}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <p
+                        className="mt-3 text-sm"
                         style={{ color: "var(--color-text-muted)" }}
                       >
-                        <span>{nbName(r.notebookId)}</span>
-                        <span>{relativeTime(r.accessedAt)}</span>
-                      </span>
-                    </button>
-                  ))}
+                        No daily note yet today.
+                      </p>
+                    )}
+
+                    {onThisDay && (
+                      <div
+                        className="mt-4 border-t pt-4"
+                        style={{ borderColor: "var(--color-border-muted)" }}
+                      >
+                        <div
+                          className="mb-2 text-xs font-medium uppercase"
+                          style={{
+                            color: "var(--color-text-muted)",
+                            letterSpacing: "0.08em",
+                          }}
+                        >
+                          On this day · a year ago
+                        </div>
+                        <blockquote
+                          className="pl-3 text-sm"
+                          style={{
+                            fontFamily: "var(--font-display)",
+                            fontStyle: "italic",
+                            fontSize:
+                              "calc(var(--font-size-base, 16px) * 1.02)",
+                            lineHeight: 1.45,
+                            color: "var(--color-text-secondary)",
+                            borderLeft: "2px solid var(--color-accent)",
+                            display: "-webkit-box",
+                            WebkitLineClamp: 3,
+                            WebkitBoxOrient: "vertical",
+                            overflow: "hidden",
+                          }}
+                        >
+                          {onThisDay.quote}
+                        </blockquote>
+                        <div
+                          className="mt-2 pl-3 text-xs"
+                          style={{ color: "var(--color-text-muted)" }}
+                        >
+                          {onThisDay.date} · {nbName(onThisDay.notebookId)}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
@@ -711,21 +1016,30 @@ function ToolDock({
               icon={<IconPlus />}
               label="Quick Capture"
               shortcut="\u2318\u21e7C"
-              onClick={() => { openQuickCapture(); setExpanded(false); }}
+              onClick={() => {
+                openQuickCapture();
+                setExpanded(false);
+              }}
             />
             <ToolDockItem
               icon={<IconInbox />}
               label="Inbox"
               shortcut="\u2318\u21e7I"
               badge={inboxCount}
-              onClick={() => { openInboxPanel(); setExpanded(false); }}
+              onClick={() => {
+                openInboxPanel();
+                setExpanded(false);
+              }}
             />
             <ToolDockItem
               icon={<IconFlashcard />}
               label="Flashcards"
               shortcut="\u2318\u21e7F"
               badge={flashcardsDue}
-              onClick={() => { toggleFlashcards(); setExpanded(false); }}
+              onClick={() => {
+                toggleFlashcards();
+                setExpanded(false);
+              }}
             />
             <div
               className="mx-2 my-1 border-t"
@@ -735,19 +1049,28 @@ function ToolDock({
               icon={<IconSparkle />}
               label="AI Chat"
               shortcut="\u2318\u21e7A"
-              onClick={() => { openAIChat(); setExpanded(false); }}
+              onClick={() => {
+                openAIChat();
+                setExpanded(false);
+              }}
             />
             <ToolDockItem
               icon={<IconBolt />}
               label="Actions"
               shortcut="\u2318\u21e7X"
-              onClick={() => { openActionLibrary(); setExpanded(false); }}
+              onClick={() => {
+                openActionLibrary();
+                setExpanded(false);
+              }}
             />
             <ToolDockItem
               icon={<IconGraph />}
               label="Graph View"
               shortcut="\u2318G"
-              onClick={() => { openGraphView(); setExpanded(false); }}
+              onClick={() => {
+                openGraphView();
+                setExpanded(false);
+              }}
             />
           </div>
         </div>
@@ -892,7 +1215,17 @@ function ToolDockItem({
 
 function IconPlus() {
   return (
-    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       <path d="M12 5v14M5 12h14" />
     </svg>
   );
@@ -900,7 +1233,17 @@ function IconPlus() {
 
 function IconInbox() {
   return (
-    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       <polyline points="22 12 16 12 14 15 10 15 8 12 2 12" />
       <path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" />
     </svg>
@@ -909,7 +1252,17 @@ function IconInbox() {
 
 function IconFlashcard() {
   return (
-    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       <rect x="2" y="4" width="20" height="16" rx="2" />
       <line x1="2" y1="12" x2="22" y2="12" />
     </svg>
@@ -918,7 +1271,17 @@ function IconFlashcard() {
 
 function IconSparkle() {
   return (
-    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       <path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3z" />
     </svg>
   );
@@ -926,7 +1289,17 @@ function IconSparkle() {
 
 function IconBolt() {
   return (
-    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
     </svg>
   );
@@ -934,7 +1307,17 @@ function IconBolt() {
 
 function IconGraph() {
   return (
-    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
       <circle cx="12" cy="12" r="3" />
       <circle cx="19" cy="5" r="2" />
       <circle cx="5" cy="19" r="2" />
