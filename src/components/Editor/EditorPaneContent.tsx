@@ -28,7 +28,7 @@ import { ChatPageRouter } from "./ChatPageRouter";
 import { CanvasEditor } from "../Canvas";
 import { DatabaseEditor, type DatabaseUndoRedoState } from "../Database";
 import { HtmlViewer } from "../Html";
-import { OutlinePanel } from "./OutlinePanel";
+import { RightRail } from "./RightRail";
 import { BacklinksPanel } from "./BacklinksPanel";
 import { SimilarPagesPanel } from "./SimilarPagesPanel";
 import type { EditorData, Page } from "../../types/page";
@@ -1070,16 +1070,19 @@ export function EditorPaneContent({
                       </>
                     )}
 
-                    {/* Backlinks panel - only for standard pages */}
+                    {/* Backlinks panel — only for standard pages, and only when
+                        the right rail is NOT showing them (rail = showOutline
+                        && !zenMode). Avoids double-rendering LINKED FROM. */}
                     {(selectedPage.pageType === "standard" ||
-                      !selectedPage.pageType) && (
-                      <BacklinksPanel
-                        pageTitle={selectedPage.title}
-                        pageId={selectedPage.id}
-                        notebookId={notebookId}
-                        onBlockRefClick={handleBlockRefClick}
-                      />
-                    )}
+                      !selectedPage.pageType) &&
+                      !(showOutline && !zenMode) && (
+                        <BacklinksPanel
+                          pageTitle={selectedPage.title}
+                          pageId={selectedPage.id}
+                          notebookId={notebookId}
+                          onBlockRefClick={handleBlockRefClick}
+                        />
+                      )}
 
                     {/* Similar Pages panel - only for standard pages */}
                     {(selectedPage.pageType === "standard" ||
@@ -1093,8 +1096,9 @@ export function EditorPaneContent({
                   </div>
                 </div>
                 {showOutline && isStandardPage && !zenMode && (
-                  <OutlinePanel
-                    blocks={selectedPage.content.blocks}
+                  <RightRail
+                    page={selectedPage}
+                    notebookId={notebookId}
                     editorScrollRef={editorScrollRef}
                   />
                 )}

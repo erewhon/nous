@@ -11,6 +11,7 @@ import { useActionStore } from "../../stores/actionStore";
 import { useInboxStore } from "../../stores/inboxStore";
 import { useFlashcardStore } from "../../stores/flashcardStore";
 import { usePageStore } from "../../stores/pageStore";
+import { useNotebookStore } from "../../stores/notebookStore";
 import * as api from "../../utils/api";
 import { localToday } from "../../utils/dateLocal";
 
@@ -96,7 +97,6 @@ const SORT_OPTIONS: { value: NotebookSortOption; label: string }[] = [
 interface NotebookWithMeta {
   notebook: Notebook;
   coverPage: Page | null;
-  pageCount: number;
 }
 
 interface NotebookOverviewProps {
@@ -132,11 +132,16 @@ export function NotebookOverview({
   const { togglePanel: toggleFlashcards, stats: flashcardStats } =
     useFlashcardStore();
 
+  // Per-notebook page counts live in the store now (shared with the Study
+  // sidebar). Missing key => unknown (omit badge), never 0.
+  const pageCounts = useNotebookStore((s) => s.pageCounts);
+  const loadPageCounts = useNotebookStore((s) => s.loadPageCounts);
+
   // Library front-door meta: greeting, date, totals, recent pages
   const recentPages = usePageStore((s) => s.recentPages);
   const totalPages = useMemo(
-    () => notebooksWithMeta.reduce((sum, n) => sum + n.pageCount, 0),
-    [notebooksWithMeta]
+    () => notebooks.reduce((sum, n) => sum + (pageCounts[n.id] ?? 0), 0),
+    [notebooks, pageCounts]
   );
   const nbName = useCallback(
     (id: string) => notebooks.find((n) => n.id === id)?.name ?? "",
@@ -244,14 +249,16 @@ export function NotebookOverview({
             new Date(a.notebook.createdAt).getTime()
           );
         case "pages":
-          return b.pageCount - a.pageCount;
+          return (
+            (pageCounts[b.notebook.id] ?? 0) - (pageCounts[a.notebook.id] ?? 0)
+          );
         default:
           return 0;
       }
     });
 
     return result;
-  }, [notebooksWithMeta, searchQuery, sortBy]);
+  }, [notebooksWithMeta, searchQuery, sortBy, pageCounts]);
 
   // Keyboard shortcut to focus search (Cmd/Ctrl + F)
   useEffect(() => {
@@ -270,7 +277,8 @@ export function NotebookOverview({
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [searchQuery]);
 
-  // Load cover pages and page counts for all notebooks
+  // Load cover pages for all notebooks. Page counts are fetched separately into
+  // the shared store (loadPageCounts) so the Study sidebar and library agree.
   useEffect(() => {
     let cancelled = false;
 
@@ -280,24 +288,13 @@ export function NotebookOverview({
 
       for (const notebook of notebooks) {
         try {
-          const [coverPage, pages] = await Promise.all([
-            api.getCoverPage(notebook.id),
-            api.listPages(notebook.id),
-          ]);
+          const coverPage = await api.getCoverPage(notebook.id);
           if (!cancelled) {
-            results.push({
-              notebook,
-              coverPage,
-              pageCount: pages.filter((p) => !p.isCover).length,
-            });
+            results.push({ notebook, coverPage });
           }
         } catch (error) {
           if (!cancelled) {
-            results.push({
-              notebook,
-              coverPage: null,
-              pageCount: 0,
-            });
+            results.push({ notebook, coverPage: null });
           }
         }
       }
@@ -309,11 +306,13 @@ export function NotebookOverview({
     }
 
     loadNotebookMeta();
+    // Refresh counts whenever the visible notebook set changes.
+    void loadPageCounts();
 
     return () => {
       cancelled = true;
     };
-  }, [notebooks]);
+  }, [notebooks, loadPageCounts]);
 
   const handleCreateNotebook = useCallback(() => {
     onCreateNotebook();
@@ -698,12 +697,12 @@ export function NotebookOverview({
         ) : (
           <>
             <div className="flex flex-wrap gap-6">
-              {filteredNotebooks.map(({ notebook, coverPage, pageCount }) => (
+              {filteredNotebooks.map(({ notebook, coverPage }) => (
                 <NotebookCard
                   key={notebook.id}
                   notebook={notebook}
                   coverPage={coverPage}
-                  pageCount={pageCount}
+                  pageCount={pageCounts[notebook.id]}
                   onClick={() => onSelectNotebook(notebook.id)}
                   onSettings={() => setSettingsNotebook(notebook)}
                 />

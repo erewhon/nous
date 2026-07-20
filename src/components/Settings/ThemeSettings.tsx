@@ -6,6 +6,7 @@ import {
   type EditorWidth,
   type EditorKeymap,
   type UIMode,
+  type SidebarMode,
 } from "../../stores/themeStore";
 import { useUndoHistoryStore } from "../../stores/undoHistoryStore";
 
@@ -20,6 +21,12 @@ const UI_MODES: { value: UIMode; label: string; description: string }[] = [
     label: "Overview",
     description: "Tiled notebook view, like physical notebooks",
   },
+];
+
+const SIDEBAR_MODES: { value: SidebarMode; label: string; description: string }[] = [
+  { value: "full", label: "Full", description: "Classic 3-panel" },
+  { value: "rail", label: "Rail", description: "Icon rail + accordion" },
+  { value: "study", label: "Study", description: "Editorial sidebar" },
 ];
 
 const THEME_MODES: { value: ThemeMode; label: string; description: string }[] = [
@@ -83,6 +90,8 @@ export function ThemeSettings() {
     settings,
     resolvedMode,
     uiMode,
+    sidebarMode,
+    setSidebarMode,
     autoHidePanels,
     showRecentPages,
     showFavoritePages,
@@ -203,6 +212,50 @@ export function ThemeSettings() {
           ))}
         </div>
       </div>
+
+      {/* Sidebar Style — only relevant in classic layout (overview has no sidebar) */}
+      {uiMode === "classic" && (
+        <div>
+          <label
+            className="mb-3 block text-sm font-medium"
+            style={{ color: "var(--color-text-primary)" }}
+          >
+            Sidebar Style
+          </label>
+          <div className="grid grid-cols-3 gap-3">
+            {SIDEBAR_MODES.map((mode) => (
+              <button
+                key={mode.value}
+                onClick={() => setSidebarMode(mode.value)}
+                className="flex flex-col items-center gap-1 rounded-lg border p-3 transition-colors"
+                style={{
+                  borderColor:
+                    sidebarMode === mode.value
+                      ? "var(--color-accent)"
+                      : "var(--color-border)",
+                  backgroundColor:
+                    sidebarMode === mode.value
+                      ? "rgba(139, 92, 246, 0.1)"
+                      : "transparent",
+                }}
+              >
+                <span
+                  className="block text-sm font-medium"
+                  style={{ color: "var(--color-text-primary)" }}
+                >
+                  {mode.label}
+                </span>
+                <span
+                  className="block text-center text-xs"
+                  style={{ color: "var(--color-text-muted)" }}
+                >
+                  {mode.description}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Panel Behavior */}
       {uiMode === "classic" && (

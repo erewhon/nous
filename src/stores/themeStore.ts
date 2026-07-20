@@ -13,7 +13,7 @@ export type UIMode = "classic" | "overview";
 export type NotebookSortOption = "position" | "name-asc" | "name-desc" | "updated" | "created" | "pages";
 export type PageSortOption = "position" | "name-asc" | "name-desc" | "updated" | "created";
 export type EditorKeymap = "standard" | "vim" | "emacs";
-export type SidebarMode = "full" | "rail";
+export type SidebarMode = "full" | "rail" | "study";
 
 export type FocusHighlightMode = "sentence" | "paragraph" | "none";
 
@@ -79,7 +79,7 @@ interface ThemeState {
   pageSortBy: PageSortOption;
   sectionSortBy: string; // "manual" | "name-asc" | "name-desc" | "created-desc" | "created-asc" | "modified-desc"
   panelWidths: PanelWidths;
-  sidebarMode: SidebarMode;  // "full" = classic 3-panel, "rail" = icon rail + accordion
+  sidebarMode: SidebarMode;  // "full" = classic 3-panel, "rail" = icon rail + accordion, "study" = Study editorial sidebar
   autoHidePanels: boolean;  // Auto-hide all panels together
   panelsHovered: boolean;   // Track hover state for auto-hide (all panels as one)
   showRecentPages: boolean;   // Show Recent section in sidebar
@@ -476,7 +476,11 @@ export const useThemeStore = create<ThemeState>()(
       pageSortBy: "position" as PageSortOption,
       sectionSortBy: "manual",
       panelWidths: DEFAULT_PANEL_WIDTHS,
-      sidebarMode: "full" as SidebarMode,
+      // Fresh profiles open on the Study sidebar (the signature default).
+      // Existing users keep their persisted mode; the rehydrate migration below
+      // backfills legacy states that predate sidebarMode to "full", so no one's
+      // explicit/implicit choice is overridden.
+      sidebarMode: "study" as SidebarMode,
       autoHidePanels: false,
       panelsHovered: false,
       showRecentPages: true,

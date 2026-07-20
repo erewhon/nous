@@ -1,6 +1,4 @@
 import { useMemo, useState, useEffect, useCallback, useRef } from "react";
-import { ResizeHandle } from "../Layout/ResizeHandle";
-import { useThemeStore } from "../../stores/themeStore";
 import type { EditorBlock } from "../../types/page";
 
 interface HeadingItem {
@@ -21,13 +19,17 @@ function stripHtml(html: string): string {
 
 const LEVEL_BADGES = ["H1", "H2", "H3", "H4", "H5", "H6"] as const;
 
-export function OutlinePanel({ blocks, editorScrollRef }: OutlinePanelProps) {
+/**
+ * The scroll-synced heading list + progress track, without the standalone
+ * panel chrome (resize handle / width / header). Shared by OutlinePanel (the
+ * classic outline column) and the Study RightRail's "On this page" section.
+ * Returns null when the page has no headings.
+ */
+export function OutlineList({ blocks, editorScrollRef }: OutlinePanelProps) {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set());
   const [scrollProgress, setScrollProgress] = useState(0);
   const panelRef = useRef<HTMLDivElement>(null);
-  const panelWidth = useThemeStore((s) => s.panelWidths.outline);
-  const setPanelWidth = useThemeStore((s) => s.setPanelWidth);
 
   const headings = useMemo<HeadingItem[]>(() => {
     const raw = blocks
@@ -98,13 +100,6 @@ export function OutlinePanel({ blocks, editorScrollRef }: OutlinePanelProps) {
     }
   }, []);
 
-  const handleResize = useCallback(
-    (delta: number) => {
-      setPanelWidth("outline", panelWidth - delta);
-    },
-    [panelWidth, setPanelWidth]
-  );
-
   // Track active heading + scroll progress on scroll
   useEffect(() => {
     const scrollContainer = editorScrollRef.current;
@@ -160,52 +155,37 @@ export function OutlinePanel({ blocks, editorScrollRef }: OutlinePanelProps) {
     }
   }, [activeId]);
 
-  if (headings.length === 0) return null;
+  if (headings.length === 0) {
+    return (
+      <div
+        className="px-3 py-2 text-xs"
+        style={{ color: "var(--color-text-muted)" }}
+      >
+        No headings yet
+      </div>
+    );
+  }
 
   return (
-    <div className="flex shrink-0" style={{ transition: "width 0.15s" }}>
-      <ResizeHandle
-        direction="horizontal"
-        position="left"
-        onResize={handleResize}
-      />
-      <div
-        ref={panelRef}
-        className="flex flex-col overflow-y-auto"
-        style={{
-          width: panelWidth,
-          borderLeft: "1px solid var(--color-border)",
-          backgroundColor: "var(--color-bg-primary)",
-        }}
-      >
+    <div ref={panelRef} className="flex flex-1 overflow-hidden">
+      {/* Scroll progress track */}
+      <div className="shrink-0 relative ml-1" style={{ width: 3 }}>
         <div
-          className="px-4 pt-4 pb-2 text-xs font-semibold uppercase tracking-wider"
-          style={{ color: "var(--color-text-muted)" }}
-        >
-          Outline
-        </div>
-        <div className="flex flex-1 overflow-hidden">
-          {/* Scroll progress track */}
-          <div
-            className="shrink-0 relative ml-2"
-            style={{ width: 3 }}
-          >
-            <div
-              className="absolute inset-0 rounded-full"
-              style={{ backgroundColor: "var(--color-border)" }}
-            />
-            <div
-              className="absolute top-0 left-0 right-0 rounded-full transition-[height] duration-100"
-              style={{
-                height: `${Math.min(100, scrollProgress * 100)}%`,
-                backgroundColor: "var(--color-accent)",
-                opacity: 0.5,
-              }}
-            />
-          </div>
-          {/* Heading list */}
-          <nav className="flex flex-col gap-0.5 px-2 pb-4 pt-0.5 flex-1 overflow-y-auto">
-            {visibleHeadings.map((h) => {
+          className="absolute inset-0 rounded-full"
+          style={{ backgroundColor: "var(--color-border)" }}
+        />
+        <div
+          className="absolute top-0 left-0 right-0 rounded-full transition-[height] duration-100"
+          style={{
+            height: `${Math.min(100, scrollProgress * 100)}%`,
+            backgroundColor: "var(--color-accent)",
+            opacity: 0.5,
+          }}
+        />
+      </div>
+      {/* Heading list */}
+      <nav className="flex flex-col gap-0.5 px-2 pb-2 pt-0.5 flex-1 overflow-y-auto">
+        {visibleHeadings.map((h) => {
               const isActive = h.id === activeId;
               const isCollapsed = collapsedIds.has(h.id);
               const indent = (h.level - 1) * 14 + 4;
@@ -277,9 +257,7 @@ export function OutlinePanel({ blocks, editorScrollRef }: OutlinePanelProps) {
                 </div>
               );
             })}
-          </nav>
-        </div>
-      </div>
+      </nav>
     </div>
   );
 }

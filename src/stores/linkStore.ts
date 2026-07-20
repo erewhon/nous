@@ -3,7 +3,7 @@ import { WikiLinkTool } from "../components/Editor/WikiLinkTool";
 import { BlockRefTool } from "../components/Editor/BlockRefTool";
 import type { Page } from "../types/page";
 
-interface LinkInfo {
+export interface LinkInfo {
   sourcePageId: string;
   sourcePageTitle: string;
   targetTitle: string;
