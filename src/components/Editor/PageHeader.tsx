@@ -33,6 +33,7 @@ import { AudioGenerateDialog } from "../Audio";
 import { PresentationDialog } from "../Presentation";
 import { PrintDialog } from "../Print";
 import { useFolderStore } from "../../stores/folderStore";
+import { useNotebookStore } from "../../stores/notebookStore";
 import { useToastStore } from "../../stores/toastStore";
 import { usePluginStore, type PluginExportFormat } from "../../stores/pluginStore";
 import { useDrawingStore } from "../../stores/drawingStore";
@@ -111,7 +112,13 @@ export function PageHeader({
     updatePageContent,
     toggleFavorite,
   } = usePageStore();
-  const { loadFolders } = useFolderStore();
+  const { loadFolders, folders } = useFolderStore();
+  const notebook = useNotebookStore((s) =>
+    s.notebooks.find((n) => n.id === page.notebookId)
+  );
+  const folder = page.folderId
+    ? folders.find((f) => f.id === page.folderId)
+    : undefined;
   const { getTemplateForPage } = useTemplateStore();
   const { showPageStats, togglePageStats } = useThemeStore();
   const toast = useToastStore();
@@ -555,6 +562,34 @@ export function PageHeader({
       className="border-b px-16 py-5"
       style={{ borderColor: "var(--color-border)" }}
     >
+      {/* Eyebrow — chapter-opening notebook · folder marker */}
+      {notebook && (
+        <div className="mb-1.5 flex min-w-0 items-center gap-2">
+          <span
+            aria-hidden
+            className="inline-block flex-shrink-0"
+            style={{
+              width: 7,
+              height: 7,
+              borderRadius: 2,
+              backgroundColor: notebook.color || "var(--color-accent)",
+            }}
+          />
+          <span
+            className="overflow-hidden text-ellipsis whitespace-nowrap"
+            style={{
+              fontSize: 11,
+              fontWeight: 600,
+              letterSpacing: "0.14em",
+              textTransform: "uppercase",
+              color: "var(--color-text-muted)",
+            }}
+          >
+            {notebook.name}
+            {folder ? ` · ${folder.name}` : ""}
+          </span>
+        </div>
+      )}
       <div className="flex items-center justify-between">
         <div className="flex-1">
           {isEditing ? (
@@ -1691,6 +1726,19 @@ export function PageHeader({
       <div className="relative mt-3">
         <TagEditor page={page} />
       </div>
+
+      {/* Accent hairline — the chapter-opening rule under the title block */}
+      <div
+        aria-hidden
+        className="mt-3"
+        style={{
+          width: 64,
+          height: 2,
+          borderRadius: 1,
+          backgroundColor: "var(--color-accent)",
+          opacity: 0.85,
+        }}
+      />
 
       {/* Save as Template Dialog */}
       <SaveAsTemplateDialog
