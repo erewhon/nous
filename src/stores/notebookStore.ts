@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { Notebook, NotebookType } from "../types/notebook";
+import type { Page } from "../types/page";
 import { usePageStore } from "./pageStore";
 import { useSectionStore } from "./sectionStore";
 import * as api from "../utils/api";
@@ -8,6 +9,28 @@ import * as api from "../utils/api";
 interface NotebookViewState {
   sectionId: string | null;
   pageId: string | null;
+}
+
+/** Count of pages in a notebook that aren't its cover page. */
+export function countNonCoverPages(pages: Page[]): number {
+  return pages.filter((p) => !p.isCover).length;
+}
+
+/**
+ * Fold per-notebook count results into a `{ notebookId: count }` map.
+ * Rejected settlements are dropped entirely — a notebook whose count failed to
+ * load gets NO entry (so the UI omits its badge rather than showing a wrong 0).
+ */
+export function buildPageCounts(
+  results: PromiseSettledResult<readonly [string, number]>[]
+): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const r of results) {
+    if (r.status === "fulfilled") {
+      counts[r.value[0]] = r.value[1];
+    }
+  }
+  return counts;
 }
 
 interface NotebookState {
@@ -18,11 +41,17 @@ interface NotebookState {
   error: string | null;
   /** Remembers the last viewed section and page for each notebook */
   notebookViewState: Record<string, NotebookViewState>;
+  /** Per-notebook non-cover page counts. A missing key means "unknown" (omit
+      the badge) — never treat absence as 0. Populated by loadPageCounts(). */
+  pageCounts: Record<string, number>;
 }
 
 interface NotebookActions {
   // Data loading
   loadNotebooks: () => Promise<void>;
+  /** Fan out listPages per non-archived notebook and cache non-cover counts.
+      Degrades gracefully (Promise.allSettled): a failed notebook is omitted. */
+  loadPageCounts: () => Promise<void>;
 
   // Notebook CRUD
   createNotebook: (name: string, type?: NotebookType) => Promise<void>;
@@ -68,6 +97,7 @@ export const useNotebookStore = create<NotebookStore>()(
   isLoading: false,
   error: null,
   notebookViewState: {},
+  pageCounts: {},
 
   // Actions
   loadNotebooks: async () => {
@@ -75,12 +105,26 @@ export const useNotebookStore = create<NotebookStore>()(
     try {
       const notebooks = await api.listNotebooks();
       set({ notebooks, isLoading: false });
+      // Refresh page counts now that the notebook list is known. Fire-and-forget:
+      // counts are decorative and must never block or fail the notebook load.
+      void get().loadPageCounts();
     } catch (err) {
       set({
         error: err instanceof Error ? err.message : "Failed to load notebooks",
         isLoading: false,
       });
     }
+  },
+
+  loadPageCounts: async () => {
+    const targets = get().notebooks.filter((n) => !n.archived);
+    const results = await Promise.allSettled(
+      targets.map(async (nb) => {
+        const pages = await api.listPages(nb.id);
+        return [nb.id, countNonCoverPages(pages)] as const;
+      })
+    );
+    set({ pageCounts: buildPageCounts(results) });
   },
 
   createNotebook: async (name, type = "standard") => {

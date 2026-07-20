@@ -1,0 +1,773 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nous — The Study · Board A · The Ledger</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 16 16%22><circle cx=%228%22 cy=%228%22 r=%226%22 fill=%22%238b5cf6%22/></svg>">
+<script>const _t=new URLSearchParams(location.search).get("theme");if(_t==="light"||_t==="dark")document.documentElement.dataset.theme=_t;</script>
+<style>
+/* NOUS · "THE STUDY" · Board view A — "The Ledger" (dense, power-user)
+   Sibling of the grouped table (direction-a-database + grafted group primitives).
+   Every color is a study token or a color-mix of study tokens. */
+
+:root {
+  --font-display: "Cormorant Garamond", "Iowan Old Style", Georgia, serif;
+  --font-ui: "DM Sans", -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", "SF Mono", Menlo, monospace;
+  --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px; --sp-4: 16px; --sp-5: 20px;
+  --sp-6: 24px; --sp-7: 32px; --sp-8: 40px; --sp-9: 48px; --sp-10: 64px;
+  --r-xs: 4px; --r-sm: 7px; --r-md: 10px; --r-lg: 14px; --r-xl: 20px; --r-full: 999px;
+  --dur-fast: 130ms; --dur-base: 190ms; --dur-slow: 260ms;
+  --ease-settle: cubic-bezier(.22,.61,.36,1);
+  --ease-inout: cubic-bezier(.45,.05,.35,.95);
+}
+:root[data-theme="dark"] {
+  --color-bg-primary: #1b1526; --color-bg-secondary: #171120; --color-bg-tertiary: #272033;
+  --color-bg-elevated: #241c33; --color-bg-sidebar: #120d1b; --color-bg-panel: #150f1e;
+  --color-text-primary: #ece7de; --color-text-secondary: #b3aac2; --color-text-muted: #8a80a0;
+  --color-accent: #ab87fc; --color-accent-hover: #bfa3ff;
+  --color-accent-secondary: #8a5cf5; --color-accent-tertiary: #6e46d9;
+  --color-success: #a9c98b; --color-warning: #e3b96f; --color-error: #e58e87; --color-info: #8fb8e8;
+  --color-border: #322a44; --color-border-muted: #251e35;
+  --color-selection: rgba(171, 135, 252, 0.28);
+  --shadow-1: 0 1px 2px rgba(10,5,20,.5);
+  --shadow-2: 0 2px 8px rgba(10,5,20,.45), 0 1px 2px rgba(10,5,20,.4);
+  --shadow-3: 0 8px 28px rgba(10,5,20,.5), 0 2px 8px rgba(10,5,20,.35);
+  --shadow-4: 0 20px 60px rgba(8,4,18,.6), 0 4px 16px rgba(8,4,18,.4);
+  --star-display: block;
+}
+:root[data-theme="light"] {
+  --color-bg-primary: #faf7f0; --color-bg-secondary: #f3eee3; --color-bg-tertiary: #eae3d3;
+  --color-bg-elevated: #fffdf8; --color-bg-sidebar: #f1ecdf; --color-bg-panel: #f6f2e8;
+  --color-text-primary: #241d33; --color-text-secondary: #564c6b; --color-text-muted: #6f6584;
+  --color-accent: #6d40cf; --color-accent-hover: #5a30b8;
+  --color-accent-secondary: #5a34ad; --color-accent-tertiary: #48288c;
+  --color-success: #3f6827; --color-warning: #7d5507; --color-error: #aa332a; --color-info: #2f639e;
+  --color-border: #ded5c2; --color-border-muted: #ebe5d6;
+  --color-selection: rgba(109, 64, 207, 0.16);
+  --shadow-1: 0 1px 2px rgba(60,45,85,.08);
+  --shadow-2: 0 2px 8px rgba(60,45,85,.10), 0 1px 2px rgba(60,45,85,.07);
+  --shadow-3: 0 8px 28px rgba(60,45,85,.14), 0 2px 8px rgba(60,45,85,.08);
+  --shadow-4: 0 20px 60px rgba(50,35,75,.20), 0 4px 16px rgba(50,35,75,.10);
+  --star-display: none;
+}
+/* AA helper: text-muted misses 4.5:1 on bg-elevated (dark) — meta text on cards
+   uses a mix nudged toward text-secondary. Still recedes, still passes. */
+:root { --text-meta: color-mix(in srgb, var(--color-text-muted) 45%, var(--color-text-secondary)); }
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+::selection { background: var(--color-selection); }
+html, body { height: 100%; }
+body {
+  font-family: var(--font-ui); font-size: 13px; line-height: 1.5;
+  background: var(--color-bg-primary); color: var(--color-text-primary);
+  -webkit-font-smoothing: antialiased; overflow-x: hidden;
+  transition: background var(--dur-slow) var(--ease-inout), color var(--dur-slow) var(--ease-inout);
+}
+:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--color-bg-primary),
+              0 0 0 4px color-mix(in srgb, var(--color-accent) 70%, transparent);
+  border-radius: var(--r-xs);
+}
+button { font-family: inherit; color: inherit; background: none; border: none; cursor: pointer; }
+
+/* Faint study sky — dark mode only, killed by reduced motion */
+#sky { position: fixed; inset: 0; pointer-events: none; z-index: 0; display: var(--star-display); }
+#sky .star { position: absolute; border-radius: 50%; background: var(--color-text-muted); opacity: .1; animation: twinkle 7s ease-in-out infinite; }
+@keyframes twinkle { 0%,100% { opacity: .08; } 50% { opacity: .26; } }
+.page { position: relative; z-index: 1; }
+
+/* ---------- Top bar ---------- */
+.topbar {
+  height: 44px; display: flex; align-items: center; gap: var(--sp-3);
+  padding: 0 var(--sp-4); border-bottom: 1px solid var(--color-border-muted);
+}
+.crumb { display: flex; align-items: center; gap: var(--sp-2); font-size: 12.5px; color: var(--color-text-muted); white-space: nowrap; overflow: hidden; }
+.crumb a { color: var(--color-text-muted); text-decoration: none; }
+.crumb a:hover { color: var(--color-text-primary); }
+.crumb .here { color: var(--color-text-secondary); font-weight: 500; overflow: hidden; text-overflow: ellipsis; }
+.topbar .spacer { flex: 1; }
+.tb-btn {
+  display: inline-flex; align-items: center; gap: var(--sp-2); flex: none;
+  font-size: 12.5px; font-weight: 500; color: var(--color-text-secondary);
+  padding: 6px 10px; border-radius: var(--r-sm);
+  transition: background var(--dur-fast) var(--ease-settle), color var(--dur-fast) var(--ease-settle);
+}
+.tb-btn:hover { background: var(--color-bg-tertiary); color: var(--color-text-primary); }
+.tb-btn.primary { background: var(--color-accent); color: var(--color-bg-sidebar); }
+.tb-btn.primary:hover { background: var(--color-accent-hover); }
+
+/* ---------- Database header ---------- */
+.wrap { max-width: 1240px; margin: 0 auto; padding: var(--sp-6) var(--sp-6) var(--sp-7); }
+.db-head { margin-bottom: var(--sp-4); }
+.db-eyebrow {
+  font-size: 11px; font-weight: 600; letter-spacing: .09em; text-transform: uppercase;
+  color: var(--color-text-muted); margin-bottom: var(--sp-2);
+  display: flex; gap: var(--sp-2); align-items: center;
+}
+.nb-dot { width: 8px; height: 8px; border-radius: 2.5px; background: var(--color-warning); }
+.db-head h1 { font-family: var(--font-display); font-weight: 600; font-size: 33px; line-height: 1.1; margin-bottom: var(--sp-1); }
+.db-head .sub { font-size: 13px; color: var(--color-text-secondary); }
+
+/* View tabs + toolbar */
+.viewbar {
+  display: flex; align-items: center; gap: var(--sp-2);
+  border-bottom: 1px solid var(--color-border); margin-bottom: var(--sp-4);
+}
+.vtab {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 13px; font-weight: 500; color: var(--color-text-muted);
+  padding: 8px 10px; border-bottom: 2px solid transparent; margin-bottom: -1px;
+  transition: color var(--dur-fast) var(--ease-settle), border-color var(--dur-fast) var(--ease-settle);
+}
+.vtab svg { opacity: .8; }
+.vtab:hover { color: var(--color-text-primary); }
+.vtab.is-active { color: var(--color-text-primary); border-bottom-color: var(--color-accent); }
+.viewbar .spacer { flex: 1; }
+.toolchip {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; font-weight: 500; color: var(--color-text-secondary);
+  border: 1px solid var(--color-border); border-radius: var(--r-full); padding: 4px 11px;
+  margin-bottom: 6px; white-space: nowrap;
+  transition: all var(--dur-fast) var(--ease-settle);
+}
+.toolchip:hover { border-color: var(--color-text-muted); color: var(--color-text-primary); }
+.toolchip.is-on {
+  background: color-mix(in srgb, var(--color-accent) 13%, transparent);
+  border-color: color-mix(in srgb, var(--color-accent) 45%, transparent);
+  color: var(--color-accent);
+}
+
+/* ---------- Board ---------- */
+.board {
+  display: flex; align-items: flex-start; gap: var(--sp-3);
+  overflow-x: auto; padding-bottom: var(--sp-3);
+  scrollbar-width: thin;
+}
+.col {
+  flex: none; width: 264px; display: flex; flex-direction: column;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border); border-radius: var(--r-lg);
+  box-shadow: var(--shadow-1); max-height: calc(100vh - 300px); min-height: 180px;
+}
+.col.is-drop { border-color: color-mix(in srgb, var(--color-accent) 45%, var(--color-border)); }
+
+/* Column header = the table's group row, stood upright */
+.col-head {
+  display: flex; align-items: center; gap: var(--sp-2); flex: none;
+  padding: 8px 10px 8px 14px; border-bottom: 1px solid var(--color-border-muted);
+  background: var(--color-bg-panel); border-radius: var(--r-lg) var(--r-lg) 0 0;
+  font-size: 12px; font-weight: 600; color: var(--color-text-primary);
+}
+.g-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; }
+.g-count { font-family: var(--font-mono); font-weight: 400; font-size: 11px; color: var(--color-text-muted); }
+.g-count.over { color: var(--color-warning); font-weight: 500; }
+.col-head .spacer { flex: 1; }
+.col-menu-btn {
+  display: inline-flex; padding: 3px; border-radius: var(--r-xs); color: var(--color-text-muted);
+  transition: background var(--dur-fast) var(--ease-settle), color var(--dur-fast) var(--ease-settle);
+}
+.col-menu-btn:hover { background: var(--color-bg-tertiary); color: var(--color-text-primary); }
+
+/* Column body */
+.col-body { overflow-y: auto; padding: var(--sp-2); display: flex; flex-direction: column; gap: 6px; scrollbar-width: thin; }
+.col-foot { flex: none; padding: 4px var(--sp-2) var(--sp-2); }
+.addcard {
+  width: 100%; display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; font-weight: 500; color: var(--color-text-muted);
+  padding: 6px 8px; border-radius: var(--r-sm);
+  transition: all var(--dur-fast) var(--ease-settle);
+}
+.addcard:hover { color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 8%, transparent); }
+
+.empty-hint {
+  margin: 2px; padding: var(--sp-5) var(--sp-3);
+  border: 1.5px dashed var(--color-border); border-radius: var(--r-md);
+  font-size: 12px; color: var(--color-text-muted); text-align: center;
+}
+
+/* ---------- Card ---------- */
+.card {
+  position: relative; background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-muted); border-radius: var(--r-sm);
+  padding: 7px 10px 8px; cursor: pointer; user-select: none;
+  transition: background var(--dur-fast) var(--ease-settle),
+              border-color var(--dur-fast) var(--ease-settle),
+              box-shadow var(--dur-fast) var(--ease-settle);
+}
+.card:hover { border-color: var(--color-border); box-shadow: var(--shadow-1);
+  background: color-mix(in srgb, var(--color-bg-tertiary) 45%, var(--color-bg-elevated)); }
+.card.is-selected {
+  background: var(--color-selection);
+  border-color: color-mix(in srgb, var(--color-accent) 40%, var(--color-border));
+}
+.card.is-selected::before {  /* the index-mark, same as the table's selected row */
+  content: ""; position: absolute; left: 3px; top: 8px;
+  width: 3px; height: 16px; border-radius: 2px; background: var(--color-accent);
+}
+.card-top { display: flex; align-items: center; gap: 6px; margin-bottom: 2px; }
+.tid { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-meta); letter-spacing: .02em; }
+.card-top .spacer { flex: 1; }
+.card-title { font-size: 13px; font-weight: 500; line-height: 1.35; color: var(--color-text-primary); }
+.card-title[contenteditable="true"] { outline: none; border-radius: var(--r-xs); box-shadow: inset 0 0 0 2px var(--color-accent); padding: 0 3px; min-height: 18px; cursor: text; }
+.card-meta { display: flex; align-items: center; gap: 6px; margin-top: 6px; min-height: 18px; min-width: 0; }
+.card-meta .spacer { flex: 1; }
+.mono-meta { flex: none; font-family: var(--font-mono); font-size: 11px; color: var(--text-meta); white-space: nowrap; }
+.mono-meta.due-late { color: var(--color-error); }
+.phase {
+  flex: none; font-size: 10.5px; font-weight: 500; color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary); border-radius: var(--r-full); padding: 1px 7px; white-space: nowrap;
+}
+/* wrap-and-clip: when space runs out, whole tags drop out instead of tearing */
+.tagset { display: inline-flex; flex: 0 1 auto; flex-wrap: wrap; gap: 4px; max-height: 18px; overflow: hidden; align-content: flex-start; align-self: center; }
+.tag {
+  font-size: 10.5px; font-weight: 500; color: var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+  border-radius: var(--r-full); padding: 1px 7px; white-space: nowrap;
+}
+.avatar {
+  flex: none; width: 18px; height: 18px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 8.5px; font-weight: 600; letter-spacing: .02em;
+  color: var(--color-text-secondary); background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+}
+
+/* Priority bar-glyph — identical to the grouped table's */
+.prio { display: inline-flex; align-items: flex-end; gap: 1.5px; height: 12px; }
+.prio i { width: 3px; border-radius: 1px; background: var(--color-bg-tertiary); display: block; }
+.prio i:nth-child(1) { height: 5px; } .prio i:nth-child(2) { height: 8px; } .prio i:nth-child(3) { height: 11px; }
+.prio.p0 i { background: var(--color-error); }
+.prio.p1 i:nth-child(-n+2) { background: var(--color-warning); }
+.prio.p2 i:first-child { background: var(--color-info); }
+.prio-label { font-family: var(--font-mono); font-size: 10.5px; color: var(--color-text-secondary); }
+
+/* Done treatment — same as the table's done rows */
+.card.is-done .card-title {
+  color: var(--color-text-muted); text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--color-text-muted) 55%, transparent);
+}
+.card.is-done { background: color-mix(in srgb, var(--color-bg-elevated) 55%, var(--color-bg-secondary)); }
+.card.is-done .tag { color: var(--text-meta); background: var(--color-bg-tertiary); }
+
+/* Dragging */
+.card.is-lifted {
+  position: fixed; z-index: 60; width: 244px; pointer-events: none;
+  box-shadow: var(--shadow-4); transform: rotate(1.6deg) scale(1.02);
+  border-color: color-mix(in srgb, var(--color-accent) 45%, var(--color-border));
+  transition: none;
+}
+.drop-slot {
+  border: 1.5px dashed color-mix(in srgb, var(--color-accent) 55%, transparent);
+  border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--color-accent) 7%, transparent);
+}
+.col-body:has(.drop-slot) .empty-hint { display: none !important; }
+
+/* Collapsed column rail */
+.col.is-collapsed { width: 42px; height: 280px; min-height: 0; max-height: none; cursor: pointer; }
+.col.is-collapsed .col-head { border-radius: var(--r-lg); border-bottom: none; background: var(--color-bg-panel);
+  writing-mode: vertical-rl; padding: 14px 0; gap: var(--sp-2); align-items: center; height: 100%; justify-content: flex-start; }
+.col.is-collapsed .col-head .g-dot { margin: 0 auto; }
+.col.is-collapsed .col-body, .col.is-collapsed .col-foot, .col.is-collapsed .col-menu-btn, .col.is-collapsed .empty-hint { display: none; }
+.col.is-collapsed:hover { border-color: var(--color-text-muted); }
+
+/* Column menu dropdown */
+.menu {
+  position: fixed; z-index: 80; min-width: 168px;
+  background: var(--color-bg-elevated); border: 1px solid var(--color-border);
+  border-radius: var(--r-md); box-shadow: var(--shadow-3); padding: 4px;
+}
+.menu button {
+  display: flex; width: 100%; align-items: center; gap: 8px;
+  font-size: 12.5px; color: var(--color-text-secondary);
+  padding: 6px 9px; border-radius: var(--r-sm); text-align: left;
+  transition: background var(--dur-fast) var(--ease-settle), color var(--dur-fast) var(--ease-settle);
+}
+.menu button:hover { background: var(--color-bg-tertiary); color: var(--color-text-primary); }
+.menu button svg { opacity: .75; flex: none; }
+.menu .sep { height: 1px; margin: 4px 6px; background: var(--color-border-muted); }
+
+/* Board footer */
+.bfoot {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: var(--sp-2) var(--sp-1) 0; font-size: 12px; color: var(--color-text-muted);
+}
+.bfoot .aggr { font-family: var(--font-mono); font-size: 11px; }
+.newrow {
+  display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 500;
+  color: var(--color-text-muted); padding: 6px 10px; border-radius: var(--r-sm);
+  transition: all var(--dur-fast) var(--ease-settle);
+}
+.newrow:hover { color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 8%, transparent); }
+
+@media (max-width: 700px) {
+  .wrap { padding: var(--sp-4) var(--sp-3) var(--sp-6); }
+  .db-head h1 { font-size: 26px; }
+  .viewbar { flex-wrap: wrap; }
+  .board { scroll-snap-type: x proximity; }
+  .col { width: min(300px, 84vw); scroll-snap-align: start; max-height: calc(100vh - 260px); }
+  .toolchip.hide-sm { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+<div id="sky" aria-hidden="true"></div>
+<div class="page">
+
+<header class="topbar">
+  <div class="crumb">
+    <a href="#">Erewhon</a><span>›</span><span class="here">Release 0.9 — Sync &amp; Publish</span>
+  </div>
+  <div class="spacer"></div>
+  <button class="tb-btn primary">New task</button>
+  <button class="tb-btn" id="themeToggle" aria-label="Toggle color theme">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M20.5 14A8.5 8.5 0 0 1 10 3.5 8.5 8.5 0 1 0 20.5 14z"/></svg>
+  </button>
+  <button class="tb-btn" aria-label="More options">
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/></svg>
+  </button>
+</header>
+
+<div class="wrap">
+  <div class="db-head">
+    <div class="db-eyebrow"><span class="nb-dot"></span>Erewhon · database</div>
+    <h1>Release 0.9 — Sync &amp; Publish</h1>
+    <div class="sub">Everything between here and shipping multi-device sync with static publishing.</div>
+  </div>
+
+  <div class="viewbar">
+    <button class="vtab">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 5h18M3 10h18M3 15h18M3 20h18"/></svg>
+      Table
+    </button>
+    <button class="vtab is-active">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="5" height="16" rx="1"/><rect x="10" y="4" width="5" height="10" rx="1"/><rect x="17" y="4" width="5" height="13" rx="1"/></svg>
+      Board
+    </button>
+    <button class="vtab">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="4" y="5" width="16" height="16" rx="2"/><path d="M16 3v4M8 3v4M4 11h16"/></svg>
+      Calendar
+    </button>
+    <div class="spacer"></div>
+    <button class="toolchip is-on">Group: status</button>
+    <button class="toolchip hide-sm">Filter</button>
+    <button class="toolchip hide-sm">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M6 12h12M10 18h4"/></svg>
+      Sort: priority
+    </button>
+    <button class="toolchip">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      Search
+    </button>
+  </div>
+
+  <div class="board" id="board">
+
+    <!-- Backlog · collapsed rail -->
+    <section class="col is-collapsed" data-status="Backlog" data-color="var(--color-text-muted)" aria-label="Backlog column, collapsed">
+      <header class="col-head">
+        <span class="g-dot" style="background:var(--color-text-muted)"></span>
+        <span class="g-name">Backlog</span>
+        <span class="g-count">4</span>
+      </header>
+      <div class="col-body">
+        <article class="card" tabindex="0" data-due="9999">
+          <div class="card-top"><span class="tid">NOU-244</span><span class="spacer"></span><span class="prio p2" data-p="2"><i></i><i></i><i></i></span><span class="prio-label">P2</span></div>
+          <div class="card-title">Selective sync: exclude notebooks per device</div>
+          <div class="card-meta"><span class="phase">Sync core</span><span class="tagset"><span class="tag">sync</span></span><span class="spacer"></span><span class="mono-meta">XL · —</span></div>
+        </article>
+        <article class="card" tabindex="0" data-due="9999">
+          <div class="card-top"><span class="tid">NOU-245</span><span class="spacer"></span><span class="prio p3" data-p="3"><i></i><i></i><i></i></span><span class="prio-label">P3</span></div>
+          <div class="card-title">Bandwidth cap + backoff tuning for metered links</div>
+          <div class="card-meta"><span class="phase">Sync core</span><span class="tagset"><span class="tag">sync</span></span><span class="spacer"></span><span class="mono-meta">M · —</span></div>
+        </article>
+        <article class="card" tabindex="0" data-due="9999">
+          <div class="card-top"><span class="tid">NOU-246</span><span class="spacer"></span><span class="prio p3" data-p="3"><i></i><i></i><i></i></span><span class="prio-label">P3</span></div>
+          <div class="card-title">Publish: custom domains for pub.nous.page</div>
+          <div class="card-meta"><span class="phase">Publish</span><span class="tagset"><span class="tag">publish</span></span><span class="spacer"></span><span class="mono-meta">L · —</span></div>
+        </article>
+        <article class="card" tabindex="0" data-due="9999">
+          <div class="card-top"><span class="tid">NOU-247</span><span class="spacer"></span><span class="prio p3" data-p="3"><i></i><i></i><i></i></span><span class="prio-label">P3</span></div>
+          <div class="card-title">Import: merge remote library on first pairing</div>
+          <div class="card-meta"><span class="phase">Sync UI</span><span class="tagset"><span class="tag">onboarding</span></span><span class="spacer"></span><span class="mono-meta">L · —</span></div>
+        </article>
+      </div>
+      <footer class="col-foot">
+        <button class="addcard"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>New task</button>
+      </footer>
+    </section>
+
+    <!-- Ready -->
+    <section class="col" data-status="Ready" data-color="var(--color-info)" aria-label="Ready column">
+      <header class="col-head">
+        <span class="g-dot" style="background:var(--color-info)"></span>
+        <span class="g-name">Ready</span>
+        <span class="g-count"></span>
+        <span class="spacer"></span>
+        <button class="col-menu-btn" aria-label="Column menu">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
+        </button>
+      </header>
+      <div class="col-body">
+        <article class="card" tabindex="0" data-due="0726">
+          <div class="card-top"><span class="tid">NOU-238</span><span class="spacer"></span><span class="prio p1" data-p="1"><i></i><i></i><i></i></span><span class="prio-label">P1</span></div>
+          <div class="card-title">Property test: replay from every log prefix converges</div>
+          <div class="card-meta"><span class="phase">Sync core</span><span class="tagset"><span class="tag">tests</span></span><span class="spacer"></span><span class="mono-meta">M · Jul 26</span><span class="avatar">SB</span></div>
+        </article>
+        <article class="card" tabindex="0" data-due="0729">
+          <div class="card-top"><span class="tid">NOU-240</span><span class="spacer"></span><span class="prio p1" data-p="1"><i></i><i></i><i></i></span><span class="prio-label">P1</span></div>
+          <div class="card-title">Conflicts panel: surface edited-after-delete blocks</div>
+          <div class="card-meta"><span class="phase">Sync UI</span><span class="tagset"><span class="tag">frontend</span></span><span class="spacer"></span><span class="mono-meta">M · Jul 29</span><span class="avatar">KT</span></div>
+        </article>
+        <article class="card" tabindex="0" data-due="0805">
+          <div class="card-top"><span class="tid">NOU-242</span><span class="spacer"></span><span class="prio p2" data-p="2"><i></i><i></i><i></i></span><span class="prio-label">P2</span></div>
+          <div class="card-title">Guest editor: snapshot-only sync for read-write links</div>
+          <div class="card-meta"><span class="phase">Collab</span><span class="tagset"><span class="tag">collab</span></span><span class="spacer"></span><span class="mono-meta">L · Aug 05</span><span class="avatar">SB</span></div>
+        </article>
+        <article class="card" tabindex="0" data-due="9999">
+          <div class="card-top"><span class="tid">NOU-243</span><span class="spacer"></span><span class="prio p2" data-p="2"><i></i><i></i><i></i></span><span class="prio-label">P2</span></div>
+          <div class="card-title">Sync status indicator in the status bar</div>
+          <div class="card-meta"><span class="phase">Sync UI</span><span class="tagset"><span class="tag">frontend</span></span><span class="spacer"></span><span class="mono-meta">XS · —</span><span class="avatar">KT</span></div>
+        </article>
+      </div>
+      <footer class="col-foot">
+        <button class="addcard"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>New task</button>
+      </footer>
+    </section>
+
+    <!-- In Progress · over WIP -->
+    <section class="col" data-status="In Progress" data-color="var(--color-accent)" data-wip="3" aria-label="In Progress column">
+      <header class="col-head">
+        <span class="g-dot" style="background:var(--color-accent)"></span>
+        <span class="g-name">In Progress</span>
+        <span class="g-count"></span>
+        <span class="spacer"></span>
+        <button class="col-menu-btn" aria-label="Column menu">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
+        </button>
+      </header>
+      <div class="col-body">
+        <article class="card is-selected" tabindex="0" data-due="0724" aria-current="true">
+          <div class="card-top"><span class="tid">NOU-231</span><span class="spacer"></span><span class="prio p0" data-p="0"><i></i><i></i><i></i></span><span class="prio-label">P0</span></div>
+          <div class="card-title">Operation log compaction with fence entries</div>
+          <div class="card-meta"><span class="phase">Sync core</span><span class="tagset"><span class="tag">sync</span><span class="tag">rust</span></span><span class="spacer"></span><span class="mono-meta">L · Jul 24</span><span class="avatar">SB</span></div>
+        </article>
+        <article class="card" tabindex="0" data-due="0718">
+          <div class="card-top"><span class="tid">NOU-227</span><span class="spacer"></span><span class="prio p0" data-p="0"><i></i><i></i><i></i></span><span class="prio-label">P0</span></div>
+          <div class="card-title">CRDT silent-wipe guard on empty snapshot</div>
+          <div class="card-meta"><span class="phase">Sync core</span><span class="tagset"><span class="tag">data-loss</span><span class="tag">crdt</span></span><span class="spacer"></span><span class="mono-meta due-late">M · Jul 18</span><span class="avatar">SB</span></div>
+        </article>
+        <article class="card" tabindex="0" data-due="0722">
+          <div class="card-top"><span class="tid">NOU-235</span><span class="spacer"></span><span class="prio p1" data-p="1"><i></i><i></i><i></i></span><span class="prio-label">P1</span></div>
+          <div class="card-title">Publish static: deploy worker + approve domain</div>
+          <div class="card-meta"><span class="phase">Publish</span><span class="tagset"><span class="tag">publish</span><span class="tag">cloud</span></span><span class="spacer"></span><span class="mono-meta">S · Jul 22</span><span class="avatar">KT</span></div>
+        </article>
+        <article class="card" tabindex="0" data-due="0725">
+          <div class="card-top"><span class="tid">NOU-230</span><span class="spacer"></span><span class="prio p1" data-p="1"><i></i><i></i><i></i></span><span class="prio-label">P1</span></div>
+          <div class="card-title">Snapshot GC: reclaim orphaned chunk files</div>
+          <div class="card-meta"><span class="phase">Storage</span><span class="tagset"><span class="tag">storage</span></span><span class="spacer"></span><span class="mono-meta">M · Jul 25</span><span class="avatar">AV</span></div>
+        </article>
+      </div>
+      <footer class="col-foot">
+        <button class="addcard"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>New task</button>
+      </footer>
+    </section>
+
+    <!-- Review · empty -->
+    <section class="col" data-status="Review" data-color="var(--color-warning)" aria-label="Review column">
+      <header class="col-head">
+        <span class="g-dot" style="background:var(--color-warning)"></span>
+        <span class="g-name">Review</span>
+        <span class="g-count"></span>
+        <span class="spacer"></span>
+        <button class="col-menu-btn" aria-label="Column menu">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
+        </button>
+      </header>
+      <div class="col-body">
+        <div class="empty-hint">Nothing awaiting review.<br>Drag a card here when work needs eyes.</div>
+      </div>
+      <footer class="col-foot">
+        <button class="addcard"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>New task</button>
+      </footer>
+    </section>
+
+    <!-- Done -->
+    <section class="col" data-status="Done" data-color="var(--color-success)" data-done="true" aria-label="Done column">
+      <header class="col-head">
+        <span class="g-dot" style="background:var(--color-success)"></span>
+        <span class="g-name">Done</span>
+        <span class="g-count"></span>
+        <span class="spacer"></span>
+        <button class="col-menu-btn" aria-label="Column menu">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>
+        </button>
+      </header>
+      <div class="col-body">
+        <article class="card is-done" tabindex="0" data-due="0720">
+          <div class="card-top"><span class="tid">NOU-229</span><span class="spacer"></span><span class="prio p1" data-p="1"><i></i><i></i><i></i></span><span class="prio-label">P1</span></div>
+          <div class="card-title">Atomic write recovery: fuzz the torn-write window</div>
+          <div class="card-meta"><span class="phase">Storage</span><span class="tagset"><span class="tag">tests</span></span><span class="spacer"></span><span class="mono-meta">S · Jul 20</span><span class="avatar">AV</span></div>
+        </article>
+        <article class="card is-done" tabindex="0" data-due="0721">
+          <div class="card-top"><span class="tid">NOU-233</span><span class="spacer"></span><span class="prio p2" data-p="2"><i></i><i></i><i></i></span><span class="prio-label">P2</span></div>
+          <div class="card-title">Publish token HMAC: rotate + revoke flow</div>
+          <div class="card-meta"><span class="phase">Publish</span><span class="tagset"><span class="tag">auth</span></span><span class="spacer"></span><span class="mono-meta">S · Jul 21</span><span class="avatar">KT</span></div>
+        </article>
+        <article class="card is-done" tabindex="0" data-due="0711">
+          <div class="card-top"><span class="tid">NOU-226</span><span class="spacer"></span><span class="prio p0" data-p="0"><i></i><i></i><i></i></span><span class="prio-label">P0</span></div>
+          <div class="card-title">Crash-atomic writes (storage/atomic.rs)</div>
+          <div class="card-meta"><span class="phase">Storage</span><span class="tagset"><span class="tag">storage</span></span><span class="spacer"></span><span class="mono-meta">M · Jul 11</span><span class="avatar">SB</span></div>
+        </article>
+        <article class="card is-done" tabindex="0" data-due="0708">
+          <div class="card-top"><span class="tid">NOU-224</span><span class="spacer"></span><span class="prio p0" data-p="0"><i></i><i></i><i></i></span><span class="prio-label">P0</span></div>
+          <div class="card-title">Hash-chained operation log (JSONL)</div>
+          <div class="card-meta"><span class="phase">Sync core</span><span class="tagset"><span class="tag">sync</span></span><span class="spacer"></span><span class="mono-meta">L · Jul 08</span><span class="avatar">SB</span></div>
+        </article>
+      </div>
+      <footer class="col-foot">
+        <button class="addcard"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>New task</button>
+      </footer>
+    </section>
+
+  </div>
+
+  <div class="bfoot">
+    <button class="newrow">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+      New task
+    </button>
+    <span class="aggr" id="aggr"></span>
+  </div>
+</div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  const root = document.documentElement;
+  const board = document.getElementById("board");
+  const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  /* ---- theme ---- */
+  document.getElementById("themeToggle").addEventListener("click", () => {
+    root.dataset.theme = root.dataset.theme === "dark" ? "light" : "dark";
+  });
+
+  /* ---- study sky (dark only via CSS) ---- */
+  const sky = document.getElementById("sky");
+  for (let i = 0; i < 24; i++) {
+    const s = document.createElement("span");
+    s.className = "star";
+    const sz = Math.random() < 0.75 ? 1 : 2;
+    s.style.cssText = "left:" + (Math.random() * 100).toFixed(2) + "%;top:" +
+      (Math.random() * 100).toFixed(2) + "%;width:" + sz + "px;height:" + sz + "px;" +
+      "animation-delay:" + (Math.random() * 7).toFixed(2) + "s;";
+    sky.appendChild(s);
+  }
+
+  /* ---- counts / WIP / empty hints / done styling / aggregate ---- */
+  function cardsOf(col) { return [...col.querySelectorAll(".col-body .card")]; }
+  function refresh() {
+    let total = 0, late = 0, wipStr = "";
+    board.querySelectorAll(".col").forEach((col) => {
+      const cards = cardsOf(col);
+      const n = cards.length;
+      total += n;
+      const cnt = col.querySelector(".g-count");
+      const wip = parseInt(col.dataset.wip || "0", 10);
+      if (wip) {
+        cnt.textContent = n + " / " + wip;
+        cnt.classList.toggle("over", n > wip);
+        if (n > wip) wipStr = " · WIP " + n + "/" + wip;
+      } else {
+        cnt.textContent = n;
+      }
+      const hint = col.querySelector(".empty-hint");
+      if (hint) hint.style.display = n === 0 ? "" : "none";
+      const done = col.dataset.done === "true";
+      cards.forEach((c) => c.classList.toggle("is-done", done));
+      cards.forEach((c) => {
+        const m = c.querySelector(".mono-meta");
+        if (m && m.classList.contains("due-late") && col.dataset.done !== "true") late++;
+      });
+    });
+    document.getElementById("aggr").textContent = total + " tasks · " + late + " overdue" + wipStr;
+  }
+
+  /* ---- selection (click + arrows) ---- */
+  function select(card) {
+    board.querySelectorAll(".card.is-selected").forEach((c) => { c.classList.remove("is-selected"); c.removeAttribute("aria-current"); });
+    if (card) { card.classList.add("is-selected"); card.setAttribute("aria-current", "true"); card.focus({ preventScroll: false }); }
+  }
+  board.addEventListener("click", (e) => {
+    const card = e.target.closest(".card");
+    if (card && !card.querySelector('[contenteditable="true"]')) select(card);
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.target.closest('[contenteditable="true"]') || e.target.matches("input,textarea")) return;
+    if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)) return;
+    const sel = board.querySelector(".card.is-selected");
+    if (!sel) { const first = board.querySelector(".col:not(.is-collapsed) .card"); if (first) select(first); return; }
+    const col = sel.closest(".col");
+    const cards = cardsOf(col);
+    const i = cards.indexOf(sel);
+    if (e.key === "ArrowUp" && i > 0) { select(cards[i - 1]); e.preventDefault(); }
+    else if (e.key === "ArrowDown" && i < cards.length - 1) { select(cards[i + 1]); e.preventDefault(); }
+    else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+      const cols = [...board.querySelectorAll(".col:not(.is-collapsed)")];
+      let j = cols.indexOf(col) + (e.key === "ArrowLeft" ? -1 : 1);
+      while (j >= 0 && j < cols.length) {
+        const target = cardsOf(cols[j])[Math.min(i, cardsOf(cols[j]).length - 1)];
+        if (target) { select(target); break; }
+        j += e.key === "ArrowLeft" ? -1 : 1;
+      }
+      e.preventDefault();
+    }
+  });
+
+  /* ---- drag ---- */
+  let drag = null;
+  board.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    const card = e.target.closest(".card");
+    if (!card || card.querySelector('[contenteditable="true"]') || e.target.closest("button")) return;
+    drag = { card, x0: e.clientX, y0: e.clientY, active: false, slot: null, home: card.nextSibling, homeParent: card.parentNode };
+  });
+  window.addEventListener("pointermove", (e) => {
+    if (!drag) return;
+    if (!drag.active) {
+      if (Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) < 6) return;
+      drag.active = true;
+      const r = drag.card.getBoundingClientRect();
+      drag.dx = e.clientX - r.left; drag.dy = e.clientY - r.top; drag.w = r.width; drag.h = r.height;
+      drag.slot = document.createElement("div");
+      drag.slot.className = "drop-slot";
+      drag.slot.style.height = r.height + "px";
+      drag.card.parentNode.insertBefore(drag.slot, drag.card);
+      drag.card.classList.add("is-lifted");
+      drag.card.style.width = drag.w + "px";
+      select(drag.card);
+      document.body.style.cursor = "grabbing";
+    }
+    drag.card.style.left = (e.clientX - drag.dx) + "px";
+    drag.card.style.top = (e.clientY - drag.dy) + "px";
+    const under = document.elementFromPoint(e.clientX, e.clientY);
+    const col = under && under.closest(".col:not(.is-collapsed)");
+    board.querySelectorAll(".col.is-drop").forEach((c) => c.classList.remove("is-drop"));
+    if (!col) return;
+    col.classList.add("is-drop");
+    const body = col.querySelector(".col-body");
+    const cards = cardsOf(col).filter((c) => c !== drag.card);
+    let before = null;
+    for (const c of cards) {
+      const cr = c.getBoundingClientRect();
+      if (e.clientY < cr.top + cr.height / 2) { before = c; break; }
+    }
+    if (before) body.insertBefore(drag.slot, before);
+    else body.appendChild(drag.slot);
+  });
+  function endDrag(cancelled) {
+    if (!drag) return;
+    const { card, slot, home, homeParent } = drag;
+    if (drag.active) {
+      card.classList.remove("is-lifted");
+      card.style.left = card.style.top = card.style.width = "";
+      if (!cancelled && slot && slot.parentNode) slot.parentNode.insertBefore(card, slot);
+      else if (homeParent) homeParent.insertBefore(card, home);
+      if (slot && slot.parentNode) slot.parentNode.removeChild(slot);
+      board.querySelectorAll(".col.is-drop").forEach((c) => c.classList.remove("is-drop"));
+      document.body.style.cursor = "";
+      refresh();
+    }
+    drag = null;
+  }
+  window.addEventListener("pointerup", () => endDrag(false));
+  window.addEventListener("pointercancel", () => endDrag(true));
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") endDrag(true); });
+
+  /* ---- add card ---- */
+  let nextId = 248;
+  board.addEventListener("click", (e) => {
+    const btn = e.target.closest(".addcard");
+    if (!btn) return;
+    const col = btn.closest(".col");
+    const body = col.querySelector(".col-body");
+    const card = document.createElement("article");
+    card.className = "card";
+    card.tabIndex = 0;
+    card.dataset.due = "9999";
+    card.innerHTML =
+      '<div class="card-top"><span class="tid">NOU-' + nextId++ + '</span><span class="spacer"></span>' +
+      '<span class="prio p3" data-p="3"><i></i><i></i><i></i></span><span class="prio-label">P3</span></div>' +
+      '<div class="card-title" contenteditable="true"></div>' +
+      '<div class="card-meta"><span class="phase">Triage</span><span class="spacer"></span><span class="mono-meta">— · —</span></div>';
+    body.appendChild(card);
+    const title = card.querySelector(".card-title");
+    title.focus();
+    function commit() {
+      title.removeAttribute("contenteditable");
+      if (!title.textContent.trim()) card.remove();
+      refresh();
+    }
+    title.addEventListener("blur", commit, { once: true });
+    title.addEventListener("keydown", (ev) => { if (ev.key === "Enter") { ev.preventDefault(); title.blur(); } });
+    refresh();
+  });
+
+  /* ---- column menu ---- */
+  let menuEl = null;
+  function closeMenu() { if (menuEl) { menuEl.remove(); menuEl = null; } }
+  board.addEventListener("click", (e) => {
+    const btn = e.target.closest(".col-menu-btn");
+    if (!btn) return;
+    e.stopPropagation();
+    closeMenu();
+    const col = btn.closest(".col");
+    menuEl = document.createElement("div");
+    menuEl.className = "menu";
+    menuEl.innerHTML =
+      '<button data-act="prio"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M6 12h12M10 18h4"/></svg>Sort by priority</button>' +
+      '<button data-act="due"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="4" y="5" width="16" height="16" rx="2"/><path d="M16 3v4M8 3v4M4 11h16"/></svg>Sort by due date</button>' +
+      '<div class="sep"></div>' +
+      '<button data-act="collapse"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 4v16M5 4v16M14 9l3 3-3 3"/></svg>Collapse column</button>' +
+      '<button data-act="wip"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v4l2.5 2.5"/></svg>Set WIP limit…</button>';
+    document.body.appendChild(menuEl);
+    const r = btn.getBoundingClientRect();
+    const mw = menuEl.offsetWidth;
+    menuEl.style.left = Math.min(r.right - mw, innerWidth - mw - 8) + "px";
+    menuEl.style.top = (r.bottom + 4) + "px";
+    menuEl.addEventListener("click", (ev) => {
+      const act = ev.target.closest("button")?.dataset.act;
+      const body = col.querySelector(".col-body");
+      if (act === "prio" || act === "due") {
+        cardsOf(col)
+          .sort((a, b) => act === "prio"
+            ? (a.querySelector(".prio")?.dataset.p || 9) - (b.querySelector(".prio")?.dataset.p || 9)
+            : (a.dataset.due || "9999").localeCompare(b.dataset.due || "9999"))
+          .forEach((c) => body.appendChild(c));
+      } else if (act === "collapse") {
+        col.classList.add("is-collapsed");
+        refresh();
+      }
+      closeMenu();
+    });
+  });
+  document.addEventListener("click", (e) => { if (menuEl && !e.target.closest(".menu")) closeMenu(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeMenu(); });
+
+  /* ---- expand collapsed rail ---- */
+  board.addEventListener("click", (e) => {
+    const col = e.target.closest(".col.is-collapsed");
+    if (col && !drag?.active) { col.classList.remove("is-collapsed"); refresh(); }
+  });
+
+  refresh();
+})();
+</script>
+</body>
+</html>

@@ -2,6 +2,7 @@ import { useCallback, useRef, useEffect, useState } from "react";
 import { Sidebar } from "../Sidebar/Sidebar";
 import { SidebarRail, type RailSection } from "../Sidebar/SidebarRail";
 import { SidebarAccordionPanel } from "../Sidebar/SidebarAccordionPanel";
+import { StudySidebar } from "../Sidebar/StudySidebar";
 import { EditorArea } from "../Editor/EditorArea";
 import { OverviewLayout } from "./OverviewLayout";
 import { ResizeHandle } from "./ResizeHandle";
@@ -226,10 +227,15 @@ export function Layout() {
         onMouseLeave={handleSidebarLeave}
         onTransitionEnd={handleTransitionEnd}
       >
-        {/* Keep sidebar rendered but control visibility for smooth transitions */}
+        {/* Keep sidebar rendered but control visibility for smooth transitions.
+            "study" reuses the classic full-mode width/resize plumbing. */}
         {(sidebarVisible || sidebarTransitioning) && (
           <div style={{ width: `${panelWidths.sidebar}px`, height: "100%" }}>
-            <Sidebar width={panelWidths.sidebar} />
+            {sidebarMode === "study" ? (
+              <StudySidebar width={panelWidths.sidebar} />
+            ) : (
+              <Sidebar width={panelWidths.sidebar} />
+            )}
           </div>
         )}
       </div>

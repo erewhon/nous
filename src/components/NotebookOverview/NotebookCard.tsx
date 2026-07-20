@@ -6,7 +6,8 @@ import { adjustColor } from "../../utils/colorUtils";
 interface NotebookCardProps {
   notebook: Notebook;
   coverPage: Page | null;
-  pageCount: number;
+  /** Undefined when the count is unknown (not yet loaded / failed) — omit the badge. */
+  pageCount?: number;
   onClick: () => void;
   onSettings: () => void;
 }
@@ -185,16 +186,18 @@ export const NotebookCard = memo(function NotebookCard({
             >
               {notebook.name}
             </h3>
-            <p
-              className="text-left text-sm"
-              style={{
-                color: hasCoverImage || hasColor
-                  ? "rgba(255,255,255,0.7)"
-                  : "var(--color-text-muted)",
-              }}
-            >
-              {pageCount} {pageCount === 1 ? "page" : "pages"}
-            </p>
+            {pageCount !== undefined && (
+              <p
+                className="text-left text-sm"
+                style={{
+                  color: hasCoverImage || hasColor
+                    ? "rgba(255,255,255,0.7)"
+                    : "var(--color-text-muted)",
+                }}
+              >
+                {pageCount} {pageCount === 1 ? "page" : "pages"}
+              </p>
+            )}
           </div>
 
           {/* Notebook type badge */}

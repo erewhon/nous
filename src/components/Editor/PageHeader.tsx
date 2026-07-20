@@ -113,7 +113,7 @@ export function PageHeader({
     updatePageContent,
     toggleFavorite,
   } = usePageStore();
-  const { loadFolders, folders } = useFolderStore();
+  const { loadFolders, folders, setFolderExpanded } = useFolderStore();
   const notebook = useNotebookStore((s) =>
     s.notebooks.find((n) => n.id === page.notebookId)
   );
@@ -578,7 +578,7 @@ export function PageHeader({
       className="border-b px-16 py-5"
       style={{ borderColor: "var(--color-border)" }}
     >
-      {/* Eyebrow — chapter-opening notebook · folder marker */}
+      {/* Breadcrumb strip — chapter-opening notebook › folder path (crumbs jump up a level) */}
       {notebook && (
         <div className="mb-1.5 flex min-w-0 items-center gap-2">
           <span
@@ -591,19 +591,60 @@ export function PageHeader({
               backgroundColor: notebook.color || "var(--color-accent)",
             }}
           />
-          <span
-            className="overflow-hidden text-ellipsis whitespace-nowrap"
+          <nav
+            aria-label="Breadcrumb"
+            className="flex min-w-0 items-center gap-1.5"
             style={{
               fontSize: 11,
               fontWeight: 600,
               letterSpacing: "0.14em",
               textTransform: "uppercase",
-              color: "var(--color-text-muted)",
             }}
           >
-            {notebook.name}
-            {folder ? ` · ${folder.name}` : ""}
-          </span>
+            <button
+              type="button"
+              onClick={() => selectPage(null)}
+              className="overflow-hidden text-ellipsis whitespace-nowrap transition-colors"
+              style={{ color: "var(--color-text-muted)", letterSpacing: "inherit" }}
+              onMouseEnter={(e) =>
+                (e.currentTarget.style.color = "var(--color-accent)")
+              }
+              onMouseLeave={(e) =>
+                (e.currentTarget.style.color = "var(--color-text-muted)")
+              }
+              title={`Back to ${notebook.name}`}
+            >
+              {notebook.name}
+            </button>
+            {folder && (
+              <>
+                <span aria-hidden style={{ color: "var(--color-text-muted)" }}>
+                  ›
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFolderExpanded(folder.id, true);
+                    selectPage(null);
+                  }}
+                  className="overflow-hidden text-ellipsis whitespace-nowrap transition-colors"
+                  style={{
+                    color: "var(--color-text-muted)",
+                    letterSpacing: "inherit",
+                  }}
+                  onMouseEnter={(e) =>
+                    (e.currentTarget.style.color = "var(--color-accent)")
+                  }
+                  onMouseLeave={(e) =>
+                    (e.currentTarget.style.color = "var(--color-text-muted)")
+                  }
+                  title={`Reveal ${folder.name}`}
+                >
+                  {folder.name}
+                </button>
+              </>
+            )}
+          </nav>
         </div>
       )}
       <div className="flex items-center justify-between">
