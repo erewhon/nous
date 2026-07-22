@@ -114,6 +114,24 @@ class NousDaemonClient:
         resp = self.client.get(self._url("/api/notebooks"))
         return self._unwrap(resp)
 
+    def get_notebook(self, notebook_id: str) -> dict:
+        resp = self.client.get(self._url(f"/api/notebooks/{notebook_id}"))
+        return self._unwrap(resp)
+
+    def create_notebook(
+        self,
+        name: str,
+        *,
+        notebook_type: str | None = None,
+    ) -> dict:
+        """Create a notebook and return it. ``notebook_type`` defaults to the daemon's standard
+        notebook type when omitted."""
+        body: dict[str, Any] = {"name": name}
+        if notebook_type is not None:
+            body["notebook_type"] = notebook_type
+        resp = self.client.post(self._url("/api/notebooks"), json=body)
+        return self._unwrap(resp)
+
     # --- Pages ---
 
     def list_pages(self, notebook_id: str) -> list[dict]:
