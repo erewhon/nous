@@ -40,3 +40,4 @@ __pycache__
 dist-web/
 .playwright-mcp/
 .claude/scheduled_tasks.lock
+.pnpm-store/
