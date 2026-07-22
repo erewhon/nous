@@ -3,6 +3,7 @@ import { persist } from "zustand/middleware";
 import type { Notebook, NotebookType } from "../types/notebook";
 import { usePageStore } from "./pageStore";
 import { useSectionStore } from "./sectionStore";
+import { useToastStore } from "./toastStore";
 import * as api from "../utils/api";
 
 interface NotebookViewState {
@@ -103,10 +104,10 @@ export const useNotebookStore = create<NotebookStore>()(
         console.warn("Failed to auto-configure sync for new notebook:", syncErr);
       }
     } catch (err) {
-      set({
-        error:
-          err instanceof Error ? err.message : "Failed to create notebook",
-      });
+      const message =
+        err instanceof Error ? err.message : "Failed to create notebook";
+      set({ error: message });
+      useToastStore.getState().error(`Failed to create notebook: ${message}`);
     }
   },
 
@@ -118,10 +119,10 @@ export const useNotebookStore = create<NotebookStore>()(
         notebooks: state.notebooks.map((n) => (n.id === id ? notebook : n)),
       }));
     } catch (err) {
-      set({
-        error:
-          err instanceof Error ? err.message : "Failed to update notebook",
-      });
+      const message =
+        err instanceof Error ? err.message : "Failed to update notebook";
+      set({ error: message });
+      useToastStore.getState().error(`Failed to update notebook: ${message}`);
     }
   },
 
@@ -135,10 +136,10 @@ export const useNotebookStore = create<NotebookStore>()(
           state.selectedNotebookId === id ? null : state.selectedNotebookId,
       }));
     } catch (err) {
-      set({
-        error:
-          err instanceof Error ? err.message : "Failed to delete notebook",
-      });
+      const message =
+        err instanceof Error ? err.message : "Failed to delete notebook";
+      set({ error: message });
+      useToastStore.getState().error(`Failed to delete notebook: ${message}`);
     }
   },
 

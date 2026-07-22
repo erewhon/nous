@@ -34,14 +34,17 @@ export async function listNotebooks(): Promise<Notebook[]> {
 }
 
 export async function getNotebook(notebookId: string): Promise<Notebook> {
-  return invoke<Notebook>("get_notebook", { notebookId });
+  return daemonGet<Notebook>(`/api/notebooks/${notebookId}`);
 }
 
 export async function createNotebook(
   name: string,
   notebookType?: NotebookType
 ): Promise<Notebook> {
-  return invoke<Notebook>("create_notebook", { name, notebookType });
+  // Daemon expects snake_case keys.
+  const body: Record<string, unknown> = { name };
+  if (notebookType !== undefined) body.notebook_type = notebookType;
+  return daemonPost<Notebook>("/api/notebooks", body);
 }
 
 export async function updateNotebook(
@@ -61,11 +64,29 @@ export async function updateNotebook(
     coverImage?: string;
   }
 ): Promise<Notebook> {
-  return invoke<Notebook>("update_notebook", { notebookId, ...updates });
+  // Daemon expects snake_case keys; omit absent fields so "no change" stays
+  // distinct from an explicit value.
+  const body: Record<string, unknown> = {};
+  if (updates.name !== undefined) body.name = updates.name;
+  if (updates.icon !== undefined) body.icon = updates.icon;
+  if (updates.color !== undefined) body.color = updates.color;
+  if (updates.sectionsEnabled !== undefined)
+    body.sections_enabled = updates.sectionsEnabled;
+  if (updates.archived !== undefined) body.archived = updates.archived;
+  if (updates.systemPrompt !== undefined)
+    body.system_prompt = updates.systemPrompt;
+  if (updates.systemPromptMode !== undefined)
+    body.system_prompt_mode = updates.systemPromptMode;
+  if (updates.aiProvider !== undefined) body.ai_provider = updates.aiProvider;
+  if (updates.aiModel !== undefined) body.ai_model = updates.aiModel;
+  if (updates.isPinned !== undefined) body.is_pinned = updates.isPinned;
+  if (updates.pageSortBy !== undefined) body.page_sort_by = updates.pageSortBy;
+  if (updates.coverImage !== undefined) body.cover_image = updates.coverImage;
+  return daemonPut<Notebook>(`/api/notebooks/${notebookId}`, body);
 }
 
 export async function deleteNotebook(notebookId: string): Promise<void> {
-  return invoke("delete_notebook", { notebookId });
+  await daemonDelete(`/api/notebooks/${notebookId}`);
 }
 
 export async function reorderNotebooks(notebookIds: string[]): Promise<void> {

@@ -33,7 +33,7 @@ use nous_lib::share::storage::{
 };
 use nous_lib::plugins::api::HostApi;
 use nous_lib::git;
-use nous_lib::storage::{EditorBlock, EditorData, FileStorageMode, Page, PageType, SystemPromptMode};
+use nous_lib::storage::{EditorBlock, EditorData, FileStorageMode, Notebook, NotebookType, Page, PageType, SystemPromptMode};
 
 use super::daemon::DaemonState;
 use nous_lib::events::AppEvent;
@@ -278,6 +278,33 @@ struct CreateFolderRequest {
     name: String,
     parent_id: Option<String>,
     section_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct CreateNotebookRequest {
+    name: String,
+    /// "standard" (default) or "zettelkasten"
+    notebook_type: Option<String>,
+}
+
+/// Body for `PUT /api/notebooks/{id}`. Mirrors the `update_notebook` Tauri
+/// command: every field is optional (omitted = no change), and the string
+/// fields that the desktop command lets you clear with an empty string keep
+/// that same clear-on-empty semantics here.
+#[derive(Deserialize)]
+struct UpdateNotebookRequest {
+    name: Option<String>,
+    icon: Option<String>,
+    color: Option<String>,
+    sections_enabled: Option<bool>,
+    archived: Option<bool>,
+    system_prompt: Option<String>,
+    system_prompt_mode: Option<String>,
+    ai_provider: Option<String>,
+    ai_model: Option<String>,
+    is_pinned: Option<bool>,
+    page_sort_by: Option<String>,
+    cover_image: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -582,7 +609,11 @@ pub fn build_router(state: AppState, auth: AuthState) -> Router {
         .route("/api/backup/settings", post(update_backup_settings))
         .route("/api/plugins", get(list_plugins))
         .route("/api/plugins/{plugin_id}/reload", post(reload_plugin))
-        .route("/api/notebooks", get(list_notebooks))
+        .route("/api/notebooks", get(list_notebooks).post(create_notebook))
+        .route(
+            "/api/notebooks/{notebook_id}",
+            get(get_notebook).put(update_notebook).delete(delete_notebook),
+        )
         .route("/api/notebooks/{notebook_id}/pages", get(list_pages))
         .route("/api/notebooks/{notebook_id}/pages", post(create_page))
         .route(
@@ -887,6 +918,145 @@ async fn list_notebooks(
         Ok(notebooks) => Ok(Json(ApiResponse { data: notebooks })),
         Err(e) => Err(api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),
     }
+}
+
+async fn get_notebook(
+    State(state): State<AppState>,
+    Path(notebook_id): Path<String>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let nb_id = parse_uuid(&notebook_id)?;
+    let storage = state.storage.lock().unwrap();
+    match storage.get_notebook(nb_id) {
+        Ok(notebook) => Ok(Json(ApiResponse { data: notebook })),
+        Err(e) => Err(api_err(StatusCode::NOT_FOUND, e.to_string())),
+    }
+}
+
+async fn create_notebook(
+    State(state): State<AppState>,
+    Json(req): Json<CreateNotebookRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let nb_type = match req.notebook_type.as_deref() {
+        Some("zettelkasten") => NotebookType::Zettelkasten,
+        _ => NotebookType::Standard,
+    };
+
+    let notebook = {
+        let storage = state.storage.lock().unwrap();
+        storage
+            .create_notebook(req.name, nb_type)
+            .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+    };
+
+    emit_event(&state, "notebook.created", serde_json::json!({
+        "notebookId": notebook.id.to_string(),
+        "name": notebook.name,
+    }));
+
+    Ok((StatusCode::CREATED, Json(ApiResponse { data: notebook })))
+}
+
+async fn update_notebook(
+    State(state): State<AppState>,
+    Path(notebook_id): Path<String>,
+    Json(req): Json<UpdateNotebookRequest>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let nb_id = parse_uuid(&notebook_id)?;
+
+    let notebook = {
+        let storage = state.storage.lock().unwrap();
+
+        let mut notebook: Notebook = storage
+            .get_notebook(nb_id)
+            .map_err(|e| api_err(StatusCode::NOT_FOUND, e.to_string()))?;
+
+        if let Some(name) = req.name {
+            notebook.name = name;
+        }
+        if let Some(icon) = req.icon {
+            notebook.icon = Some(icon);
+        }
+        if let Some(color) = req.color {
+            notebook.color = Some(color);
+        }
+        if let Some(enabled) = req.sections_enabled {
+            notebook.sections_enabled = enabled;
+        }
+        if let Some(archived) = req.archived {
+            notebook.archived = archived;
+        }
+        // Empty string clears these optional fields (parity with the
+        // update_notebook Tauri command).
+        if let Some(prompt) = req.system_prompt {
+            notebook.system_prompt = if prompt.is_empty() { None } else { Some(prompt) };
+        }
+        if let Some(mode) = req.system_prompt_mode {
+            notebook.system_prompt_mode = match mode.as_str() {
+                "concatenate" => SystemPromptMode::Concatenate,
+                _ => SystemPromptMode::Override,
+            };
+        }
+        if let Some(provider) = req.ai_provider {
+            notebook.ai_provider = if provider.is_empty() { None } else { Some(provider) };
+        }
+        if let Some(model) = req.ai_model {
+            notebook.ai_model = if model.is_empty() { None } else { Some(model) };
+        }
+        if let Some(pinned) = req.is_pinned {
+            notebook.is_pinned = pinned;
+        }
+        if let Some(sort) = req.page_sort_by {
+            notebook.page_sort_by = if sort.is_empty() { None } else { Some(sort) };
+        }
+        if let Some(img) = req.cover_image {
+            notebook.cover_image = if img.is_empty() { None } else { Some(img) };
+        }
+        notebook.updated_at = chrono::Utc::now();
+
+        storage
+            .update_notebook(&notebook)
+            .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+        // Auto-commit if git is enabled for this notebook (parity with desktop).
+        let notebook_path = storage.get_notebook_path(nb_id);
+        if git::is_git_repo(&notebook_path) {
+            let commit_message = format!("Update notebook: {}", notebook.name);
+            if let Err(e) = git::commit_all(&notebook_path, &commit_message) {
+                log::warn!("Failed to auto-commit notebook update: {}", e);
+            }
+        }
+
+        notebook
+    };
+
+    emit_event(&state, "notebook.updated", serde_json::json!({
+        "notebookId": notebook.id.to_string(),
+        "name": notebook.name,
+    }));
+
+    Ok(Json(ApiResponse { data: notebook }))
+}
+
+async fn delete_notebook(
+    State(state): State<AppState>,
+    Path(notebook_id): Path<String>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let nb_id = parse_uuid(&notebook_id)?;
+
+    {
+        let storage = state.storage.lock().unwrap();
+        storage
+            .delete_notebook(nb_id)
+            .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    }
+
+    emit_event(&state, "notebook.deleted", serde_json::json!({
+        "notebookId": notebook_id,
+    }));
+
+    Ok(Json(ApiResponse {
+        data: serde_json::json!({"ok": true}),
+    }))
 }
 
 async fn list_pages(
