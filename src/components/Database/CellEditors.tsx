@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
+import type { ReactNode } from "react";
 import type { CellValue, SelectOption, NumberFormat } from "../../types/database";
 import { formatNumber } from "./formatNumber";
 import { SELECT_COLORS } from "../../types/database";
@@ -9,6 +10,14 @@ interface CellEditorProps {
   options?: SelectOption[];
   onAddOption?: (label: string) => SelectOption;
 }
+
+/**
+ * Optional display override for the closed (non-editing) state of a cell.
+ * Returning null falls back to the default rendering — used by the table to
+ * draw priority bar-glyphs while keeping the standard dropdown/input editing.
+ */
+export type SelectDisplayRenderer = (opt: SelectOption) => ReactNode | null;
+export type NumberDisplayRenderer = (value: number) => ReactNode | null;
 
 // Text cell — contentEditable div
 export function TextCell({ value, onChange }: CellEditorProps) {
@@ -62,7 +71,15 @@ export function TextCell({ value, onChange }: CellEditorProps) {
 }
 
 // Number cell
-export function NumberCell({ value, onChange, numberFormat }: CellEditorProps & { numberFormat?: NumberFormat }) {
+export function NumberCell({
+  value,
+  onChange,
+  numberFormat,
+  renderDisplayValue,
+}: CellEditorProps & {
+  numberFormat?: NumberFormat;
+  renderDisplayValue?: NumberDisplayRenderer;
+}) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value != null ? String(value) : "");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -103,7 +120,10 @@ export function NumberCell({ value, onChange, numberFormat }: CellEditorProps & 
           setEditing(true);
         }}
       >
-        {value != null ? formatNumber(Number(value), numberFormat) : ""}
+        {value != null
+          ? renderDisplayValue?.(Number(value)) ??
+            formatNumber(Number(value), numberFormat)
+          : ""}
       </div>
     );
   }
@@ -225,7 +245,13 @@ export function UrlCell({ value, onChange }: CellEditorProps) {
 }
 
 // Select cell — dropdown
-export function SelectCell({ value, onChange, options = [], onAddOption }: CellEditorProps) {
+export function SelectCell({
+  value,
+  onChange,
+  options = [],
+  onAddOption,
+  renderDisplayValue,
+}: CellEditorProps & { renderDisplayValue?: SelectDisplayRenderer }) {
   const [open, setOpen] = useState(false);
   const [newLabel, setNewLabel] = useState("");
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -248,9 +274,11 @@ export function SelectCell({ value, onChange, options = [], onAddOption }: CellE
     <div className="db-cell-select" ref={dropdownRef}>
       <div className="db-cell-display" onClick={() => setOpen(!open)}>
         {selected ? (
-          <span className="db-select-pill" style={{ backgroundColor: selected.color + "30", color: selected.color }}>
-            {selected.label}
-          </span>
+          renderDisplayValue?.(selected) ?? (
+            <span className="db-select-pill" style={{ backgroundColor: selected.color + "30", color: selected.color }}>
+              {selected.label}
+            </span>
+          )
         ) : (
           <span className="db-cell-placeholder">Select...</span>
         )}

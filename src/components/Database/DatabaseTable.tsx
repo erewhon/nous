@@ -28,7 +28,13 @@ import {
   pickNextColor,
 } from "./CellEditors";
 import { applyViewToRows, compareCellValues, applyFilter } from "./viewRows";
-import { resolveStatusColor } from "./boardSemantics";
+import {
+  findIdProperty,
+  findPriorityProperty,
+  isDoneStatus,
+  priorityRank,
+  resolveStatusColor,
+} from "./boardSemantics";
 import type { RelationContext } from "./useRelationContext";
 import { PropertyEditor, PropertyTypeIcon } from "./PropertyEditor";
 import { computeSummary, getAggregationsForType, SUMMARY_LABELS } from "./computeSummary";
@@ -95,6 +101,21 @@ export function DatabaseTable({
       (prop, idx) => idx === 0 || !hiddenSet.has(prop.id)
     );
   }, [content.properties, hiddenPropertyIds]);
+
+  // Corkboard record slots (shared semantics with the board): the priority
+  // column renders the P0–P3 bar-glyph, an id-like text column renders mono.
+  const titleProp = useMemo(
+    () => content.properties.find((p) => p.type === "text"),
+    [content.properties]
+  );
+  const prioProp = useMemo(
+    () => findPriorityProperty(visibleProperties),
+    [visibleProperties]
+  );
+  const idProp = useMemo(
+    () => findIdProperty(visibleProperties, titleProp?.id),
+    [visibleProperties, titleProp?.id]
+  );
 
   // Resolve cell value: check formula → rollup → raw cell
   const resolveCellValue = useCallback(
@@ -516,6 +537,25 @@ export function DatabaseTable({
     [onUpdateView]
   );
 
+  // P0–P3 bar-glyph + mono label (the grouped-table treatment; the board
+  // renders the same glyph without the label, per the Corkboard mockup).
+  const renderPriorityGlyph = useCallback(
+    (rank: 0 | 1 | 2 | 3) => (
+      <span className="db-prio-cell">
+        <span
+          className={`db-prio db-prio-${rank}`}
+          aria-label={`Priority ${rank}`}
+        >
+          <i />
+          <i />
+          <i />
+        </span>
+        <span className="db-prio-label">P{rank}</span>
+      </span>
+    ),
+    []
+  );
+
   // Render cell based on property type
   const renderCell = (prop: PropertyDef, row: DatabaseRow) => {
     const value = row.cells[prop.id] ?? null;
@@ -572,7 +612,21 @@ export function DatabaseTable({
       case "text":
         return <TextCell value={value} onChange={onChange} />;
       case "number":
-        return <NumberCell value={value} onChange={onChange} numberFormat={prop.numberFormat} />;
+        return (
+          <NumberCell
+            value={value}
+            onChange={onChange}
+            numberFormat={prop.numberFormat}
+            renderDisplayValue={
+              prop.id === prioProp?.id
+                ? (n) => {
+                    const rank = priorityRank(prop, n);
+                    return rank == null ? null : renderPriorityGlyph(rank);
+                  }
+                : undefined
+            }
+          />
+        );
       case "checkbox":
         return <CheckboxCell value={value} onChange={onChange} />;
       case "date":
@@ -586,6 +640,14 @@ export function DatabaseTable({
             onChange={onChange}
             options={prop.options ?? []}
             onAddOption={(label) => handleAddSelectOption(prop.id, label)}
+            renderDisplayValue={
+              prop.id === prioProp?.id
+                ? (opt) => {
+                    const rank = priorityRank(prop, opt.id);
+                    return rank == null ? null : renderPriorityGlyph(rank);
+                  }
+                : undefined
+            }
           />
         );
       case "multiSelect":
@@ -621,7 +683,7 @@ export function DatabaseTable({
 
   const colCount = visibleProperties.length + 1; // +1 for row num column
 
-  const renderRowGroup = (rows: DatabaseRow[], startIdx: number) =>
+  const renderRowGroup = (rows: DatabaseRow[], startIdx: number, done = false) =>
     rows.map((row, idx) => {
       // Row bg color for pinned cells (match zebra striping)
       const isEven = idx % 2 === 0;
@@ -661,10 +723,18 @@ export function DatabaseTable({
             );
             const pinStyle = pinnedStyles[colIdx];
             const isPinned = !!pinStyle.position;
+            const cellClass = [
+              "db-cell",
+              isPinned ? "db-cell-pinned" : "",
+              prop.id === idProp?.id ? "db-cell-id" : "",
+              done && prop.id === titleProp?.id ? "db-done-text" : "",
+            ]
+              .filter(Boolean)
+              .join(" ");
             return (
               <td
                 key={prop.id}
-                className={`db-cell${isPinned ? " db-cell-pinned" : ""}`}
+                className={cellClass}
                 style={{
                   width: getColWidth(prop),
                   ...cfCSS,
@@ -804,7 +874,8 @@ export function DatabaseTable({
                         </span>
                       </td>
                     </tr>
-                    {!isCollapsed && renderRowGroup(group.rows, 0)}
+                    {!isCollapsed &&
+                      renderRowGroup(group.rows, 0, isDoneStatus(group.label))}
                   </GroupRows>
                 );
               })}

@@ -1154,16 +1154,34 @@
   background: var(--color-info);
 }
 
-/* Mono record ID (human-facing refs like NOU-231, never row UUIDs) */
-.db-tid {
+/* Mono record ID (human-facing refs like NOU-231, never row UUIDs).
+   The table applies it via the .db-cell-id column class so the display div
+   picks it up without touching the editing input. */
+.db-tid,
+.db-cell-id .db-cell-display {
   font-family: var(--font-mono);
   font-size: 11px;
   color: var(--text-meta);
   letter-spacing: 0.02em;
 }
 
-/* Done treatment: muted + soft strikethrough */
-.db-done-text {
+/* Priority cell in the table: glyph + mono label side by side */
+.db-prio-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.db-prio-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}
+
+/* Done treatment: muted + soft strikethrough. Doubled selector so composing
+   it wins over consumers' own color rules (e.g. .db-board-card-title) at any
+   position in this file. */
+.db-done-text.db-done-text {
   color: var(--color-text-muted);
   text-decoration: line-through;
   text-decoration-color: color-mix(
@@ -1612,15 +1630,7 @@
   opacity: 0.5;
 }
 
-.db-board-card-done .db-board-card-title {
-  color: var(--color-text-muted);
-  text-decoration: line-through;
-  text-decoration-color: color-mix(
-    in srgb,
-    var(--color-text-muted) 55%,
-    transparent
-  );
-}
+/* Done card titles compose .db-done-text (the shared record primitive). */
 
 /* Option pill colors are inline styles; the done flatten has to out-rank them */
 .db-board-card-done .db-select-pill {

@@ -223,7 +223,9 @@ export function DatabaseBoardCard({
           )}
         </div>
       )}
-      <div className="db-board-card-title">{title || "Untitled"}</div>
+      <div className={`db-board-card-title${done ? " db-done-text" : ""}`}>
+        {title || "Untitled"}
+      </div>
       {(tagPills.length > 0 || dueText) && (
         <div className="db-board-card-meta">
           {tagPills.length > 0 && (
