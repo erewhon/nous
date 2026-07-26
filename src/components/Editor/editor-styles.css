@@ -104,8 +104,13 @@
   font-family: var(--font-mono);
 }
 
-/* Blockquote — Cormorant italic with the accent rule, "a scholar's marginalia" */
-.bn-quote {
+/* Blockquote — Cormorant italic with the accent rule, "a scholar's marginalia".
+   The compound selector is load-bearing: BlockNote bundles its own
+   [data-content-type=quote] blockquote rule at (0,1,1) — grey #7d797a bar and
+   text — which out-ranks a bare .bn-quote (0,1,0). (0,2,1) wins regardless of
+   stylesheet order. */
+[data-content-type="quote"] blockquote.bn-quote,
+blockquote.bn-quote {
   font-family: var(--font-display);
   font-style: italic;
   font-weight: 500;
@@ -115,6 +120,76 @@
   border-left: 3px solid var(--color-accent);
   padding: 0.15em 0 0.15em 1rem;
   margin: 1rem 0;
+}
+
+/* Quote attribution — back to the UI face, quiet and letterspaced */
+[data-content-type="quote"] blockquote.bn-quote cite,
+blockquote.bn-quote cite {
+  display: block;
+  margin-top: 8px;
+  font-family: var(--font-family);
+  font-style: normal;
+  font-weight: 500;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+}
+
+/* Callouts — the BlockNote path (.bn-callout from CalloutBlock.tsx renders
+   icon button + content div). Study treatment: 7% tinted wash, 30% tinted
+   frame with a 3px semantic left edge, --radius-md. The legacy Editor.js
+   path keeps its own .callout-block--* rules further down. */
+.bn-callout {
+  display: flex;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid;
+  border-left-width: 3px;
+  border-radius: var(--radius-md);
+  margin: 6px 0;
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.bn-callout-icon {
+  flex: none;
+  margin-top: 2px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  font-size: 15px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.bn-callout-content {
+  flex: 1;
+  min-width: 0;
+  color: var(--color-text-secondary);
+}
+
+.bn-callout.callout-info {
+  border-color: color-mix(in srgb, var(--color-info) 30%, transparent);
+  border-left-color: var(--color-info);
+  background: color-mix(in srgb, var(--color-info) 7%, transparent);
+}
+
+.bn-callout.callout-warning {
+  border-color: color-mix(in srgb, var(--color-warning) 30%, transparent);
+  border-left-color: var(--color-warning);
+  background: color-mix(in srgb, var(--color-warning) 7%, transparent);
+}
+
+.bn-callout.callout-tip {
+  border-color: color-mix(in srgb, var(--color-success) 30%, transparent);
+  border-left-color: var(--color-success);
+  background: color-mix(in srgb, var(--color-success) 7%, transparent);
+}
+
+.bn-callout.callout-danger {
+  border-color: color-mix(in srgb, var(--color-error) 30%, transparent);
+  border-left-color: var(--color-error);
+  background: color-mix(in srgb, var(--color-error) 7%, transparent);
 }
 
 /* Display face (Cormorant) on legacy Editor.js headings — kept for that path */
