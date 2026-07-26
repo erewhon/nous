@@ -6,6 +6,7 @@ import {
   findPriorityProperty,
   isDoneStatus,
   priorityRank,
+  resolveOptionPillStyle,
   resolveStatusColor,
 } from "./boardSemantics";
 
@@ -180,5 +181,28 @@ describe("findDueProperty", () => {
     const due = prop({ id: "d2", name: "Due", type: "date" });
     expect(findDueProperty([prop({ id: "t" }), created, due])?.id).toBe("d1");
     expect(findDueProperty([prop({ id: "t" })])).toBeUndefined();
+  });
+});
+
+describe("resolveOptionPillStyle", () => {
+  it("renders well-known status labels from semantic tokens", () => {
+    expect(resolveOptionPillStyle({ label: "Ready", color: "#ef4444" })).toEqual({
+      backgroundColor: "rgb(from var(--color-info) r g b / 0.19)",
+      color: "var(--color-info)",
+    });
+    expect(resolveOptionPillStyle({ label: "Done", color: "#f97316" })).toEqual({
+      backgroundColor: "rgb(from var(--color-success) r g b / 0.19)",
+      color: "var(--color-success)",
+    });
+    expect(
+      resolveOptionPillStyle({ label: "in-progress", color: "#111111" }).color
+    ).toBe("var(--color-accent)");
+  });
+
+  it("keeps the stored color for unrecognized labels", () => {
+    expect(resolveOptionPillStyle({ label: "Sci-Fi", color: "#ab12cd" })).toEqual({
+      backgroundColor: "#ab12cd30",
+      color: "#ab12cd",
+    });
   });
 });

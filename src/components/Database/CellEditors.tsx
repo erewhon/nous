@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import type { ReactNode } from "react";
 import type { CellValue, SelectOption, NumberFormat } from "../../types/database";
 import { formatNumber } from "./formatNumber";
+import { resolveOptionPillStyle } from "./boardSemantics";
 import { SELECT_COLORS } from "../../types/database";
 
 interface CellEditorProps {
@@ -275,7 +276,7 @@ export function SelectCell({
       <div className="db-cell-display" onClick={() => setOpen(!open)}>
         {selected ? (
           renderDisplayValue?.(selected) ?? (
-            <span className="db-select-pill" style={{ backgroundColor: selected.color + "30", color: selected.color }}>
+            <span className="db-select-pill" style={resolveOptionPillStyle(selected)}>
               {selected.label}
             </span>
           )
@@ -297,7 +298,7 @@ export function SelectCell({
               className="db-select-option"
               onClick={() => { onChange(opt.id); setOpen(false); }}
             >
-              <span className="db-select-pill" style={{ backgroundColor: opt.color + "30", color: opt.color }}>
+              <span className="db-select-pill" style={resolveOptionPillStyle(opt)}>
                 {opt.label}
               </span>
             </button>
@@ -361,7 +362,7 @@ export function MultiSelectCell({ value, onChange, options = [], onAddOption }: 
       <div className="db-cell-display db-cell-multi" onClick={() => setOpen(!open)}>
         {selectedOptions.length > 0 ? (
           selectedOptions.map((opt) => (
-            <span key={opt.id} className="db-select-pill" style={{ backgroundColor: opt.color + "30", color: opt.color }}>
+            <span key={opt.id} className="db-select-pill" style={resolveOptionPillStyle(opt)}>
               {opt.label}
             </span>
           ))
@@ -380,7 +381,7 @@ export function MultiSelectCell({ value, onChange, options = [], onAddOption }: 
                 onClick={() => toggleOption(opt.id)}
               >
                 <input type="checkbox" checked={checked} readOnly className="db-select-checkbox" />
-                <span className="db-select-pill" style={{ backgroundColor: opt.color + "30", color: opt.color }}>
+                <span className="db-select-pill" style={resolveOptionPillStyle(opt)}>
                   {opt.label}
                 </span>
               </button>

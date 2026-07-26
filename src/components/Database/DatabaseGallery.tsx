@@ -12,6 +12,7 @@ import { generateId } from "../../utils/generateId";
 import { createDefaultRow } from "../../types/database";
 import { formatNumber } from "./formatNumber";
 import { pickNextColor } from "./CellEditors";
+import { resolveOptionPillStyle } from "./boardSemantics";
 import type { RelationContext } from "./useRelationContext";
 import { DatabaseRowDetail } from "./DatabaseRowDetail";
 import { compareCellValues, applyFilter } from "./DatabaseTable";
@@ -203,7 +204,7 @@ export function DatabaseGallery({
       return (
         <span
           className="db-select-pill"
-          style={{ backgroundColor: opt.color + "30", color: opt.color }}
+          style={resolveOptionPillStyle(opt)}
         >
           {opt.label}
         </span>
@@ -219,7 +220,7 @@ export function DatabaseGallery({
               <span
                 key={id}
                 className="db-select-pill"
-                style={{ backgroundColor: opt.color + "30", color: opt.color }}
+                style={resolveOptionPillStyle(opt)}
               >
                 {opt.label}
               </span>

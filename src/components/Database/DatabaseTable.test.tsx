@@ -143,6 +143,17 @@ describe("DatabaseTable — Corkboard record primitives", () => {
     expect(statusPills).toContain("Done");
   });
 
+  it("renders status-like select pills from semantic tokens", () => {
+    const { container } = renderTable();
+    const pills = Array.from(
+      container.querySelectorAll(".db-select-pill")
+    ) as HTMLElement[];
+    const ready = pills.find((el) => el.textContent === "Ready");
+    const done = pills.find((el) => el.textContent === "Done");
+    expect(ready?.style.color).toBe("var(--color-info)");
+    expect(done?.style.color).toBe("var(--color-success)");
+  });
+
   it("marks the id-like text column with db-cell-id for the mono treatment", () => {
     const { container } = renderTable();
     const idCells = Array.from(container.querySelectorAll("td.db-cell-id"));

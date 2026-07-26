@@ -9,6 +9,7 @@ import {
   findIdProperty,
   findPriorityProperty,
   priorityRank,
+  resolveOptionPillStyle,
 } from "./boardSemantics";
 
 interface DatabaseBoardCardProps {
@@ -117,7 +118,7 @@ export function DatabaseBoardCard({
         <span
           key={`${prop.id}:${id}`}
           className="db-select-pill"
-          style={{ backgroundColor: opt.color + "30", color: opt.color }}
+          style={resolveOptionPillStyle(opt)}
         >
           {opt.label}
         </span>,
@@ -135,7 +136,7 @@ export function DatabaseBoardCard({
       return (
         <span
           className="db-select-pill"
-          style={{ backgroundColor: opt.color + "30", color: opt.color }}
+          style={resolveOptionPillStyle(opt)}
         >
           {opt.label}
         </span>

@@ -6,7 +6,7 @@
 // options keep their stored color. Done-ness, priority, ID, and due-date
 // discovery live here too so every view agrees on what those names mean.
 
-import type { CellValue, PropertyDef } from "../../types/database";
+import type { CellValue, PropertyDef, SelectOption } from "../../types/database";
 
 export type SemanticToken =
   | "text-muted"
@@ -75,6 +75,27 @@ export function resolveStatusColor(label: string, fallback?: string): string {
 /** Whether a column label denotes completion (drives the Done card treatment). */
 export function isDoneStatus(label: string): boolean {
   return NAME_TO_TOKEN.get(normalizeLabel(label)) === "success";
+}
+
+/**
+ * Inline pill colors for a select option. Well-known status labels render
+ * from semantic theme tokens so the pill agrees with group dots and board
+ * columns (and tracks the theme); other options keep their stored color.
+ * Resolution happens at render time only — stored option colors are never
+ * migrated. The 0x30 suffix and 0.19 alpha are the same 19% wash.
+ */
+export function resolveOptionPillStyle(opt: Pick<SelectOption, "label" | "color">): {
+  backgroundColor: string;
+  color: string;
+} {
+  const token = NAME_TO_TOKEN.get(normalizeLabel(opt.label));
+  if (token) {
+    return {
+      backgroundColor: `rgb(from var(--color-${token}) r g b / 0.19)`,
+      color: `var(--color-${token})`,
+    };
+  }
+  return { backgroundColor: opt.color + "30", color: opt.color };
 }
 
 const PRIORITY_NAME_RE = /^p(rio(rity)?)?$/i;
