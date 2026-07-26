@@ -118,11 +118,14 @@
   background-color: rgb(from var(--color-accent) r g b / 0.1);
 }
 
-/* Table */
+/* Table — Direction A "ledger": horizontal hairlines only, no vertical
+   rules, no zebra; the card sits on bg-secondary with lamplight elevation. */
 .db-table-wrapper {
   overflow-x: auto;
   border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-secondary);
+  box-shadow: var(--shadow-1);
 }
 
 .db-table {
@@ -148,7 +151,6 @@
   color: var(--color-text-muted);
   background-color: var(--color-bg-secondary);
   border-bottom: 1px solid var(--color-border);
-  border-right: 1px solid var(--color-border);
 }
 
 .db-col-header {
@@ -156,21 +158,16 @@
   padding: 0;
   background-color: var(--color-bg-secondary);
   border-bottom: 1px solid var(--color-border);
-  border-right: 1px solid var(--color-border);
   user-select: none;
-}
-
-.db-col-header:last-child {
-  border-right: none;
 }
 
 .db-col-header-content {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 10px;
+  padding: 8px 14px;
   cursor: pointer;
-  transition: background-color 0.15s;
+  transition: background-color var(--motion-fast) var(--ease-settle);
 }
 
 .db-col-header-content:hover {
@@ -185,9 +182,11 @@
 }
 
 .db-col-header-name {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
-  color: var(--color-text-secondary);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -246,30 +245,31 @@
   color: var(--color-accent);
 }
 
-/* Pinned cell hover override — match row hover bg */
+/* Pinned cell hover override — opaque equivalent of the soft row wash
+   (sticky cells must stay opaque to cover scrolled content) */
 .db-row:hover .db-cell-pinned {
-  background-color: var(--color-bg-tertiary) !important;
+  background-color: color-mix(
+    in srgb,
+    var(--color-bg-tertiary) 65%,
+    var(--color-bg-secondary)
+  ) !important;
 }
 
 .db-row:hover .db-row-num {
-  background-color: var(--color-bg-tertiary) !important;
+  background-color: color-mix(
+    in srgb,
+    var(--color-bg-tertiary) 65%,
+    var(--color-bg-secondary)
+  ) !important;
 }
 
-/* Rows */
+/* Rows — flat on the wrapper's bg-secondary, soft wash on hover */
 .db-row {
-  transition: background-color 0.1s;
-}
-
-.db-row:nth-child(even) {
-  background-color: var(--color-bg-primary);
-}
-
-.db-row:nth-child(odd) {
-  background-color: var(--color-bg-secondary);
+  transition: background-color var(--motion-fast) var(--ease-settle);
 }
 
 .db-row:hover {
-  background-color: var(--color-bg-tertiary);
+  background-color: color-mix(in srgb, var(--color-bg-tertiary) 65%, transparent);
 }
 
 .db-row-num {
@@ -279,7 +279,7 @@
   text-align: center;
   font-size: 11px;
   color: var(--color-text-muted);
-  border-right: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border-muted);
   position: relative;
 }
 
@@ -304,27 +304,39 @@
 /* Cells */
 .db-cell {
   padding: 0;
-  border-right: 1px solid var(--color-border);
-  border-bottom: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border-muted);
   vertical-align: middle;
   overflow: visible;
 }
 
-.db-cell:last-child {
-  border-right: none;
+/* Last body row: the footer's border-top provides the closing rule */
+.db-table tbody tr:last-child .db-cell,
+.db-table tbody tr:last-child .db-row-num {
+  border-bottom: none;
 }
 
 .db-cell-display {
-  padding: 4px 8px;
-  min-height: 28px;
+  padding: 8px 14px;
+  min-height: 34px;
   display: flex;
   align-items: center;
   cursor: text;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: var(--color-text-primary);
+  color: var(--color-text-secondary);
   font-size: 13px;
+}
+
+/* The title column reads primary-weighted; everything else stays secondary */
+.db-cell-title .db-cell-display {
+  color: var(--color-text-primary);
+  font-weight: 500;
+}
+
+/* Done rows: let the td's .db-done-text muting win over the title color */
+td.db-done-text .db-cell-display {
+  color: inherit;
 }
 
 .db-cell-multi {
@@ -1056,12 +1068,18 @@
 
 .db-group-header-cell {
   padding: 6px 10px !important;
-  display: flex;
-  align-items: center;
-  gap: 8px;
   font-size: 12px;
   font-weight: 600;
   border-bottom: 1px solid var(--color-border-muted);
+}
+
+/* Flex lives on an inner wrapper — display:flex directly on the td voids
+   its colSpan, clamping the content box to the first column's width. */
+.db-group-header-inner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
 }
 
 .db-group-toggle {

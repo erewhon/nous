@@ -685,9 +685,6 @@ export function DatabaseTable({
 
   const renderRowGroup = (rows: DatabaseRow[], startIdx: number, done = false) =>
     rows.map((row, idx) => {
-      // Row bg color for pinned cells (match zebra striping)
-      const isEven = idx % 2 === 0;
-      const rowBg = isEven ? "var(--color-bg-primary)" : "var(--color-bg-secondary)";
       const isSelected = selectedRowIds.has(row.id);
       return (
         <tr key={row.id} className={`db-row${isSelected ? " db-row-selected" : ""}`}>
@@ -726,6 +723,7 @@ export function DatabaseTable({
             const cellClass = [
               "db-cell",
               isPinned ? "db-cell-pinned" : "",
+              prop.id === titleProp?.id ? "db-cell-title" : "",
               prop.id === idProp?.id ? "db-cell-id" : "",
               done && prop.id === titleProp?.id ? "db-done-text" : "",
             ]
@@ -739,7 +737,6 @@ export function DatabaseTable({
                   width: getColWidth(prop),
                   ...cfCSS,
                   ...pinStyle,
-                  ...(isPinned ? { backgroundColor: rowBg } : {}),
                 }}
               >
                 {renderCell(prop, row)}
@@ -840,6 +837,7 @@ export function DatabaseTable({
                   <GroupRows key={group.key}>
                     <tr className="db-group-header-row">
                       <td colSpan={colCount} className="db-group-header-cell">
+                        <div className="db-group-header-inner">
                         <button
                           className="db-group-toggle"
                           onClick={() => toggleGroupCollapse(group.key)}
@@ -870,6 +868,7 @@ export function DatabaseTable({
                         <span className="db-group-count">
                           {group.rows.length}
                         </span>
+                        </div>
                       </td>
                     </tr>
                     {!isCollapsed &&
