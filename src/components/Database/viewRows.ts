@@ -35,6 +35,28 @@ export function compareCellValues(a: CellValue, b: CellValue): number {
   return String(a).localeCompare(String(b));
 }
 
+/**
+ * Property-aware compare: select cells sort by their option's position in the
+ * property's option list (the user's declared order — P0 before P1, not the
+ * accident of option-id strings). Everything else falls back to
+ * compareCellValues.
+ */
+export function compareCellValuesForProp(
+  prop: PropertyDef | undefined,
+  a: CellValue,
+  b: CellValue
+): number {
+  if (prop?.type === "select" && prop.options) {
+    if (a == null && b == null) return 0;
+    if (a == null) return -1;
+    if (b == null) return 1;
+    const ai = prop.options.findIndex((o) => o.id === a);
+    const bi = prop.options.findIndex((o) => o.id === b);
+    if (ai !== -1 || bi !== -1) return ai - bi;
+  }
+  return compareCellValues(a, b);
+}
+
 // Helper: apply a filter to a cell value
 export function applyFilter(
   cellVal: CellValue,

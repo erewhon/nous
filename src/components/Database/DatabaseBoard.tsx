@@ -24,8 +24,14 @@ import { pickNextColor } from "./CellEditors";
 import type { RelationContext } from "./useRelationContext";
 import { DatabaseBoardCard } from "./DatabaseBoardCard";
 import { DatabaseRowDetail } from "./DatabaseRowDetail";
-import { compareCellValues, applyFilter } from "./DatabaseTable";
-import { isDoneStatus, resolveStatusColor } from "./boardSemantics";
+import { BoardColumnMenu } from "./BoardColumnMenu";
+import { applyFilter, compareCellValuesForProp } from "./viewRows";
+import {
+  findDueProperty,
+  findPriorityProperty,
+  isDoneStatus,
+  resolveStatusColor,
+} from "./boardSemantics";
 import { useIsPhone } from "../../hooks/useIsPhone";
 
 interface DatabaseBoardProps {
@@ -134,7 +140,11 @@ export function DatabaseBoard({
     if (view.sorts.length > 0) {
       rows.sort((a, b) => {
         for (const sort of view.sorts) {
-          const cmp = compareCellValues(
+          const prop = content.properties.find(
+            (p) => p.id === sort.propertyId
+          );
+          const cmp = compareCellValuesForProp(
+            prop,
             a.cells[sort.propertyId],
             b.cells[sort.propertyId]
           );
@@ -343,6 +353,75 @@ export function DatabaseBoard({
     [columns, onUpdateView]
   );
 
+  // Column-menu sorts write the board-wide view.sorts — there is no
+  // per-column order in the data model, and pretending otherwise would
+  // diverge from every other view.
+  const handleSortBoard = useCallback(
+    (propertyId: string) => {
+      onUpdateView((prev) => ({
+        ...prev,
+        sorts: [{ propertyId, direction: "asc" }],
+      }));
+    },
+    [onUpdateView]
+  );
+
+  const handleCollapseColumn = useCallback(
+    (columnId: string) => {
+      onUpdateView((prev) => {
+        const cfg = prev.config as BoardViewConfig;
+        const collapsed = new Set(cfg.collapsedColumns ?? []);
+        collapsed.add(columnId);
+        return {
+          ...prev,
+          config: { ...prev.config, collapsedColumns: [...collapsed] },
+        };
+      });
+    },
+    [onUpdateView]
+  );
+
+  const handleExpandColumn = useCallback(
+    (columnId: string) => {
+      onUpdateView((prev) => {
+        const cfg = prev.config as BoardViewConfig;
+        const collapsed = (cfg.collapsedColumns ?? []).filter(
+          (id) => id !== columnId
+        );
+        return {
+          ...prev,
+          config: {
+            ...prev.config,
+            collapsedColumns: collapsed.length > 0 ? collapsed : undefined,
+          },
+        };
+      });
+    },
+    [onUpdateView]
+  );
+
+  const handleSetWipLimit = useCallback(
+    (columnId: string, limit: number | null) => {
+      onUpdateView((prev) => {
+        const cfg = prev.config as BoardViewConfig;
+        const wipLimits = { ...(cfg.wipLimits ?? {}) };
+        if (limit == null) {
+          delete wipLimits[columnId];
+        } else {
+          wipLimits[columnId] = limit;
+        }
+        return {
+          ...prev,
+          config: {
+            ...prev.config,
+            wipLimits: Object.keys(wipLimits).length > 0 ? wipLimits : undefined,
+          },
+        };
+      });
+    },
+    [onUpdateView]
+  );
+
   if (!groupProp) {
     return (
       <div className="db-board-empty">
@@ -364,6 +443,14 @@ export function DatabaseBoard({
     ? columns.find((c) => c.rows.some((r) => r.id === activeId))
     : null;
 
+  // Collapsed rails are desktop-only: a 44px rail breaks the phone's
+  // one-column snap-swipe model, so phones render every column expanded.
+  const collapsedColumns =
+    !isPhone && config.collapsedColumns ? new Set(config.collapsedColumns) : null;
+  const wipLimits = config.wipLimits;
+  const priorityProp = findPriorityProperty(content.properties);
+  const dueProp = findDueProperty(content.properties);
+
   return (
     <>
       <DndContext
@@ -373,32 +460,56 @@ export function DatabaseBoard({
         onDragCancel={handleDragCancel}
       >
         <div className="db-board-container">
-          {columns.map((col, colIdx) => (
-            <BoardColumn
-              key={col.id}
-              id={col.id}
-              label={col.label}
-              color={col.color}
-              rows={col.rows}
-              properties={content.properties}
-              selectedRowId={selectedRowId}
-              dragActive={activeId != null}
-              activeCardHeight={activeCardHeight}
-              onCardClick={setSelectedRowId}
-              onAddCard={() => handleAddCard(col.id)}
-              pageLinkPages={pageLinkPages}
-              formulaValues={relationContext?.formulaValues}
-              cardPropertyIds={cardPropertyIds}
-              canMoveLeft={colIdx > 0 && col.id !== NO_VALUE_COLUMN}
-              canMoveRight={
-                colIdx < columns.length - 1 &&
-                col.id !== NO_VALUE_COLUMN &&
-                columns[colIdx + 1]?.id !== NO_VALUE_COLUMN
-              }
-              onMoveLeft={() => handleMoveColumn(colIdx, -1)}
-              onMoveRight={() => handleMoveColumn(colIdx, 1)}
-            />
-          ))}
+          {columns.map((col, colIdx) =>
+            collapsedColumns?.has(col.id) ? (
+              <CollapsedBoardColumn
+                key={col.id}
+                label={col.label}
+                color={col.color}
+                count={col.rows.length}
+                onExpand={() => handleExpandColumn(col.id)}
+              />
+            ) : (
+              <BoardColumn
+                key={col.id}
+                id={col.id}
+                label={col.label}
+                color={col.color}
+                rows={col.rows}
+                properties={content.properties}
+                selectedRowId={selectedRowId}
+                dragActive={activeId != null}
+                activeCardHeight={activeCardHeight}
+                wipLimit={wipLimits?.[col.id]}
+                isPhone={isPhone}
+                priorityPropName={priorityProp?.name}
+                duePropName={dueProp?.name}
+                onSortByPriority={
+                  priorityProp
+                    ? () => handleSortBoard(priorityProp.id)
+                    : undefined
+                }
+                onSortByDue={
+                  dueProp ? () => handleSortBoard(dueProp.id) : undefined
+                }
+                onCollapse={() => handleCollapseColumn(col.id)}
+                onSetWipLimit={(limit) => handleSetWipLimit(col.id, limit)}
+                onCardClick={setSelectedRowId}
+                onAddCard={() => handleAddCard(col.id)}
+                pageLinkPages={pageLinkPages}
+                formulaValues={relationContext?.formulaValues}
+                cardPropertyIds={cardPropertyIds}
+                canMoveLeft={colIdx > 0 && col.id !== NO_VALUE_COLUMN}
+                canMoveRight={
+                  colIdx < columns.length - 1 &&
+                  col.id !== NO_VALUE_COLUMN &&
+                  columns[colIdx + 1]?.id !== NO_VALUE_COLUMN
+                }
+                onMoveLeft={() => handleMoveColumn(colIdx, -1)}
+                onMoveRight={() => handleMoveColumn(colIdx, 1)}
+              />
+            )
+          )}
         </div>
         <DragOverlay>
           {activeRow && (
@@ -445,6 +556,41 @@ export function DatabaseBoard({
   );
 }
 
+function CollapsedBoardColumn({
+  label,
+  color,
+  count,
+  onExpand,
+}: {
+  label: string;
+  color: string;
+  count: number;
+  onExpand: () => void;
+}) {
+  return (
+    <section
+      className="db-board-column db-board-column-collapsed"
+      style={{ "--col-color": resolveStatusColor(label, color) } as CSSProperties}
+      aria-label={`${label} column, collapsed`}
+      role="button"
+      tabIndex={0}
+      onClick={onExpand}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onExpand();
+        }
+      }}
+    >
+      <header className="db-board-column-header">
+        <span className="db-group-dot" />
+        <span className="db-board-column-name">{label}</span>
+        <span className="db-board-column-count">{count}</span>
+      </header>
+    </section>
+  );
+}
+
 function BoardColumn({
   id,
   label,
@@ -454,6 +600,14 @@ function BoardColumn({
   selectedRowId,
   dragActive,
   activeCardHeight,
+  wipLimit,
+  isPhone,
+  priorityPropName,
+  duePropName,
+  onSortByPriority,
+  onSortByDue,
+  onCollapse,
+  onSetWipLimit,
   onCardClick,
   onAddCard,
   pageLinkPages,
@@ -472,6 +626,14 @@ function BoardColumn({
   selectedRowId: string | null;
   dragActive: boolean;
   activeCardHeight: number;
+  wipLimit?: number;
+  isPhone: boolean;
+  priorityPropName?: string;
+  duePropName?: string;
+  onSortByPriority?: () => void;
+  onSortByDue?: () => void;
+  onCollapse: () => void;
+  onSetWipLimit: (limit: number | null) => void;
   onCardClick: (rowId: string) => void;
   onAddCard: () => void;
   pageLinkPages?: Array<{ id: string; title: string }>;
@@ -483,9 +645,11 @@ function BoardColumn({
   onMoveRight?: () => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id });
+  const [menuAnchor, setMenuAnchor] = useState<DOMRect | null>(null);
 
   const colColor = resolveStatusColor(label, color);
   const done = isDoneStatus(label);
+  const overWip = wipLimit != null && rows.length > wipLimit;
   // Dashed slot at the end of the list: the card will join this column (global
   // sorts decide where, so an insertion-position slot would lie).
   const showDropSlot = isOver && dragActive;
@@ -500,29 +664,51 @@ function BoardColumn({
       <header className="db-board-column-header">
         <span className="db-group-dot" />
         <span className="db-board-column-name">{label}</span>
-        <span className="db-board-column-count">{rows.length}</span>
+        <span
+          className={`db-board-column-count${
+            overWip ? " db-board-column-count-over" : ""
+          }`}
+        >
+          {wipLimit != null ? `${rows.length} / ${wipLimit}` : rows.length}
+        </span>
         <span className="db-board-column-spacer" />
-        {(canMoveLeft || canMoveRight) && (
-          <span className="db-board-column-reorder">
-            {canMoveLeft && (
-              <button
-                className="db-board-move-btn"
-                onClick={onMoveLeft}
-                title="Move left"
-              >
-                ‹
-              </button>
-            )}
-            {canMoveRight && (
-              <button
-                className="db-board-move-btn"
-                onClick={onMoveRight}
-                title="Move right"
-              >
-                ›
-              </button>
-            )}
-          </span>
+        <button
+          className="db-board-col-menu-btn"
+          aria-label="Column menu"
+          onClick={(e) =>
+            setMenuAnchor(e.currentTarget.getBoundingClientRect())
+          }
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="currentColor"
+          >
+            <circle cx="5" cy="12" r="1.6" />
+            <circle cx="12" cy="12" r="1.6" />
+            <circle cx="19" cy="12" r="1.6" />
+          </svg>
+        </button>
+        {menuAnchor && (
+          <BoardColumnMenu
+            anchorRect={menuAnchor}
+            isNoValue={id === NO_VALUE_COLUMN}
+            isPhone={isPhone}
+            canMoveLeft={canMoveLeft ?? false}
+            canMoveRight={canMoveRight ?? false}
+            wipLimit={wipLimit}
+            priorityPropName={priorityPropName}
+            duePropName={duePropName}
+            onSortByPriority={onSortByPriority}
+            onSortByDue={onSortByDue}
+            onMoveLeft={() => onMoveLeft?.()}
+            onMoveRight={() => onMoveRight?.()}
+            onCollapse={onCollapse}
+            onSetWipLimit={onSetWipLimit}
+            onClose={() => setMenuAnchor(null)}
+          />
         )}
       </header>
       <div className="db-board-column-cards">

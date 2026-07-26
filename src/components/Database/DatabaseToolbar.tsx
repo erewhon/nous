@@ -89,14 +89,30 @@ export function DatabaseToolbar({
         : null;
 
   const handleSetGroupBy = (propertyId: string | null) => {
-    onUpdateView((prev) => ({
-      ...prev,
-      config: {
-        ...prev.config,
-        groupByPropertyId: propertyId,
-        collapsedGroups: [],
-      },
-    }));
+    onUpdateView((prev) => {
+      if (prev.type === "board") {
+        // A new group property invalidates every option-id-keyed board setting.
+        return {
+          ...prev,
+          config: {
+            ...prev.config,
+            groupByPropertyId: propertyId,
+            columnOrder: undefined,
+            hiddenColumns: undefined,
+            collapsedColumns: undefined,
+            wipLimits: undefined,
+          },
+        };
+      }
+      return {
+        ...prev,
+        config: {
+          ...prev.config,
+          groupByPropertyId: propertyId,
+          collapsedGroups: [],
+        },
+      };
+    });
     setShowGroup(false);
   };
 

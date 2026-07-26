@@ -185,6 +185,10 @@ export const BoardViewConfigSchema = z.object({
   // Property ids (in order) to show on each card, excluding the title. When
   // unset, the card falls back to the first few non-title properties.
   cardPropertyIds: z.array(z.string()).optional(),
+  // Option ids (or "__no_value__") rendered as collapsed vertical rails.
+  collapsedColumns: z.array(z.string()).optional(),
+  // Option id → soft WIP limit; over-limit columns show "n / limit" in warning.
+  wipLimits: z.record(z.string(), z.number()).optional(),
 });
 export type BoardViewConfig = z.infer<typeof BoardViewConfigSchema>;
 
