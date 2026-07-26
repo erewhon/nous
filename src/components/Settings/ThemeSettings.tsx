@@ -37,6 +37,11 @@ const THEME_MODES: { value: ThemeMode; label: string; description: string }[] = 
 
 const COLOR_SCHEMES: { value: ColorScheme; label: string; colors: string[] }[] = [
   {
+    value: "study",
+    label: "Study",
+    colors: ["#ab87fc", "#ece7de", "#1b1526"],
+  },
+  {
     value: "catppuccin",
     label: "Catppuccin",
     colors: ["#8b5cf6", "#cdd6f4", "#1e1e2e"],
@@ -64,6 +69,7 @@ const COLOR_SCHEMES: { value: ColorScheme; label: string; colors: string[] }[] =
 ];
 
 const FONT_FAMILIES: { value: FontFamily; label: string; preview: string }[] = [
+  { value: "dm-sans", label: "DM Sans", preview: "Aa Bb Cc" },
   { value: "system", label: "System Default", preview: "Aa Bb Cc" },
   { value: "inter", label: "Inter", preview: "Aa Bb Cc" },
   { value: "serif", label: "Serif (Georgia)", preview: "Aa Bb Cc" },
