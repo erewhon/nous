@@ -1700,6 +1700,19 @@
   background: color-mix(in srgb, var(--color-accent) 8%, transparent);
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .db-board-container *,
+  .db-board-container *::before,
+  .db-board-container *::after {
+    transition-duration: 0.01ms !important;
+    animation: none !important;
+  }
+
+  .db-board-card:hover {
+    transform: none;
+  }
+}
+
 /* ============================================
    Gallery View
    ============================================ */

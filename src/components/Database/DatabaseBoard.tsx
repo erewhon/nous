@@ -125,14 +125,14 @@ export function DatabaseBoard({
   );
   const cardPropertyIds = config.cardPropertyIds;
 
-  const pointerSensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
-  );
   // Phone: no drag — columns are swiped one at a time (CSS scroll-snap)
   // and moving a card = changing the group property in the detail sheet
-  // (mobile spec decision D). Empty sensors keep DndContext mounted for
-  // the useDraggable/useDroppable hooks without ever activating a drag.
-  const sensors = isPhone ? [] : pointerSensors;
+  // (mobile spec decision D). Dragging is disabled per-card (useDraggable
+  // disabled) rather than by swapping the sensors array, which React
+  // rejects as a changed-size hook dependency when the breakpoint flips.
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
+  );
 
   // Filter and sort rows
   const displayRows = useMemo(() => {
@@ -507,7 +507,9 @@ export function DatabaseBoard({
     if (!isArrow && key !== "Enter" && key !== " " && key !== "Escape") return;
 
     if (key === "Escape") {
-      if (focusedCardId) {
+      // With the detail sheet open, Escape belongs to the sheet (its document
+      // listener closes it and hands focus back to the card).
+      if (!selectedRowId && focusedCardId) {
         setFocusedCardId(null);
         (document.activeElement as HTMLElement | null)?.blur();
       }
@@ -631,6 +633,7 @@ export function DatabaseBoard({
                 pageLinkPages={pageLinkPages}
                 formulaValues={relationContext?.formulaValues}
                 cardPropertyIds={cardPropertyIds}
+                groupByPropertyId={config.groupByPropertyId}
                 canMoveLeft={colIdx > 0 && col.id !== NO_VALUE_COLUMN}
                 canMoveRight={
                   colIdx < columns.length - 1 &&
@@ -662,6 +665,7 @@ export function DatabaseBoard({
                 pageLinkPages={pageLinkPages}
                 formulaValues={relationContext?.formulaValues}
                 cardPropertyIds={cardPropertyIds}
+                groupByPropertyId={config.groupByPropertyId}
                 done={activeColumn ? isDoneStatus(activeColumn.label) : false}
               />
             </div>
@@ -680,6 +684,14 @@ export function DatabaseBoard({
           onClose={() => {
             setSelectedRowId(null);
             setNewRowId(null);
+            // Hand DOM focus back to the card so arrow navigation continues
+            // (the focus effect won't refire — focusedCardId is unchanged).
+            const returnTo = focusedCardId;
+            if (returnTo) {
+              requestAnimationFrame(() =>
+                cardRefs.current.get(returnTo)?.focus()
+              );
+            }
           }}
           onDelete={() => handleDeleteRow(selectedRow.id)}
           relationContext={relationContext}
@@ -753,6 +765,7 @@ function BoardColumn({
   pageLinkPages,
   formulaValues,
   cardPropertyIds,
+  groupByPropertyId,
   canMoveLeft,
   canMoveRight,
   onMoveLeft,
@@ -783,6 +796,7 @@ function BoardColumn({
   pageLinkPages?: Array<{ id: string; title: string }>;
   formulaValues?: Map<string, Map<string, CellValue>>;
   cardPropertyIds?: string[];
+  groupByPropertyId?: string;
   canMoveLeft?: boolean;
   canMoveRight?: boolean;
   onMoveLeft?: () => void;
@@ -871,6 +885,7 @@ function BoardColumn({
             pageLinkPages={pageLinkPages}
             formulaValues={formulaValues}
             cardPropertyIds={cardPropertyIds}
+            groupByPropertyId={groupByPropertyId}
           />
         ))}
         {showDropSlot && (
@@ -920,6 +935,7 @@ function DraggableCard({
   pageLinkPages,
   formulaValues,
   cardPropertyIds,
+  groupByPropertyId,
 }: {
   row: DatabaseRow;
   properties: PropertyDef[];
@@ -933,10 +949,13 @@ function DraggableCard({
   pageLinkPages?: Array<{ id: string; title: string }>;
   formulaValues?: Map<string, Map<string, CellValue>>;
   cardPropertyIds?: string[];
+  groupByPropertyId?: string;
 }) {
+  const isPhone = useIsPhone();
   const { attributes, listeners, setNodeRef, transform, isDragging } =
     useDraggable({
       id: row.id,
+      disabled: isPhone,
     });
 
   const style = transform
@@ -971,6 +990,7 @@ function DraggableCard({
         pageLinkPages={pageLinkPages}
         formulaValues={formulaValues}
         cardPropertyIds={cardPropertyIds}
+        groupByPropertyId={groupByPropertyId}
       />
     </div>
   );

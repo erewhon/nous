@@ -23,6 +23,12 @@ interface DatabaseBoardCardProps {
    * undefined, falls back to the first 3 non-title properties.
    */
   cardPropertyIds?: string[];
+  /**
+   * The board's group-by property — excluded from the default field set
+   * (the column already carries it), though an explicit cardPropertyIds
+   * choice can still include it.
+   */
+  groupByPropertyId?: string;
   /** Card sits in a Done-style column — muted + strikethrough treatment. */
   done?: boolean;
   /** Card carries the selection wash + index-mark. */
@@ -62,6 +68,7 @@ export function DatabaseBoardCard({
   pageLinkPages,
   formulaValues,
   cardPropertyIds,
+  groupByPropertyId,
   done,
   selected,
 }: DatabaseBoardCardProps) {
@@ -69,13 +76,15 @@ export function DatabaseBoardCard({
   const title = titleProp ? String(row.cells[titleProp.id] ?? "") : "";
 
   // Which secondary properties to show: an explicit configured list (in order),
-  // otherwise the first 3 non-title properties as a default.
+  // otherwise the first 3 non-title, non-group properties as a default.
   const secondaryProps =
     cardPropertyIds && cardPropertyIds.length > 0
       ? cardPropertyIds
           .map((id) => properties.find((p) => p.id === id))
           .filter((p): p is PropertyDef => p != null && p.id !== titleProp?.id)
-      : properties.filter((p) => p.id !== titleProp?.id).slice(0, 3);
+      : properties
+          .filter((p) => p.id !== titleProp?.id && p.id !== groupByPropertyId)
+          .slice(0, 3);
 
   // Corkboard slots drawn from the visible set: mono ID + priority glyph on
   // the top rule, tags + due date on the meta rule; everything else renders

@@ -117,11 +117,12 @@ export function DatabaseToolbar({
   };
 
   // Board "card fields": which properties appear on each card. When unset, the
-  // board defaults to the first 3 non-title properties, so mirror that default
-  // here so the checkboxes match what the card actually shows.
+  // board defaults to the first 3 non-title, non-group properties (the column
+  // already carries the group value), so mirror that default here so the
+  // checkboxes match what the card actually shows.
   const titleProp = properties.find((p) => p.type === "text");
   const defaultCardPropertyIds = properties
-    .filter((p) => p.id !== titleProp?.id)
+    .filter((p) => p.id !== titleProp?.id && p.id !== groupByPropertyId)
     .slice(0, 3)
     .map((p) => p.id);
   const cardPropertyIds =
