@@ -176,3 +176,79 @@ describe("DatabaseTable — Corkboard record primitives", () => {
     expect(doneTitle?.className).not.toContain("db-done-text");
   });
 });
+
+describe("DatabaseTable — group header dots", () => {
+  it("renders a semantic dot for every select group", () => {
+    const { container } = renderTable();
+    const dots = Array.from(container.querySelectorAll(".db-group-dot"));
+    expect(dots).toHaveLength(2); // Ready group + Done group
+    const colors = dots.map(
+      (el) => (el as HTMLElement).style.backgroundColor
+    );
+    expect(colors).toContain("var(--color-info)"); // Ready
+    expect(colors).toContain("var(--color-success)"); // Done
+  });
+
+  it("renders dots when grouping by a text property with status-like values", () => {
+    const content = makeContent({
+      properties: [
+        { id: "title", name: "Title", type: "text" },
+        { id: "state", name: "State", type: "text" },
+      ],
+      rows: [
+        {
+          id: "r1",
+          cells: { title: "One", state: "In Progress" },
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+        {
+          id: "r2",
+          cells: { title: "Two", state: "Blocked" },
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+        {
+          id: "r3",
+          cells: { title: "Three", state: "Someweirdstate" },
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+      config: { groupByPropertyId: "state" },
+    });
+    const { container } = renderTable(content);
+    const dots = Array.from(container.querySelectorAll(".db-group-dot")).map(
+      (el) => (el as HTMLElement).style.backgroundColor
+    );
+    expect(dots).toHaveLength(3);
+    expect(dots).toContain("var(--color-accent)"); // In Progress
+    expect(dots).toContain("var(--color-error)"); // Blocked
+    expect(dots).toContain("var(--color-text-muted)"); // unrecognized label
+  });
+
+  it("keeps the stored option color for unrecognized select labels", () => {
+    const content = makeContent({
+      properties: [
+        { id: "title", name: "Title", type: "text" },
+        {
+          id: "status",
+          name: "Status",
+          type: "select",
+          options: [{ id: "s-w", label: "Weirdname", color: "#ab12cd" }],
+        },
+      ],
+      rows: [
+        {
+          id: "r1",
+          cells: { title: "One", status: "s-w" },
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+    });
+    const { container } = renderTable(content);
+    const dot = container.querySelector(".db-group-dot") as HTMLElement;
+    expect(dot.style.backgroundColor).toBe("rgb(171, 18, 205)"); // #ab12cd
+  });
+});

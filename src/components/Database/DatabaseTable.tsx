@@ -857,17 +857,15 @@ export function DatabaseTable({
                             <path d="M9 18l6-6-6-6" />
                           </svg>
                         </button>
-                        {group.color && (
-                          <span
-                            className="db-group-dot"
-                            style={{
-                              backgroundColor: resolveStatusColor(
-                                group.label,
-                                group.color
-                              ),
-                            }}
-                          />
-                        )}
+                        <span
+                          className="db-group-dot"
+                          style={{
+                            backgroundColor: resolveStatusColor(
+                              group.label,
+                              group.color
+                            ),
+                          }}
+                        />
                         <span className="db-group-label">{group.label}</span>
                         <span className="db-group-count">
                           {group.rows.length}
