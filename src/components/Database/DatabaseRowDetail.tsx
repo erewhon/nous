@@ -30,6 +30,8 @@ interface DatabaseRowDetailProps {
   relationContext?: RelationContext;
   pageLinkPages?: Array<{ id: string; title: string }>;
   onNavigatePageLink?: (pageId: string) => void;
+  /** Focus the title editor on mount (fresh rows created from a board column). */
+  autoFocusTitle?: boolean;
 }
 
 export function DatabaseRowDetail({
@@ -42,8 +44,22 @@ export function DatabaseRowDetail({
   relationContext,
   pageLinkPages,
   onNavigatePageLink,
+  autoFocusTitle,
 }: DatabaseRowDetailProps) {
   const panelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!autoFocusTitle || !panelRef.current) return;
+    const titleProp = properties.find((p) => p.type === "text");
+    if (!titleProp) return;
+    panelRef.current
+      .querySelector<HTMLElement>(
+        `[data-prop-id="${titleProp.id}"] input, [data-prop-id="${titleProp.id}"] textarea`
+      )
+      ?.focus();
+    // Mount-only: refocusing on later prop/row updates would steal the cursor.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
@@ -198,7 +214,11 @@ export function DatabaseRowDetail({
         </div>
         <div className="db-row-detail-body">
           {properties.map((prop) => (
-            <div key={prop.id} className="db-row-detail-prop">
+            <div
+              key={prop.id}
+              className="db-row-detail-prop"
+              data-prop-id={prop.id}
+            >
               <div className="db-row-detail-prop-label">{prop.name}</div>
               <div className="db-row-detail-prop-value">
                 {renderEditor(prop)}

@@ -1,4 +1,12 @@
-import { useState, useCallback, useMemo, type CSSProperties } from "react";
+import {
+  useState,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
 import {
   DndContext,
   DragOverlay,
@@ -103,6 +111,12 @@ export function DatabaseBoard({
   const [selectedRowId, setSelectedRowId] = useState<string | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [activeCardHeight, setActiveCardHeight] = useState<number>(56);
+  // Roving focus for arrow-key navigation — distinct from selectedRowId,
+  // which opens the detail sheet.
+  const [focusedCardId, setFocusedCardId] = useState<string | null>(null);
+  // Row minted by the add-card button; its detail sheet autofocuses the title.
+  const [newRowId, setNewRowId] = useState<string | null>(null);
+  const cardRefs = useRef(new Map<string, HTMLElement>());
   const isPhone = useIsPhone();
 
   const config = view.config as BoardViewConfig;
@@ -274,13 +288,18 @@ export function DatabaseBoard({
         cells[config.groupByPropertyId] =
           groupProp.type === "multiSelect" ? [cellValue] : cellValue;
       }
+      const newId = generateId();
       onUpdateContent((prev) => ({
         ...prev,
         rows: [
           ...prev.rows,
-          { id: generateId(), cells, createdAt: now, updatedAt: now },
+          { id: newId, cells, createdAt: now, updatedAt: now },
         ],
       }));
+      // Open the fresh row so it's immediately nameable.
+      setNewRowId(newId);
+      setSelectedRowId(newId);
+      setFocusedCardId(newId);
     },
     [onUpdateContent, config.groupByPropertyId, groupProp]
   );
@@ -295,6 +314,22 @@ export function DatabaseBoard({
     },
     [onUpdateContent]
   );
+
+  const registerCardRef = useCallback(
+    (rowId: string, node: HTMLElement | null) => {
+      if (node) cardRefs.current.set(rowId, node);
+      else cardRefs.current.delete(rowId);
+    },
+    []
+  );
+
+  // DOM focus follows the roving focus state — including after a card moves
+  // columns (its wrapper remounts under the new column).
+  useEffect(() => {
+    if (!focusedCardId) return;
+    const node = cardRefs.current.get(focusedCardId);
+    if (node && document.activeElement !== node) node.focus();
+  }, [focusedCardId, columns]);
 
   const handleCellChange = useCallback(
     (rowId: string, propertyId: string, value: CellValue) => {
@@ -451,6 +486,99 @@ export function DatabaseBoard({
   const priorityProp = findPriorityProperty(content.properties);
   const dueProp = findDueProperty(content.properties);
 
+  const expandedColumns = collapsedColumns
+    ? columns.filter((c) => !collapsedColumns.has(c.id))
+    : columns;
+  // The card reachable by Tab when nothing holds roving focus yet.
+  const firstCardId =
+    expandedColumns.find((c) => c.rows.length > 0)?.rows[0]?.id ?? null;
+  const tabbableCardId = focusedCardId ?? firstCardId;
+
+  const handleBoardKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    const target = e.target as HTMLElement;
+    if (target.closest("input, textarea, [contenteditable='true']")) return;
+
+    const key = e.key;
+    const isArrow =
+      key === "ArrowUp" ||
+      key === "ArrowDown" ||
+      key === "ArrowLeft" ||
+      key === "ArrowRight";
+    if (!isArrow && key !== "Enter" && key !== " " && key !== "Escape") return;
+
+    if (key === "Escape") {
+      if (focusedCardId) {
+        setFocusedCardId(null);
+        (document.activeElement as HTMLElement | null)?.blur();
+      }
+      return;
+    }
+
+    if (!focusedCardId) {
+      if (isArrow && firstCardId) {
+        e.preventDefault();
+        setFocusedCardId(firstCardId);
+      }
+      return;
+    }
+
+    const colIdx = expandedColumns.findIndex((c) =>
+      c.rows.some((r) => r.id === focusedCardId)
+    );
+    if (colIdx === -1) return;
+    const col = expandedColumns[colIdx];
+    const rowIdx = col.rows.findIndex((r) => r.id === focusedCardId);
+
+    if (key === "Enter" || key === " ") {
+      e.preventDefault();
+      setSelectedRowId(focusedCardId);
+      return;
+    }
+
+    e.preventDefault();
+    if (key === "ArrowUp") {
+      if (rowIdx > 0) setFocusedCardId(col.rows[rowIdx - 1].id);
+    } else if (key === "ArrowDown") {
+      if (rowIdx < col.rows.length - 1)
+        setFocusedCardId(col.rows[rowIdx + 1].id);
+    } else {
+      const dir = key === "ArrowLeft" ? -1 : 1;
+      if (e.shiftKey && groupProp) {
+        // Shift+Arrow moves the card itself to the adjacent expanded column
+        // (no drag sensor involved — same mutation as a drop).
+        const j = colIdx + dir;
+        if (j >= 0 && j < expandedColumns.length) {
+          const targetId = expandedColumns[j].id;
+          onUpdateContent((prev) =>
+            applyBoardDrop(
+              prev,
+              groupProp,
+              config.groupByPropertyId,
+              focusedCardId,
+              targetId
+            )
+          );
+        }
+        return;
+      }
+      // Focus the nearest non-empty expanded column in that direction.
+      let j = colIdx + dir;
+      while (
+        j >= 0 &&
+        j < expandedColumns.length &&
+        expandedColumns[j].rows.length === 0
+      ) {
+        j += dir;
+      }
+      if (j >= 0 && j < expandedColumns.length) {
+        const targetCol = expandedColumns[j];
+        setFocusedCardId(
+          targetCol.rows[Math.min(rowIdx, targetCol.rows.length - 1)].id
+        );
+      }
+    }
+  };
+
   return (
     <>
       <DndContext
@@ -459,7 +587,7 @@ export function DatabaseBoard({
         onDragEnd={handleDragEnd}
         onDragCancel={handleDragCancel}
       >
-        <div className="db-board-container">
+        <div className="db-board-container" onKeyDown={handleBoardKeyDown}>
           {columns.map((col, colIdx) =>
             collapsedColumns?.has(col.id) ? (
               <CollapsedBoardColumn
@@ -478,6 +606,10 @@ export function DatabaseBoard({
                 rows={col.rows}
                 properties={content.properties}
                 selectedRowId={selectedRowId}
+                focusedCardId={focusedCardId}
+                tabbableCardId={tabbableCardId}
+                onFocusCard={setFocusedCardId}
+                registerCardRef={registerCardRef}
                 dragActive={activeId != null}
                 activeCardHeight={activeCardHeight}
                 wipLimit={wipLimits?.[col.id]}
@@ -545,11 +677,15 @@ export function DatabaseBoard({
             handleCellChange(selectedRow.id, propId, val)
           }
           onAddSelectOption={handleAddSelectOption}
-          onClose={() => setSelectedRowId(null)}
+          onClose={() => {
+            setSelectedRowId(null);
+            setNewRowId(null);
+          }}
           onDelete={() => handleDeleteRow(selectedRow.id)}
           relationContext={relationContext}
           pageLinkPages={pageLinkPages}
           onNavigatePageLink={onNavigatePageLink}
+          autoFocusTitle={selectedRow.id === newRowId}
         />
       )}
     </>
@@ -598,6 +734,10 @@ function BoardColumn({
   rows,
   properties,
   selectedRowId,
+  focusedCardId,
+  tabbableCardId,
+  onFocusCard,
+  registerCardRef,
   dragActive,
   activeCardHeight,
   wipLimit,
@@ -624,6 +764,10 @@ function BoardColumn({
   rows: DatabaseRow[];
   properties: PropertyDef[];
   selectedRowId: string | null;
+  focusedCardId: string | null;
+  tabbableCardId: string | null;
+  onFocusCard: (rowId: string) => void;
+  registerCardRef: (rowId: string, node: HTMLElement | null) => void;
   dragActive: boolean;
   activeCardHeight: number;
   wipLimit?: number;
@@ -718,7 +862,11 @@ function BoardColumn({
             row={row}
             properties={properties}
             done={done}
-            selected={row.id === selectedRowId}
+            selected={row.id === selectedRowId || row.id === focusedCardId}
+            isFocused={row.id === focusedCardId}
+            isTabbable={row.id === tabbableCardId}
+            onFocusCard={onFocusCard}
+            registerRef={registerCardRef}
             onClick={() => onCardClick(row.id)}
             pageLinkPages={pageLinkPages}
             formulaValues={formulaValues}
@@ -764,6 +912,10 @@ function DraggableCard({
   properties,
   done,
   selected,
+  isFocused,
+  isTabbable,
+  onFocusCard,
+  registerRef,
   onClick,
   pageLinkPages,
   formulaValues,
@@ -773,6 +925,10 @@ function DraggableCard({
   properties: PropertyDef[];
   done?: boolean;
   selected?: boolean;
+  isFocused?: boolean;
+  isTabbable?: boolean;
+  onFocusCard: (rowId: string) => void;
+  registerRef: (rowId: string, node: HTMLElement | null) => void;
   onClick: () => void;
   pageLinkPages?: Array<{ id: string; title: string }>;
   formulaValues?: Map<string, Map<string, CellValue>>;
@@ -791,7 +947,21 @@ function DraggableCard({
     : undefined;
 
   return (
-    <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
+    <div
+      ref={(node) => {
+        setNodeRef(node);
+        registerRef(row.id, node);
+      }}
+      style={style}
+      {...attributes}
+      {...listeners}
+      // Roving tabindex overrides dnd-kit's default tabIndex={0}
+      tabIndex={isTabbable ? 0 : -1}
+      data-row-id={row.id}
+      aria-current={isFocused ? "true" : undefined}
+      className="db-board-card-holder"
+      onFocus={() => onFocusCard(row.id)}
+    >
       <DatabaseBoardCard
         row={row}
         properties={properties}

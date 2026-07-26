@@ -1484,6 +1484,17 @@
   padding: 4px 12px 12px;
 }
 
+.db-board-card-holder {
+  outline: none;
+  border-radius: var(--radius-md);
+}
+
+.db-board-card-holder:focus-visible {
+  box-shadow:
+    0 0 0 2px var(--color-bg-primary),
+    0 0 0 4px color-mix(in srgb, var(--color-accent) 70%, transparent);
+}
+
 .db-board-card {
   position: relative;
   background-color: var(--color-bg-elevated);
