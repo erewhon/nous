@@ -1191,7 +1191,7 @@ END:VCALENDAR`;
                     ? "var(--color-accent)"
                     : "var(--color-text-muted)",
                   backgroundColor: showArchived
-                    ? "rgba(139, 92, 246, 0.1)"
+                    ? "rgb(from var(--color-accent) r g b / 0.1)"
                     : "transparent",
                 }}
                 title={showArchived ? "Hide archived" : "Show archived"}

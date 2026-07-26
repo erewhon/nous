@@ -1621,7 +1621,7 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
       <div
         className={`flex items-center justify-between px-5 py-4 ${panel.isDetached ? "cursor-move" : ""}`}
         style={{
-          background: "linear-gradient(to right, rgba(139, 92, 246, 0.1), rgba(124, 58, 237, 0.05))",
+          background: "linear-gradient(to right, rgb(from var(--color-accent) r g b / 0.1), rgba(124, 58, 237, 0.05))",
         }}
         onMouseDown={handleDragStart}
       >
@@ -1696,7 +1696,7 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
                     style={{
                       backgroundColor: (currentSessionRef.current.currentBranch || "main") !== "main"
                         ? "rgba(249, 115, 22, 0.2)"
-                        : "rgba(139, 92, 246, 0.1)",
+                        : "rgb(from var(--color-accent) r g b / 0.1)",
                       color: (currentSessionRef.current.currentBranch || "main") !== "main"
                         ? "var(--color-warning)"
                         : "var(--color-text-muted)",
@@ -1751,7 +1751,7 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
                 <span
                   className="rounded-full px-1.5 py-0.5 text-[10px] font-medium"
                   style={{
-                    backgroundColor: "rgba(139, 92, 246, 0.2)",
+                    backgroundColor: "rgb(from var(--color-accent) r g b / 0.2)",
                     color: "var(--color-accent)",
                   }}
                 >
@@ -1979,7 +1979,7 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
                   key={s.id}
                   className="group flex items-center gap-3 rounded-xl p-3 cursor-pointer transition-colors hover:bg-[--color-bg-tertiary]"
                   style={{
-                    backgroundColor: s.id === panel.activeSessionId ? "rgba(139, 92, 246, 0.1)" : undefined,
+                    backgroundColor: s.id === panel.activeSessionId ? "rgb(from var(--color-accent) r g b / 0.1)" : undefined,
                     border: "1px solid var(--color-border)",
                   }}
                   onClick={async () => {
@@ -2091,7 +2091,7 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
               <p
                 className="mt-3 rounded-full px-4 py-1.5 text-xs"
                 style={{
-                  backgroundColor: "rgba(139, 92, 246, 0.1)",
+                  backgroundColor: "rgb(from var(--color-accent) r g b / 0.1)",
                   color: "var(--color-accent)",
                 }}
               >
@@ -2148,7 +2148,7 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
                         onClick={() => toggleThinking(i)}
                         className="flex items-center gap-2 text-xs rounded-lg px-3 py-1.5 transition-all"
                         style={{
-                          backgroundColor: "rgba(139, 92, 246, 0.1)",
+                          backgroundColor: "rgb(from var(--color-accent) r g b / 0.1)",
                           color: "var(--color-accent)",
                         }}
                       >
@@ -2167,8 +2167,8 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
                         <div
                           className="mt-2 rounded-xl p-3 text-xs overflow-auto max-h-64"
                           style={{
-                            backgroundColor: "rgba(139, 92, 246, 0.05)",
-                            border: "1px solid rgba(139, 92, 246, 0.2)",
+                            backgroundColor: "rgb(from var(--color-accent) r g b / 0.05)",
+                            border: "1px solid rgb(from var(--color-accent) r g b / 0.2)",
                             color: "var(--color-text-secondary)",
                           }}
                         >
@@ -2503,8 +2503,8 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
               <div
                 className="rounded-xl border p-4"
                 style={{
-                  backgroundColor: "rgba(139, 92, 246, 0.05)",
-                  borderColor: "rgba(139, 92, 246, 0.2)",
+                  backgroundColor: "rgb(from var(--color-accent) r g b / 0.05)",
+                  borderColor: "rgb(from var(--color-accent) r g b / 0.2)",
                 }}
               >
                 <button
@@ -2549,7 +2549,7 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
                           <span
                             className="text-xs rounded-full px-2 py-0.5"
                             style={{
-                              backgroundColor: "rgba(139, 92, 246, 0.1)",
+                              backgroundColor: "rgb(from var(--color-accent) r g b / 0.1)",
                               color: "var(--color-accent)",
                             }}
                           >
@@ -2675,7 +2675,7 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
                 <span
                   className="rounded px-1 py-0.5"
                   style={{
-                    backgroundColor: "rgba(139, 92, 246, 0.2)",
+                    backgroundColor: "rgb(from var(--color-accent) r g b / 0.2)",
                     color: "var(--color-accent)",
                     fontSize: "9px",
                   }}
@@ -2744,7 +2744,7 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
                             className="w-full rounded-lg px-3 py-2 text-left transition-colors hover:bg-[--color-bg-tertiary]"
                             style={{
                               color: isActive ? "var(--color-accent)" : "var(--color-text-primary)",
-                              backgroundColor: isActive ? "rgba(139, 92, 246, 0.1)" : undefined,
+                              backgroundColor: isActive ? "rgb(from var(--color-accent) r g b / 0.1)" : undefined,
                             }}
                           >
                             {model.name}
@@ -2763,7 +2763,7 @@ export function AIChatPanel({ isOpen: isOpenProp, onClose: onCloseProp, onOpenSe
               <span
                 className="flex items-center gap-1 rounded-full px-2 py-0.5"
                 style={{
-                  backgroundColor: "rgba(139, 92, 246, 0.2)",
+                  backgroundColor: "rgb(from var(--color-accent) r g b / 0.2)",
                   color: "var(--color-accent)",
                 }}
                 title="Semantic search enabled - relevant notes will be included in context"

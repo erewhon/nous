@@ -314,7 +314,7 @@ export function VersionHistoryDialog({
                             style={{
                               backgroundColor:
                                 viewMode === m
-                                  ? "rgba(139, 92, 246, 0.15)"
+                                  ? "rgb(from var(--color-accent) r g b / 0.15)"
                                   : "transparent",
                               color:
                                 viewMode === m

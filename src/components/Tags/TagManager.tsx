@@ -249,8 +249,8 @@ export function TagManager({ isOpen, onClose, notebookId }: TagManagerProps) {
                     style={{
                       backgroundColor:
                         selectedTag === tag.name
-                          ? "rgba(139, 92, 246, 0.3)"
-                          : "rgba(139, 92, 246, 0.1)",
+                          ? "rgb(from var(--color-accent) r g b / 0.3)"
+                          : "rgb(from var(--color-accent) r g b / 0.1)",
                       color: "var(--color-accent)",
                       border:
                         selectedTag === tag.name
@@ -315,8 +315,8 @@ export function TagManager({ isOpen, onClose, notebookId }: TagManagerProps) {
                     className="rounded-full px-3 py-1 text-sm transition-colors"
                     style={{
                       backgroundColor: selectedTags.includes(tag.name)
-                        ? "rgba(139, 92, 246, 0.3)"
-                        : "rgba(139, 92, 246, 0.1)",
+                        ? "rgb(from var(--color-accent) r g b / 0.3)"
+                        : "rgb(from var(--color-accent) r g b / 0.1)",
                       color: "var(--color-accent)",
                       border: selectedTags.includes(tag.name)
                         ? "1px solid var(--color-accent)"
@@ -382,7 +382,7 @@ export function TagManager({ isOpen, onClose, notebookId }: TagManagerProps) {
                       backgroundColor:
                         selectedTag === tag.name
                           ? "rgba(239, 68, 68, 0.3)"
-                          : "rgba(139, 92, 246, 0.1)",
+                          : "rgb(from var(--color-accent) r g b / 0.1)",
                       color: selectedTag === tag.name ? "#ef4444" : "var(--color-accent)",
                       border:
                         selectedTag === tag.name
@@ -477,7 +477,7 @@ export function TagManager({ isOpen, onClose, notebookId }: TagManagerProps) {
                             className="inline-flex items-center gap-2 rounded-full px-3 py-1 text-sm"
                             style={{
                               marginLeft: `${indent * 16}px`,
-                              backgroundColor: "rgba(139, 92, 246, 0.1)",
+                              backgroundColor: "rgb(from var(--color-accent) r g b / 0.1)",
                               color: "var(--color-accent)",
                             }}
                           >

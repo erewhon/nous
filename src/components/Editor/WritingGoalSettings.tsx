@@ -150,7 +150,7 @@ export function WritingGoalSettings({ isOpen, onClose }: WritingGoalSettingsProp
                           : "var(--color-border)",
                       backgroundColor:
                         period === p
-                          ? "rgba(139, 92, 246, 0.1)"
+                          ? "rgb(from var(--color-accent) r g b / 0.1)"
                           : "transparent",
                       color: "var(--color-text-primary)",
                     }}

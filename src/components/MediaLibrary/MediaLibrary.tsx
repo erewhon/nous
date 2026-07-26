@@ -262,7 +262,7 @@ export function MediaLibrary({ notebookId, isOpen, onClose }: MediaLibraryProps)
                 isBatchMode ? "ring-1 ring-[--color-accent]" : ""
               }`}
               style={{
-                backgroundColor: isBatchMode ? "rgba(139, 92, 246, 0.1)" : "transparent",
+                backgroundColor: isBatchMode ? "rgb(from var(--color-accent) r g b / 0.1)" : "transparent",
                 color: isBatchMode ? "var(--color-accent)" : "var(--color-text-muted)",
               }}
             >

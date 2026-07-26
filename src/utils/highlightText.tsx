@@ -27,7 +27,7 @@ export function highlightText(
   const parts = text.split(pattern);
 
   const defaultStyle: React.CSSProperties = {
-    backgroundColor: "rgba(139, 92, 246, 0.3)",
+    backgroundColor: "var(--color-selection)",
     color: "inherit",
     borderRadius: "2px",
     padding: "0 2px",

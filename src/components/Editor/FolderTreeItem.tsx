@@ -301,7 +301,7 @@ export const FolderTreeItem = memo(function FolderTreeItem({
           paddingLeft: `${paddingLeft}px`,
           paddingRight: "8px",
           backgroundColor: showDropHighlight
-            ? "rgba(139, 92, 246, 0.15)"
+            ? "rgb(from var(--color-accent) r g b / 0.15)"
             : isDragging
             ? "var(--color-bg-tertiary)"
             : "transparent",
@@ -1025,7 +1025,7 @@ const DraggablePageItem = memo(function DraggablePageItem({
             paddingLeft: `${paddingLeft}px`,
             paddingRight: "8px",
             backgroundColor: showDropHighlight
-              ? "rgba(139, 92, 246, 0.15)"
+              ? "rgb(from var(--color-accent) r g b / 0.15)"
               : isSelected
               ? "var(--color-bg-tertiary)"
               : "transparent",

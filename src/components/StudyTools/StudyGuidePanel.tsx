@@ -87,7 +87,7 @@ export function StudyGuidePanel({
                     depth === d ? "border-[--color-accent]" : "border-[--color-border]"
                   }`}
                   style={{
-                    backgroundColor: depth === d ? "rgba(139, 92, 246, 0.1)" : "var(--color-bg-primary)",
+                    backgroundColor: depth === d ? "rgb(from var(--color-accent) r g b / 0.1)" : "var(--color-bg-primary)",
                     color: depth === d ? "var(--color-accent)" : "var(--color-text-secondary)",
                   }}
                 >

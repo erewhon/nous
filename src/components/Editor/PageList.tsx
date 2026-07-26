@@ -125,7 +125,7 @@ const PageListItem = memo(function PageListItem({
             backgroundColor: page.color
               ? `${page.color}20`
               : isSelected
-                ? "rgba(139, 92, 246, 0.2)"
+                ? "rgb(from var(--color-accent) r g b / 0.2)"
                 : "var(--color-bg-tertiary)",
             color: page.color || (isSelected ? "var(--color-accent)" : "var(--color-text-muted)"),
           }}
@@ -146,7 +146,7 @@ const PageListItem = memo(function PageListItem({
                     key={tag}
                     className="rounded-full text-xs px-2 py-0.5"
                     style={{
-                      backgroundColor: page.color ? `${page.color}1a` : "rgba(139, 92, 246, 0.1)",
+                      backgroundColor: page.color ? `${page.color}1a` : "rgb(from var(--color-accent) r g b / 0.1)",
                       color: page.color || "var(--color-accent)",
                     }}
                     title={tag}
@@ -255,7 +255,7 @@ export function PageList({
             className="flex h-7 w-7 items-center justify-center rounded-lg transition-all"
             style={{
               color: selectedTags.length > 0 ? "var(--color-accent)" : "var(--color-text-muted)",
-              backgroundColor: selectedTags.length > 0 ? "rgba(139, 92, 246, 0.1)" : "transparent",
+              backgroundColor: selectedTags.length > 0 ? "rgb(from var(--color-accent) r g b / 0.1)" : "transparent",
             }}
             title="Filter by tags"
           >
@@ -339,8 +339,8 @@ export function PageList({
                     className="rounded-full px-2 py-0.5 text-xs transition-colors"
                     style={{
                       backgroundColor: isSelected
-                        ? "rgba(139, 92, 246, 0.3)"
-                        : "rgba(139, 92, 246, 0.1)",
+                        ? "rgb(from var(--color-accent) r g b / 0.3)"
+                        : "rgb(from var(--color-accent) r g b / 0.1)",
                       color: "var(--color-accent)",
                       border: isSelected
                         ? "1px solid var(--color-accent)"
@@ -378,7 +378,7 @@ export function PageList({
               key={tag}
               className="rounded-full px-2 py-0.5 text-xs"
               style={{
-                backgroundColor: "rgba(139, 92, 246, 0.15)",
+                backgroundColor: "rgb(from var(--color-accent) r g b / 0.15)",
                 color: "var(--color-accent)",
               }}
             >

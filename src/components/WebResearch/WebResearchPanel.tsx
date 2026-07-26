@@ -598,7 +598,7 @@ function SearchResultItem({
           ? "var(--color-accent)"
           : "var(--color-border)",
         backgroundColor: isSelected
-          ? "rgba(139, 92, 246, 0.05)"
+          ? "rgb(from var(--color-accent) r g b / 0.05)"
           : "var(--color-bg-secondary)",
       }}
     >

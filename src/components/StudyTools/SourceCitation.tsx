@@ -54,7 +54,7 @@ export function SourceCitations({
               <span
                 className="flex-shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-xs font-medium"
                 style={{
-                  backgroundColor: "rgba(139, 92, 246, 0.15)",
+                  backgroundColor: "rgb(from var(--color-accent) r g b / 0.15)",
                   color: "#8b5cf6",
                 }}
               >
@@ -147,7 +147,7 @@ export function CitationBadge({ id, onClick, isActive }: CitationBadgeProps) {
       onClick={onClick}
       className={`inline-flex items-center justify-center w-4 h-4 rounded text-[10px] font-medium transition-colors ${isActive ? "ring-1 ring-offset-1 ring-[#8b5cf6]" : ""}`}
       style={{
-        backgroundColor: isActive ? "#8b5cf6" : "rgba(139, 92, 246, 0.15)",
+        backgroundColor: isActive ? "#8b5cf6" : "rgb(from var(--color-accent) r g b / 0.15)",
         color: isActive ? "white" : "#8b5cf6",
       }}
     >

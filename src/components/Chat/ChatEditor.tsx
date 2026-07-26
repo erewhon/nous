@@ -1624,7 +1624,7 @@ function CellRenderer({
             <div
               className="px-3 py-2 text-xs border-b"
               style={{
-                backgroundColor: "rgba(139, 92, 246, 0.05)",
+                backgroundColor: "rgb(from var(--color-accent) r g b / 0.05)",
                 borderColor: "var(--color-border)",
                 color: "var(--color-text-secondary)",
               }}

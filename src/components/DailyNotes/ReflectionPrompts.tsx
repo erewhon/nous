@@ -162,7 +162,7 @@ export function ReflectionPrompts({ notebookId }: ReflectionPromptsProps) {
           <span
             className="rounded-full px-1.5 py-0.5 text-[10px]"
             style={{
-              backgroundColor: "rgba(139, 92, 246, 0.15)",
+              backgroundColor: "rgb(from var(--color-accent) r g b / 0.15)",
               color: "var(--color-accent)",
             }}
           >
@@ -183,7 +183,7 @@ export function ReflectionPrompts({ notebookId }: ReflectionPromptsProps) {
                 style={{
                   backgroundColor:
                     category === cat.value
-                      ? "rgba(139, 92, 246, 0.15)"
+                      ? "rgb(from var(--color-accent) r g b / 0.15)"
                       : "transparent",
                   color:
                     category === cat.value

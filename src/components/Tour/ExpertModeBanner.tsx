@@ -29,7 +29,7 @@ export function ExpertModeBanner() {
     >
       <div
         className="mt-0.5 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg"
-        style={{ backgroundColor: "rgba(139, 92, 246, 0.15)" }}
+        style={{ backgroundColor: "rgb(from var(--color-accent) r g b / 0.15)" }}
       >
         <svg
           width="16"

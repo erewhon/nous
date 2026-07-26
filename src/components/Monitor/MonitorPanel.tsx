@@ -18,7 +18,7 @@ function CaptureEventRow({
       className="border-b transition-colors"
       style={{
         borderColor: "var(--color-border)",
-        backgroundColor: !event.isRead ? "rgba(139, 92, 246, 0.05)" : "transparent",
+        backgroundColor: !event.isRead ? "rgb(from var(--color-accent) r g b / 0.05)" : "transparent",
       }}
     >
       <div className="flex items-start gap-3 p-3">
@@ -52,7 +52,7 @@ function CaptureEventRow({
               <span
                 className="rounded-full px-1.5 py-0.5 text-[10px]"
                 style={{
-                  backgroundColor: "rgba(139, 92, 246, 0.15)",
+                  backgroundColor: "rgb(from var(--color-accent) r g b / 0.15)",
                   color: "var(--color-accent)",
                 }}
               >

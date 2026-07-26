@@ -1512,7 +1512,7 @@ export function NotebookSettingsDialog({
                   <span
                     className="text-xs px-1.5 py-0.5 rounded"
                     style={{
-                      backgroundColor: "rgba(139, 92, 246, 0.15)",
+                      backgroundColor: "rgb(from var(--color-accent) r g b / 0.15)",
                       color: "rgb(139, 92, 246)",
                     }}
                   >
@@ -1881,8 +1881,8 @@ export function NotebookSettingsDialog({
           <div
             className="flex items-start gap-2 rounded-lg border p-3"
             style={{
-              backgroundColor: "rgba(139, 92, 246, 0.05)",
-              borderColor: "rgba(139, 92, 246, 0.2)",
+              backgroundColor: "rgb(from var(--color-accent) r g b / 0.05)",
+              borderColor: "rgb(from var(--color-accent) r g b / 0.2)",
             }}
           >
             <IconInfo />

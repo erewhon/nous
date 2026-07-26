@@ -127,7 +127,7 @@ export function ThemeSettings() {
         data-tour="expert-toggle"
         style={{
           borderColor: expertMode ? "var(--color-accent)" : "var(--color-border)",
-          backgroundColor: expertMode ? "rgba(139, 92, 246, 0.08)" : "var(--color-bg-secondary)",
+          backgroundColor: expertMode ? "rgb(from var(--color-accent) r g b / 0.08)" : "var(--color-bg-secondary)",
         }}
       >
         <div>
@@ -183,7 +183,7 @@ export function ThemeSettings() {
                     : "var(--color-border)",
                 backgroundColor:
                   uiMode === mode.value
-                    ? "rgba(139, 92, 246, 0.1)"
+                    ? "rgb(from var(--color-accent) r g b / 0.1)"
                     : "transparent",
               }}
             >
@@ -241,7 +241,7 @@ export function ThemeSettings() {
                       : "var(--color-border)",
                   backgroundColor:
                     sidebarMode === mode.value
-                      ? "rgba(139, 92, 246, 0.1)"
+                      ? "rgb(from var(--color-accent) r g b / 0.1)"
                       : "transparent",
                 }}
               >
@@ -541,7 +541,7 @@ export function ThemeSettings() {
                     : "var(--color-border)",
                 backgroundColor:
                   settings.mode === mode.value
-                    ? "rgba(139, 92, 246, 0.1)"
+                    ? "rgb(from var(--color-accent) r g b / 0.1)"
                     : "transparent",
               }}
             >
@@ -606,7 +606,7 @@ export function ThemeSettings() {
                     : "var(--color-border)",
                 backgroundColor:
                   settings.colorScheme === scheme.value
-                    ? "rgba(139, 92, 246, 0.1)"
+                    ? "rgb(from var(--color-accent) r g b / 0.1)"
                     : "transparent",
               }}
             >
@@ -654,7 +654,7 @@ export function ThemeSettings() {
                     : "var(--color-border)",
                 backgroundColor:
                   settings.fontFamily === font.value
-                    ? "rgba(139, 92, 246, 0.1)"
+                    ? "rgb(from var(--color-accent) r g b / 0.1)"
                     : "transparent",
               }}
             >
@@ -815,7 +815,7 @@ export function ThemeSettings() {
                     : "var(--color-border)",
                 backgroundColor:
                   settings.editorWidth === width.value
-                    ? "rgba(139, 92, 246, 0.1)"
+                    ? "rgb(from var(--color-accent) r g b / 0.1)"
                     : "transparent",
               }}
             >
@@ -857,7 +857,7 @@ export function ThemeSettings() {
                     : "var(--color-border)",
                 backgroundColor:
                   settings.editorKeymap === keymap.value
-                    ? "rgba(139, 92, 246, 0.1)"
+                    ? "rgb(from var(--color-accent) r g b / 0.1)"
                     : "transparent",
               }}
             >

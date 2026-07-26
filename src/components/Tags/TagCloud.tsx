@@ -75,8 +75,8 @@ export function TagCloud({
               fontSize: tag.fontSize,
               opacity: isSelected ? 1 : tag.opacity,
               backgroundColor: isSelected
-                ? "rgba(139, 92, 246, 0.3)"
-                : "rgba(139, 92, 246, 0.1)",
+                ? "rgb(from var(--color-accent) r g b / 0.3)"
+                : "rgb(from var(--color-accent) r g b / 0.1)",
               color: "var(--color-accent)",
               border: isSelected
                 ? "1px solid var(--color-accent)"

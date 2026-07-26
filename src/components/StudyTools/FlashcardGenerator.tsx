@@ -238,7 +238,7 @@ export function FlashcardGenerator({
                         }`}
                         style={{
                           backgroundColor: cardTypes.includes(type.id)
-                            ? "rgba(139, 92, 246, 0.1)"
+                            ? "rgb(from var(--color-accent) r g b / 0.1)"
                             : "var(--color-bg-primary)",
                           color: cardTypes.includes(type.id)
                             ? "var(--color-accent)"
@@ -375,7 +375,7 @@ function FlashcardPreview({ card, isSelected, onToggle }: FlashcardPreviewProps)
       }`}
       style={{
         backgroundColor: isSelected
-          ? "rgba(139, 92, 246, 0.05)"
+          ? "rgb(from var(--color-accent) r g b / 0.05)"
           : "var(--color-bg-primary)",
       }}
       onClick={onToggle}

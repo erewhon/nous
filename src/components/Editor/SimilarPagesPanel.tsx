@@ -325,7 +325,7 @@ export function SimilarPagesPanel({ page, notebookId, allPages }: SimilarPagesPa
               <button
                 onClick={() => handlePageClick(result.id)}
                 className="flex w-full flex-col gap-1 rounded px-3 py-2 text-left transition-colors hover:bg-white/5"
-                style={{ backgroundColor: "rgba(139, 92, 246, 0.05)" }}
+                style={{ backgroundColor: "rgb(from var(--color-accent) r g b / 0.05)" }}
               >
                 <div className="flex items-center gap-2">
                   <svg

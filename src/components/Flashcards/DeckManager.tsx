@@ -291,7 +291,7 @@ function DeckItem({ deck, onClick, onEdit, onReview, onAIGenerate }: DeckItemPro
             }}
             className="px-2 py-0.5 rounded text-xs font-medium transition-colors hover:opacity-80"
             style={{
-              backgroundColor: "rgba(139, 92, 246, 0.1)",
+              backgroundColor: "rgb(from var(--color-accent) r g b / 0.1)",
               color: "var(--color-accent)",
             }}
           >

@@ -588,7 +588,7 @@ export function PageHistoryDialog({
                             style={{
                               backgroundColor:
                                 viewMode === "preview"
-                                  ? "rgba(139, 92, 246, 0.15)"
+                                  ? "rgb(from var(--color-accent) r g b / 0.15)"
                                   : "transparent",
                               color:
                                 viewMode === "preview"
@@ -604,7 +604,7 @@ export function PageHistoryDialog({
                             style={{
                               backgroundColor:
                                 viewMode === "changes"
-                                  ? "rgba(139, 92, 246, 0.15)"
+                                  ? "rgb(from var(--color-accent) r g b / 0.15)"
                                   : "transparent",
                               color:
                                 viewMode === "changes"

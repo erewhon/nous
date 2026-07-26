@@ -191,7 +191,7 @@ export function RollupDialog({ isOpen, onClose, notebookId }: RollupDialogProps)
                           : "var(--color-border)",
                       backgroundColor:
                         selectedPeriod === option.key
-                          ? "rgba(139, 92, 246, 0.1)"
+                          ? "rgb(from var(--color-accent) r g b / 0.1)"
                           : "transparent",
                       color: "var(--color-text-primary)",
                     }}
@@ -223,7 +223,7 @@ export function RollupDialog({ isOpen, onClose, notebookId }: RollupDialogProps)
                           : "var(--color-border)",
                       backgroundColor:
                         summaryStyle === option.value
-                          ? "rgba(139, 92, 246, 0.1)"
+                          ? "rgb(from var(--color-accent) r g b / 0.1)"
                           : "transparent",
                       color: "var(--color-text-primary)",
                     }}

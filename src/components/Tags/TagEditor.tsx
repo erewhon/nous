@@ -175,7 +175,7 @@ export function TagEditor({ page, onTagsChange }: TagEditorProps) {
           key={tag}
           className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs"
           style={{
-            backgroundColor: "rgba(139, 92, 246, 0.15)",
+            backgroundColor: "rgb(from var(--color-accent) r g b / 0.15)",
             color: "var(--color-accent)",
           }}
         >
@@ -358,7 +358,7 @@ export function TagEditor({ page, onTagsChange }: TagEditorProps) {
                   }}
                   className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs transition-colors hover:bg-violet-500/20"
                   style={{
-                    backgroundColor: "rgba(139, 92, 246, 0.1)",
+                    backgroundColor: "rgb(from var(--color-accent) r g b / 0.1)",
                     color: "var(--color-accent)",
                   }}
                 >

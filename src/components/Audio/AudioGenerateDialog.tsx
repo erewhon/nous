@@ -286,7 +286,7 @@ export function AudioGenerateDialog({
                           : "var(--color-border)",
                       backgroundColor:
                         mode === "tts"
-                          ? "rgba(139, 92, 246, 0.1)"
+                          ? "rgb(from var(--color-accent) r g b / 0.1)"
                           : "transparent",
                     }}
                   >
@@ -316,7 +316,7 @@ export function AudioGenerateDialog({
                           : "var(--color-border)",
                       backgroundColor:
                         mode === "podcast"
-                          ? "rgba(139, 92, 246, 0.1)"
+                          ? "rgb(from var(--color-accent) r g b / 0.1)"
                           : "transparent",
                     }}
                   >
@@ -429,7 +429,7 @@ export function AudioGenerateDialog({
                                 : "var(--color-border)",
                             backgroundColor:
                               podcastLength === opt.value
-                                ? "rgba(139, 92, 246, 0.1)"
+                                ? "rgb(from var(--color-accent) r g b / 0.1)"
                                 : "transparent",
                           }}
                         >

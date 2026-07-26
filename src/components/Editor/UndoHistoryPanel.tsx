@@ -209,7 +209,7 @@ export function UndoHistoryPanel({
                     <span
                       className="rounded-full px-2 py-0.5 text-xs"
                       style={{
-                        backgroundColor: "rgba(139, 92, 246, 0.15)",
+                        backgroundColor: "rgb(from var(--color-accent) r g b / 0.15)",
                         color: "var(--color-accent)",
                       }}
                     >

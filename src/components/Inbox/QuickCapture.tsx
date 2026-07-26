@@ -210,7 +210,7 @@ export function QuickCapture({ onClose }: QuickCaptureProps) {
                 key={tag}
                 className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs"
                 style={{
-                  backgroundColor: "rgba(139, 92, 246, 0.15)",
+                  backgroundColor: "rgb(from var(--color-accent) r g b / 0.15)",
                   color: "var(--color-accent)",
                 }}
               >

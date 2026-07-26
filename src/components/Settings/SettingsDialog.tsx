@@ -229,7 +229,7 @@ export function SettingsDialog({
                       style={{
                         backgroundColor:
                           activeTab === tab.id
-                            ? "rgba(139, 92, 246, 0.15)"
+                            ? "rgb(from var(--color-accent) r g b / 0.15)"
                             : undefined,
                         color:
                           activeTab === tab.id
@@ -732,7 +732,7 @@ function ProviderAccordion({
           ? "var(--color-accent)"
           : "var(--color-border)",
         backgroundColor: provider.enabled
-          ? "rgba(139, 92, 246, 0.05)"
+          ? "rgb(from var(--color-accent) r g b / 0.05)"
           : "transparent",
       }}
     >
@@ -1147,7 +1147,7 @@ function AudioSettingsContent() {
                       ? "var(--color-accent)"
                       : "var(--color-border)",
                     backgroundColor: isSelected
-                      ? "rgba(139, 92, 246, 0.1)"
+                      ? "rgb(from var(--color-accent) r g b / 0.1)"
                       : "transparent",
                   }}
                 >
@@ -1468,7 +1468,7 @@ function AudioSettingsContent() {
                         : "var(--color-border)",
                     backgroundColor:
                       settings.podcastLength === opt.value
-                        ? "rgba(139, 92, 246, 0.1)"
+                        ? "rgb(from var(--color-accent) r g b / 0.1)"
                         : "transparent",
                     color: "var(--color-text-primary)",
                   }}
@@ -1555,7 +1555,7 @@ function VoiceSettingsContent() {
                       : "var(--color-border)",
                   backgroundColor:
                     settings.sttModelSize === m.value
-                      ? "rgba(139, 92, 246, 0.1)"
+                      ? "rgb(from var(--color-accent) r g b / 0.1)"
                       : "transparent",
                 }}
               >
@@ -1790,7 +1790,7 @@ function WebResearchSettingsContent() {
                     : "var(--color-border)",
                 backgroundColor:
                   settings.searchDepth === option.value
-                    ? "rgba(139, 92, 246, 0.1)"
+                    ? "rgb(from var(--color-accent) r g b / 0.1)"
                     : "transparent",
               }}
             >
@@ -1895,7 +1895,7 @@ function SystemPromptSettingsContent() {
       <div
         className="flex items-start gap-3 rounded-lg border p-4"
         style={{
-          backgroundColor: "rgba(139, 92, 246, 0.1)",
+          backgroundColor: "rgb(from var(--color-accent) r g b / 0.1)",
           borderColor: "var(--color-accent)",
         }}
       >
@@ -2006,7 +2006,7 @@ function SystemPromptSettingsContent() {
             <div
               className="flex h-6 w-6 items-center justify-center rounded-full text-xs font-medium"
               style={{
-                backgroundColor: "rgba(139, 92, 246, 0.2)",
+                backgroundColor: "rgb(from var(--color-accent) r g b / 0.2)",
                 color: "var(--color-accent)",
               }}
             >
@@ -2031,7 +2031,7 @@ function SystemPromptSettingsContent() {
             <div
               className="flex h-6 w-6 items-center justify-center rounded-full text-xs font-medium"
               style={{
-                backgroundColor: "rgba(139, 92, 246, 0.15)",
+                backgroundColor: "rgb(from var(--color-accent) r g b / 0.15)",
                 color: "var(--color-accent)",
               }}
             >
@@ -2056,7 +2056,7 @@ function SystemPromptSettingsContent() {
             <div
               className="flex h-6 w-6 items-center justify-center rounded-full text-xs font-medium"
               style={{
-                backgroundColor: "rgba(139, 92, 246, 0.1)",
+                backgroundColor: "rgb(from var(--color-accent) r g b / 0.1)",
                 color: "var(--color-accent)",
               }}
             >

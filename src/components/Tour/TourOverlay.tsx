@@ -142,7 +142,7 @@ export function TourOverlay() {
             top: spot.y,
             width: spot.w,
             height: spot.h,
-            boxShadow: "0 0 0 2px var(--color-accent), 0 0 16px 2px rgba(139, 92, 246, 0.3)",
+            boxShadow: "0 0 0 2px var(--color-accent), 0 0 16px 2px rgb(from var(--color-accent) r g b / 0.3)",
           }}
         />
       )}

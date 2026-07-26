@@ -85,7 +85,7 @@ function InboxItemRow({ item, isSelected, onToggle, onDelete }: InboxItemRowProp
       className="border-b transition-colors"
       style={{
         borderColor: "var(--color-border)",
-        backgroundColor: isSelected ? "rgba(139, 92, 246, 0.1)" : "transparent",
+        backgroundColor: isSelected ? "rgb(from var(--color-accent) r g b / 0.1)" : "transparent",
       }}
     >
       <div className="flex items-start gap-3 p-3">
@@ -177,7 +177,7 @@ function InboxItemRow({ item, isSelected, onToggle, onDelete }: InboxItemRowProp
                   key={tag}
                   className="rounded-full px-2 py-0.5 text-xs"
                   style={{
-                    backgroundColor: "rgba(139, 92, 246, 0.15)",
+                    backgroundColor: "rgb(from var(--color-accent) r g b / 0.15)",
                     color: "var(--color-accent)",
                   }}
                 >

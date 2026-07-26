@@ -228,7 +228,7 @@ export function KeybindingsSettings() {
                         <span
                           className="text-xs px-1.5 py-0.5 rounded"
                           style={{
-                            backgroundColor: "rgba(139, 92, 246, 0.15)",
+                            backgroundColor: "rgb(from var(--color-accent) r g b / 0.15)",
                             color: "var(--color-accent)",
                           }}
                         >

@@ -14,7 +14,7 @@ export function DailyNotesSettings() {
       <div
         className="flex items-start gap-3 rounded-lg border p-4"
         style={{
-          backgroundColor: "rgba(139, 92, 246, 0.1)",
+          backgroundColor: "rgb(from var(--color-accent) r g b / 0.1)",
           borderColor: "var(--color-accent)",
         }}
       >

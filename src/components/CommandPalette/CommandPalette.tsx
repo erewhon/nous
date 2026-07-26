@@ -1255,7 +1255,7 @@ export function CommandPalette({
                             ? highlightText(cmd.title, query, {
                                 backgroundColor: isSelected
                                   ? "rgba(255,255,255,0.3)"
-                                  : "rgba(139, 92, 246, 0.3)",
+                                  : "rgb(from var(--color-accent) r g b / 0.3)",
                                 color: "inherit",
                                 borderRadius: "2px",
                                 padding: "0 2px",
@@ -1283,7 +1283,7 @@ export function CommandPalette({
                               ? highlightText(cmd.snippet, query, {
                                   backgroundColor: isSelected
                                     ? "rgba(255,255,255,0.3)"
-                                    : "rgba(139, 92, 246, 0.3)",
+                                    : "rgb(from var(--color-accent) r g b / 0.3)",
                                   color: "inherit",
                                   borderRadius: "2px",
                                   padding: "0 2px",

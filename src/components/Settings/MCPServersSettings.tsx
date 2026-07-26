@@ -96,7 +96,7 @@ export function MCPServersSettings() {
       <div
         className="flex items-start gap-3 rounded-lg border p-4"
         style={{
-          backgroundColor: "rgba(139, 92, 246, 0.1)",
+          backgroundColor: "rgb(from var(--color-accent) r g b / 0.1)",
           borderColor: "var(--color-accent)",
         }}
       >
@@ -349,7 +349,7 @@ export function MCPServersSettings() {
                 <span
                   className="rounded px-1.5 py-0.5 text-xs font-medium"
                   style={{
-                    backgroundColor: "rgba(139, 92, 246, 0.2)",
+                    backgroundColor: "rgb(from var(--color-accent) r g b / 0.2)",
                     color: "var(--color-accent)",
                   }}
                 >
@@ -538,7 +538,7 @@ function ServerCard({
       className="rounded-lg border p-3"
       style={{
         borderColor: server.enabled ? "var(--color-accent)" : "var(--color-border)",
-        backgroundColor: server.enabled ? "rgba(139, 92, 246, 0.05)" : "transparent",
+        backgroundColor: server.enabled ? "rgb(from var(--color-accent) r g b / 0.05)" : "transparent",
       }}
     >
       <div className="flex items-center justify-between">

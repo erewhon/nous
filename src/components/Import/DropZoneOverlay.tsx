@@ -16,7 +16,7 @@ export function DropZoneOverlay({ isVisible }: DropZoneOverlayProps) {
       <div
         className="flex flex-col items-center justify-center rounded-2xl border-2 border-dashed p-12"
         style={{
-          backgroundColor: "rgba(139, 92, 246, 0.1)",
+          backgroundColor: "rgb(from var(--color-accent) r g b / 0.1)",
           borderColor: "var(--color-accent)",
           minWidth: "320px",
         }}

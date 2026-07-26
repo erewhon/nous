@@ -93,7 +93,7 @@ export function RAGSettings() {
         className="flex items-center justify-between rounded-lg border p-4"
         style={{
           backgroundColor: settings.ragEnabled
-            ? "rgba(139, 92, 246, 0.1)"
+            ? "rgb(from var(--color-accent) r g b / 0.1)"
             : "var(--color-bg-secondary)",
           borderColor: settings.ragEnabled
             ? "var(--color-accent)"
@@ -154,7 +154,7 @@ export function RAGSettings() {
                       ? "var(--color-accent)"
                       : "var(--color-border)",
                     backgroundColor: isSelected
-                      ? "rgba(139, 92, 246, 0.1)"
+                      ? "rgb(from var(--color-accent) r g b / 0.1)"
                       : "transparent",
                   }}
                 >

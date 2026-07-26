@@ -898,7 +898,7 @@ export function BackupDialog({ isOpen, onClose }: BackupDialogProps) {
                 style={{
                   backgroundColor:
                     activeTab === tab.id
-                      ? "rgba(139, 92, 246, 0.1)"
+                      ? "rgb(from var(--color-accent) r g b / 0.1)"
                       : "transparent",
                   color:
                     activeTab === tab.id

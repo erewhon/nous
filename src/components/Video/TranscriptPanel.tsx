@@ -286,7 +286,7 @@ export function TranscriptPanel({
         }
 
         .transcript-btn--summarize:hover {
-          background: rgba(139, 92, 246, 0.15);
+          background: rgb(from var(--color-accent) r g b / 0.15);
           color: var(--color-accent);
         }
 
