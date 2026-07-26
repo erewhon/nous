@@ -29,17 +29,26 @@ interface DatabaseBoardCardProps {
   selected?: boolean;
 }
 
-function formatDueDate(val: CellValue): string | null {
+// Date-only strings must be parsed as local dates — new Date("2020-01-02")
+// is UTC midnight, which renders as the previous day west of Greenwich.
+function parseDateCell(val: CellValue): Date | null {
   if (typeof val !== "string" || val === "") return null;
-  const date = new Date(val);
-  if (Number.isNaN(date.getTime())) return null;
+  const dateOnly = val.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const date = dateOnly
+    ? new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]))
+    : new Date(val);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function formatDueDate(val: CellValue): string | null {
+  const date = parseDateCell(val);
+  if (!date) return null;
   return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
 function isPastDue(val: CellValue): boolean {
-  if (typeof val !== "string" || val === "") return false;
-  const date = new Date(val);
-  if (Number.isNaN(date.getTime())) return false;
+  const date = parseDateCell(val);
+  if (!date) return false;
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   return date.getTime() < today.getTime();
