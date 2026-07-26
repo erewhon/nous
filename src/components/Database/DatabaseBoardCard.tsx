@@ -4,6 +4,12 @@ import {
   evaluateConditionalFormat,
   conditionalStyleToCSS,
 } from "./conditionalFormat";
+import {
+  findDueProperty,
+  findIdProperty,
+  findPriorityProperty,
+  priorityRank,
+} from "./boardSemantics";
 
 interface DatabaseBoardCardProps {
   row: DatabaseRow;
@@ -17,6 +23,26 @@ interface DatabaseBoardCardProps {
    * undefined, falls back to the first 3 non-title properties.
    */
   cardPropertyIds?: string[];
+  /** Card sits in a Done-style column — muted + strikethrough treatment. */
+  done?: boolean;
+  /** Card carries the selection wash + index-mark. */
+  selected?: boolean;
+}
+
+function formatDueDate(val: CellValue): string | null {
+  if (typeof val !== "string" || val === "") return null;
+  const date = new Date(val);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function isPastDue(val: CellValue): boolean {
+  if (typeof val !== "string" || val === "") return false;
+  const date = new Date(val);
+  if (Number.isNaN(date.getTime())) return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return date.getTime() < today.getTime();
 }
 
 export function DatabaseBoardCard({
@@ -27,6 +53,8 @@ export function DatabaseBoardCard({
   pageLinkPages,
   formulaValues,
   cardPropertyIds,
+  done,
+  selected,
 }: DatabaseBoardCardProps) {
   const titleProp = properties.find((p) => p.type === "text");
   const title = titleProp ? String(row.cells[titleProp.id] ?? "") : "";
@@ -39,6 +67,45 @@ export function DatabaseBoardCard({
           .map((id) => properties.find((p) => p.id === id))
           .filter((p): p is PropertyDef => p != null && p.id !== titleProp?.id)
       : properties.filter((p) => p.id !== titleProp?.id).slice(0, 3);
+
+  // Corkboard slots drawn from the visible set: mono ID + priority glyph on
+  // the top rule, tags + due date on the meta rule; everything else renders
+  // as the generic property rows below.
+  const idProp = findIdProperty(secondaryProps, titleProp?.id);
+  const prioProp = findPriorityProperty(secondaryProps);
+  const dueProp = findDueProperty(secondaryProps);
+  const tagProps = secondaryProps.filter((p) => p.type === "multiSelect");
+
+  const consumed = new Set(
+    [idProp?.id, prioProp?.id, dueProp?.id, ...tagProps.map((p) => p.id)].filter(
+      (id): id is string => id != null
+    )
+  );
+  const restProps = secondaryProps.filter((p) => !consumed.has(p.id));
+
+  const idText = idProp ? String(row.cells[idProp.id] ?? "") : "";
+  const rank = prioProp ? priorityRank(prioProp, row.cells[prioProp.id]) : null;
+  const dueText = dueProp ? formatDueDate(row.cells[dueProp.id]) : null;
+  const dueLate =
+    dueProp != null && !done && dueText != null && isPastDue(row.cells[dueProp.id]);
+
+  const tagPills = tagProps.flatMap((prop) => {
+    const val = row.cells[prop.id];
+    if (!Array.isArray(val)) return [];
+    return val.flatMap((id) => {
+      const opt = prop.options?.find((o) => o.id === id);
+      if (!opt) return [];
+      return [
+        <span
+          key={`${prop.id}:${id}`}
+          className="db-select-pill"
+          style={{ backgroundColor: opt.color + "30", color: opt.color }}
+        >
+          {opt.label}
+        </span>,
+      ];
+    });
+  });
 
   const renderValue = (prop: PropertyDef) => {
     const val = row.cells[prop.id];
@@ -57,31 +124,8 @@ export function DatabaseBoardCard({
       );
     }
 
-    if (prop.type === "multiSelect" && Array.isArray(val)) {
-      return (
-        <span className="db-board-card-pills">
-          {val.slice(0, 2).map((id) => {
-            const opt = prop.options?.find((o) => o.id === id);
-            if (!opt) return null;
-            return (
-              <span
-                key={id}
-                className="db-select-pill"
-                style={{ backgroundColor: opt.color + "30", color: opt.color }}
-              >
-                {opt.label}
-              </span>
-            );
-          })}
-          {val.length > 2 && (
-            <span className="db-board-card-more">+{val.length - 2}</span>
-          )}
-        </span>
-      );
-    }
-
     if (prop.type === "checkbox") {
-      return <span>{val ? "\u2611" : "\u2610"}</span>;
+      return <span>{val ? "☑" : "☐"}</span>;
     }
 
     if (prop.type === "relation" && Array.isArray(val)) {
@@ -126,13 +170,58 @@ export function DatabaseBoardCard({
       );
     }
 
+    if (prop.type === "date") {
+      const formatted = formatDueDate(val);
+      if (!formatted) return null;
+      return <span className="db-board-card-due">{formatted}</span>;
+    }
+
     return <span className="db-board-card-text">{String(val)}</span>;
   };
 
+  const cardClass = [
+    "db-board-card",
+    done ? "db-board-card-done" : "",
+    selected ? "db-board-card-selected" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
   return (
-    <div className="db-board-card" onClick={onClick} {...dragHandleProps}>
+    <div className={cardClass} onClick={onClick} {...dragHandleProps}>
+      {(idText || rank != null) && (
+        <div className="db-board-card-top">
+          {idText && <span className="db-tid">{idText}</span>}
+          <span className="db-board-card-spacer" />
+          {rank != null && (
+            <span
+              className={`db-prio db-prio-${rank}`}
+              aria-label={`Priority ${rank}`}
+            >
+              <i />
+              <i />
+              <i />
+            </span>
+          )}
+        </div>
+      )}
       <div className="db-board-card-title">{title || "Untitled"}</div>
-      {secondaryProps.map((prop) => {
+      {(tagPills.length > 0 || dueText) && (
+        <div className="db-board-card-meta">
+          {tagPills.length > 0 && (
+            <span className="db-board-card-tagset">{tagPills}</span>
+          )}
+          <span className="db-board-card-spacer" />
+          {dueText && (
+            <span
+              className={`db-board-card-due${dueLate ? " db-board-card-due-late" : ""}`}
+            >
+              {dueText}
+            </span>
+          )}
+        </div>
+      )}
+      {restProps.map((prop) => {
         const rendered = renderValue(prop);
         if (!rendered) return null;
         const cfCSS = conditionalStyleToCSS(

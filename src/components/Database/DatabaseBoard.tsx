@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, type CSSProperties } from "react";
 import {
   DndContext,
   DragOverlay,
@@ -25,6 +25,7 @@ import type { RelationContext } from "./useRelationContext";
 import { DatabaseBoardCard } from "./DatabaseBoardCard";
 import { DatabaseRowDetail } from "./DatabaseRowDetail";
 import { compareCellValues, applyFilter } from "./DatabaseTable";
+import { isDoneStatus, resolveStatusColor } from "./boardSemantics";
 import { useIsPhone } from "../../hooks/useIsPhone";
 
 interface DatabaseBoardProps {
@@ -41,6 +42,49 @@ interface DatabaseBoardProps {
 
 const NO_VALUE_COLUMN = "__no_value__";
 
+/**
+ * Move a row to a board column: rewrites the group-by cell (multiSelect drops
+ * every option of the group property before appending the target). Pure so
+ * drop behavior is testable without dnd-kit choreography.
+ */
+export function applyBoardDrop(
+  prev: DatabaseContentV2,
+  groupProp: PropertyDef,
+  groupByPropertyId: string,
+  rowId: string,
+  targetColumnId: string
+): DatabaseContentV2 {
+  const newValue = targetColumnId === NO_VALUE_COLUMN ? null : targetColumnId;
+  return {
+    ...prev,
+    rows: prev.rows.map((r) => {
+      if (r.id !== rowId) return r;
+      if (groupProp.type === "multiSelect") {
+        const current = Array.isArray(r.cells[groupByPropertyId])
+          ? (r.cells[groupByPropertyId] as string[])
+          : [];
+        // Remove old column values and add new one
+        const oldColumnIds = new Set((groupProp.options ?? []).map((o) => o.id));
+        const filtered = current.filter((id) => !oldColumnIds.has(id));
+        const newArr = newValue ? [...filtered, newValue] : filtered;
+        return {
+          ...r,
+          cells: {
+            ...r.cells,
+            [groupByPropertyId]: newArr.length > 0 ? newArr : null,
+          },
+          updatedAt: new Date().toISOString(),
+        };
+      }
+      return {
+        ...r,
+        cells: { ...r.cells, [groupByPropertyId]: newValue },
+        updatedAt: new Date().toISOString(),
+      };
+    }),
+  };
+}
+
 export function DatabaseBoard({
   content,
   view,
@@ -52,6 +96,7 @@ export function DatabaseBoard({
 }: DatabaseBoardProps) {
   const [selectedRowId, setSelectedRowId] = useState<string | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [activeCardHeight, setActiveCardHeight] = useState<number>(56);
   const isPhone = useIsPhone();
 
   const config = view.config as BoardViewConfig;
@@ -185,6 +230,11 @@ export function DatabaseBoard({
 
   const handleDragStart = (event: DragStartEvent) => {
     setActiveId(String(event.active.id));
+    setActiveCardHeight(event.active.rect.current.initial?.height ?? 56);
+  };
+
+  const handleDragCancel = () => {
+    setActiveId(null);
   };
 
   const handleDragEnd = (event: DragEndEvent) => {
@@ -194,38 +244,15 @@ export function DatabaseBoard({
 
     const rowId = String(active.id);
     const targetColumnId = String(over.id);
-    const newValue = targetColumnId === NO_VALUE_COLUMN ? null : targetColumnId;
-
-    onUpdateContent((prev) => ({
-      ...prev,
-      rows: prev.rows.map((r) => {
-        if (r.id !== rowId) return r;
-        if (groupProp.type === "multiSelect") {
-          const current = Array.isArray(r.cells[config.groupByPropertyId])
-            ? (r.cells[config.groupByPropertyId] as string[])
-            : [];
-          // Remove old column values and add new one
-          const oldColumnIds = new Set(
-            (groupProp.options ?? []).map((o) => o.id)
-          );
-          const filtered = current.filter((id) => !oldColumnIds.has(id));
-          const newArr = newValue ? [...filtered, newValue] : filtered;
-          return {
-            ...r,
-            cells: {
-              ...r.cells,
-              [config.groupByPropertyId]: newArr.length > 0 ? newArr : null,
-            },
-            updatedAt: new Date().toISOString(),
-          };
-        }
-        return {
-          ...r,
-          cells: { ...r.cells, [config.groupByPropertyId]: newValue },
-          updatedAt: new Date().toISOString(),
-        };
-      }),
-    }));
+    onUpdateContent((prev) =>
+      applyBoardDrop(
+        prev,
+        groupProp,
+        config.groupByPropertyId,
+        rowId,
+        targetColumnId
+      )
+    );
   };
 
   const handleAddCard = useCallback(
@@ -331,12 +358,19 @@ export function DatabaseBoard({
     ? content.rows.find((r) => r.id === selectedRowId)
     : null;
 
+  // The column the dragged card came from — its color rides along on the
+  // overlay so the status spine survives the lift.
+  const activeColumn = activeId
+    ? columns.find((c) => c.rows.some((r) => r.id === activeId))
+    : null;
+
   return (
     <>
       <DndContext
         sensors={sensors}
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
+        onDragCancel={handleDragCancel}
       >
         <div className="db-board-container">
           {columns.map((col, colIdx) => (
@@ -347,6 +381,9 @@ export function DatabaseBoard({
               color={col.color}
               rows={col.rows}
               properties={content.properties}
+              selectedRowId={selectedRowId}
+              dragActive={activeId != null}
+              activeCardHeight={activeCardHeight}
               onCardClick={setSelectedRowId}
               onAddCard={() => handleAddCard(col.id)}
               pageLinkPages={pageLinkPages}
@@ -365,14 +402,26 @@ export function DatabaseBoard({
         </div>
         <DragOverlay>
           {activeRow && (
-            <DatabaseBoardCard
-              row={activeRow}
-              properties={content.properties}
-              onClick={() => {}}
-              pageLinkPages={pageLinkPages}
-              formulaValues={relationContext?.formulaValues}
-              cardPropertyIds={cardPropertyIds}
-            />
+            <div
+              className="db-board-card-overlay"
+              style={
+                {
+                  "--col-color": activeColumn
+                    ? resolveStatusColor(activeColumn.label, activeColumn.color)
+                    : "var(--color-text-muted)",
+                } as CSSProperties
+              }
+            >
+              <DatabaseBoardCard
+                row={activeRow}
+                properties={content.properties}
+                onClick={() => {}}
+                pageLinkPages={pageLinkPages}
+                formulaValues={relationContext?.formulaValues}
+                cardPropertyIds={cardPropertyIds}
+                done={activeColumn ? isDoneStatus(activeColumn.label) : false}
+              />
+            </div>
           )}
         </DragOverlay>
       </DndContext>
@@ -402,6 +451,9 @@ function BoardColumn({
   color,
   rows,
   properties,
+  selectedRowId,
+  dragActive,
+  activeCardHeight,
   onCardClick,
   onAddCard,
   pageLinkPages,
@@ -417,6 +469,9 @@ function BoardColumn({
   color: string;
   rows: DatabaseRow[];
   properties: PropertyDef[];
+  selectedRowId: string | null;
+  dragActive: boolean;
+  activeCardHeight: number;
   onCardClick: (rowId: string) => void;
   onAddCard: () => void;
   pageLinkPages?: Array<{ id: string; title: string }>;
@@ -429,19 +484,24 @@ function BoardColumn({
 }) {
   const { setNodeRef, isOver } = useDroppable({ id });
 
+  const colColor = resolveStatusColor(label, color);
+  const done = isDoneStatus(label);
+  // Dashed slot at the end of the list: the card will join this column (global
+  // sorts decide where, so an insertion-position slot would lie).
+  const showDropSlot = isOver && dragActive;
+
   return (
-    <div
+    <section
       ref={setNodeRef}
       className={`db-board-column ${isOver ? "db-board-column-over" : ""}`}
+      style={{ "--col-color": colColor } as CSSProperties}
+      aria-label={`${label} column`}
     >
-      <div className="db-board-column-header">
-        <span
-          className="db-select-pill"
-          style={{ backgroundColor: color + "30", color }}
-        >
-          {label}
-        </span>
+      <header className="db-board-column-header">
+        <span className="db-group-dot" />
+        <span className="db-board-column-name">{label}</span>
         <span className="db-board-column-count">{rows.length}</span>
+        <span className="db-board-column-spacer" />
         {(canMoveLeft || canMoveRight) && (
           <span className="db-board-column-reorder">
             {canMoveLeft && (
@@ -464,41 +524,60 @@ function BoardColumn({
             )}
           </span>
         )}
-      </div>
+      </header>
       <div className="db-board-column-cards">
         {rows.map((row) => (
           <DraggableCard
             key={row.id}
             row={row}
             properties={properties}
+            done={done}
+            selected={row.id === selectedRowId}
             onClick={() => onCardClick(row.id)}
             pageLinkPages={pageLinkPages}
             formulaValues={formulaValues}
             cardPropertyIds={cardPropertyIds}
           />
         ))}
+        {showDropSlot && (
+          <div
+            className="db-board-drop-slot"
+            style={{ height: activeCardHeight }}
+          />
+        )}
+        {rows.length === 0 && !showDropSlot && (
+          <div className="db-board-empty-hint">
+            Nothing here yet.
+            <br />
+            Drag a card in, or add one below.
+          </div>
+        )}
       </div>
-      <button className="db-board-add-card" onClick={onAddCard}>
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          width="12"
-          height="12"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-        >
-          <path d="M12 5v14M5 12h14" />
-        </svg>
-        New
-      </button>
-    </div>
+      <footer className="db-board-column-foot">
+        <button className="db-board-add-card" onClick={onAddCard}>
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+          >
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+          New
+        </button>
+      </footer>
+    </section>
   );
 }
 
 function DraggableCard({
   row,
   properties,
+  done,
+  selected,
   onClick,
   pageLinkPages,
   formulaValues,
@@ -506,6 +585,8 @@ function DraggableCard({
 }: {
   row: DatabaseRow;
   properties: PropertyDef[];
+  done?: boolean;
+  selected?: boolean;
   onClick: () => void;
   pageLinkPages?: Array<{ id: string; title: string }>;
   formulaValues?: Map<string, Map<string, CellValue>>;
@@ -528,6 +609,8 @@ function DraggableCard({
       <DatabaseBoardCard
         row={row}
         properties={properties}
+        done={done}
+        selected={selected}
         onClick={onClick}
         pageLinkPages={pageLinkPages}
         formulaValues={formulaValues}
