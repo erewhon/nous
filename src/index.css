@@ -79,6 +79,14 @@
   --ease-settle: cubic-bezier(0.22, 0.61, 0.36, 1);
   --ease-inout: cubic-bezier(0.45, 0.05, 0.35, 0.95);
 
+  /* AA helper: text-muted misses 4.5:1 on bg-elevated in dark mode — meta text
+     (card IDs, dates, counts) uses muted nudged toward secondary instead. */
+  --text-meta: color-mix(
+    in srgb,
+    var(--color-text-muted) 45%,
+    var(--color-text-secondary)
+  );
+
   /* Roll motion onto Tailwind's transition-* utilities app-wide (Tailwind v4
      reads these defaults) — every hover/focus transition gets the "settle" ease. */
   --default-transition-duration: 160ms;

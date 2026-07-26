@@ -28,6 +28,7 @@ import {
   pickNextColor,
 } from "./CellEditors";
 import { applyViewToRows, compareCellValues, applyFilter } from "./viewRows";
+import { resolveStatusColor } from "./boardSemantics";
 import type { RelationContext } from "./useRelationContext";
 import { PropertyEditor, PropertyTypeIcon } from "./PropertyEditor";
 import { computeSummary, getAggregationsForType, SUMMARY_LABELS } from "./computeSummary";
@@ -789,7 +790,12 @@ export function DatabaseTable({
                         {group.color && (
                           <span
                             className="db-group-dot"
-                            style={{ backgroundColor: group.color }}
+                            style={{
+                              backgroundColor: resolveStatusColor(
+                                group.label,
+                                group.color
+                              ),
+                            }}
                           />
                         )}
                         <span className="db-group-label">{group.label}</span>

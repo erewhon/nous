@@ -1090,8 +1090,8 @@
 }
 
 .db-group-dot {
-  width: 9px;
-  height: 9px;
+  width: 8px;
+  height: 8px;
   border-radius: 9999px;
   flex-shrink: 0;
 }
@@ -1103,13 +1103,74 @@
 }
 
 .db-group-count {
+  font-family: var(--font-mono);
   font-size: 11px;
   font-weight: 400;
   color: var(--color-text-muted);
-  background-color: var(--color-bg-tertiary);
-  padding: 0 6px;
-  border-radius: 10px;
   line-height: 18px;
+}
+
+/* ============================================
+   Shared record primitives (table + board)
+   ============================================ */
+
+/* P0–P3 priority bar-glyph: three ascending bars, lit by severity */
+.db-prio {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 1.5px;
+  height: 12px;
+  flex-shrink: 0;
+}
+
+.db-prio i {
+  width: 3px;
+  border-radius: 1px;
+  background: var(--color-bg-tertiary);
+  display: block;
+}
+
+.db-prio i:nth-child(1) {
+  height: 5px;
+}
+
+.db-prio i:nth-child(2) {
+  height: 8px;
+}
+
+.db-prio i:nth-child(3) {
+  height: 11px;
+}
+
+.db-prio-0 i {
+  background: var(--color-error);
+}
+
+.db-prio-1 i:nth-child(-n + 2) {
+  background: var(--color-warning);
+}
+
+.db-prio-2 i:first-child {
+  background: var(--color-info);
+}
+
+/* Mono record ID (human-facing refs like NOU-231, never row UUIDs) */
+.db-tid {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-meta);
+  letter-spacing: 0.02em;
+}
+
+/* Done treatment: muted + soft strikethrough */
+.db-done-text {
+  color: var(--color-text-muted);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(
+    in srgb,
+    var(--color-text-muted) 55%,
+    transparent
+  );
 }
 
 /* ============================================
@@ -2475,9 +2536,17 @@
   background-color: rgb(from var(--color-accent) r g b / 0.12) !important;
 }
 
-/* Index-mark — the selected/active row carries a violet bar on its left edge */
-.db-row-selected .db-row-num {
-  box-shadow: inset 3px 0 0 0 var(--color-accent) !important;
+/* Index-mark — the selected/active row carries a centered 3×16 violet bar */
+.db-row-selected .db-row-num::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 16px;
+  border-radius: 2px;
+  background: var(--color-accent);
 }
 
 /* ============================================
