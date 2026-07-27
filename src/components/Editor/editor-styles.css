@@ -251,6 +251,78 @@ blockquote.bn-quote cite {
   transition-delay: 0s;
 }
 
+/* Block references — the info-blue marginalia chip from the mockup (.bref):
+   9% info wash, dotted half-info underline. Distinct from wiki-links'
+   accent-violet treatment so the two link kinds read differently. */
+.bn-editor .bn-block-ref {
+  color: var(--color-info);
+  background: color-mix(in srgb, var(--color-info) 9%, transparent);
+  border-bottom: 1px dotted color-mix(in srgb, var(--color-info) 50%, transparent);
+  padding: 0 2px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 0.95em;
+}
+
+.bn-editor .bn-block-ref:hover {
+  background: color-mix(in srgb, var(--color-info) 16%, transparent);
+  border-bottom-color: var(--color-info);
+}
+
+/* Checklists — the study checkbox (mockup .todo .box): 17px, 5px radius,
+   1.5px muted border; checked fills accent with a bg-sidebar checkmark.
+   The mark is an ::after on the wrapper (form inputs can't host pseudo
+   elements), cut with a mask so its color stays theme-aware. */
+.bn-editor .bn-block-content[data-content-type="checkListItem"] > div > input {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 17px;
+  height: 17px;
+  align-self: center;
+  border: 1.5px solid var(--color-text-muted);
+  border-radius: 5px;
+  background: transparent;
+  cursor: pointer;
+  transition:
+    background-color var(--motion-fast) var(--ease-settle),
+    border-color var(--motion-fast) var(--ease-settle);
+}
+
+.bn-editor .bn-block-content[data-content-type="checkListItem"] > div > input:hover {
+  border-color: var(--color-text-secondary);
+}
+
+.bn-editor
+  .bn-block-content[data-content-type="checkListItem"]
+  > div
+  > input:checked {
+  background-color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.bn-editor .bn-block-content[data-content-type="checkListItem"] > div:has(> input) {
+  position: relative;
+  display: flex;
+}
+
+.bn-editor
+  .bn-block-content[data-content-type="checkListItem"]
+  > div:has(> input:checked)::after {
+  content: "";
+  position: absolute;
+  left: 7px;
+  top: 50%;
+  width: 11px;
+  height: 11px;
+  transform: translateY(-50%);
+  background-color: var(--color-bg-sidebar);
+  -webkit-mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5" fill="none" stroke="black" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>')
+    center / contain no-repeat;
+  mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5" fill="none" stroke="black" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/></svg>')
+    center / contain no-repeat;
+  pointer-events: none;
+}
+
 /* Display face (Cormorant) on legacy Editor.js headings — kept for that path */
 h1.ce-header,
 h2.ce-header,

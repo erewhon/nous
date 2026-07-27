@@ -22,12 +22,6 @@ export const BlockRefInline = createReactInlineContentSpec(
           className="bn-block-ref"
           data-block-id={blockId}
           data-page-id={pageId}
-          style={{
-            color: "var(--block-ref-color, #8b5cf6)",
-            cursor: "pointer",
-            borderBottom: "1px dashed currentColor",
-            fontSize: "0.95em",
-          }}
         >
           {text || `((${blockId.slice(0, 8)}))`}
         </span>
