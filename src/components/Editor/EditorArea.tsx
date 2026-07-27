@@ -414,9 +414,10 @@ export function EditorArea() {
     );
   }
 
-  // In rail mode, sections and folder tree are rendered in the accordion
-  // panel; on phones they live in the navigation drawer instead.
-  const showInlinePanels = sidebarMode !== "rail" && !isPhone;
+  // The classic Sections + Folders/Pages panels only render in full mode.
+  // In rail mode they live in the accordion panel, in study mode inside the
+  // StudySidebar's inline tree, and on phones in the navigation drawer.
+  const showInlinePanels = sidebarMode === "full" && !isPhone;
 
   return (
     <div className="flex h-full">

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useThemeStore } from "../../stores/themeStore";
 import { useNotebookStore } from "../../stores/notebookStore";
 import { usePageStore } from "../../stores/pageStore";
@@ -6,10 +6,22 @@ import { useTasksStore } from "../../stores/tasksStore";
 import { useFlashcardStore } from "../../stores/flashcardStore";
 import { useInboxStore } from "../../stores/inboxStore";
 import { useDailyNotesStore } from "../../stores/dailyNotesStore";
+import { StudyTree } from "./StudyTree";
+import {
+  StudyBadge,
+  StudyIconButton,
+  StudyKbd,
+  StudyRow,
+  StudyRowIcon,
+  StudySectionLabel,
+} from "./studyPrimitives";
 
 // The Study sidebar — Direction A's editorial left column (design brief
 // nous-app.md; mockup design/direction-a-editor.html). A third SidebarMode
 // alongside "full" and "rail": a flat, calm PINNED / NOTEBOOKS / VIEWS frame.
+// In this mode the classic Sections and Folders/Pages panels are NOT rendered
+// (EditorArea's showInlinePanels) — the expanded notebook grows an inline
+// StudyTree instead, keeping the whole app to a single navigation column.
 
 interface StudySidebarProps {
   width: number;
@@ -26,13 +38,6 @@ function dispatchKey(key: string, meta: boolean, shift: boolean) {
 
 const openCommandPalette = () =>
   window.dispatchEvent(new CustomEvent("open-command-palette"));
-
-const PAGE_ICON = (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
-    <path d="M6 3h9l4 4v14H6z" />
-    <path d="M14 3v5h5" />
-  </svg>
-);
 
 export function StudySidebar({ width }: StudySidebarProps) {
   const uiMode = useThemeStore((s) => s.uiMode);
@@ -217,7 +222,7 @@ function PinnedSection() {
   );
 }
 
-// ---- NOTEBOOKS: flat list; active notebook expands to its recent pages ----
+// ---- NOTEBOOKS: flat list; active notebook expands to its inline tree ----
 
 function NotebooksSection() {
   const notebooks = useNotebookStore((s) => s.notebooks);
@@ -226,10 +231,6 @@ function NotebooksSection() {
   const selectedNotebookId = useNotebookStore((s) => s.selectedNotebookId);
   const selectNotebook = useNotebookStore((s) => s.selectNotebook);
   const createNotebook = useNotebookStore((s) => s.createNotebook);
-  const pages = usePageStore((s) => s.pages);
-  const selectPage = usePageStore((s) => s.selectPage);
-  const selectedPageId = usePageStore((s) => s.selectedPageId);
-  const setSidebarMode = useThemeStore((s) => s.setSidebarMode);
 
   const visibleNotebooks = useMemo(
     () => (showArchived ? notebooks : notebooks.filter((n) => !n.archived)),
@@ -243,19 +244,6 @@ function NotebooksSection() {
   useEffect(() => {
     setExpandedId(selectedNotebookId);
   }, [selectedNotebookId]);
-
-  // pageStore.pages holds the SELECTED notebook's pages, so only show the
-  // inline page list when the open notebook is the selected one.
-  const recentPages = useMemo(() => {
-    if (!expandedId || expandedId !== selectedNotebookId) return [];
-    return pages
-      .filter((p) => !p.isCover)
-      .slice()
-      .sort(
-        (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
-      )
-      .slice(0, 8);
-  }, [pages, expandedId, selectedNotebookId]);
 
   const onNotebookClick = (id: string) => {
     if (expandedId === id) {
@@ -328,35 +316,9 @@ function NotebooksSection() {
               )}
             </StudyRow>
 
-            {isOpen && (
-              <>
-                {recentPages.map((p) => (
-                  <StudyRow
-                    key={p.id}
-                    indent
-                    selected={p.id === selectedPageId}
-                    title={p.title || "Untitled"}
-                    onClick={() => selectPage(p.id)}
-                  >
-                    <StudyRowIcon selected={p.id === selectedPageId}>
-                      {PAGE_ICON}
-                    </StudyRowIcon>
-                    <span className="flex-1 truncate">{p.title || "Untitled"}</span>
-                  </StudyRow>
-                ))}
-                {/* Escape hatch to the full sidebar — the reachability answer
-                    for folders / sections / drag-and-drop that this flat list
-                    deliberately omits. Keeps the notebook selected. */}
-                <StudyRow indent onClick={() => setSidebarMode("full")}>
-                  <span
-                    className="flex-1 truncate"
-                    style={{ color: "var(--color-text-muted)" }}
-                  >
-                    All pages →
-                  </span>
-                </StudyRow>
-              </>
-            )}
+            {/* The page/folder stores hold the SELECTED notebook's data, so
+                the inline tree only renders for the selected notebook. */}
+            {isOpen && nb.id === selectedNotebookId && <StudyTree notebook={nb} />}
           </div>
         );
       })}
@@ -426,181 +388,5 @@ function ViewsSection() {
         {inboxCount > 0 && <StudyBadge>{inboxCount}</StudyBadge>}
       </StudyRow>
     </>
-  );
-}
-
-// ---- Shared presentational primitives (reused across sections) ----
-
-export function StudySectionLabel({
-  children,
-  action,
-}: {
-  children: ReactNode;
-  action?: ReactNode;
-}) {
-  return (
-    <div
-      className="flex items-center justify-between px-2 pb-1 pt-4"
-      style={{
-        fontSize: 10.5,
-        fontWeight: 600,
-        letterSpacing: "0.09em",
-        textTransform: "uppercase",
-        color: "var(--color-text-muted)",
-      }}
-    >
-      <span>{children}</span>
-      {action}
-    </div>
-  );
-}
-
-export function StudyRow({
-  children,
-  onClick,
-  selected = false,
-  indent = false,
-  emphasis = false,
-  width = "100%",
-  title,
-}: {
-  children: ReactNode;
-  onClick?: () => void;
-  selected?: boolean;
-  indent?: boolean;
-  emphasis?: boolean;
-  width?: string;
-  title?: string;
-}) {
-  const restColor = emphasis
-    ? "var(--color-text-primary)"
-    : "var(--color-text-secondary)";
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={title}
-      className="flex items-center gap-2 text-left transition-colors"
-      style={{
-        width,
-        padding: indent ? "5px 8px 5px 28px" : "5px 8px",
-        borderRadius: "var(--radius-sm)",
-        fontSize: 13,
-        fontWeight: emphasis ? 500 : 400,
-        color: selected ? "var(--color-text-primary)" : restColor,
-        backgroundColor: selected ? "var(--color-selection)" : "transparent",
-      }}
-      onMouseEnter={(e) => {
-        if (!selected) {
-          e.currentTarget.style.backgroundColor = "var(--color-bg-tertiary)";
-          e.currentTarget.style.color = "var(--color-text-primary)";
-        }
-      }}
-      onMouseLeave={(e) => {
-        if (!selected) {
-          e.currentTarget.style.backgroundColor = "transparent";
-          e.currentTarget.style.color = restColor;
-        }
-      }}
-    >
-      {children}
-    </button>
-  );
-}
-
-export function StudyRowIcon({
-  children,
-  selected = false,
-}: {
-  children: ReactNode;
-  selected?: boolean;
-}) {
-  return (
-    <span
-      aria-hidden
-      className="flex-none"
-      style={{
-        width: 15,
-        height: 15,
-        color: selected ? "var(--color-accent)" : "var(--color-text-muted)",
-      }}
-    >
-      {children}
-    </span>
-  );
-}
-
-export function StudyBadge({ children }: { children: ReactNode }) {
-  return (
-    <span
-      style={{
-        fontSize: 10.5,
-        fontWeight: 500,
-        borderRadius: "var(--radius-full)",
-        padding: "1px 7px",
-        color: "var(--color-accent)",
-        backgroundColor: "var(--color-selection)",
-      }}
-    >
-      {children}
-    </span>
-  );
-}
-
-export function StudyKbd({ children }: { children: ReactNode }) {
-  return (
-    <span
-      style={{
-        fontFamily: "var(--font-mono)",
-        fontSize: 10,
-        color: "var(--color-text-secondary)",
-        backgroundColor: "var(--color-bg-tertiary)",
-        border: "1px solid var(--color-border)",
-        borderBottomWidth: 2,
-        borderRadius: "var(--radius-xs)",
-        padding: "1px 5px",
-        lineHeight: 1.4,
-      }}
-    >
-      {children}
-    </span>
-  );
-}
-
-export function StudyIconButton({
-  children,
-  onClick,
-  title,
-  size = 26,
-}: {
-  children: ReactNode;
-  onClick?: () => void;
-  title?: string;
-  size?: number;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={title}
-      aria-label={title}
-      className="inline-flex items-center justify-center transition-colors"
-      style={{
-        width: size,
-        height: size,
-        borderRadius: "var(--radius-sm)",
-        color: "var(--color-text-muted)",
-      }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.backgroundColor = "var(--color-bg-tertiary)";
-        e.currentTarget.style.color = "var(--color-text-primary)";
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.backgroundColor = "transparent";
-        e.currentTarget.style.color = "var(--color-text-muted)";
-      }}
-    >
-      {children}
-    </button>
   );
 }
