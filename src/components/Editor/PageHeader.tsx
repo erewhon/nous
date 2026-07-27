@@ -574,10 +574,7 @@ export function PageHeader({
   }
 
   return (
-    <div
-      className="border-b px-16 py-5"
-      style={{ borderColor: "var(--color-border)" }}
-    >
+    <div className="px-16 py-5">
       {/* Breadcrumb strip — chapter-opening notebook › folder path (crumbs jump up a level) */}
       {notebook && (
         <div className="mb-1.5 flex min-w-0 items-center gap-2">
@@ -657,8 +654,15 @@ export function PageHeader({
               onChange={(e) => setTitle(e.target.value)}
               onBlur={handleSave}
               onKeyDown={handleKeyDown}
-              className="w-full bg-transparent text-2xl font-bold outline-none"
-              style={{ color: "var(--color-text-primary)" }}
+              className="w-full bg-transparent outline-none"
+              style={{
+                color: "var(--color-text-primary)",
+                fontFamily: "var(--font-display)",
+                fontWeight: 600,
+                fontSize: "calc(var(--font-size-base, 16px) * 2.4)",
+                letterSpacing: "0.005em",
+                lineHeight: 1.2,
+              }}
               placeholder="Page title"
             />
           ) : (
@@ -670,8 +674,8 @@ export function PageHeader({
                   color: "var(--color-text-primary)",
                   fontFamily: "var(--font-display)",
                   fontWeight: 600,
-                  fontSize: "calc(var(--font-size-base, 16px) * 1.35)",
-                  letterSpacing: "-0.01em",
+                  fontSize: "calc(var(--font-size-base, 16px) * 2.4)",
+                  letterSpacing: "0.005em",
                   lineHeight: 1.2,
                 }}
               >
@@ -1802,18 +1806,32 @@ export function PageHeader({
         <TagEditor page={page} />
       </div>
 
-      {/* Accent hairline — the chapter-opening rule under the title block */}
-      <div
-        aria-hidden
-        className="mt-3"
-        style={{
-          width: 64,
-          height: 2,
-          borderRadius: 1,
-          backgroundColor: "var(--color-accent)",
-          opacity: 0.85,
-        }}
-      />
+      {/* Chapter rule — ONE full-width hairline with a 64×3 accent tip
+          sitting on it (mockup .page-rule); this IS the header/content
+          separator, replacing the container's old border-b. */}
+      <div aria-hidden className="relative mt-3" style={{ height: 3 }}>
+        <div
+          style={{
+            position: "absolute",
+            left: 0,
+            right: 0,
+            top: 1,
+            height: 1,
+            backgroundColor: "var(--color-border)",
+          }}
+        />
+        <div
+          style={{
+            position: "absolute",
+            left: 0,
+            top: 0,
+            width: 64,
+            height: 3,
+            borderRadius: 2,
+            backgroundColor: "var(--color-accent)",
+          }}
+        />
+      </div>
 
       {/* Save as Template Dialog */}
       <SaveAsTemplateDialog
