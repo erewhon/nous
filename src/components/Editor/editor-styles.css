@@ -88,6 +88,31 @@
   --bn-font-family: var(--font-family);
 }
 
+/* BlockNote's Mantine theme paints the text area with its own neutral palette
+   (#1f1f1f / #ffffff editor background, grey text) — a cold rectangle on the
+   study surfaces. Remap every --bn-colors-* onto the theme tokens; the editor
+   background goes transparent so content sits on the page, per the mockup.
+   div+attr selectors out-rank the bundled rules in any stylesheet order. */
+div.bn-container,
+div.bn-container[data-color-scheme="light"],
+div.bn-container[data-color-scheme="dark"] {
+  --bn-colors-editor-text: var(--color-text-primary);
+  --bn-colors-editor-background: transparent;
+  --bn-colors-menu-text: var(--color-text-primary);
+  --bn-colors-menu-background: var(--color-bg-elevated);
+  --bn-colors-tooltip-text: var(--color-text-secondary);
+  --bn-colors-tooltip-background: var(--color-bg-tertiary);
+  --bn-colors-hovered-text: var(--color-text-primary);
+  --bn-colors-hovered-background: var(--color-bg-tertiary);
+  --bn-colors-selected-text: var(--color-text-primary);
+  --bn-colors-selected-background: var(--color-selection);
+  --bn-colors-disabled-text: var(--color-text-muted);
+  --bn-colors-disabled-background: var(--color-bg-secondary);
+  --bn-colors-shadow: color-mix(in srgb, var(--color-bg-sidebar) 45%, transparent);
+  --bn-colors-border: var(--color-border);
+  --bn-colors-side-menu: var(--color-text-muted);
+}
+
 .bn-editor h1,
 .bn-editor h2,
 .bn-editor h3,
