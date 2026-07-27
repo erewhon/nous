@@ -192,6 +192,65 @@ blockquote.bn-quote cite {
   background: color-mix(in srgb, var(--color-error) 7%, transparent);
 }
 
+/* Code blocks — study chrome over BlockNote's hardcoded near-black default
+   (#161616). The .bn-editor prefix out-ranks the bundled (0,2,0) rules in
+   any stylesheet order. The header band is drawn with ::before, and the
+   library's hover-only language <select> becomes the band's always-visible
+   mono language label. */
+.bn-editor .bn-block-content[data-content-type="codeBlock"] {
+  background-color: var(--color-bg-sidebar);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.bn-editor .bn-block-content[data-content-type="codeBlock"]::before {
+  content: attr(data-language);
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 34px;
+  line-height: 34px;
+  padding-left: 14px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: var(--color-text-muted);
+  border-bottom: 1px solid var(--color-border);
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  pointer-events: none;
+}
+
+.bn-editor .bn-block-content[data-content-type="codeBlock"] > pre {
+  padding: 44px 16px 14px;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+/* The focus-time language <select> replaces the static ::before label —
+   opaque band background so it covers the attr() text beneath it. */
+.bn-editor .bn-block-content[data-content-type="codeBlock"] > div > select {
+  opacity: 0.85;
+  color: var(--color-text-muted);
+  background-color: var(--color-bg-sidebar);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  top: 1px;
+  left: 1px;
+  height: 32px;
+  padding: 0 8px 0 13px;
+  border-radius: var(--radius-md) 0 0 0;
+  transition: opacity var(--motion-fast) var(--ease-settle);
+  transition-delay: 0s;
+}
+
+.bn-editor .bn-block-content[data-content-type="codeBlock"]:hover > div > select,
+.bn-editor .bn-block-content[data-content-type="codeBlock"] > div > select:focus {
+  opacity: 1;
+  color: var(--color-text-secondary);
+  transition-delay: 0s;
+}
+
 /* Display face (Cormorant) on legacy Editor.js headings — kept for that path */
 h1.ce-header,
 h2.ce-header,
