@@ -723,7 +723,7 @@ h4.ce-header {
   display: none;
 }
 
-/* Popover (block tunes menu) - High contrast for dark mode */
+/* Popover (block tunes menu) — theme-tokenized; !important out-ranks Editor.js internals */
 .ce-popover,
 .ce-popover *,
 .ce-popover [class*="__title"],
@@ -735,7 +735,7 @@ h4.ce-header {
   background-color: var(--color-bg-elevated) !important;
   border: 1px solid var(--color-border) !important;
   border-radius: 8px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-3);
   z-index: 10002 !important;
 }
 
@@ -778,7 +778,7 @@ h4.ce-header {
 }
 
 .ce-popover-item__secondary-title {
-  color: #a0a0b0 !important;
+  color: var(--color-text-secondary) !important;
 }
 
 .ce-popover-item {
@@ -787,7 +787,7 @@ h4.ce-header {
 }
 
 .ce-popover-item:hover {
-  background-color: #2a2a4a !important;
+  background-color: var(--color-bg-tertiary) !important;
   color: var(--color-text-primary) !important;
 }
 
@@ -796,7 +796,7 @@ h4.ce-header {
 }
 
 .ce-popover-item--focused {
-  background-color: #2a2a4a !important;
+  background-color: var(--color-bg-tertiary) !important;
 }
 
 .ce-popover-item--focused .ce-popover-item__title {
@@ -804,24 +804,24 @@ h4.ce-header {
 }
 
 .ce-popover-item__icon {
-  color: #9090a0 !important;
+  color: var(--color-text-muted) !important;
   background-color: transparent !important;
 }
 
 .ce-popover-item__icon svg {
-  color: #9090a0 !important;
+  color: var(--color-text-muted) !important;
   fill: currentColor;
   stroke: currentColor;
 }
 
 .ce-popover-item:hover .ce-popover-item__icon,
 .ce-popover-item:hover .ce-popover-item__icon svg {
-  color: #c0c0d0 !important;
+  color: var(--color-text-secondary) !important;
 }
 
 /* Popover item with confirmation state */
 .ce-popover-item--confirmation {
-  background-color: #2a2a4a !important;
+  background-color: var(--color-bg-tertiary) !important;
 }
 
 .ce-popover-item--confirmation .ce-popover-item__title {
@@ -834,12 +834,12 @@ h4.ce-header {
 }
 
 .ce-popover-item--disabled .ce-popover-item__title {
-  color: #808090 !important;
+  color: var(--color-text-muted) !important;
 }
 
 /* Nothing found message */
 .ce-popover__nothing-found-message {
-  color: #a0a0b0 !important;
+  color: var(--color-text-secondary) !important;
 }
 
 /* Block tunes specific */
@@ -862,18 +862,18 @@ h4.ce-header {
 .ce-block-tunes *,
 .ce-block-tunes [class*="__title"],
 .ce-block-tunes [class*="__label"] {
-  color: #f0f0f0 !important;
+  color: var(--color-text-primary) !important;
 }
 
 /* cdx-settings-button (custom settings buttons) */
 .cdx-settings-button {
-  color: #f0f0f0 !important;
+  color: var(--color-text-primary) !important;
   background-color: transparent !important;
 }
 
 .cdx-settings-button:hover {
-  background-color: #2a2a4a !important;
-  color: #ffffff !important;
+  background-color: var(--color-bg-tertiary) !important;
+  color: var(--color-text-primary) !important;
 }
 
 .cdx-settings-button--active {
@@ -882,34 +882,34 @@ h4.ce-header {
 
 /* Inline popover (appears for inline tools) */
 .ce-inline-toolbar {
-  background-color: #1a1a2e !important;
-  border: 1px solid #3a3a5a !important;
+  background-color: var(--color-bg-elevated) !important;
+  border: 1px solid var(--color-border) !important;
 }
 
 .ce-inline-toolbar__toggler-and-button-wrapper {
-  background-color: #1a1a2e !important;
+  background-color: var(--color-bg-elevated) !important;
 }
 
 /* Conversion toolbar items */
 .ce-conversion-toolbar {
-  background-color: #1a1a2e !important;
-  border: 1px solid #3a3a5a !important;
+  background-color: var(--color-bg-elevated) !important;
+  border: 1px solid var(--color-border) !important;
 }
 
 .ce-conversion-toolbar__label {
-  color: #f0f0f0 !important;
+  color: var(--color-text-primary) !important;
 }
 
 .ce-conversion-tool {
-  color: #f0f0f0 !important;
+  color: var(--color-text-primary) !important;
 }
 
 .ce-conversion-tool:hover {
-  background-color: #2a2a4a !important;
+  background-color: var(--color-bg-tertiary) !important;
 }
 
 .ce-conversion-tool__icon {
-  color: #9090a0 !important;
+  color: var(--color-text-muted) !important;
 }
 
 /* Search input in popover */
