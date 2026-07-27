@@ -1,9 +1,12 @@
 import { useDailyNotesStore } from "../../stores/dailyNotesStore";
 import { useTemplateStore } from "../../stores/templateStore";
+import { useNotebookStore } from "../../stores/notebookStore";
 
 export function DailyNotesSettings() {
-  const { settings, setUseTemplate, setTemplateId } = useDailyNotesStore();
+  const { settings, setUseTemplate, setTemplateId, setDailyNotesNotebook } =
+    useDailyNotesStore();
   const { templates } = useTemplateStore();
+  const notebooks = useNotebookStore((s) => s.notebooks);
 
   // Get available templates
   const availableTemplates = templates;
@@ -34,6 +37,43 @@ export function DailyNotesSettings() {
             like Daily Journal to add structure to your daily notes.
           </p>
         </div>
+      </div>
+
+      {/* Home Notebook */}
+      <div>
+        <label
+          className="mb-2 block text-sm font-medium"
+          style={{ color: "var(--color-text-primary)" }}
+        >
+          Home Notebook
+        </label>
+        <select
+          value={settings.notebookId || ""}
+          onChange={(e) => setDailyNotesNotebook(e.target.value || null)}
+          className="w-full rounded-lg border px-3 py-2.5 text-sm outline-none transition-colors focus:border-[--color-accent] dark-select"
+          style={{
+            backgroundColor: "var(--color-bg-secondary)",
+            borderColor: "var(--color-border)",
+            color: "var(--color-text-primary)",
+          }}
+        >
+          <option value="">Current notebook (wherever you are)</option>
+          {notebooks
+            .filter((nb) => !nb.archived)
+            .map((nb) => (
+              <option key={nb.id} value={nb.id}>
+                {nb.name}
+              </option>
+            ))}
+        </select>
+        <p
+          className="mt-1.5 text-xs"
+          style={{ color: "var(--color-text-muted)" }}
+        >
+          Where "Today" opens your daily note (sidebar pin, Cmd+Shift+D). Pick
+          a notebook so daily notes always land there, even while you're
+          browsing another notebook.
+        </p>
       </div>
 
       {/* Use Template Toggle */}

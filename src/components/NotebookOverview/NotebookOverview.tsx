@@ -328,61 +328,27 @@ export function NotebookOverview({
       className="flex h-full w-full flex-col"
       style={{ backgroundColor: "var(--color-bg-primary)" }}
     >
-      {/* Header */}
+      {/* Slim top bar — chrome only, per the mockup's .topbar. The greeting
+          block lives in the content column below so it aligns with the shelf. */}
       <header
-        className="flex items-center justify-between border-b px-8 py-6"
-        style={{ borderColor: "var(--color-border)" }}
+        className="flex flex-none items-center justify-between gap-4 border-b px-6"
+        style={{ borderColor: "var(--color-border-muted)", height: 52 }}
       >
-        {/* Pure typography per the mockup — no icon tile beside the greeting */}
-        <div>
-          <div
-            className="mb-1.5 text-xs font-semibold uppercase"
-            style={{
-              color: "var(--color-text-muted)",
-              letterSpacing: "0.09em",
-            }}
-          >
-            The library · {todayLabel}
-          </div>
-          <h1
-            style={{
-              fontFamily: "var(--font-display)",
-              fontWeight: 600,
-              fontSize: "calc(var(--font-size-base, 16px) * 2.35)",
-              lineHeight: 1.1,
-              color: "var(--color-text-primary)",
-            }}
-          >
-            {greeting}
-          </h1>
-          <p
-            className="mt-1.5 text-sm"
-            style={{ color: "var(--color-text-secondary)" }}
-          >
-            {notebooks.length}{" "}
-            {notebooks.length === 1 ? "notebook" : "notebooks"},{" "}
-            <b style={{ color: "var(--color-text-primary)", fontWeight: 500 }}>
-              {totalPages} {totalPages === 1 ? "page" : "pages"}
-            </b>
-            {recentPages[0] && (
-              <>
-                {" "}
-                — last opened{" "}
-                <b style={{ color: "var(--color-text-primary)", fontWeight: 500 }}>
-                  {relativeTime(recentPages[0].accessedAt)}
-                </b>{" "}
-                in{" "}
-                <b style={{ color: "var(--color-text-primary)", fontWeight: 500 }}>
-                  {nbName(recentPages[0].notebookId) || "a notebook"}
-                </b>
-              </>
-            )}
-            .
-          </p>
-        </div>
+        <span
+          className="leading-none"
+          style={{
+            fontFamily: "var(--font-display)",
+            fontWeight: 600,
+            fontSize: 22,
+            letterSpacing: "0.01em",
+            color: "var(--color-text-primary)",
+          }}
+        >
+          Nou<span style={{ color: "var(--color-accent)" }}>s</span>
+        </span>
 
         {/* Search and actions */}
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
           {/* Search input */}
           <div className="relative">
             <svg
@@ -590,6 +556,55 @@ export function NotebookOverview({
       <div className="flex-1 overflow-y-auto p-8">
         {/* Centered reading column, per the mockup's .wrap */}
         <div className="mx-auto w-full max-w-[1120px]">
+        {/* Greeting — the mockup's .hello block: eyebrow, display greeting,
+            stats subline. In the column (not a bar) so it lines up with the
+            shelf grid below on wide windows. */}
+        <div className="mb-10">
+          <div
+            className="mb-2 text-xs font-semibold uppercase"
+            style={{
+              color: "var(--color-text-muted)",
+              letterSpacing: "0.09em",
+            }}
+          >
+            The library · {todayLabel}
+          </div>
+          <h1
+            style={{
+              fontFamily: "var(--font-display)",
+              fontWeight: 600,
+              fontSize: "calc(var(--font-size-base, 16px) * 2.35)",
+              lineHeight: 1.1,
+              color: "var(--color-text-primary)",
+            }}
+          >
+            {greeting}
+          </h1>
+          <p
+            className="mt-2 text-sm"
+            style={{ color: "var(--color-text-secondary)" }}
+          >
+            {notebooks.length}{" "}
+            {notebooks.length === 1 ? "notebook" : "notebooks"},{" "}
+            <b style={{ color: "var(--color-text-primary)", fontWeight: 500 }}>
+              {totalPages} {totalPages === 1 ? "page" : "pages"}
+            </b>
+            {recentPages[0] && (
+              <>
+                {" "}
+                — last opened{" "}
+                <b style={{ color: "var(--color-text-primary)", fontWeight: 500 }}>
+                  {relativeTime(recentPages[0].accessedAt)}
+                </b>{" "}
+                in{" "}
+                <b style={{ color: "var(--color-text-primary)", fontWeight: 500 }}>
+                  {nbName(recentPages[0].notebookId) || "a notebook"}
+                </b>
+              </>
+            )}
+            .
+          </p>
+        </div>
         {isLoading ? (
           <div className="flex h-full items-center justify-center">
             <div

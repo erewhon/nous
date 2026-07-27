@@ -13,11 +13,17 @@ import { localToday, localDateStr, parseLocalDate } from "../utils/dateLocal";
 interface DailyNotesSettings {
   useTemplate: boolean; // Whether to use a template when creating daily notes
   templateId: string | null; // Which template to use (null = no template)
+  // Which notebook daily notes live in. null = the currently selected
+  // notebook (the historical behavior). Set this so "Today" affordances
+  // (sidebar pin, ⌘D, mobile nav) always land in the same notebook instead
+  // of creating stray empty notes in whatever notebook happens to be open.
+  notebookId: string | null;
 }
 
 const DEFAULT_SETTINGS: DailyNotesSettings = {
   useTemplate: false,
   templateId: "daily-journal", // Default to daily-journal when enabled
+  notebookId: null,
 };
 
 interface DailyNotesState {
@@ -54,6 +60,7 @@ interface DailyNotesActions {
   // Settings
   setUseTemplate: (useTemplate: boolean) => void;
   setTemplateId: (templateId: string | null) => void;
+  setDailyNotesNotebook: (notebookId: string | null) => void;
 
   // Error handling
   clearError: () => void;
@@ -232,6 +239,11 @@ export const useDailyNotesStore = create<DailyNotesStore>()(
       setTemplateId: (templateId: string | null) =>
         set((state) => ({
           settings: { ...state.settings, templateId },
+        })),
+
+      setDailyNotesNotebook: (notebookId: string | null) =>
+        set((state) => ({
+          settings: { ...state.settings, notebookId },
         })),
 
       // Error handling

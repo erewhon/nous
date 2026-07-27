@@ -129,6 +129,31 @@ div.bn-container[data-color-scheme="dark"] {
   font-family: var(--font-mono);
 }
 
+/* The heading-collapse chevron (useBlockNoteHeaderCollapse) lives in the left
+   gutter (glyph at -24px..-8px) so heading text aligns flush with paragraphs.
+   BlockNote's side menu floats in that same 54px gutter with its right edge
+   pinned to the content edge by floating-ui — margins get re-measured and
+   compensated, so only a transform can actually move it. On heading blocks,
+   drop the "+" button (still available on every other block) and slide the
+   drag handle left of the chevron; 21px handle at -48px..-27px + 24px chevron
+   strip fit the gutter at any pane width. */
+.bn-side-menu[data-block-type="heading"] > button:first-child {
+  display: none;
+}
+.bn-side-menu[data-block-type="heading"] {
+  transform: translateX(-27px);
+}
+/* The side menu's anonymous floating-ui positioner still overlays the last
+   ~21px before the text edge (the transform above only moves its child), and
+   an untouched div swallows clicks — let gutter clicks fall through to the
+   collapse chevron below while keeping the menu buttons interactive. */
+div:has(> .bn-side-menu) {
+  pointer-events: none;
+}
+div:has(> .bn-side-menu) > .bn-side-menu {
+  pointer-events: auto;
+}
+
 /* Blockquote — Cormorant italic with the accent rule, "a scholar's marginalia".
    The compound selector is load-bearing: BlockNote bundles its own
    [data-content-type=quote] blockquote rule at (0,1,1) — grey #7d797a bar and

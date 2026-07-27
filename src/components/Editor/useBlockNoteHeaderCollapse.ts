@@ -79,23 +79,31 @@ export function useBlockNoteHeaderCollapse({
 
       // Base styles: toggle chevron via ::before on all headings.
       // Uses mask-image so the chevron inherits the heading's text color.
+      // The chevron sits in the editor's left gutter (.bn-editor has 54px
+      // padding-inline) so heading text stays flush with paragraph text.
+      // BlockNote's side menu (drag handle) floats in the same gutter; a rule
+      // in editor-styles.css shifts it further left for heading blocks.
       lines.push(
         `${scopeSelector} [data-node-type="blockContainer"] [data-content-type="heading"] {` +
           `position: relative;` +
-          `padding-left: 24px;` +
           `}`,
+        // The box spans the full -24px..0 strip (glyph left-aligned in it) so
+        // hover stays continuous from the heading text into the gutter.
         `${scopeSelector} [data-node-type="blockContainer"] [data-content-type="heading"]::before {` +
           `content: "";` +
           `position: absolute;` +
-          `left: 2px;` +
+          `left: -24px;` +
           `top: 50%;` +
           `transform: translateY(-50%);` +
-          `width: 16px;` +
+          `transform-origin: 8px 50%;` +
+          `width: 24px;` +
           `height: 16px;` +
           `-webkit-mask-image: url("data:image/svg+xml,${CHEVRON_SVG}");` +
           `mask-image: url("data:image/svg+xml,${CHEVRON_SVG}");` +
-          `-webkit-mask-size: contain;` +
-          `mask-size: contain;` +
+          `-webkit-mask-size: 16px 16px;` +
+          `mask-size: 16px 16px;` +
+          `-webkit-mask-position: left center;` +
+          `mask-position: left center;` +
           `-webkit-mask-repeat: no-repeat;` +
           `mask-repeat: no-repeat;` +
           `background-color: currentColor;` +
@@ -151,10 +159,13 @@ export function useBlockNoteHeaderCollapse({
       ) as HTMLElement | null;
       if (!heading) return;
 
-      // Only toggle when clicking the left 28px (the ::before toggle area)
+      // Only toggle when clicking the gutter chevron strip (the ::before
+      // spans -24px..0; clicks on a visible pseudo-element hit-test to its
+      // originating element, so gutter clicks arrive here with a negative
+      // offset). Clicks inside the text box place the caret as usual.
       const headingRect = heading.getBoundingClientRect();
       const clickX = e.clientX - headingRect.left;
-      if (clickX > 28) return;
+      if (clickX > 0 || clickX < -28) return;
 
       const block = heading.closest(
         '[data-node-type="blockContainer"]'

@@ -42,13 +42,13 @@ import { useActionStore } from "./stores/actionStore";
 import { useInboxStore } from "./stores/inboxStore";
 import { useAIStore } from "./stores/aiStore";
 import { useFlashcardStore } from "./stores/flashcardStore";
-import { useDailyNotesStore } from "./stores/dailyNotesStore";
 import { useTasksStore } from "./stores/tasksStore";
 import { useSectionStore } from "./stores/sectionStore";
 import { useToastStore } from "./stores/toastStore";
 import { useWindowLibrary } from "./contexts/WindowContext";
 import { useCloudAutoSync } from "./cloud";
 import { exportPageToFile } from "./utils/api";
+import { openTodayDailyNote } from "./utils/openDailyNote";
 import { save } from "./platform/dialog";
 
 function App() {
@@ -290,7 +290,6 @@ function App() {
     closePanel: closeAIPanel,
   } = useAIStore();
   const toggleFlashcardPanel = useFlashcardStore((state) => state.togglePanel);
-  const openTodayNote = useDailyNotesStore((state) => state.openTodayNote);
   const pages = usePageStore((s) => s.pages);
   const selectedPageId = usePageStore((s) => s.selectedPageId);
   const selectPage = usePageStore((s) => s.selectPage);
@@ -357,16 +356,15 @@ function App() {
     setShowDeleteConfirm(true);
   }, [selectedPage]);
 
-  // Open today's daily note
+  // Open today's daily note (in the configured daily-notes notebook, falling
+  // back to the selected one — see utils/openDailyNote).
   const handleDailyNote = useCallback(async () => {
-    if (!selectedNotebookId) return;
     try {
-      const note = await openTodayNote(selectedNotebookId);
-      selectPage(note.id);
+      await openTodayDailyNote();
     } catch (err) {
       console.error("Failed to open daily note:", err);
     }
-  }, [selectedNotebookId, openTodayNote, selectPage]);
+  }, []);
 
   // Toggle favorite on current page
   const handleToggleFavorite = useCallback(() => {

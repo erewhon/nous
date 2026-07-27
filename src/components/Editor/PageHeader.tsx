@@ -575,9 +575,15 @@ export function PageHeader({
 
   return (
     <div className="px-16 py-5">
+      {/* Top row: breadcrumb strip on the left, page controls on the right.
+          The title gets its own full-measure line below so long titles wrap
+          at natural width instead of being squeezed by the button cluster
+          (design/direction-a-editor.html: .topbar chrome + .page-title). */}
+      <div className="flex min-h-[36px] items-center justify-between gap-4">
+        <div className="min-w-0 flex-1">
       {/* Breadcrumb strip — chapter-opening notebook › folder path (crumbs jump up a level) */}
       {notebook && (
-        <div className="mb-1.5 flex min-w-0 items-center gap-2">
+        <div className="flex min-w-0 items-center gap-2">
           <span
             aria-hidden
             className="inline-block flex-shrink-0"
@@ -644,106 +650,11 @@ export function PageHeader({
           </nav>
         </div>
       )}
-      <div className="flex items-center justify-between">
-        <div className="flex-1">
-          {isEditing ? (
-            <input
-              ref={inputRef}
-              type="text"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              onBlur={handleSave}
-              onKeyDown={handleKeyDown}
-              className="w-full bg-transparent outline-none"
-              style={{
-                color: "var(--color-text-primary)",
-                fontFamily: "var(--font-display)",
-                fontWeight: 600,
-                fontSize: "calc(var(--font-size-base, 16px) * 2.4)",
-                letterSpacing: "0.005em",
-                lineHeight: 1.2,
-              }}
-              placeholder="Page title"
-            />
-          ) : (
-            <div className="flex items-center gap-3">
-              <h1
-                onClick={() => setIsEditing(true)}
-                className="cursor-text"
-                style={{
-                  color: "var(--color-text-primary)",
-                  fontFamily: "var(--font-display)",
-                  fontWeight: 600,
-                  fontSize: "calc(var(--font-size-base, 16px) * 2.4)",
-                  letterSpacing: "0.005em",
-                  lineHeight: 1.2,
-                }}
-              >
-                {page.title || "Untitled"}
-              </h1>
-              {pageTemplate && (
-                <span
-                  className="rounded-full px-2.5 py-0.5 text-xs font-medium"
-                  style={{
-                    backgroundColor: "rgb(from var(--color-accent) r g b / 0.15)",
-                    color: "var(--color-accent)",
-                  }}
-                  title={`Template: ${pageTemplate.name}`}
-                >
-                  Template
-                </span>
-              )}
-              {page.systemPrompt && (
-                <span
-                  className="flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium"
-                  style={{
-                    backgroundColor: "rgba(59, 130, 246, 0.15)",
-                    color: "rgb(59, 130, 246)",
-                  }}
-                  title="Has custom AI prompt"
-                >
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    width="10"
-                    height="10"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-                  </svg>
-                  AI Prompt
-                </span>
-              )}
-              {page.isDailyNote && (
-                <span
-                  className="rounded-full px-2.5 py-0.5 text-xs font-medium"
-                  style={{
-                    backgroundColor: "rgba(34, 197, 94, 0.15)",
-                    color: "rgb(34, 197, 94)",
-                  }}
-                  title={`Daily Note: ${page.dailyNoteDate}`}
-                >
-                  Daily Note
-                </span>
-              )}
-              {page.isArchived && (
-                <span
-                  className="rounded-full px-2.5 py-0.5 text-xs font-medium"
-                  style={{
-                    backgroundColor: "rgba(255, 193, 7, 0.15)",
-                    color: "rgb(255, 193, 7)",
-                  }}
-                >
-                  Archived
-                </span>
-              )}
-            </div>
-          )}
         </div>
+
+        {/* Page controls cluster — kept from the working app (the mockup's
+            slim topbar has only Share/theme/More; we keep the full set). */}
+        <div className="flex flex-none items-center">
 
         {/* Use Template button - only shown for template source pages */}
         {pageTemplate && (
@@ -1532,10 +1443,116 @@ export function PageHeader({
             </div>
           )}
         </div>
+        </div>
+      </div>
 
+      {/* Title — its own full-measure line (wraps naturally, never squeezed) */}
+      <div className="mt-1.5">
+        {isEditing ? (
+          <input
+            ref={inputRef}
+            type="text"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            onBlur={handleSave}
+            onKeyDown={handleKeyDown}
+            className="w-full bg-transparent outline-none"
+            style={{
+              color: "var(--color-text-primary)",
+              fontFamily: "var(--font-display)",
+              fontWeight: 600,
+              fontSize: "calc(var(--font-size-base, 16px) * 2.4)",
+              letterSpacing: "0.005em",
+              lineHeight: 1.2,
+            }}
+            placeholder="Page title"
+          />
+        ) : (
+          <div className="flex flex-wrap items-center gap-3">
+            <h1
+              onClick={() => setIsEditing(true)}
+              className="cursor-text"
+              style={{
+                color: "var(--color-text-primary)",
+                fontFamily: "var(--font-display)",
+                fontWeight: 600,
+                fontSize: "calc(var(--font-size-base, 16px) * 2.4)",
+                letterSpacing: "0.005em",
+                lineHeight: 1.2,
+              }}
+            >
+              {page.title || "Untitled"}
+            </h1>
+            {pageTemplate && (
+              <span
+                className="rounded-full px-2.5 py-0.5 text-xs font-medium"
+                style={{
+                  backgroundColor: "rgb(from var(--color-accent) r g b / 0.15)",
+                  color: "var(--color-accent)",
+                }}
+                title={`Template: ${pageTemplate.name}`}
+              >
+                Template
+              </span>
+            )}
+            {page.systemPrompt && (
+              <span
+                className="flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium"
+                style={{
+                  backgroundColor: "rgba(59, 130, 246, 0.15)",
+                  color: "rgb(59, 130, 246)",
+                }}
+                title="Has custom AI prompt"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="10"
+                  height="10"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                </svg>
+                AI Prompt
+              </span>
+            )}
+            {page.isDailyNote && (
+              <span
+                className="rounded-full px-2.5 py-0.5 text-xs font-medium"
+                style={{
+                  backgroundColor: "rgba(34, 197, 94, 0.15)",
+                  color: "rgb(34, 197, 94)",
+                }}
+                title={`Daily Note: ${page.dailyNoteDate}`}
+              >
+                Daily Note
+              </span>
+            )}
+            {page.isArchived && (
+              <span
+                className="rounded-full px-2.5 py-0.5 text-xs font-medium"
+                style={{
+                  backgroundColor: "rgba(255, 193, 7, 0.15)",
+                  color: "rgb(255, 193, 7)",
+                }}
+              >
+                Archived
+              </span>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Meta line under the title — stats · reading level · writing goal ·
+          save status (mockup's .page-meta row) */}
+      <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1">
         {/* Page stats */}
         {stats && (
-          <div className="ml-4 flex items-center gap-2">
+          <div className="flex items-center gap-2">
             {showPageStats && (
               <div className="flex items-center gap-3">
                 <span
@@ -1604,7 +1621,7 @@ export function PageHeader({
         )}
 
         {/* Writing goal progress */}
-        <div className="ml-2">
+        <div>
           <WritingGoalProgress
             onOpenSettings={() => setShowWritingGoalSettings(true)}
           />
@@ -1612,7 +1629,7 @@ export function PageHeader({
 
         {/* Save status */}
         <div
-          className="ml-4 flex items-center gap-2 text-sm"
+          className="flex items-center gap-2 text-xs"
           style={{ color: "var(--color-text-muted)" }}
         >
           {isSaving ? (

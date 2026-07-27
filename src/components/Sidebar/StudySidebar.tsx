@@ -6,6 +6,10 @@ import { useTasksStore } from "../../stores/tasksStore";
 import { useFlashcardStore } from "../../stores/flashcardStore";
 import { useInboxStore } from "../../stores/inboxStore";
 import { useDailyNotesStore } from "../../stores/dailyNotesStore";
+import { openTodayDailyNote } from "../../utils/openDailyNote";
+import { searchPages } from "../../utils/api";
+import { localToday } from "../../utils/dateLocal";
+import type { SearchResult } from "../../types/page";
 import { StudyTree } from "./StudyTree";
 import {
   StudyBadge,
@@ -146,19 +150,43 @@ export function StudySidebar({ width }: StudySidebarProps) {
   );
 }
 
-// ---- PINNED: today's daily note + favorite pages ----
+// ---- PINNED: today's daily note + daily brief + favorite pages ----
+
+const DAILY_BRIEF_PREFIX = "Daily Brief — ";
+
+// Find the freshest "Daily Brief — YYYY-MM-DD" page: today's if it exists,
+// otherwise the latest (ISO date suffix makes lexicographic order work).
+async function findDailyBrief(): Promise<SearchResult | null> {
+  const hits = await searchPages("Daily Brief", 20);
+  const briefs = hits
+    .filter((h) => h.title.startsWith(DAILY_BRIEF_PREFIX))
+    .sort((a, b) => b.title.localeCompare(a.title));
+  return (
+    briefs.find((b) => b.title === `${DAILY_BRIEF_PREFIX}${localToday()}`) ??
+    briefs[0] ??
+    null
+  );
+}
 
 function PinnedSection() {
   const selectedNotebookId = useNotebookStore((s) => s.selectedNotebookId);
+  const notebooks = useNotebookStore((s) => s.notebooks);
   const selectNotebook = useNotebookStore((s) => s.selectNotebook);
   const allFavoritePages = usePageStore((s) => s.allFavoritePages);
   const selectPage = usePageStore((s) => s.selectPage);
   const selectedPageId = usePageStore((s) => s.selectedPageId);
-  const openTodayNote = useDailyNotesStore((s) => s.openTodayNote);
+  const configuredDailyNotebookId = useDailyNotesStore(
+    (s) => s.settings.notebookId
+  );
 
-  // Resolve a notebook for the daily note the way the rest of the app does
-  // (the selected notebook). If none, we hide the Today row rather than guess.
-  const todayNotebookId = selectedNotebookId;
+  // The Today row targets the configured daily-notes notebook (Settings →
+  // Daily Notes) so it opens the real note regardless of which notebook is
+  // browsed; without a config it falls back to the selected notebook.
+  const todayNotebookId =
+    configuredDailyNotebookId &&
+    notebooks.some((n) => n.id === configuredDailyNotebookId)
+      ? configuredDailyNotebookId
+      : selectedNotebookId;
 
   const todayLabel = useMemo(
     () =>
@@ -170,20 +198,57 @@ function PinnedSection() {
     []
   );
 
+  // The Daily Brief row only renders when brief pages exist in the library
+  // (they're produced by an external agent; most libraries won't have them).
+  const [hasBrief, setHasBrief] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    findDailyBrief()
+      .then((brief) => {
+        if (!cancelled) setHasBrief(brief !== null);
+      })
+      .catch(() => {
+        // Search unavailable (e.g. daemon offline) — just hide the row.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const favorites = allFavoritePages.slice(0, 6);
-  const hasContent = !!todayNotebookId || favorites.length > 0;
+  const hasContent = !!todayNotebookId || hasBrief || favorites.length > 0;
   if (!hasContent) return null;
 
   const openToday = async () => {
-    if (!todayNotebookId) return;
     try {
-      const note = await openTodayNote(todayNotebookId);
-      // A just-created note isn't in the page list yet; reload before selecting.
-      await usePageStore.getState().loadPages(todayNotebookId);
-      await selectPage(note.id);
+      await openTodayDailyNote();
     } catch (err) {
       console.error("Failed to open today's daily note:", err);
     }
+  };
+
+  // Re-resolve on click so a brief published after mount opens fresh.
+  const openBrief = async () => {
+    try {
+      const brief = await findDailyBrief();
+      if (!brief) return;
+      if (useNotebookStore.getState().selectedNotebookId !== brief.notebookId) {
+        selectNotebook(brief.notebookId);
+      }
+      await usePageStore.getState().loadPages(brief.notebookId);
+      await selectPage(brief.pageId);
+    } catch (err) {
+      console.error("Failed to open Daily Brief:", err);
+    }
+  };
+
+  const openFavorite = async (fav: (typeof favorites)[number]) => {
+    if (useNotebookStore.getState().selectedNotebookId !== fav.notebookId) {
+      selectNotebook(fav.notebookId);
+    }
+    // Pages from another notebook aren't in the store until loaded.
+    await usePageStore.getState().loadPages(fav.notebookId);
+    await selectPage(fav.id);
   };
 
   return (
@@ -200,15 +265,23 @@ function PinnedSection() {
           <span className="flex-1 truncate">Today · {todayLabel}</span>
         </StudyRow>
       )}
+      {hasBrief && (
+        <StudyRow onClick={openBrief} title="Open the latest Daily Brief">
+          <StudyRowIcon>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M4 5h13a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z" />
+              <path d="M19 9h1a1 1 0 0 1 1 1v8a2 2 0 0 1-2 2M8 9h5M8 13h5M8 17h5" />
+            </svg>
+          </StudyRowIcon>
+          <span className="flex-1 truncate">Daily Brief</span>
+        </StudyRow>
+      )}
       {favorites.map((fav) => (
         <StudyRow
           key={fav.id}
           selected={fav.id === selectedPageId}
           title={`${fav.title} — ${fav.notebookName}`}
-          onClick={() => {
-            selectNotebook(fav.notebookId);
-            selectPage(fav.id);
-          }}
+          onClick={() => void openFavorite(fav)}
         >
           <StudyRowIcon selected={fav.id === selectedPageId}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">

@@ -3,8 +3,11 @@ import { useMobileStore } from "../../stores/mobileStore";
 import { useInboxStore } from "../../stores/inboxStore";
 import { useNotebookStore } from "../../stores/notebookStore";
 import { usePageStore } from "../../stores/pageStore";
-import { useDailyNotesStore } from "../../stores/dailyNotesStore";
 import { searchPages } from "../../utils/api";
+import {
+  openTodayDailyNote,
+  resolveDailyNotesNotebookId,
+} from "../../utils/openDailyNote";
 
 /**
  * Phone bottom navigation: Capture · Today · Tasks · Search · Browse
@@ -42,7 +45,6 @@ export function MobileNav() {
   const toggleDrawer = useMobileStore((s) => s.toggleDrawer);
   const closeDrawer = useMobileStore((s) => s.closeDrawer);
   const openQuickCapture = useInboxStore((s) => s.openQuickCapture);
-  const openTodayNote = useDailyNotesStore((s) => s.openTodayNote);
 
   const handleCapture = useCallback(() => {
     closeDrawer();
@@ -51,21 +53,16 @@ export function MobileNav() {
 
   const handleToday = useCallback(async () => {
     closeDrawer();
-    const notebookId = useNotebookStore.getState().selectedNotebookId;
-    if (!notebookId) {
+    if (!resolveDailyNotesNotebookId()) {
       toggleDrawer(); // pick a notebook first
       return;
     }
     try {
-      const note = await openTodayNote(notebookId);
-      // A just-created note isn't in the store's page list yet, and panes
-      // only render pages they can find there — reload before selecting.
-      await usePageStore.getState().loadPages(notebookId);
-      await usePageStore.getState().selectPage(note.id);
+      await openTodayDailyNote();
     } catch (err) {
       console.error("Failed to open daily note:", err);
     }
-  }, [closeDrawer, openTodayNote, toggleDrawer]);
+  }, [closeDrawer, toggleDrawer]);
 
   const handleTasks = useCallback(async () => {
     closeDrawer();
