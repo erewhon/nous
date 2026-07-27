@@ -134,3 +134,62 @@ class TestRoundTrip:
         types = [b["type"] for b in blocks]
         assert types == ["header", "paragraph", "list", "delimiter"]
         assert blocks_to_markdown(blocks) == md
+
+
+class TestPipeTables:
+    def test_basic_table_with_headings(self):
+        md = "| Path | Goal |\n|---|---|\n| Card | Prefill |\n| EPYC | MoE |"
+        blocks = markdown_to_blocks(md)
+        assert len(blocks) == 1
+        assert blocks[0]["type"] == "table"
+        assert blocks[0]["data"]["withHeadings"] is True
+        assert blocks[0]["data"]["content"] == [
+            ["Path", "Goal"],
+            ["Card", "Prefill"],
+            ["EPYC", "MoE"],
+        ]
+
+    def test_inline_formatting_in_cells(self):
+        md = "| Model | Notes |\n|---|---|\n| **A6000** | blower, `48GB` |"
+        blocks = markdown_to_blocks(md)
+        row = blocks[0]["data"]["content"][1]
+        assert row == ["<b>A6000</b>", "blower, <code>48GB</code>"]
+
+    def test_alignment_colons_accepted(self):
+        md = "| a | b | c |\n|:---|:--:|---:|\n| 1 | 2 | 3 |"
+        blocks = markdown_to_blocks(md)
+        assert blocks[0]["type"] == "table"
+        assert blocks[0]["data"]["content"][1] == ["1", "2", "3"]
+
+    def test_ragged_rows_normalized_to_header_width(self):
+        md = "| a | b | c |\n|---|---|---|\n| 1 | 2 |\n| 1 | 2 | 3 | 4 |"
+        blocks = markdown_to_blocks(md)
+        content = blocks[0]["data"]["content"]
+        assert content[1] == ["1", "2", ""]
+        assert content[2] == ["1", "2", "3"]
+
+    def test_escaped_pipes_in_cells(self):
+        md = "| expr | result |\n|---|---|\n| a \\| b | ok |"
+        blocks = markdown_to_blocks(md)
+        assert blocks[0]["data"]["content"][1] == ["a | b", "ok"]
+
+    def test_pipe_row_without_separator_stays_paragraph(self):
+        md = "| just | one | line |"
+        blocks = markdown_to_blocks(md)
+        assert blocks[0]["type"] == "paragraph"
+
+    def test_paragraph_breaks_at_table_start(self):
+        md = "Intro line\n| a | b |\n|---|---|\n| 1 | 2 |"
+        blocks = markdown_to_blocks(md)
+        assert [b["type"] for b in blocks] == ["paragraph", "table"]
+        assert blocks[0]["data"]["text"] == "Intro line"
+
+    def test_table_between_blocks(self):
+        md = "## Heading\n\n| a |\n|---|\n| 1 |\n\nafter"
+        blocks = markdown_to_blocks(md)
+        assert [b["type"] for b in blocks] == ["header", "table", "paragraph"]
+
+    def test_table_round_trip(self):
+        md = "| Path | Goal |\n| --- | --- |\n| **Card** | Prefill |"
+        blocks = markdown_to_blocks(md)
+        assert blocks_to_markdown(blocks) == md

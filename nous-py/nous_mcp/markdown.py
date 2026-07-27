@@ -333,6 +333,31 @@ _ORDERED_RE = re.compile(r"^\d+\.\s+(.*)")
 _UNORDERED_RE = re.compile(r"^[-*]\s+(.*)")
 _HR_RE = re.compile(r"^(?:---+|___+|\*\*\*+)\s*$")
 
+# GFM pipe tables. A table starts at a `| ... |` row whose NEXT line is the
+# separator row (`|---|:--:|...`); rows continue while they match the row
+# pattern. Cells may contain escaped pipes (`\|`).
+_TABLE_ROW_RE = re.compile(r"^\|.*\|$")
+_TABLE_SEP_RE = re.compile(r"^\|(?:\s*:?-+:?\s*\|)+$")
+_TABLE_CELL_SPLIT_RE = re.compile(r"(?<!\\)\|")
+
+
+def _split_table_row(line: str) -> list[str]:
+    """Split a `| a | b |` row into cell strings (unescaping `\\|`)."""
+    parts = _TABLE_CELL_SPLIT_RE.split(line.strip())
+    # Leading/trailing pipes produce empty first/last segments.
+    if parts and parts[0].strip() == "":
+        parts = parts[1:]
+    if parts and parts[-1].strip() == "":
+        parts = parts[:-1]
+    return [p.strip().replace("\\|", "|") for p in parts]
+
+
+def _is_table_start(lines: list[str], i: int) -> bool:
+    """True when line i opens a GFM table (row followed by a separator row)."""
+    if not _TABLE_ROW_RE.match(lines[i].strip()):
+        return False
+    return i + 1 < len(lines) and bool(_TABLE_SEP_RE.match(lines[i + 1].strip()))
+
 
 def _block_id() -> str:
     from uuid import uuid4
@@ -344,7 +369,7 @@ def markdown_to_blocks(text: str) -> list[dict]:
     """Convert markdown text to Editor.js blocks.
 
     Handles headers, paragraphs, unordered/ordered lists, checklists,
-    fenced code blocks, blockquotes, and horizontal rules.
+    fenced code blocks, blockquotes, horizontal rules, and GFM pipe tables.
     """
     if not text:
         return []
@@ -458,6 +483,29 @@ def markdown_to_blocks(text: str) -> list[dict]:
             })
             continue
 
+        # GFM pipe table — header row + separator row, then body rows. The
+        # first row becomes headings (withHeadings); ragged body rows are
+        # padded/truncated to the header's column count. Alignment colons in
+        # the separator are accepted and ignored (Editor.js has no alignment).
+        if _is_table_start(lines, i):
+            header = _split_table_row(stripped)
+            width = len(header)
+            content: list[list[str]] = [
+                [_inline_md_to_html(c) for c in header]
+            ]
+            i += 2  # skip header + separator rows
+            while i < len(lines) and _TABLE_ROW_RE.match(lines[i].strip()):
+                cells = _split_table_row(lines[i].strip())
+                cells = (cells + [""] * width)[:width]
+                content.append([_inline_md_to_html(c) for c in cells])
+                i += 1
+            blocks.append({
+                "id": _block_id(),
+                "type": "table",
+                "data": {"withHeadings": True, "content": content},
+            })
+            continue
+
         # Blockquote
         if stripped.startswith(">"):
             quote_lines: list[str] = []
@@ -488,6 +536,7 @@ def markdown_to_blocks(text: str) -> list[dict]:
                 or _UNORDERED_RE.match(ps)
                 or ps.startswith("```")
                 or ps.startswith(">")
+                or _is_table_start(lines, i)
             ):
                 break
             para_lines.append(_inline_md_to_html(ps))
