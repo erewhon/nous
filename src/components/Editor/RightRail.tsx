@@ -25,8 +25,8 @@ export function RightRail({ page, notebookId, editorScrollRef }: RightRailProps)
     <div
       className="flex shrink-0 flex-col overflow-y-auto"
       style={{
-        width: 256,
-        borderLeft: "1px solid var(--color-border)",
+        width: 236,
+        borderLeft: "1px solid var(--color-border-muted)",
         backgroundColor: "var(--color-bg-panel)",
       }}
     >
@@ -49,12 +49,17 @@ export function RightRail({ page, notebookId, editorScrollRef }: RightRailProps)
                   border: "1px solid var(--color-border-muted)",
                   backgroundColor: "var(--color-bg-secondary)",
                 }}
-                onMouseEnter={(e) =>
-                  (e.currentTarget.style.borderColor = "var(--color-accent)")
-                }
-                onMouseLeave={(e) =>
-                  (e.currentTarget.style.borderColor = "var(--color-border-muted)")
-                }
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.borderColor = "var(--color-border)";
+                  e.currentTarget.style.backgroundColor =
+                    "var(--color-bg-tertiary)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.borderColor =
+                    "var(--color-border-muted)";
+                  e.currentTarget.style.backgroundColor =
+                    "var(--color-bg-secondary)";
+                }}
                 title={bl.sourcePageTitle}
               >
                 <span
@@ -63,12 +68,32 @@ export function RightRail({ page, notebookId, editorScrollRef }: RightRailProps)
                 >
                   {bl.sourcePageTitle}
                 </span>
-                <span
-                  className="truncate text-xs"
-                  style={{ color: "var(--color-text-muted)" }}
-                >
-                  links to {bl.targetTitle}
-                </span>
+                {bl.excerpt ? (
+                  <span
+                    className="text-xs"
+                    style={{
+                      color: "var(--color-text-secondary)",
+                      lineHeight: 1.5,
+                      display: "-webkit-box",
+                      WebkitLineClamp: 3,
+                      WebkitBoxOrient: "vertical",
+                      overflow: "hidden",
+                    }}
+                  >
+                    {bl.excerpt.before}
+                    <em style={{ color: "var(--color-accent)" }}>
+                      {bl.excerpt.link}
+                    </em>
+                    {bl.excerpt.after}
+                  </span>
+                ) : (
+                  <span
+                    className="truncate text-xs"
+                    style={{ color: "var(--color-text-muted)" }}
+                  >
+                    links to {bl.targetTitle}
+                  </span>
+                )}
               </button>
             ))}
           </div>
@@ -85,8 +110,8 @@ export function RightRail({ page, notebookId, editorScrollRef }: RightRailProps)
                 key={tag}
                 className="rounded-full px-2 py-0.5 text-xs"
                 style={{
-                  backgroundColor: "var(--color-selection)",
-                  color: "var(--color-accent)",
+                  border: "1px solid var(--color-border)",
+                  color: "var(--color-text-secondary)",
                 }}
               >
                 #{tag}

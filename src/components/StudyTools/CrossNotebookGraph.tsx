@@ -3,7 +3,7 @@ import * as d3 from "d3";
 import { save } from "../../platform/dialog";
 import { writeTextFile } from "../../platform/fs";
 import { listNotebooks, listPages } from "../../utils/api";
-import { WikiLinkTool } from "../Editor/WikiLinkTool";
+import { extractWikiLinks } from "../../utils/extractWikiLinks";
 import { useToastStore } from "../../stores/toastStore";
 import type { Notebook } from "../../types/notebook";
 import type { Page } from "../../types/page";
@@ -110,7 +110,7 @@ export function CrossNotebookGraph({
 
           // Extract links from page content
           if (page.content?.blocks) {
-            const linkTitles = WikiLinkTool.extractLinks(
+            const linkTitles = extractWikiLinks(
               page.content.blocks as Array<{
                 type: string;
                 data: Record<string, unknown>;

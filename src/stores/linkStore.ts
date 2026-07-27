@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { WikiLinkTool } from "../components/Editor/WikiLinkTool";
+import { extractWikiLinks } from "../utils/extractWikiLinks";
 import { BlockRefTool } from "../components/Editor/BlockRefTool";
 import type { Page } from "../types/page";
 
@@ -75,7 +75,7 @@ export const useLinkStore = create<LinkStore>((set, get) => ({
       data: b.data,
     }));
 
-    const links = WikiLinkTool.extractLinks(blocksForExtraction);
+    const links = extractWikiLinks(blocksForExtraction);
     const blockRefs = BlockRefTool.extractBlockRefs(blocksForExtraction);
 
     set((state) => {
@@ -183,7 +183,7 @@ export const useLinkStore = create<LinkStore>((set, get) => ({
         data: b.data,
       }));
 
-      const links = WikiLinkTool.extractLinks(blocksForExtraction);
+      const links = extractWikiLinks(blocksForExtraction);
       const blockRefs = BlockRefTool.extractBlockRefs(blocksForExtraction);
 
       outgoingLinks.set(page.id, links);

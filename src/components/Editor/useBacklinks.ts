@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { useLinkStore, type BlockRefInfo, type LinkInfo } from "../../stores/linkStore";
 import { usePageStore } from "../../stores/pageStore";
+import { extractBacklinkExcerpt, type BacklinkExcerpt } from "./backlinkExcerpt";
 
 export interface BlockBacklinkEntry {
   blockId: string;
@@ -8,9 +9,15 @@ export interface BlockBacklinkEntry {
   refs: BlockRefInfo[];
 }
 
+export interface BacklinkWithExcerpt extends LinkInfo {
+  /** Sentence around the wiki-link in the source page, split for highlighting;
+      null when the source content isn't loaded or the link isn't in a text block. */
+  excerpt: BacklinkExcerpt | null;
+}
+
 export interface UseBacklinksResult {
   /** Page-level backlinks (pages that [[wiki-link]] to this page's title). */
-  backlinks: LinkInfo[];
+  backlinks: BacklinkWithExcerpt[];
   /** Block-level references grouped by the block on this page they point at. */
   blockBacklinks: BlockBacklinkEntry[];
   /** Always false today — backlinks come from synchronous store selectors, not
@@ -35,7 +42,23 @@ export function useBacklinks(
   const selectPage = usePageStore((s) => s.selectPage);
   const pages = usePageStore((s) => s.pages);
 
-  const backlinks = getBacklinks(pageTitle);
+  const rawBacklinks = getBacklinks(pageTitle);
+
+  // Attach the source-sentence excerpt to each backlink (the rail's card body).
+  const backlinks = useMemo(
+    () =>
+      rawBacklinks.map((bl): BacklinkWithExcerpt => {
+        const source = pages.find((p) => p.id === bl.sourcePageId);
+        return {
+          ...bl,
+          excerpt: extractBacklinkExcerpt(
+            source?.content?.blocks,
+            bl.targetTitle
+          ),
+        };
+      }),
+    [rawBacklinks, pages]
+  );
 
   // Collect block-level references for all blocks on this page.
   const blockBacklinks = useMemo(() => {
