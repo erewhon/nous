@@ -1633,15 +1633,15 @@ block-ref.broken {
 }
 
 .flashcard-add-deck-btn--synced {
-  background: rgba(16, 185, 129, 0.1);
-  border-color: #10b981;
-  color: #10b981;
+  background: rgb(from var(--color-success) r g b / 0.1);
+  border-color: var(--color-success);
+  color: var(--color-success);
   cursor: default;
 }
 
 .flashcard-add-deck-btn--synced:hover {
-  background: rgba(16, 185, 129, 0.1);
-  color: #10b981;
+  background: rgb(from var(--color-success) r g b / 0.1);
+  color: var(--color-success);
 }
 
 /* Settings panel for flashcard */
@@ -1994,9 +1994,9 @@ block-ref.broken {
 }
 
 .video-transcribe-btn--complete {
-  background: rgba(16, 185, 129, 0.1);
-  border-color: #10b981;
-  color: #10b981;
+  background: rgb(from var(--color-success) r g b / 0.1);
+  border-color: var(--color-success);
+  color: var(--color-success);
 }
 
 .video-fullscreen-btn {
@@ -2891,7 +2891,7 @@ block-ref.broken {
 }
 
 .embed-error svg {
-  color: #ef4444;
+  color: var(--color-error);
 }
 
 /* Embedded Page Content */
@@ -3005,23 +3005,23 @@ block-ref.broken {
 }
 
 .embed-callout--info {
-  border-color: #3b82f6;
-  background: rgba(59, 130, 246, 0.1);
+  border-color: var(--color-info);
+  background: rgb(from var(--color-info) r g b / 0.1);
 }
 
 .embed-callout--warning {
-  border-color: #f59e0b;
-  background: rgba(245, 158, 11, 0.1);
+  border-color: var(--color-warning);
+  background: rgb(from var(--color-warning) r g b / 0.1);
 }
 
 .embed-callout--tip {
-  border-color: #10b981;
-  background: rgba(16, 185, 129, 0.1);
+  border-color: var(--color-success);
+  background: rgb(from var(--color-success) r g b / 0.1);
 }
 
 .embed-callout--danger {
-  border-color: #ef4444;
-  background: rgba(239, 68, 68, 0.1);
+  border-color: var(--color-error);
+  background: rgb(from var(--color-error) r g b / 0.1);
 }
 
 .embed-empty {
@@ -4081,15 +4081,15 @@ block-ref.broken {
 
 /* Broken state */
 .block-embed-broken {
-  border-color: var(--color-danger, #e53e3e);
+  border-color: var(--color-error);
 }
 
 .block-embed-broken .block-embed-header {
-  border-bottom-color: var(--color-danger, #e53e3e);
+  border-bottom-color: var(--color-error);
 }
 
 .block-embed-broken .block-embed-header svg {
-  color: var(--color-danger, #e53e3e);
+  color: var(--color-error);
 }
 
 /* ── Block Embed Picker ── */

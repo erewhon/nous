@@ -27,7 +27,7 @@
 
 .db-save-error {
   font-size: 11px;
-  color: var(--color-danger, #dc2626);
+  color: var(--color-error);
   max-width: 320px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -957,9 +957,9 @@ td.db-done-text .db-cell-display {
   align-items: center;
   gap: 12px;
   padding: 16px;
-  color: var(--color-danger-text, #dc2626);
+  color: var(--color-error);
   font-size: 13px;
-  background: var(--color-danger-bg, #fef2f2);
+  background: rgb(from var(--color-error) r g b / 0.1);
   border-radius: 6px;
   margin: 8px 0;
 }
@@ -2495,7 +2495,7 @@ td.db-done-text .db-cell-display {
 }
 
 .db-formula-cell-error {
-  color: var(--color-danger, #ef4444);
+  color: var(--color-error);
   cursor: help;
   font-size: 12px;
 }
@@ -2515,10 +2515,10 @@ td.db-done-text .db-cell-display {
 
 .db-formula-validation-error {
   font-size: 11px;
-  color: var(--color-danger, #ef4444);
+  color: var(--color-error);
   margin-top: 4px;
   padding: 4px 6px;
-  background: var(--color-danger-bg, rgba(239, 68, 68, 0.1));
+  background: rgb(from var(--color-error) r g b / 0.1);
   border-radius: 4px;
 }
 

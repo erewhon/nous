@@ -163,8 +163,8 @@ export function CloudSettings() {
 
   const btnDanger: React.CSSProperties = {
     ...btnSecondary,
-    borderColor: "var(--color-danger-border)",
-    color: "var(--color-danger-text)",
+    borderColor: "rgb(from var(--color-error) r g b / 0.35)",
+    color: "var(--color-error)",
   };
 
   const cardStyle: React.CSSProperties = {
@@ -195,9 +195,9 @@ export function CloudSettings() {
             style={{
               padding: "0.5rem 0.75rem",
               borderRadius: 6,
-              background: "var(--color-danger-bg)",
-              border: "1px solid var(--color-danger-border)",
-              color: "var(--color-danger-text)",
+              background: "rgb(from var(--color-error) r g b / 0.1)",
+              border: "1px solid rgb(from var(--color-error) r g b / 0.35)",
+              color: "var(--color-error)",
               fontSize: "0.8rem",
             }}
           >
@@ -345,9 +345,9 @@ export function CloudSettings() {
           style={{
             padding: "0.5rem 0.75rem",
             borderRadius: 6,
-            background: "var(--color-danger-bg)",
-            border: "1px solid var(--color-danger-border)",
-            color: "var(--color-danger-text)",
+            background: "rgb(from var(--color-error) r g b / 0.1)",
+            border: "1px solid rgb(from var(--color-error) r g b / 0.35)",
+            color: "var(--color-error)",
             fontSize: "0.8rem",
           }}
         >

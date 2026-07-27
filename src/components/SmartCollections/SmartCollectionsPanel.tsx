@@ -133,7 +133,7 @@ export function SmartCollectionsPanel({ isOpen, onClose }: SmartCollectionsPanel
             </button>
           )}
           {error && (
-            <span className="ml-2 text-xs" style={{ color: "var(--color-danger, #e53e3e)" }}>
+            <span className="ml-2 text-xs" style={{ color: "var(--color-error)" }}>
               {error}
             </span>
           )}

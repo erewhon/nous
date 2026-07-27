@@ -127,9 +127,9 @@ export function PluginSettings() {
         <div
           className="rounded-lg border px-3 py-2 text-sm"
           style={{
-            backgroundColor: "var(--color-danger-bg, #fef2f2)",
-            borderColor: "var(--color-danger-border, #fecaca)",
-            color: "var(--color-danger-text, #dc2626)",
+            backgroundColor: "rgb(from var(--color-error) r g b / 0.1)",
+            borderColor: "rgb(from var(--color-error) r g b / 0.35)",
+            color: "var(--color-error)",
           }}
         >
           {error}
@@ -529,8 +529,8 @@ function PluginCard({
             <span
               className="text-xs px-1.5 py-0.5 rounded shrink-0"
               style={{
-                backgroundColor: "var(--color-danger-bg, #fef2f2)",
-                color: "var(--color-danger-text, #dc2626)",
+                backgroundColor: "rgb(from var(--color-error) r g b / 0.1)",
+                color: "var(--color-error)",
               }}
             >
               disabled

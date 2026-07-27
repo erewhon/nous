@@ -301,9 +301,9 @@ export function WebClipperDialog({ isOpen, onClose, initialUrl }: WebClipperDial
             <div
               className="mt-3 rounded-lg border px-3 py-2 text-sm"
               style={{
-                borderColor: "var(--color-danger, #ef4444)",
-                color: "var(--color-danger, #ef4444)",
-                backgroundColor: "var(--color-danger-bg, rgba(239,68,68,0.1))",
+                borderColor: "var(--color-error)",
+                color: "var(--color-error)",
+                backgroundColor: "rgb(from var(--color-error) r g b / 0.1)",
               }}
             >
               {error}
