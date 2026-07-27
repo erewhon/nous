@@ -71,11 +71,11 @@ const COLOR_SCHEMES: { value: ColorScheme; label: string; colors: string[] }[] =
 const FONT_FAMILIES: { value: FontFamily; label: string; preview: string }[] = [
   { value: "dm-sans", label: "DM Sans", preview: "Aa Bb Cc" },
   { value: "system", label: "System Default", preview: "Aa Bb Cc" },
-  { value: "inter", label: "Inter", preview: "Aa Bb Cc" },
+  { value: "inter", label: "Inter (if installed)", preview: "Aa Bb Cc" },
   { value: "serif", label: "Serif (Georgia)", preview: "Aa Bb Cc" },
   { value: "tufte", label: "Tufte (Palatino)", preview: "Aa Bb Cc" },
-  { value: "jetbrains-mono", label: "JetBrains Mono", preview: "Aa Bb Cc" },
-  { value: "fira-code", label: "Fira Code", preview: "Aa Bb Cc" },
+  { value: "jetbrains-mono", label: "JetBrains Mono (if installed)", preview: "Aa Bb Cc" },
+  { value: "fira-code", label: "Fira Code (if installed)", preview: "Aa Bb Cc" },
 ];
 
 const EDITOR_WIDTHS: { value: EditorWidth; label: string; description: string }[] = [

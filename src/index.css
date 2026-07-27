@@ -63,6 +63,9 @@
   --radius-xl: 20px;
   --radius-2xl: 26px;
   --radius-3xl: 34px;
+  /* Keep the scale monotonic — Tailwind's un-overridden 4xl default (32px)
+     would sit BELOW our 3xl. */
+  --radius-4xl: 44px;
   --radius-full: 9999px;
 
   /* Elevation — "lamplight" (warm-tinted, never pure black).
@@ -89,7 +92,7 @@
 
   /* Roll motion onto Tailwind's transition-* utilities app-wide (Tailwind v4
      reads these defaults) — every hover/focus transition gets the "settle" ease. */
-  --default-transition-duration: 160ms;
+  --default-transition-duration: var(--motion-fast);
   --default-transition-timing-function: var(--ease-settle);
 
   /* The constellation sits in a deeper well than the app (mockup: sidebar-dark

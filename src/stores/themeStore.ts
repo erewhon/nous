@@ -680,7 +680,7 @@ export const useThemeStore = create<ThemeState>()(
         const root = document.documentElement;
 
         // Apply color scheme
-        const scheme = COLOR_SCHEMES[settings.colorScheme] || COLOR_SCHEMES.catppuccin;
+        const scheme = COLOR_SCHEMES[settings.colorScheme] || COLOR_SCHEMES.study;
         const colors = scheme[resolvedMode];
 
         Object.entries(colors).forEach(([key, value]) => {
