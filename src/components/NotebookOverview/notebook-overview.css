@@ -1,0 +1,112 @@
+/* The Library front door — bookshelf card + shelf grid (Direction A mockup:
+   design/direction-a-library.html). Each card carries its notebook color as
+   --nb; the 4px spine, hover lift, and tinted hover border all read it. */
+
+.nb-shelf {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 16px;
+}
+
+.nb-card {
+  --nb: var(--color-accent);
+  position: relative;
+  text-align: left;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+  overflow: hidden;
+  cursor: pointer;
+  transition:
+    transform var(--motion-base) var(--ease-settle),
+    box-shadow var(--motion-base) var(--ease-settle),
+    border-color var(--motion-base) var(--ease-settle);
+}
+
+/* Bookshelf spine */
+.nb-card::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: var(--nb);
+  opacity: 0.9;
+}
+
+.nb-card:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-3);
+  border-color: color-mix(in srgb, var(--nb) 35%, var(--color-border));
+}
+
+.nb-card-body {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  padding: 20px 20px 16px 26px;
+}
+
+.nb-card h3 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 22px;
+  line-height: 1.2;
+  margin-bottom: 3px;
+  color: var(--color-text-primary);
+}
+
+.nb-card-desc {
+  font-size: 12.5px;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+  min-height: 2.9em;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.nb-card-meta {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin-top: 16px;
+  font-size: 11.5px;
+  color: var(--color-text-muted);
+}
+
+.nb-card-meta b {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}
+
+/* Ghost "New notebook" card at the end of the shelf */
+.nb-card-ghost {
+  background: transparent;
+  border-style: dashed;
+  box-shadow: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  min-height: 128px;
+  padding: 20px;
+}
+
+.nb-card-ghost::before {
+  display: none;
+}
+
+.nb-card-ghost:hover {
+  color: var(--color-accent);
+  border-color: color-mix(in srgb, var(--color-accent) 45%, transparent);
+  transform: none;
+  box-shadow: none;
+}

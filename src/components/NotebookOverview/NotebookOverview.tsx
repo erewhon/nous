@@ -147,6 +147,11 @@ export function NotebookOverview({
     (id: string) => notebooks.find((n) => n.id === id)?.name ?? "",
     [notebooks]
   );
+  const nbColor = useCallback(
+    (id: string) =>
+      notebooks.find((n) => n.id === id)?.color || "var(--color-accent)",
+    [notebooks]
+  );
   const greeting = useMemo(() => {
     const h = new Date().getHours();
     if (h < 5) return "Good night.";
@@ -320,7 +325,7 @@ export function NotebookOverview({
 
   return (
     <div
-      className="flex h-full flex-col"
+      className="flex h-full w-full flex-col"
       style={{ backgroundColor: "var(--color-bg-primary)" }}
     >
       {/* Header */}
@@ -328,57 +333,52 @@ export function NotebookOverview({
         className="flex items-center justify-between border-b px-8 py-6"
         style={{ borderColor: "var(--color-border)" }}
       >
-        <div className="flex items-center gap-3">
+        {/* Pure typography per the mockup — no icon tile beside the greeting */}
+        <div>
           <div
-            className="flex h-10 w-10 items-center justify-center rounded-xl"
-            style={{ backgroundColor: "var(--color-accent)" }}
+            className="mb-1.5 text-xs font-semibold uppercase"
+            style={{
+              color: "var(--color-text-muted)",
+              letterSpacing: "0.09em",
+            }}
           >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="white"
-              strokeWidth="2.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" />
-            </svg>
+            The library · {todayLabel}
           </div>
-          <div>
-            <div
-              className="mb-1 text-xs font-medium uppercase"
-              style={{
-                color: "var(--color-text-muted)",
-                letterSpacing: "0.08em",
-              }}
-            >
-              The Library · {todayLabel}
-            </div>
-            <h1
-              className="font-bold"
-              style={{
-                fontFamily: "var(--font-display)",
-                fontWeight: 600,
-                fontSize: "calc(var(--font-size-base, 16px) * 2)",
-                letterSpacing: "-0.01em",
-                lineHeight: 1.1,
-                color: "var(--color-text-primary)",
-              }}
-            >
-              {greeting}
-            </h1>
-            <p
-              className="mt-1 text-sm"
-              style={{ color: "var(--color-text-muted)" }}
-            >
-              {notebooks.length}{" "}
-              {notebooks.length === 1 ? "notebook" : "notebooks"} · {totalPages}{" "}
-              {totalPages === 1 ? "page" : "pages"}
-            </p>
-          </div>
+          <h1
+            style={{
+              fontFamily: "var(--font-display)",
+              fontWeight: 600,
+              fontSize: "calc(var(--font-size-base, 16px) * 2.35)",
+              lineHeight: 1.1,
+              color: "var(--color-text-primary)",
+            }}
+          >
+            {greeting}
+          </h1>
+          <p
+            className="mt-1.5 text-sm"
+            style={{ color: "var(--color-text-secondary)" }}
+          >
+            {notebooks.length}{" "}
+            {notebooks.length === 1 ? "notebook" : "notebooks"},{" "}
+            <b style={{ color: "var(--color-text-primary)", fontWeight: 500 }}>
+              {totalPages} {totalPages === 1 ? "page" : "pages"}
+            </b>
+            {recentPages[0] && (
+              <>
+                {" "}
+                — last opened{" "}
+                <b style={{ color: "var(--color-text-primary)", fontWeight: 500 }}>
+                  {relativeTime(recentPages[0].accessedAt)}
+                </b>{" "}
+                in{" "}
+                <b style={{ color: "var(--color-text-primary)", fontWeight: 500 }}>
+                  {nbName(recentPages[0].notebookId) || "a notebook"}
+                </b>
+              </>
+            )}
+            .
+          </p>
         </div>
 
         {/* Search and actions */}
@@ -588,6 +588,8 @@ export function NotebookOverview({
 
       {/* Notebook grid */}
       <div className="flex-1 overflow-y-auto p-8">
+        {/* Centered reading column, per the mockup's .wrap */}
+        <div className="mx-auto w-full max-w-[1120px]">
         {isLoading ? (
           <div className="flex h-full items-center justify-center">
             <div
@@ -696,7 +698,16 @@ export function NotebookOverview({
           </div>
         ) : (
           <>
-            <div className="flex flex-wrap gap-6">
+            <div
+              className="mb-3 text-xs font-semibold uppercase"
+              style={{
+                color: "var(--color-text-muted)",
+                letterSpacing: "0.09em",
+              }}
+            >
+              Notebooks
+            </div>
+            <div className="nb-shelf">
               {filteredNotebooks.map(({ notebook, coverPage }) => (
                 <NotebookCard
                   key={notebook.id}
@@ -707,6 +718,25 @@ export function NotebookOverview({
                   onSettings={() => setSettingsNotebook(notebook)}
                 />
               ))}
+              {!searchQuery && (
+                <button
+                  className="nb-card nb-card-ghost"
+                  onClick={handleCreateNotebook}
+                >
+                  <svg
+                    width="15"
+                    height="15"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                  >
+                    <path d="M12 5v14M5 12h14" />
+                  </svg>
+                  New notebook
+                </button>
+              )}
             </div>
 
             {/* Recent + Today — the warm front door's quick way back in */}
@@ -731,20 +761,39 @@ export function NotebookOverview({
                         <button
                           key={r.pageId}
                           onClick={() => onSelectNotebook(r.notebookId)}
-                          className="flex items-center justify-between gap-4 rounded-md px-3 py-2 text-left transition-colors hover:bg-[--color-bg-secondary]"
+                          className="flex items-center gap-3 rounded-md px-3 py-2 text-left transition-colors hover:bg-[--color-bg-tertiary]"
                         >
                           <span
-                            className="truncate text-sm"
+                            aria-hidden
+                            className="flex-shrink-0"
+                            style={{
+                              width: 8,
+                              height: 8,
+                              borderRadius: 2.5,
+                              backgroundColor: nbColor(r.notebookId),
+                            }}
+                          />
+                          <span
+                            className="min-w-0 flex-1 truncate text-sm font-medium"
                             style={{ color: "var(--color-text-primary)" }}
                           >
                             {r.title || "Untitled"}
                           </span>
                           <span
-                            className="flex flex-shrink-0 items-center gap-3 text-xs"
+                            className="flex-shrink-0 text-xs"
                             style={{ color: "var(--color-text-muted)" }}
                           >
-                            <span>{nbName(r.notebookId)}</span>
-                            <span>{relativeTime(r.accessedAt)}</span>
+                            {nbName(r.notebookId)}
+                          </span>
+                          <span
+                            className="flex-shrink-0 whitespace-nowrap text-right"
+                            style={{
+                              fontFamily: "var(--font-mono)",
+                              fontSize: 11,
+                              color: "var(--color-text-muted)",
+                            }}
+                          >
+                            {relativeTime(r.accessedAt)}
                           </span>
                         </button>
                       ))}
@@ -918,8 +967,24 @@ export function NotebookOverview({
                 </div>
               </div>
             )}
+
+            {/* Footer — the quiet colophon from the mockup */}
+            <footer
+              className="mt-16 flex items-center justify-between border-t pb-2 pt-5"
+              style={{
+                borderColor: "var(--color-border-muted)",
+                color: "var(--color-text-muted)",
+                fontSize: 11.5,
+              }}
+            >
+              <span>Local-first · private · yours</span>
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: 10.5 }}>
+                AGPL-3.0 · Nous
+              </span>
+            </footer>
           </>
         )}
+        </div>
       </div>
 
       {/* Notebook Settings Dialog */}

@@ -2,6 +2,21 @@ import { useMemo, memo, useCallback } from "react";
 import type { Notebook } from "../../types/notebook";
 import type { Page } from "../../types/page";
 import { adjustColor } from "../../utils/colorUtils";
+import "./notebook-overview.css";
+
+// Compact "edited …" label for the card meta line.
+function editedLabel(iso: string | undefined): string | null {
+  if (!iso) return null;
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return null;
+  const mins = Math.floor((Date.now() - then) / 60000);
+  if (mins < 60) return "edited just now";
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `edited ${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 14) return `edited ${days}d ago`;
+  return `edited ${new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
+}
 
 interface NotebookCardProps {
   notebook: Notebook;
@@ -41,10 +56,11 @@ export const NotebookCard = memo(function NotebookCard({
     }).filter(Boolean).join(" ");
   }, [coverPage]);
 
-  // Card background style
+  // Cover-image cards keep the media treatment (the user opted in by setting
+  // a cover); the lamplight shadow replaces the old pure-black one.
   const cardStyle = useMemo(() => {
     const style: React.CSSProperties = {
-      boxShadow: "0 4px 20px rgba(0, 0, 0, 0.15)",
+      boxShadow: "var(--shadow-1)",
     };
 
     if (hasCoverImage) {
@@ -65,15 +81,84 @@ export const NotebookCard = memo(function NotebookCard({
       style.border = "1px solid";
     }
 
-    // Bookshelf spine — a 3px colored edge in the notebook's own accent
-    style.borderLeft = `3px solid ${notebook.color || "var(--color-accent)"}`;
+    // Bookshelf spine — a colored edge in the notebook's own accent
+    style.borderLeft = `4px solid ${notebook.color || "var(--color-accent)"}`;
 
     return style;
   }, [hasCoverImage, hasColor, notebook.color, notebook.coverImage]);
 
+  // Default card — the mockup's text-only "book spine": serif name, two-line
+  // description (from the cover page's text), mono page count + edited meta.
+  if (!hasCoverImage) {
+    return (
+      <div
+        className="nb-card group"
+        style={{ "--nb": accentColor } as React.CSSProperties}
+      >
+        <button
+          onClick={handleSettings}
+          className="absolute right-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-md opacity-0 transition-all group-hover:opacity-100"
+          style={{
+            backgroundColor: "var(--color-bg-secondary)",
+            color: "var(--color-text-muted)",
+          }}
+          title="Notebook settings"
+        >
+          <IconSettings />
+        </button>
+        <button onClick={onClick} className="nb-card-body focus:outline-none">
+          <h3 className="line-clamp-2 text-left">{notebook.name}</h3>
+          <div className="nb-card-desc text-left">{coverPreview ?? ""}</div>
+          <div className="nb-card-meta">
+            {pageCount !== undefined && (
+              <>
+                <b>{pageCount}</b>
+                <span>{pageCount === 1 ? "page" : "pages"}</span>
+              </>
+            )}
+            {editedLabel(notebook.updatedAt) && (
+              <>
+                {pageCount !== undefined && <span>·</span>}
+                <span>{editedLabel(notebook.updatedAt)}</span>
+              </>
+            )}
+          </div>
+          {(notebook.type === "zettelkasten" || notebook.sectionsEnabled) && (
+            <div className="mt-3 flex gap-2">
+              {notebook.type === "zettelkasten" && (
+                <span
+                  className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs"
+                  style={{
+                    backgroundColor: "var(--color-bg-tertiary)",
+                    color: "var(--color-text-secondary)",
+                  }}
+                >
+                  <IconLink size={10} />
+                  Zettelkasten
+                </span>
+              )}
+              {notebook.sectionsEnabled && (
+                <span
+                  className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs"
+                  style={{
+                    backgroundColor: "var(--color-bg-tertiary)",
+                    color: "var(--color-text-secondary)",
+                  }}
+                >
+                  <IconLayers size={10} />
+                  Sections
+                </span>
+              )}
+            </div>
+          )}
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div
-      className="group relative flex w-64 flex-col overflow-hidden rounded-lg transition-all duration-300 hover:scale-[1.02] hover:shadow-2xl focus-within:ring-2 focus-within:ring-[--color-accent] focus-within:ring-offset-2"
+      className="group relative flex flex-col overflow-hidden rounded-lg transition-all hover:-translate-y-[3px] hover:shadow-lg focus-within:ring-2 focus-within:ring-[--color-accent] focus-within:ring-offset-2"
       style={cardStyle}
     >
       {/* Dark gradient overlay for cover image cards */}
