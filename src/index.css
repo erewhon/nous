@@ -276,8 +276,24 @@ select:focus-visible {
 .graph-star {
   animation: graph-twinkle 5s ease-in-out infinite;
 }
+
+/* Focus halo — the pulsing accent ring on the focused constellation node */
+@keyframes graph-halo-pulse {
+  0%,
+  100% {
+    stroke-opacity: 0.5;
+  }
+  50% {
+    stroke-opacity: 0.18;
+  }
+}
+.graph-halo {
+  animation: graph-halo-pulse 4s var(--ease-inout) infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .graph-star {
+  .graph-star,
+  .graph-halo {
     animation: none;
   }
 }

@@ -47,6 +47,23 @@ interface GraphViewProps {
 // Node type thresholds
 const HUB_THRESHOLD = 5; // Nodes with 5+ connections are hubs
 
+// First readable text from a page's blocks, for the focus card excerpt.
+function pageExcerpt(page: Page | undefined): string {
+  if (!page?.content?.blocks) return "";
+  for (const block of page.content.blocks) {
+    const t = (block as { data?: { text?: unknown } }).data?.text;
+    if (typeof t === "string" && t.trim()) {
+      const div = document.createElement("div");
+      div.innerHTML = t;
+      const plain = (div.textContent || "").replace(/\s+/g, " ").trim();
+      if (plain) {
+        return plain.length > 150 ? plain.slice(0, 150).trimEnd() + "\u2026" : plain;
+      }
+    }
+  }
+  return "";
+}
+
 export function GraphView({ onClose, onNodeClick }: GraphViewProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -281,6 +298,38 @@ export function GraphView({ onClose, onNodeClick }: GraphViewProps) {
     setFocusedNodeId(null);
   }, []);
 
+  // Glass-chrome plumbing: zoom controls drive the d3 zoom behavior captured
+  // by the render effect; the % readout updates through a ref (no re-render
+  // per zoom tick).
+  const zoomRef = useRef<{
+    svg: d3.Selection<SVGSVGElement, unknown, null, undefined>;
+    zoom: d3.ZoomBehavior<SVGSVGElement, unknown>;
+  } | null>(null);
+  const zoomPctRef = useRef<HTMLSpanElement | null>(null);
+
+  const zoomBy = useCallback((k: number) => {
+    const z = zoomRef.current;
+    if (z) z.svg.transition().duration(190).call(z.zoom.scaleBy, k);
+  }, []);
+  const zoomReset = useCallback(() => {
+    const z = zoomRef.current;
+    if (z) z.svg.transition().duration(260).call(z.zoom.transform, d3.zoomIdentity);
+  }, []);
+
+  // Focus card data
+  const focusedNode = useMemo(
+    () =>
+      focusedNodeId
+        ? graphData.nodes.find((n) => n.id === focusedNodeId) ?? null
+        : null,
+    [graphData, focusedNodeId]
+  );
+  const focusedPage = useMemo(
+    () => (focusedNodeId ? pages.find((p) => p.id === focusedNodeId) : undefined),
+    [pages, focusedNodeId]
+  );
+  const focusedExcerpt = useMemo(() => pageExcerpt(focusedPage), [focusedPage]);
+
   // Get node color based on type and state
   const getNodeColor = useCallback((node: GraphNode, isHighlighted: boolean) => {
     if (node.isSelected) return themeColor("--color-accent", "#8b5cf6");
@@ -395,9 +444,15 @@ export function GraphView({ onClose, onNodeClick }: GraphViewProps) {
       .scaleExtent([0.1, 4])
       .on("zoom", (event) => {
         g.attr("transform", event.transform);
+        if (zoomPctRef.current) {
+          zoomPctRef.current.textContent = `${Math.round(
+            (event.transform as d3.ZoomTransform).k * 100
+          )}%`;
+        }
       });
 
     svg.call(zoom);
+    zoomRef.current = { svg, zoom };
 
     // Create force simulation
     const simulation = d3
@@ -470,6 +525,22 @@ export function GraphView({ onClose, onNodeClick }: GraphViewProps) {
       })
       .attr("stroke-width", (d) => highlightedNodes.has(d.id) ? 3 : 2);
 
+    // Focus halo — a pulsing accent ring around the focused node (mockup
+    // .halo; the pulse lives in index.css and dies under reduced-motion).
+    node
+      .filter((d) => d.id === focusedNodeId)
+      .append("circle")
+      .attr("class", "graph-halo")
+      .attr("r", (d) => {
+        const baseSize = 10;
+        const connectionBonus = Math.min((d.outgoingCount + d.incomingCount) * 1.5, 12);
+        return baseSize + connectionBonus + 7;
+      })
+      .attr("fill", "none")
+      .attr("stroke", themeColor("--color-accent", "#ab87fc"))
+      .attr("stroke-width", 1.5)
+      .attr("pointer-events", "none");
+
     // Node type indicator (small icon/badge)
     node
       .filter((d) => d.nodeType === "orphan")
@@ -492,19 +563,34 @@ export function GraphView({ onClose, onNodeClick }: GraphViewProps) {
       .attr("pointer-events", "none")
       .text("H");
 
-    // Node labels
+    // Node labels — the focused node reads as a chapter heading (Cormorant,
+    // larger, primary), everything else stays quiet DM Sans 11px.
     node
       .append("text")
-      .text((d) => d.title.length > 20 ? d.title.slice(0, 18) + "..." : d.title)
+      .text((d) =>
+        d.id === focusedNodeId
+          ? d.title
+          : d.title.length > 20
+            ? d.title.slice(0, 18) + "..."
+            : d.title
+      )
       .attr("x", 0)
       .attr("y", (d) => {
         const baseSize = 10;
         const connectionBonus = Math.min((d.outgoingCount + d.incomingCount) * 1.5, 12);
-        return baseSize + connectionBonus + 14;
+        return baseSize + connectionBonus + (d.id === focusedNodeId ? 22 : 14);
       })
       .attr("text-anchor", "middle")
-      .attr("fill", themeColor("--color-text-secondary", "#a6adc8"))
-      .attr("font-size", "11px")
+      .attr("fill", (d) =>
+        d.id === focusedNodeId
+          ? themeColor("--color-text-primary", "#ece7de")
+          : themeColor("--color-text-secondary", "#a6adc8")
+      )
+      .attr("font-size", (d) => (d.id === focusedNodeId ? "17px" : "11px"))
+      .attr("font-weight", (d) => (d.id === focusedNodeId ? 600 : null))
+      .style("font-family", (d) =>
+        d.id === focusedNodeId ? "var(--font-display)" : null
+      )
       .attr("pointer-events", "none");
 
     // Click handler
@@ -604,46 +690,74 @@ export function GraphView({ onClose, onNodeClick }: GraphViewProps) {
     return () => {
       simulation.stop();
     };
-  }, [filteredData, dimensions, highlightedNodes, getNodeColor, onNodeClick, handleFocusNode, themeMode, themeScheme]);
+  }, [filteredData, dimensions, highlightedNodes, getNodeColor, onNodeClick, handleFocusNode, themeMode, themeScheme, focusedNodeId]);
 
   return (
     <div
-      className="fixed inset-0 z-50 flex flex-col"
+      className="fixed inset-0 z-50"
       style={{ backgroundColor: "var(--graph-bg, var(--color-bg-primary))" }}
     >
-      {/* Header with toolbar */}
+      {/* Stage — the constellation runs full-bleed under the glass chrome */}
+      <div ref={containerRef} className="absolute inset-0 overflow-hidden">
+        {filteredData.nodes.length === 0 ? (
+          <div className="flex h-full items-center justify-center">
+            <div className="text-center">
+              <div className="mb-4 text-4xl opacity-20">
+                {showOrphansOnly ? "\u{1F3DD}\uFE0F" : "\u{1F578}\uFE0F"}
+              </div>
+              <p style={{ color: "var(--color-text-muted)" }}>
+                {showOrphansOnly
+                  ? "No orphaned pages found. All pages are connected!"
+                  : pages.length === 0
+                  ? "No pages to display. Create some pages first."
+                  : "No pages match your search."}
+              </p>
+            </div>
+          </div>
+        ) : (
+          <svg ref={svgRef} className="h-full w-full" />
+        )}
+      </div>
+
+      {/* Topbar — translucent glass over the sky */}
       <div
-        className="flex items-center justify-between border-b px-4 py-3"
-        style={{ borderColor: "var(--color-border)" }}
+        className="absolute inset-x-0 top-0 z-10 flex items-center justify-between gap-3 px-4"
+        style={{
+          height: 52,
+          background:
+            "color-mix(in srgb, var(--graph-bg, var(--color-bg-primary)) 78%, transparent)",
+          backdropFilter: "blur(10px)",
+          WebkitBackdropFilter: "blur(10px)",
+          borderBottom: "1px solid var(--color-border-muted)",
+        }}
       >
-        <div className="flex items-center gap-3">
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="20"
-            height="20"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            style={{ color: "var(--color-accent)" }}
-          >
-            <circle cx="12" cy="12" r="3" />
-            <circle cx="19" cy="5" r="2" />
-            <circle cx="5" cy="19" r="2" />
-            <line x1="14.5" y1="9.5" x2="17.5" y2="6.5" />
-            <line x1="9.5" y1="14.5" x2="6.5" y2="17.5" />
-          </svg>
-          <h2
-            className="text-lg font-semibold"
-            style={{ color: "var(--color-text-primary)" }}
-          >
-            Graph View
-          </h2>
+        <div className="flex min-w-0 items-center gap-4">
+          <div className="flex min-w-0 items-baseline gap-3">
+            <h2
+              className="whitespace-nowrap"
+              style={{
+                fontFamily: "var(--font-display)",
+                fontWeight: 600,
+                fontSize: 19,
+                color: "var(--color-text-primary)",
+              }}
+            >
+              The constellation
+            </h2>
+            <span
+              className="whitespace-nowrap text-xs"
+              style={{ color: "var(--color-text-muted)" }}
+            >
+              {filteredData.nodes.length}
+              {filteredData.nodes.length !== graphData.nodes.length
+                ? ` of ${graphData.nodes.length}`
+                : ""}{" "}
+              pages {"\u00b7"} {filteredData.links.length} links
+            </span>
+          </div>
 
           {/* Search box */}
-          <div className="relative ml-4">
+          <div className="relative">
             <input
               type="text"
               value={searchQuery}
@@ -671,7 +785,7 @@ export function GraphView({ onClose, onNodeClick }: GraphViewProps) {
           </div>
 
           {/* Filters */}
-          <div className="ml-4 flex items-center gap-2">
+          <div className="flex items-center gap-2">
             <button
               onClick={() => setShowOrphansOnly(!showOrphansOnly)}
               className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors"
@@ -730,211 +844,378 @@ export function GraphView({ onClose, onNodeClick }: GraphViewProps) {
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          <span
-            className="text-sm"
-            style={{ color: "var(--color-text-muted)" }}
-          >
-            {filteredData.nodes.length} pages
-            {filteredData.nodes.length !== graphData.nodes.length && (
-              <span className="ml-1">
-                (of {graphData.nodes.length})
-              </span>
-            )}
-          </span>
-          <button
-            onClick={onClose}
-            className="rounded p-2 transition-colors hover:opacity-80"
-            style={{
-              backgroundColor: "var(--color-bg-tertiary)",
-              color: "var(--color-text-muted)",
-            }}
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
-          </button>
-        </div>
-      </div>
-
-      {/* Main content area */}
-      <div className="relative flex flex-1 overflow-hidden">
-        {/* Stats panel */}
-        {showStats && (
-          <div
-            className="absolute left-4 top-4 z-10 w-64 rounded-lg border p-4 shadow-lg"
-            style={{
-              backgroundColor: "var(--color-bg-secondary)",
-              borderColor: "var(--color-border)",
-            }}
-          >
-            <h3
-              className="mb-3 flex items-center gap-2 text-sm font-medium"
-              style={{ color: "var(--color-text-primary)" }}
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M3 3v18h18" />
-                <path d="M18 17V9" />
-                <path d="M13 17V5" />
-                <path d="M8 17v-3" />
-              </svg>
-              Graph Statistics
-            </h3>
-            <div className="space-y-2 text-xs">
-              <div className="flex justify-between">
-                <span style={{ color: "var(--color-text-muted)" }}>Total Pages</span>
-                <span className="font-medium" style={{ color: "var(--color-text-primary)" }}>{stats.totalNodes}</span>
-              </div>
-              <div className="flex justify-between">
-                <span style={{ color: "var(--color-text-muted)" }}>Total Links</span>
-                <span className="font-medium" style={{ color: "var(--color-text-primary)" }}>{stats.totalLinks}</span>
-              </div>
-              <div className="flex justify-between">
-                <span style={{ color: "var(--color-text-muted)" }}>Avg. Connections</span>
-                <span className="font-medium" style={{ color: "var(--color-text-primary)" }}>{stats.avgConnections.toFixed(1)}</span>
-              </div>
-              <div
-                className="my-2 border-t"
-                style={{ borderColor: "var(--color-border)" }}
-              />
-              <div className="flex justify-between">
-                <span className="flex items-center gap-1.5">
-                  <span className="h-2 w-2 rounded-full bg-red-500" />
-                  <span style={{ color: "var(--color-text-muted)" }}>Orphans</span>
-                </span>
-                <span className="font-medium text-red-400">{stats.orphanCount}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="flex items-center gap-1.5">
-                  <span className="h-2 w-2 rounded-full bg-green-500" />
-                  <span style={{ color: "var(--color-text-muted)" }}>Hubs (5+ links)</span>
-                </span>
-                <span className="font-medium text-green-400">{stats.hubCount}</span>
-              </div>
-              {stats.mostConnected && stats.mostConnected.count > 0 && (
-                <>
-                  <div
-                    className="my-2 border-t"
-                    style={{ borderColor: "var(--color-border)" }}
-                  />
-                  <div>
-                    <span style={{ color: "var(--color-text-muted)" }}>Most Connected</span>
-                    <div className="mt-1 flex items-center justify-between">
-                      <span
-                        className="max-w-[140px] truncate font-medium"
-                        style={{ color: "var(--color-text-primary)" }}
-                      >
-                        {stats.mostConnected.title}
-                      </span>
-                      <span className="text-green-400">{stats.mostConnected.count}</span>
-                    </div>
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Search results indicator */}
-        {searchQuery && highlightedNodes.size > 0 && (
-          <div className="absolute left-1/2 top-4 z-10 -translate-x-1/2 rounded-md bg-amber-500/20 px-3 py-1.5 text-xs font-medium text-amber-400">
-            Found {highlightedNodes.size} matching page{highlightedNodes.size !== 1 ? "s" : ""}
-          </div>
-        )}
-
-        {/* Graph canvas */}
-        <div ref={containerRef} className="flex-1 overflow-hidden">
-          {filteredData.nodes.length === 0 ? (
-            <div className="flex h-full items-center justify-center">
-              <div className="text-center">
-                <div className="mb-4 text-4xl opacity-20">
-                  {showOrphansOnly ? "🏝️" : "🕸️"}
-                </div>
-                <p style={{ color: "var(--color-text-muted)" }}>
-                  {showOrphansOnly
-                    ? "No orphaned pages found. All pages are connected!"
-                    : pages.length === 0
-                    ? "No pages to display. Create some pages first."
-                    : "No pages match your search."}
-                </p>
-              </div>
-            </div>
-          ) : (
-            <svg ref={svgRef} className="h-full w-full" />
-          )}
-        </div>
-      </div>
-
-      {/* Enhanced legend */}
-      <div
-        className="border-t px-4 py-2"
-        style={{ borderColor: "var(--color-border)" }}
-      >
-        <div
-          className="flex flex-wrap items-center gap-x-6 gap-y-1 text-xs"
-          style={{ color: "var(--color-text-muted)" }}
+        <button
+          onClick={onClose}
+          className="rounded p-2 transition-colors hover:opacity-80"
+          style={{
+            backgroundColor: "var(--color-bg-tertiary)",
+            color: "var(--color-text-muted)",
+          }}
         >
-          <div className="flex items-center gap-2">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </button>
+      </div>
+
+      {/* Stats panel — floating glass */}
+      {showStats && (
+        <div
+          className="absolute left-4 top-16 z-10 w-64 p-4"
+          style={{
+            background:
+              "color-mix(in srgb, var(--color-bg-panel) 88%, transparent)",
+            backdropFilter: "blur(12px)",
+            WebkitBackdropFilter: "blur(12px)",
+            border: "1px solid var(--color-border)",
+            borderRadius: "var(--radius-lg)",
+            boxShadow: "var(--shadow-3)",
+          }}
+        >
+          <h3
+            className="mb-3 flex items-center gap-2 text-sm font-medium"
+            style={{ color: "var(--color-text-primary)" }}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M3 3v18h18" />
+              <path d="M18 17V9" />
+              <path d="M13 17V5" />
+              <path d="M8 17v-3" />
+            </svg>
+            Graph Statistics
+          </h3>
+          <div className="space-y-2 text-xs">
+            <div className="flex justify-between">
+              <span style={{ color: "var(--color-text-muted)" }}>Total Pages</span>
+              <span className="font-medium" style={{ color: "var(--color-text-primary)" }}>{stats.totalNodes}</span>
+            </div>
+            <div className="flex justify-between">
+              <span style={{ color: "var(--color-text-muted)" }}>Total Links</span>
+              <span className="font-medium" style={{ color: "var(--color-text-primary)" }}>{stats.totalLinks}</span>
+            </div>
+            <div className="flex justify-between">
+              <span style={{ color: "var(--color-text-muted)" }}>Avg. Connections</span>
+              <span className="font-medium" style={{ color: "var(--color-text-primary)" }}>{stats.avgConnections.toFixed(1)}</span>
+            </div>
             <div
-              className="h-3 w-3 rounded-full"
-              style={{ backgroundColor: "var(--color-accent)" }}
+              className="my-2 border-t"
+              style={{ borderColor: "var(--color-border)" }}
             />
-            <span>Selected</span>
+            <div className="flex justify-between">
+              <span className="flex items-center gap-1.5">
+                <span
+                  className="h-2 w-2 rounded-full"
+                  style={{ backgroundColor: "var(--color-error)" }}
+                />
+                <span style={{ color: "var(--color-text-muted)" }}>Orphans</span>
+              </span>
+              <span className="font-medium" style={{ color: "var(--color-error)" }}>{stats.orphanCount}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="flex items-center gap-1.5">
+                <span
+                  className="h-2 w-2 rounded-full"
+                  style={{ backgroundColor: "var(--color-success)" }}
+                />
+                <span style={{ color: "var(--color-text-muted)" }}>Hubs (5+ links)</span>
+              </span>
+              <span className="font-medium" style={{ color: "var(--color-success)" }}>{stats.hubCount}</span>
+            </div>
+            {stats.mostConnected && stats.mostConnected.count > 0 && (
+              <>
+                <div
+                  className="my-2 border-t"
+                  style={{ borderColor: "var(--color-border)" }}
+                />
+                <div>
+                  <span style={{ color: "var(--color-text-muted)" }}>Most Connected</span>
+                  <div className="mt-1 flex items-center justify-between">
+                    <span
+                      className="max-w-[140px] truncate font-medium"
+                      style={{ color: "var(--color-text-primary)" }}
+                    >
+                      {stats.mostConnected.title}
+                    </span>
+                    <span style={{ color: "var(--color-success)" }}>{stats.mostConnected.count}</span>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
-          <div className="flex items-center gap-2">
-            <div
-              className="h-3 w-3 rounded-full"
-              style={{ backgroundColor: "var(--color-success)" }}
-            />
-            <span>Hub (5+ links)</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div
-              className="h-3 w-3 rounded-full"
-              style={{ backgroundColor: "var(--color-accent)" }}
-            />
-            <span>Leaf (only incoming)</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div
-              className="h-3 w-3 rounded-full"
-              style={{ backgroundColor: "var(--color-error)" }}
-            />
-            <span>Orphan (no links)</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div
-              className="h-3 w-3 rounded-full"
-              style={{ backgroundColor: "var(--color-warning)" }}
-            />
-            <span>Search match</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div
-              className="w-6"
-              style={{ height: "2px", backgroundColor: "var(--color-success)" }}
-            />
-            <span>Bidirectional</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-6" style={{ height: "2px", backgroundImage: "repeating-linear-gradient(to right, var(--color-accent) 0, var(--color-accent) 4px, transparent 4px, transparent 7px)" }} />
-            <span>Block ref</span>
-          </div>
-          <span className="ml-auto">
-            Scroll: zoom | Drag: move nodes | Click: navigate | Double-click: focus
-          </span>
         </div>
+      )}
+
+      {/* Search results indicator */}
+      {searchQuery && highlightedNodes.size > 0 && (
+        <div
+          className="absolute left-1/2 top-16 z-10 -translate-x-1/2 rounded-md px-3 py-1.5 text-xs font-medium"
+          style={{
+            backgroundColor: "rgb(from var(--color-warning) r g b / 0.2)",
+            color: "var(--color-warning)",
+          }}
+        >
+          Found {highlightedNodes.size} matching page{highlightedNodes.size !== 1 ? "s" : ""}
+        </div>
+      )}
+
+      {/* Focus card — the glass reading card for the focused star */}
+      {focusedNode && (
+        <div
+          className="absolute right-4 top-16 z-10 overflow-hidden"
+          style={{
+            width: 250,
+            background:
+              "color-mix(in srgb, var(--color-bg-elevated) 92%, transparent)",
+            backdropFilter: "blur(12px)",
+            WebkitBackdropFilter: "blur(12px)",
+            border: "1px solid var(--color-border)",
+            borderRadius: "var(--radius-lg)",
+            boxShadow: "var(--shadow-3)",
+          }}
+        >
+          <div className="p-4">
+            <div
+              className="mb-1 flex items-center gap-1.5 font-semibold uppercase"
+              style={{
+                fontSize: 10.5,
+                letterSpacing: "0.09em",
+                color: "var(--color-accent)",
+              }}
+            >
+              <span
+                aria-hidden
+                style={{
+                  width: 7,
+                  height: 7,
+                  borderRadius: 2,
+                  backgroundColor: "var(--color-accent)",
+                }}
+              />
+              Focused page
+            </div>
+            <h3
+              style={{
+                fontFamily: "var(--font-display)",
+                fontWeight: 600,
+                fontSize: 22,
+                lineHeight: 1.15,
+                color: "var(--color-text-primary)",
+                marginBottom: 8,
+              }}
+            >
+              {focusedNode.title}
+            </h3>
+            {focusedExcerpt && (
+              <p
+                className="mb-3"
+                style={{
+                  fontSize: 12,
+                  lineHeight: 1.55,
+                  color: "var(--color-text-secondary)",
+                }}
+              >
+                {focusedExcerpt}
+              </p>
+            )}
+            <div
+              className="flex gap-3"
+              style={{ fontSize: 11, color: "var(--color-text-muted)" }}
+            >
+              <span>
+                {"\u2192"}{" "}
+                <b
+                  style={{
+                    fontFamily: "var(--font-mono)",
+                    fontWeight: 500,
+                    fontSize: 10.5,
+                    color: "var(--color-text-secondary)",
+                  }}
+                >
+                  {focusedNode.outgoingCount}
+                </b>{" "}
+                outgoing
+              </span>
+              <span>
+                {"\u2190"}{" "}
+                <b
+                  style={{
+                    fontFamily: "var(--font-mono)",
+                    fontWeight: 500,
+                    fontSize: 10.5,
+                    color: "var(--color-text-secondary)",
+                  }}
+                >
+                  {focusedNode.incomingCount}
+                </b>{" "}
+                incoming
+              </span>
+            </div>
+          </div>
+          <div
+            className="flex"
+            style={{ borderTop: "1px solid var(--color-border-muted)" }}
+          >
+            <button
+              onClick={() => onNodeClick?.(focusedNode.id)}
+              className="flex-1 py-2 text-xs font-medium transition-colors hover:bg-[--color-bg-tertiary]"
+              style={{ color: "var(--color-accent)" }}
+            >
+              Open
+            </button>
+            <button
+              onClick={clearFocus}
+              className="flex-1 py-2 text-xs font-medium transition-colors hover:bg-[--color-bg-tertiary]"
+              style={{
+                color: "var(--color-text-secondary)",
+                borderLeft: "1px solid var(--color-border-muted)",
+              }}
+            >
+              Exit focus
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Legend — the floating pill */}
+      <div
+        className="absolute bottom-4 left-4 z-10 flex flex-wrap items-center gap-x-4 gap-y-1"
+        style={{
+          background:
+            "color-mix(in srgb, var(--color-bg-panel) 85%, transparent)",
+          backdropFilter: "blur(10px)",
+          WebkitBackdropFilter: "blur(10px)",
+          border: "1px solid var(--color-border)",
+          borderRadius: "var(--radius-full)",
+          padding: "6px 14px",
+          fontSize: 11.5,
+          color: "var(--color-text-secondary)",
+        }}
+        title="Scroll: zoom | Drag: move nodes | Click: navigate | Double-click: focus"
+      >
+        <span className="inline-flex items-center gap-1.5">
+          <span
+            className="h-2 w-2 rounded-full"
+            style={{ backgroundColor: "var(--color-accent)" }}
+          />
+          Selected
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span
+            className="h-2 w-2 rounded-full"
+            style={{ backgroundColor: "var(--color-success)" }}
+          />
+          Hub
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span
+            className="h-2 w-2 rounded-full"
+            style={{ backgroundColor: "var(--color-accent)" }}
+          />
+          Leaf
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span
+            className="h-2 w-2 rounded-full"
+            style={{ backgroundColor: "var(--color-error)" }}
+          />
+          Orphan
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span
+            className="h-2 w-2 rounded-full"
+            style={{ backgroundColor: "var(--color-warning)" }}
+          />
+          Match
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span
+            className="w-5"
+            style={{ height: 2, backgroundColor: "var(--color-success)" }}
+          />
+          Bidirectional
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <span
+            className="w-5"
+            style={{
+              height: 2,
+              backgroundImage:
+                "repeating-linear-gradient(to right, var(--color-accent) 0, var(--color-accent) 4px, transparent 4px, transparent 7px)",
+            }}
+          />
+          Block ref
+        </span>
+      </div>
+
+      {/* Zoom stack */}
+      <div
+        className="absolute bottom-4 right-4 z-10 flex flex-col overflow-hidden"
+        style={{
+          background:
+            "color-mix(in srgb, var(--color-bg-panel) 85%, transparent)",
+          backdropFilter: "blur(10px)",
+          WebkitBackdropFilter: "blur(10px)",
+          border: "1px solid var(--color-border)",
+          borderRadius: "var(--radius-md)",
+          boxShadow: "var(--shadow-2)",
+        }}
+      >
+        <button
+          onClick={() => zoomBy(1.4)}
+          className="flex items-center justify-center transition-colors hover:bg-[--color-bg-tertiary]"
+          style={{ width: 34, height: 32, color: "var(--color-text-secondary)", fontSize: 15 }}
+          title="Zoom in"
+        >
+          +
+        </button>
+        <span
+          ref={zoomPctRef}
+          className="flex items-center justify-center"
+          style={{
+            width: 34,
+            height: 24,
+            fontFamily: "var(--font-mono)",
+            fontSize: 9.5,
+            color: "var(--color-text-muted)",
+            borderTop: "1px solid var(--color-border-muted)",
+            borderBottom: "1px solid var(--color-border-muted)",
+          }}
+        >
+          100%
+        </span>
+        <button
+          onClick={() => zoomBy(1 / 1.4)}
+          className="flex items-center justify-center transition-colors hover:bg-[--color-bg-tertiary]"
+          style={{ width: 34, height: 32, color: "var(--color-text-secondary)", fontSize: 15 }}
+          title="Zoom out"
+        >
+          {"\u2212"}
+        </button>
+        <button
+          onClick={zoomReset}
+          className="flex items-center justify-center transition-colors hover:bg-[--color-bg-tertiary]"
+          style={{
+            width: 34,
+            height: 32,
+            color: "var(--color-text-secondary)",
+            fontSize: 13,
+            borderTop: "1px solid var(--color-border-muted)",
+          }}
+          title="Reset zoom"
+        >
+          {"\u2302"}
+        </button>
       </div>
     </div>
   );
