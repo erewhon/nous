@@ -91,6 +91,10 @@
      reads these defaults) — every hover/focus transition gets the "settle" ease. */
   --default-transition-duration: 160ms;
   --default-transition-timing-function: var(--ease-settle);
+
+  /* The constellation sits in a deeper well than the app (mockup: sidebar-dark
+     by night, panel-light by day) — tracks every scheme via the referenced vars. */
+  --graph-bg: var(--color-bg-sidebar);
 }
 
 /* Light-mode elevation — warmer, lower-alpha lamplight (shared chrome, all light themes) */
@@ -99,6 +103,7 @@
   --shadow-2: 0 2px 8px rgba(60, 45, 85, 0.1), 0 1px 2px rgba(60, 45, 85, 0.07);
   --shadow-3: 0 8px 28px rgba(60, 45, 85, 0.14), 0 2px 8px rgba(60, 45, 85, 0.08);
   --shadow-4: 0 20px 60px rgba(50, 35, 75, 0.2), 0 4px 16px rgba(50, 35, 75, 0.1);
+  --graph-bg: var(--color-bg-panel);
 }
 
 /* Roll the lamplight elevation onto Tailwind's shadow-* utilities app-wide.

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import * as d3 from "d3";
 import { usePageStore } from "../../stores/pageStore";
 import { useLinkStore } from "../../stores/linkStore";
+import { useThemeStore } from "../../stores/themeStore";
 import type { Page } from "../../types/page";
 
 // Resolve a CSS custom property to a concrete color. D3 sets colors on SVG
@@ -52,6 +53,13 @@ export function GraphView({ onClose, onNodeClick }: GraphViewProps) {
   const { pages, selectedPageId } = usePageStore();
   const { outgoingLinks, backlinks, blockRefBacklinks } = useLinkStore();
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
+
+  // D3 bakes themeColor() values into presentation attributes, and the star
+  // layer is gated on data-theme — so the render effect must re-run when the
+  // theme changes. applyTheme() runs synchronously in the store setters, so
+  // by the time the effect fires the CSS vars and data-theme are current.
+  const themeMode = useThemeStore((s) => s.settings.mode);
+  const themeScheme = useThemeStore((s) => s.settings.colorScheme);
 
   // UI state
   const [searchQuery, setSearchQuery] = useState("");
@@ -596,12 +604,12 @@ export function GraphView({ onClose, onNodeClick }: GraphViewProps) {
     return () => {
       simulation.stop();
     };
-  }, [filteredData, dimensions, highlightedNodes, getNodeColor, onNodeClick, handleFocusNode]);
+  }, [filteredData, dimensions, highlightedNodes, getNodeColor, onNodeClick, handleFocusNode, themeMode, themeScheme]);
 
   return (
     <div
       className="fixed inset-0 z-50 flex flex-col"
-      style={{ backgroundColor: "var(--color-bg-primary)" }}
+      style={{ backgroundColor: "var(--graph-bg, var(--color-bg-primary))" }}
     >
       {/* Header with toolbar */}
       <div
@@ -668,12 +676,17 @@ export function GraphView({ onClose, onNodeClick }: GraphViewProps) {
               onClick={() => setShowOrphansOnly(!showOrphansOnly)}
               className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors"
               style={{
-                backgroundColor: showOrphansOnly ? "rgba(239, 68, 68, 0.2)" : "var(--color-bg-secondary)",
+                backgroundColor: showOrphansOnly
+                  ? "rgb(from var(--color-error) r g b / 0.2)"
+                  : "var(--color-bg-secondary)",
                 color: showOrphansOnly ? "var(--color-error)" : "var(--color-text-muted)",
               }}
               title="Show only orphaned pages (no links)"
             >
-              <span className="h-2 w-2 rounded-full bg-red-500" />
+              <span
+                className="h-2 w-2 rounded-full"
+                style={{ backgroundColor: "var(--color-error)" }}
+              />
               Orphans
             </button>
 
@@ -682,7 +695,7 @@ export function GraphView({ onClose, onNodeClick }: GraphViewProps) {
                 onClick={clearFocus}
                 className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors"
                 style={{
-                  backgroundColor: "rgba(139, 92, 246, 0.2)",
+                  backgroundColor: "rgb(from var(--color-accent) r g b / 0.2)",
                   color: "var(--color-accent)",
                 }}
               >
@@ -699,7 +712,9 @@ export function GraphView({ onClose, onNodeClick }: GraphViewProps) {
               onClick={() => setShowStats(!showStats)}
               className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors"
               style={{
-                backgroundColor: showStats ? "rgba(139, 92, 246, 0.2)" : "var(--color-bg-secondary)",
+                backgroundColor: showStats
+                  ? "rgb(from var(--color-accent) r g b / 0.2)"
+                  : "var(--color-bg-secondary)",
                 color: showStats ? "var(--color-accent)" : "var(--color-text-muted)",
               }}
               title="Show graph statistics"
@@ -878,23 +893,38 @@ export function GraphView({ onClose, onNodeClick }: GraphViewProps) {
             <span>Selected</span>
           </div>
           <div className="flex items-center gap-2">
-            <div className="h-3 w-3 rounded-full bg-green-500" />
+            <div
+              className="h-3 w-3 rounded-full"
+              style={{ backgroundColor: "var(--color-success)" }}
+            />
             <span>Hub (5+ links)</span>
           </div>
           <div className="flex items-center gap-2">
-            <div className="h-3 w-3 rounded-full bg-purple-500" />
+            <div
+              className="h-3 w-3 rounded-full"
+              style={{ backgroundColor: "var(--color-accent)" }}
+            />
             <span>Leaf (only incoming)</span>
           </div>
           <div className="flex items-center gap-2">
-            <div className="h-3 w-3 rounded-full bg-red-500" />
+            <div
+              className="h-3 w-3 rounded-full"
+              style={{ backgroundColor: "var(--color-error)" }}
+            />
             <span>Orphan (no links)</span>
           </div>
           <div className="flex items-center gap-2">
-            <div className="h-3 w-3 rounded-full bg-amber-400" />
+            <div
+              className="h-3 w-3 rounded-full"
+              style={{ backgroundColor: "var(--color-warning)" }}
+            />
             <span>Search match</span>
           </div>
           <div className="flex items-center gap-2">
-            <div className="h-px w-6 bg-green-500" style={{ height: "2px" }} />
+            <div
+              className="w-6"
+              style={{ height: "2px", backgroundColor: "var(--color-success)" }}
+            />
             <span>Bidirectional</span>
           </div>
           <div className="flex items-center gap-2">
