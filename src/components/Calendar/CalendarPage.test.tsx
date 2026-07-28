@@ -165,6 +165,22 @@ describe("CalendarPage", () => {
     expect(screen.getByTitle(/HTTP 502/)).toBeTruthy();
   });
 
+  it("restores week mode from config and persists toggling back to month", async () => {
+    getFileContent.mockResolvedValue({
+      content: JSON.stringify({ version: 1, sources: [], viewMode: "week" }),
+    });
+    updateFileContent.mockResolvedValue(undefined);
+
+    render(<CalendarPage page={page} notebookId="nb-1" />);
+
+    expect(await screen.findByTestId("calendar-week-view")).toBeTruthy();
+
+    fireEvent.click(screen.getByText("Month"));
+    await waitFor(() => expect(updateFileContent).toHaveBeenCalledTimes(1));
+    const written = updateFileContent.mock.calls[0][2] as string;
+    expect(JSON.parse(written).viewMode).toBe("month");
+  });
+
   it("surfaces malformed config as an error without writing the file", async () => {
     getFileContent.mockResolvedValue({ content: "not json{" });
 

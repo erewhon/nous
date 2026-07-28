@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import type { CalendarItem } from "./calendarSources";
+import { CalendarItemPopover, type PopoverPos } from "./CalendarItemPopover";
 
 /**
  * The resolver window for a displayed month: the calendar grid padded to
@@ -40,34 +41,8 @@ function isSameDay(a: Date, b: Date): boolean {
   );
 }
 
-function formatTime(date: Date): string {
-  return date.toLocaleTimeString(undefined, {
-    hour: "numeric",
-    minute: "2-digit",
-  });
-}
-
-function formatItemTime(item: CalendarItem): string {
-  if (item.allDay) {
-    return isSameDay(item.start, item.end)
-      ? "All day"
-      : `All day · ${item.start.toLocaleDateString()} – ${item.end.toLocaleDateString()}`;
-  }
-  if (item.start.getTime() === item.end.getTime()) {
-    return `${item.start.toLocaleDateString()} ${formatTime(item.start)}`;
-  }
-  return `${item.start.toLocaleDateString()} ${formatTime(item.start)} – ${
-    isSameDay(item.start, item.end) ? "" : `${item.end.toLocaleDateString()} `
-  }${formatTime(item.end)}`;
-}
-
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const MAX_CHIPS = 3;
-
-interface PopoverPos {
-  x: number;
-  y: number;
-}
 
 interface CalendarMonthViewProps {
   /** Any date inside the displayed month. */
@@ -337,79 +312,13 @@ export function CalendarMonthView({
 
       {/* Item detail popover */}
       {detail && (
-        <>
-          <div className="fixed inset-0 z-40" onClick={() => setDetail(null)} />
-          <div
-            className="fixed z-50 w-80 rounded-lg border p-3 shadow-lg"
-            style={{
-              left: detail.pos.x,
-              top: detail.pos.y,
-              backgroundColor: "var(--color-bg-primary)",
-              borderColor: "var(--color-border)",
-            }}
-          >
-            <div className="flex items-start gap-2 mb-1">
-              <span
-                className="mt-1 h-2.5 w-2.5 rounded-full flex-shrink-0"
-                style={{ backgroundColor: detail.item.color }}
-              />
-              <div className="min-w-0">
-                <div
-                  className="text-sm font-medium"
-                  style={{ color: "var(--color-text-primary)" }}
-                >
-                  {detail.item.title}
-                </div>
-                <div
-                  className="text-xs"
-                  style={{ color: "var(--color-text-muted)" }}
-                >
-                  {formatItemTime(detail.item)}
-                  {detail.item.recurring ? " · Repeats" : ""}
-                </div>
-              </div>
-            </div>
-            {detail.item.location && (
-              <div
-                className="text-xs mb-1"
-                style={{ color: "var(--color-text-secondary)" }}
-              >
-                📍 {detail.item.location}
-              </div>
-            )}
-            {detail.item.description && (
-              <p
-                className="text-xs whitespace-pre-wrap mb-1 max-h-32 overflow-y-auto"
-                style={{ color: "var(--color-text-secondary)" }}
-              >
-                {detail.item.description}
-              </p>
-            )}
-            <div className="flex items-center justify-between mt-2">
-              <span
-                className="text-xs"
-                style={{ color: "var(--color-text-muted)" }}
-              >
-                {sourceNames?.[detail.item.sourceId] ?? ""}
-              </span>
-              {onOpenItem && detail.item.pageId && (
-                <button
-                  onClick={() => {
-                    onOpenItem(detail.item);
-                    setDetail(null);
-                  }}
-                  className="text-xs px-2 py-1 rounded"
-                  style={{
-                    backgroundColor: "var(--color-accent)",
-                    color: "white",
-                  }}
-                >
-                  Open
-                </button>
-              )}
-            </div>
-          </div>
-        </>
+        <CalendarItemPopover
+          item={detail.item}
+          pos={detail.pos}
+          sourceName={sourceNames?.[detail.item.sourceId]}
+          onOpenItem={onOpenItem}
+          onClose={() => setDetail(null)}
+        />
       )}
     </div>
   );

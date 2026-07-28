@@ -18,6 +18,7 @@ import {
 import { buildIcs } from "../../utils/icsExport";
 import { downloadTextFile, safeFilename } from "../../utils/download";
 import { CalendarMonthView, monthGridRange } from "./CalendarMonthView";
+import { CalendarWeekView, weekRange } from "./CalendarWeekView";
 import { CalendarSourcesPanel } from "./CalendarSourcesPanel";
 import { EventQuickCreate } from "./EventQuickCreate";
 
@@ -213,16 +214,22 @@ export function CalendarPage({ page, notebookId, className = "" }: CalendarPageP
     const now = new Date();
     return new Date(now.getFullYear(), now.getMonth(), 1);
   });
+  const [weekAnchor, setWeekAnchor] = useState(() => new Date());
   const [showSources, setShowSources] = useState(false);
   const [quickCreate, setQuickCreate] = useState<{ date?: string } | null>(null);
   const [refresh, setRefresh] = useState({ token: 0, force: false });
 
-  const gridRange = useMemo(() => monthGridRange(month), [month]);
+  const viewMode = config?.viewMode ?? "month";
+  const window = useMemo(
+    () =>
+      viewMode === "week" ? weekRange(weekAnchor) : monthGridRange(month),
+    [viewMode, weekAnchor, month],
+  );
   const { items, sourceErrors, staleSources } = useCalendarItems(
     notebookId,
     config,
-    gridRange.start.getTime(),
-    gridRange.end.getTime(),
+    window.start.getTime(),
+    window.end.getTime(),
     refresh,
   );
 
@@ -381,6 +388,37 @@ export function CalendarPage({ page, notebookId, className = "" }: CalendarPageP
           ))}
         </div>
         <div className="flex items-center gap-1.5 flex-shrink-0">
+          <div
+            className="flex rounded-lg overflow-hidden border"
+            style={{ borderColor: "var(--color-border)" }}
+          >
+            <button
+              onClick={() => saveConfig({ ...config, viewMode: "month" })}
+              className="px-2 py-1 text-xs transition-colors"
+              style={{
+                backgroundColor:
+                  viewMode === "month" ? "var(--color-accent)" : "transparent",
+                color:
+                  viewMode === "month"
+                    ? "white"
+                    : "var(--color-text-secondary)",
+              }}
+            >
+              Month
+            </button>
+            <button
+              onClick={() => saveConfig({ ...config, viewMode: "week" })}
+              className="px-2 py-1 text-xs transition-colors"
+              style={{
+                backgroundColor:
+                  viewMode === "week" ? "var(--color-accent)" : "transparent",
+                color:
+                  viewMode === "week" ? "white" : "var(--color-text-secondary)",
+              }}
+            >
+              Week
+            </button>
+          </div>
           <button
             aria-label="Refresh sources"
             title="Refresh all sources (bypasses the subscription cache)"
@@ -462,16 +500,26 @@ export function CalendarPage({ page, notebookId, className = "" }: CalendarPageP
         </div>
       )}
 
-      {/* Month grid */}
+      {/* Calendar body */}
       <div className="flex-1 overflow-hidden">
-        <CalendarMonthView
-          month={month}
-          onMonthChange={setMonth}
-          items={items}
-          sourceNames={sourceNames}
-          onOpenItem={handleOpenItem}
-          onDayClick={(day) => setQuickCreate({ date: toDateKey(day) })}
-        />
+        {viewMode === "week" ? (
+          <CalendarWeekView
+            anchor={weekAnchor}
+            onAnchorChange={setWeekAnchor}
+            items={items}
+            sourceNames={sourceNames}
+            onOpenItem={handleOpenItem}
+          />
+        ) : (
+          <CalendarMonthView
+            month={month}
+            onMonthChange={setMonth}
+            items={items}
+            sourceNames={sourceNames}
+            onOpenItem={handleOpenItem}
+            onDayClick={(day) => setQuickCreate({ date: toDateKey(day) })}
+          />
+        )}
       </div>
     </div>
   );
