@@ -15,6 +15,7 @@ import {
   type CalendarItem,
 } from "./calendarSources";
 import { CalendarMonthView, monthGridRange } from "./CalendarMonthView";
+import { CalendarSourcesPanel } from "./CalendarSourcesPanel";
 
 /**
  * Loads and persists a calendar page's source config. The config is the
@@ -164,11 +165,15 @@ interface CalendarPageProps {
 }
 
 export function CalendarPage({ page, notebookId, className = "" }: CalendarPageProps) {
-  const { config, isLoading, error } = useCalendarConfig(notebookId, page.id);
+  const { config, isLoading, error, saveConfig } = useCalendarConfig(
+    notebookId,
+    page.id,
+  );
   const [month, setMonth] = useState(() => {
     const now = new Date();
     return new Date(now.getFullYear(), now.getMonth(), 1);
   });
+  const [showSources, setShowSources] = useState(false);
 
   const gridRange = useMemo(() => monthGridRange(month), [month]);
   const { items, sourceErrors, skippedSubscriptions } = useCalendarItems(
@@ -302,7 +307,26 @@ export function CalendarPage({ page, notebookId, className = "" }: CalendarPageP
             </span>
           )}
         </div>
+        <button
+          onClick={() => setShowSources(true)}
+          className="text-xs px-2 py-1 rounded border flex-shrink-0"
+          style={{
+            borderColor: "var(--color-border)",
+            color: "var(--color-text-secondary)",
+          }}
+        >
+          Sources
+        </button>
       </div>
+
+      {showSources && (
+        <CalendarSourcesPanel
+          notebookId={notebookId}
+          config={config}
+          onChange={saveConfig}
+          onClose={() => setShowSources(false)}
+        />
+      )}
 
       {/* Empty-config hint */}
       {config.sources.length === 0 && (
@@ -314,8 +338,8 @@ export function CalendarPage({ page, notebookId, className = "" }: CalendarPageP
             color: "var(--color-text-muted)",
           }}
         >
-          This calendar has no sources yet. Add databases with date properties
-          or ICS calendars as sources to see them here.
+          This calendar has no sources yet. Use the Sources button to add
+          databases with date properties or ICS calendars.
         </div>
       )}
 
