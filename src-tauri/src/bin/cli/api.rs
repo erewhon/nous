@@ -1860,6 +1860,7 @@ async fn update_page(
                     page.page_type,
                     PageType::Markdown
                         | PageType::Ics
+                        | PageType::Calendar
                         | PageType::Chat
                         | PageType::Jupyter
                         | PageType::Canvas
@@ -4845,6 +4846,7 @@ async fn put_file_content(
     match page.page_type {
         PageType::Markdown
         | PageType::Ics
+        | PageType::Calendar
         | PageType::Jupyter
         | PageType::Chat
         | PageType::Canvas

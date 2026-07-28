@@ -23,7 +23,7 @@ import { MarkdownEditor } from "../Markdown";
 import { PDFPageViewer } from "../PDF";
 import { JupyterViewer } from "../Jupyter";
 import { EpubReader } from "../Epub";
-import { CalendarViewer } from "../Calendar";
+import { CalendarViewer, CalendarPage } from "../Calendar";
 import { ChatPageRouter } from "./ChatPageRouter";
 import { CanvasEditor } from "../Canvas";
 import { DatabaseEditor, type DatabaseUndoRedoState } from "../Database";
@@ -886,6 +886,34 @@ export function EditorPaneContent({
                   notebookId={notebookId}
                   className="min-h-[calc(100vh-300px)]"
                   onUndoRedoStateChange={setDbUndoState}
+                />
+              </div>
+            </>
+          ) : selectedPage.pageType === "calendar" ? (
+            /* Aggregating calendar gets its own full-height container */
+            <>
+              <div className="relative">
+                <PageHeader
+                  page={selectedPage}
+                  isSaving={false}
+                  lastSaved={null}
+                  stats={null}
+                  zenMode={zenMode}
+                  onExitZenMode={() => setZenMode(false)}
+                  onEnterZenMode={() => setZenMode(true)}
+                  historyCount={0}
+                  canUndo={false}
+                  canRedo={false}
+                  onUndo={() => {}}
+                  onRedo={() => {}}
+                />
+              </div>
+              <div className="flex-1 overflow-hidden">
+                <CalendarPage
+                  key={selectedPage.id}
+                  page={selectedPage}
+                  notebookId={notebookId}
+                  className="h-full"
                 />
               </div>
             </>

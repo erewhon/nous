@@ -468,7 +468,8 @@ export function FolderTree({
     }
   }, [notebookId, sectionsEnabled, selectedSectionId, createPage]);
 
-  // Handle creating a calendar page
+  // Handle creating an aggregating calendar page (config-based; ICS file
+  // pages come from import/link, not this menu)
   const handleCreateCalendarPage = useCallback(async () => {
     try {
       const title = "New Calendar";
@@ -478,21 +479,21 @@ export function FolderTree({
         console.error("Failed to create calendar page");
         return;
       }
-      // Update the page to have .ics extension which will set pageType to ics
-      const { updatePage: storeUpdatePage } = usePageStore.getState();
-      await storeUpdatePage(notebookId, pageData.id, {
-        fileExtension: "ics",
-        pageType: "ics",
+      // Use api.updatePage directly so errors propagate (store method swallows them)
+      const updatedPage = await api.updatePage(notebookId, pageData.id, {
+        fileExtension: "calendar",
+        pageType: "calendar",
       });
-      // Initialize with empty iCalendar content
-      const icsContent = `BEGIN:VCALENDAR
-VERSION:2.0
-PRODID:-//Nous//Nous Calendar//EN
-CALSCALE:GREGORIAN
-METHOD:PUBLISH
-X-WR-CALNAME:${title}
-END:VCALENDAR`;
-      await api.updateFileContent(notebookId, pageData.id, icsContent);
+      usePageStore.setState((state) => ({
+        pages: state.pages.map((p) => (p.id === pageData.id ? updatedPage : p)),
+      }));
+      // Initialize with an empty source config
+      const { createDefaultCalendarConfig } = await import("../../types/calendar");
+      await api.updateFileContent(
+        notebookId,
+        pageData.id,
+        JSON.stringify(createDefaultCalendarConfig(), null, 2)
+      );
     } catch (err) {
       console.error("Failed to create calendar page:", err);
     }

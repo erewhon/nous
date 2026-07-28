@@ -33,6 +33,7 @@ export const PageTypeSchema = z.enum([
   "jupyter", // Jupyter notebook (.ipynb)
   "epub", // E-book (.epub)
   "ics", // Calendar file (.ics)
+  "calendar", // Aggregating calendar page (file content holds source config)
   "chat", // AI Chat conversation page (.chat)
   "canvas", // Infinite canvas/whiteboard (.canvas)
   "database", // Database/table view (.database)
