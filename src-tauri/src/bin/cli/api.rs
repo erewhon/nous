@@ -601,6 +601,7 @@ pub fn build_router(state: AppState, auth: AuthState) -> Router {
 
     Router::new()
         .route("/api/status", get(get_status))
+        .route("/api/ics-subscription", post(fetch_ics_subscription))
         .route("/api/search", get(search_pages))
         .route("/api/search/rebuild", post(rebuild_search_index))
         .route("/api/search/rag/configure", post(rag_configure))
@@ -4886,6 +4887,43 @@ async fn put_file_content(
 
     Ok(Json(ApiResponse {
         data: serde_json::json!({ "ok": true, "id": pg_id.to_string() }),
+    }))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct IcsSubscriptionBody {
+    url: String,
+    #[serde(default)]
+    max_age_secs: u64,
+}
+
+/// `POST /api/ics-subscription` — fetch a calendar subscription feed with
+/// on-disk caching. Mirrors the Tauri `fetch_ics_subscription` command so
+/// the web bundle has parity.
+async fn fetch_ics_subscription(
+    State(state): State<AppState>,
+    Json(body): Json<IcsSubscriptionBody>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let cache_dir = {
+        let storage = state.storage.lock().unwrap();
+        storage.cache_dir().join("ics-subscriptions")
+    };
+
+    // Blocking reqwest + file IO — keep it off the async runtime.
+    let result = tokio::task::spawn_blocking(move || {
+        nous_lib::ics_subscriptions::fetch_ics_subscription(
+            &cache_dir,
+            &body.url,
+            body.max_age_secs,
+        )
+    })
+    .await
+    .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+    .map_err(|e| api_err(StatusCode::BAD_GATEWAY, e))?;
+
+    Ok(Json(ApiResponse {
+        data: serde_json::json!(result),
     }))
 }
 

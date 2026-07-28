@@ -19,6 +19,7 @@ pub mod external_sources;
 mod flashcards;
 pub mod git;
 pub mod goals;
+pub mod ics_subscriptions;
 pub mod inbox;
 mod joplin;
 mod monitor;
@@ -550,6 +551,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             // Daemon API key (for frontend → daemon HTTP client)
             commands::get_daemon_api_key,
+            // ICS subscriptions (calendar pages)
+            commands::fetch_ics_subscription,
             // Notebook commands
             commands::list_notebooks,
             commands::get_notebook,

@@ -121,6 +121,11 @@ impl FileStorage {
     }
 
     /// Get the notebooks base directory
+    /// App-level cache directory (non-notebook data, e.g. ICS subscriptions).
+    pub fn cache_dir(&self) -> PathBuf {
+        self.base_path.join("cache")
+    }
+
     pub fn notebooks_base_dir(&self) -> PathBuf {
         self.base_path.join("notebooks")
     }
