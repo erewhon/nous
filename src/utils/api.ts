@@ -206,7 +206,7 @@ export async function updatePage(
       | "pdf"
       | "jupyter"
       | "epub"
-      | "calendar"
+      | "ics"
       | "chat"
       | "canvas"
       | "database"

@@ -78,7 +78,11 @@ pub enum PageType {
     Jupyter,
     /// E-book (.epub)
     Epub,
-    /// Calendar file (.ics)
+    /// Calendar file (.ics). Named "calendar" before 2026-07; legacy values
+    /// are repaired on load in FileStorage so "calendar" can be reused by the
+    /// aggregating calendar page type.
+    Ics,
+    /// Aggregating calendar page — content holds source config, not events
     Calendar,
     /// AI Chat conversation page (.chat)
     Chat,

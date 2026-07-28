@@ -478,11 +478,11 @@ export function FolderTree({
         console.error("Failed to create calendar page");
         return;
       }
-      // Update the page to have .ics extension which will set pageType to calendar
+      // Update the page to have .ics extension which will set pageType to ics
       const { updatePage: storeUpdatePage } = usePageStore.getState();
       await storeUpdatePage(notebookId, pageData.id, {
         fileExtension: "ics",
-        pageType: "calendar",
+        pageType: "ics",
       });
       // Initialize with empty iCalendar content
       const icsContent = `BEGIN:VCALENDAR

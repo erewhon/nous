@@ -1,20 +1,24 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
-import ICAL from "ical.js";
 import type { Page } from "../../types/page";
 import { useLinkedFileSync } from "../../hooks/useLinkedFileSync";
 import { LinkedFileChangedBanner } from "../LinkedFile";
 import * as api from "../../utils/api";
 import { useThemeStore } from "../../stores/themeStore";
+import {
+  getIcsCalendarName,
+  parseIcsEvents,
+  type IcsEvent,
+} from "../../utils/icsEvents";
 
-interface CalendarEvent {
-  id: string;
-  summary: string;
-  description?: string;
-  location?: string;
-  startDate: Date;
-  endDate: Date;
-  isAllDay: boolean;
-  recurrence?: string;
+function addMonths(date: Date, months: number): Date {
+  return new Date(date.getFullYear(), date.getMonth() + months, date.getDate());
+}
+
+// Recurrences are expanded over a bounded window; it widens on demand when
+// month navigation leaves it.
+function defaultParseWindow(): { start: Date; end: Date } {
+  const now = new Date();
+  return { start: addMonths(now, -1), end: addMonths(now, 12) };
 }
 
 interface CalendarViewerProps {
@@ -26,12 +30,13 @@ interface CalendarViewerProps {
 type ViewMode = "list" | "month";
 
 export function CalendarViewer({ page, notebookId, className = "" }: CalendarViewerProps) {
-  const [events, setEvents] = useState<CalendarEvent[]>([]);
+  const [events, setEvents] = useState<IcsEvent[]>([]);
   const [calendarName, setCalendarName] = useState<string>("");
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("list");
   const [selectedMonth, setSelectedMonth] = useState(new Date());
+  const [parseWindow, setParseWindow] = useState(defaultParseWindow);
   const [isReloading, setIsReloading] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   const resolvedMode = useThemeStore((state) => state.resolvedMode);
@@ -64,42 +69,10 @@ export function CalendarViewer({ page, notebookId, className = "" }: CalendarVie
 
       try {
         const result = await api.getFileContent(notebookId, page.id);
-        const jcalData = ICAL.parse(result.content);
-        const comp = new ICAL.Component(jcalData);
-
-        // Get calendar name
-        const calName = comp.getFirstPropertyValue("x-wr-calname") as string | null;
-        setCalendarName(calName || "Calendar");
-
-        // Parse events
-        const vevents = comp.getAllSubcomponents("vevent");
-        const parsedEvents: CalendarEvent[] = vevents.map((vevent) => {
-          const event = new ICAL.Event(vevent);
-          const startDate = event.startDate.toJSDate();
-          const endDate = event.endDate.toJSDate();
-
-          // Check if it's an all-day event
-          const isAllDay = event.startDate.isDate;
-
-          // Get recurrence rule if present
-          const rrule = vevent.getFirstPropertyValue("rrule") as ICAL.Recur | null;
-          const recurrence = rrule ? formatRecurrence(rrule) : undefined;
-
-          return {
-            id: event.uid,
-            summary: event.summary || "Untitled Event",
-            description: event.description || undefined,
-            location: event.location || undefined,
-            startDate,
-            endDate,
-            isAllDay,
-            recurrence,
-          };
-        });
-
-        // Sort by start date
-        parsedEvents.sort((a, b) => a.startDate.getTime() - b.startDate.getTime());
-        setEvents(parsedEvents);
+        setCalendarName(getIcsCalendarName(result.content) || "Calendar");
+        setEvents(
+          parseIcsEvents(result.content, parseWindow.start, parseWindow.end),
+        );
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load calendar");
         console.error("Failed to load calendar:", err);
@@ -109,7 +82,7 @@ export function CalendarViewer({ page, notebookId, className = "" }: CalendarVie
     };
 
     loadCalendar();
-  }, [notebookId, page.id, reloadKey]);
+  }, [notebookId, page.id, reloadKey, parseWindow]);
 
   // Filter events for selected month in month view
   const filteredEvents = useMemo(() => {
@@ -127,7 +100,7 @@ export function CalendarViewer({ page, notebookId, className = "" }: CalendarVie
 
   // Group events by date for list view
   const groupedEvents = useMemo(() => {
-    const groups: Map<string, CalendarEvent[]> = new Map();
+    const groups: Map<string, IcsEvent[]> = new Map();
 
     filteredEvents.forEach((event) => {
       const dateKey = event.startDate.toDateString();
@@ -142,7 +115,27 @@ export function CalendarViewer({ page, notebookId, className = "" }: CalendarVie
   }, [filteredEvents]);
 
   const navigateMonth = (delta: number) => {
-    setSelectedMonth((prev) => new Date(prev.getFullYear(), prev.getMonth() + delta, 1));
+    const next = new Date(
+      selectedMonth.getFullYear(),
+      selectedMonth.getMonth() + delta,
+      1,
+    );
+    const monthEnd = new Date(next.getFullYear(), next.getMonth() + 1, 0);
+    setSelectedMonth(next);
+    // Widen the expansion window (with a month of slack) if navigation left it,
+    // so recurring occurrences exist for the newly visible month.
+    setParseWindow((w) =>
+      next >= w.start && monthEnd <= w.end
+        ? w
+        : {
+            start: new Date(
+              Math.min(w.start.getTime(), addMonths(next, -1).getTime()),
+            ),
+            end: new Date(
+              Math.max(w.end.getTime(), addMonths(monthEnd, 1).getTime()),
+            ),
+          },
+    );
   };
 
   if (isLoading) {
@@ -373,7 +366,7 @@ export function CalendarViewer({ page, notebookId, className = "" }: CalendarVie
 }
 
 interface ListViewProps {
-  groupedEvents: { date: Date; events: CalendarEvent[] }[];
+  groupedEvents: { date: Date; events: IcsEvent[] }[];
   isDark: boolean;
 }
 
@@ -411,7 +404,7 @@ function ListView({ groupedEvents, isDark }: ListViewProps) {
 }
 
 interface MonthViewProps {
-  events: CalendarEvent[];
+  events: IcsEvent[];
   selectedMonth: Date;
   isDark: boolean;
 }
@@ -442,7 +435,7 @@ function MonthView({ events, selectedMonth, isDark }: MonthViewProps) {
     return daysArray;
   }, [selectedMonth]);
 
-  const getEventsForDay = (date: Date): CalendarEvent[] => {
+  const getEventsForDay = (date: Date): IcsEvent[] => {
     return events.filter((event) => {
       const eventDate = event.startDate;
       return (
@@ -536,7 +529,7 @@ function MonthView({ events, selectedMonth, isDark }: MonthViewProps) {
 }
 
 interface EventCardProps {
-  event: CalendarEvent;
+  event: IcsEvent;
   isDark: boolean;
 }
 
@@ -569,7 +562,7 @@ function EventCard({ event, isDark }: EventCardProps) {
               : `${formatTime(event.startDate)} - ${formatTime(event.endDate)}`}
           </p>
         </div>
-        {event.recurrence && (
+        {event.recurrenceLabel && (
           <span
             className="text-xs px-1.5 py-0.5 rounded ml-2 flex-shrink-0"
             style={{
@@ -577,7 +570,7 @@ function EventCard({ event, isDark }: EventCardProps) {
               color: "var(--color-text-muted)",
             }}
           >
-            {event.recurrence}
+            {event.recurrenceLabel}
           </span>
         )}
       </div>
@@ -642,37 +635,4 @@ function formatTime(date: Date): string {
     hour: "numeric",
     minute: "2-digit",
   });
-}
-
-function formatRecurrence(rrule: ICAL.Recur): string {
-  const freq = rrule.freq?.toLowerCase();
-  const interval = rrule.interval || 1;
-
-  if (interval === 1) {
-    switch (freq) {
-      case "daily":
-        return "Daily";
-      case "weekly":
-        return "Weekly";
-      case "monthly":
-        return "Monthly";
-      case "yearly":
-        return "Yearly";
-      default:
-        return "Repeats";
-    }
-  }
-
-  switch (freq) {
-    case "daily":
-      return `Every ${interval} days`;
-    case "weekly":
-      return `Every ${interval} weeks`;
-    case "monthly":
-      return `Every ${interval} months`;
-    case "yearly":
-      return `Every ${interval} years`;
-    default:
-      return "Repeats";
-  }
 }

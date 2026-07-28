@@ -1834,6 +1834,7 @@ async fn update_page(
             "pdf" => PageType::Pdf,
             "jupyter" => PageType::Jupyter,
             "epub" => PageType::Epub,
+            "ics" => PageType::Ics,
             "calendar" => PageType::Calendar,
             "chat" => PageType::Chat,
             "canvas" => PageType::Canvas,
@@ -1858,7 +1859,7 @@ async fn update_page(
                 let is_file_based = matches!(
                     page.page_type,
                     PageType::Markdown
-                        | PageType::Calendar
+                        | PageType::Ics
                         | PageType::Chat
                         | PageType::Jupyter
                         | PageType::Canvas
@@ -4843,7 +4844,7 @@ async fn put_file_content(
 
     match page.page_type {
         PageType::Markdown
-        | PageType::Calendar
+        | PageType::Ics
         | PageType::Jupyter
         | PageType::Chat
         | PageType::Canvas

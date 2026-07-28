@@ -295,6 +295,68 @@ impl FileStorage {
             .join(format!("{}.json", page_id))
     }
 
+    /// Repair the legacy `"calendar"` page type in raw page JSON.
+    ///
+    /// ICS file pages were typed `"calendar"` before 2026-07; that name now
+    /// belongs to the aggregating calendar page type. Flips the value to
+    /// `"ics"` only when the page carries ICS evidence (file extension or
+    /// source file), so genuine calendar pages are never rewritten. Returns
+    /// true when a repair was made.
+    fn repair_legacy_calendar_value(value: &mut serde_json::Value) -> bool {
+        // Page serializes with rename_all = "camelCase" — disk keys are
+        // pageType / fileExtension / sourceFile.
+        if value.get("pageType").and_then(|v| v.as_str()) != Some("calendar") {
+            return false;
+        }
+        let ext_is_ics = value
+            .get("fileExtension")
+            .and_then(|v| v.as_str())
+            .map(|e| e.eq_ignore_ascii_case("ics") || e.eq_ignore_ascii_case("ical"))
+            .unwrap_or(false);
+        let source_is_ics = value
+            .get("sourceFile")
+            .and_then(|v| v.as_str())
+            .map(|s| {
+                let s = s.to_ascii_lowercase();
+                s.ends_with(".ics") || s.ends_with(".ical")
+            })
+            .unwrap_or(false);
+        if !(ext_is_ics || source_is_ics) {
+            return false;
+        }
+        value["pageType"] = serde_json::Value::from("ics");
+        true
+    }
+
+    /// Parse a page's JSON, applying the legacy-calendar repair when needed.
+    /// Returns the page and whether the raw JSON was repaired (callers persist
+    /// repaired pages so the migration converges).
+    fn parse_page_repairing(content: &str) -> serde_json::Result<(Page, bool)> {
+        // Cheap pre-screen so healthy pages keep the single-parse hot path.
+        if content.contains("\"calendar\"") {
+            if let Ok(mut value) = serde_json::from_str::<serde_json::Value>(content) {
+                if Self::repair_legacy_calendar_value(&mut value) {
+                    return Ok((serde_json::from_value::<Page>(value)?, true));
+                }
+            }
+        }
+        Ok((serde_json::from_str::<Page>(content)?, false))
+    }
+
+    /// Persist a repaired page's raw JSON in the on-disk pretty format
+    /// (best-effort — the in-memory page is already correct either way).
+    fn persist_repaired_page(&self, page: &Page) {
+        let page_path = self.page_path(page.notebook_id, page.id);
+        match super::content_format::page_to_disk_json(page) {
+            Ok(json) => {
+                if let Err(e) = Self::atomic_write(&page_path, &json) {
+                    log::warn!("Failed to persist repaired page {}: {}", page.id, e);
+                }
+            }
+            Err(e) => log::warn!("Failed to serialize repaired page {}: {}", page.id, e),
+        }
+    }
+
     pub fn list_pages(&self, notebook_id: Uuid) -> Result<Vec<Page>> {
         let pages_dir = self.pages_dir(notebook_id);
 
@@ -319,7 +381,10 @@ impl FileStorage {
                 && !path.to_string_lossy().ends_with(".metadata.json")
             {
                 let content = fs::read_to_string(&path)?;
-                let page: Page = serde_json::from_str(&content)?;
+                let (page, repaired) = Self::parse_page_repairing(&content)?;
+                if repaired {
+                    self.persist_repaired_page(&page);
+                }
                 pages.push(page);
             }
         }
@@ -338,7 +403,10 @@ impl FileStorage {
         }
 
         let content = fs::read_to_string(&page_path)?;
-        let page: Page = serde_json::from_str(&content)?;
+        let (page, repaired) = Self::parse_page_repairing(&content)?;
+        if repaired {
+            self.persist_repaired_page(&page);
+        }
         Ok(page)
     }
 
@@ -2525,7 +2593,7 @@ impl FileStorage {
             "pdf" => Some(PageType::Pdf),
             "ipynb" => Some(PageType::Jupyter),
             "epub" => Some(PageType::Epub),
-            "ics" | "ical" => Some(PageType::Calendar),
+            "ics" | "ical" => Some(PageType::Ics),
             "chat" => Some(PageType::Chat),
             "canvas" => Some(PageType::Canvas),
             "html" | "htm" => Some(PageType::Html),
@@ -2796,7 +2864,10 @@ impl FileStorage {
         let page_path = self.page_path(notebook_id, page_id);
         if page_path.exists() {
             let content = fs::read_to_string(&page_path)?;
-            let page: Page = serde_json::from_str(&content)?;
+            let (page, repaired) = Self::parse_page_repairing(&content)?;
+            if repaired {
+                self.persist_repaired_page(&page);
+            }
             return Ok(page);
         }
 
@@ -2804,7 +2875,12 @@ impl FileStorage {
         let metadata_path = self.metadata_path(notebook_id, page_id);
         if metadata_path.exists() {
             let content = fs::read_to_string(&metadata_path)?;
-            let page: Page = serde_json::from_str(&content)?;
+            let (page, repaired) = Self::parse_page_repairing(&content)?;
+            if repaired {
+                if let Err(e) = self.update_page_metadata(&page) {
+                    log::warn!("Failed to persist repaired page {}: {}", page.id, e);
+                }
+            }
             return Ok(page);
         }
 
@@ -2835,7 +2911,10 @@ impl FileStorage {
             // Check for standard JSON pages
             if ext == Some("json") && !path.to_string_lossy().contains(".metadata.json") {
                 let content = fs::read_to_string(&path)?;
-                let page: Page = serde_json::from_str(&content)?;
+                let (page, repaired) = Self::parse_page_repairing(&content)?;
+                if repaired {
+                    self.persist_repaired_page(&page);
+                }
                 if !seen_ids.contains(&page.id) {
                     seen_ids.insert(page.id);
                     pages.push(page);
@@ -2844,7 +2923,12 @@ impl FileStorage {
             // Check for metadata files (file-based pages)
             else if path.to_string_lossy().ends_with(".metadata.json") {
                 let content = fs::read_to_string(&path)?;
-                let page: Page = serde_json::from_str(&content)?;
+                let (page, repaired) = Self::parse_page_repairing(&content)?;
+                if repaired {
+                    if let Err(e) = self.update_page_metadata(&page) {
+                        log::warn!("Failed to persist repaired page {}: {}", page.id, e);
+                    }
+                }
                 if !seen_ids.contains(&page.id) {
                     seen_ids.insert(page.id);
                     pages.push(page);
@@ -2912,11 +2996,17 @@ impl FileStorage {
         if is_encrypted_file(&content) {
             let key = key.ok_or(StorageError::EncryptedContentNoKey)?;
             let container: EncryptedContainer = serde_json::from_str(&content)?;
-            let page: Page = decrypt_json(&container, key)?;
+            // Legacy-calendar repair in memory only; re-encrypted on next save.
+            let mut value: serde_json::Value = decrypt_json(&container, key)?;
+            Self::repair_legacy_calendar_value(&mut value);
+            let page: Page = serde_json::from_value(value)?;
             Ok(page)
         } else {
             // Normal unencrypted page
-            let page: Page = serde_json::from_str(&content)?;
+            let (page, repaired) = Self::parse_page_repairing(&content)?;
+            if repaired {
+                self.persist_repaired_page(&page);
+            }
             Ok(page)
         }
     }
@@ -3000,17 +3090,25 @@ impl FileStorage {
                 // Check if encrypted
                 if is_encrypted_file(&content) {
                     if let Some(key) = key {
-                        // Decrypt and add
+                        // Decrypt and add. Legacy-calendar repair is applied
+                        // in memory only; the file is re-encrypted with the
+                        // fixed type on its next save.
                         if let Ok(container) = serde_json::from_str::<EncryptedContainer>(&content) {
-                            if let Ok(page) = decrypt_json::<Page>(&container, key) {
-                                pages.push(page);
+                            if let Ok(mut value) = decrypt_json::<serde_json::Value>(&container, key) {
+                                Self::repair_legacy_calendar_value(&mut value);
+                                if let Ok(page) = serde_json::from_value::<Page>(value) {
+                                    pages.push(page);
+                                }
                             }
                         }
                     }
                     // If no key provided, skip encrypted pages (they're locked)
                 } else {
                     // Normal unencrypted page
-                    let page: Page = serde_json::from_str(&content)?;
+                    let (page, repaired) = Self::parse_page_repairing(&content)?;
+                    if repaired {
+                        self.persist_repaired_page(&page);
+                    }
                     pages.push(page);
                 }
             }
@@ -3220,6 +3318,77 @@ impl FileStorage {
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    /// Legacy ICS pages were typed "calendar"; loading must repair them to
+    /// "ics" in memory AND on disk, since "calendar" now belongs to the
+    /// aggregating calendar page type.
+    #[test]
+    fn test_legacy_calendar_page_type_repaired_to_ics() {
+        let temp_dir = TempDir::new().unwrap();
+        let storage = FileStorage::new(temp_dir.path().to_path_buf());
+        storage.init().unwrap();
+
+        let notebook = storage
+            .create_notebook("Test".to_string(), NotebookType::default())
+            .unwrap();
+        let page = storage
+            .create_page(notebook.id, "Holidays".to_string())
+            .unwrap();
+
+        // Rewrite the page file as a legacy ICS page typed "calendar".
+        let page_path = storage.page_path(notebook.id, page.id);
+        let mut value: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&page_path).unwrap()).unwrap();
+        value["pageType"] = serde_json::Value::from("calendar");
+        value["fileExtension"] = serde_json::Value::from("ics");
+        fs::write(&page_path, serde_json::to_string_pretty(&value).unwrap()).unwrap();
+
+        // get_page repairs the type in memory...
+        let loaded = storage.get_page(notebook.id, page.id).unwrap();
+        assert_eq!(loaded.page_type, PageType::Ics);
+        assert_eq!(loaded.file_extension.as_deref(), Some("ics"));
+
+        // ...and persists the repair to disk.
+        let reparsed: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&page_path).unwrap()).unwrap();
+        assert_eq!(reparsed["pageType"], "ics");
+
+        // list_pages sees the repaired page too.
+        let pages = storage.list_pages(notebook.id).unwrap();
+        assert!(pages
+            .iter()
+            .any(|p| p.id == page.id && p.page_type == PageType::Ics));
+    }
+
+    /// A "calendar" page WITHOUT ICS evidence is the new aggregating calendar
+    /// type and must never be rewritten by the legacy repair.
+    #[test]
+    fn test_calendar_page_without_ics_evidence_not_repaired() {
+        let temp_dir = TempDir::new().unwrap();
+        let storage = FileStorage::new(temp_dir.path().to_path_buf());
+        storage.init().unwrap();
+
+        let notebook = storage
+            .create_notebook("Test".to_string(), NotebookType::default())
+            .unwrap();
+        let page = storage
+            .create_page(notebook.id, "My Calendar".to_string())
+            .unwrap();
+
+        let page_path = storage.page_path(notebook.id, page.id);
+        let mut value: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&page_path).unwrap()).unwrap();
+        value["pageType"] = serde_json::Value::from("calendar");
+        fs::write(&page_path, serde_json::to_string_pretty(&value).unwrap()).unwrap();
+
+        let loaded = storage.get_page(notebook.id, page.id).unwrap();
+        assert_eq!(loaded.page_type, PageType::Calendar);
+
+        // Disk copy still says "calendar".
+        let reparsed: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&page_path).unwrap()).unwrap();
+        assert_eq!(reparsed["pageType"], "calendar");
+    }
 
     /// Test that asset paths are correctly generated.
     ///

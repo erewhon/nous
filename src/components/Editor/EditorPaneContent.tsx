@@ -987,7 +987,7 @@ export function EditorPaneContent({
                         className="min-h-[calc(100vh-300px)]"
                       />
                     )}
-                    {selectedPage.pageType === "calendar" && (
+                    {selectedPage.pageType === "ics" && (
                       <CalendarViewer
                         key={selectedPage.id}
                         page={selectedPage}

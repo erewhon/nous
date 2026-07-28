@@ -19,6 +19,7 @@ fn page_type_to_str(page_type: &PageType) -> &'static str {
         PageType::Pdf => "pdf",
         PageType::Jupyter => "jupyter",
         PageType::Epub => "epub",
+        PageType::Ics => "ics",
         PageType::Calendar => "calendar",
         PageType::Chat => "chat",
         PageType::Canvas => "canvas",
@@ -413,7 +414,7 @@ impl SearchIndex {
         let content = match page.page_type {
             PageType::Jupyter => Self::extract_text_from_jupyter(file_content),
             PageType::Markdown => file_content.to_string(),
-            PageType::Calendar => Self::extract_text_from_calendar(file_content),
+            PageType::Ics => Self::extract_text_from_calendar(file_content),
             PageType::Pdf | PageType::Epub => Self::extract_text_from_markdown(file_content),
             PageType::Database => Self::extract_text_from_database(file_content),
             PageType::Html => crate::storage::html_utils::html_to_searchable_text(file_content),

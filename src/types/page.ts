@@ -32,7 +32,7 @@ export const PageTypeSchema = z.enum([
   "pdf", // PDF document
   "jupyter", // Jupyter notebook (.ipynb)
   "epub", // E-book (.epub)
-  "calendar", // Calendar file (.ics)
+  "ics", // Calendar file (.ics)
   "chat", // AI Chat conversation page (.chat)
   "canvas", // Infinite canvas/whiteboard (.canvas)
   "database", // Database/table view (.database)
