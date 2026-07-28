@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { generateId } from "../utils/generateId";
 
 // Property types supported by database columns
 export const PropertyTypeSchema = z.enum([
@@ -370,7 +371,7 @@ export function migrateDatabaseContent(raw: unknown): DatabaseContentV2 {
       rows: v1.rows,
       views: [
         {
-          id: crypto.randomUUID(),
+          id: generateId(),
           name: "Table",
           type: "table",
           sorts: v1.sorts,
@@ -392,7 +393,7 @@ export function createDefaultDatabaseContent(): DatabaseContentV2 {
     version: 2,
     properties: [
       {
-        id: crypto.randomUUID(),
+        id: generateId(),
         name: "Name",
         type: "text",
       },
@@ -400,7 +401,7 @@ export function createDefaultDatabaseContent(): DatabaseContentV2 {
     rows: [],
     views: [
       {
-        id: crypto.randomUUID(),
+        id: generateId(),
         name: "Table",
         type: "table",
         sorts: [],
@@ -1011,7 +1012,7 @@ export function createDefaultRow(properties: PropertyDef[]): DatabaseRow {
       cells[prop.id] = prop.defaultValue;
     }
   }
-  return { id: crypto.randomUUID(), cells, createdAt: now, updatedAt: now };
+  return { id: generateId(), cells, createdAt: now, updatedAt: now };
 }
 
 // Create database content from an object type
@@ -1019,7 +1020,7 @@ export function createDatabaseFromObjectType(
   objectType: ObjectType
 ): DatabaseContentV2 {
   const properties: PropertyDef[] = objectType.properties.map((p) => ({
-    id: crypto.randomUUID(),
+    id: generateId(),
     name: p.name,
     type: p.type,
     ...(p.options ? { options: p.options } : {}),
@@ -1088,7 +1089,7 @@ export function createDatabaseFromObjectType(
     rows: [],
     views: [
       {
-        id: crypto.randomUUID(),
+        id: generateId(),
         name: viewName,
         type: viewType,
         sorts,
