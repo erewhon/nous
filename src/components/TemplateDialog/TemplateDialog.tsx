@@ -8,6 +8,9 @@ import type { EditorData } from "../../types/page";
 import { TemplatePreview } from "./TemplatePreview";
 import { generateId } from "../../utils/generateId";
 import { createCalendarPage } from "../../utils/createCalendarPage";
+import { createDatabasePage } from "../../utils/createDatabasePage";
+import { ObjectTypePicker, ObjectTypeManager } from "../Database/ObjectTypeManager";
+import type { ObjectType } from "../../types/database";
 
 interface TemplateDialogProps {
   isOpen: boolean;
@@ -103,6 +106,26 @@ export function TemplateDialog({
       console.error("Failed to create calendar page:", err);
     }
   }, [notebookId, onClose]);
+
+  const [showDatabasePicker, setShowDatabasePicker] = useState(false);
+  const [showObjectTypeManager, setShowObjectTypeManager] = useState(false);
+
+  const handleCreateDatabasePage = useCallback(
+    async (objectType: ObjectType | null) => {
+      if (!notebookId) return;
+      try {
+        setShowDatabasePicker(false);
+        const pageId = await createDatabasePage(notebookId, undefined, objectType);
+        if (pageId) {
+          await usePageStore.getState().selectPage(pageId);
+        }
+        onClose();
+      } catch (err) {
+        console.error("Failed to create database page:", err);
+      }
+    },
+    [notebookId, onClose],
+  );
 
   const handleStartEdit = (template: PageTemplate) => {
     setEditingTemplate(template);
@@ -697,7 +720,84 @@ export function TemplateDialog({
                 </p>
               </div>
             </button>
+            <button
+              onClick={() => setShowDatabasePicker(true)}
+              className="flex items-start gap-4 rounded-lg border p-4 text-left transition-all hover:border-[--color-accent] hover:shadow-md"
+              style={{
+                backgroundColor: "var(--color-bg-secondary)",
+                borderColor: "var(--color-border)",
+              }}
+            >
+              <div
+                className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg"
+                style={{ backgroundColor: "var(--color-bg-tertiary)" }}
+              >
+                <span style={{ color: "var(--color-accent)" }}>
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <rect x="3" y="3" width="18" height="18" rx="2" />
+                    <line x1="3" y1="9" x2="21" y2="9" />
+                    <line x1="9" y1="3" x2="9" y2="21" />
+                  </svg>
+                </span>
+              </div>
+              <div className="min-w-0 flex-1">
+                <div
+                  className="font-medium"
+                  style={{ color: "var(--color-text-primary)" }}
+                >
+                  Database
+                </div>
+                <p
+                  className="mt-1 text-sm"
+                  style={{ color: "var(--color-text-muted)" }}
+                >
+                  Table, board, calendar, and chart views over structured rows
+                </p>
+              </div>
+            </button>
           </div>
+
+          {/* Database object-type picker (same flow as the folder tree) */}
+          {showDatabasePicker && (
+            <div
+              className="fixed inset-0 z-[100] flex items-center justify-center"
+              style={{ backgroundColor: "rgba(0, 0, 0, 0.5)" }}
+              onClick={() => setShowDatabasePicker(false)}
+            >
+              <div
+                className="rounded-xl shadow-2xl"
+                style={{
+                  backgroundColor: "var(--color-bg-secondary)",
+                  border: "1px solid var(--color-border)",
+                  width: "380px",
+                  maxHeight: "500px",
+                  overflowY: "auto",
+                }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                {showObjectTypeManager ? (
+                  <ObjectTypeManager
+                    onClose={() => setShowObjectTypeManager(false)}
+                  />
+                ) : (
+                  <ObjectTypePicker
+                    onSelect={handleCreateDatabasePage}
+                    onManageTypes={() => setShowObjectTypeManager(true)}
+                  />
+                )}
+              </div>
+            </div>
+          )}
 
           {/* Custom templates section */}
           {customTemplates.length > 0 && (

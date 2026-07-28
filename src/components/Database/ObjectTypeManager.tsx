@@ -398,7 +398,7 @@ interface ObjectTypePickerProps {
 }
 
 const TEMPLATE_CATEGORIES: { label: string; typeIds: string[] }[] = [
-  { label: "Productivity", typeIds: ["builtin-project", "builtin-task", "builtin-meeting", "builtin-habit"] },
+  { label: "Productivity", typeIds: ["builtin-project", "builtin-task", "builtin-meeting", "builtin-events", "builtin-habit"] },
   { label: "People & Sales", typeIds: ["builtin-person", "builtin-crm"] },
   { label: "Collections", typeIds: ["builtin-book", "builtin-recipe", "builtin-inventory"] },
 ];

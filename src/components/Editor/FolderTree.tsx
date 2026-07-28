@@ -486,32 +486,16 @@ export function FolderTree({
   // Handle creating a database page (optionally from an object type template)
   const handleCreateDatabasePage = useCallback(async (objectType?: ObjectType | null) => {
     try {
-      const title = objectType ? `New ${objectType.name}` : "New Database";
+      const { createDatabasePage } = await import("../../utils/createDatabasePage");
       const sectionId = sectionsEnabled && selectedSectionId ? selectedSectionId : undefined;
-      const pageData = await createPage(notebookId, title, undefined, undefined, sectionId);
-      if (!pageData) {
+      const pageId = await createDatabasePage(notebookId, sectionId, objectType);
+      if (!pageId) {
         console.error("Failed to create database page");
-        return;
       }
-      // Use api.updatePage directly so errors propagate (store method swallows them)
-      const updatedPage = await api.updatePage(notebookId, pageData.id, {
-        fileExtension: "database",
-        pageType: "database",
-      });
-      // Update the store with the result
-      usePageStore.setState((state) => ({
-        pages: state.pages.map((p) => (p.id === pageData.id ? updatedPage : p)),
-      }));
-      // Initialize database content — from template or empty
-      const { createDefaultDatabaseContent, createDatabaseFromObjectType } = await import("../../types/database");
-      const dbContent = objectType
-        ? createDatabaseFromObjectType(objectType)
-        : createDefaultDatabaseContent();
-      await api.updateFileContent(notebookId, pageData.id, JSON.stringify(dbContent, null, 2));
     } catch (err) {
       console.error("Failed to create database page:", err);
     }
-  }, [notebookId, sectionsEnabled, selectedSectionId, createPage]);
+  }, [notebookId, sectionsEnabled, selectedSectionId]);
 
   // Handle creating a canvas page
   const handleCreateCanvasPage = useCallback(async () => {
