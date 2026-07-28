@@ -124,10 +124,12 @@ export function CalendarMonthView({
         59,
         999,
       );
+      // End is exclusive at exact midnight (ICS all-day events end at the
+      // next day's 00:00) — strict comparison keeps them off the next day.
       const dayItems = items.filter((item) =>
         item.start.getTime() === item.end.getTime()
           ? item.start >= dayStart && item.start <= dayEnd
-          : item.start <= dayEnd && item.end >= dayStart,
+          : item.start <= dayEnd && item.end > dayStart,
       );
       if (dayItems.length > 0) {
         map.set(dayKey(day), dayItems);

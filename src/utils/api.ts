@@ -2404,6 +2404,28 @@ export async function putDatabase(
   }
 }
 
+export interface IcsSubscriptionResult {
+  content: string;
+  /** RFC 3339 timestamp of the last network fetch. */
+  fetchedAt: string;
+  fromCache: boolean;
+}
+
+/**
+ * Fetch an ICS subscription feed through the daemon's cached fetcher.
+ * `maxAgeSecs = 0` forces a network refresh; a failed fetch with a cache
+ * present resolves with the stale copy (`fromCache: true`).
+ */
+export async function fetchIcsSubscription(
+  url: string,
+  maxAgeSecs: number
+): Promise<IcsSubscriptionResult> {
+  return daemonPost<IcsSubscriptionResult>("/api/ics-subscription", {
+    url,
+    maxAgeSecs,
+  });
+}
+
 /**
  * Duplicate a database page (schema + optionally rows).
  */

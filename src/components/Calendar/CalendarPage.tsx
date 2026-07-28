@@ -78,28 +78,40 @@ interface SourceError {
   message: string;
 }
 
+interface StaleSource {
+  sourceId: string;
+  fetchedAt: string;
+}
+
+interface RefreshRequest {
+  token: number;
+  /** Bypass the subscription cache (maxAgeSecs 0) for this load. */
+  force: boolean;
+}
+
 /**
  * Loads each configured source's raw data and resolves it to CalendarItems
  * for the window. Per-source failures degrade to error entries instead of
- * blanking the calendar. ICS subscriptions are skipped until the fetcher
- * lands (Forge: "Wire ICS subscription sources into calendar resolver").
+ * blanking the calendar. Subscriptions load through the daemon's cached
+ * fetcher; a cached copy older than 2× the refresh interval is reported as
+ * stale.
  */
 function useCalendarItems(
   notebookId: string,
   config: CalendarPageConfig | null,
   windowStartMs: number,
   windowEndMs: number,
-  refreshToken: number,
+  refresh: RefreshRequest,
 ) {
   const [items, setItems] = useState<CalendarItem[]>([]);
   const [sourceErrors, setSourceErrors] = useState<SourceError[]>([]);
-  const [skippedSubscriptions, setSkippedSubscriptions] = useState(0);
+  const [staleSources, setStaleSources] = useState<StaleSource[]>([]);
 
   useEffect(() => {
     if (!config) {
       setItems([]);
       setSourceErrors([]);
-      setSkippedSubscriptions(0);
+      setStaleSources([]);
       return;
     }
     let cancelled = false;
@@ -108,7 +120,11 @@ function useCalendarItems(
 
     const loadSource = async (
       source: CalendarSource,
-    ): Promise<{ items: CalendarItem[]; error: SourceError | null; skipped: boolean }> => {
+    ): Promise<{
+      items: CalendarItem[];
+      error: SourceError | null;
+      stale: StaleSource | null;
+    }> => {
       try {
         if (source.type === "database") {
           const result = await api.getDatabase(notebookId, source.pageId);
@@ -119,7 +135,7 @@ function useCalendarItems(
           return {
             items: resolveDatabaseSource(source, content, windowStart, windowEnd),
             error: null,
-            skipped: false,
+            stale: null,
           };
         }
         if (source.type === "ics-file") {
@@ -127,10 +143,25 @@ function useCalendarItems(
           return {
             items: resolveIcsSource(source, result.content, windowStart, windowEnd),
             error: null,
-            skipped: false,
+            stale: null,
           };
         }
-        return { items: [], error: null, skipped: true };
+        const result = await api.fetchIcsSubscription(
+          source.url,
+          refresh.force ? 0 : source.refreshMinutes * 60,
+        );
+        const ageMs = Date.now() - new Date(result.fetchedAt).getTime();
+        const isStale =
+          result.fromCache &&
+          Number.isFinite(ageMs) &&
+          ageMs > 2 * source.refreshMinutes * 60_000;
+        return {
+          items: resolveIcsSource(source, result.content, windowStart, windowEnd),
+          error: null,
+          stale: isStale
+            ? { sourceId: source.id, fetchedAt: result.fetchedAt }
+            : null,
+        };
       } catch (err) {
         return {
           items: [],
@@ -138,7 +169,7 @@ function useCalendarItems(
             sourceId: source.id,
             message: err instanceof Error ? err.message : "Failed to load source",
           },
-          skipped: false,
+          stale: null,
         };
       }
     };
@@ -149,18 +180,16 @@ function useCalendarItems(
         return;
       }
       setItems(sortCalendarItems(results.flatMap((r) => r.items)));
-      setSourceErrors(
-        results.flatMap((r) => (r.error ? [r.error] : [])),
-      );
-      setSkippedSubscriptions(results.filter((r) => r.skipped).length);
+      setSourceErrors(results.flatMap((r) => (r.error ? [r.error] : [])));
+      setStaleSources(results.flatMap((r) => (r.stale ? [r.stale] : [])));
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [notebookId, config, windowStartMs, windowEndMs, refreshToken]);
+  }, [notebookId, config, windowStartMs, windowEndMs, refresh]);
 
-  return { items, sourceErrors, skippedSubscriptions };
+  return { items, sourceErrors, staleSources };
 }
 
 function toDateKey(date: Date): string {
@@ -186,15 +215,15 @@ export function CalendarPage({ page, notebookId, className = "" }: CalendarPageP
   });
   const [showSources, setShowSources] = useState(false);
   const [quickCreate, setQuickCreate] = useState<{ date?: string } | null>(null);
-  const [refreshToken, setRefreshToken] = useState(0);
+  const [refresh, setRefresh] = useState({ token: 0, force: false });
 
   const gridRange = useMemo(() => monthGridRange(month), [month]);
-  const { items, sourceErrors, skippedSubscriptions } = useCalendarItems(
+  const { items, sourceErrors, staleSources } = useCalendarItems(
     notebookId,
     config,
     gridRange.start.getTime(),
     gridRange.end.getTime(),
-    refreshToken,
+    refresh,
   );
 
   const pages = usePageStore((s) => s.pages);
@@ -335,21 +364,35 @@ export function CalendarPage({ page, notebookId, className = "" }: CalendarPageP
               ⚠ {sourceNames[sourceError.sourceId] ?? sourceError.sourceId}
             </span>
           ))}
-          {skippedSubscriptions > 0 && (
+          {staleSources.map((stale) => (
             <span
+              key={stale.sourceId}
               className="text-xs px-1.5 py-0.5 rounded flex-shrink-0"
-              title="ICS subscriptions load in an upcoming update"
+              title={`Showing a cached copy last fetched ${new Date(
+                stale.fetchedAt,
+              ).toLocaleString()}. Use refresh to retry.`}
               style={{
                 backgroundColor: "var(--color-bg-tertiary)",
                 color: "var(--color-text-muted)",
               }}
             >
-              {skippedSubscriptions} subscription
-              {skippedSubscriptions === 1 ? "" : "s"} pending
+              {sourceNames[stale.sourceId] ?? stale.sourceId} · stale
             </span>
-          )}
+          ))}
         </div>
         <div className="flex items-center gap-1.5 flex-shrink-0">
+          <button
+            aria-label="Refresh sources"
+            title="Refresh all sources (bypasses the subscription cache)"
+            onClick={() => setRefresh((r) => ({ token: r.token + 1, force: true }))}
+            className="text-xs px-2 py-1 rounded border"
+            style={{
+              borderColor: "var(--color-border)",
+              color: "var(--color-text-secondary)",
+            }}
+          >
+            ↻
+          </button>
           <button
             onClick={() => setQuickCreate({})}
             className="text-xs px-2 py-1 rounded"
@@ -398,7 +441,7 @@ export function CalendarPage({ page, notebookId, className = "" }: CalendarPageP
           config={config}
           initialDate={quickCreate.date}
           onClose={() => setQuickCreate(null)}
-          onCreated={() => setRefreshToken((t) => t + 1)}
+          onCreated={() => setRefresh((r) => ({ token: r.token + 1, force: false }))}
           onOpenSources={() => setShowSources(true)}
           onConfigChange={saveConfig}
         />
