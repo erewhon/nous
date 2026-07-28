@@ -9,6 +9,7 @@ import type {
 } from "../../types/calendar";
 import { applyFilter } from "../Database/viewRows";
 import { parseIcsEvents } from "../../utils/icsEvents";
+import type { ExportEvent } from "../../utils/icsExport";
 
 /**
  * Normalized calendar entry — the one shape the calendar views render,
@@ -192,6 +193,70 @@ export function resolveIcsSource(
     description: event.description,
     recurring: event.recurring,
   }));
+}
+
+/**
+ * Map an events database's rows to exportable events for ICS serialization.
+ * Properties resolve by name (Title, Date, End Date, Location, Notes →
+ * description) with the same date-cell semantics the calendar resolver uses;
+ * rows without a valid Date cell are skipped. Not window-limited — export
+ * covers the whole database.
+ */
+export function databaseRowsToExportEvents(
+  content: DatabaseContentV2,
+): ExportEvent[] {
+  const byNameType = (name: string, type: string) =>
+    content.properties.find(
+      (p) => p.type === type && p.name.toLowerCase() === name,
+    );
+  const titleProp =
+    byNameType("title", "text") ??
+    content.properties.find((p) => p.type === "text");
+  const dateProp =
+    byNameType("date", "date") ??
+    content.properties.find((p) => p.type === "date");
+  const endProp = byNameType("end date", "date");
+  const locationProp = byNameType("location", "text");
+  const notesProp = byNameType("notes", "text");
+  if (!dateProp) {
+    return [];
+  }
+
+  const events: ExportEvent[] = [];
+  for (const row of content.rows) {
+    const startCell = parseDateCell(row.cells[dateProp.id]);
+    if (!startCell) {
+      continue;
+    }
+    const allDay = startCell.dateOnly;
+    const start = startCell.date;
+    const endCell = endProp ? parseDateCell(row.cells[endProp.id]) : null;
+    let end: Date;
+    if (endCell) {
+      end = endCell.dateOnly ? endOfDay(endCell.date) : endCell.date;
+    } else {
+      end = allDay ? endOfDay(start) : start;
+    }
+    if (end.getTime() < start.getTime()) {
+      end = allDay ? endOfDay(start) : start;
+    }
+
+    const text = (prop: { id: string } | undefined): string | undefined => {
+      const value = prop ? row.cells[prop.id] : null;
+      return typeof value === "string" && value.trim() !== "" ? value : undefined;
+    };
+
+    events.push({
+      uid: `${row.id}@nous`,
+      title: text(titleProp) ?? "Untitled",
+      start,
+      end,
+      allDay,
+      location: text(locationProp),
+      description: text(notesProp),
+    });
+  }
+  return events;
 }
 
 /** All-day items first, then by start time, then title — the render order. */

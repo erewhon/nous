@@ -6,6 +6,7 @@ import type {
   CalendarIcsFileSource,
 } from "../../types/calendar";
 import {
+  databaseRowsToExportEvents,
   resolveDatabaseSource,
   resolveIcsSource,
   sortCalendarItems,
@@ -32,6 +33,8 @@ function makeContent(
           { id: "s-done", label: "Done", color: "#222" },
         ],
       },
+      { id: "p-loc", name: "Location", type: "text" },
+      { id: "p-notes", name: "Notes", type: "text" },
     ],
     rows: rows.map((cells, i) => ({
       id: `row-${i}`,
@@ -245,6 +248,50 @@ describe("resolveIcsSource", () => {
 
   it("throws on malformed ICS for the caller to handle", () => {
     expect(() => resolveIcsSource(icsSource, "junk", JUL1, AUG1)).toThrow();
+  });
+});
+
+describe("databaseRowsToExportEvents", () => {
+  it("maps rows by property name including Notes to description", () => {
+    const content = makeContent([
+      {
+        "p-title": "Conference",
+        "p-date": "2026-07-10",
+        "p-end": "2026-07-12",
+        "p-loc": "Berlin",
+        "p-notes": "Bring badge",
+      },
+    ]);
+    const [ev] = databaseRowsToExportEvents(content);
+
+    expect(ev.uid).toBe("row-0@nous");
+    expect(ev.title).toBe("Conference");
+    expect(ev.allDay).toBe(true);
+    expect(ev.start).toEqual(new Date(2026, 6, 10));
+    expect(ev.end).toEqual(new Date(2026, 6, 12, 23, 59, 59, 999));
+    expect(ev.location).toBe("Berlin");
+    expect(ev.description).toBe("Bring badge");
+  });
+
+  it("passes timed ISO cells through and skips rows without dates", () => {
+    const content = makeContent([
+      { "p-title": "Timed", "p-date": "2026-07-10T14:00:00.000Z" },
+      { "p-title": "No date" },
+    ]);
+    const events = databaseRowsToExportEvents(content);
+
+    expect(events).toHaveLength(1);
+    expect(events[0].allDay).toBe(false);
+    expect(events[0].start.toISOString()).toBe("2026-07-10T14:00:00.000Z");
+    expect(events[0].end.getTime()).toBe(events[0].start.getTime());
+  });
+
+  it("is not window-limited", () => {
+    const content = makeContent([
+      { "p-title": "Ancient", "p-date": "1999-01-01" },
+      { "p-title": "Future", "p-date": "2099-12-31" },
+    ]);
+    expect(databaseRowsToExportEvents(content)).toHaveLength(2);
   });
 });
 

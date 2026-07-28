@@ -9,11 +9,14 @@ import {
   type CalendarSource,
 } from "../../types/calendar";
 import {
+  databaseRowsToExportEvents,
   resolveDatabaseSource,
   resolveIcsSource,
   sortCalendarItems,
   type CalendarItem,
 } from "./calendarSources";
+import { buildIcs } from "../../utils/icsExport";
+import { downloadTextFile, safeFilename } from "../../utils/download";
 import { CalendarMonthView, monthGridRange } from "./CalendarMonthView";
 import { CalendarSourcesPanel } from "./CalendarSourcesPanel";
 import { EventQuickCreate } from "./EventQuickCreate";
@@ -223,6 +226,34 @@ export function CalendarPage({ page, notebookId, className = "" }: CalendarPageP
     [selectPage],
   );
 
+  const eventsTarget = useMemo(
+    () =>
+      config?.sources.find(
+        (s) => s.type === "database" && Boolean(s.isEventsTarget),
+      ) ?? null,
+    [config],
+  );
+
+  const handleExport = useCallback(async () => {
+    if (!eventsTarget || eventsTarget.type !== "database") {
+      return;
+    }
+    try {
+      const result = await api.getDatabase(notebookId, eventsTarget.pageId);
+      const content = result.database as DatabaseContentV2 | null;
+      if (!content || !Array.isArray(content.rows)) {
+        throw new Error("Events database unavailable");
+      }
+      downloadTextFile(
+        `${safeFilename(page.title, "calendar")}.ics`,
+        buildIcs(databaseRowsToExportEvents(content), page.title),
+        "text/calendar;charset=utf-8",
+      );
+    } catch (err) {
+      console.error("Failed to export calendar:", err);
+    }
+  }, [eventsTarget, notebookId, page.title]);
+
   if (isLoading) {
     return (
       <div className={`flex items-center justify-center h-full ${className}`}>
@@ -336,6 +367,19 @@ export function CalendarPage({ page, notebookId, className = "" }: CalendarPageP
           >
             Sources
           </button>
+          {eventsTarget && (
+            <button
+              onClick={handleExport}
+              title="Export the events database as an .ics file"
+              className="text-xs px-2 py-1 rounded border"
+              style={{
+                borderColor: "var(--color-border)",
+                color: "var(--color-text-secondary)",
+              }}
+            >
+              Export .ics
+            </button>
+          )}
         </div>
       </div>
 
