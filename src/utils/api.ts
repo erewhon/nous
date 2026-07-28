@@ -332,7 +332,9 @@ export async function movePageToNotebook(
 }
 
 export async function getAllFavoritePages(): Promise<FavoritePageEntry[]> {
-  return invoke<FavoritePageEntry[]>("get_all_favorite_pages");
+  // Daemon-first so the web bundle works too (the Tauri command is
+  // unreachable in browsers and pinned favorites silently came up empty).
+  return daemonGet<FavoritePageEntry[]>("/api/favorites");
 }
 
 export async function moveFolderToNotebook(

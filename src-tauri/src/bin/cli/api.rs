@@ -602,6 +602,7 @@ pub fn build_router(state: AppState, auth: AuthState) -> Router {
     Router::new()
         .route("/api/status", get(get_status))
         .route("/api/ics-subscription", post(fetch_ics_subscription))
+        .route("/api/favorites", get(get_all_favorites))
         .route("/api/search", get(search_pages))
         .route("/api/search/rebuild", post(rebuild_search_index))
         .route("/api/search/rag/configure", post(rag_configure))
@@ -4888,6 +4889,43 @@ async fn put_file_content(
     Ok(Json(ApiResponse {
         data: serde_json::json!({ "ok": true, "id": pg_id.to_string() }),
     }))
+}
+
+/// `GET /api/favorites` — favorite pages across all non-archived notebooks
+/// (lightweight, no content). Mirrors the Tauri `get_all_favorite_pages`
+/// command so the web bundle can populate the pinned section.
+async fn get_all_favorites(
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    let storage = state.storage.lock().unwrap();
+    let notebooks = storage
+        .list_notebooks()
+        .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let mut entries = Vec::new();
+    for notebook in &notebooks {
+        if notebook.archived {
+            continue;
+        }
+        let Ok(pages) = storage.list_pages(notebook.id) else {
+            continue;
+        };
+        for page in &pages {
+            if page.is_favorite && page.deleted_at.is_none() {
+                entries.push(nous_lib::commands::FavoritePageEntry {
+                    id: page.id.to_string(),
+                    notebook_id: notebook.id.to_string(),
+                    notebook_name: notebook.name.clone(),
+                    title: page.title.clone(),
+                    page_type: page.page_type.clone(),
+                    updated_at: page.updated_at,
+                });
+            }
+        }
+    }
+    entries.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+
+    Ok(Json(ApiResponse { data: entries }))
 }
 
 #[derive(Deserialize)]
