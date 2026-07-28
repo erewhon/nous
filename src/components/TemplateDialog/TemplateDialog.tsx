@@ -6,6 +6,8 @@ import {
 import { usePageStore } from "../../stores/pageStore";
 import type { EditorData } from "../../types/page";
 import { TemplatePreview } from "./TemplatePreview";
+import { generateId } from "../../utils/generateId";
+import { createCalendarPage } from "../../utils/createCalendarPage";
 
 interface TemplateDialogProps {
   isOpen: boolean;
@@ -75,7 +77,7 @@ export function TemplateDialog({
           version: template.content.version,
           blocks: template.content.blocks.map((block) => ({
             ...block,
-            id: crypto.randomUUID(),
+            id: generateId(),
             data: { ...block.data },
           })),
         };
@@ -88,6 +90,19 @@ export function TemplateDialog({
     },
     [notebookId, createPage, updatePageContent, onClose]
   );
+
+  const handleCreateCalendarPage = useCallback(async () => {
+    if (!notebookId) return;
+    try {
+      const pageId = await createCalendarPage(notebookId);
+      if (pageId) {
+        await usePageStore.getState().selectPage(pageId);
+      }
+      onClose();
+    } catch (err) {
+      console.error("Failed to create calendar page:", err);
+    }
+  }, [notebookId, onClose]);
 
   const handleStartEdit = (template: PageTemplate) => {
     setEditingTemplate(template);
@@ -643,6 +658,47 @@ export function TemplateDialog({
 
         {/* Templates Grid */}
         <div className="max-h-96 overflow-y-auto p-6">
+          {/* Special page types (not block templates) */}
+          <h3
+            className="mb-3 text-xs font-semibold uppercase tracking-wider"
+            style={{ color: "var(--color-text-muted)" }}
+          >
+            Special Pages
+          </h3>
+          <div className="mb-6 grid grid-cols-2 gap-4">
+            <button
+              onClick={handleCreateCalendarPage}
+              className="flex items-start gap-4 rounded-lg border p-4 text-left transition-all hover:border-[--color-accent] hover:shadow-md"
+              style={{
+                backgroundColor: "var(--color-bg-secondary)",
+                borderColor: "var(--color-border)",
+              }}
+            >
+              <div
+                className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg"
+                style={{ backgroundColor: "var(--color-bg-tertiary)" }}
+              >
+                <span style={{ color: "var(--color-accent)" }}>
+                  {getIconComponent("calendar")}
+                </span>
+              </div>
+              <div className="min-w-0 flex-1">
+                <div
+                  className="font-medium"
+                  style={{ color: "var(--color-text-primary)" }}
+                >
+                  Calendar
+                </div>
+                <p
+                  className="mt-1 text-sm"
+                  style={{ color: "var(--color-text-muted)" }}
+                >
+                  Databases and ICS feeds on a month or week grid
+                </p>
+              </div>
+            </button>
+          </div>
+
           {/* Custom templates section */}
           {customTemplates.length > 0 && (
             <>

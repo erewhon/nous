@@ -472,32 +472,16 @@ export function FolderTree({
   // pages come from import/link, not this menu)
   const handleCreateCalendarPage = useCallback(async () => {
     try {
-      const title = "New Calendar";
+      const { createCalendarPage } = await import("../../utils/createCalendarPage");
       const sectionId = sectionsEnabled && selectedSectionId ? selectedSectionId : undefined;
-      const pageData = await createPage(notebookId, title, undefined, undefined, sectionId);
-      if (!pageData) {
+      const pageId = await createCalendarPage(notebookId, sectionId);
+      if (!pageId) {
         console.error("Failed to create calendar page");
-        return;
       }
-      // Use api.updatePage directly so errors propagate (store method swallows them)
-      const updatedPage = await api.updatePage(notebookId, pageData.id, {
-        fileExtension: "calendar",
-        pageType: "calendar",
-      });
-      usePageStore.setState((state) => ({
-        pages: state.pages.map((p) => (p.id === pageData.id ? updatedPage : p)),
-      }));
-      // Initialize with an empty source config
-      const { createDefaultCalendarConfig } = await import("../../types/calendar");
-      await api.updateFileContent(
-        notebookId,
-        pageData.id,
-        JSON.stringify(createDefaultCalendarConfig(), null, 2)
-      );
     } catch (err) {
       console.error("Failed to create calendar page:", err);
     }
-  }, [notebookId, sectionsEnabled, selectedSectionId, createPage]);
+  }, [notebookId, sectionsEnabled, selectedSectionId]);
 
   // Handle creating a database page (optionally from an object type template)
   const handleCreateDatabasePage = useCallback(async (objectType?: ObjectType | null) => {
