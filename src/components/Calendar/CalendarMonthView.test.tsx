@@ -140,6 +140,18 @@ describe("CalendarMonthView", () => {
     expect(prev.getMonth()).toBe(5);
   });
 
+  it("fires onDayClick for empty cell areas but not item chips", () => {
+    const onDayClick = vi.fn();
+    const { container } = renderView([conf], { onDayClick });
+
+    fireEvent.click(cell(container, "2026-07-14"));
+    expect(onDayClick).toHaveBeenCalledTimes(1);
+    expect((onDayClick.mock.calls[0][0] as Date).getDate()).toBe(14);
+
+    fireEvent.click(container.querySelector('[data-item-id="s1:r1"]')!);
+    expect(onDayClick).toHaveBeenCalledTimes(1);
+  });
+
   it("opens a detail popover with source name and Open action", () => {
     const { container, onOpenItem } = renderView([conf, standup]);
 

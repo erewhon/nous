@@ -79,6 +79,8 @@ interface CalendarMonthViewProps {
   sourceNames?: Record<string, string>;
   /** Navigate to the item's backing page; omit to hide the Open action. */
   onOpenItem?: (item: CalendarItem) => void;
+  /** Click on a day cell's empty area (item chips stop propagation). */
+  onDayClick?: (day: Date) => void;
 }
 
 export function CalendarMonthView({
@@ -87,6 +89,7 @@ export function CalendarMonthView({
   items,
   sourceNames,
   onOpenItem,
+  onDayClick,
 }: CalendarMonthViewProps) {
   const [detail, setDetail] = useState<
     { item: CalendarItem; pos: PopoverPos } | null
@@ -224,6 +227,7 @@ export function CalendarMonthView({
               <div
                 key={key}
                 data-date={key}
+                onClick={() => onDayClick?.(day)}
                 className="min-h-[96px] rounded-lg p-1.5 border"
                 style={{
                   backgroundColor: inMonth

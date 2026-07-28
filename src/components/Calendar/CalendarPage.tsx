@@ -16,6 +16,7 @@ import {
 } from "./calendarSources";
 import { CalendarMonthView, monthGridRange } from "./CalendarMonthView";
 import { CalendarSourcesPanel } from "./CalendarSourcesPanel";
+import { EventQuickCreate } from "./EventQuickCreate";
 
 /**
  * Loads and persists a calendar page's source config. The config is the
@@ -85,6 +86,7 @@ function useCalendarItems(
   config: CalendarPageConfig | null,
   windowStartMs: number,
   windowEndMs: number,
+  refreshToken: number,
 ) {
   const [items, setItems] = useState<CalendarItem[]>([]);
   const [sourceErrors, setSourceErrors] = useState<SourceError[]>([]);
@@ -153,9 +155,15 @@ function useCalendarItems(
     return () => {
       cancelled = true;
     };
-  }, [notebookId, config, windowStartMs, windowEndMs]);
+  }, [notebookId, config, windowStartMs, windowEndMs, refreshToken]);
 
   return { items, sourceErrors, skippedSubscriptions };
+}
+
+function toDateKey(date: Date): string {
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${date.getFullYear()}-${m}-${d}`;
 }
 
 interface CalendarPageProps {
@@ -174,6 +182,8 @@ export function CalendarPage({ page, notebookId, className = "" }: CalendarPageP
     return new Date(now.getFullYear(), now.getMonth(), 1);
   });
   const [showSources, setShowSources] = useState(false);
+  const [quickCreate, setQuickCreate] = useState<{ date?: string } | null>(null);
+  const [refreshToken, setRefreshToken] = useState(0);
 
   const gridRange = useMemo(() => monthGridRange(month), [month]);
   const { items, sourceErrors, skippedSubscriptions } = useCalendarItems(
@@ -181,6 +191,7 @@ export function CalendarPage({ page, notebookId, className = "" }: CalendarPageP
     config,
     gridRange.start.getTime(),
     gridRange.end.getTime(),
+    refreshToken,
   );
 
   const pages = usePageStore((s) => s.pages);
@@ -307,16 +318,25 @@ export function CalendarPage({ page, notebookId, className = "" }: CalendarPageP
             </span>
           )}
         </div>
-        <button
-          onClick={() => setShowSources(true)}
-          className="text-xs px-2 py-1 rounded border flex-shrink-0"
-          style={{
-            borderColor: "var(--color-border)",
-            color: "var(--color-text-secondary)",
-          }}
-        >
-          Sources
-        </button>
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          <button
+            onClick={() => setQuickCreate({})}
+            className="text-xs px-2 py-1 rounded"
+            style={{ backgroundColor: "var(--color-accent)", color: "white" }}
+          >
+            New event
+          </button>
+          <button
+            onClick={() => setShowSources(true)}
+            className="text-xs px-2 py-1 rounded border"
+            style={{
+              borderColor: "var(--color-border)",
+              color: "var(--color-text-secondary)",
+            }}
+          >
+            Sources
+          </button>
+        </div>
       </div>
 
       {showSources && (
@@ -325,6 +345,18 @@ export function CalendarPage({ page, notebookId, className = "" }: CalendarPageP
           config={config}
           onChange={saveConfig}
           onClose={() => setShowSources(false)}
+        />
+      )}
+
+      {quickCreate && (
+        <EventQuickCreate
+          notebookId={notebookId}
+          config={config}
+          initialDate={quickCreate.date}
+          onClose={() => setQuickCreate(null)}
+          onCreated={() => setRefreshToken((t) => t + 1)}
+          onOpenSources={() => setShowSources(true)}
+          onConfigChange={saveConfig}
         />
       )}
 
@@ -351,6 +383,7 @@ export function CalendarPage({ page, notebookId, className = "" }: CalendarPageP
           items={items}
           sourceNames={sourceNames}
           onOpenItem={handleOpenItem}
+          onDayClick={(day) => setQuickCreate({ date: toDateKey(day) })}
         />
       </div>
     </div>
