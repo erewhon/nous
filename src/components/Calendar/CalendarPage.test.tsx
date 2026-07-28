@@ -7,10 +7,17 @@ import type { Page } from "../../types/page";
 
 const getFileContent = vi.fn();
 const updateFileContent = vi.fn();
+const getDatabase = vi.fn();
 
 vi.mock("../../utils/api", () => ({
   getFileContent: (...args: unknown[]) => getFileContent(...args),
   updateFileContent: (...args: unknown[]) => updateFileContent(...args),
+  getDatabase: (...args: unknown[]) => getDatabase(...args),
+}));
+
+vi.mock("../../stores/pageStore", () => ({
+  usePageStore: <T,>(selector: (s: unknown) => T): T =>
+    selector({ pages: [], selectPage: () => {} }),
 }));
 
 const page = {
@@ -33,9 +40,7 @@ describe("CalendarPage", () => {
     render(<CalendarPage page={page} notebookId="nb-1" />);
 
     await waitFor(() =>
-      expect(
-        screen.getByText("This calendar has no sources yet."),
-      ).toBeTruthy(),
+      expect(screen.getByText(/no sources yet/)).toBeTruthy(),
     );
     expect(screen.getByText("0 sources")).toBeTruthy();
   });
