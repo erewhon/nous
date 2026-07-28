@@ -1319,16 +1319,25 @@ export const usePageStore = create<PageStore>()(
             return hasContentChanged(current, fresh);
           });
           if (changedPages.length > 0 || newPages.length > 0) {
-            set((state) => ({
-              pages: [
-                ...state.pages.map((p) => {
-                  const fresh = changedPages.find((f) => f.id === p.id);
-                  return fresh ?? p;
-                }),
-                ...newPages,
-              ],
-              pageDataVersion: state.pageDataVersion + 1,
-            }));
+            set((state) => {
+              // Re-check "new" pages against the CURRENT state: a concurrent
+              // path (e.g. createPage's own append racing the page.created
+              // WS event) may have added them since we classified above —
+              // appending blindly would duplicate the array entry.
+              const stillNew = newPages.filter(
+                (np) => !state.pages.some((p) => p.id === np.id),
+              );
+              const refreshById = new Map(
+                [...changedPages, ...newPages].map((p) => [p.id, p]),
+              );
+              return {
+                pages: [
+                  ...state.pages.map((p) => refreshById.get(p.id) ?? p),
+                  ...stillNew,
+                ],
+                pageDataVersion: state.pageDataVersion + 1,
+              };
+            });
           }
         }
       },

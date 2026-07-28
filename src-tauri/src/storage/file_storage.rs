@@ -390,6 +390,27 @@ impl FileStorage {
                 if repaired {
                     self.persist_repaired_page(&page);
                 }
+
+                // Heal forked records: a {id}.metadata.json alongside a
+                // {id}.json is a stale copy left by the old
+                // update_page_metadata (which wrote metadata even when the
+                // record lived in the standard file). The standard file is
+                // authoritative everywhere it's read, so drop the fork.
+                let metadata_path = self.metadata_path(notebook_id, page.id);
+                if metadata_path.exists() {
+                    match fs::remove_file(&metadata_path) {
+                        Ok(()) => log::info!(
+                            "Removed stale forked metadata record for page {}",
+                            page.id
+                        ),
+                        Err(e) => log::warn!(
+                            "Failed to remove forked metadata record for page {}: {}",
+                            page.id,
+                            e
+                        ),
+                    }
+                }
+
                 pages.push(page);
             }
         }
@@ -2857,8 +2878,19 @@ impl FileStorage {
             return self.update_page(page);
         }
 
-        let metadata_path = self.metadata_path(page.notebook_id, page.id);
+        // File-based pages created in-app (database/calendar via
+        // createPage + type change) keep their record in {id}.json; only
+        // imported file pages live in {id}.metadata.json. Write wherever the
+        // record actually lives — writing metadata while {id}.json exists
+        // forks a second, diverging copy of the page record.
+        let page_path = self.page_path(page.notebook_id, page.id);
         let content = super::content_format::page_to_disk_json(page)?;
+        if page_path.exists() {
+            Self::atomic_write(&page_path, &content)?;
+            return Ok(());
+        }
+
+        let metadata_path = self.metadata_path(page.notebook_id, page.id);
         Self::atomic_write(&metadata_path, &content)?;
         Ok(())
     }
@@ -3393,6 +3425,55 @@ mod tests {
         let reparsed: serde_json::Value =
             serde_json::from_str(&fs::read_to_string(&page_path).unwrap()).unwrap();
         assert_eq!(reparsed["pageType"], "calendar");
+    }
+
+    /// update_page_metadata must write wherever the page record lives: for
+    /// in-app file-based pages that's {id}.json — writing {id}.metadata.json
+    /// alongside forks a second diverging record (seen as duplicate/stale
+    /// pages). list_pages heals forks left by the old behavior.
+    #[test]
+    fn test_file_page_record_not_forked_and_forks_healed() {
+        let temp_dir = TempDir::new().unwrap();
+        let storage = FileStorage::new(temp_dir.path().to_path_buf());
+        storage.init().unwrap();
+
+        let notebook = storage
+            .create_notebook("Test".to_string(), NotebookType::default())
+            .unwrap();
+        let mut page = storage
+            .create_page(notebook.id, "My Calendar".to_string())
+            .unwrap();
+        page.page_type = PageType::Calendar;
+        page.file_extension = Some("calendar".to_string());
+        storage.update_page(&page).unwrap();
+
+        let page_path = storage.page_path(notebook.id, page.id);
+        let metadata_path = storage.metadata_path(notebook.id, page.id);
+
+        // The record lives in {id}.json — a metadata write must go there.
+        page.title = "Renamed".to_string();
+        storage.update_page_metadata(&page).unwrap();
+        assert!(!metadata_path.exists(), "must not fork a metadata record");
+        let on_disk = storage.get_page(notebook.id, page.id).unwrap();
+        assert_eq!(on_disk.title, "Renamed");
+
+        // A fork left by the old behavior is healed on list_pages.
+        fs::write(
+            &metadata_path,
+            fs::read_to_string(&page_path).unwrap().replace("Renamed", "Stale"),
+        )
+        .unwrap();
+        let pages = storage.list_pages(notebook.id).unwrap();
+        assert!(!metadata_path.exists(), "fork must be removed on list");
+        let entries: Vec<_> = pages.iter().filter(|p| p.id == page.id).collect();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].title, "Renamed");
+
+        // Genuine metadata-only pages (imported file pages) still write to
+        // the metadata path when no standard record exists.
+        fs::remove_file(&page_path).unwrap();
+        storage.update_page_metadata(&page).unwrap();
+        assert!(metadata_path.exists());
     }
 
     /// Test that asset paths are correctly generated.
