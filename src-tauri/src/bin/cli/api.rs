@@ -18,8 +18,9 @@ use tower_http::cors::{AllowOrigin, CorsLayer};
 use uuid::Uuid;
 
 use super::auth::{ApiKeySet, AuthedUser, Scope};
-use super::oidc::{OidcAuthError, OidcVerifier};
-use super::tenants::{ReloadingRegistry, TokenAuthError, TOKEN_PREFIX};
+use super::oidc::OidcAuthError;
+use super::session::{self, MultiUserCtx};
+use super::tenants::{TokenAuthError, TOKEN_PREFIX};
 
 use nous_lib::commands::{create_daily_note_core, find_daily_note, list_daily_notes_core};
 use nous_lib::inbox::{CaptureRequest, CaptureSource};
@@ -514,6 +515,12 @@ fn is_public_route(path: &str) -> bool {
         // the homelab front door adds SSO on top.
         || path == "/app"
         || path.starts_with("/app/")
+        // Session bootstrap: logging in (POST) is how you obtain
+        // credentials; logout (DELETE) only clears a cookie; config tells
+        // the SPA where the identity provider is. /api/me is NOT here —
+        // it's a normal authenticated route.
+        || path == "/api/session"
+        || path == "/api/session/config"
 }
 
 /// Auth state. Three modes:
@@ -526,27 +533,22 @@ fn is_public_route(path: &str) -> bool {
 #[derive(Clone)]
 pub struct AuthState {
     keys: Option<Arc<ApiKeySet>>,
-    registry: Option<Arc<std::sync::Mutex<ReloadingRegistry>>>,
-    /// OIDC verifier — multi-user mode only. None → JWT bearers rejected,
-    /// only PATs authenticate.
-    oidc: Option<Arc<OidcVerifier>>,
+    /// Multi-user context (registry + OIDC verifier + session key) —
+    /// shared with the session handlers via `DaemonState.multi_user`.
+    multi: Option<MultiUserCtx>,
 }
 
 impl AuthState {
     pub fn disabled() -> Self {
-        Self { keys: None, registry: None, oidc: None }
+        Self { keys: None, multi: None }
     }
 
     pub fn enabled(keys: ApiKeySet) -> Self {
-        Self { keys: Some(Arc::new(keys)), registry: None, oidc: None }
+        Self { keys: Some(Arc::new(keys)), multi: None }
     }
 
-    pub fn multi_user(registry: ReloadingRegistry, oidc: Option<Arc<OidcVerifier>>) -> Self {
-        Self {
-            keys: None,
-            registry: Some(Arc::new(std::sync::Mutex::new(registry))),
-            oidc,
-        }
+    pub fn multi_user(ctx: MultiUserCtx) -> Self {
+        Self { keys: None, multi: Some(ctx) }
     }
 }
 
@@ -575,8 +577,8 @@ async fn auth_middleware(
     next: Next,
 ) -> axum::response::Response {
     // Multi-user mode takes precedence — the shared key file is retired.
-    if let Some(registry) = &auth.registry {
-        return multi_user_auth(registry, auth.oidc.as_ref(), req, next).await;
+    if let Some(ctx) = &auth.multi {
+        return multi_user_auth(ctx, req, next).await;
     }
 
     // Auth disabled — pass through
@@ -623,8 +625,8 @@ async fn auth_middleware(
 /// Default-deny authentication for multi-user mode. Credential routing by
 /// shape: `nous_`-prefixed bearer → personal access token; any other
 /// bearer → OIDC JWT (rejected when no verifier is configured); no
-/// credential → session cookie (rejected until the session leaf lands).
-/// Successful authentication inserts [`AuthedUser`].
+/// bearer → the `nous_session` cookie. Successful authentication inserts
+/// [`AuthedUser`].
 ///
 /// Credential rejections are a uniform 401 — whether the token was
 /// unknown, revoked, or belongs to an inactive user is for the logs, not
@@ -632,8 +634,7 @@ async fn auth_middleware(
 /// isn't allowed in: that's a 403 with a friendly message ("invite
 /// required" / "account disabled") so the sign-in UI can explain itself.
 async fn multi_user_auth(
-    registry: &Arc<std::sync::Mutex<ReloadingRegistry>>,
-    oidc: Option<&Arc<OidcVerifier>>,
+    ctx: &MultiUserCtx,
     mut req: Request,
     next: Next,
 ) -> axum::response::Response {
@@ -652,14 +653,45 @@ async fn multi_user_auth(
     };
 
     let Some(token) = extract_bearer(&req) else {
-        // Session-cookie authentication arrives with the session leaf.
-        log::debug!("multi-user auth: no bearer credential");
-        return unauthorized();
+        // No bearer — fall back to the browser session cookie. The cookie
+        // is only proof of identity; the user's *status* is re-checked
+        // against the registry on every request, so disabling a user
+        // kills live sessions immediately.
+        let Some(cookie) = session::cookie_from_headers(req.headers()) else {
+            log::debug!("multi-user auth: no bearer credential and no session cookie");
+            return unauthorized();
+        };
+        let Some(user_id) = session::verify_cookie_value(
+            &ctx.session_key,
+            &cookie,
+            chrono::Utc::now().timestamp(),
+        ) else {
+            log::debug!("multi-user auth: session cookie rejected (bad signature or expired)");
+            return unauthorized();
+        };
+        let authed = {
+            let mut reg = ctx.registry.lock().unwrap_or_else(|p| p.into_inner());
+            reg.with_fresh(|r| r.authenticate_session_user(&user_id))
+        };
+        return match authed {
+            Ok(user) => {
+                req.extensions_mut().insert(AuthedUser {
+                    user_id: user.user_id,
+                    role: user.role,
+                    scope: user.scope,
+                });
+                next.run(req).await
+            }
+            Err(reason) => {
+                log::debug!("multi-user auth: session rejected: {reason:?}");
+                unauthorized()
+            }
+        };
     };
 
     if !token.starts_with(TOKEN_PREFIX) {
         // Not a PAT — an OIDC JWT if a verifier is configured.
-        let Some(oidc) = oidc else {
+        let Some(oidc) = &ctx.oidc else {
             log::debug!("multi-user auth: bearer is not a PAT and OIDC is not configured");
             return unauthorized();
         };
@@ -673,7 +705,7 @@ async fn multi_user_auth(
             }
         };
         let resolved = {
-            let mut reg = registry.lock().unwrap_or_else(|p| p.into_inner());
+            let mut reg = ctx.registry.lock().unwrap_or_else(|p| p.into_inner());
             reg.with_fresh(|r| super::oidc::resolve_user(r, &claims))
         };
         return match resolved {
@@ -699,7 +731,7 @@ async fn multi_user_auth(
 
     // Brief lock, no awaits while held. Reload-on-mtime happens inside.
     let authed = {
-        let mut reg = registry.lock().unwrap_or_else(|p| p.into_inner());
+        let mut reg = ctx.registry.lock().unwrap_or_else(|p| p.into_inner());
         reg.authenticate_token(&token)
     };
 
@@ -1008,6 +1040,15 @@ pub fn build_router(state: AppState, auth: AuthState) -> Router {
         .route("/api/inbox/{item_id}", delete(delete_inbox_item))
         // WebSocket event stream
         .route("/api/events", get(ws_events))
+        // Browser sessions (multi-user mode; 404 otherwise). POST/DELETE
+        // /api/session and /api/session/config are on the public-route
+        // allowlist — /api/me is authenticated like everything else.
+        .route(
+            "/api/session",
+            post(session::create_session).delete(session::destroy_session),
+        )
+        .route("/api/session/config", get(session::session_config))
+        .route("/api/me", get(session::get_me))
         .layer(middleware::from_fn_with_state(auth, auth_middleware))
         // Raise the default 2 MB body limit for the whole API. Whole-content
         // writes (databases send content + an equal-sized merge baseline) exceed

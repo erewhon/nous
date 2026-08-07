@@ -81,6 +81,10 @@ pub struct DaemonState {
     /// at /app. `NOUS_WEB_APP_DIR` overrides; defaults to {data_dir}/web-app.
     /// Serving 404s gracefully when the directory doesn't exist.
     pub web_app_dir: PathBuf,
+    /// Multi-user context (session key + registry + OIDC verifier), shared
+    /// with the auth middleware. None in legacy single-user mode — the
+    /// session/`/api/me` handlers 404.
+    pub multi_user: Option<super::session::MultiUserCtx>,
     pub event_tx: nous_lib::events::EventSender,
 }
 
@@ -339,33 +343,9 @@ pub async fn run(library_name: Option<&str>, port: Option<u16>, bind: Option<&st
         );
     }
 
-    // Build shared daemon state
-    let state = Arc::new(DaemonState {
-        storage: storage_arc,
-        library_storage: library_storage_arc,
-        inbox_storage: inbox_storage_arc,
-        goals_storage: goals_storage_arc,
-        energy_storage: energy_storage_arc,
-        contacts_storage: contacts_storage_arc,
-        sync_manager: sync_manager_arc,
-        action_scheduler: Mutex::new(action_scheduler),
-        search_index: search_index_arc,
-        tantivy: tantivy_backend,
-        rag: rag_backend,
-        rag_config,
-        ai_config,
-        daemon_config_path,
-        crdt_store,
-        backup_scheduler: Arc::clone(&backup_scheduler),
-        #[cfg(feature = "plugins")]
-        plugin_host,
-        library_path: library_path.clone(),
-        python_ai: Arc::clone(&python_ai_arc),
-        web_app_dir,
-        event_tx,
-    });
-
-    // Load API keys and configure auth
+    // Load API keys and configure auth. Runs before DaemonState is built
+    // so the multi-user context (registry + verifier + session key) can be
+    // shared between the auth middleware and the session handlers.
     let key_path = auth::key_file_path(&data_dir);
     let bind_addr: std::net::IpAddr = bind
         .unwrap_or("127.0.0.1")
@@ -397,10 +377,12 @@ pub async fn run(library_name: Option<&str>, port: Option<u16>, bind: Option<&st
             .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
             .unwrap_or(false);
 
-    let auth_state = if multi_user {
+    let (auth_state, multi_user_ctx) = if multi_user {
         let registry_path = super::tenants::TenantRegistry::registry_path(&data_dir);
-        let registry = super::tenants::ReloadingRegistry::open(&registry_path)
-            .context("Failed to load tenant registry")?;
+        let registry = Arc::new(std::sync::Mutex::new(
+            super::tenants::ReloadingRegistry::open(&registry_path)
+                .context("Failed to load tenant registry")?,
+        ));
         if key_path.exists() {
             log::info!(
                 "Multi-user mode: shared key file {} is ignored",
@@ -421,18 +403,25 @@ pub async fn run(library_name: Option<&str>, port: Option<u16>, bind: Option<&st
                 None
             }
         };
+        let session_key = super::session::load_or_create_session_key(&data_dir)
+            .map_err(|e| anyhow::anyhow!("session key: {e}"))?;
+        let ctx = super::session::MultiUserCtx {
+            session_key,
+            registry,
+            oidc,
+        };
         log::info!(
             "Multi-user authentication enabled (registry {}; reloads on change)",
             registry_path.display()
         );
         println!("Multi-user authentication enabled ({})", registry_path.display());
-        api::AuthState::multi_user(registry, oidc)
+        (api::AuthState::multi_user(ctx.clone()), Some(ctx))
     } else if key_path.exists() {
         let keys = auth::ApiKeySet::load(&key_path)?;
         let count = if keys.is_empty() { 0 } else { 1 }; // at least one
         log::info!("API authentication enabled ({} key(s) from {})", count, key_path.display());
         println!("API authentication enabled (keys from {})", key_path.display());
-        api::AuthState::enabled(keys)
+        (api::AuthState::enabled(keys), None)
     } else if !is_loopback {
         bail!(
             "Cannot bind to non-loopback address ({}) without API key.\n\
@@ -441,8 +430,35 @@ pub async fn run(library_name: Option<&str>, port: Option<u16>, bind: Option<&st
         );
     } else {
         log::info!("API authentication disabled (no key file, localhost only)");
-        api::AuthState::disabled()
+        (api::AuthState::disabled(), None)
     };
+
+    // Build shared daemon state
+    let state = Arc::new(DaemonState {
+        storage: storage_arc,
+        library_storage: library_storage_arc,
+        inbox_storage: inbox_storage_arc,
+        goals_storage: goals_storage_arc,
+        energy_storage: energy_storage_arc,
+        contacts_storage: contacts_storage_arc,
+        sync_manager: sync_manager_arc,
+        action_scheduler: Mutex::new(action_scheduler),
+        search_index: search_index_arc,
+        tantivy: tantivy_backend,
+        rag: rag_backend,
+        rag_config,
+        ai_config,
+        daemon_config_path,
+        crdt_store,
+        backup_scheduler: Arc::clone(&backup_scheduler),
+        #[cfg(feature = "plugins")]
+        plugin_host,
+        library_path: library_path.clone(),
+        python_ai: Arc::clone(&python_ai_arc),
+        web_app_dir,
+        multi_user: multi_user_ctx,
+        event_tx,
+    });
 
     // Start HTTP API
     let router = api::build_router(Arc::clone(&state), auth_state);

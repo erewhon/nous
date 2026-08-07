@@ -527,6 +527,24 @@ impl TenantRegistry {
             scope,
         })
     }
+
+    /// Map a session cookie's (signature-checked) user id to its active
+    /// user. Status is re-checked here on every request, so disabling a
+    /// user kills live sessions immediately. Sessions act as the user
+    /// with full rights.
+    pub fn authenticate_session_user(&self, user_id: &str) -> Result<TokenAuth, TokenAuthError> {
+        let user = self
+            .find_by_id(user_id)
+            .ok_or(TokenAuthError::InvalidToken)?;
+        if user.status != UserStatus::Active {
+            return Err(TokenAuthError::InactiveUser);
+        }
+        Ok(TokenAuth {
+            user_id: user.id.clone(),
+            role: user.role,
+            scope: Scope::ReadWrite,
+        })
+    }
 }
 
 // ===== Reloading handle for the daemon =====

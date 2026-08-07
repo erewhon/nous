@@ -90,6 +90,10 @@ pub struct TestEnv {
     pub rag_config: Arc<RwLock<RagConfig>>,
 }
 
+/// Fixed session-cookie signing key for multi-user test envs — lets
+/// tests mint their own (expired/tampered) cookies.
+const TEST_SESSION_KEY: [u8; 32] = [7u8; 32];
+
 /// How [`TestEnv::build`] configures authentication.
 enum AuthSetup {
     Disabled,
@@ -196,6 +200,57 @@ impl TestEnv {
         sync_manager_arc.set_emitter(Arc::new(LogEmitter));
         sync_manager_arc.set_crdt_store(Arc::clone(&crdt_store));
 
+        // Auth before DaemonState so the multi-user context can be shared
+        // between the middleware and the session handlers (same shape as
+        // the real daemon boot).
+        let (auth_state, multi_user_ctx, rw_token, ro_token, invited_token) = match auth_setup {
+            AuthSetup::Disabled => (api::AuthState::disabled(), None, None, None, None),
+            AuthSetup::Keys(rw, ro) => {
+                let mut keys = ApiKeySet::empty();
+                keys.insert(rw.clone(), Scope::ReadWrite);
+                keys.insert(ro.clone(), Scope::ReadOnly);
+                (api::AuthState::enabled(keys), None, Some(rw), Some(ro), None)
+            }
+            AuthSetup::MultiUser { oidc } => {
+                let registry_path = library_path.join("tenants.json");
+                let mut reg = TenantRegistry::load(&registry_path).expect("registry load");
+
+                let alice = User::new_invited("alice@example.org", UserRole::Member);
+                let alice_id = alice.id.clone();
+                reg.insert(alice).expect("insert alice");
+                reg.update(&alice_id, |u| u.status = UserStatus::Active)
+                    .expect("activate alice");
+                let rw = reg
+                    .mint_token(&alice_id, "rw", Scope::ReadWrite)
+                    .expect("mint rw");
+                let ro = reg
+                    .mint_token(&alice_id, "ro", Scope::ReadOnly)
+                    .expect("mint ro");
+
+                let invited = User::new_invited("newbie@example.org", UserRole::Member);
+                let invited_id = invited.id.clone();
+                reg.insert(invited).expect("insert invited");
+                let inv = reg
+                    .mint_token(&invited_id, "onboarding", Scope::ReadWrite)
+                    .expect("mint invited");
+
+                reg.save().expect("registry save");
+                let handle = ReloadingRegistry::open(&registry_path).expect("registry open");
+                let ctx = super::session::MultiUserCtx {
+                    session_key: TEST_SESSION_KEY,
+                    registry: Arc::new(Mutex::new(handle)),
+                    oidc: oidc.then(|| Arc::new(super::oidc::test_jwt::verifier())),
+                };
+                (
+                    api::AuthState::multi_user(ctx.clone()),
+                    Some(ctx),
+                    Some(rw.token),
+                    Some(ro.token),
+                    Some(inv.token),
+                )
+            }
+        };
+
         let state = Arc::new(DaemonState {
             storage: storage_arc,
             library_storage: library_storage_arc,
@@ -229,51 +284,9 @@ impl TestEnv {
             python_ai: Arc::clone(&python_ai_arc),
             // No web bundle in the harness — /app routes 404 gracefully.
             web_app_dir: library_path.join("web-app"),
+            multi_user: multi_user_ctx,
             event_tx,
         });
-
-        let (auth_state, rw_token, ro_token, invited_token) = match auth_setup {
-            AuthSetup::Disabled => (api::AuthState::disabled(), None, None, None),
-            AuthSetup::Keys(rw, ro) => {
-                let mut keys = ApiKeySet::empty();
-                keys.insert(rw.clone(), Scope::ReadWrite);
-                keys.insert(ro.clone(), Scope::ReadOnly);
-                (api::AuthState::enabled(keys), Some(rw), Some(ro), None)
-            }
-            AuthSetup::MultiUser { oidc } => {
-                let registry_path = library_path.join("tenants.json");
-                let mut reg = TenantRegistry::load(&registry_path).expect("registry load");
-
-                let alice = User::new_invited("alice@example.org", UserRole::Member);
-                let alice_id = alice.id.clone();
-                reg.insert(alice).expect("insert alice");
-                reg.update(&alice_id, |u| u.status = UserStatus::Active)
-                    .expect("activate alice");
-                let rw = reg
-                    .mint_token(&alice_id, "rw", Scope::ReadWrite)
-                    .expect("mint rw");
-                let ro = reg
-                    .mint_token(&alice_id, "ro", Scope::ReadOnly)
-                    .expect("mint ro");
-
-                let invited = User::new_invited("newbie@example.org", UserRole::Member);
-                let invited_id = invited.id.clone();
-                reg.insert(invited).expect("insert invited");
-                let inv = reg
-                    .mint_token(&invited_id, "onboarding", Scope::ReadWrite)
-                    .expect("mint invited");
-
-                reg.save().expect("registry save");
-                let handle = ReloadingRegistry::open(&registry_path).expect("registry open");
-                let verifier = oidc.then(|| Arc::new(super::oidc::test_jwt::verifier()));
-                (
-                    api::AuthState::multi_user(handle, verifier),
-                    Some(rw.token),
-                    Some(ro.token),
-                    Some(inv.token),
-                )
-            }
-        };
 
         let router = api::build_router(Arc::clone(&state), auth_state);
 
@@ -338,6 +351,47 @@ impl TestEnv {
             .body(body_bytes.map(Body::from).unwrap_or_else(Body::empty))
             .unwrap();
         self.send(req).await
+    }
+
+    /// Request authenticated by a session cookie instead of a bearer
+    /// token (multi-user envs). Returns the response plus any Set-Cookie
+    /// header value.
+    pub async fn request_with_cookie(
+        &self,
+        method: Method,
+        path: &str,
+        body: Option<Value>,
+        cookie: Option<&str>,
+    ) -> (StatusCode, Value, Option<String>) {
+        let mut req = Request::builder().method(method).uri(path);
+        if let Some(c) = cookie {
+            req = req.header("Cookie", format!("nous_session={c}"));
+        }
+        let body_bytes = body.map(|v| serde_json::to_vec(&v).unwrap());
+        if body_bytes.is_some() {
+            req = req.header("Content-Type", "application/json");
+        }
+        let req = req
+            .body(body_bytes.map(Body::from).unwrap_or_else(Body::empty))
+            .unwrap();
+
+        let resp = self.router.clone().oneshot(req).await.expect("router serve");
+        let status = resp.status();
+        let set_cookie = resp
+            .headers()
+            .get("set-cookie")
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_string);
+        let bytes = to_bytes(resp.into_body(), 16 * 1024 * 1024)
+            .await
+            .expect("read body");
+        let body = if bytes.is_empty() {
+            Value::Null
+        } else {
+            serde_json::from_slice(&bytes)
+                .unwrap_or_else(|_| Value::String(String::from_utf8_lossy(&bytes).to_string()))
+        };
+        (status, body, set_cookie)
     }
 
     async fn send(&self, req: Request<Body>) -> (StatusCode, Value) {
@@ -1748,4 +1802,190 @@ async fn oidc_expired_jwt_is_plain_401() {
         .request_with_token(Method::GET, "/api/notebooks", None, Some(&sign(&claims, "test-key")))
         .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+// ===== Browser sessions (cookie auth) =====
+
+/// POST /api/session with a signed ID token; returns (status, body, cookie value).
+async fn login_with_id_token(env: &TestEnv, id_token: &str) -> (StatusCode, Value, Option<String>) {
+    let (status, body, set_cookie) = env
+        .request_with_cookie(
+            Method::POST,
+            "/api/session",
+            Some(json!({ "idToken": id_token })),
+            None,
+        )
+        .await;
+    let cookie = set_cookie
+        .as_deref()
+        .and_then(|s| s.split(';').next())
+        .and_then(|s| s.strip_prefix("nous_session="))
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    (status, body, cookie)
+}
+
+#[tokio::test]
+async fn session_login_cookie_and_me_round_trip() {
+    use super::oidc::test_jwt::{sign, valid_claims};
+
+    let env = TestEnv::with_multi_user_oidc();
+    let token = sign(
+        &valid_claims("zitadel|cookie", Some("newbie@example.org"), Some("newbie")),
+        "test-key",
+    );
+
+    // Login: activates the invited user, returns the me-payload + cookie.
+    let (status, body, cookie) = login_with_id_token(&env, &token).await;
+    assert_eq!(status, StatusCode::OK);
+    let cookie = cookie.expect("session cookie set");
+    assert_eq!(body["status"], "active");
+    assert_eq!(body["username"], "newbie");
+
+    // Cookie authenticates /api/me and normal data routes (full rights).
+    let (status, me, _) = env
+        .request_with_cookie(Method::GET, "/api/me", None, Some(&cookie))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(me["userId"], body["userId"]);
+
+    let (status, _, _) = env
+        .request_with_cookie(
+            Method::POST,
+            "/api/notebooks",
+            Some(json!({"name": "Via Cookie"})),
+            Some(&cookie),
+        )
+        .await;
+    assert!(status.is_success(), "cookie-authed write failed: {status}");
+
+    // No cookie, no bearer → 401 on authed routes.
+    let (status, _, _) = env
+        .request_with_cookie(Method::GET, "/api/me", None, None)
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn session_login_rejects_bad_tokens_and_uninvited() {
+    use super::oidc::test_jwt::{sign, valid_claims};
+
+    let env = TestEnv::with_multi_user_oidc();
+
+    // Garbage ID token → 401, no cookie.
+    let (status, _, cookie) = login_with_id_token(&env, "not.a.jwt").await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert!(cookie.is_none());
+
+    // Valid token for an uninvited subject → friendly 403, no cookie.
+    let token = sign(
+        &valid_claims("zitadel|stranger", Some("stranger@example.org"), None),
+        "test-key",
+    );
+    let (status, body, cookie) = login_with_id_token(&env, &token).await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(body["message"], "invite required");
+    assert!(cookie.is_none());
+}
+
+#[tokio::test]
+async fn tampered_and_expired_cookies_are_rejected() {
+    let env = TestEnv::with_multi_user();
+    let now = chrono::Utc::now().timestamp();
+
+    // Forge a cookie for alice with the *right* key but expired.
+    let reg = TenantRegistry::load(&env.library_path.join("tenants.json")).unwrap();
+    let alice_id = reg.find_by_email("alice@example.org").unwrap().id.clone();
+    let expired = super::session::mint_cookie_value(&TEST_SESSION_KEY, &alice_id, now - 10);
+    let (status, _, _) = env
+        .request_with_cookie(Method::GET, "/api/me", None, Some(&expired))
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    // Valid expiry but tampered signature.
+    let good = super::session::mint_cookie_value(&TEST_SESSION_KEY, &alice_id, now + 3600);
+    let mut tampered = good.clone();
+    let flip = if tampered.ends_with('0') { '1' } else { '0' };
+    tampered.pop();
+    tampered.push(flip);
+    let (status, _, _) = env
+        .request_with_cookie(Method::GET, "/api/me", None, Some(&tampered))
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    // The untampered one works (PAT-only env: cookies still valid — the
+    // signing key exists independently of OIDC).
+    let (status, me, _) = env
+        .request_with_cookie(Method::GET, "/api/me", None, Some(&good))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(me["userId"], Value::String(alice_id));
+}
+
+#[tokio::test]
+async fn disabling_a_user_kills_their_live_session() {
+    let env = TestEnv::with_multi_user();
+    let now = chrono::Utc::now().timestamp();
+
+    let registry_path = env.library_path.join("tenants.json");
+    let reg = TenantRegistry::load(&registry_path).unwrap();
+    let alice_id = reg.find_by_email("alice@example.org").unwrap().id.clone();
+    let cookie = super::session::mint_cookie_value(&TEST_SESSION_KEY, &alice_id, now + 3600);
+
+    let (status, _, _) = env
+        .request_with_cookie(Method::GET, "/api/me", None, Some(&cookie))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Disable out-of-band (as the CLI would): the still-valid cookie must
+    // die on the very next request via the per-request status re-check.
+    let mut reg = TenantRegistry::load(&registry_path).unwrap();
+    reg.update(&alice_id, |u| u.status = UserStatus::Disabled).unwrap();
+    reg.save().unwrap();
+
+    let (status, _, _) = env
+        .request_with_cookie(Method::GET, "/api/me", None, Some(&cookie))
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn logout_clears_cookie_and_config_reports_oidc() {
+    let env = TestEnv::with_multi_user_oidc();
+
+    // Logout is public and clears the cookie client-side.
+    let (status, _, set_cookie) = env
+        .request_with_cookie(Method::DELETE, "/api/session", None, None)
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let set_cookie = set_cookie.expect("clearing Set-Cookie present");
+    assert!(set_cookie.starts_with("nous_session=;"), "got: {set_cookie}");
+    assert!(set_cookie.contains("Max-Age=0"));
+
+    // Config advertises the issuer + client id for the SPA.
+    let (status, body, _) = env
+        .request_with_cookie(Method::GET, "/api/session/config", None, None)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["issuer"], super::oidc::test_jwt::ISSUER);
+    assert_eq!(body["clientId"], super::oidc::test_jwt::CLIENT_ID);
+
+    // Without OIDC configured, config 404s so the SPA can say "sign-in
+    // unavailable".
+    let plain = TestEnv::with_multi_user();
+    let (status, _, _) = plain
+        .request_with_cookie(Method::GET, "/api/session/config", None, None)
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // Legacy mode: session surface doesn't exist meaningfully.
+    let legacy = TestEnv::new();
+    let (status, _, _) = legacy
+        .request_with_cookie(Method::GET, "/api/session/config", None, None)
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _, _) = legacy
+        .request_with_cookie(Method::GET, "/api/me", None, None)
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
 }
