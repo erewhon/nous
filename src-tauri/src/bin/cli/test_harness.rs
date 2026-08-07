@@ -2148,3 +2148,78 @@ async fn swept_routes_isolate_tenants_end_to_end() {
         "cross-tenant leak into owner library: {names:?}"
     );
 }
+
+#[tokio::test]
+async fn swept_database_routes_isolate_tenants() {
+    let env = TestEnv::with_multi_user();
+    let alice_pat = env.rw_token.clone().unwrap();
+    let newbie_pat = env.invited_token.clone().unwrap();
+
+    // Alice: a notebook with a database.
+    let (status, nb) = env
+        .request_with_token(
+            Method::POST,
+            "/api/notebooks",
+            Some(json!({"name": "Alice DBs"})),
+            Some(&alice_pat),
+        )
+        .await;
+    assert!(status.is_success(), "{status} {nb}");
+    let nb_id = nb["data"]["id"].as_str().unwrap().to_string();
+    let (status, db) = env
+        .request_with_token(
+            Method::POST,
+            &format!("/api/notebooks/{nb_id}/databases"),
+            Some(json!({"title": "Alice Tasks", "properties": []})),
+            Some(&alice_pat),
+        )
+        .await;
+    assert!(status.is_success(), "alice create db: {status} {db}");
+    let db_id = db["data"]["id"].as_str().expect("db id").to_string();
+
+    // Activate newbie; his lazy tenant has no such notebook or database.
+    let registry_path = env.library_path.join("tenants.json");
+    let mut reg = TenantRegistry::load(&registry_path).unwrap();
+    let newbie_id = reg.find_by_email("newbie@example.org").unwrap().id.clone();
+    reg.update(&newbie_id, |u| u.status = UserStatus::Active).unwrap();
+    reg.save().unwrap();
+
+    // List errors (the notebook doesn't exist in his tenant) and leaks
+    // nothing. Pre-existing wart, unchanged by the sweep: list_databases
+    // maps unknown-notebook to 500, not 404 (list_pages error mapping).
+    let (status, body) = env
+        .request_with_token(
+            Method::GET,
+            &format!("/api/notebooks/{nb_id}/databases"),
+            None,
+            Some(&newbie_pat),
+        )
+        .await;
+    assert!(!status.is_success(), "must not serve alice's databases");
+    assert!(
+        !body.to_string().contains("Alice Tasks"),
+        "cross-tenant database leak: {body}"
+    );
+
+    // Direct-id fetch of alice's database → 404 in newbie's tenant.
+    let (status, _) = env
+        .request_with_token(
+            Method::GET,
+            &format!("/api/notebooks/{nb_id}/databases/{db_id}"),
+            None,
+            Some(&newbie_pat),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // Alice still reads her database fine (rows path included).
+    let (status, _) = env
+        .request_with_token(
+            Method::POST,
+            &format!("/api/notebooks/{nb_id}/databases/{db_id}/rows"),
+            Some(json!({"rows": [{"cells": {}}]})),
+            Some(&alice_pat),
+        )
+        .await;
+    assert!(status.is_success(), "alice add rows: {status}");
+}

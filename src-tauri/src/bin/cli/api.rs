@@ -4587,10 +4587,11 @@ async fn send_pane_ack(
 
 async fn list_databases(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path(notebook_id): Path<String>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     let nb_id = parse_uuid(&notebook_id)?;
-    let storage = state.storage.lock().unwrap();
+    let storage = tenant.storage.lock().unwrap();
     let pages = storage
         .list_pages(nb_id)
         .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
@@ -4627,11 +4628,12 @@ async fn list_databases(
 
 async fn get_database(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path((notebook_id, db_id)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     let nb_id = parse_uuid(&notebook_id)?;
     let pg_id = parse_uuid(&db_id)?;
-    let storage = state.storage.lock().unwrap();
+    let storage = tenant.storage.lock().unwrap();
 
     let page = storage
         .get_page(nb_id, pg_id)
@@ -4967,12 +4969,13 @@ fn merge_database_3way(
 ///   delete a concurrently-added row.
 async fn put_database(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path((notebook_id, db_id)): Path<(String, String)>,
     Json(body): Json<serde_json::Value>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     let nb_id = parse_uuid(&notebook_id)?;
     let pg_id = parse_uuid(&db_id)?;
-    let storage = state.storage.lock().unwrap();
+    let storage = tenant.storage.lock().unwrap();
 
     let mut page = storage
         .get_page(nb_id, pg_id)
@@ -5044,9 +5047,13 @@ async fn put_database(
 
     drop(storage);
 
-    state.sync_manager.queue_page_update(nb_id, pg_id);
+    // WebDAV sync is owner-only (hosted policy) — never queue another
+    // tenant's pages into the owner's sync run.
+    if state.tenants.is_owner_tenant(&tenant.0) {
+        state.sync_manager.queue_page_update(nb_id, pg_id);
+    }
 
-    emit_event(&state, "database.updated", serde_json::json!({
+    emit_tenant_event(&tenant, "database.updated", serde_json::json!({
         "notebookId": notebook_id,
         "pageId": db_id,
     }));
@@ -5789,12 +5796,13 @@ async fn delete_tag(
 
 async fn add_database_rows(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path((notebook_id, db_id)): Path<(String, String)>,
     Json(req): Json<AddRowsRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     let nb_id = parse_uuid(&notebook_id)?;
     let pg_id = parse_uuid(&db_id)?;
-    let storage = state.storage.lock().unwrap();
+    let storage = tenant.storage.lock().unwrap();
 
     let page = storage
         .get_page(nb_id, pg_id)
@@ -5847,7 +5855,7 @@ async fn add_database_rows(
         .write_native_file_content(&page, &db_json)
         .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    emit_event(&state, "database.rows_added", serde_json::json!({
+    emit_tenant_event(&tenant, "database.rows_added", serde_json::json!({
         "notebookId": notebook_id,
         "databaseId": db_id,
         "rowsAdded": added,
@@ -5866,12 +5874,13 @@ async fn add_database_rows(
 
 async fn update_database_rows(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path((notebook_id, db_id)): Path<(String, String)>,
     Json(req): Json<UpdateRowsRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     let nb_id = parse_uuid(&notebook_id)?;
     let pg_id = parse_uuid(&db_id)?;
-    let storage = state.storage.lock().unwrap();
+    let storage = tenant.storage.lock().unwrap();
 
     let page = storage
         .get_page(nb_id, pg_id)
@@ -5941,7 +5950,7 @@ async fn update_database_rows(
         .write_native_file_content(&page, &db_json)
         .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    emit_event(&state, "database.rows_updated", serde_json::json!({
+    emit_tenant_event(&tenant, "database.rows_updated", serde_json::json!({
         "notebookId": notebook_id,
         "databaseId": db_id,
         "rowsUpdated": updated_count,
@@ -5959,11 +5968,12 @@ async fn update_database_rows(
 
 async fn create_database(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path(notebook_id): Path<String>,
     Json(req): Json<CreateDatabaseRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     let nb_id = parse_uuid(&notebook_id)?;
-    let storage = state.storage.lock().unwrap();
+    let storage = tenant.storage.lock().unwrap();
 
     // Create the page
     let mut page = storage
@@ -6055,9 +6065,13 @@ async fn create_database(
         .write_native_file_content(&page, &db_json)
         .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    state.sync_manager.queue_page_update(nb_id, page.id);
+    // WebDAV sync is owner-only (hosted policy) — never queue another
+    // tenant's pages into the owner's sync run.
+    if state.tenants.is_owner_tenant(&tenant.0) {
+        state.sync_manager.queue_page_update(nb_id, page.id);
+    }
 
-    emit_event(&state, "database.created", serde_json::json!({
+    emit_tenant_event(&tenant, "database.created", serde_json::json!({
         "notebookId": notebook_id,
         "databaseId": page.id.to_string(),
         "title": page.title,
@@ -6078,12 +6092,13 @@ async fn create_database(
 
 async fn delete_database_rows(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path((notebook_id, db_id)): Path<(String, String)>,
     Json(req): Json<DeleteRowsRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     let nb_id = parse_uuid(&notebook_id)?;
     let pg_id = parse_uuid(&db_id)?;
-    let storage = state.storage.lock().unwrap();
+    let storage = tenant.storage.lock().unwrap();
 
     let page = storage
         .get_page(nb_id, pg_id)
@@ -6121,7 +6136,7 @@ async fn delete_database_rows(
         .write_native_file_content(&page, &db_json)
         .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    emit_event(&state, "database.rows_deleted", serde_json::json!({
+    emit_tenant_event(&tenant, "database.rows_deleted", serde_json::json!({
         "notebookId": notebook_id,
         "databaseId": db_id,
         "rowsDeleted": deleted,
