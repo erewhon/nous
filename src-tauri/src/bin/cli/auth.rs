@@ -17,10 +17,14 @@ const KEY_FILE_NAME: &str = "daemon-api-key";
 /// Length of the random portion in bytes (256 bits).
 const KEY_RANDOM_BYTES: usize = 32;
 
-/// Permission scope for an API key.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Permission scope for an API key or personal access token. Serialized
+/// with the same short names the key-file prefixes use ("rw"/"ro") so the
+/// tenant registry's token records read naturally.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Scope {
+    #[serde(rename = "rw")]
     ReadWrite,
+    #[serde(rename = "ro")]
     ReadOnly,
 }
 

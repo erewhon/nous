@@ -3,9 +3,12 @@
 //! `{data_dir}/tenants.json` holds the user rows for multi-user mode (see
 //! `docs/multi-user-daemon-plan.md`). Pure data — no HTTP or OIDC coupling
 //! here; the auth middleware and OIDC provisioning layers consume this
-//! module. Personal access token records are added to the same file by the
-//! PAT work ("Personal access tokens with scopes"), which is why the file
-//! carries a `version` field and tolerates unknown fields on load.
+//! module. The file also holds personal access token records — bearer
+//! credentials for non-browser clients (MCP, SDK, Emacs): plaintext is
+//! `nous_` + 64 hex chars of a random 256-bit secret, only its SHA-256
+//! hash is stored (a fast hash is correct for high-entropy secrets —
+//! argon2 is for low-entropy passwords), and each token carries a
+//! rw/ro [`Scope`] preserving today's key-file semantics.
 //!
 //! Same file-hygiene contract as the API key file (`auth.rs`): written
 //! atomically (`nous_lib::storage::atomic`), kept 0600, and load refuses a
@@ -24,8 +27,14 @@ use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use super::auth::Scope;
+
 /// Registry file name within the daemon data directory.
 pub const REGISTRY_FILE_NAME: &str = "tenants.json";
+
+/// Prefix distinguishing personal access tokens from other bearer values
+/// (the auth middleware routes on it: `nous_` → PAT, otherwise OIDC JWT).
+pub const TOKEN_PREFIX: &str = "nous_";
 
 /// Current on-disk format version. Bump only on breaking layout changes;
 /// additive fields use `#[serde(default)]` instead.
@@ -139,16 +148,75 @@ impl User {
     }
 }
 
+// ===== Personal access tokens =====
+
+/// A stored token record. Only the SHA-256 hash of the plaintext lives
+/// here — the plaintext exists exactly once, in the [`MintedToken`]
+/// returned by [`TenantRegistry::mint_token`].
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AccessToken {
+    /// Token id (uuid v4) — the handle for revocation and listing.
+    pub id: String,
+    pub user_id: String,
+    /// Human label ("mcp on delphi"), display-only.
+    pub name: String,
+    pub scope: Scope,
+    /// Hex SHA-256 of the plaintext token.
+    pub token_hash: String,
+    pub created_at: DateTime<Utc>,
+    #[serde(default)]
+    pub revoked_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub last_used_at: Option<DateTime<Utc>>,
+}
+
+/// A freshly minted token. `token` is the only copy of the plaintext —
+/// show it once, never log it.
+#[derive(Debug)]
+pub struct MintedToken {
+    pub token: String,
+    pub token_id: String,
+    pub user_id: String,
+    pub name: String,
+    pub scope: Scope,
+}
+
+/// Successful token authentication: who, and with what rights.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TokenAuth {
+    pub user_id: String,
+    pub role: UserRole,
+    pub scope: Scope,
+}
+
+/// Why a token was rejected. Kept coarse on purpose: the HTTP layer maps
+/// both to 401 without leaking which failed (the distinction matters only
+/// for logs).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TokenAuthError {
+    /// Unknown, malformed, or revoked token.
+    InvalidToken,
+    /// Token is valid but the user is not active (invited/disabled).
+    InactiveUser,
+}
+
+fn hash_token(token: &str) -> String {
+    use sha2::{Digest, Sha256};
+    hex::encode(Sha256::digest(token.as_bytes()))
+}
+
 // ===== On-disk format =====
 
-/// The serialized file. Additive fields (e.g. the PAT records) must use
-/// `#[serde(default)]` so older files load; unknown fields are tolerated so
-/// newer files still load in older builds.
+/// The serialized file. Additive fields must use `#[serde(default)]` so
+/// older files load; unknown fields are tolerated so newer files still
+/// load in older builds.
 #[derive(Debug, Serialize, Deserialize)]
 struct RegistryFile {
     version: u32,
     #[serde(default)]
     users: Vec<User>,
+    #[serde(default)]
+    tokens: Vec<AccessToken>,
 }
 
 // ===== Registry =====
@@ -160,6 +228,7 @@ struct RegistryFile {
 pub struct TenantRegistry {
     path: PathBuf,
     users: Vec<User>,
+    tokens: Vec<AccessToken>,
 }
 
 impl TenantRegistry {
@@ -177,6 +246,7 @@ impl TenantRegistry {
             return Ok(Self {
                 path: path.to_path_buf(),
                 users: Vec::new(),
+                tokens: Vec::new(),
             });
         }
 
@@ -215,6 +285,7 @@ impl TenantRegistry {
         Ok(Self {
             path: path.to_path_buf(),
             users: file.users,
+            tokens: file.tokens,
         })
     }
 
@@ -226,6 +297,7 @@ impl TenantRegistry {
         let file = RegistryFile {
             version: REGISTRY_VERSION,
             users: self.users.clone(),
+            tokens: self.tokens.clone(),
         };
         let mut content = serde_json::to_string_pretty(&file)?;
         content.push('\n');
@@ -316,6 +388,105 @@ impl TenantRegistry {
             }
         }
         Ok(())
+    }
+
+    // ===== Personal access tokens =====
+
+    /// Mint a new token for an existing user. The user may be in any
+    /// status — an invited user can hold a token before activation;
+    /// [`TenantRegistry::authenticate_token`] is what gates on `active`.
+    /// Caller must [`TenantRegistry::save`] to persist.
+    pub fn mint_token(&mut self, user_id: &str, name: &str, scope: Scope) -> Result<MintedToken> {
+        if self.find_by_id(user_id).is_none() {
+            bail!("user not found: {user_id}");
+        }
+
+        let mut secret = [0u8; 32];
+        rand::Rng::fill(&mut rand::thread_rng(), &mut secret);
+        let token = format!("{TOKEN_PREFIX}{}", hex::encode(secret));
+        let token_id = uuid::Uuid::new_v4().to_string();
+
+        self.tokens.push(AccessToken {
+            id: token_id.clone(),
+            user_id: user_id.to_string(),
+            name: name.to_string(),
+            scope,
+            token_hash: hash_token(&token),
+            created_at: Utc::now(),
+            revoked_at: None,
+            last_used_at: None,
+        });
+
+        Ok(MintedToken {
+            token,
+            token_id,
+            user_id: user_id.to_string(),
+            name: name.to_string(),
+            scope,
+        })
+    }
+
+    /// Revoke a token by id. Idempotent: returns `true` only when the
+    /// token was live and is now revoked; unknown or already-revoked ids
+    /// return `false`. Caller must [`TenantRegistry::save`] to persist.
+    pub fn revoke_token(&mut self, token_id: &str) -> bool {
+        match self
+            .tokens
+            .iter_mut()
+            .find(|t| t.id == token_id && t.revoked_at.is_none())
+        {
+            Some(t) => {
+                t.revoked_at = Some(Utc::now());
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Token records (hashes included — display layers must not print
+    /// `token_hash`; it is not secret-equivalent but has no business in
+    /// terminal output).
+    pub fn tokens(&self) -> &[AccessToken] {
+        &self.tokens
+    }
+
+    /// Resolve a plaintext bearer token to its active user.
+    ///
+    /// Rejects unknown/revoked tokens and tokens of non-active users
+    /// (status is checked here, at use — not at mint). Stamps
+    /// `last_used_at` in memory; persistence of the stamp is the caller's
+    /// choice (best-effort — the daemon saves opportunistically, and losing
+    /// a stamp on crash is harmless).
+    ///
+    /// Hash comparison is a plain `==` on SHA-256 hex: with a 256-bit
+    /// random preimage, hash-timing leaks nothing an attacker can use
+    /// (unlike the raw key comparison in `auth.rs`, which is over the
+    /// secret itself and therefore constant-time).
+    pub fn authenticate_token(&mut self, token: &str) -> Result<TokenAuth, TokenAuthError> {
+        let hash = hash_token(token);
+        let record = self
+            .tokens
+            .iter_mut()
+            .find(|t| t.revoked_at.is_none() && t.token_hash == hash)
+            .ok_or(TokenAuthError::InvalidToken)?;
+
+        let user_id = record.user_id.clone();
+        record.last_used_at = Some(Utc::now());
+        let scope = record.scope;
+
+        let user = self
+            .find_by_id(&user_id)
+            // A token whose user row vanished is invalid, not a panic.
+            .ok_or(TokenAuthError::InvalidToken)?;
+        if user.status != UserStatus::Active {
+            return Err(TokenAuthError::InactiveUser);
+        }
+
+        Ok(TokenAuth {
+            user_id: user.id.clone(),
+            role: user.role,
+            scope,
+        })
     }
 }
 
@@ -505,6 +676,153 @@ mod tests {
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
         let err = TenantRegistry::load(&path).unwrap_err().to_string();
         assert!(err.contains("chmod 600"), "unexpected error: {err}");
+    }
+
+    // ===== Personal access tokens =====
+
+    /// Insert an active user and return its id.
+    fn insert_active(reg: &mut TenantRegistry, email: &str) -> String {
+        let u = User::new_invited(email, UserRole::Member);
+        let id = u.id.clone();
+        reg.insert(u).unwrap();
+        reg.update(&id, |u| u.status = UserStatus::Active).unwrap();
+        id
+    }
+
+    #[test]
+    fn mint_and_authenticate_round_trip() {
+        let dir = TempDir::new().unwrap();
+        let mut reg = registry_in(&dir);
+        let alice = insert_active(&mut reg, "alice@example.org");
+
+        let minted = reg.mint_token(&alice, "cli", Scope::ReadWrite).unwrap();
+        assert!(minted.token.starts_with(TOKEN_PREFIX));
+        assert_eq!(minted.token.len(), TOKEN_PREFIX.len() + 64);
+
+        // Only the hash is stored, and it matches the plaintext's digest.
+        let stored = &reg.tokens()[0];
+        assert_ne!(stored.token_hash, minted.token);
+        assert_eq!(stored.token_hash, hash_token(&minted.token));
+        assert!(stored.last_used_at.is_none());
+
+        let auth = reg.authenticate_token(&minted.token).unwrap();
+        assert_eq!(auth.user_id, alice);
+        assert_eq!(auth.role, UserRole::Member);
+        assert_eq!(auth.scope, Scope::ReadWrite);
+
+        // last_used_at stamped on successful auth.
+        assert!(reg.tokens()[0].last_used_at.is_some());
+
+        // Minting for an unknown user is an error.
+        assert!(reg.mint_token("nobody", "x", Scope::ReadOnly).is_err());
+    }
+
+    #[test]
+    fn authenticate_rejects_garbage_revoked_and_inactive() {
+        let dir = TempDir::new().unwrap();
+        let mut reg = registry_in(&dir);
+        let alice = insert_active(&mut reg, "alice@example.org");
+
+        // Garbage.
+        assert_eq!(
+            reg.authenticate_token("nous_definitely_not_a_token"),
+            Err(TokenAuthError::InvalidToken)
+        );
+
+        // Revoked: first revocation true, second false, then auth fails.
+        let minted = reg.mint_token(&alice, "cli", Scope::ReadWrite).unwrap();
+        assert!(reg.revoke_token(&minted.token_id));
+        assert!(!reg.revoke_token(&minted.token_id));
+        assert!(!reg.revoke_token("nope"));
+        assert_eq!(
+            reg.authenticate_token(&minted.token),
+            Err(TokenAuthError::InvalidToken)
+        );
+
+        // Invited (not yet active) user: token mints but doesn't authenticate.
+        let invited = User::new_invited("new@example.org", UserRole::Member);
+        let invited_id = invited.id.clone();
+        reg.insert(invited).unwrap();
+        let tok = reg.mint_token(&invited_id, "onboarding", Scope::ReadWrite).unwrap();
+        assert_eq!(
+            reg.authenticate_token(&tok.token),
+            Err(TokenAuthError::InactiveUser)
+        );
+
+        // Disabling a user kills their live token immediately.
+        let disabled_tok = reg.mint_token(&alice, "later", Scope::ReadWrite).unwrap();
+        reg.update(&alice, |u| u.status = UserStatus::Disabled).unwrap();
+        assert_eq!(
+            reg.authenticate_token(&disabled_tok.token),
+            Err(TokenAuthError::InactiveUser)
+        );
+    }
+
+    #[test]
+    fn scope_is_carried_and_enforces_methods() {
+        let dir = TempDir::new().unwrap();
+        let mut reg = registry_in(&dir);
+        let alice = insert_active(&mut reg, "alice@example.org");
+
+        let ro = reg.mint_token(&alice, "reader", Scope::ReadOnly).unwrap();
+        let auth = reg.authenticate_token(&ro.token).unwrap();
+        assert_eq!(auth.scope, Scope::ReadOnly);
+        // Same enforcement contract as the legacy key file.
+        assert!(auth.scope.allows_method("GET"));
+        assert!(auth.scope.allows_method("HEAD"));
+        assert!(auth.scope.allows_method("OPTIONS"));
+        assert!(!auth.scope.allows_method("POST"));
+        assert!(!auth.scope.allows_method("PUT"));
+        assert!(!auth.scope.allows_method("DELETE"));
+
+        let rw = reg.mint_token(&alice, "writer", Scope::ReadWrite).unwrap();
+        let auth = reg.authenticate_token(&rw.token).unwrap();
+        assert!(auth.scope.allows_method("POST"));
+        assert!(auth.scope.allows_method("DELETE"));
+    }
+
+    #[test]
+    fn tokens_map_to_distinct_users_and_persist() {
+        let dir = TempDir::new().unwrap();
+        let mut reg = registry_in(&dir);
+        let alice = insert_active(&mut reg, "alice@example.org");
+        let bob = insert_active(&mut reg, "bob@example.org");
+
+        let a_tok = reg.mint_token(&alice, "a", Scope::ReadWrite).unwrap();
+        let b_tok = reg.mint_token(&bob, "b", Scope::ReadOnly).unwrap();
+        let revoked = reg.mint_token(&bob, "old", Scope::ReadWrite).unwrap();
+        assert!(reg.revoke_token(&revoked.token_id));
+        reg.save().unwrap();
+
+        // Everything — scope, revocation, ownership — survives reload.
+        let mut reloaded = registry_in(&dir);
+        assert_eq!(reloaded.tokens().len(), 3);
+        assert_eq!(reloaded.authenticate_token(&a_tok.token).unwrap().user_id, alice);
+        let b_auth = reloaded.authenticate_token(&b_tok.token).unwrap();
+        assert_eq!(b_auth.user_id, bob);
+        assert_eq!(b_auth.scope, Scope::ReadOnly);
+        assert_eq!(
+            reloaded.authenticate_token(&revoked.token),
+            Err(TokenAuthError::InvalidToken)
+        );
+    }
+
+    #[test]
+    fn tokenless_v1_file_still_loads() {
+        // A registry written before token records existed (no "tokens"
+        // field) must load cleanly — serde(default) contract.
+        let dir = TempDir::new().unwrap();
+        let path = TenantRegistry::registry_path(dir.path());
+        std::fs::write(
+            &path,
+            r#"{"version":1,"users":[{"id":"u1","email":"x@example.org",
+                "role":"member","status":"active","created_at":"2026-01-01T00:00:00Z"}]}"#,
+        )
+        .unwrap();
+        set_mode_600(&path);
+        let reg = TenantRegistry::load(&path).unwrap();
+        assert_eq!(reg.users().len(), 1);
+        assert!(reg.tokens().is_empty());
     }
 
     fn set_mode_600(path: &Path) {
