@@ -63,8 +63,8 @@ pub struct DaemonState {
     pub multi_user: Option<super::session::MultiUserCtx>,
     /// User → tenant resolution (lazy builds). In legacy mode this holds
     /// just the owner tenant, which the `Tenant` extractor falls back to.
+    /// Event channels live on each TenantState; there is no global one.
     pub tenants: Arc<super::tenant::TenantManager>,
-    pub event_tx: nous_lib::events::EventSender,
 }
 
 /// Default daemon port
@@ -330,7 +330,6 @@ pub async fn run(library_name: Option<&str>, port: Option<u16>, bind: Option<&st
         web_app_dir,
         multi_user: multi_user_ctx,
         tenants,
-        event_tx,
     });
 
     // Start HTTP API

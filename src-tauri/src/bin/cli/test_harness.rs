@@ -245,7 +245,6 @@ impl TestEnv {
             web_app_dir: library_path.join("web-app"),
             multi_user: multi_user_ctx,
             tenants,
-            event_tx,
         });
 
         let router = api::build_router(Arc::clone(&state), auth_state);
@@ -2410,4 +2409,83 @@ async fn sync_trigger_is_owner_only_and_member_plugins_are_empty() {
         .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["data"], json!([]));
+}
+
+// ===== Per-tenant event channels (WS leaf) =====
+
+#[tokio::test]
+async fn ws_events_route_requires_credentials_in_multi_user_mode() {
+    // The /api/events upgrade sits behind the same default-deny
+    // middleware as everything else — anonymous request dies with 401
+    // before any upgrade/tenant resolution happens.
+    let env = TestEnv::with_multi_user();
+    let (status, _) = env
+        .request_with_token(Method::GET, "/api/events", None, None)
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn tenant_event_channels_are_isolated_both_directions() {
+    let env = TestEnv::with_multi_user();
+    let alice_pat = env.rw_token.clone().unwrap();
+    let newbie_pat = env.invited_token.clone().unwrap();
+
+    // Activate newbie and pre-build his tenant (first request) so we can
+    // subscribe to his channel before generating events.
+    let registry_path = env.library_path.join("tenants.json");
+    let mut reg = TenantRegistry::load(&registry_path).unwrap();
+    let newbie_id = reg.find_by_email("newbie@example.org").unwrap().id.clone();
+    reg.update(&newbie_id, |u| u.status = UserStatus::Active).unwrap();
+    reg.save().unwrap();
+    let (status, _) = env
+        .request_with_token(Method::GET, "/api/notebooks", None, Some(&newbie_pat))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Subscribe to both channels exactly as each tenant's WS would.
+    let owner_tenant = env.state.tenants.owner();
+    let newbie_tenant = env.state.tenants.resolve(&newbie_id).unwrap();
+    let mut owner_rx = owner_tenant.event_tx.subscribe();
+    let mut newbie_rx = newbie_tenant.event_tx.subscribe();
+
+    // Alice creates a notebook → event on the owner channel only.
+    let (status, _) = env
+        .request_with_token(
+            Method::POST,
+            "/api/notebooks",
+            Some(json!({"name": "Owner Events"})),
+            Some(&alice_pat),
+        )
+        .await;
+    assert!(status.is_success());
+    let owner_evt = tokio::time::timeout(std::time::Duration::from_secs(1), owner_rx.recv())
+        .await
+        .expect("owner event within 1s")
+        .expect("owner channel open");
+    assert_eq!(owner_evt.event, "notebook.created");
+    assert!(
+        newbie_rx.try_recv().is_err(),
+        "alice's event leaked onto newbie's channel"
+    );
+
+    // Newbie creates a notebook → event on HIS channel only.
+    let (status, _) = env
+        .request_with_token(
+            Method::POST,
+            "/api/notebooks",
+            Some(json!({"name": "Member Events"})),
+            Some(&newbie_pat),
+        )
+        .await;
+    assert!(status.is_success());
+    let newbie_evt = tokio::time::timeout(std::time::Duration::from_secs(1), newbie_rx.recv())
+        .await
+        .expect("newbie event within 1s")
+        .expect("newbie channel open");
+    assert_eq!(newbie_evt.event, "notebook.created");
+    assert!(
+        owner_rx.try_recv().is_err(),
+        "newbie's event leaked onto the owner channel"
+    );
 }

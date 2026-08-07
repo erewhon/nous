@@ -42,16 +42,10 @@ use nous_lib::storage::{EditorBlock, EditorData, FileStorageMode, Notebook, Note
 use super::daemon::DaemonState;
 use nous_lib::events::AppEvent;
 
-/// Emit an event to all WebSocket subscribers (fire-and-forget).
-fn emit_event(state: &DaemonState, event: &str, data: serde_json::Value) {
-    let _ = state.event_tx.send(AppEvent::new(event, data));
-}
-
-/// Tenant-aware event emission for swept handlers: publish to the owning
-/// tenant's channel. The owner tenant's channel IS the daemon-wide one
-/// (`/api/events`), so single-user behavior is unchanged; lazy tenants'
-/// events stay on their private channels until the per-tenant WS leaf
-/// surfaces them — they must never leak into another user's stream.
+/// Emit an event on the owning tenant's channel (fire-and-forget). Each
+/// tenant's `/api/events` WS subscribes to its own channel, so events
+/// never cross tenants; in single-user mode the owner tenant's channel
+/// is the only one and behavior matches the pre-tenancy daemon.
 fn emit_tenant_event(tenant: &Tenant, event: &str, data: serde_json::Value) {
     let _ = tenant.event_tx.send(AppEvent::new(event, data));
 }
@@ -4461,9 +4455,14 @@ async fn delete_inbox_item(
 
 async fn ws_events(
     ws: WebSocketUpgrade,
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
+    tenant: Tenant,
 ) -> impl IntoResponse {
-    ws.on_upgrade(move |socket| handle_ws_events(socket, state))
+    // The socket serves the authenticated user's tenant: their event
+    // channel, their storage, their CRDT store. Auth happened in the
+    // middleware (PAT via ?token=, or the session cookie, which browsers
+    // send on same-origin WS upgrades automatically).
+    ws.on_upgrade(move |socket| handle_ws_events(socket, tenant.0))
 }
 
 /// Inbound commands from the WS client. Page content is loaded server-side
@@ -4487,8 +4486,8 @@ enum PaneCommand {
     },
 }
 
-async fn handle_ws_events(mut socket: WebSocket, state: AppState) {
-    let mut rx = state.event_tx.subscribe();
+async fn handle_ws_events(mut socket: WebSocket, tenant: Arc<super::tenant::TenantState>) {
+    let mut rx = tenant.event_tx.subscribe();
 
     // Track panes opened by THIS connection so we can auto-close them when
     // the socket drops. Without this invariant a desktop crash would leave
@@ -4531,7 +4530,7 @@ async fn handle_ws_events(mut socket: WebSocket, state: AppState) {
                                 continue;
                             }
                         };
-                        if !handle_pane_command(cmd, &state, &mut my_panes, &mut socket).await {
+                        if !handle_pane_command(cmd, &tenant, &mut my_panes, &mut socket).await {
                             break;
                         }
                     }
@@ -4543,33 +4542,27 @@ async fn handle_ws_events(mut socket: WebSocket, state: AppState) {
 
     // Auto-close any panes this connection opened so the CRDT store's
     // close_pane invariants (final flush + GC of LivePage) still run.
-    // TODO(per-tenant WS leaf): the events WS and its pane machinery are
-    // owner-scoped until that leaf routes per-tenant channels.
-    let owner = state.tenants.owner();
     for (page_id, pane_id) in &my_panes {
-        owner.crdt_store.close_pane(*page_id, pane_id);
+        tenant.crdt_store.close_pane(*page_id, pane_id);
     }
 
     log::info!("WebSocket client disconnected from /api/events");
 }
 
-/// Apply one PaneCommand. Returns false if the connection should be closed.
-///
-/// TODO(per-tenant WS leaf): pane commands act on the OWNER tenant — the
-/// events WS is owner-scoped until that leaf routes per-tenant channels.
+/// Apply one PaneCommand against the connection's tenant. Returns false
+/// if the connection should be closed.
 async fn handle_pane_command(
     cmd: PaneCommand,
-    state: &AppState,
+    tenant: &Arc<super::tenant::TenantState>,
     my_panes: &mut HashSet<(Uuid, String)>,
     socket: &mut WebSocket,
 ) -> bool {
-    let owner = state.tenants.owner();
     match cmd {
         PaneCommand::PaneOpen { notebook_id, page_id, pane_id } => {
             // Load page content with the storage guard scoped to this block
             // so the !Send MutexGuard is dropped before any .await below.
             let load_result: Result<EditorData, String> = {
-                let storage = match owner.storage.lock() {
+                let storage = match tenant.storage.lock() {
                     Ok(g) => g,
                     Err(e) => {
                         log::warn!("WS pane_open: storage lock poisoned: {}", e);
@@ -4593,7 +4586,7 @@ async fn handle_pane_command(
                 }
             };
 
-            if let Err(e) = owner.crdt_store.open_page(notebook_id, page_id, &pane_id, &content) {
+            if let Err(e) = tenant.crdt_store.open_page(notebook_id, page_id, &pane_id, &content) {
                 log::warn!(
                     "WS pane_open: crdt_store.open_page failed for {}/{}: {}",
                     page_id, pane_id, e
@@ -4605,7 +4598,7 @@ async fn handle_pane_command(
             send_pane_ack(socket, "pane_opened", page_id, &pane_id).await
         }
         PaneCommand::PaneClose { page_id, pane_id } => {
-            owner.crdt_store.close_pane(page_id, &pane_id);
+            tenant.crdt_store.close_pane(page_id, &pane_id);
             my_panes.remove(&(page_id, pane_id.clone()));
             send_pane_ack(socket, "pane_closed", page_id, &pane_id).await
         }
