@@ -2223,3 +2223,119 @@ async fn swept_database_routes_isolate_tenants() {
         .await;
     assert!(status.is_success(), "alice add rows: {status}");
 }
+
+#[tokio::test]
+async fn swept_search_and_asset_routes_isolate_tenants() {
+    let env = TestEnv::with_multi_user();
+    let alice_pat = env.rw_token.clone().unwrap();
+    let newbie_pat = env.invited_token.clone().unwrap();
+
+    // Alice: notebook + page with a distinctive term, then index it.
+    let (_, nb) = env
+        .request_with_token(
+            Method::POST,
+            "/api/notebooks",
+            Some(json!({"name": "Alice Search"})),
+            Some(&alice_pat),
+        )
+        .await;
+    let nb_id = nb["data"]["id"].as_str().unwrap().to_string();
+    let (status, _) = env
+        .request_with_token(
+            Method::POST,
+            &format!("/api/notebooks/{nb_id}/pages"),
+            Some(json!({"title": "Xylophone Blueprints"})),
+            Some(&alice_pat),
+        )
+        .await;
+    assert!(status.is_success());
+    let (status, _) = env
+        .request_with_token(Method::POST, "/api/search/rebuild", None, Some(&alice_pat))
+        .await;
+    assert!(status.is_success(), "alice rebuild: {status}");
+
+    // Alice uploads an asset.
+    let asset_path = format!("/api/notebooks/{nb_id}/assets/secret.txt");
+    let mut req = Request::builder()
+        .method(Method::PUT)
+        .uri(&asset_path)
+        .header("Authorization", format!("Bearer {alice_pat}"))
+        .header("Content-Type", "text/plain");
+    let resp = env
+        .router
+        .clone()
+        .oneshot(req.body(Body::from("alice's bytes")).unwrap())
+        .await
+        .unwrap();
+    assert!(resp.status().is_success(), "asset upload: {}", resp.status());
+
+    // Alice finds her page. Tantivy's reader (OnCommitWithDelay) can lag
+    // the commit — poll like search_returns_indexed_pages does.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    loop {
+        let (status, hits) = env
+            .request_with_token(
+                Method::GET,
+                "/api/search?q=xylophone",
+                None,
+                Some(&alice_pat),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK);
+        if hits.to_string().contains("Xylophone") {
+            break;
+        }
+        if std::time::Instant::now() >= deadline {
+            panic!("alice search found nothing within 3s: {hits}");
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+
+    // Activate newbie.
+    let registry_path = env.library_path.join("tenants.json");
+    let mut reg = TenantRegistry::load(&registry_path).unwrap();
+    let newbie_id = reg.find_by_email("newbie@example.org").unwrap().id.clone();
+    reg.update(&newbie_id, |u| u.status = UserStatus::Active).unwrap();
+    reg.save().unwrap();
+
+    // Newbie's search hits his own (empty) index — no cross-tenant hits.
+    let (status, hits) = env
+        .request_with_token(
+            Method::GET,
+            "/api/search?q=xylophone",
+            None,
+            Some(&newbie_pat),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        !hits.to_string().contains("Xylophone"),
+        "cross-tenant search leak: {hits}"
+    );
+
+    // Newbie cannot fetch alice's asset (his tenant has no such file),
+    // and a traversal-shaped path is rejected outright.
+    let (status, _) = env
+        .request_with_token(Method::GET, &asset_path, None, Some(&newbie_pat))
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = env
+        .request_with_token(
+            Method::GET,
+            &format!("/api/notebooks/{nb_id}/assets/..%2F..%2Ftenants.json"),
+            None,
+            Some(&newbie_pat),
+        )
+        .await;
+    assert!(
+        status == StatusCode::BAD_REQUEST || status == StatusCode::NOT_FOUND,
+        "traversal must be rejected, got {status}"
+    );
+
+    // Alice still reads her asset.
+    let (status, body) = env
+        .request_with_token(Method::GET, &asset_path, None, Some(&alice_pat))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.to_string().contains("alice's bytes"));
+}

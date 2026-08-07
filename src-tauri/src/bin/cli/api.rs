@@ -1119,7 +1119,7 @@ async fn get_status() -> impl IntoResponse {
 //   - owner-only globals (WebDAV sync queueing) are gated with
 //     state.tenants.is_owner_tenant(&tenant.0)
 async fn list_notebooks(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     tenant: Tenant,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     let storage = tenant.storage.lock().unwrap();
@@ -1130,7 +1130,7 @@ async fn list_notebooks(
 }
 
 async fn get_notebook(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     tenant: Tenant,
     Path(notebook_id): Path<String>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
@@ -1143,7 +1143,7 @@ async fn get_notebook(
 }
 
 async fn create_notebook(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     tenant: Tenant,
     Json(req): Json<CreateNotebookRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
@@ -1168,7 +1168,7 @@ async fn create_notebook(
 }
 
 async fn update_notebook(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     tenant: Tenant,
     Path(notebook_id): Path<String>,
     Json(req): Json<UpdateNotebookRequest>,
@@ -1250,7 +1250,7 @@ async fn update_notebook(
 }
 
 async fn delete_notebook(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     tenant: Tenant,
     Path(notebook_id): Path<String>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
@@ -1273,7 +1273,7 @@ async fn delete_notebook(
 }
 
 async fn list_pages(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     tenant: Tenant,
     Path(notebook_id): Path<String>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
@@ -1286,7 +1286,7 @@ async fn list_pages(
 }
 
 async fn get_page(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     tenant: Tenant,
     Path((notebook_id, page_id)): Path<(String, String)>,
     Query(query): Query<FormatQuery>,
@@ -1311,7 +1311,7 @@ async fn get_page(
 }
 
 async fn resolve_page(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     tenant: Tenant,
     Path(notebook_id): Path<String>,
     Query(query): Query<ResolvePageQuery>,
@@ -1374,6 +1374,7 @@ async fn resolve_page(
 
 async fn search_pages(
     State(state): State<AppState>,
+    tenant: Tenant,
     Query(query): Query<SearchQuery>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     let limit = query.limit.unwrap_or(20);
@@ -1402,10 +1403,10 @@ async fn search_pages(
         nous_lib::search::SearchMode::Keyword => {
             // Tantivy adapter respects the fuzzy flag.
             if fuzzy {
-                state.tantivy.fuzzy_query(&query.q, limit, nb_filter).await
+                tenant.tantivy.fuzzy_query(&query.q, limit, nb_filter).await
             } else {
                 use nous_lib::search::SearchBackend;
-                state.tantivy.query(&query.q, limit, nb_filter).await
+                tenant.tantivy.query(&query.q, limit, nb_filter).await
             }
         }
         nous_lib::search::SearchMode::Semantic => {
@@ -1485,10 +1486,11 @@ async fn search_pages(
 /// non-archived page across every notebook. Useful after schema changes,
 /// corrupt segments, or when the daemon was offline during many writes.
 async fn rebuild_search_index(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
+    tenant: Tenant,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     let pages = {
-        let storage = state.storage.lock().map_err(|e| {
+        let storage = tenant.storage.lock().map_err(|e| {
             api_err(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Failed to acquire storage lock: {}", e),
@@ -1522,7 +1524,7 @@ async fn rebuild_search_index(
     {
         // DL-46: recover a poisoned lock so a rebuild can actually run — rebuild
         // is the recovery path, so it must not be blocked by a poisoned mutex.
-        let mut idx = lock_search_index(&state.search_index);
+        let mut idx = lock_search_index(&tenant.search_index);
 
         // Atomic rebuild: delete_all + bulk add + a single commit, so search is
         // never observably empty (a crash mid-rebuild leaves the prior index
@@ -1600,10 +1602,11 @@ async fn rag_configure(
 /// HTTP perspective; can take minutes on a large library.
 async fn rag_reindex(
     State(state): State<AppState>,
+    tenant: Tenant,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     // Collect pages first, releasing the storage lock before async embedding work.
     let pages = {
-        let storage = state.storage.lock().map_err(|e| {
+        let storage = tenant.storage.lock().map_err(|e| {
             api_err(StatusCode::INTERNAL_SERVER_ERROR, format!("storage lock: {}", e))
         })?;
         let notebooks = storage
@@ -2238,7 +2241,7 @@ fn snapshot_preview(page: &Page, max_chars: usize) -> String {
 /// `GET /api/notebooks/{nb}/pages/{pg}/versions` — timeline of restorable
 /// snapshots (newest first) plus oplog change-counts between them.
 async fn list_page_versions(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     tenant: Tenant,
     Path((notebook_id, page_id)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
@@ -2299,7 +2302,7 @@ async fn list_page_versions(
 /// `GET /api/notebooks/{nb}/pages/{pg}/versions/{name}` — full page content of a
 /// specific snapshot, for preview / diff against current.
 async fn get_page_version(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     tenant: Tenant,
     Path((notebook_id, page_id, version_name)): Path<(String, String, String)>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
@@ -2953,7 +2956,7 @@ async fn insert_after_block(
 }
 
 async fn get_daily_note(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     tenant: Tenant,
     Path((notebook_id, date)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
@@ -2977,7 +2980,7 @@ struct ListDailyNotesQuery {
 }
 
 async fn list_daily_notes(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     tenant: Tenant,
     Path(notebook_id): Path<String>,
     Query(query): Query<ListDailyNotesQuery>,
@@ -4000,14 +4003,15 @@ fn resolve_notebook_asset_path(
 }
 
 async fn get_notebook_asset(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
+    tenant: Tenant,
     Path((notebook_id, asset_path)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     use axum::http::header;
 
     let nb_id = parse_uuid(&notebook_id)?;
     let assets_dir = {
-        let storage = state.storage.lock().unwrap();
+        let storage = tenant.storage.lock().unwrap();
         storage.notebook_assets_dir(nb_id)
     };
     let file = resolve_notebook_asset_path(&assets_dir, &asset_path)
@@ -4028,7 +4032,8 @@ async fn get_notebook_asset(
 }
 
 async fn put_notebook_asset(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
+    tenant: Tenant,
     Path((notebook_id, asset_path)): Path<(String, String)>,
     body: axum::body::Bytes,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
@@ -4037,7 +4042,7 @@ async fn put_notebook_asset(
         return Err(api_err(StatusCode::BAD_REQUEST, "Empty request body"));
     }
     let assets_dir = {
-        let storage = state.storage.lock().unwrap();
+        let storage = tenant.storage.lock().unwrap();
         storage.notebook_assets_dir(nb_id)
     };
     let file = resolve_notebook_asset_path(&assets_dir, &asset_path)
@@ -4247,7 +4252,7 @@ fn text_to_blocks(text: &str) -> Vec<EditorBlock> {
 // ===== Folders & Sections =====
 
 async fn list_folders(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     tenant: Tenant,
     Path(notebook_id): Path<String>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
@@ -4260,7 +4265,7 @@ async fn list_folders(
 }
 
 async fn list_sections(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     tenant: Tenant,
     Path(notebook_id): Path<String>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
@@ -4329,7 +4334,7 @@ async fn delete_page(
 }
 
 async fn update_tags(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     tenant: Tenant,
     Path((notebook_id, page_id)): Path<(String, String)>,
     Json(req): Json<UpdateTagsRequest>,
@@ -4359,7 +4364,7 @@ async fn update_tags(
 }
 
 async fn move_page(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     tenant: Tenant,
     Path((notebook_id, page_id)): Path<(String, String)>,
     Json(req): Json<MovePageRequest>,
@@ -4586,7 +4591,7 @@ async fn send_pane_ack(
 // ===== Databases =====
 
 async fn list_databases(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     tenant: Tenant,
     Path(notebook_id): Path<String>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
@@ -4627,7 +4632,7 @@ async fn list_databases(
 }
 
 async fn get_database(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     tenant: Tenant,
     Path((notebook_id, db_id)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
@@ -5075,7 +5080,7 @@ struct FileContentBody {
 /// Tauri `get_file_content` command so the daemon is the single owner of these
 /// files (DL-04).
 async fn get_file_content(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     tenant: Tenant,
     Path((notebook_id, page_id)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
@@ -5172,7 +5177,7 @@ async fn put_file_content(
 /// (lightweight, no content). Mirrors the Tauri `get_all_favorite_pages`
 /// command so the web bundle can populate the pinned section.
 async fn get_all_favorites(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     tenant: Tenant,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     let storage = tenant.storage.lock().unwrap();
@@ -5246,7 +5251,7 @@ async fn fetch_ics_subscription(
 // ===== Folders: Create, Update, Delete =====
 
 async fn create_folder(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     tenant: Tenant,
     Path(notebook_id): Path<String>,
     Json(req): Json<CreateFolderRequest>,
@@ -5283,7 +5288,7 @@ async fn create_folder(
 }
 
 async fn update_folder(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     tenant: Tenant,
     Path((notebook_id, folder_id)): Path<(String, String)>,
     Json(req): Json<UpdateFolderRequest>,
@@ -5354,7 +5359,7 @@ async fn update_folder(
 }
 
 async fn delete_folder(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     tenant: Tenant,
     Path((notebook_id, folder_id)): Path<(String, String)>,
     Query(query): Query<DeleteFolderQuery>,
@@ -5386,7 +5391,7 @@ async fn delete_folder(
 // ===== Sections: Create, Update, Delete =====
 
 async fn create_section(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     tenant: Tenant,
     Path(notebook_id): Path<String>,
     Json(req): Json<CreateSectionRequest>,
@@ -5409,7 +5414,7 @@ async fn create_section(
 }
 
 async fn update_section(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     tenant: Tenant,
     Path((notebook_id, section_id)): Path<(String, String)>,
     Json(req): Json<UpdateSectionRequest>,
@@ -5460,7 +5465,7 @@ async fn update_section(
 }
 
 async fn delete_section(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     tenant: Tenant,
     Path((notebook_id, section_id)): Path<(String, String)>,
     Query(query): Query<DeleteSectionQuery>,
@@ -5492,7 +5497,7 @@ async fn delete_section(
 // ===== Archive / Unarchive =====
 
 async fn archive_page(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     tenant: Tenant,
     Path((notebook_id, page_id)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
@@ -5515,7 +5520,7 @@ async fn archive_page(
 }
 
 async fn unarchive_page(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     tenant: Tenant,
     Path((notebook_id, page_id)): Path<(String, String)>,
     Json(req): Json<UnarchivePageRequest>,
@@ -5544,7 +5549,7 @@ async fn unarchive_page(
 }
 
 async fn archive_folder(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     tenant: Tenant,
     Path((notebook_id, folder_id)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
@@ -5567,7 +5572,7 @@ async fn archive_folder(
 }
 
 async fn unarchive_folder(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     tenant: Tenant,
     Path((notebook_id, folder_id)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
@@ -5592,7 +5597,7 @@ async fn unarchive_folder(
 // ===== Reorder =====
 
 async fn reorder_pages(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     tenant: Tenant,
     Path(notebook_id): Path<String>,
     Json(req): Json<ReorderPagesRequest>,
@@ -5625,7 +5630,7 @@ async fn reorder_pages(
 }
 
 async fn reorder_folders(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     tenant: Tenant,
     Path(notebook_id): Path<String>,
     Json(req): Json<ReorderFoldersRequest>,
@@ -5658,7 +5663,7 @@ async fn reorder_folders(
 }
 
 async fn reorder_sections(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     tenant: Tenant,
     Path(notebook_id): Path<String>,
     Json(req): Json<ReorderSectionsRequest>,
@@ -5688,7 +5693,7 @@ async fn reorder_sections(
 // ===== Tags =====
 
 async fn list_all_tags(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     tenant: Tenant,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     let storage = tenant.storage.lock().unwrap();
@@ -5703,7 +5708,7 @@ async fn list_all_tags(
 }
 
 async fn list_notebook_tags(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     tenant: Tenant,
     Path(notebook_id): Path<String>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
@@ -5720,7 +5725,7 @@ async fn list_notebook_tags(
 }
 
 async fn rename_tag(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     tenant: Tenant,
     Path((notebook_id, tag)): Path<(String, String)>,
     Json(req): Json<RenameTagRequest>,
@@ -5745,7 +5750,7 @@ async fn rename_tag(
 }
 
 async fn merge_tags(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     tenant: Tenant,
     Path(notebook_id): Path<String>,
     Json(req): Json<MergeTagsRequest>,
@@ -5770,7 +5775,7 @@ async fn merge_tags(
 }
 
 async fn delete_tag(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     tenant: Tenant,
     Path((notebook_id, tag)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
@@ -5795,7 +5800,7 @@ async fn delete_tag(
 // ===== Database Rows =====
 
 async fn add_database_rows(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     tenant: Tenant,
     Path((notebook_id, db_id)): Path<(String, String)>,
     Json(req): Json<AddRowsRequest>,
@@ -5873,7 +5878,7 @@ async fn add_database_rows(
 }
 
 async fn update_database_rows(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     tenant: Tenant,
     Path((notebook_id, db_id)): Path<(String, String)>,
     Json(req): Json<UpdateRowsRequest>,
@@ -6091,7 +6096,7 @@ async fn create_database(
 // ===== Delete Database Rows =====
 
 async fn delete_database_rows(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     tenant: Tenant,
     Path((notebook_id, db_id)): Path<(String, String)>,
     Json(req): Json<DeleteRowsRequest>,
@@ -6412,7 +6417,8 @@ async fn serve_finance(
 // ===== Image Cache =====
 
 async fn serve_cached_image(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
+    tenant: Tenant,
     Path(hash): Path<String>,
     Query(query): Query<ImageCacheQuery>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
@@ -6426,7 +6432,7 @@ async fn serve_cached_image(
     }
 
     // Cache directory
-    let cache_dir = state.library_path.join(".cache/images");
+    let cache_dir = tenant.library_path.join(".cache/images");
     let _ = std::fs::create_dir_all(&cache_dir);
 
     // Determine file extension from URL
@@ -6505,7 +6511,7 @@ async fn serve_cached_image(
 // ===== Agile Results Daily Note =====
 
 async fn agile_daily_note(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     tenant: Tenant,
     Path(notebook_id): Path<String>,
     Json(req): Json<AgileDailyRequest>,
