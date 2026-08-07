@@ -2339,3 +2339,56 @@ async fn swept_search_and_asset_routes_isolate_tenants() {
     assert_eq!(status, StatusCode::OK);
     assert!(body.to_string().contains("alice's bytes"));
 }
+
+#[tokio::test]
+async fn swept_inbox_and_goals_routes_isolate_tenants() {
+    let env = TestEnv::with_multi_user();
+    let alice_pat = env.rw_token.clone().unwrap();
+    let newbie_pat = env.invited_token.clone().unwrap();
+
+    // Alice captures an inbox item.
+    let (status, body) = env
+        .request_with_token(
+            Method::POST,
+            "/api/inbox",
+            Some(json!({"title": "Alice's private thought"})),
+            Some(&alice_pat),
+        )
+        .await;
+    assert!(status.is_success(), "alice capture: {status} {body}");
+
+    // Activate newbie.
+    let registry_path = env.library_path.join("tenants.json");
+    let mut reg = TenantRegistry::load(&registry_path).unwrap();
+    let newbie_id = reg.find_by_email("newbie@example.org").unwrap().id.clone();
+    reg.update(&newbie_id, |u| u.status = UserStatus::Active).unwrap();
+    reg.save().unwrap();
+
+    // Newbie's inbox is empty — alice's capture never appears.
+    let (status, body) = env
+        .request_with_token(Method::GET, "/api/inbox", None, Some(&newbie_pat))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        !body.to_string().contains("private thought"),
+        "cross-tenant inbox leak: {body}"
+    );
+
+    // Goals and energy listings likewise resolve per tenant (both empty
+    // for newbie, and importantly: 200 from HIS tenant, not an error).
+    let (status, _) = env
+        .request_with_token(Method::GET, "/api/goals", None, Some(&newbie_pat))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = env
+        .request_with_token(Method::GET, "/api/energy/checkins", None, Some(&newbie_pat))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Alice still sees her item.
+    let (status, body) = env
+        .request_with_token(Method::GET, "/api/inbox", None, Some(&alice_pat))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.to_string().contains("private thought"), "alice lost her inbox: {body}");
+}

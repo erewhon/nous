@@ -3021,9 +3021,10 @@ async fn create_or_get_daily_note(
 }
 
 async fn list_inbox(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
+    tenant: Tenant,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
-    let inbox = state.inbox_storage.lock().unwrap();
+    let inbox = tenant.inbox_storage.lock().unwrap();
     match inbox.list_items() {
         Ok(items) => Ok(Json(ApiResponse { data: items })),
         Err(e) => Err(api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),
@@ -3031,10 +3032,11 @@ async fn list_inbox(
 }
 
 async fn capture_inbox(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
+    tenant: Tenant,
     Json(req): Json<InboxCaptureRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
-    let inbox = state.inbox_storage.lock().unwrap();
+    let inbox = tenant.inbox_storage.lock().unwrap();
     let capture = CaptureRequest {
         title: req.title,
         content: req.content.unwrap_or_default(),
@@ -3049,7 +3051,7 @@ async fn capture_inbox(
         Ok(item) => {
             #[cfg(feature = "plugins")]
             nous_lib::plugins::dispatch_plugin_event_bg(
-                &state.plugin_host,
+                &tenant.plugin_host,
                 nous_lib::plugins::HookPoint::OnInboxCaptured,
                 serde_json::json!({
                     "item_id": item.id.to_string(),
@@ -3057,7 +3059,7 @@ async fn capture_inbox(
                     "tags": item.tags,
                 }),
             );
-            emit_event(&state, "inbox.captured", serde_json::json!({
+            emit_tenant_event(&tenant, "inbox.captured", serde_json::json!({
                 "itemId": item.id.to_string(),
                 "title": item.title,
             }));
@@ -3105,9 +3107,10 @@ async fn trigger_sync(
 // ===== Goals handlers =====
 
 async fn list_goals(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
+    tenant: Tenant,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
-    let goals_storage = state.goals_storage.lock().unwrap();
+    let goals_storage = tenant.goals_storage.lock().unwrap();
     let goals = goals_storage
         .list_active_goals()
         .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
@@ -3128,9 +3131,10 @@ async fn list_goals(
 }
 
 async fn get_goals_summary(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
+    tenant: Tenant,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
-    let goals_storage = state.goals_storage.lock().unwrap();
+    let goals_storage = tenant.goals_storage.lock().unwrap();
     let summary = goals_storage
         .get_summary()
         .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
@@ -3138,11 +3142,12 @@ async fn get_goals_summary(
 }
 
 async fn get_goal(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
+    tenant: Tenant,
     Path(goal_id): Path<String>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     let id = parse_uuid(&goal_id)?;
-    let goals_storage = state.goals_storage.lock().unwrap();
+    let goals_storage = tenant.goals_storage.lock().unwrap();
 
     let goal = goals_storage
         .get_goal(id)
@@ -3160,12 +3165,13 @@ async fn get_goal(
 }
 
 async fn get_goal_progress(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
+    tenant: Tenant,
     Path(goal_id): Path<String>,
     Query(query): Query<DateRangeQuery>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     let id = parse_uuid(&goal_id)?;
-    let goals_storage = state.goals_storage.lock().unwrap();
+    let goals_storage = tenant.goals_storage.lock().unwrap();
 
     let entries = if let (Some(start), Some(end)) = (&query.start, &query.end) {
         let start_date = chrono::NaiveDate::parse_from_str(start, "%Y-%m-%d")
@@ -3191,12 +3197,13 @@ async fn get_goal_progress(
 }
 
 async fn record_goal_progress(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
+    tenant: Tenant,
     Path(goal_id): Path<String>,
     Json(req): Json<RecordProgressRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     let id = parse_uuid(&goal_id)?;
-    let goals_storage = state.goals_storage.lock().unwrap();
+    let goals_storage = tenant.goals_storage.lock().unwrap();
 
     let date = chrono::NaiveDate::parse_from_str(&req.date, "%Y-%m-%d")
         .map_err(|e| api_err(StatusCode::BAD_REQUEST, format!("Invalid date: {}", e)))?;
@@ -3217,7 +3224,7 @@ async fn record_goal_progress(
 
     // Notify WS subscribers so open goal displays refresh without polling.
     // Goals are not notebook-scoped on the daemon, so no notebookId here.
-    emit_event(&state, "goal.progress.recorded", serde_json::json!({
+    emit_tenant_event(&tenant, "goal.progress.recorded", serde_json::json!({
         "goalId": id.to_string(),
         "date": req.date.clone(),
         "completed": completed,
@@ -3227,7 +3234,7 @@ async fn record_goal_progress(
     // Plugin OnGoalProgress hook (background thread).
     #[cfg(feature = "plugins")]
     nous_lib::plugins::dispatch_plugin_event_bg(
-        &state.plugin_host,
+        &tenant.plugin_host,
         nous_lib::plugins::HookPoint::OnGoalProgress,
         serde_json::json!({
             "goal_id": id.to_string(),
@@ -3242,10 +3249,11 @@ async fn record_goal_progress(
 // ===== Energy handlers =====
 
 async fn get_energy_checkins(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
+    tenant: Tenant,
     Query(query): Query<DateRangeQuery>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
-    let energy_storage = state.energy_storage.lock().unwrap();
+    let energy_storage = tenant.energy_storage.lock().unwrap();
 
     let checkins = if let (Some(start), Some(end)) = (&query.start, &query.end) {
         let start_date = chrono::NaiveDate::parse_from_str(start, "%Y-%m-%d")
@@ -3265,10 +3273,11 @@ async fn get_energy_checkins(
 }
 
 async fn get_energy_patterns(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
+    tenant: Tenant,
     Query(query): Query<DateRangeQuery>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
-    let energy_storage = state.energy_storage.lock().unwrap();
+    let energy_storage = tenant.energy_storage.lock().unwrap();
 
     let end_date = if let Some(end) = &query.end {
         chrono::NaiveDate::parse_from_str(end, "%Y-%m-%d")
@@ -4410,15 +4419,16 @@ async fn move_page(
 // ===== Inbox Delete =====
 
 async fn delete_inbox_item(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
+    tenant: Tenant,
     Path(item_id): Path<String>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     let id = parse_uuid(&item_id)?;
-    let inbox = state.inbox_storage.lock().unwrap();
+    let inbox = tenant.inbox_storage.lock().unwrap();
     inbox
         .delete_item(id)
         .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    emit_event(&state, "inbox.deleted", serde_json::json!({"itemId": item_id}));
+    emit_tenant_event(&tenant, "inbox.deleted", serde_json::json!({"itemId": item_id}));
     Ok(Json(ApiResponse {
         data: serde_json::json!({"ok": true}),
     }))
