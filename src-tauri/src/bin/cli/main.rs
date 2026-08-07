@@ -171,6 +171,65 @@ enum DaemonCommand {
 
     /// Show the current API key
     ShowKey,
+
+    /// Manage multi-user registry users (invite, list, enable, disable).
+    /// A running daemon picks changes up automatically (mtime-based
+    /// registry reload) — no restart needed.
+    #[command(subcommand)]
+    User(UserCommand),
+
+    /// Manage personal access tokens for MCP/SDK/CLI clients.
+    /// A running daemon picks changes up automatically (mtime-based
+    /// registry reload) — no restart needed.
+    #[command(subcommand)]
+    Token(TokenCommand),
+}
+
+#[derive(Subcommand)]
+enum UserCommand {
+    /// Invite a user by email (they activate on first OIDC sign-in)
+    Invite {
+        email: String,
+        /// Role: member or owner
+        #[arg(long, default_value = "member")]
+        role: String,
+        /// Pre-assign a username (otherwise claimed at activation)
+        #[arg(long)]
+        username: Option<String>,
+    },
+    /// List all users
+    List,
+    /// Re-enable a user (sets status to active)
+    Enable {
+        /// User id or email
+        user: String,
+    },
+    /// Disable a user — kills their sessions and tokens on next request
+    Disable {
+        /// User id or email
+        user: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum TokenCommand {
+    /// Mint a personal access token (plaintext shown exactly once)
+    Mint {
+        /// User id or email the token belongs to
+        user: String,
+        /// Human label for the token (e.g. "mcp on delphi")
+        #[arg(long)]
+        name: String,
+        /// Scope: rw (read-write) or ro (read-only)
+        #[arg(long, default_value = "rw")]
+        scope: String,
+    },
+    /// List tokens (never shows secrets)
+    List,
+    /// Revoke a token by id
+    Revoke {
+        token_id: String,
+    },
 }
 
 /// Read content from stdin if piped, or resolve "-" as stdin
@@ -318,6 +377,50 @@ fn main() -> anyhow::Result<()> {
                     } else {
                         eprintln!("No read-write key found in {}", path.display());
                         std::process::exit(1);
+                    }
+                }
+                DaemonCommand::User(cmd) => {
+                    let data_dir = nous_lib::storage::FileStorage::default_data_dir()?;
+                    match cmd {
+                        UserCommand::Invite { email, role, username } => {
+                            commands::user::run_invite(
+                                &data_dir,
+                                &email,
+                                &role,
+                                username.as_deref(),
+                            )?;
+                        }
+                        UserCommand::List => {
+                            commands::user::run_list(&data_dir, &cli.format)?;
+                        }
+                        UserCommand::Enable { user } => {
+                            commands::user::run_set_status(
+                                &data_dir,
+                                &user,
+                                tenants::UserStatus::Active,
+                            )?;
+                        }
+                        UserCommand::Disable { user } => {
+                            commands::user::run_set_status(
+                                &data_dir,
+                                &user,
+                                tenants::UserStatus::Disabled,
+                            )?;
+                        }
+                    }
+                }
+                DaemonCommand::Token(cmd) => {
+                    let data_dir = nous_lib::storage::FileStorage::default_data_dir()?;
+                    match cmd {
+                        TokenCommand::Mint { user, name, scope } => {
+                            commands::user::run_token_mint(&data_dir, &user, &name, &scope)?;
+                        }
+                        TokenCommand::List => {
+                            commands::user::run_token_list(&data_dir, &cli.format)?;
+                        }
+                        TokenCommand::Revoke { token_id } => {
+                            commands::user::run_token_revoke(&data_dir, &token_id)?;
+                        }
                     }
                 }
             }
