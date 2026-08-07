@@ -521,6 +521,9 @@ fn is_public_route(path: &str) -> bool {
         // it's a normal authenticated route.
         || path == "/api/session"
         || path == "/api/session/config"
+        // OIDC redirect target — serves the SPA shell (index.html), which
+        // finishes the code exchange client-side before any data loads.
+        || path == "/auth/callback"
 }
 
 /// Auth state. Three modes:
@@ -1049,6 +1052,9 @@ pub fn build_router(state: AppState, auth: AuthState) -> Router {
         )
         .route("/api/session/config", get(session::session_config))
         .route("/api/me", get(session::get_me))
+        // OIDC redirect URI ({origin}/auth/callback, outside /app): serve
+        // the SPA shell; its assets still load from /app/assets.
+        .route("/auth/callback", get(serve_web_app_root))
         .layer(middleware::from_fn_with_state(auth, auth_middleware))
         // Raise the default 2 MB body limit for the whole API. Whole-content
         // writes (databases send content + an equal-sized merge baseline) exceed

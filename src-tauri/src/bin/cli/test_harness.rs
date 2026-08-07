@@ -1989,3 +1989,16 @@ async fn logout_clears_cookie_and_config_reports_oidc() {
         .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+async fn auth_callback_route_is_public_in_multi_user_mode() {
+    // The OIDC redirect target must never require credentials — the whole
+    // point is that an unauthenticated browser lands there. (404 here:
+    // the harness deploys no web bundle; the assertion is that auth
+    // does not intercept with a 401.)
+    let env = TestEnv::with_multi_user_oidc();
+    let (status, _, _) = env
+        .request_with_cookie(Method::GET, "/auth/callback", None, None)
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}

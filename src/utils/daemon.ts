@@ -8,9 +8,26 @@
 // is localhost:7667 + the shell-provided key; in the web-parity build both
 // are configurable (localStorage / build env / same-origin).
 
-import { getDaemonBaseUrl, loadDaemonApiKey } from "./daemonConfig";
+import {
+  getDaemonBaseUrl,
+  getStoredDaemonApiKey,
+  loadDaemonApiKey,
+} from "./daemonConfig";
+import { isTauri } from "./platform";
+import { SESSION_EXPIRED_EVENT } from "../auth/authWeb";
 
 const DAEMON_BASE_URL = getDaemonBaseUrl();
+
+/**
+ * A 401 in cookie-session mode (browser, no stored API key) means the
+ * session expired or the user was disabled — tell the auth gate to swap
+ * in the sign-in screen instead of leaving a broken app.
+ */
+function noteUnauthorized(resp: Response): void {
+  if (resp.status === 401 && !isTauri() && !getStoredDaemonApiKey()) {
+    window.dispatchEvent(new Event(SESSION_EXPIRED_EVENT));
+  }
+}
 
 let cachedApiKey: string | null | undefined = undefined;
 let keyLoadPromise: Promise<string | null> | null = null;
@@ -65,7 +82,14 @@ async function fetchWithTimeout(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(url, { ...init, signal: controller.signal });
+    // credentials is explicit so the session cookie always rides along
+    // (same-origin is also the fetch default, but the auth path is not a
+    // place for implicit behavior).
+    return await fetch(url, {
+      credentials: "same-origin",
+      ...init,
+      signal: controller.signal,
+    });
   } catch (err) {
     if (err instanceof DOMException && err.name === "AbortError") {
       throw new DaemonError(`Request timed out after ${timeoutMs}ms`, 0);
@@ -78,6 +102,7 @@ async function fetchWithTimeout(
 
 async function unwrap<T>(resp: Response): Promise<T> {
   if (!resp.ok) {
+    noteUnauthorized(resp);
     let msg = `HTTP ${resp.status}`;
     try {
       const body = await resp.json();
@@ -101,6 +126,7 @@ async function unwrap<T>(resp: Response): Promise<T> {
 export async function daemonGet<T>(path: string): Promise<T> {
   const resp = await fetch(`${DAEMON_BASE_URL}${path}`, {
     method: "GET",
+    credentials: "same-origin",
     headers: await authHeaders(),
   });
   return unwrap<T>(resp);
@@ -109,9 +135,11 @@ export async function daemonGet<T>(path: string): Promise<T> {
 export async function daemonGetText(path: string): Promise<string> {
   const resp = await fetch(`${DAEMON_BASE_URL}${path}`, {
     method: "GET",
+    credentials: "same-origin",
     headers: await authHeaders(),
   });
   if (!resp.ok) {
+    noteUnauthorized(resp);
     throw new DaemonError(`HTTP ${resp.status}`, resp.status);
   }
   return resp.text();
@@ -172,6 +200,7 @@ export async function daemonPutBytes<T>(
 export async function daemonDelete<T = void>(path: string): Promise<T> {
   const resp = await fetch(`${DAEMON_BASE_URL}${path}`, {
     method: "DELETE",
+    credentials: "same-origin",
     headers: await authHeaders(),
   });
   return unwrap<T>(resp);

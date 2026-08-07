@@ -2,6 +2,8 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import { WindowContextProvider } from "./contexts/WindowContext";
+import { AuthCallback, WebAuthGate } from "./auth/AuthGate";
+import { isTauri } from "./utils/platform";
 import { dumpPreviousCrumbs, startFreezeDetector } from "./utils/freezeDetector";
 // Self-hosted brand faces (bundled .woff2, no runtime CDN) — the "study" identity.
 // DM Sans = UI/body, Cormorant Garamond = display/titles, IBM Plex Mono = code/data.
@@ -22,10 +24,25 @@ dumpPreviousCrumbs();
 // Start monitoring main thread for freezes
 startFreezeDetector();
 
+// /auth/callback is outside the /app base path — finish the OIDC code
+// exchange before the app (and its stores/daemon clients) boots. The
+// Tauri shell never sees either branch below.
+const onAuthCallback = !isTauri() && window.location.pathname === "/auth/callback";
+
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <WindowContextProvider>
-      <App />
-    </WindowContextProvider>
+    {onAuthCallback ? (
+      <AuthCallback />
+    ) : isTauri() ? (
+      <WindowContextProvider>
+        <App />
+      </WindowContextProvider>
+    ) : (
+      <WebAuthGate>
+        <WindowContextProvider>
+          <App />
+        </WindowContextProvider>
+      </WebAuthGate>
+    )}
   </React.StrictMode>
 );

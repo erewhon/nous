@@ -20,6 +20,7 @@ import { DAEMON_BASE_URL, daemonPost } from "../../utils/daemon";
 import { save, open } from "../../platform/dialog";
 import { highlightText } from "../../utils/highlightText";
 import { isTauri } from "../../utils/platform";
+import { isSessionAuth, signOut } from "../../auth/authWeb";
 import { rankCommands, rankSearchResults, isCommandVisible } from "./rankCommands";
 import type { SearchResult, PageType } from "../../types/page";
 
@@ -488,6 +489,29 @@ export function CommandPalette({
       keywords: ["live", "sessions", "active", "collab", "collaboration"],
       expert: true,
     });
+
+    // Web session sign-out — only meaningful when this browser session is
+    // cookie-authenticated against a multi-user daemon.
+    if (!isTauri() && isSessionAuth()) {
+      cmds.push({
+        id: "action-sign-out",
+        title: "Sign Out",
+        subtitle: "End this web session",
+        icon: (
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+            <polyline points="16 17 21 12 16 7" />
+            <line x1="21" y1="12" x2="9" y2="12" />
+          </svg>
+        ),
+        category: "action",
+        action: () => {
+          onClose();
+          void signOut();
+        },
+        keywords: ["logout", "log out", "session", "sign out"],
+      });
+    }
 
     cmds.push({
       id: "action-share-notebook",

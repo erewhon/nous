@@ -79,6 +79,8 @@ export async function runBrowserAiStream(body: unknown): Promise<void> {
   const key = getStoredDaemonApiKey();
   const resp = await fetch(`${getDaemonBaseUrl()}/api/ai/chat-stream`, {
     method: "POST",
+    // Session cookie rides along when there's no stored key (multi-user).
+    credentials: "same-origin",
     headers: {
       "Content-Type": "application/json",
       ...(key ? { Authorization: `Bearer ${key}` } : {}),
