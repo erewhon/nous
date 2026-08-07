@@ -4,6 +4,11 @@ mod auth;
 mod commands;
 mod daemon;
 mod render;
+// Multi-user tenant registry. Not yet consumed at runtime — the auth
+// middleware and admin CLI (see the "Multi-User Identity" feature in
+// Forge) wire it in; until then only its tests exercise it.
+#[allow(dead_code)]
+mod tenants;
 #[cfg(feature = "tui")]
 mod tui;
 
