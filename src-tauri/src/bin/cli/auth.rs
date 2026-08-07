@@ -166,6 +166,50 @@ impl ApiKeySet {
     }
 }
 
+// ===== Multi-user request context =====
+
+/// Authenticated per-request user context (multi-user mode). The auth
+/// middleware inserts this as a request extension after validating the
+/// credential; handlers declare `user: AuthedUser` and pass
+/// `user.user_id` to tenant-scoped code explicitly — there is no
+/// "current user" global. Scope rides along so handlers that need
+/// finer-than-method gating can consult it (the middleware already
+/// enforces the method-level rw/ro contract).
+#[derive(Debug, Clone)]
+pub struct AuthedUser {
+    pub user_id: String,
+    pub role: super::tenants::UserRole,
+    pub scope: Scope,
+}
+
+impl<S> axum::extract::FromRequestParts<S> for AuthedUser
+where
+    S: Send + Sync,
+{
+    type Rejection = axum::response::Response;
+
+    async fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        _state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        use axum::response::IntoResponse;
+        parts.extensions.get::<AuthedUser>().cloned().ok_or_else(|| {
+            // A handler asked for AuthedUser on a route that isn't behind
+            // the multi-user auth middleware — fail loudly rather than
+            // invent a user context.
+            log::error!(
+                "AuthedUser extracted on a route outside the authenticated scope: {}",
+                parts.uri.path()
+            );
+            (
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                axum::Json(serde_json::json!({ "error": "internal error" })),
+            )
+                .into_response()
+        })
+    }
+}
+
 /// Generate a new API key with the given scope.
 pub fn generate_key(scope: Scope) -> String {
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -291,6 +335,27 @@ mod tests {
         assert!(!Scope::ReadOnly.allows_method("POST"));
         assert!(!Scope::ReadOnly.allows_method("PUT"));
         assert!(!Scope::ReadOnly.allows_method("DELETE"));
+    }
+
+    #[tokio::test]
+    async fn authed_user_outside_auth_scope_fails_loudly() {
+        use tower::ServiceExt;
+        // A handler that takes AuthedUser on a route without the auth
+        // middleware must 500 (misconfiguration), never invent a context.
+        let router: axum::Router = axum::Router::new().route(
+            "/naked",
+            axum::routing::get(|user: AuthedUser| async move { user.user_id }),
+        );
+        let resp = router
+            .oneshot(
+                axum::http::Request::builder()
+                    .uri("/naked")
+                    .body(axum::body::Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), axum::http::StatusCode::INTERNAL_SERVER_ERROR);
     }
 
     #[test]

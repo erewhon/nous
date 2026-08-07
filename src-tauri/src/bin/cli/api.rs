@@ -17,7 +17,8 @@ use serde::{Deserialize, Serialize};
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use uuid::Uuid;
 
-use super::auth::{ApiKeySet, Scope};
+use super::auth::{ApiKeySet, AuthedUser, Scope};
+use super::tenants::{ReloadingRegistry, TokenAuthError, TOKEN_PREFIX};
 
 use nous_lib::commands::{create_daily_note_core, find_daily_note, list_daily_notes_core};
 use nous_lib::inbox::{CaptureRequest, CaptureSource};
@@ -514,20 +515,53 @@ fn is_public_route(path: &str) -> bool {
         || path.starts_with("/app/")
 }
 
-/// Auth state: None means auth is disabled (localhost, no key file).
+/// Auth state. Three modes:
+/// - legacy disabled (localhost, no key file): everything passes;
+/// - legacy keys: the shared rw/ro key file, behavior unchanged;
+/// - multi-user: per-user credentials from the tenant registry
+///   (personal access tokens now; OIDC JWTs and session cookies land
+///   with their own leaves). In this mode the shared key file is
+///   ignored and an [`AuthedUser`] extension is inserted per request.
 #[derive(Clone)]
 pub struct AuthState {
     keys: Option<Arc<ApiKeySet>>,
+    registry: Option<Arc<std::sync::Mutex<ReloadingRegistry>>>,
 }
 
 impl AuthState {
     pub fn disabled() -> Self {
-        Self { keys: None }
+        Self { keys: None, registry: None }
     }
 
     pub fn enabled(keys: ApiKeySet) -> Self {
-        Self { keys: Some(Arc::new(keys)) }
+        Self { keys: Some(Arc::new(keys)), registry: None }
     }
+
+    pub fn multi_user(registry: ReloadingRegistry) -> Self {
+        Self {
+            keys: None,
+            registry: Some(Arc::new(std::sync::Mutex::new(registry))),
+        }
+    }
+}
+
+/// Bearer credential from the Authorization header, falling back to the
+/// `?token=` query param (WebSocket clients can't set headers).
+/// URL-decodes the query form since browsers encode ':' as '%3A'.
+fn extract_bearer(req: &Request) -> Option<String> {
+    req.headers()
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .map(|s| s.to_string())
+        .or_else(|| {
+            req.uri().query().and_then(|q| {
+                q.split('&')
+                    .find_map(|pair| pair.strip_prefix("token="))
+                    .and_then(|raw| urlencoding::decode(raw).ok())
+                    .map(|s| s.into_owned())
+            })
+        })
 }
 
 async fn auth_middleware(
@@ -535,6 +569,11 @@ async fn auth_middleware(
     req: Request,
     next: Next,
 ) -> axum::response::Response {
+    // Multi-user mode takes precedence — the shared key file is retired.
+    if let Some(registry) = &auth.registry {
+        return multi_user_auth(registry, req, next).await;
+    }
+
     // Auth disabled — pass through
     let keys = match &auth.keys {
         None => return next.run(req).await,
@@ -546,25 +585,7 @@ async fn auth_middleware(
         return next.run(req).await;
     }
 
-    // Extract bearer token from header or query param (for WebSocket)
-    let token = req
-        .headers()
-        .get("authorization")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "))
-        .map(|s| s.to_string())
-        .or_else(|| {
-            // Fall back to ?token= query param (for WebSocket clients).
-            // URL-decode since browsers encode ':' as '%3A' via encodeURIComponent.
-            req.uri().query().and_then(|q| {
-                q.split('&')
-                    .find_map(|pair| pair.strip_prefix("token="))
-                    .and_then(|raw| urlencoding::decode(raw).ok())
-                    .map(|s| s.into_owned())
-            })
-        });
-
-    let token = match token {
+    let token = match extract_bearer(&req) {
         Some(t) => t,
         None => {
             return (
@@ -590,6 +611,79 @@ async fn auth_middleware(
             } else {
                 next.run(req).await
             }
+        }
+    }
+}
+
+/// Default-deny authentication for multi-user mode. Credential routing by
+/// shape: `nous_`-prefixed bearer → personal access token; any other
+/// bearer → OIDC JWT (rejected until the OIDC leaf configures a
+/// verifier); no credential → session cookie (rejected until the session
+/// leaf lands). Successful authentication inserts [`AuthedUser`].
+///
+/// Rejections are a uniform 401 — whether the token was unknown, revoked,
+/// or belongs to an inactive user is for the logs, not the caller.
+async fn multi_user_auth(
+    registry: &Arc<std::sync::Mutex<ReloadingRegistry>>,
+    mut req: Request,
+    next: Next,
+) -> axum::response::Response {
+    // Public routes — no auth required (surface audited by the
+    // "Public route audit with hosted gating" leaf).
+    if is_public_route(req.uri().path()) {
+        return next.run(req).await;
+    }
+
+    let unauthorized = || {
+        (
+            StatusCode::UNAUTHORIZED,
+            Json(ApiError { error: "Invalid or missing credentials".into() }),
+        )
+            .into_response()
+    };
+
+    let Some(token) = extract_bearer(&req) else {
+        // Session-cookie authentication arrives with the session leaf.
+        log::debug!("multi-user auth: no bearer credential");
+        return unauthorized();
+    };
+
+    if !token.starts_with(TOKEN_PREFIX) {
+        log::debug!("multi-user auth: bearer is not a PAT and OIDC is not configured");
+        return unauthorized();
+    }
+
+    // Brief lock, no awaits while held. Reload-on-mtime happens inside.
+    let authed = {
+        let mut reg = registry.lock().unwrap_or_else(|p| p.into_inner());
+        reg.authenticate_token(&token)
+    };
+
+    match authed {
+        Ok(t) => {
+            if !t.scope.allows_method(req.method().as_str()) {
+                return (
+                    StatusCode::FORBIDDEN,
+                    Json(ApiError {
+                        error: "Read-only token cannot perform write operations".into(),
+                    }),
+                )
+                    .into_response();
+            }
+            req.extensions_mut().insert(AuthedUser {
+                user_id: t.user_id,
+                role: t.role,
+                scope: t.scope,
+            });
+            next.run(req).await
+        }
+        Err(TokenAuthError::InvalidToken) => {
+            log::debug!("multi-user auth: unknown or revoked token");
+            unauthorized()
+        }
+        Err(TokenAuthError::InactiveUser) => {
+            log::debug!("multi-user auth: token for inactive user");
+            unauthorized()
         }
     }
 }

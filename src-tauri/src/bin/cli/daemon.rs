@@ -373,7 +373,31 @@ pub async fn run(library_name: Option<&str>, port: Option<u16>, bind: Option<&st
         .context("Invalid bind address")?;
     let is_loopback = bind_addr.is_loopback();
 
-    let auth_state = if key_path.exists() {
+    // Multi-user mode: explicit opt-in via NOUS_MULTI_USER=1|true for now
+    // (the OIDC leaf extends the trigger to the OIDC env vars). Switches
+    // auth to the tenant registry — per-user PATs, and later JWTs and
+    // session cookies — and retires the shared key file.
+    let multi_user = std::env::var("NOUS_MULTI_USER")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+
+    let auth_state = if multi_user {
+        let registry_path = super::tenants::TenantRegistry::registry_path(&data_dir);
+        let registry = super::tenants::ReloadingRegistry::open(&registry_path)
+            .context("Failed to load tenant registry")?;
+        if key_path.exists() {
+            log::info!(
+                "Multi-user mode: shared key file {} is ignored",
+                key_path.display()
+            );
+        }
+        log::info!(
+            "Multi-user authentication enabled (registry {}; reloads on change)",
+            registry_path.display()
+        );
+        println!("Multi-user authentication enabled ({})", registry_path.display());
+        api::AuthState::multi_user(registry)
+    } else if key_path.exists() {
         let keys = auth::ApiKeySet::load(&key_path)?;
         let count = if keys.is_empty() { 0 } else { 1 }; // at least one
         log::info!("API authentication enabled ({} key(s) from {})", count, key_path.display());

@@ -490,6 +490,63 @@ impl TenantRegistry {
     }
 }
 
+// ===== Reloading handle for the daemon =====
+
+/// Registry handle that transparently reloads when the backing file
+/// changes ((mtime, len) stamp), so CLI edits — invite, disable, revoke —
+/// take effect on a running daemon without a restart. A failed reload
+/// keeps the last good snapshot (atomic writes mean a torn file can't
+/// occur; this guards against e.g. a hand-edited malformed file locking
+/// everyone out). A *missing* file reloads to an empty registry: deleting
+/// tenants.json fails closed, rejecting all tokens.
+#[derive(Debug)]
+pub struct ReloadingRegistry {
+    path: PathBuf,
+    stamp: Option<(std::time::SystemTime, u64)>,
+    registry: TenantRegistry,
+}
+
+impl ReloadingRegistry {
+    pub fn open(path: &Path) -> Result<Self> {
+        let registry = TenantRegistry::load(path)?;
+        Ok(Self {
+            path: path.to_path_buf(),
+            stamp: Self::stamp_of(path),
+            registry,
+        })
+    }
+
+    fn stamp_of(path: &Path) -> Option<(std::time::SystemTime, u64)> {
+        let meta = fs::metadata(path).ok()?;
+        Some((meta.modified().ok()?, meta.len()))
+    }
+
+    fn maybe_reload(&mut self) {
+        let current = Self::stamp_of(&self.path);
+        if current == self.stamp {
+            return;
+        }
+        match TenantRegistry::load(&self.path) {
+            Ok(fresh) => {
+                self.registry = fresh;
+                self.stamp = current;
+                log::info!("Tenant registry reloaded from {}", self.path.display());
+            }
+            Err(e) => {
+                log::warn!(
+                    "Tenant registry reload failed (keeping previous snapshot): {e:#}"
+                );
+            }
+        }
+    }
+
+    /// Authenticate a PAT against the freshest registry state.
+    pub fn authenticate_token(&mut self, token: &str) -> Result<TokenAuth, TokenAuthError> {
+        self.maybe_reload();
+        self.registry.authenticate_token(token)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

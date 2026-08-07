@@ -66,6 +66,7 @@ use tokio::sync::RwLock;
 
 use super::api;
 use super::auth::{ApiKeySet, Scope};
+use super::tenants::{ReloadingRegistry, TenantRegistry, User, UserRole, UserStatus};
 use super::daemon::DaemonState;
 
 /// One isolated daemon instance for a test. Owns its tempdir, so dropping
@@ -83,14 +84,25 @@ pub struct TestEnv {
     /// rw/ro tokens when auth is enabled; None when disabled.
     pub rw_token: Option<String>,
     pub ro_token: Option<String>,
+    /// PAT of a not-yet-activated (invited) user — multi-user envs only.
+    pub invited_token: Option<String>,
     /// Live handle to the RAG config — mutate for semantic-mode tests.
     pub rag_config: Arc<RwLock<RagConfig>>,
+}
+
+/// How [`TestEnv::build`] configures authentication.
+enum AuthSetup {
+    Disabled,
+    /// Legacy shared key file (rw, ro).
+    Keys(String, String),
+    /// Tenant-registry PATs (multi-user mode).
+    MultiUser,
 }
 
 impl TestEnv {
     /// Build an env with auth disabled. Most happy-path tests want this.
     pub fn new() -> Self {
-        Self::build(None)
+        Self::build(AuthSetup::Disabled)
     }
 
     /// Build an env with auth enabled. Returns generated `rw` and `ro`
@@ -98,10 +110,19 @@ impl TestEnv {
     pub fn with_auth() -> Self {
         let rw = format!("rw:{}", random_token_suffix());
         let ro = format!("ro:{}", random_token_suffix());
-        Self::build(Some((rw, ro)))
+        Self::build(AuthSetup::Keys(rw, ro))
     }
 
-    fn build(auth_tokens: Option<(String, String)>) -> Self {
+    /// Build an env in multi-user mode: a tenant registry seeded with an
+    /// active user "alice@example.org" (whose rw/ro PATs land in
+    /// `env.rw_token` / `env.ro_token`) plus an invited (not yet active)
+    /// user whose PAT lands in `env.invited_token`. The registry file
+    /// lives at `{library_path}/tenants.json` for out-of-band edits.
+    pub fn with_multi_user() -> Self {
+        Self::build(AuthSetup::MultiUser)
+    }
+
+    fn build(auth_setup: AuthSetup) -> Self {
         let tmp = tempfile::tempdir().expect("create tempdir");
         let library_path = tmp.path().to_path_buf();
 
@@ -201,13 +222,45 @@ impl TestEnv {
             event_tx,
         });
 
-        let (auth_state, rw_token, ro_token) = match auth_tokens {
-            None => (api::AuthState::disabled(), None, None),
-            Some((rw, ro)) => {
+        let (auth_state, rw_token, ro_token, invited_token) = match auth_setup {
+            AuthSetup::Disabled => (api::AuthState::disabled(), None, None, None),
+            AuthSetup::Keys(rw, ro) => {
                 let mut keys = ApiKeySet::empty();
                 keys.insert(rw.clone(), Scope::ReadWrite);
                 keys.insert(ro.clone(), Scope::ReadOnly);
-                (api::AuthState::enabled(keys), Some(rw), Some(ro))
+                (api::AuthState::enabled(keys), Some(rw), Some(ro), None)
+            }
+            AuthSetup::MultiUser => {
+                let registry_path = library_path.join("tenants.json");
+                let mut reg = TenantRegistry::load(&registry_path).expect("registry load");
+
+                let alice = User::new_invited("alice@example.org", UserRole::Member);
+                let alice_id = alice.id.clone();
+                reg.insert(alice).expect("insert alice");
+                reg.update(&alice_id, |u| u.status = UserStatus::Active)
+                    .expect("activate alice");
+                let rw = reg
+                    .mint_token(&alice_id, "rw", Scope::ReadWrite)
+                    .expect("mint rw");
+                let ro = reg
+                    .mint_token(&alice_id, "ro", Scope::ReadOnly)
+                    .expect("mint ro");
+
+                let invited = User::new_invited("newbie@example.org", UserRole::Member);
+                let invited_id = invited.id.clone();
+                reg.insert(invited).expect("insert invited");
+                let inv = reg
+                    .mint_token(&invited_id, "onboarding", Scope::ReadWrite)
+                    .expect("mint invited");
+
+                reg.save().expect("registry save");
+                let handle = ReloadingRegistry::open(&registry_path).expect("registry open");
+                (
+                    api::AuthState::multi_user(handle),
+                    Some(rw.token),
+                    Some(ro.token),
+                    Some(inv.token),
+                )
             }
         };
 
@@ -221,6 +274,7 @@ impl TestEnv {
             event_rx,
             rw_token,
             ro_token,
+            invited_token,
             rag_config,
         }
     }
@@ -1471,4 +1525,123 @@ async fn publish_notebook_nous_bad_expiry_400() {
         )
         .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+// ===== Multi-user auth middleware =====
+
+#[tokio::test]
+async fn multi_user_rejects_missing_and_malformed_credentials() {
+    let env = TestEnv::with_multi_user();
+
+    // No credential.
+    let (status, _) = env
+        .request_with_token(Method::GET, "/api/notebooks", None, None)
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    // Garbage PAT.
+    let (status, _) = env
+        .request_with_token(Method::GET, "/api/notebooks", None, Some("nous_definitely_wrong"))
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    // Non-PAT bearer (JWT-shaped) — OIDC is not configured yet.
+    let (status, _) = env
+        .request_with_token(Method::GET, "/api/notebooks", None, Some("eyJhbGciOi.payload.sig"))
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    // Legacy shared keys are retired in multi-user mode.
+    let (status, _) = env
+        .request_with_token(Method::GET, "/api/notebooks", None, Some("rw:legacykey"))
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    // Public route stays open without credentials.
+    let (status, _) = env
+        .request_with_token(Method::GET, "/api/status", None, None)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn multi_user_valid_pat_authenticates_and_scope_enforces() {
+    let env = TestEnv::with_multi_user();
+    let rw = env.rw_token.clone().unwrap();
+    let ro = env.ro_token.clone().unwrap();
+
+    // rw reads and writes.
+    let (status, _) = env
+        .request_with_token(Method::GET, "/api/notebooks", None, Some(&rw))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, body) = env
+        .request_with_token(
+            Method::POST,
+            "/api/notebooks",
+            Some(json!({"name": "MU Notebook"})),
+            Some(&rw),
+        )
+        .await;
+    assert!(status.is_success(), "rw create failed: {status} {body}");
+
+    // ro reads but cannot write.
+    let (status, _) = env
+        .request_with_token(Method::GET, "/api/notebooks", None, Some(&ro))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = env
+        .request_with_token(
+            Method::POST,
+            "/api/notebooks",
+            Some(json!({"name": "Denied"})),
+            Some(&ro),
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // ?token= query form (WebSocket clients can't set headers).
+    let (status, _) = env
+        .request_with_token(Method::GET, &format!("/api/notebooks?token={rw}"), None, None)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn multi_user_invited_pat_rejected_until_active() {
+    let env = TestEnv::with_multi_user();
+    let inv = env.invited_token.clone().unwrap();
+    let (status, _) = env
+        .request_with_token(Method::GET, "/api/notebooks", None, Some(&inv))
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn multi_user_registry_reload_kills_disabled_user() {
+    let env = TestEnv::with_multi_user();
+    let rw = env.rw_token.clone().unwrap();
+    let (status, _) = env
+        .request_with_token(Method::GET, "/api/notebooks", None, Some(&rw))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Disable alice out-of-band, exactly as the admin CLI would. The
+    // running daemon must pick it up via the mtime-based reload — no
+    // restart, next request dies.
+    let registry_path = env.library_path.join("tenants.json");
+    let mut reg = TenantRegistry::load(&registry_path).expect("load registry");
+    let alice_id = reg
+        .find_by_email("alice@example.org")
+        .expect("alice exists")
+        .id
+        .clone();
+    reg.update(&alice_id, |u| u.status = UserStatus::Disabled)
+        .expect("disable alice");
+    reg.save().expect("save registry");
+
+    let (status, _) = env
+        .request_with_token(Method::GET, "/api/notebooks", None, Some(&rw))
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
