@@ -10,15 +10,51 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 /// Top-level config file shape: `[search.rag]` plus `[ai]` (provider
-/// credentials — see crate::ai_config). Anything that persists a partial
-/// DaemonConfig must carry BOTH sections or it will wipe the other on
-/// save (see rag_configure / ai_configure in bin/cli/api.rs).
+/// credentials — see crate::ai_config) plus `[hosted]` (multi-user
+/// policy). Anything that persists a partial DaemonConfig must carry ALL
+/// sections or it will wipe the others on save (see rag_configure /
+/// ai_configure in bin/cli/api.rs).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DaemonConfig {
     #[serde(default)]
     pub search: SearchSection,
     #[serde(default)]
     pub ai: crate::ai_config::AiSection,
+    #[serde(default)]
+    pub hosted: HostedSection,
+}
+
+/// `[hosted]` table — what non-owner (hosted) tenants may use on a
+/// multi-user daemon. Ignored entirely in single-user mode; the owner
+/// tenant is never restricted by it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HostedSection {
+    /// Load Lua plugin hosts for hosted tenants. Off: never run another
+    /// user's Lua inside the daemon.
+    #[serde(default)]
+    pub plugins: bool,
+    /// Allow hosted tenants to trigger WebDAV sync over their own
+    /// library. Off: the hosted daemon is their source of truth.
+    #[serde(default)]
+    pub sync: bool,
+    /// Expose semantic/hybrid (RAG) search to hosted tenants. Off until
+    /// vector collections are tenant-namespaced.
+    #[serde(default)]
+    pub rag: bool,
+    /// AI endpoints for hosted tenants (operator-keyed). Reserved — v1
+    /// always serves AI; the flag exists so the config shape is stable.
+    #[serde(default = "default_true")]
+    pub ai: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl Default for HostedSection {
+    fn default() -> Self {
+        Self { plugins: false, sync: false, rag: false, ai: true }
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

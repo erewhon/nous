@@ -8,6 +8,6 @@ pub use backend::{BackendError, BackendResult, PageRef, SearchBackend, SearchHit
 pub use index::{ReadOnlySearchIndex, SearchIndex, SearchResult};
 pub use rag_backend::RagBackend;
 pub use rag_config::{
-    config_path, load_or_default, save, DaemonConfig, RagConfig, SearchSection,
+    config_path, load_or_default, save, DaemonConfig, HostedSection, RagConfig, SearchSection,
 };
 pub use tantivy_backend::TantivyBackend;

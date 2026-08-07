@@ -11,7 +11,6 @@ use std::sync::{Arc, Mutex};
 use anyhow::{bail, Context, Result};
 use tokio::signal;
 
-use nous_lib::commands::{start_backup_scheduler, BackupScheduler};
 use nous_lib::library::LibraryStorage;
 use nous_lib::python_bridge::PythonAI;
 use nous_lib::search::{self as search_mod, DaemonConfig, RagBackend, RagConfig};
@@ -47,7 +46,9 @@ pub struct DaemonState {
     /// Path to the on-disk daemon-config.toml — the configure
     /// endpoint writes back here when it persists changes.
     pub daemon_config_path: PathBuf,
-    pub backup_scheduler: Arc<BackupScheduler>,
+    /// `[hosted]` policy from daemon-config.toml — what non-owner
+    /// tenants may use. Ignored in single-user mode.
+    pub hosted: nous_lib::search::HostedSection,
     /// PyO3 bridge for AI operations (chat, summarize, suggest). Shared
     /// across all tenants (one interpreter/GIL per process); the
     /// /api/ai/* routes lock it from spawn_blocking because calls hold
@@ -186,12 +187,6 @@ pub async fn run(library_name: Option<&str>, port: Option<u16>, bind: Option<&st
     );
     log::info!("Sync scheduler started");
 
-    // Daemon is the sole owner of periodic backups; Tauri no longer constructs
-    // one. Owner-tenant storage — per-tenant backups arrive with the scheduler
-    // lifecycle leaf.
-    let backup_scheduler = Arc::new(start_backup_scheduler(Arc::clone(&owner.storage)));
-    log::info!("Backup scheduler started");
-
     // Web bundle directory for /app (see `just web-deploy`)
     let web_app_dir = std::env::var_os("NOUS_WEB_APP_DIR")
         .map(PathBuf::from)
@@ -315,6 +310,9 @@ pub async fn run(library_name: Option<&str>, port: Option<u16>, bind: Option<&st
         Arc::clone(&owner),
         owner_user_id,
         Arc::clone(&python_ai_arc),
+        // Lazy (hosted) tenants run schedulers + backups; plugins per
+        // the operator's [hosted] policy.
+        super::tenant::TenantBuildOpts::hosted(&daemon_config.hosted),
     ));
 
     // Build shared daemon state — process-globals only; per-tenant state
@@ -325,7 +323,7 @@ pub async fn run(library_name: Option<&str>, port: Option<u16>, bind: Option<&st
         rag_config,
         ai_config,
         daemon_config_path,
-        backup_scheduler: Arc::clone(&backup_scheduler),
+        hosted: daemon_config.hosted.clone(),
         python_ai: Arc::clone(&python_ai_arc),
         web_app_dir,
         multi_user: multi_user_ctx,
@@ -352,13 +350,8 @@ pub async fn run(library_name: Option<&str>, port: Option<u16>, bind: Option<&st
     // Cleanup
     log::info!("Shutting down...");
     sync_scheduler.shutdown();
-    state.backup_scheduler.shutdown();
-    // Owner tenant's scheduler; lazy tenants' schedulers are never
-    // started in this leaf (the scheduler-lifecycle leaf owns their
-    // start/stop policy).
-    if let Ok(sched) = state.tenants.owner().action_scheduler.lock() {
-        sched.shutdown();
-    }
+    // Every live tenant's action + backup schedulers, owner included.
+    state.tenants.shutdown_all();
     let _ = std::fs::remove_file(&pid_path);
     log::info!("Daemon stopped");
 

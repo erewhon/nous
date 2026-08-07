@@ -142,15 +142,15 @@ impl TestEnv {
         let (event_tx, event_rx) =
             tokio::sync::broadcast::channel::<AppEvent>(256);
 
-        // The owner tenant, exactly as the daemon builds it — hosted()
+        // The owner tenant, exactly as the daemon builds it — quiet()
         // opts skip what tests must not have running: no scheduler
-        // thread, no Lua plugins.
+        // thread, no Lua plugins, inert backups.
         let owner = TenantState::build_at(
             library_path.clone(),
             library_path.clone(),
             Arc::clone(&python_ai_arc),
             event_tx.clone(),
-            TenantBuildOpts::hosted(),
+            TenantBuildOpts::quiet(),
         )
         .expect("owner tenant build");
 
@@ -225,6 +225,8 @@ impl TestEnv {
             Arc::clone(&owner),
             owner_user_id,
             Arc::clone(&python_ai_arc),
+            // Lazy tenants in tests must not spawn background threads.
+            TenantBuildOpts::quiet(),
         ));
 
         let state = Arc::new(DaemonState {
@@ -233,11 +235,7 @@ impl TestEnv {
             rag_config: Arc::clone(&rag_config),
             ai_config: Arc::new(RwLock::new(Default::default())),
             daemon_config_path,
-            // Inert backup scheduler — tests must not spawn the real scheduler
-            // (it runs a background loop against the real user data dir).
-            backup_scheduler: std::sync::Arc::new(
-                nous_lib::commands::BackupScheduler::inert(),
-            ),
+            hosted: Default::default(),
             // Placeholder-path bridge (see note above) — /api/ai routes
             // exercised in tests return clean 500s instead of results.
             python_ai: Arc::clone(&python_ai_arc),
@@ -2487,5 +2485,54 @@ async fn tenant_event_channels_are_isolated_both_directions() {
     assert!(
         owner_rx.try_recv().is_err(),
         "newbie's event leaked onto the owner channel"
+    );
+}
+
+#[tokio::test]
+async fn operator_config_endpoints_are_owner_only() {
+    let env = TestEnv::with_multi_user();
+    let alice_pat = env.rw_token.clone().unwrap();
+    let newbie_pat = env.invited_token.clone().unwrap();
+
+    // Activate newbie.
+    let registry_path = env.library_path.join("tenants.json");
+    let mut reg = TenantRegistry::load(&registry_path).unwrap();
+    let newbie_id = reg.find_by_email("newbie@example.org").unwrap().id.clone();
+    reg.update(&newbie_id, |u| u.status = UserStatus::Active).unwrap();
+    reg.save().unwrap();
+
+    // Operator-global config endpoints reject members with 403.
+    for (method, path, body) in [
+        (Method::POST, "/api/search/rag/configure", Some(json!({"enabled": false}))),
+        (Method::POST, "/api/search/rag/reindex", None),
+        (Method::POST, "/api/ai/configure", Some(json!({"providers": {}}))),
+        (Method::GET, "/api/backup/settings", None),
+    ] {
+        let (status, resp) = env
+            .request_with_token(method.clone(), path, body, Some(&newbie_pat))
+            .await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{method} {path}: {resp}");
+    }
+
+    // The owner still reaches them (backup settings as the cheap probe).
+    let (status, _) = env
+        .request_with_token(Method::GET, "/api/backup/settings", None, Some(&alice_pat))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Semantic search for a member reports unavailable (400), regardless
+    // of the operator's own RAG state.
+    let (status, body) = env
+        .request_with_token(
+            Method::GET,
+            "/api/search?q=x&mode=semantic",
+            None,
+            Some(&newbie_pat),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(
+        body.to_string().contains("hosted"),
+        "expected hosted-account message: {body}"
     );
 }

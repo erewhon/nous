@@ -45,6 +45,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use anyhow::{Context, Result};
 
 use nous_lib::actions::{ActionExecutor, ActionScheduler, ActionStorage};
+use nous_lib::commands::{start_backup_scheduler, BackupScheduler};
 use nous_lib::contacts::ContactsStorage;
 use nous_lib::energy::EnergyStorage;
 use nous_lib::events::EventSender;
@@ -60,26 +61,35 @@ use nous_lib::sync::CrdtStore;
 
 /// Construction options. The owner tenant on a real daemon starts its
 /// background machinery and loads plugins (exactly the pre-tenancy
-/// behavior); lazily built hosted tenants start quiet — the scheduler
-/// lifecycle leaf owns their start/stop policy, and hosted plugins are
-/// off by policy (never load another user's Lua into the daemon).
+/// behavior); lazily built hosted tenants run their own schedulers and
+/// backups, with Lua plugins gated by the operator's `[hosted]` policy.
 #[derive(Debug, Clone, Copy)]
 pub struct TenantBuildOpts {
     /// Start the action scheduler after construction.
     pub start_scheduler: bool,
     /// Construct and load the Lua plugin host.
     pub plugins: bool,
+    /// Run the periodic backup scheduler (inert when off).
+    pub backups: bool,
 }
 
 impl TenantBuildOpts {
     /// The owner tenant of a running daemon.
     pub fn owner() -> Self {
-        Self { start_scheduler: true, plugins: true }
+        Self { start_scheduler: true, plugins: true, backups: true }
     }
 
-    /// A lazily built (hosted) tenant — quiet background, no plugins.
-    pub fn hosted() -> Self {
-        Self { start_scheduler: false, plugins: false }
+    /// A lazily built hosted tenant: background machinery runs (daily
+    /// notes and backups are core value), Lua plugins per operator
+    /// policy — never another user's Lua unless explicitly enabled.
+    pub fn hosted(policy: &nous_lib::search::HostedSection) -> Self {
+        Self { start_scheduler: true, plugins: policy.plugins, backups: true }
+    }
+
+    /// Everything off — for test harnesses that must not spawn
+    /// background threads.
+    pub fn quiet() -> Self {
+        Self { start_scheduler: false, plugins: false, backups: false }
     }
 }
 
@@ -105,6 +115,9 @@ pub struct TenantState {
     pub crdt_store: Arc<CrdtStore>,
     /// Constructed for every tenant; started per [`TenantBuildOpts`].
     pub action_scheduler: Arc<Mutex<ActionScheduler>>,
+    /// Periodic backups of this tenant's storage (inert when
+    /// `TenantBuildOpts::backups` is off).
+    pub backup_scheduler: Arc<BackupScheduler>,
     #[cfg(feature = "plugins")]
     pub plugin_host: Option<Arc<Mutex<plugins::PluginHost>>>,
     /// Event channel. The owner's is the daemon-wide channel the
@@ -246,6 +259,12 @@ impl TenantState {
             log::info!("Action scheduler started ({})", library_path.display());
         }
 
+        let backup_scheduler = if opts.backups {
+            Arc::new(start_backup_scheduler(Arc::clone(&storage_arc)))
+        } else {
+            Arc::new(BackupScheduler::inert())
+        };
+
         Ok(Arc::new(Self {
             root_dir,
             library_path,
@@ -259,6 +278,7 @@ impl TenantState {
             tantivy,
             crdt_store,
             action_scheduler: Arc::new(Mutex::new(action_scheduler)),
+            backup_scheduler,
             #[cfg(feature = "plugins")]
             plugin_host,
             event_tx,
@@ -277,6 +297,9 @@ pub struct TenantManager {
     tenants: RwLock<HashMap<String, Arc<TenantState>>>,
     /// Shared across all tenants (one Python interpreter per process).
     python_ai: Arc<Mutex<PythonAI>>,
+    /// Build options for lazily created tenants (policy-derived on a
+    /// real daemon; quiet in test harnesses).
+    lazy_opts: TenantBuildOpts,
 }
 
 impl TenantManager {
@@ -285,6 +308,7 @@ impl TenantManager {
         owner: Arc<TenantState>,
         owner_user_id: Option<String>,
         python_ai: Arc<Mutex<PythonAI>>,
+        lazy_opts: TenantBuildOpts,
     ) -> Self {
         Self {
             data_dir,
@@ -292,6 +316,43 @@ impl TenantManager {
             owner,
             tenants: RwLock::new(HashMap::new()),
             python_ai,
+            lazy_opts,
+        }
+    }
+
+    /// Shut down every live tenant's background machinery (action +
+    /// backup schedulers). Called from the daemon's SIGTERM path so no
+    /// tenant thread outlives the process's graceful window.
+    pub fn shutdown_all(&self) {
+        let shutdown_one = |t: &Arc<TenantState>| {
+            if let Ok(sched) = t.action_scheduler.lock() {
+                sched.shutdown();
+            }
+            t.backup_scheduler.shutdown();
+        };
+        shutdown_one(&self.owner);
+        for t in self
+            .tenants
+            .read()
+            .unwrap_or_else(|p| p.into_inner())
+            .values()
+        {
+            shutdown_one(t);
+        }
+    }
+
+    /// Reload every live tenant's backup scheduler. Backup settings are
+    /// operator-global (commands/backup.rs reads the shared data dir), so
+    /// a settings change touches all of them.
+    pub fn reload_backup_schedulers(&self) {
+        self.owner.backup_scheduler.reload();
+        for t in self
+            .tenants
+            .read()
+            .unwrap_or_else(|p| p.into_inner())
+            .values()
+        {
+            t.backup_scheduler.reload();
         }
     }
 
@@ -365,7 +426,7 @@ impl TenantManager {
             library.path,
             Arc::clone(&self.python_ai),
             event_tx,
-            TenantBuildOpts::hosted(),
+            self.lazy_opts,
         )?;
         log::info!("Built tenant state for user {user_id}");
         map.insert(user_id.to_string(), Arc::clone(&state));
@@ -436,7 +497,7 @@ mod tests {
             root.to_path_buf(),
             python(),
             event_tx,
-            TenantBuildOpts::hosted(),
+            TenantBuildOpts::quiet(),
         )
         .expect("tenant build")
     }
@@ -474,6 +535,7 @@ mod tests {
             Arc::clone(&owner),
             Some("owner-1".into()),
             python(),
+            TenantBuildOpts::quiet(),
         );
 
         // Owner id → the owner tenant, no lazy build.
@@ -502,5 +564,77 @@ mod tests {
         // Path-shaping ids are rejected outright.
         assert!(mgr.resolve("../escape").is_err());
         assert!(mgr.resolve("").is_err());
+    }
+}
+
+#[cfg(test)]
+mod lifecycle_tests {
+    use super::*;
+    use nous_lib::python_bridge::PythonAI;
+    use tempfile::TempDir;
+
+    #[tokio::test]
+    async fn started_scheduler_shuts_down_cleanly_across_tenants() {
+        // A real (started) action scheduler per tenant, then shutdown_all
+        // — the SIGTERM path must join every live tenant's machinery.
+        // Backups stay off: the backup scheduler reads the operator's
+        // real data dir, which unit tests must not touch.
+        let opts = TenantBuildOpts { start_scheduler: true, plugins: false, backups: false };
+        let dir = TempDir::new().unwrap();
+        let (event_tx, _) = tokio::sync::broadcast::channel(16);
+        let python = Arc::new(Mutex::new(PythonAI::new(PathBuf::from("nous-py"))));
+        let owner = TenantState::build_at(
+            dir.path().to_path_buf(),
+            dir.path().to_path_buf(),
+            Arc::clone(&python),
+            event_tx,
+            opts,
+        )
+        .unwrap();
+
+        let mgr = TenantManager::new(
+            dir.path().to_path_buf(),
+            Arc::clone(&owner),
+            Some("owner-1".into()),
+            python,
+            opts, // lazy tenants also get a started scheduler
+        );
+        let _lazy = mgr.resolve("11111111-aaaa-bbbb-cccc-00000000abcd").unwrap();
+        assert_eq!(mgr.lazy_count(), 1);
+
+        // Must return promptly with all schedulers stopped; a hang here
+        // fails the test's runtime.
+        mgr.shutdown_all();
+    }
+
+    #[test]
+    fn hosted_policy_parses_with_defaults() {
+        use nous_lib::search::{config_path, load_or_default};
+        let dir = TempDir::new().unwrap();
+
+        // Missing file → defaults: plugins/sync/rag off, ai on.
+        let cfg = load_or_default(&config_path(dir.path()));
+        assert!(!cfg.hosted.plugins);
+        assert!(!cfg.hosted.sync);
+        assert!(!cfg.hosted.rag);
+        assert!(cfg.hosted.ai);
+
+        // Explicit [hosted] section overrides.
+        std::fs::write(
+            config_path(dir.path()),
+            "[hosted]\nplugins = true\nsync = true\n",
+        )
+        .unwrap();
+        let cfg = load_or_default(&config_path(dir.path()));
+        assert!(cfg.hosted.plugins);
+        assert!(cfg.hosted.sync);
+        assert!(!cfg.hosted.rag);
+        assert!(cfg.hosted.ai);
+
+        // Opts derive from policy.
+        let opts = TenantBuildOpts::hosted(&cfg.hosted);
+        assert!(opts.plugins);
+        assert!(opts.start_scheduler);
+        assert!(opts.backups);
     }
 }

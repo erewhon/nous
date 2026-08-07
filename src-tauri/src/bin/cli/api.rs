@@ -50,6 +50,23 @@ fn emit_tenant_event(tenant: &Tenant, event: &str, data: serde_json::Value) {
     let _ = tenant.event_tx.send(AppEvent::new(event, data));
 }
 
+/// Operator-global configuration endpoints are owner-only on a
+/// multi-user daemon (single-user mode: every request IS the owner).
+fn ensure_owner(
+    state: &AppState,
+    tenant: &Tenant,
+    what: &str,
+) -> Result<(), (StatusCode, Json<ApiError>)> {
+    if state.tenants.is_owner_tenant(&tenant.0) {
+        Ok(())
+    } else {
+        Err(api_err(
+            StatusCode::FORBIDDEN,
+            format!("{what} is managed by the server operator"),
+        ))
+    }
+}
+
 /// Spawn a background task that asks the RAG backend to (re)index a
 /// page. The HTTP response returns immediately; embedding calls happen
 /// off the request hot path. NotConfigured is silently ignored — the
@@ -1404,10 +1421,22 @@ async fn search_pages(
             }
         }
         nous_lib::search::SearchMode::Semantic => {
+            if !state.tenants.is_owner_tenant(&tenant.0) && !state.hosted.rag {
+                return Err(api_err(
+                    StatusCode::BAD_REQUEST,
+                    "Semantic search is not available for hosted accounts",
+                ));
+            }
             use nous_lib::search::SearchBackend;
             state.rag.query(&query.q, limit, nb_filter).await
         }
         nous_lib::search::SearchMode::Hybrid => {
+            if !state.tenants.is_owner_tenant(&tenant.0) && !state.hosted.rag {
+                return Err(api_err(
+                    StatusCode::BAD_REQUEST,
+                    "Semantic search is not available for hosted accounts",
+                ));
+            }
             // Pull rerank_candidates from RAG config; fetch that many
             // Tantivy hits, then ask RAG to rerank. If RAG fails, fall
             // back to the Tantivy candidates so a flaky embedding
@@ -1554,8 +1583,10 @@ async fn rebuild_search_index(
 /// Returns the new (sanitized) config.
 async fn rag_configure(
     State(state): State<AppState>,
+    tenant: Tenant,
     Json(req): Json<RagConfigureRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    ensure_owner(&state, &tenant, "RAG configuration")?;
     use nous_lib::search::DaemonConfig;
     let mut current = state.rag_config.write().await;
     if let Some(v) = req.enabled { current.enabled = v; }
@@ -1577,6 +1608,7 @@ async fn rag_configure(
             rag: current.clone(),
         },
         ai: state.ai_config.read().await.clone(),
+        hosted: state.hosted.clone(),
     };
     if let Err(e) = nous_lib::search::save(&state.daemon_config_path, &to_persist) {
         log::warn!(
@@ -1598,6 +1630,7 @@ async fn rag_reindex(
     State(state): State<AppState>,
     tenant: Tenant,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    ensure_owner(&state, &tenant, "RAG reindexing")?;
     // Collect pages first, releasing the storage lock before async embedding work.
     let pages = {
         let storage = tenant.storage.lock().map_err(|e| {
@@ -1663,8 +1696,10 @@ async fn rag_reindex(
 
 /// `GET /api/backup/settings` — return the current scheduled-backup settings.
 async fn get_backup_settings(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
+    tenant: Tenant,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    ensure_owner(&state, &tenant, "Backup scheduling")?;
     let data_dir = nous_lib::storage::FileStorage::default_data_dir()
         .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let settings = nous_lib::storage::backup::load_backup_settings(&data_dir)
@@ -1677,14 +1712,18 @@ async fn get_backup_settings(
 /// in-process `BackupScheduler` so the new schedule takes effect immediately.
 async fn update_backup_settings(
     State(state): State<AppState>,
+    tenant: Tenant,
     Json(mut settings): Json<nous_lib::storage::backup::BackupSettings>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    ensure_owner(&state, &tenant, "Backup scheduling")?;
     let data_dir = nous_lib::storage::FileStorage::default_data_dir()
         .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     settings.next_backup = nous_lib::storage::backup::calculate_next_backup_time(&settings);
     nous_lib::storage::backup::save_backup_settings(&data_dir, &settings)
         .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
-    state.backup_scheduler.reload();
+    // Settings are operator-global (commands/backup.rs reads the shared
+    // data dir) — reload every live tenant's scheduler.
+    state.tenants.reload_backup_schedulers();
     Ok(Json(ApiResponse { data: settings }))
 }
 
@@ -3074,10 +3113,10 @@ async fn trigger_sync(
     State(state): State<AppState>,
     tenant: Tenant,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
-    // WebDAV sync is an owner-tenant concern (hosted tenants have it off
-    // by policy) — a member must never trigger a run over the owner's
-    // library. The scheduler-lifecycle leaf refines this into config.
-    if !state.tenants.is_owner_tenant(&tenant.0) {
+    // WebDAV sync for hosted tenants is off unless the operator enables
+    // [hosted].sync — and each tenant's run only ever touches their own
+    // storage (passed below).
+    if !state.tenants.is_owner_tenant(&tenant.0) && !state.hosted.sync {
         return Err(api_err(
             StatusCode::FORBIDDEN,
             "Sync is not available for hosted accounts",
@@ -3893,8 +3932,10 @@ struct AiDiscoverModelsRequest {
 
 async fn ai_discover_models(
     State(state): State<AppState>,
+    tenant: Tenant,
     Json(req): Json<AiDiscoverModelsRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    ensure_owner(&state, &tenant, "AI provider discovery")?;
     // Same fallback as chat: a keyless client can discover models when the
     // daemon holds the provider's key.
     let api_key = match req.api_key.filter(|k| !k.is_empty()) {
@@ -3946,8 +3987,10 @@ struct AiProviderConfigInput {
 /// section (never the keys).
 async fn ai_configure(
     State(state): State<AppState>,
+    tenant: Tenant,
     Json(req): Json<AiConfigureRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    ensure_owner(&state, &tenant, "AI provider configuration")?;
     let mut ai = state.ai_config.write().await;
 
     for (name, input) in req.providers {
@@ -3972,6 +4015,7 @@ async fn ai_configure(
             rag: state.rag_config.read().await.clone(),
         },
         ai: ai.clone(),
+        hosted: state.hosted.clone(),
     };
     if let Err(e) = nous_lib::search::save(&state.daemon_config_path, &to_persist) {
         log::warn!(
