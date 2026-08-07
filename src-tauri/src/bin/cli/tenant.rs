@@ -301,6 +301,12 @@ impl TenantManager {
         Arc::clone(&self.owner)
     }
 
+    /// Whether `t` is the owner tenant. Handlers use this to gate
+    /// owner-only globals (WebDAV sync queueing) inside swept routes.
+    pub fn is_owner_tenant(&self, t: &Arc<TenantState>) -> bool {
+        Arc::ptr_eq(&self.owner, t)
+    }
+
     /// Number of lazily built tenants (excludes the owner).
     pub fn lazy_count(&self) -> usize {
         self.tenants.read().map(|m| m.len()).unwrap_or(0)

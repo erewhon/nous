@@ -2064,3 +2064,87 @@ async fn tenant_extractor_maps_owner_and_lazily_builds_members() {
     let newbie_root = env.library_path.join("tenants").join(&newbie_id);
     assert!(newbie_root.is_dir());
 }
+
+#[tokio::test]
+async fn swept_routes_isolate_tenants_end_to_end() {
+    // The first end-to-end isolation proof through real routes: alice
+    // (owner) and newbie (member) each see only their own data on the
+    // swept notebook/page routes.
+    let env = TestEnv::with_multi_user();
+    let alice_pat = env.rw_token.clone().unwrap();
+    let newbie_pat = env.invited_token.clone().unwrap();
+
+    // Alice creates a notebook + page in the owner library.
+    let (status, nb) = env
+        .request_with_token(
+            Method::POST,
+            "/api/notebooks",
+            Some(json!({"name": "Alice Notebook"})),
+            Some(&alice_pat),
+        )
+        .await;
+    assert!(status.is_success(), "alice create nb: {status} {nb}");
+    let nb_id = nb["data"]["id"].as_str().expect("nb id").to_string();
+    let (status, page) = env
+        .request_with_token(
+            Method::POST,
+            &format!("/api/notebooks/{nb_id}/pages"),
+            Some(json!({"title": "Alice Secret"})),
+            Some(&alice_pat),
+        )
+        .await;
+    assert!(status.is_success(), "alice create page: {status} {page}");
+    let page_id = page["data"]["id"].as_str().expect("page id").to_string();
+
+    // Activate newbie out-of-band (as the admin CLI would); his PAT now
+    // authenticates and his first request lazily builds his tenant.
+    let registry_path = env.library_path.join("tenants.json");
+    let mut reg = TenantRegistry::load(&registry_path).unwrap();
+    let newbie_id = reg.find_by_email("newbie@example.org").unwrap().id.clone();
+    reg.update(&newbie_id, |u| u.status = UserStatus::Active).unwrap();
+    reg.save().unwrap();
+
+    // Newbie's notebook list is empty — not alice's library.
+    let (status, body) = env
+        .request_with_token(Method::GET, "/api/notebooks", None, Some(&newbie_pat))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["data"].as_array().map(Vec::len), Some(0), "got: {body}");
+    assert_eq!(env.state.tenants.lazy_count(), 1);
+
+    // Direct fetch of alice's page → 404 in newbie's tenant.
+    let (status, _) = env
+        .request_with_token(
+            Method::GET,
+            &format!("/api/notebooks/{nb_id}/pages/{page_id}"),
+            None,
+            Some(&newbie_pat),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // Newbie's own notebook lands in his tenant, invisible to alice.
+    let (status, his) = env
+        .request_with_token(
+            Method::POST,
+            "/api/notebooks",
+            Some(json!({"name": "Newbie Notebook"})),
+            Some(&newbie_pat),
+        )
+        .await;
+    assert!(status.is_success(), "newbie create nb: {status} {his}");
+    let (_, alice_list) = env
+        .request_with_token(Method::GET, "/api/notebooks", None, Some(&alice_pat))
+        .await;
+    let names: Vec<String> = alice_list["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|n| n["name"].as_str().unwrap_or_default().to_string())
+        .collect();
+    assert!(names.contains(&"Alice Notebook".to_string()));
+    assert!(
+        !names.contains(&"Newbie Notebook".to_string()),
+        "cross-tenant leak into owner library: {names:?}"
+    );
+}

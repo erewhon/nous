@@ -93,9 +93,6 @@ pub struct DaemonState {
     pub multi_user: Option<super::session::MultiUserCtx>,
     /// User → tenant resolution (lazy builds). In legacy mode this holds
     /// just the owner tenant, which the `Tenant` extractor falls back to.
-    /// (Read by the extractor; dead-code analysis can't see that until
-    /// the first route sweep instantiates it — allow goes away then.)
-    #[allow(dead_code)]
     pub tenants: Arc<super::tenant::TenantManager>,
     pub event_tx: nous_lib::events::EventSender,
 }

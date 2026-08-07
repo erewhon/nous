@@ -20,6 +20,7 @@ use uuid::Uuid;
 use super::auth::{ApiKeySet, AuthedUser, Scope};
 use super::oidc::OidcAuthError;
 use super::session::{self, MultiUserCtx};
+use super::tenant::Tenant;
 use super::tenants::{TokenAuthError, TOKEN_PREFIX};
 
 use nous_lib::commands::{create_daily_note_core, find_daily_note, list_daily_notes_core};
@@ -44,6 +45,15 @@ use nous_lib::events::AppEvent;
 /// Emit an event to all WebSocket subscribers (fire-and-forget).
 fn emit_event(state: &DaemonState, event: &str, data: serde_json::Value) {
     let _ = state.event_tx.send(AppEvent::new(event, data));
+}
+
+/// Tenant-aware event emission for swept handlers: publish to the owning
+/// tenant's channel. The owner tenant's channel IS the daemon-wide one
+/// (`/api/events`), so single-user behavior is unchanged; lazy tenants'
+/// events stay on their private channels until the per-tenant WS leaf
+/// surfaces them — they must never leak into another user's stream.
+fn emit_tenant_event(tenant: &Tenant, event: &str, data: serde_json::Value) {
+    let _ = tenant.event_tx.send(AppEvent::new(event, data));
 }
 
 /// Spawn a background task that asks the RAG backend to (re)index a
@@ -1097,10 +1107,22 @@ async fn get_status() -> impl IntoResponse {
     })
 }
 
+// ===== SWEEP PATTERN (Multi-User Tenancy) =====
+// Converted handlers take the `Tenant` extractor and read per-tenant
+// state (`tenant.storage`, `tenant.search_index`, …) instead of the
+// DaemonState aliases. Rules, applied uniformly (keep it this way in the
+// remaining sweeps — see tenant.rs module docs):
+//   - add `tenant: Tenant` after the State extractor; handler logic
+//     otherwise untouched
+//   - events go through emit_tenant_event(&tenant, ..) so they land on
+//     the owning tenant's channel
+//   - owner-only globals (WebDAV sync queueing) are gated with
+//     state.tenants.is_owner_tenant(&tenant.0)
 async fn list_notebooks(
     State(state): State<AppState>,
+    tenant: Tenant,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
-    let storage = state.storage.lock().unwrap();
+    let storage = tenant.storage.lock().unwrap();
     match storage.list_notebooks() {
         Ok(notebooks) => Ok(Json(ApiResponse { data: notebooks })),
         Err(e) => Err(api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),
@@ -1109,10 +1131,11 @@ async fn list_notebooks(
 
 async fn get_notebook(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path(notebook_id): Path<String>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     let nb_id = parse_uuid(&notebook_id)?;
-    let storage = state.storage.lock().unwrap();
+    let storage = tenant.storage.lock().unwrap();
     match storage.get_notebook(nb_id) {
         Ok(notebook) => Ok(Json(ApiResponse { data: notebook })),
         Err(e) => Err(api_err(StatusCode::NOT_FOUND, e.to_string())),
@@ -1121,6 +1144,7 @@ async fn get_notebook(
 
 async fn create_notebook(
     State(state): State<AppState>,
+    tenant: Tenant,
     Json(req): Json<CreateNotebookRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     let nb_type = match req.notebook_type.as_deref() {
@@ -1129,13 +1153,13 @@ async fn create_notebook(
     };
 
     let notebook = {
-        let storage = state.storage.lock().unwrap();
+        let storage = tenant.storage.lock().unwrap();
         storage
             .create_notebook(req.name, nb_type)
             .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
     };
 
-    emit_event(&state, "notebook.created", serde_json::json!({
+    emit_tenant_event(&tenant, "notebook.created", serde_json::json!({
         "notebookId": notebook.id.to_string(),
         "name": notebook.name,
     }));
@@ -1145,13 +1169,14 @@ async fn create_notebook(
 
 async fn update_notebook(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path(notebook_id): Path<String>,
     Json(req): Json<UpdateNotebookRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     let nb_id = parse_uuid(&notebook_id)?;
 
     let notebook = {
-        let storage = state.storage.lock().unwrap();
+        let storage = tenant.storage.lock().unwrap();
 
         let mut notebook: Notebook = storage
             .get_notebook(nb_id)
@@ -1216,7 +1241,7 @@ async fn update_notebook(
         notebook
     };
 
-    emit_event(&state, "notebook.updated", serde_json::json!({
+    emit_tenant_event(&tenant, "notebook.updated", serde_json::json!({
         "notebookId": notebook.id.to_string(),
         "name": notebook.name,
     }));
@@ -1226,18 +1251,19 @@ async fn update_notebook(
 
 async fn delete_notebook(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path(notebook_id): Path<String>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     let nb_id = parse_uuid(&notebook_id)?;
 
     {
-        let storage = state.storage.lock().unwrap();
+        let storage = tenant.storage.lock().unwrap();
         storage
             .delete_notebook(nb_id)
             .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     }
 
-    emit_event(&state, "notebook.deleted", serde_json::json!({
+    emit_tenant_event(&tenant, "notebook.deleted", serde_json::json!({
         "notebookId": notebook_id,
     }));
 
@@ -1248,10 +1274,11 @@ async fn delete_notebook(
 
 async fn list_pages(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path(notebook_id): Path<String>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     let nb_id = parse_uuid(&notebook_id)?;
-    let storage = state.storage.lock().unwrap();
+    let storage = tenant.storage.lock().unwrap();
     match storage.list_pages(nb_id) {
         Ok(pages) => Ok(Json(ApiResponse { data: pages })),
         Err(e) => Err(api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())),
@@ -1260,12 +1287,13 @@ async fn list_pages(
 
 async fn get_page(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path((notebook_id, page_id)): Path<(String, String)>,
     Query(query): Query<FormatQuery>,
 ) -> Result<axum::response::Response, (StatusCode, Json<ApiError>)> {
     let nb_id = parse_uuid(&notebook_id)?;
     let pg_id = parse_uuid(&page_id)?;
-    let storage = state.storage.lock().unwrap();
+    let storage = tenant.storage.lock().unwrap();
     match storage.get_page(nb_id, pg_id) {
         Ok(page) => {
             if query.format.as_deref() == Some("markdown") {
@@ -1284,11 +1312,12 @@ async fn get_page(
 
 async fn resolve_page(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path(notebook_id): Path<String>,
     Query(query): Query<ResolvePageQuery>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     let nb_id = parse_uuid(&notebook_id)?;
-    let storage = state.storage.lock().unwrap();
+    let storage = tenant.storage.lock().unwrap();
     let title_lower = query.title.to_lowercase();
 
     // Try as UUID first
@@ -1795,11 +1824,12 @@ async fn reload_plugin(
 
 async fn create_page(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path(notebook_id): Path<String>,
     Json(req): Json<CreatePageRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     let nb_id = parse_uuid(&notebook_id)?;
-    let storage = state.storage.lock().unwrap();
+    let storage = tenant.storage.lock().unwrap();
 
     let mut page = match storage.create_page(nb_id, req.title) {
         Ok(p) => p,
@@ -1896,11 +1926,15 @@ async fn create_page(
     }
 
     // Queue sync
-    state.sync_manager.queue_page_update(nb_id, page.id);
+    // WebDAV sync is owner-only (hosted policy) — never queue another
+    // tenant's pages into the owner's sync run.
+    if state.tenants.is_owner_tenant(&tenant.0) {
+        state.sync_manager.queue_page_update(nb_id, page.id);
+    }
 
     // Index the new page (best-effort — log on failure, don't fail the request).
     {
-        let mut idx = lock_search_index(&state.search_index);
+        let mut idx = lock_search_index(&tenant.search_index);
         if let Err(e) = idx.index_page(&page) {
             log::warn!("Failed to index newly created page {}: {}", page.id, e);
         }
@@ -1913,7 +1947,7 @@ async fn create_page(
     // Dispatch plugin OnPageCreated hook (background thread; never blocks).
     #[cfg(feature = "plugins")]
     nous_lib::plugins::dispatch_plugin_event_bg(
-        &state.plugin_host,
+        &tenant.plugin_host,
         nous_lib::plugins::HookPoint::OnPageCreated,
         serde_json::json!({
             "notebook_id": nb_id.to_string(),
@@ -1922,7 +1956,7 @@ async fn create_page(
         }),
     );
 
-    emit_event(&state, "page.created", serde_json::json!({
+    emit_tenant_event(&tenant, "page.created", serde_json::json!({
         "notebookId": notebook_id,
         "pageId": page.id.to_string(),
         "title": page.title,
@@ -1933,12 +1967,13 @@ async fn create_page(
 
 async fn update_page(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path((notebook_id, page_id)): Path<(String, String)>,
     Json(req): Json<UpdatePageRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     let nb_id = parse_uuid(&notebook_id)?;
     let pg_id = parse_uuid(&page_id)?;
-    let storage = state.storage.lock().unwrap();
+    let storage = tenant.storage.lock().unwrap();
 
     let mut page = match storage.get_page(nb_id, pg_id) {
         Ok(p) => p,
@@ -1966,7 +2001,7 @@ async fn update_page(
 
     if let Some(content) = proposed_content {
         let pane = req.pane_id.as_deref().unwrap_or("default");
-        match state.crdt_store.apply_save(pg_id, pane, &content) {
+        match tenant.crdt_store.apply_save(pg_id, pane, &content) {
             Ok(Some(canonical)) => page.content = canonical,
             Ok(None) => page.content = content,
             Err(e) => {
@@ -2095,11 +2130,15 @@ async fn update_page(
     let notebook_path = storage.get_notebook_path(nb_id);
     drop(storage);
 
-    state.sync_manager.queue_page_update(nb_id, pg_id);
+    // WebDAV sync is owner-only (hosted policy) — never queue another
+    // tenant's pages into the owner's sync run.
+    if state.tenants.is_owner_tenant(&tenant.0) {
+        state.sync_manager.queue_page_update(nb_id, pg_id);
+    }
 
     // Reindex (best-effort).
     {
-        let mut idx = lock_search_index(&state.search_index);
+        let mut idx = lock_search_index(&tenant.search_index);
         if let Err(e) = idx.index_page(&page) {
             log::warn!("Failed to reindex page {}: {}", pg_id, e);
         }
@@ -2111,7 +2150,7 @@ async fn update_page(
     // Plugin OnPageUpdated hook (background thread).
     #[cfg(feature = "plugins")]
     nous_lib::plugins::dispatch_plugin_event_bg(
-        &state.plugin_host,
+        &tenant.plugin_host,
         nous_lib::plugins::HookPoint::OnPageUpdated,
         serde_json::json!({
             "notebook_id": nb_id.to_string(),
@@ -2128,7 +2167,7 @@ async fn update_page(
         }
     }
 
-    emit_event(&state, "page.updated", serde_json::json!({
+    emit_tenant_event(&tenant, "page.updated", serde_json::json!({
         "notebookId": notebook_id,
         "pageId": page_id,
         "title": page.title,
@@ -2200,6 +2239,7 @@ fn snapshot_preview(page: &Page, max_chars: usize) -> String {
 /// snapshots (newest first) plus oplog change-counts between them.
 async fn list_page_versions(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path((notebook_id, page_id)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     use nous_lib::storage::{oplog, snapshots};
@@ -2210,7 +2250,7 @@ async fn list_page_versions(
     // Snapshots/oplog are immutable historical files; grab the paths under the
     // lock then read them lock-free so we don't block writers during disk I/O.
     let pages_dir = {
-        let storage = state.storage.lock().unwrap();
+        let storage = tenant.storage.lock().unwrap();
         storage.get_notebook_path(nb_id).join("pages")
     };
 
@@ -2260,6 +2300,7 @@ async fn list_page_versions(
 /// specific snapshot, for preview / diff against current.
 async fn get_page_version(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path((notebook_id, page_id, version_name)): Path<(String, String, String)>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     let nb_id = parse_uuid(&notebook_id)?;
@@ -2269,7 +2310,7 @@ async fn get_page_version(
     }
 
     let pages_dir = {
-        let storage = state.storage.lock().unwrap();
+        let storage = tenant.storage.lock().unwrap();
         storage.get_notebook_path(nb_id).join("pages")
     };
     let snap_dir = nous_lib::storage::snapshots::snapshots_dir(&pages_dir, pg_id);
@@ -2290,6 +2331,7 @@ async fn get_page_version(
 /// a normal page update.
 async fn restore_page_version(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path((notebook_id, page_id, version_name)): Path<(String, String, String)>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     let nb_id = parse_uuid(&notebook_id)?;
@@ -2298,7 +2340,7 @@ async fn restore_page_version(
         return Err(api_err(StatusCode::BAD_REQUEST, "Invalid snapshot name"));
     }
 
-    let storage = state.storage.lock().unwrap();
+    let storage = tenant.storage.lock().unwrap();
     let pages_dir = storage.get_notebook_path(nb_id).join("pages");
     let snap_dir = nous_lib::storage::snapshots::snapshots_dir(&pages_dir, pg_id);
 
@@ -2327,7 +2369,7 @@ async fn restore_page_version(
     // content (otherwise the open editor would clobber the restore on its next
     // save). apply_save returns the canonical post-merge state when live.
     let restored_content = snapshot_page.content;
-    match state.crdt_store.apply_save(pg_id, "default", &restored_content) {
+    match tenant.crdt_store.apply_save(pg_id, "default", &restored_content) {
         Ok(Some(canonical)) => page.content = canonical,
         Ok(None) => page.content = restored_content,
         Err(e) => {
@@ -2342,18 +2384,22 @@ async fn restore_page_version(
     }
     drop(storage);
 
-    state.sync_manager.queue_page_update(nb_id, pg_id);
+    // WebDAV sync is owner-only (hosted policy) — never queue another
+    // tenant's pages into the owner's sync run.
+    if state.tenants.is_owner_tenant(&tenant.0) {
+        state.sync_manager.queue_page_update(nb_id, pg_id);
+    }
 
     {
-        let mut idx = lock_search_index(&state.search_index);
+        let mut idx = lock_search_index(&tenant.search_index);
         if let Err(e) = idx.index_page(&page) {
             log::warn!("Failed to reindex page {} after restore: {}", pg_id, e);
         }
     }
     spawn_rag_index(&state, &page);
 
-    emit_event(
-        &state,
+    emit_tenant_event(
+        &tenant,
         "page.updated",
         serde_json::json!({
             "notebookId": notebook_id,
@@ -2373,19 +2419,20 @@ async fn restore_page_version(
 /// and stale in search until the next full-page save.
 fn after_block_level_write(
     state: &AppState,
+    tenant: &Tenant,
     page: &Page,
     notebook_id: &str,
     page_id: &str,
 ) {
     {
-        let mut idx = lock_search_index(&state.search_index);
+        let mut idx = lock_search_index(&tenant.search_index);
         if let Err(e) = idx.index_page(page) {
             log::warn!("Failed to reindex page {} after block edit: {}", page_id, e);
         }
     }
     spawn_rag_index(state, page);
 
-    emit_event(state, "page.updated", serde_json::json!({
+    emit_tenant_event(tenant, "page.updated", serde_json::json!({
         "notebookId": notebook_id,
         "pageId": page_id,
         "title": page.title,
@@ -2394,12 +2441,13 @@ fn after_block_level_write(
 
 async fn append_to_page(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path((notebook_id, page_id)): Path<(String, String)>,
     Json(req): Json<AppendPageRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     let nb_id = parse_uuid(&notebook_id)?;
     let pg_id = parse_uuid(&page_id)?;
-    let storage = state.storage.lock().unwrap();
+    let storage = tenant.storage.lock().unwrap();
 
     let mut page = match storage.get_page(nb_id, pg_id) {
         Ok(p) => p,
@@ -2422,8 +2470,12 @@ async fn append_to_page(
     }
 
     drop(storage);
-    state.sync_manager.queue_page_update(nb_id, pg_id);
-    after_block_level_write(&state, &page, &notebook_id, &page_id);
+    // WebDAV sync is owner-only (hosted policy) — never queue another
+    // tenant's pages into the owner's sync run.
+    if state.tenants.is_owner_tenant(&tenant.0) {
+        state.sync_manager.queue_page_update(nb_id, pg_id);
+    }
+    after_block_level_write(&state, &tenant, &page, &notebook_id, &page_id);
 
     Ok(Json(ApiResponse { data: page }))
 }
@@ -2741,12 +2793,13 @@ async fn publish_notebook_to_nous(
 
 async fn delete_block(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path((notebook_id, page_id)): Path<(String, String)>,
     Json(req): Json<DeleteBlockRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     let nb_id = parse_uuid(&notebook_id)?;
     let pg_id = parse_uuid(&page_id)?;
-    let storage = state.storage.lock().unwrap();
+    let storage = tenant.storage.lock().unwrap();
 
     let mut page = match storage.get_page(nb_id, pg_id) {
         Ok(p) => p,
@@ -2770,20 +2823,25 @@ async fn delete_block(
     }
 
     drop(storage);
-    state.sync_manager.queue_page_update(nb_id, pg_id);
-    after_block_level_write(&state, &page, &notebook_id, &page_id);
+    // WebDAV sync is owner-only (hosted policy) — never queue another
+    // tenant's pages into the owner's sync run.
+    if state.tenants.is_owner_tenant(&tenant.0) {
+        state.sync_manager.queue_page_update(nb_id, pg_id);
+    }
+    after_block_level_write(&state, &tenant, &page, &notebook_id, &page_id);
 
     Ok(Json(ApiResponse { data: page }))
 }
 
 async fn replace_block(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path((notebook_id, page_id)): Path<(String, String)>,
     Json(req): Json<ReplaceBlockRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     let nb_id = parse_uuid(&notebook_id)?;
     let pg_id = parse_uuid(&page_id)?;
-    let storage = state.storage.lock().unwrap();
+    let storage = tenant.storage.lock().unwrap();
 
     let mut page = match storage.get_page(nb_id, pg_id) {
         Ok(p) => p,
@@ -2824,20 +2882,25 @@ async fn replace_block(
     }
 
     drop(storage);
-    state.sync_manager.queue_page_update(nb_id, pg_id);
-    after_block_level_write(&state, &page, &notebook_id, &page_id);
+    // WebDAV sync is owner-only (hosted policy) — never queue another
+    // tenant's pages into the owner's sync run.
+    if state.tenants.is_owner_tenant(&tenant.0) {
+        state.sync_manager.queue_page_update(nb_id, pg_id);
+    }
+    after_block_level_write(&state, &tenant, &page, &notebook_id, &page_id);
 
     Ok(Json(ApiResponse { data: page }))
 }
 
 async fn insert_after_block(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path((notebook_id, page_id)): Path<(String, String)>,
     Json(req): Json<InsertAfterBlockRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     let nb_id = parse_uuid(&notebook_id)?;
     let pg_id = parse_uuid(&page_id)?;
-    let storage = state.storage.lock().unwrap();
+    let storage = tenant.storage.lock().unwrap();
 
     let mut page = match storage.get_page(nb_id, pg_id) {
         Ok(p) => p,
@@ -2879,18 +2942,23 @@ async fn insert_after_block(
     }
 
     drop(storage);
-    state.sync_manager.queue_page_update(nb_id, pg_id);
-    after_block_level_write(&state, &page, &notebook_id, &page_id);
+    // WebDAV sync is owner-only (hosted policy) — never queue another
+    // tenant's pages into the owner's sync run.
+    if state.tenants.is_owner_tenant(&tenant.0) {
+        state.sync_manager.queue_page_update(nb_id, pg_id);
+    }
+    after_block_level_write(&state, &tenant, &page, &notebook_id, &page_id);
 
     Ok(Json(ApiResponse { data: page }))
 }
 
 async fn get_daily_note(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path((notebook_id, date)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     let nb_id = parse_uuid(&notebook_id)?;
-    let storage = state.storage.lock().unwrap();
+    let storage = tenant.storage.lock().unwrap();
 
     match find_daily_note(&storage, nb_id, &date) {
         Ok(Some(page)) => Ok(Json(ApiResponse { data: page })),
@@ -2910,11 +2978,12 @@ struct ListDailyNotesQuery {
 
 async fn list_daily_notes(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path(notebook_id): Path<String>,
     Query(query): Query<ListDailyNotesQuery>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     let nb_id = parse_uuid(&notebook_id)?;
-    let storage = state.storage.lock().unwrap();
+    let storage = tenant.storage.lock().unwrap();
     let pages = list_daily_notes_core(
         &storage,
         nb_id,
@@ -2927,16 +2996,21 @@ async fn list_daily_notes(
 
 async fn create_or_get_daily_note(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path((notebook_id, date)): Path<(String, String)>,
     body: Option<Json<CreateDailyNoteRequest>>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     let nb_id = parse_uuid(&notebook_id)?;
     let template_id = body.and_then(|b| b.template_id.clone());
-    let storage = state.storage.lock().unwrap();
+    let storage = tenant.storage.lock().unwrap();
 
     match create_daily_note_core(&storage, nb_id, &date, template_id) {
         Ok(page) => {
-            state.sync_manager.queue_page_update(nb_id, page.id);
+            // WebDAV sync is owner-only (hosted policy) — never queue another
+            // tenant's pages into the owner's sync run.
+            if state.tenants.is_owner_tenant(&tenant.0) {
+                state.sync_manager.queue_page_update(nb_id, page.id);
+            }
             Ok(Json(ApiResponse { data: page }))
         }
         Err(e) => Err(api_err(StatusCode::INTERNAL_SERVER_ERROR, e.message)),
@@ -4174,10 +4248,11 @@ fn text_to_blocks(text: &str) -> Vec<EditorBlock> {
 
 async fn list_folders(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path(notebook_id): Path<String>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     let nb_id = parse_uuid(&notebook_id)?;
-    let storage = state.storage.lock().unwrap();
+    let storage = tenant.storage.lock().unwrap();
     let folders = storage
         .list_folders(nb_id)
         .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
@@ -4186,10 +4261,11 @@ async fn list_folders(
 
 async fn list_sections(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path(notebook_id): Path<String>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     let nb_id = parse_uuid(&notebook_id)?;
-    let storage = state.storage.lock().unwrap();
+    let storage = tenant.storage.lock().unwrap();
     let sections = storage
         .list_sections(nb_id)
         .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
@@ -4200,11 +4276,12 @@ async fn list_sections(
 
 async fn delete_page(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path((notebook_id, page_id)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     let nb_id = parse_uuid(&notebook_id)?;
     let page_id = parse_uuid(&page_id)?;
-    let storage = state.storage.lock().unwrap();
+    let storage = tenant.storage.lock().unwrap();
 
     // Soft delete (move to trash)
     let mut page = storage
@@ -4219,7 +4296,7 @@ async fn delete_page(
 
     // Drop from search index — best-effort.
     {
-        let mut idx = lock_search_index(&state.search_index);
+        let mut idx = lock_search_index(&tenant.search_index);
         if let Err(e) = idx.remove_page(page_id) {
             log::warn!("Failed to remove page {} from search index: {}", page_id, e);
         }
@@ -4231,7 +4308,7 @@ async fn delete_page(
     // Plugin OnPageDeleted hook (background thread).
     #[cfg(feature = "plugins")]
     nous_lib::plugins::dispatch_plugin_event_bg(
-        &state.plugin_host,
+        &tenant.plugin_host,
         nous_lib::plugins::HookPoint::OnPageDeleted,
         serde_json::json!({
             "notebook_id": nb_id.to_string(),
@@ -4240,7 +4317,7 @@ async fn delete_page(
         }),
     );
 
-    emit_event(&state, "page.deleted", serde_json::json!({
+    emit_tenant_event(&tenant, "page.deleted", serde_json::json!({
         "notebookId": notebook_id,
         "pageId": page_id.to_string(),
         "title": page.title,
@@ -4253,12 +4330,13 @@ async fn delete_page(
 
 async fn update_tags(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path((notebook_id, page_id)): Path<(String, String)>,
     Json(req): Json<UpdateTagsRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     let nb_id = parse_uuid(&notebook_id)?;
     let page_id = parse_uuid(&page_id)?;
-    let storage = state.storage.lock().unwrap();
+    let storage = tenant.storage.lock().unwrap();
 
     let mut page = storage
         .get_page(nb_id, page_id)
@@ -4269,7 +4347,7 @@ async fn update_tags(
         .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     drop(storage);
-    emit_event(&state, "page.tags.updated", serde_json::json!({
+    emit_tenant_event(&tenant, "page.tags.updated", serde_json::json!({
         "notebookId": notebook_id,
         "pageId": page.id.to_string(),
         "tags": page.tags,
@@ -4282,12 +4360,13 @@ async fn update_tags(
 
 async fn move_page(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path((notebook_id, page_id)): Path<(String, String)>,
     Json(req): Json<MovePageRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     let nb_id = parse_uuid(&notebook_id)?;
     let page_id = parse_uuid(&page_id)?;
-    let storage = state.storage.lock().unwrap();
+    let storage = tenant.storage.lock().unwrap();
 
     let mut page = storage
         .get_page(nb_id, page_id)
@@ -4313,7 +4392,7 @@ async fn move_page(
         .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     drop(storage);
-    emit_event(&state, "page.moved", serde_json::json!({
+    emit_tenant_event(&tenant, "page.moved", serde_json::json!({
         "notebookId": notebook_id,
         "pageId": page.id.to_string(),
         "folderId": page.folder_id.map(|u| u.to_string()),
@@ -4990,11 +5069,12 @@ struct FileContentBody {
 /// files (DL-04).
 async fn get_file_content(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path((notebook_id, page_id)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     let nb_id = parse_uuid(&notebook_id)?;
     let pg_id = parse_uuid(&page_id)?;
-    let storage = state.storage.lock().unwrap();
+    let storage = tenant.storage.lock().unwrap();
 
     let page = storage
         .get_page_any_type(nb_id, pg_id)
@@ -5019,12 +5099,13 @@ async fn get_file_content(
 /// these files, eliminating the cross-process clobber with MCP/daemon writers.
 async fn put_file_content(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path((notebook_id, page_id)): Path<(String, String)>,
     Json(body): Json<FileContentBody>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     let nb_id = parse_uuid(&notebook_id)?;
     let pg_id = parse_uuid(&page_id)?;
-    let storage = state.storage.lock().unwrap();
+    let storage = tenant.storage.lock().unwrap();
 
     let mut page = storage
         .get_page_any_type(nb_id, pg_id)
@@ -5058,15 +5139,19 @@ async fn put_file_content(
 
     drop(storage);
 
-    state.sync_manager.queue_page_update(nb_id, pg_id);
+    // WebDAV sync is owner-only (hosted policy) — never queue another
+    // tenant's pages into the owner's sync run.
+    if state.tenants.is_owner_tenant(&tenant.0) {
+        state.sync_manager.queue_page_update(nb_id, pg_id);
+    }
 
     let event = if page.page_type == PageType::Database {
         "database.updated"
     } else {
         "page.updated"
     };
-    emit_event(
-        &state,
+    emit_tenant_event(
+        &tenant,
         event,
         serde_json::json!({ "notebookId": notebook_id, "pageId": page_id }),
     );
@@ -5081,8 +5166,9 @@ async fn put_file_content(
 /// command so the web bundle can populate the pinned section.
 async fn get_all_favorites(
     State(state): State<AppState>,
+    tenant: Tenant,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
-    let storage = state.storage.lock().unwrap();
+    let storage = tenant.storage.lock().unwrap();
     let notebooks = storage
         .list_notebooks()
         .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
@@ -5154,11 +5240,12 @@ async fn fetch_ics_subscription(
 
 async fn create_folder(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path(notebook_id): Path<String>,
     Json(req): Json<CreateFolderRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     let nb_id = parse_uuid(&notebook_id)?;
-    let storage = state.storage.lock().unwrap();
+    let storage = tenant.storage.lock().unwrap();
 
     let parent_id = req.parent_id
         .as_deref()
@@ -5177,7 +5264,7 @@ async fn create_folder(
     }
 
     drop(storage);
-    emit_event(&state, "folder.created", serde_json::json!({
+    emit_tenant_event(&tenant, "folder.created", serde_json::json!({
         "notebookId": notebook_id,
         "folderId": folder.id.to_string(),
         "name": folder.name,
@@ -5190,12 +5277,13 @@ async fn create_folder(
 
 async fn update_folder(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path((notebook_id, folder_id)): Path<(String, String)>,
     Json(req): Json<UpdateFolderRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     let nb_id = parse_uuid(&notebook_id)?;
     let fld_id = parse_uuid(&folder_id)?;
-    let storage = state.storage.lock().unwrap();
+    let storage = tenant.storage.lock().unwrap();
 
     let mut folder = storage
         .get_folder(nb_id, fld_id)
@@ -5247,7 +5335,7 @@ async fn update_folder(
         .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     drop(storage);
-    emit_event(&state, "folder.updated", serde_json::json!({
+    emit_tenant_event(&tenant, "folder.updated", serde_json::json!({
         "notebookId": notebook_id,
         "folderId": folder.id.to_string(),
         "name": folder.name,
@@ -5260,6 +5348,7 @@ async fn update_folder(
 
 async fn delete_folder(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path((notebook_id, folder_id)): Path<(String, String)>,
     Query(query): Query<DeleteFolderQuery>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
@@ -5269,14 +5358,14 @@ async fn delete_folder(
         None | Some("") => None,
         Some(s) => Some(parse_uuid(s)?),
     };
-    let storage = state.storage.lock().unwrap();
+    let storage = tenant.storage.lock().unwrap();
 
     storage
         .delete_folder(nb_id, fld_id, target)
         .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     drop(storage);
-    emit_event(&state, "folder.deleted", serde_json::json!({
+    emit_tenant_event(&tenant, "folder.deleted", serde_json::json!({
         "notebookId": notebook_id,
         "folderId": folder_id,
         "movePagesTo": target.map(|u| u.to_string()),
@@ -5291,18 +5380,19 @@ async fn delete_folder(
 
 async fn create_section(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path(notebook_id): Path<String>,
     Json(req): Json<CreateSectionRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     let nb_id = parse_uuid(&notebook_id)?;
-    let storage = state.storage.lock().unwrap();
+    let storage = tenant.storage.lock().unwrap();
 
     let section = storage
         .create_section(nb_id, req.name.clone(), req.color)
         .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     drop(storage);
-    emit_event(&state, "section.created", serde_json::json!({
+    emit_tenant_event(&tenant, "section.created", serde_json::json!({
         "notebookId": notebook_id,
         "sectionId": section.id.to_string(),
         "name": section.name,
@@ -5313,12 +5403,13 @@ async fn create_section(
 
 async fn update_section(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path((notebook_id, section_id)): Path<(String, String)>,
     Json(req): Json<UpdateSectionRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     let nb_id = parse_uuid(&notebook_id)?;
     let sec_id = parse_uuid(&section_id)?;
-    let storage = state.storage.lock().unwrap();
+    let storage = tenant.storage.lock().unwrap();
 
     let mut section = storage
         .get_section(nb_id, sec_id)
@@ -5352,7 +5443,7 @@ async fn update_section(
         .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     drop(storage);
-    emit_event(&state, "section.updated", serde_json::json!({
+    emit_tenant_event(&tenant, "section.updated", serde_json::json!({
         "notebookId": notebook_id,
         "sectionId": section.id.to_string(),
         "name": section.name,
@@ -5363,6 +5454,7 @@ async fn update_section(
 
 async fn delete_section(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path((notebook_id, section_id)): Path<(String, String)>,
     Query(query): Query<DeleteSectionQuery>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
@@ -5372,14 +5464,14 @@ async fn delete_section(
         None | Some("") => None,
         Some(s) => Some(parse_uuid(s)?),
     };
-    let storage = state.storage.lock().unwrap();
+    let storage = tenant.storage.lock().unwrap();
 
     storage
         .delete_section(nb_id, sec_id, target)
         .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     drop(storage);
-    emit_event(&state, "section.deleted", serde_json::json!({
+    emit_tenant_event(&tenant, "section.deleted", serde_json::json!({
         "notebookId": notebook_id,
         "sectionId": section_id,
         "moveItemsTo": target.map(|u| u.to_string()),
@@ -5394,18 +5486,19 @@ async fn delete_section(
 
 async fn archive_page(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path((notebook_id, page_id)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     let nb_id = parse_uuid(&notebook_id)?;
     let pg_id = parse_uuid(&page_id)?;
-    let storage = state.storage.lock().unwrap();
+    let storage = tenant.storage.lock().unwrap();
 
     let page = storage
         .archive_page(nb_id, pg_id)
         .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     drop(storage);
-    emit_event(&state, "page.archived", serde_json::json!({
+    emit_tenant_event(&tenant, "page.archived", serde_json::json!({
         "notebookId": notebook_id,
         "pageId": page.id.to_string(),
         "title": page.title,
@@ -5416,6 +5509,7 @@ async fn archive_page(
 
 async fn unarchive_page(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path((notebook_id, page_id)): Path<(String, String)>,
     Json(req): Json<UnarchivePageRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
@@ -5425,14 +5519,14 @@ async fn unarchive_page(
         None | Some("") => None,
         Some(s) => Some(parse_uuid(s)?),
     };
-    let storage = state.storage.lock().unwrap();
+    let storage = tenant.storage.lock().unwrap();
 
     let page = storage
         .unarchive_page(nb_id, pg_id, target_folder_id)
         .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     drop(storage);
-    emit_event(&state, "page.unarchived", serde_json::json!({
+    emit_tenant_event(&tenant, "page.unarchived", serde_json::json!({
         "notebookId": notebook_id,
         "pageId": page.id.to_string(),
         "title": page.title,
@@ -5444,18 +5538,19 @@ async fn unarchive_page(
 
 async fn archive_folder(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path((notebook_id, folder_id)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     let nb_id = parse_uuid(&notebook_id)?;
     let fld_id = parse_uuid(&folder_id)?;
-    let storage = state.storage.lock().unwrap();
+    let storage = tenant.storage.lock().unwrap();
 
     let folder = storage
         .archive_folder(nb_id, fld_id)
         .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     drop(storage);
-    emit_event(&state, "folder.archived", serde_json::json!({
+    emit_tenant_event(&tenant, "folder.archived", serde_json::json!({
         "notebookId": notebook_id,
         "folderId": folder.id.to_string(),
         "name": folder.name,
@@ -5466,18 +5561,19 @@ async fn archive_folder(
 
 async fn unarchive_folder(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path((notebook_id, folder_id)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     let nb_id = parse_uuid(&notebook_id)?;
     let fld_id = parse_uuid(&folder_id)?;
-    let storage = state.storage.lock().unwrap();
+    let storage = tenant.storage.lock().unwrap();
 
     let folder = storage
         .unarchive_folder(nb_id, fld_id)
         .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     drop(storage);
-    emit_event(&state, "folder.unarchived", serde_json::json!({
+    emit_tenant_event(&tenant, "folder.unarchived", serde_json::json!({
         "notebookId": notebook_id,
         "folderId": folder.id.to_string(),
         "name": folder.name,
@@ -5490,6 +5586,7 @@ async fn unarchive_folder(
 
 async fn reorder_pages(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path(notebook_id): Path<String>,
     Json(req): Json<ReorderPagesRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
@@ -5503,13 +5600,13 @@ async fn reorder_pages(
         page_uuids.push(parse_uuid(s)?);
     }
 
-    let storage = state.storage.lock().unwrap();
+    let storage = tenant.storage.lock().unwrap();
     storage
         .reorder_pages(nb_id, folder_id, &page_uuids)
         .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     drop(storage);
-    emit_event(&state, "page.reordered", serde_json::json!({
+    emit_tenant_event(&tenant, "page.reordered", serde_json::json!({
         "notebookId": notebook_id,
         "folderId": folder_id.map(|u| u.to_string()),
         "pageIds": req.page_ids,
@@ -5522,6 +5619,7 @@ async fn reorder_pages(
 
 async fn reorder_folders(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path(notebook_id): Path<String>,
     Json(req): Json<ReorderFoldersRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
@@ -5535,13 +5633,13 @@ async fn reorder_folders(
         folder_uuids.push(parse_uuid(s)?);
     }
 
-    let storage = state.storage.lock().unwrap();
+    let storage = tenant.storage.lock().unwrap();
     storage
         .reorder_folders(nb_id, parent_id, &folder_uuids)
         .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     drop(storage);
-    emit_event(&state, "folder.reordered", serde_json::json!({
+    emit_tenant_event(&tenant, "folder.reordered", serde_json::json!({
         "notebookId": notebook_id,
         "parentId": parent_id.map(|u| u.to_string()),
         "folderIds": req.folder_ids,
@@ -5554,6 +5652,7 @@ async fn reorder_folders(
 
 async fn reorder_sections(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path(notebook_id): Path<String>,
     Json(req): Json<ReorderSectionsRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
@@ -5563,13 +5662,13 @@ async fn reorder_sections(
         section_uuids.push(parse_uuid(s)?);
     }
 
-    let storage = state.storage.lock().unwrap();
+    let storage = tenant.storage.lock().unwrap();
     storage
         .reorder_sections(nb_id, &section_uuids)
         .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     drop(storage);
-    emit_event(&state, "section.reordered", serde_json::json!({
+    emit_tenant_event(&tenant, "section.reordered", serde_json::json!({
         "notebookId": notebook_id,
         "sectionIds": req.section_ids,
     }));
@@ -5583,8 +5682,9 @@ async fn reorder_sections(
 
 async fn list_all_tags(
     State(state): State<AppState>,
+    tenant: Tenant,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
-    let storage = state.storage.lock().unwrap();
+    let storage = tenant.storage.lock().unwrap();
     let tags = storage
         .get_all_tags()
         .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
@@ -5597,10 +5697,11 @@ async fn list_all_tags(
 
 async fn list_notebook_tags(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path(notebook_id): Path<String>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     let nb_id = parse_uuid(&notebook_id)?;
-    let storage = state.storage.lock().unwrap();
+    let storage = tenant.storage.lock().unwrap();
     let tags = storage
         .get_notebook_tags(nb_id)
         .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
@@ -5613,17 +5714,18 @@ async fn list_notebook_tags(
 
 async fn rename_tag(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path((notebook_id, tag)): Path<(String, String)>,
     Json(req): Json<RenameTagRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     let nb_id = parse_uuid(&notebook_id)?;
-    let storage = state.storage.lock().unwrap();
+    let storage = tenant.storage.lock().unwrap();
     let updated = storage
         .rename_tag(nb_id, &tag, &req.new_name)
         .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     drop(storage);
-    emit_event(&state, "tag.renamed", serde_json::json!({
+    emit_tenant_event(&tenant, "tag.renamed", serde_json::json!({
         "notebookId": notebook_id,
         "from": tag,
         "to": req.new_name,
@@ -5637,17 +5739,18 @@ async fn rename_tag(
 
 async fn merge_tags(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path(notebook_id): Path<String>,
     Json(req): Json<MergeTagsRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     let nb_id = parse_uuid(&notebook_id)?;
-    let storage = state.storage.lock().unwrap();
+    let storage = tenant.storage.lock().unwrap();
     let updated = storage
         .merge_tags(nb_id, &req.from, &req.into)
         .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     drop(storage);
-    emit_event(&state, "tag.merged", serde_json::json!({
+    emit_tenant_event(&tenant, "tag.merged", serde_json::json!({
         "notebookId": notebook_id,
         "from": req.from,
         "into": req.into,
@@ -5661,16 +5764,17 @@ async fn merge_tags(
 
 async fn delete_tag(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path((notebook_id, tag)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     let nb_id = parse_uuid(&notebook_id)?;
-    let storage = state.storage.lock().unwrap();
+    let storage = tenant.storage.lock().unwrap();
     let updated = storage
         .delete_tag(nb_id, &tag)
         .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     drop(storage);
-    emit_event(&state, "tag.deleted", serde_json::json!({
+    emit_tenant_event(&tenant, "tag.deleted", serde_json::json!({
         "notebookId": notebook_id,
         "tag": tag,
         "pagesUpdated": updated,
@@ -6051,6 +6155,7 @@ struct ImportMarkdownRequest {
 /// plus the standard daemon-side indexing and page.created event.
 async fn import_markdown_page(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path(notebook_id): Path<String>,
     Json(req): Json<ImportMarkdownRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
@@ -6080,16 +6185,20 @@ async fn import_markdown_page(
     page.section_id = section_id;
 
     {
-        let storage = state.storage.lock().unwrap();
+        let storage = tenant.storage.lock().unwrap();
         storage
             .create_page_from(page.clone())
             .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     }
 
-    state.sync_manager.queue_page_update(nb_id, page.id);
+    // WebDAV sync is owner-only (hosted policy) — never queue another
+    // tenant's pages into the owner's sync run.
+    if state.tenants.is_owner_tenant(&tenant.0) {
+        state.sync_manager.queue_page_update(nb_id, page.id);
+    }
 
     {
-        let mut idx = lock_search_index(&state.search_index);
+        let mut idx = lock_search_index(&tenant.search_index);
         if let Err(e) = idx.index_page(&page) {
             log::warn!("Failed to index imported page {}: {}", page.id, e);
         }
@@ -6098,7 +6207,7 @@ async fn import_markdown_page(
 
     #[cfg(feature = "plugins")]
     nous_lib::plugins::dispatch_plugin_event_bg(
-        &state.plugin_host,
+        &tenant.plugin_host,
         nous_lib::plugins::HookPoint::OnPageCreated,
         serde_json::json!({
             "notebook_id": nb_id.to_string(),
@@ -6107,7 +6216,7 @@ async fn import_markdown_page(
         }),
     );
 
-    emit_event(&state, "page.created", serde_json::json!({
+    emit_tenant_event(&tenant, "page.created", serde_json::json!({
         "notebookId": notebook_id,
         "pageId": page.id.to_string(),
         "title": page.title,
@@ -6382,6 +6491,7 @@ async fn serve_cached_image(
 
 async fn agile_daily_note(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path(notebook_id): Path<String>,
     Json(req): Json<AgileDailyRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
@@ -6390,7 +6500,7 @@ async fn agile_daily_note(
 
     // Resolve notebook name
     let nb_name = {
-        let storage = state.storage.lock().unwrap();
+        let storage = tenant.storage.lock().unwrap();
         let notebooks = storage.list_notebooks()
             .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
         notebooks.into_iter()
