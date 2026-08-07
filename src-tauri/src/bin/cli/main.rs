@@ -3,6 +3,7 @@ mod app;
 mod auth;
 mod commands;
 mod daemon;
+mod oidc;
 mod render;
 mod tenants;
 #[cfg(feature = "tui")]

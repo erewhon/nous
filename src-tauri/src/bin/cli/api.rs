@@ -18,6 +18,7 @@ use tower_http::cors::{AllowOrigin, CorsLayer};
 use uuid::Uuid;
 
 use super::auth::{ApiKeySet, AuthedUser, Scope};
+use super::oidc::{OidcAuthError, OidcVerifier};
 use super::tenants::{ReloadingRegistry, TokenAuthError, TOKEN_PREFIX};
 
 use nous_lib::commands::{create_daily_note_core, find_daily_note, list_daily_notes_core};
@@ -526,21 +527,25 @@ fn is_public_route(path: &str) -> bool {
 pub struct AuthState {
     keys: Option<Arc<ApiKeySet>>,
     registry: Option<Arc<std::sync::Mutex<ReloadingRegistry>>>,
+    /// OIDC verifier — multi-user mode only. None → JWT bearers rejected,
+    /// only PATs authenticate.
+    oidc: Option<Arc<OidcVerifier>>,
 }
 
 impl AuthState {
     pub fn disabled() -> Self {
-        Self { keys: None, registry: None }
+        Self { keys: None, registry: None, oidc: None }
     }
 
     pub fn enabled(keys: ApiKeySet) -> Self {
-        Self { keys: Some(Arc::new(keys)), registry: None }
+        Self { keys: Some(Arc::new(keys)), registry: None, oidc: None }
     }
 
-    pub fn multi_user(registry: ReloadingRegistry) -> Self {
+    pub fn multi_user(registry: ReloadingRegistry, oidc: Option<Arc<OidcVerifier>>) -> Self {
         Self {
             keys: None,
             registry: Some(Arc::new(std::sync::Mutex::new(registry))),
+            oidc,
         }
     }
 }
@@ -571,7 +576,7 @@ async fn auth_middleware(
 ) -> axum::response::Response {
     // Multi-user mode takes precedence — the shared key file is retired.
     if let Some(registry) = &auth.registry {
-        return multi_user_auth(registry, req, next).await;
+        return multi_user_auth(registry, auth.oidc.as_ref(), req, next).await;
     }
 
     // Auth disabled — pass through
@@ -617,14 +622,18 @@ async fn auth_middleware(
 
 /// Default-deny authentication for multi-user mode. Credential routing by
 /// shape: `nous_`-prefixed bearer → personal access token; any other
-/// bearer → OIDC JWT (rejected until the OIDC leaf configures a
-/// verifier); no credential → session cookie (rejected until the session
-/// leaf lands). Successful authentication inserts [`AuthedUser`].
+/// bearer → OIDC JWT (rejected when no verifier is configured); no
+/// credential → session cookie (rejected until the session leaf lands).
+/// Successful authentication inserts [`AuthedUser`].
 ///
-/// Rejections are a uniform 401 — whether the token was unknown, revoked,
-/// or belongs to an inactive user is for the logs, not the caller.
+/// Credential rejections are a uniform 401 — whether the token was
+/// unknown, revoked, or belongs to an inactive user is for the logs, not
+/// the caller. The exception is a *valid* OIDC token for a user who
+/// isn't allowed in: that's a 403 with a friendly message ("invite
+/// required" / "account disabled") so the sign-in UI can explain itself.
 async fn multi_user_auth(
     registry: &Arc<std::sync::Mutex<ReloadingRegistry>>,
+    oidc: Option<&Arc<OidcVerifier>>,
     mut req: Request,
     next: Next,
 ) -> axum::response::Response {
@@ -649,8 +658,43 @@ async fn multi_user_auth(
     };
 
     if !token.starts_with(TOKEN_PREFIX) {
-        log::debug!("multi-user auth: bearer is not a PAT and OIDC is not configured");
-        return unauthorized();
+        // Not a PAT — an OIDC JWT if a verifier is configured.
+        let Some(oidc) = oidc else {
+            log::debug!("multi-user auth: bearer is not a PAT and OIDC is not configured");
+            return unauthorized();
+        };
+        // Verify BEFORE touching the registry lock — verification may
+        // fetch JWKS over the network.
+        let claims = match oidc.verify(&token).await {
+            Ok(c) => c,
+            Err(reason) => {
+                log::debug!("multi-user auth: OIDC token rejected: {reason}");
+                return unauthorized();
+            }
+        };
+        let resolved = {
+            let mut reg = registry.lock().unwrap_or_else(|p| p.into_inner());
+            reg.with_fresh(|r| super::oidc::resolve_user(r, &claims))
+        };
+        return match resolved {
+            Ok(user) => {
+                req.extensions_mut().insert(user);
+                next.run(req).await
+            }
+            Err(OidcAuthError::Forbidden(message)) => (
+                StatusCode::FORBIDDEN,
+                Json(serde_json::json!({ "error": "forbidden", "message": message })),
+            )
+                .into_response(),
+            Err(OidcAuthError::Registry(e)) => {
+                log::error!("multi-user auth: registry failure during OIDC resolve: {e}");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ApiError { error: "internal error".into() }),
+                )
+                    .into_response()
+            }
+        };
     }
 
     // Brief lock, no awaits while held. Reload-on-mtime happens inside.

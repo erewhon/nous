@@ -130,6 +130,28 @@ pub struct User {
     pub created_at: DateTime<Utc>,
 }
 
+/// Validate a username: 2–32 chars, lowercase ASCII alphanumeric plus
+/// `-`/`_`, starting with a letter or digit. Used at CLI invite time and
+/// when OIDC activation tries to claim `preferred_username`.
+pub fn validate_username(name: &str) -> Result<()> {
+    let len = name.chars().count();
+    if !(2..=32).contains(&len) {
+        bail!("username must be 2-32 characters");
+    }
+    let mut chars = name.chars();
+    let first = chars.next().unwrap();
+    if !first.is_ascii_lowercase() && !first.is_ascii_digit() {
+        bail!("username must start with a lowercase letter or digit");
+    }
+    if !name
+        .chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
+    {
+        bail!("username may only contain lowercase letters, digits, '-' and '_'");
+    }
+    Ok(())
+}
+
 impl User {
     /// A fresh invited row — the only way users enter the registry in v1
     /// (CLI invite). Email is normalized to lowercase here so every later
@@ -390,6 +412,23 @@ impl TenantRegistry {
         Ok(())
     }
 
+    /// Ensure the tenant data directory for a user exists —
+    /// `{data_dir}/tenants/{user_id}/` (the registry file lives at
+    /// `{data_dir}/tenants.json`, so the data dir is our parent). The
+    /// Nous analog of Astra's `ensure_user_volume`: called at OIDC
+    /// activation so a signing-in user lands in a ready tenant. The
+    /// TenantState work builds the full per-tenant stack on top.
+    pub fn ensure_tenant_dir(&self, user_id: &str) -> Result<PathBuf> {
+        let data_dir = self
+            .path
+            .parent()
+            .context("registry path has no parent directory")?;
+        let dir = data_dir.join("tenants").join(user_id);
+        fs::create_dir_all(&dir)
+            .with_context(|| format!("Failed to create tenant dir: {}", dir.display()))?;
+        Ok(dir)
+    }
+
     // ===== Personal access tokens =====
 
     /// Mint a new token for an existing user. The user may be in any
@@ -544,6 +583,16 @@ impl ReloadingRegistry {
     pub fn authenticate_token(&mut self, token: &str) -> Result<TokenAuth, TokenAuthError> {
         self.maybe_reload();
         self.registry.authenticate_token(token)
+    }
+
+    /// Run `f` against the freshest registry state. If the closure writes
+    /// the file (e.g. OIDC activation calls `save`), the stamp goes stale
+    /// and the next request reloads our own write — one redundant file
+    /// read, chosen over a stamp-refresh here that could race with (and
+    /// then mask) a concurrent external write.
+    pub fn with_fresh<R>(&mut self, f: impl FnOnce(&mut TenantRegistry) -> R) -> R {
+        self.maybe_reload();
+        f(&mut self.registry)
     }
 }
 

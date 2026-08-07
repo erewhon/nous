@@ -101,6 +101,9 @@ subtle = "2"
 async-stream = "0.3"
 bytes = "1.5"
 
+# Multi-user daemon auth (OIDC JWT verification)
+jsonwebtoken = { version = "10", features = ["aws_lc_rs"] }
+
 # Encryption support
 chacha20poly1305 = "0.10"
 argon2 = "0.5"

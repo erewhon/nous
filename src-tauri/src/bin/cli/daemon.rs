@@ -373,13 +373,29 @@ pub async fn run(library_name: Option<&str>, port: Option<u16>, bind: Option<&st
         .context("Invalid bind address")?;
     let is_loopback = bind_addr.is_loopback();
 
-    // Multi-user mode: explicit opt-in via NOUS_MULTI_USER=1|true for now
-    // (the OIDC leaf extends the trigger to the OIDC env vars). Switches
-    // auth to the tenant registry — per-user PATs, and later JWTs and
-    // session cookies — and retires the shared key file.
-    let multi_user = std::env::var("NOUS_MULTI_USER")
-        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-        .unwrap_or(false);
+    // OIDC configuration: NOUS_OIDC_ISSUER + NOUS_OIDC_CLIENT_ID (a
+    // public PKCE SPA client, e.g. registered in Zitadel — no secret).
+    let oidc_config = match (
+        std::env::var("NOUS_OIDC_ISSUER"),
+        std::env::var("NOUS_OIDC_CLIENT_ID"),
+    ) {
+        (Ok(issuer), Ok(client_id)) if !issuer.trim().is_empty() && !client_id.trim().is_empty() => {
+            Some(super::oidc::OidcConfig {
+                issuer: issuer.trim().trim_end_matches('/').to_string(),
+                client_id: client_id.trim().to_string(),
+            })
+        }
+        _ => None,
+    };
+
+    // Multi-user mode: configuring OIDC implies it; NOUS_MULTI_USER=1|true
+    // opts in without OIDC (PATs only). Switches auth to the tenant
+    // registry — per-user PATs and OIDC JWTs (session cookies come with
+    // the session leaf) — and retires the shared key file.
+    let multi_user = oidc_config.is_some()
+        || std::env::var("NOUS_MULTI_USER")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
 
     let auth_state = if multi_user {
         let registry_path = super::tenants::TenantRegistry::registry_path(&data_dir);
@@ -391,12 +407,26 @@ pub async fn run(library_name: Option<&str>, port: Option<u16>, bind: Option<&st
                 key_path.display()
             );
         }
+        let oidc = match oidc_config {
+            Some(cfg) => {
+                log::info!(
+                    "OIDC sign-in enabled (issuer {}, client id {})",
+                    cfg.issuer,
+                    cfg.client_id
+                );
+                Some(std::sync::Arc::new(super::oidc::OidcVerifier::new(cfg)))
+            }
+            None => {
+                log::info!("OIDC not configured — only personal access tokens authenticate");
+                None
+            }
+        };
         log::info!(
             "Multi-user authentication enabled (registry {}; reloads on change)",
             registry_path.display()
         );
         println!("Multi-user authentication enabled ({})", registry_path.display());
-        api::AuthState::multi_user(registry)
+        api::AuthState::multi_user(registry, oidc)
     } else if key_path.exists() {
         let keys = auth::ApiKeySet::load(&key_path)?;
         let count = if keys.is_empty() { 0 } else { 1 }; // at least one

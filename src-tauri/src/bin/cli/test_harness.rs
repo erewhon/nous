@@ -95,8 +95,9 @@ enum AuthSetup {
     Disabled,
     /// Legacy shared key file (rw, ro).
     Keys(String, String),
-    /// Tenant-registry PATs (multi-user mode).
-    MultiUser,
+    /// Tenant-registry PATs (multi-user mode). `oidc` adds a
+    /// static-key OIDC verifier (fixtures from `oidc::test_jwt`).
+    MultiUser { oidc: bool },
 }
 
 impl TestEnv {
@@ -119,7 +120,16 @@ impl TestEnv {
     /// user whose PAT lands in `env.invited_token`. The registry file
     /// lives at `{library_path}/tenants.json` for out-of-band edits.
     pub fn with_multi_user() -> Self {
-        Self::build(AuthSetup::MultiUser)
+        Self::build(AuthSetup::MultiUser { oidc: false })
+    }
+
+    /// Multi-user env with an OIDC verifier holding the static test key
+    /// set — sign JWTs with `oidc::test_jwt::{valid_claims, sign}`.
+    /// Registry seed is the same as [`Self::with_multi_user`]:
+    /// active alice@example.org (no linked subject) and invited
+    /// newbie@example.org.
+    pub fn with_multi_user_oidc() -> Self {
+        Self::build(AuthSetup::MultiUser { oidc: true })
     }
 
     fn build(auth_setup: AuthSetup) -> Self {
@@ -230,7 +240,7 @@ impl TestEnv {
                 keys.insert(ro.clone(), Scope::ReadOnly);
                 (api::AuthState::enabled(keys), Some(rw), Some(ro), None)
             }
-            AuthSetup::MultiUser => {
+            AuthSetup::MultiUser { oidc } => {
                 let registry_path = library_path.join("tenants.json");
                 let mut reg = TenantRegistry::load(&registry_path).expect("registry load");
 
@@ -255,8 +265,9 @@ impl TestEnv {
 
                 reg.save().expect("registry save");
                 let handle = ReloadingRegistry::open(&registry_path).expect("registry open");
+                let verifier = oidc.then(|| Arc::new(super::oidc::test_jwt::verifier()));
                 (
-                    api::AuthState::multi_user(handle),
+                    api::AuthState::multi_user(handle, verifier),
                     Some(rw.token),
                     Some(ro.token),
                     Some(inv.token),
@@ -1642,6 +1653,99 @@ async fn multi_user_registry_reload_kills_disabled_user() {
 
     let (status, _) = env
         .request_with_token(Method::GET, "/api/notebooks", None, Some(&rw))
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+// ===== OIDC JWT sessions (multi-user mode) =====
+
+#[tokio::test]
+async fn oidc_invited_jwt_activates_and_authenticates_end_to_end() {
+    use super::oidc::test_jwt::{sign, valid_claims};
+
+    let env = TestEnv::with_multi_user_oidc();
+    let token = sign(
+        &valid_claims("zitadel|web", Some("newbie@example.org"), Some("newbie")),
+        "test-key",
+    );
+
+    // First request: invite claimed — subject linked, user activated.
+    let (status, _) = env
+        .request_with_token(Method::GET, "/api/notebooks", None, Some(&token))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // JWTs act as the user with full rights — writes allowed.
+    let (status, body) = env
+        .request_with_token(
+            Method::POST,
+            "/api/notebooks",
+            Some(json!({"name": "Via OIDC"})),
+            Some(&token),
+        )
+        .await;
+    assert!(status.is_success(), "OIDC write failed: {status} {body}");
+
+    // Activation persisted: subject linked, active, username claimed,
+    // tenant dir created.
+    let reg = TenantRegistry::load(&env.library_path.join("tenants.json")).unwrap();
+    let user = reg.find_by_subject("zitadel|web").expect("subject linked");
+    assert_eq!(user.email, "newbie@example.org");
+    assert_eq!(user.status, UserStatus::Active);
+    assert_eq!(user.username.as_deref(), Some("newbie"));
+    assert!(env
+        .library_path
+        .join("tenants")
+        .join(&user.id)
+        .is_dir());
+}
+
+#[tokio::test]
+async fn oidc_uninvited_and_takeover_jwts_get_friendly_403() {
+    use super::oidc::test_jwt::{sign, valid_claims};
+
+    let env = TestEnv::with_multi_user_oidc();
+
+    // Complete stranger → 403 "invite required".
+    let token = sign(
+        &valid_claims("zitadel|nope", Some("stranger@example.org"), None),
+        "test-key",
+    );
+    let (status, body) = env
+        .request_with_token(Method::GET, "/api/notebooks", None, Some(&token))
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(body["error"], "forbidden");
+    assert_eq!(body["message"], "invite required");
+
+    // Alice is active with NO linked subject — a matching email claim
+    // from an unknown subject must not take her account over.
+    let token = sign(
+        &valid_claims("zitadel|attacker", Some("alice@example.org"), None),
+        "test-key",
+    );
+    let (status, body) = env
+        .request_with_token(Method::GET, "/api/notebooks", None, Some(&token))
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(body["message"], "invite required");
+    let reg = TenantRegistry::load(&env.library_path.join("tenants.json")).unwrap();
+    assert_eq!(
+        reg.find_by_email("alice@example.org").unwrap().external_subject,
+        None,
+        "takeover attempt must not link a subject"
+    );
+}
+
+#[tokio::test]
+async fn oidc_expired_jwt_is_plain_401() {
+    use super::oidc::test_jwt::{sign, valid_claims};
+
+    let env = TestEnv::with_multi_user_oidc();
+    let mut claims = valid_claims("zitadel|web", Some("newbie@example.org"), None);
+    claims.exp = chrono::Utc::now().timestamp() - 3600;
+    let (status, _) = env
+        .request_with_token(Method::GET, "/api/notebooks", None, Some(&sign(&claims, "test-key")))
         .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
