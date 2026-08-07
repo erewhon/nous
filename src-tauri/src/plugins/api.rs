@@ -32,7 +32,8 @@ pub struct HostApi {
     pub(crate) energy_storage: Option<Arc<Mutex<EnergyStorage>>>,
     pub(crate) python_ai: Option<Arc<Mutex<PythonAI>>>,
     pub(crate) ai_config: Arc<Mutex<Option<AIConfig>>>,
-    pub(crate) http_client: reqwest::blocking::Client,
+    /// Lazily built — see [`HostApi::http_client`].
+    pub(crate) http_client: std::sync::OnceLock<reqwest::blocking::Client>,
 }
 
 impl HostApi {
@@ -41,13 +42,6 @@ impl HostApi {
         goals_storage: Arc<Mutex<GoalsStorage>>,
         inbox_storage: Arc<Mutex<InboxStorage>>,
     ) -> Self {
-        let http_client = reqwest::blocking::Client::builder()
-            .timeout(Duration::from_secs(30))
-            .redirect(reqwest::redirect::Policy::limited(5))
-            .user_agent("nous-plugin/1.0")
-            .build()
-            .unwrap_or_else(|_| reqwest::blocking::Client::new());
-
         Self {
             storage,
             goals_storage,
@@ -56,8 +50,25 @@ impl HostApi {
             energy_storage: None,
             python_ai: None,
             ai_config: Arc::new(Mutex::new(None)),
-            http_client,
+            http_client: std::sync::OnceLock::new(),
         }
+    }
+
+    /// The blocking HTTP client, built on first use. Lazy on purpose:
+    /// constructing a `reqwest::blocking::Client` spins up (and on the
+    /// fallback path drops) an internal tokio runtime, which panics when
+    /// it happens inside an async context — and `HostApi::new` is called
+    /// from the daemon's async `run()`. First use is always on a plugin
+    /// thread (event dispatch / action execution), where blocking is fine.
+    fn http_client(&self) -> &reqwest::blocking::Client {
+        self.http_client.get_or_init(|| {
+            reqwest::blocking::Client::builder()
+                .timeout(Duration::from_secs(30))
+                .redirect(reqwest::redirect::Policy::limited(5))
+                .user_agent("nous-plugin/1.0")
+                .build()
+                .unwrap_or_else(|_| reqwest::blocking::Client::new())
+        })
     }
 
     /// Set the search index reference (called after construction when Arc is available).
@@ -1457,7 +1468,7 @@ impl HostApi {
         let timeout = Duration::from_secs(timeout_secs.unwrap_or(30).min(MAX_TIMEOUT_SECS));
 
         // Build request
-        let mut req = self.http_client.request(http_method, url).timeout(timeout);
+        let mut req = self.http_client().request(http_method, url).timeout(timeout);
 
         // Add headers (filter dangerous ones)
         if let Some(hdrs) = headers {
