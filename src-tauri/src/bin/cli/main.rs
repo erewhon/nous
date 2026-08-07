@@ -6,6 +6,7 @@ mod daemon;
 mod oidc;
 mod render;
 mod session;
+mod tenant;
 mod tenants;
 #[cfg(feature = "tui")]
 mod tui;

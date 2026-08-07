@@ -51,23 +51,18 @@ use tempfile::TempDir;
 use tower::ServiceExt;
 use uuid::Uuid;
 
-use nous_lib::actions::{ActionExecutor, ActionScheduler, ActionStorage};
-use nous_lib::contacts::ContactsStorage;
-use nous_lib::energy::EnergyStorage;
 use nous_lib::events::AppEvent;
-use nous_lib::goals::GoalsStorage;
-use nous_lib::inbox::InboxStorage;
-use nous_lib::library::LibraryStorage;
 use nous_lib::python_bridge::PythonAI;
-use nous_lib::search::{RagBackend, RagConfig, SearchIndex, TantivyBackend};
-use nous_lib::storage::{FileStorage, NotebookType};
-use nous_lib::sync::{CrdtStore, LogEmitter, SyncManager};
+use nous_lib::search::{RagBackend, RagConfig};
+use nous_lib::storage::NotebookType;
+use nous_lib::sync::{LogEmitter, SyncManager};
 use tokio::sync::RwLock;
 
 use super::api;
 use super::auth::{ApiKeySet, Scope};
-use super::tenants::{ReloadingRegistry, TenantRegistry, User, UserRole, UserStatus};
 use super::daemon::DaemonState;
+use super::tenant::{TenantBuildOpts, TenantManager, TenantState};
+use super::tenants::{ReloadingRegistry, TenantRegistry, User, UserRole, UserStatus};
 
 /// One isolated daemon instance for a test. Owns its tempdir, so dropping
 /// the `TestEnv` cleans up everything on disk.
@@ -140,139 +135,119 @@ impl TestEnv {
         let tmp = tempfile::tempdir().expect("create tempdir");
         let library_path = tmp.path().to_path_buf();
 
-        let storage = FileStorage::new(library_path.clone());
-        storage.init().expect("storage init");
-
-        let library_storage = LibraryStorage::new(library_path.clone());
-        let inbox_storage = InboxStorage::new(library_path.clone()).expect("inbox init");
-        let goals_storage = GoalsStorage::new(library_path.clone()).expect("goals init");
-        let energy_storage = EnergyStorage::new(library_path.clone()).expect("energy init");
-        let contacts_storage = ContactsStorage::new(library_path.clone()).expect("contacts init");
-        let action_storage = ActionStorage::new(library_path.clone()).expect("action init");
-
         // PythonAI is constructed lazily — passing a placeholder path is
         // safe because tests don't exercise Python-backed flows.
-        let python_ai = PythonAI::new(PathBuf::from("nous-py"));
-
-        let search_index = SearchIndex::new(library_path.join("search_index"))
-            .expect("search index init");
-        let crdt_store = Arc::new(CrdtStore::new(library_path.clone()));
-
-        // Tantivy adapter + RAG (disabled by default — tests opt in by
-        // mutating env.rag_config before sending requests).
-        let search_index_arc = Arc::new(Mutex::new(search_index));
-        let tantivy_backend = Arc::new(TantivyBackend::new(Arc::clone(&search_index_arc)));
-        let rag_config = Arc::new(RwLock::new(RagConfig::disabled()));
-        let rag_backend = Arc::new(RagBackend::new(Arc::clone(&rag_config)));
-        let daemon_config_path = library_path.join("daemon-config.toml");
-
-        let storage_arc = Arc::new(Mutex::new(storage));
-        let library_storage_arc = Arc::new(Mutex::new(library_storage));
-        let inbox_storage_arc = Arc::new(Mutex::new(inbox_storage));
-        let goals_storage_arc = Arc::new(Mutex::new(goals_storage));
-        let energy_storage_arc = Arc::new(Mutex::new(energy_storage));
-        let contacts_storage_arc = Arc::new(Mutex::new(contacts_storage));
-        let action_storage_arc = Arc::new(Mutex::new(action_storage));
-        let python_ai_arc = Arc::new(Mutex::new(python_ai));
-
-        let mut action_executor = ActionExecutor::new(
-            Arc::clone(&storage_arc),
-            Arc::clone(&action_storage_arc),
-            Arc::clone(&python_ai_arc),
-        );
-        action_executor.set_goals_storage(Arc::clone(&goals_storage_arc));
-        action_executor.set_energy_storage(Arc::clone(&energy_storage_arc));
-        action_executor.set_inbox_storage(Arc::clone(&inbox_storage_arc));
-        let action_executor_arc = Arc::new(Mutex::new(action_executor));
-
-        // Don't .start() the scheduler — we don't want background timer
-        // threads firing during a unit test run.
-        let action_scheduler = ActionScheduler::new(
-            Arc::clone(&action_storage_arc),
-            Arc::clone(&action_executor_arc),
-        );
+        let python_ai_arc = Arc::new(Mutex::new(PythonAI::new(PathBuf::from("nous-py"))));
 
         let (event_tx, event_rx) =
             tokio::sync::broadcast::channel::<AppEvent>(256);
 
+        // The owner tenant, exactly as the daemon builds it — hosted()
+        // opts skip what tests must not have running: no scheduler
+        // thread, no Lua plugins.
+        let owner = TenantState::build_at(
+            library_path.clone(),
+            library_path.clone(),
+            Arc::clone(&python_ai_arc),
+            event_tx.clone(),
+            TenantBuildOpts::hosted(),
+        )
+        .expect("owner tenant build");
+
+        // RAG (disabled by default — tests opt in by mutating
+        // env.rag_config before sending requests).
+        let rag_config = Arc::new(RwLock::new(RagConfig::disabled()));
+        let rag_backend = Arc::new(RagBackend::new(Arc::clone(&rag_config)));
+        let daemon_config_path = library_path.join("daemon-config.toml");
+
         let sync_manager = SyncManager::new(library_path.clone());
         let sync_manager_arc = Arc::new(sync_manager);
         sync_manager_arc.set_emitter(Arc::new(LogEmitter));
-        sync_manager_arc.set_crdt_store(Arc::clone(&crdt_store));
+        sync_manager_arc.set_crdt_store(Arc::clone(&owner.crdt_store));
 
         // Auth before DaemonState so the multi-user context can be shared
         // between the middleware and the session handlers (same shape as
         // the real daemon boot).
-        let (auth_state, multi_user_ctx, rw_token, ro_token, invited_token) = match auth_setup {
-            AuthSetup::Disabled => (api::AuthState::disabled(), None, None, None, None),
-            AuthSetup::Keys(rw, ro) => {
-                let mut keys = ApiKeySet::empty();
-                keys.insert(rw.clone(), Scope::ReadWrite);
-                keys.insert(ro.clone(), Scope::ReadOnly);
-                (api::AuthState::enabled(keys), None, Some(rw), Some(ro), None)
-            }
-            AuthSetup::MultiUser { oidc } => {
-                let registry_path = library_path.join("tenants.json");
-                let mut reg = TenantRegistry::load(&registry_path).expect("registry load");
+        let (auth_state, multi_user_ctx, owner_user_id, rw_token, ro_token, invited_token) =
+            match auth_setup {
+                AuthSetup::Disabled => (api::AuthState::disabled(), None, None, None, None, None),
+                AuthSetup::Keys(rw, ro) => {
+                    let mut keys = ApiKeySet::empty();
+                    keys.insert(rw.clone(), Scope::ReadWrite);
+                    keys.insert(ro.clone(), Scope::ReadOnly);
+                    (api::AuthState::enabled(keys), None, None, Some(rw), Some(ro), None)
+                }
+                AuthSetup::MultiUser { oidc } => {
+                    let registry_path = library_path.join("tenants.json");
+                    let mut reg = TenantRegistry::load(&registry_path).expect("registry load");
 
-                let alice = User::new_invited("alice@example.org", UserRole::Member);
-                let alice_id = alice.id.clone();
-                reg.insert(alice).expect("insert alice");
-                reg.update(&alice_id, |u| u.status = UserStatus::Active)
-                    .expect("activate alice");
-                let rw = reg
-                    .mint_token(&alice_id, "rw", Scope::ReadWrite)
-                    .expect("mint rw");
-                let ro = reg
-                    .mint_token(&alice_id, "ro", Scope::ReadOnly)
-                    .expect("mint ro");
+                    // Alice is the OWNER: pinned to the harness's seeded
+                    // library, matching the daemon's oldest-owner rule.
+                    let alice = User::new_invited("alice@example.org", UserRole::Owner);
+                    let alice_id = alice.id.clone();
+                    reg.insert(alice).expect("insert alice");
+                    reg.update(&alice_id, |u| u.status = UserStatus::Active)
+                        .expect("activate alice");
+                    let rw = reg
+                        .mint_token(&alice_id, "rw", Scope::ReadWrite)
+                        .expect("mint rw");
+                    let ro = reg
+                        .mint_token(&alice_id, "ro", Scope::ReadOnly)
+                        .expect("mint ro");
 
-                let invited = User::new_invited("newbie@example.org", UserRole::Member);
-                let invited_id = invited.id.clone();
-                reg.insert(invited).expect("insert invited");
-                let inv = reg
-                    .mint_token(&invited_id, "onboarding", Scope::ReadWrite)
-                    .expect("mint invited");
+                    let invited = User::new_invited("newbie@example.org", UserRole::Member);
+                    let invited_id = invited.id.clone();
+                    reg.insert(invited).expect("insert invited");
+                    let inv = reg
+                        .mint_token(&invited_id, "onboarding", Scope::ReadWrite)
+                        .expect("mint invited");
 
-                reg.save().expect("registry save");
-                let handle = ReloadingRegistry::open(&registry_path).expect("registry open");
-                let ctx = super::session::MultiUserCtx {
-                    session_key: TEST_SESSION_KEY,
-                    registry: Arc::new(Mutex::new(handle)),
-                    oidc: oidc.then(|| Arc::new(super::oidc::test_jwt::verifier())),
-                };
-                (
-                    api::AuthState::multi_user(ctx.clone()),
-                    Some(ctx),
-                    Some(rw.token),
-                    Some(ro.token),
-                    Some(inv.token),
-                )
-            }
-        };
+                    reg.save().expect("registry save");
+                    let handle = ReloadingRegistry::open(&registry_path).expect("registry open");
+                    let ctx = super::session::MultiUserCtx {
+                        session_key: TEST_SESSION_KEY,
+                        registry: Arc::new(Mutex::new(handle)),
+                        oidc: oidc.then(|| Arc::new(super::oidc::test_jwt::verifier())),
+                    };
+                    (
+                        api::AuthState::multi_user(ctx.clone()),
+                        Some(ctx),
+                        Some(alice_id),
+                        Some(rw.token),
+                        Some(ro.token),
+                        Some(inv.token),
+                    )
+                }
+            };
+
+        let tenants = Arc::new(TenantManager::new(
+            library_path.clone(),
+            Arc::clone(&owner),
+            owner_user_id,
+            Arc::clone(&python_ai_arc),
+        ));
 
         let state = Arc::new(DaemonState {
-            storage: storage_arc,
-            library_storage: library_storage_arc,
-            inbox_storage: inbox_storage_arc,
-            goals_storage: goals_storage_arc,
-            energy_storage: energy_storage_arc,
-            contacts_storage: contacts_storage_arc,
+            storage: Arc::clone(&owner.storage),
+            library_storage: Arc::clone(&owner.library_storage),
+            inbox_storage: Arc::clone(&owner.inbox_storage),
+            goals_storage: Arc::clone(&owner.goals_storage),
+            energy_storage: Arc::clone(&owner.energy_storage),
+            contacts_storage: Arc::clone(&owner.contacts_storage),
             sync_manager: sync_manager_arc,
-            action_scheduler: Mutex::new(action_scheduler),
-            search_index: search_index_arc,
-            tantivy: tantivy_backend,
+            action_scheduler: Arc::clone(&owner.action_scheduler),
+            search_index: Arc::clone(&owner.search_index),
+            tantivy: Arc::clone(&owner.tantivy),
             rag: rag_backend,
             rag_config: Arc::clone(&rag_config),
             ai_config: Arc::new(RwLock::new(Default::default())),
             daemon_config_path,
-            crdt_store,
-            // Plugin host is None in tests by default — keeps construction
-            // fast and avoids loading any user-installed Lua plugins from
-            // disk into the test process. Tests that exercise plugin
-            // routes can swap this out via a future helper.
+            crdt_store: Arc::clone(&owner.crdt_store),
+            // hosted() build opts → no plugin host in tests (keeps
+            // construction fast, no user Lua loaded into the test
+            // process).
             #[cfg(feature = "plugins")]
-            plugin_host: None,
+            plugin_host: owner.plugin_host.clone(),
             // Inert backup scheduler — tests must not spawn the real scheduler
             // (it runs a background loop against the real user data dir).
             backup_scheduler: std::sync::Arc::new(
@@ -285,6 +260,7 @@ impl TestEnv {
             // No web bundle in the harness — /app routes 404 gracefully.
             web_app_dir: library_path.join("web-app"),
             multi_user: multi_user_ctx,
+            tenants,
             event_tx,
         });
 
@@ -2001,4 +1977,90 @@ async fn auth_callback_route_is_public_in_multi_user_mode() {
         .request_with_cookie(Method::GET, "/auth/callback", None, None)
         .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+// ===== Tenant extractor (sweep contract) =====
+
+/// A one-route probe router using the `Tenant` extractor, sharing the
+/// env's DaemonState — what every swept handler will do.
+fn tenant_probe_router(env: &TestEnv) -> Router {
+    use super::tenant::Tenant;
+    Router::new()
+        .route(
+            "/probe",
+            axum::routing::get(|tenant: Tenant| async move {
+                tenant.library_path.display().to_string()
+            }),
+        )
+        .with_state(Arc::clone(&env.state))
+}
+
+async fn probe(router: &Router, user: Option<super::auth::AuthedUser>) -> String {
+    let mut req = Request::builder().uri("/probe");
+    if let Some(u) = user {
+        req = req.extension(u);
+    }
+    let resp = router
+        .clone()
+        .oneshot(req.body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = to_bytes(resp.into_body(), 1 << 20).await.unwrap();
+    String::from_utf8(bytes.to_vec()).unwrap()
+}
+
+#[tokio::test]
+async fn tenant_extractor_falls_back_to_owner_without_authed_user() {
+    // Legacy single-user mode: no AuthedUser extension → owner tenant,
+    // which is the env's library.
+    let env = TestEnv::new();
+    let path = probe(&tenant_probe_router(&env), None).await;
+    assert_eq!(path, env.library_path.display().to_string());
+}
+
+#[tokio::test]
+async fn tenant_extractor_maps_owner_and_lazily_builds_members() {
+    use super::auth::AuthedUser;
+    use super::auth::Scope;
+    use super::tenants::UserRole;
+
+    let env = TestEnv::with_multi_user();
+    let router = tenant_probe_router(&env);
+    let reg = TenantRegistry::load(&env.library_path.join("tenants.json")).unwrap();
+    let alice_id = reg.find_by_email("alice@example.org").unwrap().id.clone();
+    let newbie_id = reg.find_by_email("newbie@example.org").unwrap().id.clone();
+
+    // Alice is the owner → the seeded library, no lazy build.
+    let alice_path = probe(
+        &router,
+        Some(AuthedUser {
+            user_id: alice_id,
+            role: UserRole::Owner,
+            scope: Scope::ReadWrite,
+        }),
+    )
+    .await;
+    assert_eq!(alice_path, env.library_path.display().to_string());
+    assert_eq!(env.state.tenants.lazy_count(), 0);
+
+    // Newbie → a lazily built tenant under {data}/tenants/{id}, stable
+    // across requests.
+    let newbie_user = AuthedUser {
+        user_id: newbie_id.clone(),
+        role: UserRole::Member,
+        scope: Scope::ReadWrite,
+    };
+    let newbie_path = probe(&router, Some(newbie_user.clone())).await;
+    assert_ne!(newbie_path, alice_path);
+    assert!(newbie_path.contains(&format!("tenants/{newbie_id}")));
+    assert_eq!(env.state.tenants.lazy_count(), 1);
+
+    let again = probe(&router, Some(newbie_user)).await;
+    assert_eq!(again, newbie_path);
+    assert_eq!(env.state.tenants.lazy_count(), 1);
+
+    // The lazy tenant's tree exists on disk with its own search index.
+    let newbie_root = env.library_path.join("tenants").join(&newbie_id);
+    assert!(newbie_root.is_dir());
 }

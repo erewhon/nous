@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use anyhow::{bail, Context, Result};
 use tokio::signal;
 
-use nous_lib::actions::{ActionExecutor, ActionScheduler, ActionStorage};
+use nous_lib::actions::ActionScheduler;
 use nous_lib::commands::{start_backup_scheduler, BackupScheduler};
 use nous_lib::contacts::ContactsStorage;
 use nous_lib::energy::EnergyStorage;
@@ -34,7 +34,13 @@ use super::auth;
 /// Re-export AppEvent as DaemonEvent for backward compatibility
 pub type DaemonEvent = nous_lib::events::AppEvent;
 
-/// Shared state for the daemon (passed to HTTP handlers and schedulers)
+/// Shared state for the daemon (passed to HTTP handlers and schedulers).
+///
+/// Tenancy note: the per-library fields here (storage, search, CRDT,
+/// personal storages, plugins) are ALIASES of the owner tenant's Arcs —
+/// see `tenant.rs`. Un-swept route handlers keep reading them and behave
+/// exactly as before tenancy; swept handlers resolve their own tenant via
+/// the `Tenant` extractor, and the final sweep removes the aliases.
 pub struct DaemonState {
     pub storage: Arc<Mutex<FileStorage>>,
     pub library_storage: Arc<Mutex<LibraryStorage>>,
@@ -43,7 +49,7 @@ pub struct DaemonState {
     pub energy_storage: Arc<Mutex<EnergyStorage>>,
     pub contacts_storage: Arc<Mutex<ContactsStorage>>,
     pub sync_manager: Arc<SyncManager>,
-    pub action_scheduler: Mutex<ActionScheduler>,
+    pub action_scheduler: Arc<Mutex<ActionScheduler>>,
     /// Raw Tantivy index. Kept for the few handlers that touch it
     /// directly (POST /api/search/rebuild) — most search now goes
     /// through `tantivy` (the backend wrapper).
@@ -85,6 +91,12 @@ pub struct DaemonState {
     /// with the auth middleware. None in legacy single-user mode — the
     /// session/`/api/me` handlers 404.
     pub multi_user: Option<super::session::MultiUserCtx>,
+    /// User → tenant resolution (lazy builds). In legacy mode this holds
+    /// just the owner tenant, which the `Tenant` extractor falls back to.
+    /// (Read by the extractor; dead-code analysis can't see that until
+    /// the first route sweep instantiates it — allow goes away then.)
+    #[allow(dead_code)]
+    pub tenants: Arc<super::tenant::TenantManager>,
     pub event_tx: nous_lib::events::EventSender,
 }
 
@@ -140,82 +152,28 @@ pub async fn run(library_name: Option<&str>, port: Option<u16>, bind: Option<&st
     let library_path = current_library.path.clone();
     log::info!("Using library: {} at {}", current_library.name, library_path.display());
 
-    // Initialize file storage
-    let storage = FileStorage::new(library_path.clone());
-    storage.init().context("Failed to initialize storage")?;
-
-    // Initialize Tantivy search index. The daemon owns the writer lock —
-    // a collision here means another process (likely a stale daemon or the
-    // desktop app from before the migration) is still holding it.
-    let mut search_index = SearchIndex::new(library_path.join("search_index"))
-        .context(
-            "Failed to initialize search index — another process is holding the Tantivy writer lock. \
-             Stop any running desktop app or stale daemon and retry.",
-        )?;
-
-    // If the index came up empty — a fresh install, or one just rebuilt after a
-    // schema migration (SearchIndex::open_or_recreate) — repopulate it from all
-    // pages so search works immediately instead of staying blank until each page
-    // is next edited.
-    if search_index.num_docs() == 0 {
-        let mut pages = Vec::new();
-        if let Ok(notebooks) = storage.list_notebooks() {
-            for nb in notebooks {
-                match storage.list_pages(nb.id) {
-                    Ok(nb_pages) => pages.extend(
-                        nb_pages
-                            .into_iter()
-                            .filter(|p| p.deleted_at.is_none() && !p.is_archived),
-                    ),
-                    Err(e) => log::warn!("Startup index: failed to list pages for {}: {}", nb.id, e),
-                }
-            }
-        }
-        if !pages.is_empty() {
-            match search_index.rebuild_index(&pages) {
-                Ok(()) => log::info!("Populated empty search index with {} pages", pages.len()),
-                Err(e) => log::warn!("Startup search index population failed: {}", e),
-            }
-        }
-    }
-
-    // Initialize CRDT store (in-memory; persists per-page Yjs state under
-    // {library_path}/notebooks/{nb_id}/sync/pages/{page_id}.crdt).
-    let crdt_store = Arc::new(CrdtStore::new(library_path.clone()));
-
-    // Initialize storages
-    let inbox_storage = InboxStorage::new(library_path.clone())
-        .context("Failed to initialize inbox storage")?;
-    let goals_storage = GoalsStorage::new(library_path.clone())
-        .context("Failed to initialize goals storage")?;
-    let energy_storage = EnergyStorage::new(data_dir.clone())
-        .context("Failed to initialize energy storage")?;
-    let contacts_storage = ContactsStorage::new(data_dir.clone())
-        .context("Failed to initialize contacts storage")?;
-    let action_storage = ActionStorage::new(library_path.clone())
-        .context("Failed to initialize action storage")?;
-
-    // Initialize Python AI bridge (needed by ActionExecutor)
+    // Initialize Python AI bridge (shared across all tenants — one
+    // interpreter/GIL per process).
     let nous_py_path = find_nous_py_path();
     log::info!("Python AI bridge path: {:?}", nous_py_path);
-    let python_ai = PythonAI::new(nous_py_path);
+    let python_ai_arc = Arc::new(Mutex::new(PythonAI::new(nous_py_path)));
 
-    // Wrap in Arc<Mutex<>>
-    let storage_arc = Arc::new(Mutex::new(storage));
-    let library_storage_arc = Arc::new(Mutex::new(library_storage));
-    let inbox_storage_arc = Arc::new(Mutex::new(inbox_storage));
-    let goals_storage_arc = Arc::new(Mutex::new(goals_storage));
-    let energy_storage_arc = Arc::new(Mutex::new(energy_storage));
-    let contacts_storage_arc = Arc::new(Mutex::new(contacts_storage));
-    let action_storage_arc = Arc::new(Mutex::new(action_storage));
-    let python_ai_arc = Arc::new(Mutex::new(python_ai));
-    let search_index_arc = Arc::new(Mutex::new(search_index));
+    // Create event broadcast channel (capacity 256 — events are small).
+    // This is the owner tenant's channel and what /api/events serves.
+    let (event_tx, _) = tokio::sync::broadcast::channel::<nous_lib::events::AppEvent>(256);
 
-    // Wrap Tantivy in the SearchBackend adapter so /api/search can
-    // dispatch keyword traffic through the same trait the RAG backend
-    // uses. The raw search_index_arc is still kept on DaemonState for
-    // the rebuild endpoint and the legacy index_page calls in handlers.
-    let tantivy_backend = Arc::new(TantivyBackend::new(Arc::clone(&search_index_arc)));
+    // Owner tenant: the legacy data-dir stack (storage, search, CRDT,
+    // personal storages, plugins, action machinery), built exactly as
+    // the pre-tenancy daemon did — in place, no file moves. Additional
+    // tenants are built lazily by the TenantManager under
+    // {data_dir}/tenants/{user_id}/.
+    let owner = super::tenant::TenantState::build_at(
+        data_dir.clone(),
+        library_path.clone(),
+        Arc::clone(&python_ai_arc),
+        event_tx.clone(),
+        super::tenant::TenantBuildOpts::owner(),
+    )?;
 
     // Load on-disk RAG config (or default to disabled). Path lives at
     // {data_dir}/daemon-config.toml — same directory as daemon-api-key.
@@ -239,95 +197,32 @@ pub async fn run(library_name: Option<&str>, port: Option<u16>, bind: Option<&st
     let ai_config = Arc::new(RwLock::new(daemon_config.ai.clone()));
     let rag_backend = Arc::new(RagBackend::new(Arc::clone(&rag_config)));
 
-    // Create event broadcast channel (capacity 256 — events are small)
-    let (event_tx, _) = tokio::sync::broadcast::channel::<nous_lib::events::AppEvent>(256);
-
-    // Initialize plugin host (Lua VM, capability gating, hook dispatch).
-    // Mirrors the Tauri-side construction in lib.rs so plugins behave the
-    // same on either side during the migration. The Tauri-side host stays
-    // running until UI plugins migrate; both load the same Lua sources and
-    // hold separate VMs (one per process). Daemon writes (Emacs, MCP)
-    // fire hooks here; legacy desktop-only writes fire on the Tauri side.
-    #[cfg(feature = "plugins")]
-    let plugin_host: Option<Arc<Mutex<plugins::PluginHost>>> = {
-        let mut api = plugins::HostApi::new(
-            Arc::clone(&storage_arc),
-            Arc::clone(&goals_storage_arc),
-            Arc::clone(&inbox_storage_arc),
-        );
-        api.set_energy_storage(Arc::clone(&energy_storage_arc));
-        api.set_python_ai(Arc::clone(&python_ai_arc));
-        // Search not wired here for now — plugins that need search go
-        // through host.http_request → daemon /api/search. Same call shape
-        // as the Tauri side for portability.
-        let api = Arc::new(api);
-        let mut host = plugins::PluginHost::new(api, library_path.join("plugins"));
-        if let Err(e) = host.load_all() {
-            log::warn!("Plugin load error: {e}");
-        }
-        Some(Arc::new(Mutex::new(host)))
-    };
-
-    // Initialize action executor
-    let mut action_executor = ActionExecutor::new(
-        Arc::clone(&storage_arc),
-        Arc::clone(&action_storage_arc),
-        Arc::clone(&python_ai_arc),
-    );
-    action_executor.set_goals_storage(Arc::clone(&goals_storage_arc));
-    action_executor.set_energy_storage(Arc::clone(&energy_storage_arc));
-    action_executor.set_inbox_storage(Arc::clone(&inbox_storage_arc));
-    action_executor.set_event_tx(event_tx.clone());
-    #[cfg(feature = "plugins")]
-    action_executor.set_plugin_host(plugin_host.clone());
-
-    // Refresh built-in actions from Lua plugin definitions (if loaded).
-    #[cfg(feature = "plugins")]
-    if let Some(ref ph) = plugin_host {
-        if let Ok(host) = ph.lock() {
-            let builtins = host.get_builtin_actions();
-            if !builtins.is_empty() {
-                if let Ok(storage) = action_storage_arc.lock() {
-                    if let Err(e) = storage.refresh_builtins(builtins) {
-                        log::warn!("Failed to refresh builtins from plugins: {e}");
-                    }
-                }
-            }
-        }
-    }
-
-    let action_executor_arc = Arc::new(Mutex::new(action_executor));
-
-    // Initialize action scheduler and start it
-    let mut action_scheduler = ActionScheduler::new(
-        Arc::clone(&action_storage_arc),
-        Arc::clone(&action_executor_arc),
-    );
-    action_scheduler.start();
-    log::info!("Action scheduler started");
-
-    // Initialize sync manager with LogEmitter (no GUI)
+    // Initialize sync manager with LogEmitter (no GUI). WebDAV sync is an
+    // owner-tenant concern (hosted tenants have it off by policy), so it
+    // runs over the owner's storages.
     let sync_manager = SyncManager::new(data_dir.clone());
     let sync_manager_arc = Arc::new(sync_manager);
     sync_manager_arc.set_emitter(Arc::new(LogEmitter));
-    sync_manager_arc.set_crdt_store(Arc::clone(&crdt_store));
+    sync_manager_arc.set_crdt_store(Arc::clone(&owner.crdt_store));
 
     // Start sync scheduler. The daemon is the sync owner, so it never yields
     // (DL-21) — `None` predicate.
     let sync_scheduler = nous_lib::sync::scheduler::start_sync_scheduler(
         Arc::clone(&sync_manager_arc),
-        Arc::clone(&storage_arc),
-        Arc::clone(&library_storage_arc),
-        Arc::clone(&goals_storage_arc),
-        Arc::clone(&inbox_storage_arc),
-        Arc::clone(&contacts_storage_arc),
-        Arc::clone(&energy_storage_arc),
+        Arc::clone(&owner.storage),
+        Arc::clone(&owner.library_storage),
+        Arc::clone(&owner.goals_storage),
+        Arc::clone(&owner.inbox_storage),
+        Arc::clone(&owner.contacts_storage),
+        Arc::clone(&owner.energy_storage),
         None,
     );
     log::info!("Sync scheduler started");
 
-    // Daemon is the sole owner of periodic backups; Tauri no longer constructs one.
-    let backup_scheduler = Arc::new(start_backup_scheduler(Arc::clone(&storage_arc)));
+    // Daemon is the sole owner of periodic backups; Tauri no longer constructs
+    // one. Owner-tenant storage — per-tenant backups arrive with the scheduler
+    // lifecycle leaf.
+    let backup_scheduler = Arc::new(start_backup_scheduler(Arc::clone(&owner.storage)));
     log::info!("Backup scheduler started");
 
     // Web bundle directory for /app (see `just web-deploy`)
@@ -377,8 +272,23 @@ pub async fn run(library_name: Option<&str>, port: Option<u16>, bind: Option<&st
             .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
             .unwrap_or(false);
 
-    let (auth_state, multi_user_ctx) = if multi_user {
+    let (auth_state, multi_user_ctx, owner_user_id) = if multi_user {
         let registry_path = super::tenants::TenantRegistry::registry_path(&data_dir);
+        // The oldest owner-role user is pinned to the legacy data-dir
+        // tenant (fixed at boot; see tenant.rs module docs).
+        let owner_user_id = super::tenants::TenantRegistry::load(&registry_path)?
+            .users()
+            .iter()
+            .filter(|u| u.role == super::tenants::UserRole::Owner)
+            .min_by_key(|u| u.created_at)
+            .map(|u| u.id.clone());
+        match &owner_user_id {
+            Some(id) => log::info!("Owner tenant mapped to user {id}"),
+            None => log::warn!(
+                "No owner-role user in the registry — the legacy library is reachable by nobody \
+                 until one is invited (nous-cli daemon user invite <email> --role owner)"
+            ),
+        }
         let registry = Arc::new(std::sync::Mutex::new(
             super::tenants::ReloadingRegistry::open(&registry_path)
                 .context("Failed to load tenant registry")?,
@@ -415,13 +325,13 @@ pub async fn run(library_name: Option<&str>, port: Option<u16>, bind: Option<&st
             registry_path.display()
         );
         println!("Multi-user authentication enabled ({})", registry_path.display());
-        (api::AuthState::multi_user(ctx.clone()), Some(ctx))
+        (api::AuthState::multi_user(ctx.clone()), Some(ctx), owner_user_id)
     } else if key_path.exists() {
         let keys = auth::ApiKeySet::load(&key_path)?;
         let count = if keys.is_empty() { 0 } else { 1 }; // at least one
         log::info!("API authentication enabled ({} key(s) from {})", count, key_path.display());
         println!("API authentication enabled (keys from {})", key_path.display());
-        (api::AuthState::enabled(keys), None)
+        (api::AuthState::enabled(keys), None, None)
     } else if !is_loopback {
         bail!(
             "Cannot bind to non-loopback address ({}) without API key.\n\
@@ -430,33 +340,44 @@ pub async fn run(library_name: Option<&str>, port: Option<u16>, bind: Option<&st
         );
     } else {
         log::info!("API authentication disabled (no key file, localhost only)");
-        (api::AuthState::disabled(), None)
+        (api::AuthState::disabled(), None, None)
     };
 
-    // Build shared daemon state
+    let tenants = Arc::new(super::tenant::TenantManager::new(
+        data_dir.clone(),
+        Arc::clone(&owner),
+        owner_user_id,
+        Arc::clone(&python_ai_arc),
+    ));
+
+    // Build shared daemon state. The storage-ish fields are aliases of
+    // the owner tenant's Arcs — kept so un-swept route handlers behave
+    // exactly as before; the tenant sweeps migrate handlers onto the
+    // `Tenant` extractor and the final sweep deletes these fields.
     let state = Arc::new(DaemonState {
-        storage: storage_arc,
-        library_storage: library_storage_arc,
-        inbox_storage: inbox_storage_arc,
-        goals_storage: goals_storage_arc,
-        energy_storage: energy_storage_arc,
-        contacts_storage: contacts_storage_arc,
+        storage: Arc::clone(&owner.storage),
+        library_storage: Arc::clone(&owner.library_storage),
+        inbox_storage: Arc::clone(&owner.inbox_storage),
+        goals_storage: Arc::clone(&owner.goals_storage),
+        energy_storage: Arc::clone(&owner.energy_storage),
+        contacts_storage: Arc::clone(&owner.contacts_storage),
         sync_manager: sync_manager_arc,
-        action_scheduler: Mutex::new(action_scheduler),
-        search_index: search_index_arc,
-        tantivy: tantivy_backend,
+        action_scheduler: Arc::clone(&owner.action_scheduler),
+        search_index: Arc::clone(&owner.search_index),
+        tantivy: Arc::clone(&owner.tantivy),
         rag: rag_backend,
         rag_config,
         ai_config,
         daemon_config_path,
-        crdt_store,
+        crdt_store: Arc::clone(&owner.crdt_store),
         backup_scheduler: Arc::clone(&backup_scheduler),
         #[cfg(feature = "plugins")]
-        plugin_host,
+        plugin_host: owner.plugin_host.clone(),
         library_path: library_path.clone(),
         python_ai: Arc::clone(&python_ai_arc),
         web_app_dir,
         multi_user: multi_user_ctx,
+        tenants,
         event_tx,
     });
 
