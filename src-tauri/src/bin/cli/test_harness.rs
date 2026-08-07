@@ -228,32 +228,16 @@ impl TestEnv {
         ));
 
         let state = Arc::new(DaemonState {
-            storage: Arc::clone(&owner.storage),
-            library_storage: Arc::clone(&owner.library_storage),
-            inbox_storage: Arc::clone(&owner.inbox_storage),
-            goals_storage: Arc::clone(&owner.goals_storage),
-            energy_storage: Arc::clone(&owner.energy_storage),
-            contacts_storage: Arc::clone(&owner.contacts_storage),
             sync_manager: sync_manager_arc,
-            action_scheduler: Arc::clone(&owner.action_scheduler),
-            search_index: Arc::clone(&owner.search_index),
-            tantivy: Arc::clone(&owner.tantivy),
             rag: rag_backend,
             rag_config: Arc::clone(&rag_config),
             ai_config: Arc::new(RwLock::new(Default::default())),
             daemon_config_path,
-            crdt_store: Arc::clone(&owner.crdt_store),
-            // hosted() build opts → no plugin host in tests (keeps
-            // construction fast, no user Lua loaded into the test
-            // process).
-            #[cfg(feature = "plugins")]
-            plugin_host: owner.plugin_host.clone(),
             // Inert backup scheduler — tests must not spawn the real scheduler
             // (it runs a background loop against the real user data dir).
             backup_scheduler: std::sync::Arc::new(
                 nous_lib::commands::BackupScheduler::inert(),
             ),
-            library_path: library_path.clone(),
             // Placeholder-path bridge (see note above) — /api/ai routes
             // exercised in tests return clean 500s instead of results.
             python_ai: Arc::clone(&python_ai_arc),
@@ -288,7 +272,8 @@ impl TestEnv {
     /// Create a notebook directly through storage, returning its UUID as
     /// a string. Faster + more deterministic than going via the HTTP API.
     pub fn create_notebook(&self, name: &str) -> String {
-        let storage = self.state.storage.lock().unwrap();
+        let owner = self.state.tenants.owner();
+        let storage = owner.storage.lock().unwrap();
         let nb = storage
             .create_notebook(name.to_string(), NotebookType::Standard)
             .expect("create notebook");
@@ -2391,4 +2376,38 @@ async fn swept_inbox_and_goals_routes_isolate_tenants() {
         .await;
     assert_eq!(status, StatusCode::OK);
     assert!(body.to_string().contains("private thought"), "alice lost her inbox: {body}");
+}
+
+#[tokio::test]
+async fn sync_trigger_is_owner_only_and_member_plugins_are_empty() {
+    let env = TestEnv::with_multi_user();
+    let alice_pat = env.rw_token.clone().unwrap();
+    let newbie_pat = env.invited_token.clone().unwrap();
+
+    // Activate newbie.
+    let registry_path = env.library_path.join("tenants.json");
+    let mut reg = TenantRegistry::load(&registry_path).unwrap();
+    let newbie_id = reg.find_by_email("newbie@example.org").unwrap().id.clone();
+    reg.update(&newbie_id, |u| u.status = UserStatus::Active).unwrap();
+    reg.save().unwrap();
+
+    // A member must not be able to trigger the owner's WebDAV sync.
+    let (status, body) = env
+        .request_with_token(Method::POST, "/api/sync/trigger", None, Some(&newbie_pat))
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "member sync: {body}");
+
+    // The owner still can.
+    let (status, _) = env
+        .request_with_token(Method::POST, "/api/sync/trigger", None, Some(&alice_pat))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // A member's plugin list is empty (hosted tenants run without Lua),
+    // never an error and never the owner's plugins.
+    let (status, body) = env
+        .request_with_token(Method::GET, "/api/plugins", None, Some(&newbie_pat))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["data"], json!([]));
 }

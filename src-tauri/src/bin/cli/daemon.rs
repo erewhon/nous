@@ -11,21 +11,12 @@ use std::sync::{Arc, Mutex};
 use anyhow::{bail, Context, Result};
 use tokio::signal;
 
-use nous_lib::actions::ActionScheduler;
 use nous_lib::commands::{start_backup_scheduler, BackupScheduler};
-use nous_lib::contacts::ContactsStorage;
-use nous_lib::energy::EnergyStorage;
-use nous_lib::goals::GoalsStorage;
-use nous_lib::inbox::InboxStorage;
 use nous_lib::library::LibraryStorage;
-#[cfg(feature = "plugins")]
-use nous_lib::plugins;
 use nous_lib::python_bridge::PythonAI;
-use nous_lib::search::{
-    self as search_mod, DaemonConfig, RagBackend, RagConfig, SearchIndex, TantivyBackend,
-};
+use nous_lib::search::{self as search_mod, DaemonConfig, RagBackend, RagConfig};
 use nous_lib::storage::FileStorage;
-use nous_lib::sync::{CrdtStore, LogEmitter, SyncManager};
+use nous_lib::sync::{LogEmitter, SyncManager};
 use tokio::sync::RwLock;
 
 use super::api;
@@ -36,27 +27,12 @@ pub type DaemonEvent = nous_lib::events::AppEvent;
 
 /// Shared state for the daemon (passed to HTTP handlers and schedulers).
 ///
-/// Tenancy note: the per-library fields here (storage, search, CRDT,
-/// personal storages, plugins) are ALIASES of the owner tenant's Arcs —
-/// see `tenant.rs`. Un-swept route handlers keep reading them and behave
-/// exactly as before tenancy; swept handlers resolve their own tenant via
-/// the `Tenant` extractor, and the final sweep removes the aliases.
+/// Tenancy note: per-library state (storage, search, CRDT, personal
+/// storages, plugins) lives on `TenantState` — handlers reach it through
+/// the `Tenant` extractor, never through globals. Only true
+/// process-globals remain here.
 pub struct DaemonState {
-    pub storage: Arc<Mutex<FileStorage>>,
-    pub library_storage: Arc<Mutex<LibraryStorage>>,
-    pub inbox_storage: Arc<Mutex<InboxStorage>>,
-    pub goals_storage: Arc<Mutex<GoalsStorage>>,
-    pub energy_storage: Arc<Mutex<EnergyStorage>>,
-    pub contacts_storage: Arc<Mutex<ContactsStorage>>,
     pub sync_manager: Arc<SyncManager>,
-    pub action_scheduler: Arc<Mutex<ActionScheduler>>,
-    /// Raw Tantivy index. Kept for the few handlers that touch it
-    /// directly (POST /api/search/rebuild) — most search now goes
-    /// through `tantivy` (the backend wrapper).
-    pub search_index: Arc<Mutex<SearchIndex>>,
-    /// Tantivy via the SearchBackend trait. Used by the dispatcher in
-    /// /api/search to route ?mode=keyword.
-    pub tantivy: Arc<TantivyBackend>,
     /// RAG backend wrapping an external embedding endpoint + vector
     /// store. Always present; checks its config snapshot internally
     /// and returns NotConfigured when disabled. The Option here is
@@ -71,17 +47,11 @@ pub struct DaemonState {
     /// Path to the on-disk daemon-config.toml — the configure
     /// endpoint writes back here when it persists changes.
     pub daemon_config_path: PathBuf,
-    pub crdt_store: Arc<CrdtStore>,
     pub backup_scheduler: Arc<BackupScheduler>,
-    /// Plugin host (Lua VM, capability gating, hook dispatch). Optional
-    /// at the type level so the daemon still compiles with the `plugins`
-    /// feature off; in default builds it's always populated.
-    #[cfg(feature = "plugins")]
-    pub plugin_host: Option<Arc<Mutex<plugins::PluginHost>>>,
-    pub library_path: PathBuf,
     /// PyO3 bridge for AI operations (chat, summarize, suggest). Shared
-    /// with the ActionExecutor/plugins; the /api/ai/* routes lock it from
-    /// spawn_blocking because calls hold the GIL for their duration.
+    /// across all tenants (one interpreter/GIL per process); the
+    /// /api/ai/* routes lock it from spawn_blocking because calls hold
+    /// the GIL for their duration.
     pub python_ai: Arc<Mutex<PythonAI>>,
     /// Directory holding the built web frontend (dist-web contents), served
     /// at /app. `NOUS_WEB_APP_DIR` overrides; defaults to {data_dir}/web-app.
@@ -347,30 +317,15 @@ pub async fn run(library_name: Option<&str>, port: Option<u16>, bind: Option<&st
         Arc::clone(&python_ai_arc),
     ));
 
-    // Build shared daemon state. The storage-ish fields are aliases of
-    // the owner tenant's Arcs — kept so un-swept route handlers behave
-    // exactly as before; the tenant sweeps migrate handlers onto the
-    // `Tenant` extractor and the final sweep deletes these fields.
+    // Build shared daemon state — process-globals only; per-tenant state
+    // is reached through `tenants` (the Tenant extractor).
     let state = Arc::new(DaemonState {
-        storage: Arc::clone(&owner.storage),
-        library_storage: Arc::clone(&owner.library_storage),
-        inbox_storage: Arc::clone(&owner.inbox_storage),
-        goals_storage: Arc::clone(&owner.goals_storage),
-        energy_storage: Arc::clone(&owner.energy_storage),
-        contacts_storage: Arc::clone(&owner.contacts_storage),
         sync_manager: sync_manager_arc,
-        action_scheduler: Arc::clone(&owner.action_scheduler),
-        search_index: Arc::clone(&owner.search_index),
-        tantivy: Arc::clone(&owner.tantivy),
         rag: rag_backend,
         rag_config,
         ai_config,
         daemon_config_path,
-        crdt_store: Arc::clone(&owner.crdt_store),
         backup_scheduler: Arc::clone(&backup_scheduler),
-        #[cfg(feature = "plugins")]
-        plugin_host: owner.plugin_host.clone(),
-        library_path: library_path.clone(),
         python_ai: Arc::clone(&python_ai_arc),
         web_app_dir,
         multi_user: multi_user_ctx,
@@ -399,7 +354,10 @@ pub async fn run(library_name: Option<&str>, port: Option<u16>, bind: Option<&st
     log::info!("Shutting down...");
     sync_scheduler.shutdown();
     state.backup_scheduler.shutdown();
-    if let Ok(sched) = state.action_scheduler.lock() {
+    // Owner tenant's scheduler; lazy tenants' schedulers are never
+    // started in this leaf (the scheduler-lifecycle leaf owns their
+    // start/stop policy).
+    if let Ok(sched) = state.tenants.owner().action_scheduler.lock() {
         sched.shutdown();
     }
     let _ = std::fs::remove_file(&pid_path);

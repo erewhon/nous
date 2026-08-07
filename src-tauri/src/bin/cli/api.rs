@@ -1420,7 +1420,7 @@ async fn search_pages(
             // service doesn't kill the search bar.
             use nous_lib::search::SearchBackend;
             let candidates_limit = state.rag_config.read().await.rerank_candidates;
-            let candidates = state
+            let candidates = tenant
                 .tantivy
                 .query(&query.q, candidates_limit, nb_filter)
                 .await;
@@ -1758,10 +1758,11 @@ fn strip_html_tags(html: &str) -> String {
 /// or build-time disabled). Mirrors the existing Tauri `list_plugins` shape.
 async fn list_plugins(
     State(state): State<AppState>,
+    tenant: Tenant,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     #[cfg(feature = "plugins")]
     {
-        let Some(ref ph) = state.plugin_host else {
+        let Some(ref ph) = tenant.plugin_host else {
             return Ok(Json(ApiResponse {
                 data: serde_json::json!([]),
             }));
@@ -1787,11 +1788,12 @@ async fn list_plugins(
 /// 404 if the id isn't loaded; 503 if the plugin host isn't available.
 async fn reload_plugin(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path(plugin_id): Path<String>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     #[cfg(feature = "plugins")]
     {
-        let Some(ref ph) = state.plugin_host else {
+        let Some(ref ph) = tenant.plugin_host else {
             return Err(api_err(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "Plugin host not available (compiled without the 'plugins' feature)",
@@ -2504,6 +2506,7 @@ struct PublishNousResponse {
 /// under the auth-gated /api prefix).
 async fn publish_page_to_nous(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path((notebook_id, page_id)): Path<(String, String)>,
     Json(req): Json<PublishNousRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
@@ -2516,7 +2519,7 @@ async fn publish_page_to_nous(
     // the async upload (never hold the lock across .await). Done before the
     // library lookup so a missing page fails fast with 404.
     let (html, record) = {
-        let storage = state.storage.lock().unwrap();
+        let storage = tenant.storage.lock().unwrap();
         let page = storage
             .get_page(nb_id, pg_id)
             .map_err(|e| api_err(StatusCode::NOT_FOUND, e.to_string()))?;
@@ -2532,21 +2535,21 @@ async fn publish_page_to_nous(
     // Publisher id = the current library id, matching the desktop app so shares
     // are co-owned (owner check on the Worker uses this).
     let publisher_id = {
-        let lib = state.library_storage.lock().unwrap();
+        let lib = tenant.library_storage.lock().unwrap();
         lib.get_current_library()
             .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
             .id
             .to_string()
     };
 
-    let url = publish::publish_rendered_page(&html, &record, &state.library_path, &publisher_id)
+    let url = publish::publish_rendered_page(&html, &record, &tenant.library_path, &publisher_id)
         .await
         .map_err(|e| api_err(StatusCode::BAD_GATEWAY, e))?;
 
     let mut record = record;
     record.external_url = Some(url.clone());
 
-    let share_storage = ShareStorage::new(state.library_path.clone());
+    let share_storage = ShareStorage::new(tenant.library_path.clone());
     share_storage
         .create_share(record.clone(), &html)
         .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
@@ -2581,13 +2584,13 @@ fn collect_folder_subtree(
 /// section / notebook daemon publish handlers. Upload failure → 502 with no
 /// partial persist.
 async fn finish_publish_site_to_nous(
-    state: &AppState,
+    tenant: &Tenant,
     site_dir: std::path::PathBuf,
     mut record: ShareRecord,
     publisher_id: &str,
 ) -> Result<Json<ApiResponse<PublishNousResponse>>, (StatusCode, Json<ApiError>)> {
     let upload =
-        publish::publish_rendered_site(&site_dir, &record, &state.library_path, publisher_id).await;
+        publish::publish_rendered_site(&site_dir, &record, &tenant.library_path, publisher_id).await;
 
     let url = match upload {
         Ok(url) => url,
@@ -2599,7 +2602,7 @@ async fn finish_publish_site_to_nous(
 
     record.external_url = Some(url.clone());
 
-    let share_storage = ShareStorage::new(state.library_path.clone());
+    let share_storage = ShareStorage::new(tenant.library_path.clone());
     let persist = share_storage.create_multi_share(record.clone(), &site_dir);
     let _ = std::fs::remove_dir_all(&site_dir);
     persist.map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
@@ -2609,9 +2612,10 @@ async fn finish_publish_site_to_nous(
     }))
 }
 
-/// The current library id, used as the stable publisher id for publish tokens.
-fn publisher_id(state: &AppState) -> Result<String, (StatusCode, Json<ApiError>)> {
-    let lib = state.library_storage.lock().unwrap();
+/// The tenant's current library id, used as the stable publisher id for
+/// publish tokens.
+fn publisher_id(tenant: &Tenant) -> Result<String, (StatusCode, Json<ApiError>)> {
+    let lib = tenant.library_storage.lock().unwrap();
     Ok(lib
         .get_current_library()
         .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
@@ -2622,6 +2626,7 @@ fn publisher_id(state: &AppState) -> Result<String, (StatusCode, Json<ApiError>)
 /// Publish a folder mini-site to Nous. Multi-page twin of `publish_page_to_nous`.
 async fn publish_folder_to_nous(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path((notebook_id, folder_id)): Path<(String, String)>,
     Json(req): Json<PublishNousRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
@@ -2633,7 +2638,7 @@ async fn publish_folder_to_nous(
     // Render the mini-site under the storage lock, release before the upload.
     let allowlist = publish::parse_page_allowlist(&req.page_ids);
     let (site_dir, record) = {
-        let storage = state.storage.lock().unwrap();
+        let storage = tenant.storage.lock().unwrap();
         let all_pages = storage
             .list_pages(nb_id)
             .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
@@ -2676,13 +2681,14 @@ async fn publish_folder_to_nous(
         (site_dir, record)
     };
 
-    let pub_id = publisher_id(&state)?;
-    finish_publish_site_to_nous(&state, site_dir, record, &pub_id).await
+    let pub_id = publisher_id(&tenant)?;
+    finish_publish_site_to_nous(&tenant, site_dir, record, &pub_id).await
 }
 
 /// Publish a section mini-site to Nous. Multi-page twin of `publish_page_to_nous`.
 async fn publish_section_to_nous(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path((notebook_id, section_id)): Path<(String, String)>,
     Json(req): Json<PublishNousRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
@@ -2693,7 +2699,7 @@ async fn publish_section_to_nous(
 
     let allowlist = publish::parse_page_allowlist(&req.page_ids);
     let (site_dir, record) = {
-        let storage = state.storage.lock().unwrap();
+        let storage = tenant.storage.lock().unwrap();
         let all_pages = storage
             .list_pages(nb_id)
             .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
@@ -2738,13 +2744,14 @@ async fn publish_section_to_nous(
         (site_dir, record)
     };
 
-    let pub_id = publisher_id(&state)?;
-    finish_publish_site_to_nous(&state, site_dir, record, &pub_id).await
+    let pub_id = publisher_id(&tenant)?;
+    finish_publish_site_to_nous(&tenant, site_dir, record, &pub_id).await
 }
 
 /// Publish a whole-notebook mini-site to Nous. Multi-page twin of `publish_page_to_nous`.
 async fn publish_notebook_to_nous(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path(notebook_id): Path<String>,
     Json(req): Json<PublishNousRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
@@ -2754,7 +2761,7 @@ async fn publish_notebook_to_nous(
 
     let allowlist = publish::parse_page_allowlist(&req.page_ids);
     let (site_dir, record) = {
-        let storage = state.storage.lock().unwrap();
+        let storage = tenant.storage.lock().unwrap();
         let notebook = storage
             .get_notebook(nb_id)
             .map_err(|e| api_err(StatusCode::NOT_FOUND, e.to_string()))?;
@@ -2790,8 +2797,8 @@ async fn publish_notebook_to_nous(
         (site_dir, record)
     };
 
-    let pub_id = publisher_id(&state)?;
-    finish_publish_site_to_nous(&state, site_dir, record, &pub_id).await
+    let pub_id = publisher_id(&tenant)?;
+    finish_publish_site_to_nous(&tenant, site_dir, record, &pub_id).await
 }
 
 async fn delete_block(
@@ -3071,10 +3078,21 @@ async fn capture_inbox(
 
 async fn trigger_sync(
     State(state): State<AppState>,
+    tenant: Tenant,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
+    // WebDAV sync is an owner-tenant concern (hosted tenants have it off
+    // by policy) — a member must never trigger a run over the owner's
+    // library. The scheduler-lifecycle leaf refines this into config.
+    if !state.tenants.is_owner_tenant(&tenant.0) {
+        return Err(api_err(
+            StatusCode::FORBIDDEN,
+            "Sync is not available for hosted accounts",
+        ));
+    }
+
     // Trigger sync for all notebooks with sync configured
     let notebooks = {
-        let storage = state.storage.lock().unwrap();
+        let storage = tenant.storage.lock().unwrap();
         storage.list_notebooks().unwrap_or_default()
     };
 
@@ -3088,7 +3106,7 @@ async fn trigger_sync(
         {
             match state
                 .sync_manager
-                .sync_notebook(notebook.id, &state.storage)
+                .sync_notebook(notebook.id, &tenant.storage)
                 .await
             {
                 Ok(_) => synced += 1,
@@ -3304,6 +3322,7 @@ async fn get_energy_patterns(
 
 async fn serve_share(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path(share_id): Path<String>,
 ) -> Result<axum::response::Response, (StatusCode, Json<ApiError>)> {
     // Validate share_id is alphanumeric
@@ -3311,7 +3330,7 @@ async fn serve_share(
         return Err(api_err(StatusCode::BAD_REQUEST, "Invalid share ID"));
     }
 
-    let share_storage = ShareStorage::new(state.library_path.clone());
+    let share_storage = ShareStorage::new(tenant.library_path.clone());
 
     let record = share_storage
         .get_share(&share_id)
@@ -3370,6 +3389,7 @@ async fn serve_share(
 
 async fn serve_share_file(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path((share_id, file_path)): Path<(String, String)>,
 ) -> Result<axum::response::Response, (StatusCode, Json<ApiError>)> {
     // Validate share_id is alphanumeric
@@ -3377,7 +3397,7 @@ async fn serve_share_file(
         return Err(api_err(StatusCode::BAD_REQUEST, "Invalid share ID"));
     }
 
-    let share_storage = ShareStorage::new(state.library_path.clone());
+    let share_storage = ShareStorage::new(tenant.library_path.clone());
 
     // Verify share exists and check expiry
     let record = share_storage
@@ -3710,6 +3730,7 @@ async fn ai_chat_tools(
 /// closes after `done` or `error`.
 async fn ai_chat_stream_sse(
     State(state): State<AppState>,
+    tenant: Tenant,
     Json(req): Json<AiChatToolsRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     use axum::response::sse::{Event, KeepAlive, Sse};
@@ -3723,7 +3744,7 @@ async fn ai_chat_stream_sse(
         req.current_notebook_id,
         req.system_prompt,
     );
-    let library_path = Some(state.library_path.to_string_lossy().to_string());
+    let library_path = Some(tenant.library_path.to_string_lossy().to_string());
 
     // chat_with_tools_stream itself returns quickly (it spawns the Python
     // thread), but acquiring the bridge lock can block behind a long
@@ -4074,8 +4095,9 @@ async fn put_notebook_asset(
 
 async fn list_shares(
     State(state): State<AppState>,
+    tenant: Tenant,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
-    let share_storage = ShareStorage::new(state.library_path.clone());
+    let share_storage = ShareStorage::new(tenant.library_path.clone());
     let shares = share_storage
         .list_shares()
         .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
@@ -4084,9 +4106,10 @@ async fn list_shares(
 
 async fn delete_share(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path(share_id): Path<String>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
-    let share_storage = ShareStorage::new(state.library_path.clone());
+    let share_storage = ShareStorage::new(tenant.library_path.clone());
     share_storage
         .delete_share(&share_id)
         .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e))?;
@@ -4520,26 +4543,33 @@ async fn handle_ws_events(mut socket: WebSocket, state: AppState) {
 
     // Auto-close any panes this connection opened so the CRDT store's
     // close_pane invariants (final flush + GC of LivePage) still run.
+    // TODO(per-tenant WS leaf): the events WS and its pane machinery are
+    // owner-scoped until that leaf routes per-tenant channels.
+    let owner = state.tenants.owner();
     for (page_id, pane_id) in &my_panes {
-        state.crdt_store.close_pane(*page_id, pane_id);
+        owner.crdt_store.close_pane(*page_id, pane_id);
     }
 
     log::info!("WebSocket client disconnected from /api/events");
 }
 
 /// Apply one PaneCommand. Returns false if the connection should be closed.
+///
+/// TODO(per-tenant WS leaf): pane commands act on the OWNER tenant — the
+/// events WS is owner-scoped until that leaf routes per-tenant channels.
 async fn handle_pane_command(
     cmd: PaneCommand,
     state: &AppState,
     my_panes: &mut HashSet<(Uuid, String)>,
     socket: &mut WebSocket,
 ) -> bool {
+    let owner = state.tenants.owner();
     match cmd {
         PaneCommand::PaneOpen { notebook_id, page_id, pane_id } => {
             // Load page content with the storage guard scoped to this block
             // so the !Send MutexGuard is dropped before any .await below.
             let load_result: Result<EditorData, String> = {
-                let storage = match state.storage.lock() {
+                let storage = match owner.storage.lock() {
                     Ok(g) => g,
                     Err(e) => {
                         log::warn!("WS pane_open: storage lock poisoned: {}", e);
@@ -4563,7 +4593,7 @@ async fn handle_pane_command(
                 }
             };
 
-            if let Err(e) = state.crdt_store.open_page(notebook_id, page_id, &pane_id, &content) {
+            if let Err(e) = owner.crdt_store.open_page(notebook_id, page_id, &pane_id, &content) {
                 log::warn!(
                     "WS pane_open: crdt_store.open_page failed for {}/{}: {}",
                     page_id, pane_id, e
@@ -4575,7 +4605,7 @@ async fn handle_pane_command(
             send_pane_ack(socket, "pane_opened", page_id, &pane_id).await
         }
         PaneCommand::PaneClose { page_id, pane_id } => {
-            state.crdt_store.close_pane(page_id, &pane_id);
+            owner.crdt_store.close_pane(page_id, &pane_id);
             my_panes.remove(&(page_id, pane_id.clone()));
             send_pane_ack(socket, "pane_closed", page_id, &pane_id).await
         }
@@ -5234,10 +5264,11 @@ struct IcsSubscriptionBody {
 /// the web bundle has parity.
 async fn fetch_ics_subscription(
     State(state): State<AppState>,
+    tenant: Tenant,
     Json(body): Json<IcsSubscriptionBody>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     let cache_dir = {
-        let storage = state.storage.lock().unwrap();
+        let storage = tenant.storage.lock().unwrap();
         storage.cache_dir().join("ics-subscriptions")
     };
 
@@ -6257,6 +6288,7 @@ async fn import_markdown_page(
 
 async fn import_artwork(
     State(state): State<AppState>,
+    tenant: Tenant,
     Path(notebook_id): Path<String>,
     Json(req): Json<ImportArtworkRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
@@ -6271,7 +6303,7 @@ async fn import_artwork(
 
     // Resolve notebook name for the script
     let nb_name = {
-        let storage = state.storage.lock().unwrap();
+        let storage = tenant.storage.lock().unwrap();
         let notebooks = storage.list_notebooks()
             .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
         notebooks.into_iter()
@@ -6354,7 +6386,7 @@ async fn import_artwork(
     let result: serde_json::Value = serde_json::from_slice(&output.stdout)
         .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, format!("Invalid script output: {e}")))?;
 
-    emit_event(&state, "artwork.imported", serde_json::json!({
+    emit_tenant_event(&tenant, "artwork.imported", serde_json::json!({
         "notebookId": notebook_id,
         "url": req.url,
         "title": result.get("title"),
