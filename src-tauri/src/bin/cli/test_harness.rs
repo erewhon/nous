@@ -2536,3 +2536,196 @@ async fn operator_config_endpoints_are_owner_only() {
         "expected hosted-account message: {body}"
     );
 }
+
+// ===== THE two-tenant isolation contract =====
+//
+// The multi-tenant security gate: one comprehensive flow proving that
+// two authenticated users are fully isolated across every subsystem.
+// This test encodes the contract and must stay green forever; the
+// per-sweep probes above are its finer-grained companions.
+
+#[tokio::test]
+async fn two_tenant_isolation_contract() {
+    let env = TestEnv::with_multi_user();
+    let alice_rw = env.rw_token.clone().unwrap();
+    let alice_ro = env.ro_token.clone().unwrap();
+    let newbie_pat = env.invited_token.clone().unwrap();
+
+    // Activate newbie (as the admin CLI would).
+    let registry_path = env.library_path.join("tenants.json");
+    let mut reg = TenantRegistry::load(&registry_path).unwrap();
+    let alice_id = reg.find_by_email("alice@example.org").unwrap().id.clone();
+    let newbie_id = reg.find_by_email("newbie@example.org").unwrap().id.clone();
+    reg.update(&newbie_id, |u| u.status = UserStatus::Active).unwrap();
+    reg.save().unwrap();
+
+    // --- Pages ---------------------------------------------------------
+    let (status, nb) = env
+        .request_with_token(
+            Method::POST,
+            "/api/notebooks",
+            Some(json!({"name": "Contract NB"})),
+            Some(&alice_rw),
+        )
+        .await;
+    assert!(status.is_success());
+    let nb_id = nb["data"]["id"].as_str().unwrap().to_string();
+    let (status, page) = env
+        .request_with_token(
+            Method::POST,
+            &format!("/api/notebooks/{nb_id}/pages"),
+            Some(json!({"title": "Quixotic Contract Page"})),
+            Some(&alice_rw),
+        )
+        .await;
+    assert!(status.is_success());
+    let page_id = page["data"]["id"].as_str().unwrap().to_string();
+
+    let (status, list) = env
+        .request_with_token(Method::GET, "/api/notebooks", None, Some(&newbie_pat))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(list["data"].as_array().map(Vec::len), Some(0), "B sees A's notebooks");
+    let (status, _) = env
+        .request_with_token(
+            Method::GET,
+            &format!("/api/notebooks/{nb_id}/pages/{page_id}"),
+            None,
+            Some(&newbie_pat),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "B fetched A's page");
+
+    // --- Databases -----------------------------------------------------
+    let (status, db) = env
+        .request_with_token(
+            Method::POST,
+            &format!("/api/notebooks/{nb_id}/databases"),
+            Some(json!({"title": "Contract DB", "properties": []})),
+            Some(&alice_rw),
+        )
+        .await;
+    assert!(status.is_success());
+    let db_id = db["data"]["id"].as_str().unwrap().to_string();
+    let (status, _) = env
+        .request_with_token(
+            Method::GET,
+            &format!("/api/notebooks/{nb_id}/databases/{db_id}"),
+            None,
+            Some(&newbie_pat),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "B fetched A's database");
+
+    // --- Search --------------------------------------------------------
+    let (status, _) = env
+        .request_with_token(Method::POST, "/api/search/rebuild", None, Some(&alice_rw))
+        .await;
+    assert!(status.is_success());
+    // A finds her page (reader lags the commit — poll).
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    loop {
+        let (_, hits) = env
+            .request_with_token(Method::GET, "/api/search?q=quixotic", None, Some(&alice_rw))
+            .await;
+        if hits.to_string().contains("Quixotic") {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "A's own search never found her page: {hits}"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    // B never does.
+    let (status, hits) = env
+        .request_with_token(Method::GET, "/api/search?q=quixotic", None, Some(&newbie_pat))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(!hits.to_string().contains("Quixotic"), "search leak: {hits}");
+
+    // --- Assets --------------------------------------------------------
+    let asset_path = format!("/api/notebooks/{nb_id}/assets/contract.bin");
+    let req = Request::builder()
+        .method(Method::PUT)
+        .uri(&asset_path)
+        .header("Authorization", format!("Bearer {alice_rw}"))
+        .header("Content-Type", "application/octet-stream")
+        .body(Body::from("contract bytes"))
+        .unwrap();
+    let resp = env.router.clone().oneshot(req).await.unwrap();
+    assert!(resp.status().is_success());
+    let (status, _) = env
+        .request_with_token(Method::GET, &asset_path, None, Some(&newbie_pat))
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "B fetched A's asset");
+    let (status, _) = env
+        .request_with_token(
+            Method::GET,
+            &format!("/api/notebooks/{nb_id}/assets/..%2F..%2Ftenants.json"),
+            None,
+            Some(&newbie_pat),
+        )
+        .await;
+    assert!(
+        status == StatusCode::BAD_REQUEST || status == StatusCode::NOT_FOUND,
+        "traversal not rejected: {status}"
+    );
+
+    // --- Events --------------------------------------------------------
+    let newbie_tenant = env.state.tenants.resolve(&newbie_id).unwrap();
+    let mut alice_rx = env.state.tenants.owner().event_tx.subscribe();
+    let mut newbie_rx = newbie_tenant.event_tx.subscribe();
+    let (status, _) = env
+        .request_with_token(
+            Method::PUT,
+            &format!("/api/notebooks/{nb_id}/pages/{page_id}"),
+            Some(json!({"title": "Quixotic Contract Page v2"})),
+            Some(&alice_rw),
+        )
+        .await;
+    assert!(status.is_success());
+    let evt = tokio::time::timeout(std::time::Duration::from_secs(1), alice_rx.recv())
+        .await
+        .expect("A's event within 1s")
+        .expect("A's channel open");
+    assert!(evt.event.starts_with("page."), "unexpected event: {}", evt.event);
+    assert!(newbie_rx.try_recv().is_err(), "A's event leaked to B's channel");
+
+    // --- Scopes --------------------------------------------------------
+    let (status, _) = env
+        .request_with_token(Method::GET, "/api/notebooks", None, Some(&alice_ro))
+        .await;
+    assert_eq!(status, StatusCode::OK, "ro token must read");
+    let (status, _) = env
+        .request_with_token(
+            Method::POST,
+            "/api/notebooks",
+            Some(json!({"name": "Denied"})),
+            Some(&alice_ro),
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "ro token must not write");
+
+    // --- Disable kills live credentials; the other tenant unaffected ---
+    let mut reg = TenantRegistry::load(&registry_path).unwrap();
+    reg.update(&alice_id, |u| u.status = UserStatus::Disabled).unwrap();
+    reg.save().unwrap();
+    let (status, _) = env
+        .request_with_token(Method::GET, "/api/notebooks", None, Some(&alice_rw))
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "disabled A still authenticated");
+    let (status, _) = env
+        .request_with_token(Method::GET, "/api/notebooks", None, Some(&newbie_pat))
+        .await;
+    assert_eq!(status, StatusCode::OK, "disabling A broke B");
+
+    // Re-enable A: her token works again (registry reload both ways).
+    let mut reg = TenantRegistry::load(&registry_path).unwrap();
+    reg.update(&alice_id, |u| u.status = UserStatus::Active).unwrap();
+    reg.save().unwrap();
+    let (status, _) = env
+        .request_with_token(Method::GET, "/api/notebooks", None, Some(&alice_rw))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+}
