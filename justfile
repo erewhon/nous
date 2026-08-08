@@ -9,6 +9,13 @@
 # pkg-config for system libs (webkit2gtk, soup3, etc.) — Tauri needs these
 export PKG_CONFIG_PATH := "/usr/lib/x86_64-linux-gnu/pkgconfig:" + env_var_or_default("PKG_CONFIG_PATH", "")
 
+# Hosted staging VM (hekaton Incus cluster — docs/hosting.md).
+# Environment-specific unit files can live outside the repo via
+# NOUS_DEPLOY_DIR (gitignored .env), matching Astra's pattern.
+staging_vm := env_var_or_default("NOUS_STAGING_VM", "nous-staging")
+deploy_dir := env_var_or_default("NOUS_DEPLOY_DIR", "deploy")
+staging_url := env_var_or_default("NOUS_STAGING_URL", "")
+
 # === Default ===
 
 default:
@@ -195,6 +202,48 @@ bundle-python:
 # Run the GitHub Actions build locally via `act`
 act-build:
     bash scripts/act-build.sh
+
+# === Hosted staging (hekaton VM) ===
+
+# Build and deploy daemon + web bundle + hardened units to the staging VM
+deploy-staging: web-build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    source setup-python-env.sh > /dev/null
+    cargo build --release --bin nous-cli --manifest-path src-tauri/Cargo.toml
+
+    # Binary: push-to-temp + rename — overwriting a running binary
+    # fails with "text file busy". Left root-owned on purpose (the
+    # daemon must not be able to overwrite its own binary).
+    incus file push --quiet src-tauri/target/release/nous-cli {{staging_vm}}/opt/nous/bin/nous-cli.new --mode 0755
+    incus exec {{staging_vm}} -- mv /opt/nous/bin/nous-cli.new /opt/nous/bin/nous-cli
+
+    # Web bundle -> {data_dir}/web-app (dist-web staged, then swapped)
+    incus exec {{staging_vm}} -- rm -rf /var/lib/nous/nous/dist-web
+    incus file push -r --quiet dist-web {{staging_vm}}/var/lib/nous/nous/
+    incus exec {{staging_vm}} -- sh -c 'rm -rf /var/lib/nous/nous/web-app && mv /var/lib/nous/nous/dist-web /var/lib/nous/nous/web-app'
+
+    # Hardened units (replace the provisioning bootstrap unit)
+    incus file push --quiet {{deploy_dir}}/nous-daemon.service {{deploy_dir}}/nous-tunnel.service {{staging_vm}}/etc/systemd/system/ --mode 0644
+    incus exec {{staging_vm}} -- sh -c 'systemctl daemon-reload && systemctl enable nous-daemon >/dev/null 2>&1; systemctl restart nous-daemon'
+    # Tunnel only once cloudflared exists (installed by the tunnel/DNS leaf)
+    incus exec {{staging_vm}} -- sh -c 'if command -v cloudflared >/dev/null 2>&1 && id cloudflared >/dev/null 2>&1; then systemctl enable nous-tunnel >/dev/null 2>&1; systemctl restart nous-tunnel; else echo "(cloudflared not installed — skipping nous-tunnel)"; fi'
+
+    sleep 3
+    if [ -n "{{staging_url}}" ]; then
+        curl -sf "{{staging_url}}/healthz"
+    else
+        incus exec {{staging_vm}} -- curl -sf http://127.0.0.1:7667/healthz
+    fi
+    echo
+
+# Status of the staging daemon + tunnel units
+daemon-status:
+    incus exec {{staging_vm}} -- systemctl status nous-daemon nous-tunnel --no-pager || true
+
+# Follow the staging daemon + tunnel journals
+daemon-logs:
+    incus exec {{staging_vm}} -- journalctl -u nous-daemon -u nous-tunnel -f
 
 # === Cleanup ===
 

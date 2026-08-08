@@ -1,0 +1,44 @@
+# Cloudflare tunnel for the Nous daemon — hardened unit template.
+#
+# Assumes a dedicated non-login `cloudflared` user and a tunnel config
+# at /etc/cloudflared/config.yml whose ingress points at the daemon's
+# bind address (default 127.0.0.1:7667). Installed and configured by
+# the tunnel/DNS leaf; `just deploy-staging` skips this unit until
+# cloudflared is present on the VM. See docs/hosting.md.
+[Unit]
+Description=Cloudflare tunnel for the Nous daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=cloudflared
+Group=cloudflared
+ExecStart=/usr/local/bin/cloudflared --no-autoupdate tunnel --config /etc/cloudflared/config.yml run
+Restart=on-failure
+RestartSec=5
+
+# Hardening (Astra template, ported)
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

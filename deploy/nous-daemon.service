@@ -1,0 +1,64 @@
+# Nous daemon — hardened systemd unit template for the hosted service.
+#
+# Assumes the layout provisioned by deploy/provision-vm.sh (see
+# docs/hosting.md): a dedicated non-login `nous` user, the binary at
+# /opt/nous/bin/nous-cli, the nous-py checkout + venv at
+# /opt/nous/nous-py, uv-managed Python under /var/lib/nous/.local, and
+# the data dir at /var/lib/nous/nous. Operator-specific unit files can
+# live out of tree — `just deploy-staging` reads them from
+# $NOUS_DEPLOY_DIR (default: this directory).
+[Unit]
+Description=Nous daemon (hosted notebook service)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=nous
+Group=nous
+Environment=RUST_LOG=info
+# Data dir resolves to $XDG_DATA_HOME/nous = /var/lib/nous/nous
+Environment=XDG_DATA_HOME=/var/lib/nous
+# PyO3 bridge: checkout path (the bridge adds .venv site-packages
+# itself) and the uv libpython dir — the minor-version symlink survives
+# 3.13.x patch upgrades. Keep the version in lockstep with
+# setup-python-env.sh on the build host.
+Environment=NOUS_PY_PATH=/opt/nous/nous-py
+Environment=LD_LIBRARY_PATH=/var/lib/nous/.local/share/uv/python/cpython-3.13-linux-x86_64-gnu/lib
+# Multi-user mode (uncomment for hosted): OIDC issuer + public PKCE
+# client id imply NOUS_MULTI_USER; see docs/multi-user-daemon-plan.md.
+#Environment=NOUS_MULTI_USER=1
+#Environment=NOUS_OIDC_ISSUER=https://auth.bcc.sh
+#Environment=NOUS_OIDC_CLIENT_ID=<client-id>
+ExecStart=/opt/nous/bin/nous-cli daemon start
+Restart=on-failure
+RestartSec=5
+
+# Hardening (Astra template, ported)
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+# Data dir + uv cache/state under the nous home
+ReadWritePaths=/var/lib/nous
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+ProtectProc=invisible
+RestrictSUIDSGID=true
+RestrictRealtime=true
+RestrictNamespaces=true
+LockPersonality=true
+# If Python AI calls ever fault with mmap/mprotect EPERM, this is the
+# knob — ctypes/libffi may need W^X relaxed on some stacks.
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

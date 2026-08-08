@@ -121,25 +121,29 @@ setting `NOUS_OIDC_ISSUER` + `NOUS_OIDC_CLIENT_ID` (public PKCE client).
 Request/rate limits and hosted-tenant policy live in
 `{data_dir}/daemon-config.toml` (`[limits]`, `[hosted]`).
 
-## Deploying the binary
-
-Build on a glibc-compatible host (both sides Debian trixie today) with
-the repo's Python env sourced, then push and rename-swap (overwriting a
-running binary fails with "text file busy"):
+## Deploying
 
 ```sh
-source setup-python-env.sh
-cargo build --release --bin nous-cli --manifest-path src-tauri/Cargo.toml
-incus file push src-tauri/target/release/nous-cli nous-staging/opt/nous/bin/nous-cli.new
-incus exec nous-staging -- sh -c \
-  'chown nous:nous /opt/nous/bin/nous-cli.new && chmod 755 /opt/nous/bin/nous-cli.new \
-   && mv /opt/nous/bin/nous-cli.new /opt/nous/bin/nous-cli \
-   && systemctl try-restart nous-daemon'
+just deploy-staging   # build daemon + web bundle → push → swap → restart → healthz
+just daemon-status    # unit status inside the VM
+just daemon-logs      # follow daemon + tunnel journals
 ```
 
-(The `just deploy-staging` recipe wrapping this — plus the hardened unit
-files in `deploy/` — is the next leaf; until then the VM runs the
-bootstrap unit `provision-vm.sh` installs.)
+`deploy-staging` builds the release daemon (glibc-compatible host —
+both sides Debian trixie today) and the browser bundle, pushes the
+binary via push-to-temp + rename (overwriting a running binary fails
+with "text file busy"; it stays root-owned so the daemon can't
+overwrite itself), swaps the web bundle into
+`/var/lib/nous/nous/web-app`, installs the **hardened units** from
+`deploy/` (`nous-daemon.service`, `nous-tunnel.service` — full Astra
+hardening block: ProtectSystem=strict, NoNewPrivileges, syscall
+filter, empty capability set), restarts, and curls `/healthz`
+(VM-local until `NOUS_STAGING_URL` is set once the tunnel exists).
+The tunnel unit is skipped until cloudflared is installed by the
+tunnel/DNS step. Overrides via env / gitignored `.env`:
+`NOUS_STAGING_VM`, `NOUS_DEPLOY_DIR` (environment-specific units
+outside the repo, Astra's `$ASTRA_DEPLOY_DIR` pattern),
+`NOUS_STAGING_URL`.
 
 ## Backups
 
