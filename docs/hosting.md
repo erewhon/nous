@@ -156,6 +156,49 @@ set — nothing to configure per-VM, and `/var/lib/nous` rides along as
 part of the block image. Restore is documented in the backup script
 header (restic dump → `zfs recv` → re-register with Incus).
 
+## Front door (Zitadel + cloudflared + DNS)
+
+Live since 2026-08-07: **`https://staging.nous.page`** → cloudflared
+tunnel `nous-staging` (`f89bcdad-…`) → `127.0.0.1:7667` in the VM. No
+inbound ports. Set up in this order — **the daemon must be in
+multi-user (default-deny) mode before the tunnel exists**, because
+legacy localhost mode has auth disabled:
+
+1. **Zitadel app** (public PKCE SPA — no client secret): provisioned in
+   the `homelab` project via the management API
+   (HOMELAB-ACCESS-FOR-AGENTS.md §3, `ho secret get zitadel/mgmt-pat`),
+   with `appType: OIDC_APP_TYPE_USER_AGENT`,
+   `authMethodType: OIDC_AUTH_METHOD_TYPE_NONE`, redirect URIs for both
+   `https://staging.nous.page/auth/callback` and
+   `https://app.nous.page/auth/callback` (prod cutover needs no Zitadel
+   change). Client id: `ho secret get nous/oidc-client-id`.
+2. **OIDC env on the VM** via a systemd drop-in
+   (`/etc/systemd/system/nous-daemon.service.d/oidc.conf`,
+   `NOUS_OIDC_ISSUER=https://auth.bcc.sh` + `NOUS_OIDC_CLIENT_ID`) —
+   a drop-in so `just deploy-staging` unit pushes don't clobber it.
+   Restart, then verify anonymous `/api/notebooks` → 401 VM-locally.
+3. **Tunnel**: `cloudflared tunnel create nous-staging` on a machine
+   with an origin cert; credentials JSON → `/etc/cloudflared/` on the
+   VM (0600, owner `cloudflared`; also in
+   `ho secret get nous/tunnel-credentials`). Config: `protocol: http2`,
+   NOT QUIC — OVN NAT conntrack times out idle UDP and QUIC flaps
+   (learned on astra). Ingress: `staging.nous.page` →
+   `http://127.0.0.1:7667`, then `http_status:404`.
+4. **DNS**: proxied CNAME `staging.nous.page` →
+   `<tunnel-id>.cfargotunnel.com` in the `nous.page` zone, created via
+   the Cloudflare API (`ho secret get cloudflare/provisioning-token`).
+   ⚠️ `cloudflared tunnel route dns` uses the zone baked into
+   `cert.pem` — with a cert for another zone it silently creates
+   `<fqdn>.<cert-zone>` in the wrong zone. Use the API directly.
+   Hostname note: `staging.app.nous.page` would be two levels under the
+   apex — outside Universal SSL — hence `staging.<apex>`, mirroring
+   Astra's `staging.astra.gallery`; `app.nous.page` stays reserved for
+   prod.
+
+Public-edge verification: `/healthz` 200, anonymous `/api/notebooks`
+and `/share/*` 401, `/app` 200, `/api/session/config` returns issuer +
+client id.
+
 ## Smoke check
 
 Done-condition for a provisioned VM:
