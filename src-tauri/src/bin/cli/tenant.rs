@@ -39,8 +39,10 @@
 //! identically on a single-user daemon.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 
@@ -124,6 +126,97 @@ pub struct TenantState {
     /// `/api/events` WS serves; lazy tenants get private channels that
     /// the per-tenant WS leaf will surface.
     pub event_tx: EventSender,
+    /// Cached recursive size of `root_dir` for the hosted soft disk
+    /// quota (never consulted for the owner tenant).
+    pub disk_usage: DiskUsage,
+}
+
+/// Cached `du` of a tenant's root dir, backing the hosted soft disk
+/// quota. Quota checks call [`Self::current`], which re-walks the tree
+/// at most once per [`Self::TTL`]; asset uploads report their byte
+/// count via [`Self::add`] so back-to-back uploads inside one TTL
+/// window accumulate immediately. The staleness window is therefore one
+/// TTL of un-`add`ed churn (page saves, deletes) — acceptable for a
+/// soft cap; the refresh corrects in both directions.
+pub struct DiskUsage {
+    bytes: AtomicU64,
+    refreshed_at: Mutex<Option<Instant>>,
+    /// Latched while usage sits above the 80%-of-cap warning threshold
+    /// so the warn log fires once per crossing, not once per write.
+    warned: AtomicBool,
+}
+
+impl DiskUsage {
+    const TTL: Duration = Duration::from_secs(60);
+
+    pub fn new() -> Self {
+        Self {
+            bytes: AtomicU64::new(0),
+            refreshed_at: Mutex::new(None),
+            warned: AtomicBool::new(false),
+        }
+    }
+
+    /// Current usage in bytes, re-walking `root` when the cache is
+    /// older than [`Self::TTL`]. Concurrent callers serialize on the
+    /// refresh lock; only one walks.
+    pub fn current(&self, root: &Path) -> u64 {
+        let mut guard = self.refreshed_at.lock().unwrap_or_else(|p| p.into_inner());
+        if guard.map_or(true, |t| t.elapsed() >= Self::TTL) {
+            self.bytes.store(dir_size(root), Ordering::Relaxed);
+            *guard = Some(Instant::now());
+        }
+        drop(guard);
+        self.bytes.load(Ordering::Relaxed)
+    }
+
+    /// Account bytes just written, keeping the cache honest between
+    /// refreshes.
+    pub fn add(&self, n: u64) {
+        self.bytes.fetch_add(n, Ordering::Relaxed);
+    }
+
+    /// Warn (once per crossing) when `usage` reaches 80% of `cap`.
+    pub fn warn_if_high(&self, usage: u64, cap: u64, root: &Path) {
+        if usage.saturating_mul(5) >= cap.saturating_mul(4) {
+            if !self.warned.swap(true, Ordering::Relaxed) {
+                log::warn!(
+                    "tenant {} disk usage {} bytes is over 80% of the {} byte quota",
+                    root.display(),
+                    usage,
+                    cap
+                );
+            }
+        } else {
+            self.warned.store(false, Ordering::Relaxed);
+        }
+    }
+
+    /// Test hook: force the next [`Self::current`] to re-walk.
+    #[cfg(test)]
+    pub fn invalidate(&self) {
+        *self.refreshed_at.lock().unwrap_or_else(|p| p.into_inner()) = None;
+    }
+}
+
+/// Recursive file-size sum. `DirEntry::metadata` does not follow
+/// symlinks, so link targets outside the tenant tree are never counted
+/// (and cycles can't recurse).
+fn dir_size(path: &Path) -> u64 {
+    let Ok(entries) = std::fs::read_dir(path) else {
+        return 0;
+    };
+    entries
+        .flatten()
+        .map(|entry| {
+            let Ok(meta) = entry.metadata() else { return 0 };
+            if meta.is_dir() {
+                dir_size(&entry.path())
+            } else {
+                meta.len()
+            }
+        })
+        .sum()
 }
 
 impl TenantState {
@@ -282,7 +375,14 @@ impl TenantState {
             #[cfg(feature = "plugins")]
             plugin_host,
             event_tx,
+            disk_usage: DiskUsage::new(),
         }))
+    }
+
+    /// Current disk usage of this tenant's tree (cached — see
+    /// [`DiskUsage`]).
+    pub fn disk_usage_bytes(&self) -> u64 {
+        self.disk_usage.current(&self.root_dir)
     }
 }
 
@@ -564,6 +664,29 @@ mod tests {
         // Path-shaping ids are rejected outright.
         assert!(mgr.resolve("../escape").is_err());
         assert!(mgr.resolve("").is_err());
+    }
+
+    #[test]
+    fn disk_usage_caches_walks_and_accounts_adds() {
+        let dir = TempDir::new().unwrap();
+        std::fs::write(dir.path().join("a.bin"), vec![0u8; 1000]).unwrap();
+        std::fs::create_dir(dir.path().join("sub")).unwrap();
+        std::fs::write(dir.path().join("sub/b.bin"), vec![0u8; 500]).unwrap();
+
+        let du = DiskUsage::new();
+        assert_eq!(du.current(dir.path()), 1500);
+
+        // Cached: an out-of-band write is invisible until the TTL
+        // expires (the documented staleness window) …
+        std::fs::write(dir.path().join("c.bin"), vec![0u8; 300]).unwrap();
+        assert_eq!(du.current(dir.path()), 1500);
+        // … but accounted writes land immediately.
+        du.add(200);
+        assert_eq!(du.current(dir.path()), 1700);
+
+        // Refresh (TTL expiry) re-walks and corrects both ways.
+        du.invalidate();
+        assert_eq!(du.current(dir.path()), 1800);
     }
 }
 

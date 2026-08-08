@@ -1,0 +1,182 @@
+# Hosting the Nous daemon
+
+The hosted Nous service is the daemon (`nous-cli daemon start`, an axum
+HTTP server over the per-tenant file/Tantivy/CRDT stack) running in a
+dedicated Incus VM, exposed through a Cloudflare Tunnel so no inbound
+ports are opened. Multi-user mode (tenant registry + OIDC sign-in) is
+enabled by environment; see [Runtime environment](#runtime-environment).
+
+This doc is the provisioning runbook. It was written standing up the
+staging VM (`nous-staging`, 2026-08-07) and is meant to be replayed for
+the prod VM. `deploy/provision-vm.sh` automates the VM-side steps.
+
+## Topology
+
+```
+browser ──► Cloudflare edge (app.nous.page, proxied CNAME)
+                │
+                ▼
+        cloudflared tunnel                    (nous-tunnel.service)
+                │  /etc/cloudflared/config.yml
+                ▼
+        nous-cli daemon on 127.0.0.1:7667     (nous-daemon.service)
+                │
+                ▼
+        /var/lib/nous/nous   (data dir: notebooks, tenants/, web-app/)
+```
+
+## VM shape (hekaton Incus cluster)
+
+One cluster spans delphi/euclid/hekaton; VMs for hosted services live on
+**hekaton** (decision in `multi-user-daemon-plan.md`). Networking is the
+**OVN fabric** (`ovn0`, `10.115.0.0/24`, MTU 1442) — greenfield services
+attach to it from day 1; `incusbr0` is legacy. Pattern copied from the
+`astra` VM:
+
+```sh
+incus init images:debian/trixie nous-staging --vm --target hekaton \
+    -c limits.cpu=4 -c limits.memory=8GiB -d root,size=60GiB -n ovn0
+incus config device set nous-staging eth0 \
+    ipv4.address=10.115.0.61 \
+    security.acls=dmz-egress \
+    security.acls.default.egress.action=allow \
+    security.acls.default.ingress.action=allow
+incus start nous-staging
+```
+
+Notes, all load-bearing:
+
+- **`dmz-egress` ACL** is the cluster's internet-facing-VM policy: default
+  allow, explicit drops to every internal subnet — a compromised VM can
+  reach the internet but not the LAN. Verify after boot: pinging
+  `1.1.1.1` works, pinging `192.168.42.20` does not.
+- **MTU**: `ovn0` runs 1442 (Geneve overhead on the interim 1500
+  underlay). The Debian `images:` VMs ship a networkd config with
+  `UseMTU=true` under `[DHCPv4]`, so the guest picks 1442 up via DHCP —
+  **verify** (`ip link show enp5s0`); a guest stuck at 1500 shows up as
+  hangs on large responses, not a clean failure. This is trap #1 in
+  homeops `infra-map/OVN-DESIGN.md`.
+- **Static IP** via `ipv4.address` on the NIC device (allocations:
+  `incus network list-allocations | grep 10.115`). Staging is `.61`.
+- **Clock**: JWT verification (OIDC) needs a sane clock. The minimal
+  Debian image does not ship `systemd-timesyncd` — install and enable
+  it, then check `timedatectl show -p NTPSynchronized`.
+- **Guest packages**: `libgit2-1.9` is a hard runtime dependency of the
+  binary (`ldd` shows it unresolved otherwise); `systemd-timesyncd`,
+  `curl`, `ca-certificates`, `git` round out the base set.
+- **Data dir must pre-exist**: the daemon writes
+  `{data_dir}/.nous-daemon.pid` before creating the data dir, so
+  `install -d -o nous -g nous -m 750 /var/lib/nous/nous` first or the
+  unit crash-loops with "Failed to write PID file".
+
+## VM-side layout
+
+| Path | Owner | Purpose |
+|---|---|---|
+| `/opt/nous/bin/nous-cli` | nous | daemon binary (pushed from a build host) |
+| `/opt/nous/nous-py` | nous | `nous-py` checkout + `.venv` (Python AI bridge) |
+| `/var/lib/nous` | nous (home) | service root; uv-managed Python under `.local/share/uv` |
+| `/var/lib/nous/nous` | nous | **daemon data dir** (`XDG_DATA_HOME=/var/lib/nous`): notebooks, `tenants/{id}` trees, `web-app/`, `daemon-config.toml`, `tenants.json` |
+
+The `nous` user is a dedicated non-login system user
+(`useradd --system --home-dir /var/lib/nous --shell /usr/sbin/nologin`).
+Code lives under `/opt/nous` (redeployable, not precious); state lives
+under `/var/lib/nous` (precious, backed up).
+
+## Python runtime (the part Astra didn't need)
+
+The daemon links **libpython via PyO3** — unlike Astra's nearly-static
+binary, copying `nous-cli` alone is not enough. The VM needs:
+
+1. **uv** (system-wide: `curl -LsSf https://astral.sh/uv/install.sh |
+   env UV_INSTALL_DIR=/usr/local/bin sh`).
+2. **Python 3.13** installed *as the `nous` user*
+   (`uv python install 3.13`) — lands under
+   `/var/lib/nous/.local/share/uv/python/cpython-3.13-linux-x86_64-gnu/`.
+   The minor version must match the build host's (PyO3 links
+   `libpython3.13.so`); keep both sides pinned to the
+   `PYTHON_VERSION` in `setup-python-env.sh`.
+3. **`nous-py` checkout + synced venv** at `/opt/nous/nous-py`: push the
+   checkout (exclude `.venv`, `__pycache__`, `.git`), then
+   `uv sync` in it as the `nous` user. A bare `uv sync` (no
+   `--extra mcp-server`) is correct here — the VM runs no MCP server,
+   only the daemon bridge.
+
+### Runtime environment
+
+The unit needs exactly these (values discovered the same way
+`setup-python-env.sh` / `build-daemon.sh` do —
+`LIBDIR = python3.13 -c "import sysconfig; print(sysconfig.get_config_var('LIBDIR'))"`):
+
+| Variable | Staging value | Why |
+|---|---|---|
+| `LD_LIBRARY_PATH` | `/var/lib/nous/.local/share/uv/python/cpython-3.13-linux-x86_64-gnu/lib` | dynamic linker finds `libpython3.13.so` |
+| `NOUS_PY_PATH` | `/opt/nous/nous-py` | explicit bridge path for daemons outside the repo (`find_nous_py_path` in `bin/cli/daemon.rs`); the bridge adds `{NOUS_PY_PATH}/.venv/…/site-packages` itself, so `PYTHONPATH` is not needed |
+| `XDG_DATA_HOME` | `/var/lib/nous` | data dir resolves to `/var/lib/nous/nous` |
+| `RUST_LOG` | `info` | the smoke check reads the startup log |
+
+Multi-user mode is switched on by environment (see
+`multi-user-daemon-plan.md`): `NOUS_MULTI_USER=1`, or implicitly by
+setting `NOUS_OIDC_ISSUER` + `NOUS_OIDC_CLIENT_ID` (public PKCE client).
+Request/rate limits and hosted-tenant policy live in
+`{data_dir}/daemon-config.toml` (`[limits]`, `[hosted]`).
+
+## Deploying the binary
+
+Build on a glibc-compatible host (both sides Debian trixie today) with
+the repo's Python env sourced, then push and rename-swap (overwriting a
+running binary fails with "text file busy"):
+
+```sh
+source setup-python-env.sh
+cargo build --release --bin nous-cli --manifest-path src-tauri/Cargo.toml
+incus file push src-tauri/target/release/nous-cli nous-staging/opt/nous/bin/nous-cli.new
+incus exec nous-staging -- sh -c \
+  'chown nous:nous /opt/nous/bin/nous-cli.new && chmod 755 /opt/nous/bin/nous-cli.new \
+   && mv /opt/nous/bin/nous-cli.new /opt/nous/bin/nous-cli \
+   && systemctl try-restart nous-daemon'
+```
+
+(The `just deploy-staging` recipe wrapping this — plus the hardened unit
+files in `deploy/` — is the next leaf; until then the VM runs the
+bootstrap unit `provision-vm.sh` installs.)
+
+## Backups
+
+Hekaton production VMs are backed up **automatically**: the nightly
+`backup-data-hekaton.sh` job (homeops repo, systemd system timer on
+hekaton) auto-discovers every VM zvol under
+`data/incus/virtual-machines/` and streams an atomic ZFS snapshot into
+restic on the mouseion NAS. `nous-staging` was verified present in that
+set — nothing to configure per-VM, and `/var/lib/nous` rides along as
+part of the block image. Restore is documented in the backup script
+header (restic dump → `zfs recv` → re-register with Incus).
+
+## Smoke check
+
+Done-condition for a provisioned VM:
+
+```sh
+incus exec nous-staging -- journalctl -u nous-daemon -b --no-pager | grep "Python AI bridge path"
+incus exec nous-staging -- curl -s http://127.0.0.1:7667/healthz
+```
+
+The bridge line proves libpython loaded and `nous_ai` is importable; the
+`/healthz` body (`{"status":"ok","version":…}`) proves the router is up.
+
+## Public surface
+
+In multi-user mode the anonymous surface is exactly (enforced by
+`is_public_route_multi_user`, contract-tested):
+
+| Route | Notes |
+|---|---|
+| `/app`, `/app/*`, `/auth/callback` | SPA bundle + OIDC redirect shell |
+| `/healthz` | version + status, no data |
+| `/api/status` | status/pid/uptime, no data |
+| `GET /api/session/config`, `POST /api/session` | session bootstrap |
+
+Everything else — including the desktop-share surfaces (`/share`,
+`/gallery`, `/finance`, `/api/image-cache`) — requires auth. `POST
+/api/session` is rate-limited per client IP (`[limits]
+session_rate_per_min`, default 10/min).

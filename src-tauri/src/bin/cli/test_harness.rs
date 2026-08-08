@@ -53,7 +53,7 @@ use uuid::Uuid;
 
 use nous_lib::events::AppEvent;
 use nous_lib::python_bridge::PythonAI;
-use nous_lib::search::{RagBackend, RagConfig};
+use nous_lib::search::{HostedSection, LimitsSection, RagBackend, RagConfig};
 use nous_lib::storage::NotebookType;
 use nous_lib::sync::{LogEmitter, SyncManager};
 use tokio::sync::RwLock;
@@ -131,7 +131,27 @@ impl TestEnv {
         Self::build(AuthSetup::MultiUser { oidc: true })
     }
 
+    /// Multi-user env with a custom `[hosted]` policy (registry seed as
+    /// in [`Self::with_multi_user`]) — for quota/policy tests.
+    pub fn with_multi_user_hosted(hosted: HostedSection) -> Self {
+        Self::build_full(
+            AuthSetup::MultiUser { oidc: false },
+            hosted,
+            LimitsSection::default(),
+        )
+    }
+
+    /// Auth-disabled env with a custom `[limits]` section — for body
+    /// limit tests (limits apply in every auth mode).
+    pub fn with_limits(limits: LimitsSection) -> Self {
+        Self::build_full(AuthSetup::Disabled, HostedSection::default(), limits)
+    }
+
     fn build(auth_setup: AuthSetup) -> Self {
+        Self::build_full(auth_setup, HostedSection::default(), LimitsSection::default())
+    }
+
+    fn build_full(auth_setup: AuthSetup, hosted: HostedSection, limits: LimitsSection) -> Self {
         let tmp = tempfile::tempdir().expect("create tempdir");
         let library_path = tmp.path().to_path_buf();
 
@@ -235,7 +255,7 @@ impl TestEnv {
             rag_config: Arc::clone(&rag_config),
             ai_config: Arc::new(RwLock::new(Default::default())),
             daemon_config_path,
-            hosted: Default::default(),
+            hosted,
             // Placeholder-path bridge (see note above) — /api/ai routes
             // exercised in tests return clean 500s instead of results.
             python_ai: Arc::clone(&python_ai_arc),
@@ -243,6 +263,8 @@ impl TestEnv {
             web_app_dir: library_path.join("web-app"),
             multi_user: multi_user_ctx,
             tenants,
+            limits,
+            session_rate: super::daemon::SessionRateLimiter::new(),
         });
 
         let router = api::build_router(Arc::clone(&state), auth_state);
@@ -484,6 +506,118 @@ async fn harness_auth_enabled_accepts_rw_token() {
         .await;
     assert_eq!(status, StatusCode::OK);
     assert!(body["data"].is_array());
+}
+
+/// Router-level contract for the hosted public surface: in multi-user
+/// mode, anonymous requests reach EXACTLY the intended public routes;
+/// everything else — including the desktop-share surfaces that stay
+/// public in legacy mode — is turned away by the auth middleware with
+/// its uniform 401. Because the middleware runs before routing, a route
+/// added later lands behind auth by default; extending the public
+/// surface means editing `is_public_route_multi_user` AND this test.
+#[tokio::test]
+async fn multi_user_public_surface_contract() {
+    let env = TestEnv::with_multi_user_oidc();
+
+    // -- The public surface: anonymous requests succeed, or fail in the
+    // handler — never with the middleware's 401 --
+
+    // Health + status probes: 200, no data-bearing fields.
+    let (status, body) = env.request_with_token(Method::GET, "/healthz", None, None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["status"], "ok");
+    assert!(body["version"].is_string());
+
+    let (status, body) = env
+        .request_with_token(Method::GET, "/api/status", None, None)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["data"]["status"], "running");
+
+    // Session bootstrap: config is served, and login POSTs reach the
+    // handler (422 = rejected by the Json extractor for the missing
+    // idToken field, meaning the request passed the auth gate).
+    let (status, body) = env
+        .request_with_token(Method::GET, "/api/session/config", None, None)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body["issuer"].is_string());
+    let (status, _) = env
+        .request_with_token(Method::POST, "/api/session", Some(json!({})), None)
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+    // SPA shell: the harness ships no web bundle, so these 404 — the
+    // point is they are not the middleware's 401.
+    for path in ["/app", "/app/", "/app/assets/app-abc.js", "/auth/callback"] {
+        let (status, _) = env.request_with_token(Method::GET, path, None, None).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "GET {path}");
+    }
+
+    // -- Everything else 401s anonymously, including surfaces that are
+    // public in legacy mode --
+    let gated: &[(Method, &str)] = &[
+        (Method::GET, "/share/abc123"),
+        (Method::GET, "/share/abc123/page.html"),
+        (Method::GET, "/gallery/some-notebook"),
+        (Method::GET, "/finance/some-notebook"),
+        (
+            Method::GET,
+            "/api/image-cache/deadbeefdeadbeef?url=https%3A%2F%2Fexample.org%2Fx.png",
+        ),
+        (Method::GET, "/api/me"),
+        (Method::GET, "/api/notebooks"),
+        (Method::GET, "/api/events"),
+        (Method::DELETE, "/api/session"),
+        (Method::POST, "/app"),
+        (Method::GET, "/api/route-added-later"),
+        (Method::GET, "/definitely-not-a-route"),
+    ];
+    for (method, path) in gated {
+        let (status, body) = env
+            .request_with_token(method.clone(), path, None, None)
+            .await;
+        assert_eq!(
+            status,
+            StatusCode::UNAUTHORIZED,
+            "{method} {path} should 401 anonymously"
+        );
+        assert_eq!(body["error"], "Invalid or missing credentials", "{method} {path}");
+    }
+
+    // Authenticated users still reach the formerly-public surfaces,
+    // now tenant-scoped: the share lookup runs (404 — no such share)
+    // instead of being rejected at the gate.
+    let token = env.rw_token.clone().unwrap();
+    let (status, _) = env
+        .request_with_token(Method::GET, "/share/abc123", None, Some(&token))
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+/// Legacy (shared-key) mode keeps today's exemptions: desktop-share
+/// surfaces and the SPA shell stay anonymously reachable.
+#[tokio::test]
+async fn legacy_public_surface_unchanged() {
+    let env = TestEnv::with_auth();
+
+    // Share lookup runs anonymously (404 — no such share, not 401).
+    let (status, _) = env
+        .request_with_token(Method::GET, "/share/abc123", None, None)
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    for path in ["/gallery/some-notebook", "/finance/some-notebook"] {
+        let (status, _) = env.request_with_token(Method::GET, path, None, None).await;
+        assert_eq!(status, StatusCode::OK, "GET {path}");
+    }
+    let (status, _) = env.request_with_token(Method::GET, "/healthz", None, None).await;
+    assert_eq!(status, StatusCode::OK);
+
+    // The API stays key-gated.
+    let (status, _) = env
+        .request_with_token(Method::GET, "/api/notebooks", None, None)
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]
@@ -1911,9 +2045,24 @@ async fn disabling_a_user_kills_their_live_session() {
 async fn logout_clears_cookie_and_config_reports_oidc() {
     let env = TestEnv::with_multi_user_oidc();
 
-    // Logout is public and clears the cookie client-side.
-    let (status, _, set_cookie) = env
+    // Logout is authenticated (only POST /api/session is public — see
+    // the public-surface contract test): anonymous DELETEs are rejected,
+    // a session-holder's DELETE clears the cookie.
+    let (status, _, _) = env
         .request_with_cookie(Method::DELETE, "/api/session", None, None)
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    let registry_path = env.library_path.join("tenants.json");
+    let reg = TenantRegistry::load(&registry_path).unwrap();
+    let alice_id = reg.find_by_email("alice@example.org").unwrap().id.clone();
+    let cookie = super::session::mint_cookie_value(
+        &TEST_SESSION_KEY,
+        &alice_id,
+        chrono::Utc::now().timestamp() + 3600,
+    );
+    let (status, _, set_cookie) = env
+        .request_with_cookie(Method::DELETE, "/api/session", None, Some(&cookie))
         .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
     let set_cookie = set_cookie.expect("clearing Set-Cookie present");
@@ -2726,6 +2875,273 @@ async fn two_tenant_isolation_contract() {
     reg.save().unwrap();
     let (status, _) = env
         .request_with_token(Method::GET, "/api/notebooks", None, Some(&alice_rw))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+/// The hosted soft disk quota: over-cap writes are refused with 507,
+/// under-cap writes and all reads are unaffected, and the owner tenant
+/// is exempt. Cap set to 1 MB so a fresh tenant tree (a few KB) sits
+/// comfortably under it.
+#[tokio::test]
+async fn hosted_disk_quota_soft_check() {
+    let env = TestEnv::with_multi_user_hosted(HostedSection {
+        disk_quota_mb: 1,
+        ..HostedSection::default()
+    });
+    let alice_rw = env.rw_token.clone().unwrap();
+    let newbie_pat = env.invited_token.clone().unwrap();
+
+    // Activate newbie (as the admin CLI would) — the hosted, non-owner
+    // tenant the quota applies to.
+    let registry_path = env.library_path.join("tenants.json");
+    let mut reg = TenantRegistry::load(&registry_path).unwrap();
+    let newbie_id = reg.find_by_email("newbie@example.org").unwrap().id.clone();
+    reg.update(&newbie_id, |u| u.status = UserStatus::Active).unwrap();
+    reg.save().unwrap();
+
+    // Raw-bytes asset PUT with a bearer token.
+    let put_asset = |path: String, bytes: Vec<u8>, token: String| {
+        let router = env.router.clone();
+        async move {
+            let req = Request::builder()
+                .method(Method::PUT)
+                .uri(path)
+                .header("Authorization", format!("Bearer {token}"))
+                .header("Content-Type", "application/octet-stream")
+                .body(Body::from(bytes))
+                .unwrap();
+            let resp = router.oneshot(req).await.unwrap();
+            let status = resp.status();
+            let body = to_bytes(resp.into_body(), 16 * 1024 * 1024).await.unwrap();
+            let body: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+            (status, body)
+        }
+    };
+
+    // --- Under quota: writes work -------------------------------------
+    let (status, nb) = env
+        .request_with_token(
+            Method::POST,
+            "/api/notebooks",
+            Some(json!({"name": "Quota NB"})),
+            Some(&newbie_pat),
+        )
+        .await;
+    assert!(status.is_success());
+    let nb_id = nb["data"]["id"].as_str().unwrap().to_string();
+
+    let (status, page) = env
+        .request_with_token(
+            Method::POST,
+            &format!("/api/notebooks/{nb_id}/pages"),
+            Some(json!({"title": "under quota"})),
+            Some(&newbie_pat),
+        )
+        .await;
+    assert!(status.is_success(), "under-quota page create refused: {status}");
+    let page_id = page["data"]["id"].as_str().unwrap().to_string();
+
+    let (status, _) = put_asset(
+        format!("/api/notebooks/{nb_id}/assets/small.bin"),
+        vec![0u8; 10 * 1024],
+        newbie_pat.clone(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "under-quota asset upload refused");
+
+    // --- One upload bigger than the whole cap: refused up front -------
+    let (status, body) = put_asset(
+        format!("/api/notebooks/{nb_id}/assets/big.bin"),
+        vec![0u8; 2 * 1024 * 1024],
+        newbie_pat.clone(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::INSUFFICIENT_STORAGE);
+    assert!(
+        body["error"].as_str().unwrap_or("").contains("quota"),
+        "error should name the quota: {body}"
+    );
+
+    // --- Accounted usage over the cap: writes refuse, reads work ------
+    // Push the (already-initialized) usage cache over the cap directly —
+    // equivalent to having uploaded that much, without megabytes of
+    // fixture traffic.
+    let tenant = env.state.tenants.resolve(&newbie_id).unwrap();
+    tenant.disk_usage.add(10 * 1024 * 1024);
+
+    let (status, _) = env
+        .request_with_token(
+            Method::POST,
+            &format!("/api/notebooks/{nb_id}/pages"),
+            Some(json!({"title": "over quota"})),
+            Some(&newbie_pat),
+        )
+        .await;
+    assert_eq!(status, StatusCode::INSUFFICIENT_STORAGE, "page create over quota");
+
+    let (status, _) = env
+        .request_with_token(
+            Method::PUT,
+            &format!("/api/notebooks/{nb_id}/pages/{page_id}"),
+            Some(json!({"content": "still writing"})),
+            Some(&newbie_pat),
+        )
+        .await;
+    assert_eq!(status, StatusCode::INSUFFICIENT_STORAGE, "page save over quota");
+
+    let (status, _) = env
+        .request_with_token(
+            Method::GET,
+            &format!("/api/notebooks/{nb_id}/pages/{page_id}"),
+            None,
+            Some(&newbie_pat),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "reads must work over quota");
+
+    // --- Owner is exempt ----------------------------------------------
+    let owner = env.state.tenants.owner();
+    owner.disk_usage.add(10 * 1024 * 1024);
+    let (status, nb) = env
+        .request_with_token(
+            Method::POST,
+            "/api/notebooks",
+            Some(json!({"name": "Owner NB"})),
+            Some(&alice_rw),
+        )
+        .await;
+    assert!(status.is_success());
+    let owner_nb = nb["data"]["id"].as_str().unwrap().to_string();
+    let (status, _) = env
+        .request_with_token(
+            Method::POST,
+            &format!("/api/notebooks/{owner_nb}/pages"),
+            Some(json!({"title": "owner writes freely"})),
+            Some(&alice_rw),
+        )
+        .await;
+    assert!(status.is_success(), "owner must be exempt from the quota");
+}
+
+/// `[limits]` body caps: the JSON API and the asset route each honor
+/// their own configured limit — oversize → 413, and the asset cap is
+/// independent of (here larger than) the JSON cap. Small values keep
+/// the fixtures cheap; defaults (64/50 MB) comfortably cover desktop
+/// flows, which the normal-sized writes below stand in for.
+#[tokio::test]
+async fn body_limits_are_configurable_and_per_route() {
+    let env = TestEnv::with_limits(LimitsSection {
+        api_body_limit_mb: 1,
+        asset_body_limit_mb: 4,
+        ..LimitsSection::default()
+    });
+    let nb = env.create_notebook("Limits");
+
+    // Normal-sized page save unaffected.
+    let (status, page) = env
+        .post_json(
+            &format!("/api/notebooks/{nb}/pages"),
+            json!({"title": "small", "content": "fits easily"}),
+        )
+        .await;
+    assert!(status.is_success());
+    let page_id = page["data"]["id"].as_str().unwrap().to_string();
+
+    // A 2 MB JSON body blows the 1 MB API cap → 413.
+    let big_text = "x".repeat(2 * 1024 * 1024);
+    let (status, _) = env
+        .put_json(
+            &format!("/api/notebooks/{nb}/pages/{page_id}"),
+            json!({"content": big_text}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
+
+    // The same 2 MB as an asset upload is fine (4 MB asset cap) …
+    let put_asset = |path: String, bytes: Vec<u8>| {
+        let router = env.router.clone();
+        async move {
+            let req = Request::builder()
+                .method(Method::PUT)
+                .uri(path)
+                .header("Content-Type", "application/octet-stream")
+                .body(Body::from(bytes))
+                .unwrap();
+            router.oneshot(req).await.unwrap().status()
+        }
+    };
+    let status = put_asset(
+        format!("/api/notebooks/{nb}/assets/mid.bin"),
+        vec![0u8; 2 * 1024 * 1024],
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // … but 8 MB blows the asset cap.
+    let status = put_asset(
+        format!("/api/notebooks/{nb}/assets/huge.bin"),
+        vec![0u8; 8 * 1024 * 1024],
+    )
+    .await;
+    assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
+
+    // The WS events route (GET, no body) is untouched by body limits —
+    // a non-upgrade probe fails in the extractor, never with 413.
+    let (status, _) = env.get_json("/api/events").await;
+    assert_ne!(status, StatusCode::PAYLOAD_TOO_LARGE);
+}
+
+/// The credential endpoint is rate-limited per client IP: the 11th
+/// attempt inside a minute → 429 with Retry-After; other IPs (and
+/// other endpoints) are unaffected.
+#[tokio::test]
+async fn session_endpoint_rate_limited_per_ip() {
+    let env = TestEnv::with_multi_user(); // default limit: 10/min
+
+    let attempt = |ip: &'static str| {
+        let router = env.router.clone();
+        async move {
+            let req = Request::builder()
+                .method(Method::POST)
+                .uri("/api/session")
+                .header("CF-Connecting-IP", ip)
+                .header("Content-Type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&json!({"idToken": "junk"})).unwrap(),
+                ))
+                .unwrap();
+            let resp = router.oneshot(req).await.unwrap();
+            let status = resp.status();
+            let retry_after = resp
+                .headers()
+                .get("retry-after")
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_string);
+            (status, retry_after)
+        }
+    };
+
+    // 10 attempts: rejected as bad credentials (no OIDC verifier in
+    // this env), never throttled.
+    for i in 0..10 {
+        let (status, _) = attempt("203.0.113.7").await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "attempt {i} throttled early");
+    }
+
+    // The 11th from the same IP → 429 + Retry-After.
+    let (status, retry_after) = attempt("203.0.113.7").await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(retry_after.as_deref(), Some("60"));
+
+    // A different client is unaffected …
+    let (status, _) = attempt("203.0.113.8").await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    // … and so are the throttled client's non-credential requests.
+    let rw = env.rw_token.clone().unwrap();
+    let (status, _) = env
+        .request_with_token(Method::GET, "/api/notebooks", None, Some(&rw))
         .await;
     assert_eq!(status, StatusCode::OK);
 }

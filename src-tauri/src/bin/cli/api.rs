@@ -545,6 +545,31 @@ fn is_public_route(path: &str) -> bool {
         // OIDC redirect target — serves the SPA shell (index.html), which
         // finishes the code exchange client-side before any data loads.
         || path == "/auth/callback"
+        // Liveness probe — version + status only, no data.
+        || path == "/healthz"
+}
+
+/// The public surface in multi-user (hosted) mode — deliberately tiny
+/// and method-aware: the static UI shell, health/status probes, and the
+/// session bootstrap. Every data-bearing route — including the
+/// desktop-share surfaces (`/share`, `/gallery`, `/finance`,
+/// `/api/image-cache`) that are public in legacy mode — requires auth,
+/// because handlers resolve the owner tenant when no `AuthedUser` is
+/// present. The router-level contract test
+/// (`multi_user_public_surface_contract`) enumerates this list; extend
+/// both together, deliberately.
+fn is_public_route_multi_user(method: &Method, path: &str) -> bool {
+    let get = matches!(*method, Method::GET | Method::HEAD);
+    (get && (path == "/app" || path.starts_with("/app/")))
+        // OIDC redirect target — the SPA shell; the code exchange runs
+        // client-side, and the session POST below is where it lands.
+        || (get && path == "/auth/callback")
+        || (get && path == "/healthz")
+        || (get && path == "/api/status")
+        || (get && path == "/api/session/config")
+        // Logging in is how credentials are obtained; logout (DELETE)
+        // is authenticated like everything else.
+        || (*method == Method::POST && path == "/api/session")
 }
 
 /// Auth state. Three modes:
@@ -662,9 +687,10 @@ async fn multi_user_auth(
     mut req: Request,
     next: Next,
 ) -> axum::response::Response {
-    // Public routes — no auth required (surface audited by the
-    // "Public route audit with hosted gating" leaf).
-    if is_public_route(req.uri().path()) {
+    // Public routes — hosted mode uses its own minimal, method-aware
+    // allowlist, NOT the legacy one (which exempts desktop-share
+    // surfaces that would leak owner-tenant data on the internet).
+    if is_public_route_multi_user(req.method(), req.uri().path()) {
         return next.run(req).await;
     }
 
@@ -793,8 +819,14 @@ async fn multi_user_auth(
 pub fn build_router(state: AppState, auth: AuthState) -> Router {
     START_TIME.get_or_init(std::time::Instant::now);
 
+    // `[limits]` from daemon-config.toml — fixed for the router's
+    // lifetime (a limit change needs a daemon restart).
+    let api_body_limit = state.limits.api_body_limit_mb.saturating_mul(1024 * 1024);
+    let asset_body_limit = state.limits.asset_body_limit_mb.saturating_mul(1024 * 1024);
+
     Router::new()
         .route("/api/status", get(get_status))
+        .route("/healthz", get(get_healthz))
         .route("/api/ics-subscription", post(fetch_ics_subscription))
         .route("/api/favorites", get(get_all_favorites))
         .route("/api/search", get(search_pages))
@@ -971,7 +1003,7 @@ pub fn build_router(state: AppState, auth: AuthState) -> Router {
             "/api/notebooks/{notebook_id}/assets/{*path}",
             get(get_notebook_asset)
                 .put(put_notebook_asset)
-                .layer(axum::extract::DefaultBodyLimit::max(NOTEBOOK_ASSET_BODY_LIMIT)),
+                .layer(axum::extract::DefaultBodyLimit::max(asset_body_limit)),
         )
         .route("/share/{share_id}", get(serve_share))
         .route("/share/{share_id}/", get(serve_share))
@@ -1077,11 +1109,18 @@ pub fn build_router(state: AppState, auth: AuthState) -> Router {
         // the SPA shell; its assets still load from /app/assets.
         .route("/auth/callback", get(serve_web_app_root))
         .layer(middleware::from_fn_with_state(auth, auth_middleware))
+        // Rate-limit the credential endpoint. Layered outside auth so
+        // every attempt counts — including ones auth would reject.
+        .layer(middleware::from_fn_with_state(
+            Arc::clone(&state),
+            session_rate_limit,
+        ))
         // Raise the default 2 MB body limit for the whole API. Whole-content
         // writes (databases send content + an equal-sized merge baseline) exceed
         // 2 MB for even modestly large databases. The asset route keeps its own
-        // (larger) per-route limit above; this governs every other route.
-        .layer(axum::extract::DefaultBodyLimit::max(API_BODY_LIMIT))
+        // per-route limit above; this governs every other route. Both come
+        // from `[limits]` in daemon-config.toml.
+        .layer(axum::extract::DefaultBodyLimit::max(api_body_limit))
         .layer(
             // Clients authenticate via Bearer token, so allow any origin. The
             // Tauri webview's origin varies by platform (tauri://localhost,
@@ -1116,6 +1155,94 @@ async fn get_status() -> impl IntoResponse {
             uptime_secs: uptime,
         },
     })
+}
+
+/// `GET /healthz` — unauthenticated liveness probe for load balancers
+/// and uptime checks: version + status, deliberately nothing else.
+async fn get_healthz() -> impl IntoResponse {
+    Json(serde_json::json!({
+        "status": "ok",
+        "version": env!("CARGO_PKG_VERSION"),
+    }))
+}
+
+/// Soft disk-quota gate for hosted tenants' write paths (asset upload,
+/// page create/save). The owner tenant and single-user mode are exempt,
+/// as is `[hosted] disk_quota_mb = 0`. Over the cap → 507 naming the
+/// quota; reads are never gated. `incoming_bytes` is the write's known
+/// size (asset body) or 0 when it isn't worth computing (page saves,
+/// bounded by the API body limit and absorbed into the staleness
+/// window — see `DiskUsage`).
+fn check_disk_quota(
+    state: &AppState,
+    tenant: &Tenant,
+    incoming_bytes: u64,
+) -> Result<(), (StatusCode, Json<ApiError>)> {
+    let quota_mb = state.hosted.disk_quota_mb;
+    if quota_mb == 0 || state.tenants.is_owner_tenant(&tenant.0) {
+        return Ok(());
+    }
+    let cap = quota_mb.saturating_mul(1024 * 1024);
+    let usage = tenant.disk_usage_bytes();
+    tenant.disk_usage.warn_if_high(usage, cap, &tenant.root_dir);
+    if usage.saturating_add(incoming_bytes) > cap {
+        return Err(api_err(
+            StatusCode::INSUFFICIENT_STORAGE,
+            format!(
+                "Disk quota exceeded: {} MB in use, quota is {} MB",
+                usage / (1024 * 1024),
+                quota_mb
+            ),
+        ));
+    }
+    Ok(())
+}
+
+/// The client identity key for the session rate limit. The hosted front
+/// door is a cloudflared tunnel, so the real client address arrives in
+/// CF-Connecting-IP; fall back to the first X-Forwarded-For hop behind
+/// other proxies, then to a single shared "local" bucket for direct
+/// connections (fine on localhost — and a hosted daemon should only be
+/// reachable through the tunnel). Forwarded headers are spoofable on a
+/// directly exposed daemon; the limit still bounds total attempt volume
+/// per claimed identity.
+fn client_ip(headers: &axum::http::HeaderMap) -> String {
+    headers
+        .get("cf-connecting-ip")
+        .or_else(|| headers.get("x-forwarded-for"))
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.split(',').next())
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| "local".to_string())
+}
+
+/// Per-IP rate limit on the credential endpoint (`POST /api/session`).
+/// Layered outside the auth middleware and before body parsing, in
+/// every auth mode, so all attempts count — well-formed or not. Over
+/// the `[limits] session_rate_per_min` cap → 429 with Retry-After.
+async fn session_rate_limit(
+    State(state): State<AppState>,
+    req: Request,
+    next: Next,
+) -> axum::response::Response {
+    if req.method() == Method::POST && req.uri().path() == "/api/session" {
+        let key = client_ip(req.headers());
+        if !state.session_rate.allow(&key, state.limits.session_rate_per_min) {
+            log::warn!("session rate limit hit for {key}");
+            let mut resp = (
+                StatusCode::TOO_MANY_REQUESTS,
+                Json(ApiError {
+                    error: "Too many sign-in attempts; try again in a minute".into(),
+                }),
+            )
+                .into_response();
+            resp.headers_mut()
+                .insert("retry-after", HeaderValue::from_static("60"));
+            return resp;
+        }
+    }
+    next.run(req).await
 }
 
 // ===== SWEEP PATTERN (Multi-User Tenancy) =====
@@ -1609,6 +1736,7 @@ async fn rag_configure(
         },
         ai: state.ai_config.read().await.clone(),
         hosted: state.hosted.clone(),
+        limits: state.limits.clone(),
     };
     if let Err(e) = nous_lib::search::save(&state.daemon_config_path, &to_persist) {
         log::warn!(
@@ -1867,6 +1995,7 @@ async fn create_page(
     Json(req): Json<CreatePageRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     let nb_id = parse_uuid(&notebook_id)?;
+    check_disk_quota(&state, &tenant, 0)?;
     let storage = tenant.storage.lock().unwrap();
 
     let mut page = match storage.create_page(nb_id, req.title) {
@@ -2011,6 +2140,7 @@ async fn update_page(
 ) -> Result<impl IntoResponse, (StatusCode, Json<ApiError>)> {
     let nb_id = parse_uuid(&notebook_id)?;
     let pg_id = parse_uuid(&page_id)?;
+    check_disk_quota(&state, &tenant, 0)?;
     let storage = tenant.storage.lock().unwrap();
 
     let mut page = match storage.get_page(nb_id, pg_id) {
@@ -4016,6 +4146,7 @@ async fn ai_configure(
         },
         ai: ai.clone(),
         hosted: state.hosted.clone(),
+        limits: state.limits.clone(),
     };
     if let Err(e) = nous_lib::search::save(&state.daemon_config_path, &to_persist) {
         log::warn!(
@@ -4036,16 +4167,14 @@ async fn ai_configure(
 // src/utils/assetUrl.ts. Upload mirrors the desktop save_notebook_asset
 // command but writes atomically.
 
-const NOTEBOOK_ASSET_BODY_LIMIT: usize = 50 * 1024 * 1024;
-
-/// Body-size limit for the JSON API routes. Axum's default is 2 MB, which is
-/// too small for whole-content writes: a database PUT sends the full content
-/// *plus* an equal-sized `baseline` for the 3-way merge (DL-04), so a database
-/// only ~1 MB on disk produces a ~2+ MB request and gets rejected with HTTP 413
-/// — silently blocking all edits (rename/filter/view/card config) to large
-/// databases from the web frontend. This is a local single-writer daemon behind
-/// an auth gate, so a generous limit is safe.
-const API_BODY_LIMIT: usize = 64 * 1024 * 1024;
+// Body-size limits live in `[limits]` in daemon-config.toml
+// (LimitsSection) — the asset default is 50 MB, and the JSON API
+// default is 64 MB because Axum's stock 2 MB is too small for
+// whole-content writes: a database PUT sends the full content *plus* an
+// equal-sized `baseline` for the 3-way merge (DL-04), so a database
+// only ~1 MB on disk produces a 2+ MB request and would 413 — silently
+// blocking all edits (rename/filter/view/card config) to large
+// databases from the web frontend.
 
 /// Resolve a request path inside a notebook's assets directory.
 ///
@@ -4100,7 +4229,7 @@ async fn get_notebook_asset(
 }
 
 async fn put_notebook_asset(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     tenant: Tenant,
     Path((notebook_id, asset_path)): Path<(String, String)>,
     body: axum::body::Bytes,
@@ -4109,6 +4238,7 @@ async fn put_notebook_asset(
     if body.is_empty() {
         return Err(api_err(StatusCode::BAD_REQUEST, "Empty request body"));
     }
+    check_disk_quota(&state, &tenant, body.len() as u64)?;
     let assets_dir = {
         let storage = tenant.storage.lock().unwrap();
         storage.notebook_assets_dir(nb_id)
@@ -4122,6 +4252,7 @@ async fn put_notebook_asset(
     }
     nous_lib::storage::atomic::write(&file, &body)
         .map_err(|e| api_err(StatusCode::INTERNAL_SERVER_ERROR, format!("Write failed: {}", e)))?;
+    tenant.disk_usage.add(body.len() as u64);
 
     Ok(Json(ApiResponse {
         data: serde_json::json!({
@@ -6663,10 +6794,11 @@ async fn agile_daily_note(
 #[cfg(test)]
 mod tests {
     use super::{
-        changes_in_intervals, is_public_route, merge_database_3way, mime_for_path,
-        reattach_concurrent_rows, resolve_notebook_asset_path, resolve_web_app_path,
-        valid_snapshot_name, web_app_cache_control,
+        changes_in_intervals, is_public_route, is_public_route_multi_user, merge_database_3way,
+        mime_for_path, reattach_concurrent_rows, resolve_notebook_asset_path,
+        resolve_web_app_path, valid_snapshot_name, web_app_cache_control,
     };
+    use axum::http::Method;
     use std::collections::HashSet;
 
     // ----- Web app bundle serving (/app) -----
@@ -6763,6 +6895,57 @@ mod tests {
         // But the API stays gated
         assert!(!is_public_route("/api/notebooks"));
         assert!(!is_public_route("/apple")); // no prefix confusion
+    }
+
+    #[test]
+    fn legacy_public_routes_unchanged() {
+        // The desktop-share surfaces stay public in legacy (localhost) mode.
+        for path in [
+            "/share/abc123",
+            "/gallery/some-notebook",
+            "/finance/some-notebook",
+            "/api/image-cache/deadbeef",
+            "/app",
+            "/api/session",
+            "/api/session/config",
+            "/auth/callback",
+            "/healthz",
+            "/api/status",
+        ] {
+            assert!(is_public_route(path), "{path} should be public in legacy mode");
+        }
+    }
+
+    #[test]
+    fn multi_user_public_surface_is_minimal() {
+        // The whole intended hosted surface:
+        assert!(is_public_route_multi_user(&Method::GET, "/app"));
+        assert!(is_public_route_multi_user(&Method::GET, "/app/"));
+        assert!(is_public_route_multi_user(&Method::GET, "/app/assets/app-abc123.js"));
+        assert!(is_public_route_multi_user(&Method::GET, "/auth/callback"));
+        assert!(is_public_route_multi_user(&Method::GET, "/healthz"));
+        assert!(is_public_route_multi_user(&Method::GET, "/api/status"));
+        assert!(is_public_route_multi_user(&Method::GET, "/api/session/config"));
+        assert!(is_public_route_multi_user(&Method::POST, "/api/session"));
+
+        // Desktop-share surfaces are NOT public in multi-user mode —
+        // their handlers fall back to the owner tenant anonymously.
+        assert!(!is_public_route_multi_user(&Method::GET, "/share/abc123"));
+        assert!(!is_public_route_multi_user(&Method::GET, "/gallery/nb-1"));
+        assert!(!is_public_route_multi_user(&Method::GET, "/finance/nb-1"));
+        assert!(!is_public_route_multi_user(&Method::GET, "/api/image-cache/deadbeef"));
+
+        // Method confusion doesn't open holes …
+        assert!(!is_public_route_multi_user(&Method::POST, "/app"));
+        assert!(!is_public_route_multi_user(&Method::GET, "/api/session"));
+        assert!(!is_public_route_multi_user(&Method::DELETE, "/api/session"));
+        assert!(!is_public_route_multi_user(&Method::POST, "/api/session/config"));
+        assert!(!is_public_route_multi_user(&Method::POST, "/healthz"));
+
+        // … and neither does prefix confusion.
+        assert!(!is_public_route_multi_user(&Method::GET, "/apple"));
+        assert!(!is_public_route_multi_user(&Method::GET, "/api/status/extra"));
+        assert!(!is_public_route_multi_user(&Method::GET, "/api/notebooks"));
     }
 
     // ----- Notebook asset serving (/api/notebooks/{nb}/assets/*) -----

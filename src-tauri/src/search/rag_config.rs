@@ -22,6 +22,51 @@ pub struct DaemonConfig {
     pub ai: crate::ai_config::AiSection,
     #[serde(default)]
     pub hosted: HostedSection,
+    #[serde(default)]
+    pub limits: LimitsSection,
+}
+
+/// `[limits]` table — request-size and rate limits. Applied in every
+/// auth mode, but only load-bearing on hosted (internet-facing)
+/// daemons; the defaults match what desktop flows already need.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LimitsSection {
+    /// Max request body for the JSON API routes, in MB. Generous
+    /// because whole-content database writes carry the content plus an
+    /// equal-sized merge baseline, so a ~1 MB database produces a
+    /// 2+ MB request.
+    #[serde(default = "default_api_body_limit_mb")]
+    pub api_body_limit_mb: usize,
+    /// Max asset-upload body (`PUT .../assets/*`), in MB — its own cap,
+    /// independent of the JSON limit.
+    #[serde(default = "default_asset_body_limit_mb")]
+    pub asset_body_limit_mb: usize,
+    /// `POST /api/session` attempts per minute per client IP (the
+    /// credential endpoint). 0 disables the limit.
+    #[serde(default = "default_session_rate_per_min")]
+    pub session_rate_per_min: u32,
+}
+
+fn default_api_body_limit_mb() -> usize {
+    64
+}
+
+fn default_asset_body_limit_mb() -> usize {
+    50
+}
+
+fn default_session_rate_per_min() -> u32 {
+    10
+}
+
+impl Default for LimitsSection {
+    fn default() -> Self {
+        Self {
+            api_body_limit_mb: default_api_body_limit_mb(),
+            asset_body_limit_mb: default_asset_body_limit_mb(),
+            session_rate_per_min: default_session_rate_per_min(),
+        }
+    }
 }
 
 /// `[hosted]` table — what non-owner (hosted) tenants may use on a
@@ -45,15 +90,30 @@ pub struct HostedSection {
     /// always serves AI; the flag exists so the config shape is stable.
     #[serde(default = "default_true")]
     pub ai: bool,
+    /// Soft per-tenant disk quota in megabytes, checked on hosted
+    /// tenants' write paths (asset upload, page save). 0 disables the
+    /// check; the owner tenant is always exempt.
+    #[serde(default = "default_disk_quota_mb")]
+    pub disk_quota_mb: u64,
 }
 
 fn default_true() -> bool {
     true
 }
 
+fn default_disk_quota_mb() -> u64 {
+    5120 // 5 GB
+}
+
 impl Default for HostedSection {
     fn default() -> Self {
-        Self { plugins: false, sync: false, rag: false, ai: true }
+        Self {
+            plugins: false,
+            sync: false,
+            rag: false,
+            ai: true,
+            disk_quota_mb: default_disk_quota_mb(),
+        }
     }
 }
 

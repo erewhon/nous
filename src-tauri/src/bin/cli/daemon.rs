@@ -66,6 +66,79 @@ pub struct DaemonState {
     /// just the owner tenant, which the `Tenant` extractor falls back to.
     /// Event channels live on each TenantState; there is no global one.
     pub tenants: Arc<super::tenant::TenantManager>,
+    /// `[limits]` request-size and rate limits from daemon-config.toml.
+    pub limits: nous_lib::search::LimitsSection,
+    /// Per-IP counter backing the `POST /api/session` rate limit.
+    pub session_rate: SessionRateLimiter,
+}
+
+/// Fixed-window per-key request counter for the session (credential)
+/// endpoint. A key's first request opens a 60-second window; requests
+/// beyond the per-minute cap inside it are refused, and the window
+/// resets on the first request after expiry. Coarser than a token
+/// bucket (a burst at a window edge can briefly double the rate) but
+/// state is one map entry per active key.
+#[derive(Default)]
+pub struct SessionRateLimiter {
+    windows: Mutex<std::collections::HashMap<String, (std::time::Instant, u32)>>,
+}
+
+impl SessionRateLimiter {
+    const WINDOW: std::time::Duration = std::time::Duration::from_secs(60);
+    /// Stale entries are pruned when the map grows past this — bounds
+    /// memory against key-spraying (e.g. spoofed forwarded-for values).
+    const PRUNE_AT: usize = 4096;
+
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Record an attempt for `key`; false = over `max_per_min`, refuse.
+    /// 0 disables the limit.
+    pub fn allow(&self, key: &str, max_per_min: u32) -> bool {
+        self.allow_at(key, max_per_min, std::time::Instant::now())
+    }
+
+    fn allow_at(&self, key: &str, max_per_min: u32, now: std::time::Instant) -> bool {
+        if max_per_min == 0 {
+            return true;
+        }
+        let mut map = self.windows.lock().unwrap_or_else(|p| p.into_inner());
+        if map.len() >= Self::PRUNE_AT {
+            map.retain(|_, (start, _)| now.duration_since(*start) < Self::WINDOW);
+        }
+        let entry = map.entry(key.to_string()).or_insert((now, 0));
+        if now.duration_since(entry.0) >= Self::WINDOW {
+            *entry = (now, 0);
+        }
+        entry.1 += 1;
+        entry.1 <= max_per_min
+    }
+}
+
+#[cfg(test)]
+mod rate_limit_tests {
+    use super::SessionRateLimiter;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn fixed_window_counts_and_resets() {
+        let rl = SessionRateLimiter::new();
+        let t0 = Instant::now();
+        for _ in 0..10 {
+            assert!(rl.allow_at("a", 10, t0));
+        }
+        assert!(!rl.allow_at("a", 10, t0), "11th in-window attempt refused");
+        // Other keys have their own windows.
+        assert!(rl.allow_at("b", 10, t0));
+        // The window expires and the key starts fresh.
+        let t1 = t0 + Duration::from_secs(61);
+        assert!(rl.allow_at("a", 10, t1));
+        // 0 disables.
+        for _ in 0..100 {
+            assert!(rl.allow_at("c", 0, t0));
+        }
+    }
 }
 
 /// Default daemon port
@@ -328,6 +401,8 @@ pub async fn run(library_name: Option<&str>, port: Option<u16>, bind: Option<&st
         web_app_dir,
         multi_user: multi_user_ctx,
         tenants,
+        limits: daemon_config.limits.clone(),
+        session_rate: SessionRateLimiter::new(),
     });
 
     // Start HTTP API
