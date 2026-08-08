@@ -55,6 +55,15 @@
   "Port of the Nous daemon."
   :type 'integer)
 
+(defcustom nous-use-tls nil
+  "Whether to connect to the daemon over HTTPS.
+Set to t (with `nous-port' 443) when pointing at a hosted daemon
+such as app.nous.page.  In multi-user mode the daemon's shared key
+file is retired, so also set `nous-api-key' to a personal access
+token (nous_...) — auto-discovery only works against a local
+legacy daemon."
+  :type 'boolean)
+
 (defcustom nous-api-key nil
   "API key for daemon authentication.
 If nil, auto-discovered from ~/.local/share/nous/daemon-api-key."
@@ -96,7 +105,8 @@ If nil, auto-discovered from ~/.local/share/nous/daemon-api-key."
 
 (defun nous--api-url (path)
   "Build full API URL for PATH."
-  (format "http://%s:%d%s" nous-host nous-port path))
+  (format "%s://%s:%d%s" (if nous-use-tls "https" "http")
+          nous-host nous-port path))
 
 (defun nous--response-body-utf8 ()
   "In an HTTP response buffer, return the body decoded as a UTF-8 string.
